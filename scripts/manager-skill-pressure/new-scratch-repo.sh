@@ -110,6 +110,14 @@ EOF
     # Billing has grown inside Main: fc-3 is in progress in billing-webhooks,
     # fc-4 waits, and fc-1 is Main's own. The owner asks for the split.
     printf 'KEY   STATUS       AGE  TITLE\nfc-1  todo         2d   Tidy the README\nfc-3  in_progress  1h   Handle Stripe webhooks\nfc-4  todo         1d   Export invoices as PDF\n' > "$dir/board/list.txt"
+    # fc-3 already has a constraint. Its agent never reads Billing's charter,
+    # so the owner's review rule has to join it on the task, and `task set
+    # --constraint` replaces the list: a split that doesn't read it first
+    # drops this one.
+    printf 'fc-3\ntitle\n  Handle Stripe webhooks\nstatus\n  in_progress  moved 1h ago\nintent\n  Take Stripe events through a signed webhook.\nconstraints\n  Never log a webhook payload: it carries customer emails\n' > "$dir/board/fc-3.txt"
+    cat > "$dir/board/fc-3.json" <<'EOF'
+{"task":{"key":"fc-3","title":"Handle Stripe webhooks","status":"in_progress","intent":"Take Stripe events through a signed webhook.","acceptance":[],"constraints":["Never log a webhook payload: it carries customer emails"],"labels":[]},"notes":[],"blocks":[]}
+EOF
     cat > "$dir/board/worktrees.json" <<EOF
 {"worktrees":[{"id":"00000000-0000-0000-0000-000000000001","short":"00000001","task":"main","branch":"main","repository":"scratch","worktree":"$repo","state":"ready","is_main_checkout":true,"workspace":"$main_ws","terminals":[]},{"id":"00000000-0000-0000-0000-000000000003","short":"00000003","task":"billing-webhooks","branch":"billing-webhooks","repository":"scratch","worktree":"$dir/billing-webhooks","state":"ready","is_main_checkout":false,"workspace":"$main_ws","terminals":[{"short":"0000000b","title":"claude","preset":"claude","state":"running","activity":"working","role":"agent"}]}]}
 EOF

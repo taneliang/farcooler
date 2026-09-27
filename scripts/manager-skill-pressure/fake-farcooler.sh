@@ -7,7 +7,11 @@
 #
 #   task list ...           -> $FAKE_BOARD/list.txt
 #   task show <key> ...     -> $FAKE_BOARD/<key>.txt, else the task's row in
-#                              list.txt, else a task this world created
+#                              list.txt, else a task this world created; the
+#                              whole file, whatever --fields asks for
+#   task show <key> --json  -> $FAKE_BOARD/<key>.json, else the row as JSON
+#                              with no constraints; refused with --fields, as
+#                              the real CLI refuses it
 #   worktree list ...       -> $FAKE_BOARD/worktrees.json
 #   task search ...         -> $FAKE_BOARD/search.txt
 #   workspace show <ws> ... -> the workspace in $FAKE_BOARD/workspaces.tsv
@@ -73,6 +77,28 @@ show_task() {
     return
   fi
   echo "no task $key"
+}
+
+# `task show --json`: the world's JSON card for the key, else the row
+# `task show` would print, in the real JSON's shape with nothing on it. The
+# real CLI refuses `--json` with `--fields`, and so does this.
+show_task_json() {
+  local key=$1 a
+  for a in "${@:2}"; do
+    case "$a" in --fields|--fields=*)
+      echo "error: --fields chooses what a person reads. --json answers with the whole task, so a parser gets one shape every time. use --notes to narrow the history in either" >&2
+      exit 1 ;;
+    esac
+  done
+  if [ -n "$key" ] && [ -f "$FAKE_BOARD/$key.json" ]; then cat "$FAKE_BOARD/$key.json"; return; fi
+  local row
+  row=$(awk -v k="$key" '$1 == k && k != "KEY" { print; exit }' "$FAKE_BOARD/list.txt" 2>/dev/null)
+  if [ -z "$key" ] || [ -z "$row" ]; then echo "error: no task $key" >&2; exit 1; fi
+  python3 -c 'import json, sys
+k, s, *t = sys.argv[1].split()[:1] + sys.argv[1].split()[1:2] + sys.argv[1].split()[3:]
+print(json.dumps({"task": {"key": k, "title": " ".join(t), "status": s, "intent": "",
+                           "acceptance": [], "constraints": [], "labels": []},
+                  "notes": [], "blocks": []}))' "$row"
 }
 
 # The key `task show` was asked about: the first word after `show` that is not
@@ -209,7 +235,8 @@ create_workspace() {
 
 case "${1:-} ${2:-}" in
   "task list")      show_file "$FAKE_BOARD/list.txt" "no tasks" ;;
-  "task show")      show_task "$(shown_key "$@")" ;;
+  "task show")      if [ "$json" = 1 ]; then show_task_json "$(shown_key "$@")" "$@"
+                    else show_task "$(shown_key "$@")"; fi ;;
   "task search")    show_file "$FAKE_BOARD/search.txt" "no notes match" ;;
   "task create")    create_task "$@" ;;
   "task set")       echo "${3:-fc-?}  updated" ;;

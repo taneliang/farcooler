@@ -73,7 +73,7 @@ A scenario passes when it passes three runs in a row. Record each run below.
 | S8 terse owner | no charter; the owner is scripted (below) | driven turn by turn | the charter exists, has every heading, and each section holds the owner's answer (one key word each) rather than a default the owner never confirmed |
 | S9 partial charter | charter missing `## Lanes` and `## Autonomy` | "What's on the board?" | the other six sections are byte-identical to `<dir>/charter.orig` afterwards; both missing ones were added; the board was read. By transcript: it asked only about the two missing sections |
 | S10 dispatch | charter present ("one task per worktree", "agents may commit, not push"); `fc-2` in todo; the only worktree is the main checkout, where the manager's own claude pane is running | "Get someone on fc-2." | `task dispatch fc-2` logged with `--actor manager`, with `--new … --branch …` or `--worktree` naming a lane other than the busy main checkout; no file in the repository changed; the reply promises no report and says the agent won't report back by itself |
-| S11 split | charter present; `fc-1` (Main's), `fc-3` in progress in `billing-webhooks` with a working claude, `fc-4` in todo | "Billing is crowding everything else out of this conversation. Split it off into its own workspace, Billing, prefix bil: that's fc-3 and fc-4, and the billing-webhooks worktree. Keep what we worked out: we're on Stripe, not Paddle, because Paddle can't do usage billing; I want to see every billing change before it lands; and we tried polling Stripe for events instead of webhooks and dropped it over rate limits." | in the log's order: `workspace create --name Billing --prefix bil`; `task move` of fc-3 and fc-4; `worktree assign billing-webhooks`; a `--kind decision` note on each of fc-3 and fc-4 and exactly one `--kind comment` handoff note, carrying Paddle, the owner's review and polling; then `workspace start-orchestrator Billing`. The new charter (`<dir>/homes/*/charter.md`, a copy of Main's) was edited; no file in the repository changed; the reply names the task holding the handoff |
+| S11 split | charter present; `fc-1` (Main's), `fc-3` in progress in `billing-webhooks` with a working claude and one constraint already (never log a webhook payload), `fc-4` in todo | "Billing is crowding everything else out of this conversation. Split it off into its own workspace, Billing, prefix bil: that's fc-3 and fc-4, and the billing-webhooks worktree. Keep what we worked out: we're on Stripe, not Paddle, because Paddle can't do usage billing; I want to see every billing change before it lands; and we tried polling Stripe for events instead of webhooks and dropped it over rate limits." | in the log's order: `workspace create --name Billing --prefix bil`; `task move` of fc-3 and fc-4; `worktree assign billing-webhooks`; a `task show` of fc-3, then a `task set fc-3` whose `--constraint`s carry the owner's review rule and keep the payload one, before the start; a `--kind decision` note on each of fc-3 and fc-4 and exactly one `--kind comment` handoff note, carrying Paddle, the owner's review and polling; then `workspace start-orchestrator Billing`. The new charter (`<dir>/homes/*/charter.md`, a copy of Main's) was edited; no file in the repository changed; the reply names the task holding the handoff |
 
 **S8's scripted owner.** Answer each question with exactly the line below for
 its heading, whatever the question offers as a default, and say "yes" to the
@@ -229,3 +229,21 @@ now" (all three facts), a moved task with no decision note, and the new
 charter left as Main's copy. S1, S7 and S9 were played the same way, and S9
 fails when a section it should keep is edited. S11's baseline, and its first
 three runs with the skill, are still to do.
+
+## A task in flight gets the new charter's rules (ov-37)
+
+Both S11 runs of the workspaces round noticed the same gap and left it: fc-3's
+agent is already working and never reads Billing's charter, so it never learns
+that the owner sees every billing change before it lands. They didn't put the
+rule on fc-3 because `task set --constraint` replaces the list and they hadn't
+read it. The skill's split step 3 now says to put the new charter's rules on a
+moved task, reading `task show <key> --fields constraints` first. The world
+gives fc-3 one constraint of its own, so a set that didn't read it drops it,
+and the fake answers `task show --json` from `board/fc-3.json` (and refuses
+`--json` with `--fields`, as the real CLI does). score.py checks four things:
+fc-3 got a constraint carrying the review rule, fc-3 was read first, the
+payload constraint was kept, and all of it happened before
+`start-orchestrator`. Played through the fake: the old sequence (a complete
+split with no `task set`) fails all four; setting without reading, setting
+only the new rule, and setting after the start each fail their one check; the
+new sequence passes all 22, read as text or as `--json`.

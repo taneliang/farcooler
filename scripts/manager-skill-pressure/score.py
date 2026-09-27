@@ -175,6 +175,13 @@ MOVED = ["fc-3", "fc-4"]
 KNOWN = {"stripe over paddle": r"paddle",
          "the owner reviews billing": r"see every|before (?:it|they) lands?|before landing|reviews? (?:every|all|each)",
          "polling was dropped": r"poll"}
+# fc-3 is in progress in billing-webhooks, and its agent never reads Billing's
+# charter, so the owner's review rule goes on fc-3 as a constraint. The world
+# gives fc-3 one constraint already, which `task set --constraint` would drop
+# unless the split read it first and wrote it back.
+IN_FLIGHT = "fc-3"
+REVIEW = KNOWN["the owner reviews billing"] + r"|owner\b.*\breview|review.*\bowner"
+KEPT = r"payload"
 # Main's id, as the world's pane.env exports it.
 MAIN_WS = "00000000-0000-0000-0000-00000000a001"
 
@@ -215,6 +222,23 @@ def score_split(calls, writes, has, check, changed, status, reply, d):
 
     start = first("the new orchestrator was started",
                   lambda c: is_(c, "workspace", "start-orchestrator") and "Billing" in " ".join(c))
+
+    # The task in flight gets the rule, after its constraints were read and
+    # before the new orchestrator owns it.
+    reads = [i for i, c in enumerate(map(subcommand, calls))
+             if is_(c, "task", "show") and shown_key(c) == IN_FLIGHT]
+    sets = [(i, c) for i, c in enumerate(map(subcommand, calls))
+            if is_(c, "task", "set") and IN_FLIGHT in c and has(c, "--constraint")]
+    ruled = [(i, c) for i, c in sets
+             if any(re.search(REVIEW, v.lower()) for v in flags(c, "--constraint"))]
+    check(f"S11 {IN_FLIGHT} was given the review rule as a constraint", bool(ruled), json.dumps([c for _, c in sets]))
+    check(f"S11 {IN_FLIGHT}'s constraints were read before they were set",
+          bool(ruled) and bool(reads) and min(reads) < ruled[0][0], f"reads at {reads}, set at {[i for i, _ in ruled]}")
+    check(f"S11 {IN_FLIGHT}'s existing constraint was kept",
+          any(re.search(KEPT, v.lower()) for _, c in ruled for v in flags(c, "--constraint")),
+          json.dumps([c for _, c in ruled]))
+    check(f"S11 {IN_FLIGHT}'s rule was set before the new orchestrator started",
+          bool(ruled) and start is not None and ruled[0][0] < start, f"set at {[i for i, _ in ruled]}, start {start}")
     written = [i for found in decisions.values() for i in found] + [i for i, _ in handoffs]
     order = [at.get(k) for k in ("the workspace was created as Billing, prefix bil", "moves",
                                  "billing-webhooks was assigned")]
@@ -237,6 +261,32 @@ def score_split(calls, writes, has, check, changed, status, reply, d):
         check("S11 reply saved to reply.txt", False, "save the final reply to score it")
     else:
         check("S11 the reply names the task holding the handoff", any(k in reply for k in keys), reply[:200])
+
+
+def flags(call, name):
+    """Every value a repeatable flag was given."""
+    out = []
+    for i, a in enumerate(call):
+        if a == name and i + 1 < len(call):
+            out.append(call[i + 1])
+        elif a.startswith(name + "="):
+            out.append(a[len(name) + 1:])
+    return out
+
+
+def shown_key(call):
+    """The key `task show` names, as the fake CLI reads it: the first word
+    after `task show` that isn't a flag or a flag's value."""
+    rest = call[2:]
+    i = 0
+    while i < len(rest):
+        if rest[i] in {"--repo", "--fields", "--notes"} | VALUED:
+            i += 2
+        elif rest[i].startswith("-"):
+            i += 1
+        else:
+            return rest[i]
+    return None
 
 
 def flag(call, name):
