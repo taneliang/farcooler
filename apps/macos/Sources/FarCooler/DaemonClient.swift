@@ -1188,6 +1188,18 @@ final class DaemonClient: ObservableObject {
     // layout — is applied in exactly one place. The value of naming them anyway is
     // that the argument order and the flag spellings live here rather than being
     // written out at each call site, which is where the last set of them drifted.
+    //
+    // A command that acts on a layout takes the one it means as `layout`, the
+    // tmux window id of the layout on screen. Without it the runner acts on the
+    // window tmux calls active, and tmux has one active window for the whole
+    // runner. Every orchestrator's window is among the main checkout's layouts,
+    // so after the CLI or an agent focuses one, the checkout's row would zoom,
+    // rearrange or cycle the orchestrator's panes rather than its own.
+
+    /// `--layout` and the window id, or nothing for tmux's active layout.
+    static func naming(_ layout: String?) -> [String] {
+        layout.map { ["--layout", $0] } ?? []
+    }
 
     /// A new terminal beside an existing pane. tmux's `split-window`.
     ///
@@ -1201,10 +1213,10 @@ final class DaemonClient: ObservableObject {
     @discardableResult
     func split(
         _ worktree: Worktree, beside terminal: String?, side: TileDirection,
-        preset: String = "shell"
+        preset: String = "shell", layout group: String? = nil
     ) async -> [PaneGroup] {
         var rest = terminal.map { [$0] } ?? []
-        rest += ["--side", side.rawValue, "--preset", preset]
+        rest += ["--side", side.rawValue, "--preset", preset] + Self.naming(group)
         let groups = await layout(worktree, ["split"], rest)
         await refresh()
         return groups
@@ -1223,13 +1235,15 @@ final class DaemonClient: ObservableObject {
     }
 
     @discardableResult
-    func applyPreset(_ preset: TilePreset, in worktree: Worktree) async -> [PaneGroup] {
-        await layout(worktree, ["preset"], [preset.rawValue])
+    func applyPreset(_ preset: TilePreset, in worktree: Worktree, layout group: String? = nil)
+        async -> [PaneGroup]
+    {
+        await layout(worktree, ["preset"], [preset.rawValue] + Self.naming(group))
     }
 
     @discardableResult
-    func cycleLayout(_ worktree: Worktree) async -> [PaneGroup] {
-        await layout(worktree, ["cycle"])
+    func cycleLayout(_ worktree: Worktree, layout group: String? = nil) async -> [PaneGroup] {
+        await layout(worktree, ["cycle"], Self.naming(group))
     }
 
     /// Focus a pane, which also brings its layout to the front.
@@ -1243,18 +1257,21 @@ final class DaemonClient: ObservableObject {
     }
 
     @discardableResult
-    func focusPane(step: String, in worktree: Worktree) async -> [PaneGroup] {
+    func focusPane(step: String, in worktree: Worktree, layout named: String? = nil)
+        async -> [PaneGroup]
+    {
         // `--next`/`--prev` step through a pane order the app already holds, so
         // the target is knowable here and the assumption is as safe as it is for
         // a pane named outright.
-        if let group = activeGroup(worktree.id), !group.panes.isEmpty,
+        let stepped = named.flatMap { id in layouts[worktree.id]?.first { $0.id == id } }
+        if let group = stepped ?? activeGroup(worktree.id), !group.panes.isEmpty,
             let current = group.panes.firstIndex(where: \.focused)
         {
             let delta = step == "--prev" ? -1 : 1
             let next = (current + delta + group.panes.count) % group.panes.count
             assumeFocus(group.panes[next].id, in: worktree.id)
         }
-        return await confirmed(worktree, ["focus"], [step])
+        return await confirmed(worktree, ["focus"], [step] + Self.naming(named))
     }
 
     @discardableResult
@@ -1288,10 +1305,12 @@ final class DaemonClient: ObservableObject {
     }
 
     @discardableResult
-    func zoomPane(_ terminal: String?, in worktree: Worktree, off: Bool = false)
-        async -> [PaneGroup]
-    {
-        await layout(worktree, ["zoom"], (terminal.map { [$0] } ?? []) + (off ? ["--off"] : []))
+    func zoomPane(
+        _ terminal: String?, in worktree: Worktree, off: Bool = false, layout group: String? = nil
+    ) async -> [PaneGroup] {
+        await layout(
+            worktree, ["zoom"],
+            (terminal.map { [$0] } ?? []) + (off ? ["--off"] : []) + Self.naming(group))
     }
 
     @discardableResult
@@ -1314,8 +1333,10 @@ final class DaemonClient: ObservableObject {
     }
 
     @discardableResult
-    func renameLayout(_ name: String, in worktree: Worktree) async -> [PaneGroup] {
-        await layout(worktree, ["rename"], [name])
+    func renameLayout(_ name: String, in worktree: Worktree, layout group: String? = nil)
+        async -> [PaneGroup]
+    {
+        await layout(worktree, ["rename"], [name] + Self.naming(group))
     }
 
     /// Tell tmux how big the view showing this layout is, in cells.
@@ -1324,8 +1345,10 @@ final class DaemonClient: ObservableObject {
     /// tmux cannot see: how much screen there is. Everything else flows back the
     /// other way — tmux lays out into this and reports where the panes landed.
     @discardableResult
-    func viewport(columns: Int, rows: Int, in worktree: Worktree) async -> [PaneGroup] {
-        await layout(worktree, ["viewport"], ["\(columns)", "\(rows)"])
+    func viewport(columns: Int, rows: Int, in worktree: Worktree, layout group: String? = nil)
+        async -> [PaneGroup]
+    {
+        await layout(worktree, ["viewport"], ["\(columns)", "\(rows)"] + Self.naming(group))
     }
 
     /// Show a different layout: by tmux window id, by name, by number, or `--next`.

@@ -320,9 +320,10 @@ struct ContentView: View {
 
             // Selecting the main checkout's row shows its own layout, never
             // the orchestrator's window tmux calls active (see `ownLayouts`).
-            // Bring that layout forward on the runner too, so the ⌃B commands
-            // it answers itself — zoom, a preset, ⌃B o — act on the panes on
-            // screen rather than on Billing's orchestrator.
+            // Bring that layout forward on the runner too. This app's ⌃B
+            // commands name the layout on screen (see `tile`), so they don't
+            // need it; this keeps tmux's active window in step for anything
+            // that names none, such as `farcooler layout zoom` from a shell.
             //
             // Only then: when tmux's active window is an orchestrator's, the
             // one case where the row's choice differs from the runner's. Any
@@ -1600,11 +1601,13 @@ struct ContentView: View {
             Task { await act(on: ws) { c in await c.stop(terminal: open.short) } }
             return
         }
+        let shown = onScreen(in: ws)?.group.id
         Task {
             let groups = await act(on: ws, default: []) { c in
-                // `beside: nil` means the focused pane, which is the daemon's
-                // own default and the same anchor `⌃B %` uses.
-                await c.split(ws, beside: nil, side: .right, preset: "changes")
+                // `beside: nil` means the focused pane of the layout on
+                // screen, which is the daemon's own default and the same
+                // anchor `⌃B %` uses.
+                await c.split(ws, beside: nil, side: .right, preset: "changes", layout: shown)
             }
             reveal(groups, in: ws)
         }
@@ -1900,10 +1903,14 @@ struct ContentView: View {
             onDropOnPane: { dragged, target, side in
                 placePane(dragged, onto: target, side: side, in: ws)
             },
-            onViewport: { columns, rows in
+            onViewport: { shown, columns, rows in
                 // Not routed through `act(on:_:)` — see `onGeometry`'s
                 // comment above: this fires from pane geometry, not a click.
-                await store.client(for: ws)?.viewport(columns: columns, rows: rows, in: ws)
+                //
+                // The layout drawn, by name: tmux's active window can be an
+                // orchestrator's while the checkout's own is on screen.
+                await store.client(for: ws)?.viewport(
+                    columns: columns, rows: rows, in: ws, layout: shown)
             },
             onResizeDivider: { terminal, side, cells in
                 resizeDivider(terminal, side: side, cells: cells, in: ws)
@@ -2218,6 +2225,11 @@ struct ContentView: View {
     /// zoom or a split means, and it decides the same way for this app, for the
     /// CLI and for an agent driving the CLI.
     ///
+    /// Each names the layout on screen (`shown`), never leaving the runner to
+    /// pick tmux's active window. In the main checkout that can be an
+    /// orchestrator's, focused by the CLI or an agent while the checkout's own
+    /// row is selected, and the checkout's ⌃B z would zoom the orchestrator.
+    ///
     /// This file no longer contributes geometry. Directional focus used to be
     /// worked out here from a recomputed arrangement; it is now read off the
     /// rectangles tmux reported, which is the only copy.
@@ -2225,6 +2237,7 @@ struct ContentView: View {
         guard let worktree = tileTarget else { return }
         let screen = onScreen(in: worktree)
         let group = screen?.group
+        let shown = group?.id
         /// The pane a keystroke acts on: the selected one, else whatever tmux says
         /// is focused.
         let here: PaneRect? = {
@@ -2234,12 +2247,16 @@ struct ContentView: View {
 
         switch command {
         case .zoom:
-            await act(on: worktree) { c in await c.zoomPane(nil, in: worktree) }
+            await act(on: worktree) { c in await c.zoomPane(nil, in: worktree, layout: shown) }
 
         case .focusNext:
-            await act(on: worktree) { c in await c.focusPane(step: "--next", in: worktree) }
+            await act(on: worktree) { c in
+                await c.focusPane(step: "--next", in: worktree, layout: shown)
+            }
         case .focusPrevious:
-            await act(on: worktree) { c in await c.focusPane(step: "--prev", in: worktree) }
+            await act(on: worktree) { c in
+                await c.focusPane(step: "--prev", in: worktree, layout: shown)
+            }
 
         case .focus(let direction):
             guard let group, let from = here,
@@ -2253,10 +2270,10 @@ struct ContentView: View {
             await act(on: worktree) { c in await c.focusPane(pane.short, in: worktree) }
 
         case .cycle:
-            await act(on: worktree) { c in await c.cycleLayout(worktree) }
+            await act(on: worktree) { c in await c.cycleLayout(worktree, layout: shown) }
 
         case .preset(let preset):
-            await act(on: worktree) { c in await c.applyPreset(preset, in: worktree) }
+            await act(on: worktree) { c in await c.applyPreset(preset, in: worktree, layout: shown) }
 
         case .evenPanes:
             // Which even arrangement, read off the panes rather than asked for.
@@ -2269,7 +2286,7 @@ struct ContentView: View {
             let columns = Set(group?.panes.map(\.left) ?? []).count
             let rows = Set(group?.panes.map(\.top) ?? []).count
             let preset: TilePreset = columns >= rows ? .evenHorizontal : .evenVertical
-            await act(on: worktree) { c in await c.applyPreset(preset, in: worktree) }
+            await act(on: worktree) { c in await c.applyPreset(preset, in: worktree, layout: shown) }
 
         case .splitRight, .splitDown:
             // One call. It used to be create-then-join-then-apply-a-preset, three
@@ -2279,7 +2296,7 @@ struct ContentView: View {
             // you name, on the side you name, and leaves the rest alone.
             let side: TileDirection = command == .splitRight ? .right : .bottom
             let groups = await act(on: worktree, default: []) { c in
-                await c.split(worktree, beside: here?.short, side: side)
+                await c.split(worktree, beside: here?.short, side: side, layout: shown)
             }
             // Land in the pane that was just made, which is the one tmux focuses.
             reveal(groups, in: worktree)

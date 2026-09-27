@@ -71,8 +71,9 @@ struct TileView: View {
     let onSelectGroup: (PaneGroup) -> Void
     /// A terminal dropped on an edge of a pane: put it there.
     let onDropOnPane: (_ dragged: String, _ onto: String, _ side: TileDirection) -> Void
-    /// How big this view is, in cells. tmux lays out into it.
-    let onViewport: (Int, Int) async -> Void
+    /// How big this view is, in cells, and the layout it's showing, by tmux
+    /// window id. tmux lays out into it.
+    let onViewport: (_ layout: String, _ columns: Int, _ rows: Int) async -> Void
     /// A divider dragged: which pane's border, and by how many cells. Returns
     /// whether it was accepted — a refused request has to be re-offered, not lost.
     let onResizeDivider: (String, TileDirection, Int) -> Bool
@@ -312,7 +313,7 @@ struct TileView: View {
         // Compared against what tmux HAS rather than against what we last asked
         // for. The two are not the same thing, and only the first one is a fact.
         guard window.columns != group.columns || window.rows != group.rows else { return }
-        await onViewport(window.columns, window.rows)
+        await onViewport(group.id, window.columns, window.rows)
     }
 }
 

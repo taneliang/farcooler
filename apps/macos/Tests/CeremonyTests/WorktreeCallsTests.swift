@@ -111,6 +111,44 @@ struct WorktreeCallsTests {
         await record("assign", ["worktree", "assign", "w1", "--to", Self.billing.id, "--json"]) {
             _ = await $0.assignWorktree(Self.worktree, to: Self.billing)
         }
+
+        // The layout commands the ⌃B keys and the tile view send, each naming
+        // the layout on screen, so the main checkout's row never acts on an
+        // orchestrator's window tmux calls active.
+        let named = ["--layout", "@2", "--json"]
+        await record("zoom", ["layout", "zoom", "w1"] + named) {
+            _ = await $0.zoomPane(nil, in: Self.worktree, layout: "@2")
+        }
+        await record("unzoom", ["layout", "zoom", "w1", "--off"] + named) {
+            _ = await $0.zoomPane(nil, in: Self.worktree, off: true, layout: "@2")
+        }
+        await record("preset", ["layout", "preset", "w1", "tiled"] + named) {
+            _ = await $0.applyPreset(.tiled, in: Self.worktree, layout: "@2")
+        }
+        await record("cycle", ["layout", "cycle", "w1"] + named) {
+            _ = await $0.cycleLayout(Self.worktree, layout: "@2")
+        }
+        await record("focus next", ["layout", "focus", "w1", "--next"] + named) {
+            _ = await $0.focusPane(step: "--next", in: Self.worktree, layout: "@2")
+        }
+        await record("focus previous", ["layout", "focus", "w1", "--prev"] + named) {
+            _ = await $0.focusPane(step: "--prev", in: Self.worktree, layout: "@2")
+        }
+        await record(
+            "split", ["layout", "split", "w1", "--side", "right", "--preset", "shell"] + named
+        ) {
+            _ = await $0.split(Self.worktree, beside: nil, side: .right, layout: "@2")
+        }
+        await record("rename", ["layout", "rename", "w1", "shells"] + named) {
+            _ = await $0.renameLayout("shells", in: Self.worktree, layout: "@2")
+        }
+        await record("viewport", ["layout", "viewport", "w1", "100", "30"] + named) {
+            _ = await $0.viewport(columns: 100, rows: 30, in: Self.worktree, layout: "@2")
+        }
+        // Naming none is still a line the CLI takes: tmux's active layout.
+        await record("zoom, unnamed", ["layout", "zoom", "w1", "--json"]) {
+            _ = await $0.zoomPane(nil, in: Self.worktree)
+        }
         return results
     }
 
