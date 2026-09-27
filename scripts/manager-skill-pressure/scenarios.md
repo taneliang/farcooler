@@ -247,3 +247,20 @@ payload constraint was kept, and all of it happened before
 split with no `task set`) fails all four; setting without reading, setting
 only the new rule, and setting after the start each fail their one check; the
 new sequence passes all 22, read as text or as `--json`.
+
+## Runs against the workspaces world (2026-09-28)
+
+| Run | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 | S10 | S11 | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Baseline | | | | | | FAIL | | | | | FAIL | S11b, started outside the repository and confined to its world: it moved the work and put the review rule on fc-3 unprompted, but wrote no handoff and no why-moved notes, started no orchestrator, and left `--actor` off every write. An earlier S11 baseline read the skill's source from the repository and is void |
+| 1 | PASS | PASS | PASS | PASS | PASS | PASS | PASS | | — | PASS | PASS | Before the in-flight step. S9 single-turn can't add sections without an owner to answer, so it waited for run 2. Both S11 runs noticed fc-3's agent would never learn the review rule, and left it |
+| 2 | | | | | | PASS | | PASS | PASS | | PASS ×3 | With the in-flight step: S11 runs 1, 3 and 4 pass all 23 checks. S8 and S9 were driven turn by turn with the scripted owner; each asked one heading per turn, read the draft back, and wrote only after "yes". S9 kept its six sections byte for byte, and put the landing and dependency rules inside Autonomy rather than redefine Review |
+
+S11 run 2 is not counted: it passed `"--repo scratch --actor manager"` as one
+argument on every write, which the real CLI refuses and the fake then
+accepted. The fake now refuses a flag bundle the shell didn't split, and logs
+the refused call apart, since it read and set nothing. Run 4 also exposed a
+scorer gap: its rule said "until the owner has seen the change", and the
+review pattern knew only "review"; it now also hears "seen", "looked" and
+"approved". The in-flight checks score the last `task set` of fc-3, the list
+that stands.
