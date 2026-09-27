@@ -116,6 +116,7 @@ async fn start_backend(
     spec: farcooler_core::activity::AdapterSpec,
     worktree: &std::path::Path,
     session: Option<String>,
+    acp_session: serde_json::Map<String, serde_json::Value>,
 ) -> Result<
     (farcooler_agent::dispatch::Backend, Vec<farcooler_agent::event::AgentEvent>, String, Vec<String>),
     farcooler_agent_core::backend::BackendError,
@@ -158,7 +159,7 @@ async fn start_backend(
             // with "Not authenticated" reached the user as "the ACP adapter
             // closed its connection", and the one fact naming the fix was
             // discarded one function above the screen.
-            let (agent, prelude) = AgentSession::start(conn, session, &Default::default()).await?;
+            let (agent, prelude) = AgentSession::start(conn, session, &acp_session).await?;
             let session_id = agent.session_id.clone();
             let modes = agent.available_modes.clone();
             let can_load = agent.can_load;
@@ -228,11 +229,11 @@ pub fn resolve(
 /// so its chat runs with the recipe its terminal does. Empty for every
 /// other pane.
 ///
-/// **Only onto a native adapter.** The daemon sends them only when its own
-/// registry says native (`Service::orchestrator_chat`), and they are
-/// claude's flags. This process reads the config again, and if it changed
-/// in between and now names an ACP adapter, that program is not handed
-/// flags it doesn't know.
+/// **Only onto a native adapter.** They are claude's flags. The daemon
+/// sends them with the same recipe as ACP session params
+/// (`Service::orchestrator_chat`, `acp_session_for`), and this process,
+/// which reads the config again, uses the half for the backend it starts,
+/// so an ACP adapter is never handed flags it doesn't know.
 pub fn resolve_with(
     registry: &farcooler_core::activity::Registry,
     preset: Option<&str>,
@@ -243,6 +244,31 @@ pub fn resolve_with(
         spec.args.extend(extra);
     }
     Some(spec)
+}
+
+/// `--acp-session`'s value: a JSON object, or the reason it isn't one.
+pub fn parse_acp_session(value: &str) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    match serde_json::from_str(value) {
+        Ok(serde_json::Value::Object(params)) => Ok(params),
+        Ok(_) => Err("not a JSON object".into()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// What an adapter's `session/new` and `session/load` are handed beside
+/// their own params: `params` for an ACP adapter, nothing for a native one.
+///
+/// The mirror of `resolve_with`. The daemon hands a Claude Code
+/// orchestrator's chat both its flags and these params, and this process,
+/// which reads the config again, picks the ones for the backend it starts.
+pub fn acp_session_for(
+    spec: &farcooler_core::activity::AdapterSpec,
+    params: serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    match spec.backend {
+        farcooler_core::activity::AdapterBackend::Acp => params,
+        farcooler_core::activity::AdapterBackend::Native => Default::default(),
+    }
 }
 
 /// Whether this preset needs `CLAUDE_CODE_EXECUTABLE` resolved for it.
@@ -335,6 +361,7 @@ pub async fn run(
     session: Option<String>,
     preset: Option<String>,
     adapter_args: Vec<String>,
+    acp_session: serde_json::Map<String, serde_json::Value>,
 ) -> Fallible {
     let registry = farcooler_core::config::load_registry();
     let Some(spec) = resolve_with(&registry, preset.as_deref(), adapter_args) else {
@@ -350,6 +377,7 @@ pub async fn run(
         report_failure(terminal, &socket, AgentFailure::NoAdapter).await;
     };
     let (program, args) = (spec.program.clone(), spec.args.clone());
+    let acp_session = acp_session_for(&spec, acp_session);
 
     // Named here rather than read off `program` at the point of failure:
     // `resolve` only returns `Some(spec)` when `preset` was `Some`, so this is
@@ -389,7 +417,7 @@ pub async fn run(
     // use, and killing that would be worse than waiting.
     let started = tokio::time::timeout(
         std::time::Duration::from_secs(90),
-        start_backend(&agent_label, spec, &worktree, session),
+        start_backend(&agent_label, spec, &worktree, session, acp_session),
     )
     .await;
 
@@ -949,6 +977,38 @@ mod tests {
         let built_in = farcooler_core::activity::Registry::built_in();
         let acp = resolve_with(&built_in, Some("claude"), adapter_args).expect("claude has an adapter");
         assert_eq!(acp.args, resolve(&built_in, Some("claude")).unwrap().args);
+    }
+
+    /// `--acp-session` parses as the daemon writes it, and goes to an ACP
+    /// adapter's session only: a native one takes the recipe as flags.
+    #[test]
+    fn an_orchestrators_acp_session_goes_to_an_acp_adapter_only() {
+        use clap::Parser;
+        let argv = [
+            "farcooler", "agent-host", "--terminal", "00000000-0000-0000-0000-000000000000",
+            "--socket", "/s", "--worktree", "/home", "--preset", "claude",
+            "--acp-session", r#"{"additionalDirectories":["/src/My Repo"]}"#,
+        ];
+        let crate::Command::AgentHost { acp_session, .. } = crate::Cli::try_parse_from(argv).expect("parses").command
+        else {
+            panic!("not agent-host")
+        };
+        let params = acp_session.expect("given");
+        assert_eq!(params["additionalDirectories"], serde_json::json!(["/src/My Repo"]));
+
+        let built_in = farcooler_core::activity::Registry::built_in();
+        let acp = resolve(&built_in, Some("claude")).expect("claude has an adapter");
+        assert_eq!(acp_session_for(&acp, params.clone()), params);
+
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config.toml");
+        std::fs::write(&config, "[adapters.claude]\nbackend = \"native\"\nprogram = \"claude\"\n").unwrap();
+        let native = resolve(&farcooler_core::config::registry_from(&config), Some("claude")).unwrap();
+        assert!(acp_session_for(&native, params).is_empty(), "claude's own flags carry it");
+
+        for bad in ["[1]", "not json"] {
+            assert!(parse_acp_session(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]
