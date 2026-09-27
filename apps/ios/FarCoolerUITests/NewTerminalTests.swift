@@ -101,6 +101,83 @@ final class NewTerminalTests: XCTestCase {
         return nil
     }
 
+    /// **Close the terminal this test made, through the app, the way a person
+    /// would.**
+    ///
+    /// The runner is shared by the whole suite and outlives every test in it,
+    /// so a terminal left here is a fixture the NEXT test inherits. It lands in
+    /// the workspace the app opens on, which on the demo runner is the
+    /// repository's own checkout and otherwise has no terminal — so every
+    /// later test that opens "the first terminal" opened this one instead, in
+    /// a different workspace from the one it was written against.
+    /// `TerminalScrollTests.testCrossingBackToAWorkspaceReopensTheTabYouLeft`
+    /// failed on every run after this one for exactly that reason. The runner
+    /// has a CLI that could do this, and a UI test on the simulator cannot
+    /// reach it; the app's own close can.
+    ///
+    /// The column's swipe, as `ShellColumnCloseTests` drives it, then the
+    /// confirmation a running shell earns (`ShellClose.mustAsk`). Only the tab
+    /// the shell LANDED on, and only when it moved off the tab it started on
+    /// to something that is not the diff: that is the one tab this test can
+    /// say it made. When it cannot say, it closes nothing and fails, because a
+    /// guess would close a fixture some other test needs.
+    ///
+    /// Asserted, not attempted. A cleanup that fails quietly is the leak it
+    /// exists to stop, reported four tests later as somebody else's failure.
+    private func closeWhatThisMade(
+        _ app: XCUIApplication, tab: Int?, tabBefore: Int, tabsBefore: Int
+    ) {
+        guard let tab, tab > 0, tab != tabBefore else {
+            XCTFail(
+                "cannot tell which tab this test made (landed on \(tab.map(String.init) ?? "nothing"), "
+                    + "started on \(tabBefore)), so it is still on \(runner) — remove it by hand "
+                    + "or the next test inherits it")
+            return
+        }
+
+        // The bar is behind the keyboard while a terminal has focus, and a tap
+        // on it would be a keystroke. See `TerminalScrollTests.openOverview`.
+        if app.buttons[Self.terminalHideKeyboard].waitForExistence(timeout: 3) {
+            hideKeyboard(app)
+        }
+        let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
+        let reachable = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in bar.exists && bar.isHittable }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [reachable], timeout: 15), .completed,
+            "the shell's bar is not reachable, so the terminal this test made was not closed")
+
+        // A tap pins the column, and the swipe is offered on a pinned column
+        // only.
+        bar.tap()
+        let row = app.buttons["shell-column-row-\(tab)"]
+        XCTAssertTrue(
+            row.waitForExistence(timeout: 10),
+            "the column has no row \(tab), so the terminal this test made was not closed")
+        let from = row.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
+        from.press(
+            forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: -60, dy: 0)),
+            withVelocity: .slow, thenHoldForDuration: 0.4)
+        let close = app.buttons["Close"]
+        XCTAssertTrue(
+            close.waitForExistence(timeout: 5),
+            "swiping row \(tab) revealed no Close, so the terminal this test made was not closed")
+        close.tap()
+        // A shell at a prompt is Running, so the close is confirmed. Tapped
+        // only if it is asked, so a runner that reports the pane otherwise
+        // still gets it closed.
+        let confirm = app.buttons["Close Terminal"]
+        if confirm.waitForExistence(timeout: 5) { confirm.tap() }
+
+        let gone = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in self.state(app)["tabs"] == tabsBefore },
+            object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [gone], timeout: 30), .completed,
+            "the workspace has \(state(app)["tabs"] ?? -1) tabs, not the \(tabsBefore) it started "
+                + "with: the terminal this test made is still on \(runner)")
+    }
+
     /// Opening the overflow and tapping New Terminal makes one, and lands on it.
     ///
     /// Both halves are the feature. A create that leaves you where you were is
@@ -146,6 +223,12 @@ final class NewTerminalTests: XCTestCase {
         }
 
         let after = state(app)
+        // Removed again when the test is done, pass or fail. See
+        // `closeWhatThisMade` for why that is not tidiness.
+        let landed = after["tab"]
+        addTeardownBlock { [unowned self] in
+            self.closeWhatThisMade(app, tab: landed, tabBefore: tabBefore, tabsBefore: tabsBefore)
+        }
         XCTAssertEqual(
             after["tabs"], tabsBefore + 1,
             "one tap should add exactly one tab")
