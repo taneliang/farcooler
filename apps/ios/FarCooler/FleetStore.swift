@@ -209,11 +209,31 @@ final class FleetStore: ObservableObject {
             Task { @MainActor in self?.publish() }
         }
         starts[runner.id] = Task { @MainActor [weak self] in
+            #if DEBUG
+            await Self.holdForTest(runner.id)
+            guard !Task.isCancelled else { return }
+            #endif
             await connection.start(host: runner)
             guard !Task.isCancelled else { return }
             self?.starts[runner.id] = nil
         }
     }
+
+    #if DEBUG
+    /// A UI test's slow runner: six seconds before this one is dialed, when
+    /// the launch arguments name it as `-debugSlowRunner <id>`.
+    ///
+    /// For `TerminalScrollTests.testACrossingIsDroppedWhenAnotherRunnerIsPicked`,
+    /// which has to pick another runner while one is still on its way. The
+    /// demo runner answers in about three seconds and a heading's menu takes
+    /// about as long to drive, so without this the test is a race. Debug
+    /// builds only, and nothing is slowed unless a launch argument asks.
+    private static func holdForTest(_ runner: UUID) async {
+        guard UserDefaults.standard.string(forKey: "debugSlowRunner") == runner.uuidString
+        else { return }
+        try? await Task.sleep(for: .seconds(6))
+    }
+    #endif
 
     private func retire(_ id: UUID) {
         // Cancel-and-remove together, so a cancelled task is never left in the

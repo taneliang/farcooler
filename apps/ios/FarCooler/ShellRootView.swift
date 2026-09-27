@@ -189,6 +189,10 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// swipe onto that runner lands there too. Read by
     /// `TerminalScrollTests.testAChangeOfRunnerRebuildsNothing` and its
     /// all-runners twin.
+    ///
+    /// It sees a remount of this view and of anything above it — `FleetView`,
+    /// `ShellScreen`, the `.pane` branch of `ShellScreen.opening` — and
+    /// nothing below it: a pane rebuilt inside the track keeps this value.
     @State private var mount = String(UUID().uuidString.prefix(8))
 
     /// The tab `position` is ON, by id, and the thing `onRest` announces.
@@ -1019,8 +1023,13 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         // in another room woke up. `settle` is what decides whether a pane
         // genuinely arrived, and it decides it on the tab id rather than on the
         // number.
-        .onChange(of: fleet) { _, now in
-            let seated = now.reseat(position, holding: anchor)
+        //
+        // `after:` the fleet it replaces, for the one case where the anchor is
+        // gone and there is nothing to clamp near: a fleet that arrives after
+        // an empty one, which is every switch with one runner at a time. See
+        // `ShellFleet.reseat(_:holding:after:)`.
+        .onChange(of: fleet) { old, now in
+            let seated = now.reseat(position, holding: anchor, after: old)
             if seated != position {
                 var silent = Transaction()
                 silent.disablesAnimations = true
@@ -1116,6 +1125,10 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         // the shell knows which part of its own number the window is going to
         // give back, so it says so here. See `ShellPaneRealView.paneBottom`.
         .environment(\.shellDisplayBottom, safeArea.bottom)
+        // Whether the grid is up over the panes, so a pane that mounts under
+        // it waits for it to go before raising a keyboard. See
+        // `TerminalView`'s first focus.
+        .environment(\.shellOverviewShowing, overview)
         // **Alongside the pane, not behind it.**
         //
         // `.gesture` attaches at the LOWEST priority in SwiftUI: anything a
@@ -1536,6 +1549,13 @@ extension EnvironmentValues {
     /// Zero outside the shell, which is the honest answer for a pane mounted
     /// somewhere with no shell furniture over it.
     @Entry var shellDisplayBottom: CGFloat = 0
+
+    /// Whether the shell's overview is up over the pane track.
+    ///
+    /// Read by `TerminalView` to hold its first focus: a pane mounted under
+    /// the grid must not raise the keyboard over it. False outside the shell,
+    /// where nothing covers a pane and it focuses on arrival as it always has.
+    @Entry var shellOverviewShowing: Bool = false
 }
 
 

@@ -417,10 +417,12 @@ struct FleetView: View {
     /// The app, once this runner has answered: the navigation shell.
     ///
     /// One branch, and it is the last thing between a connection and the shell.
-    /// `hasFleet` is what it turns on because the shell opens ON a pane — see
-    /// `ShellScreen.seed` — and there is no pane to open on until the runner
-    /// has said what it has. It is set by the fleet read itself rather than by
-    /// the phase, which flips to `.connected` a whole SSH round trip earlier.
+    /// It first opens on `hasFleet`, because the shell opens ON a pane — see
+    /// `ShellScreen.seed` — and there is no pane to open on until a runner
+    /// has said what it has. That is set by the fleet read itself rather than
+    /// by the phase, which flips to `.connected` a whole SSH round trip
+    /// earlier. Once the shell has had a worktree it stays whether or not any
+    /// runner has a fleet: see `phases` and `shellStood`.
     ///
     /// This used to be the inbox — a list of what on this runner was waiting on
     /// a person — with the shell behind a debug flag beside it. Both are gone:

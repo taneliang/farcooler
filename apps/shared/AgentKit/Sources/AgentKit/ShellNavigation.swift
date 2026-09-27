@@ -685,6 +685,28 @@ struct ShellFleet: Hashable {
         return clamping(position)
     }
 
+    /// `reseat(_:holding:)`, for a fleet that arrived after `previous`.
+    ///
+    /// The one difference is a fleet that arrives after an EMPTY one with the
+    /// anchor gone. A clamp keeps somebody near where they were, and after an
+    /// empty fleet there is nowhere they were: the index is left over from a
+    /// fleet that has gone entirely. That is a switch with one runner at a
+    /// time — A is retired, nothing is left, then B answers — and a clamp
+    /// there stood the shell on B's worktree at A's old index, which is
+    /// whatever B happens to keep at that number. So it lands where a launch
+    /// does instead: the first worktree, on the tab it resumes on.
+    func reseat(
+        _ position: ShellPosition, holding tab: String?, after previous: ShellFleet
+    ) -> ShellPosition {
+        if let tab, let found = self.position(ofTab: tab) { return found }
+        if previous.workspaces.isEmpty, let first {
+            return clamping(
+                ShellPosition(
+                    workspace: first.workspace, tab: workspaces[first.workspace].resumeTab))
+        }
+        return clamping(position)
+    }
+
     /// The nearest position this fleet actually has, or the one handed in when
     /// it has none at all.
     func clamping(_ position: ShellPosition) -> ShellPosition {

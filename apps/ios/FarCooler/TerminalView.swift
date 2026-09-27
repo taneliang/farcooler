@@ -795,6 +795,12 @@ struct TerminalView: View {
     @State private var altArmed = false
     @State private var focusRequest = 0
     @State private var dismissRequest = 0
+    /// An arrival's keyboard, held because the shell's grid was over this
+    /// pane when it appeared. See the `onAppear` at the end of `body`.
+    @State private var focusHeld = false
+    /// Whether the shell's grid is over this pane. See
+    /// `EnvironmentValues.shellOverviewShowing`.
+    @Environment(\.shellOverviewShowing) private var overviewShowing
     /// The URL a long press landed on, which is also what presents the dialog.
     ///
     /// One value rather than a flag plus a string: a dialog that can be shown
@@ -1410,7 +1416,24 @@ struct TerminalView: View {
         // to switch to it did nothing at all.
         .frame(width: size.width, height: size.height)
         .clipped()
-        .onAppear { focusRequest += 1 }
+        // The keyboard on arrival — but not while the shell's grid is over
+        // this pane. A pane mounted under an open overview (a runner switched
+        // to from its heading, whose fleet lands while the grid is up) raised
+        // the keyboard over the grid and covered half the cards. The request
+        // is held instead and made when the grid goes, so closing the grid
+        // onto the pane still arrives with a keyboard.
+        .onAppear {
+            if overviewShowing { focusHeld = true } else { focusRequest += 1 }
+        }
+        //
+        // Made only by the pane the grid closes ONTO. Every neighbour the
+        // track mounted under the grid held one too, and releasing them all
+        // would leave the keyboard with whichever asked last.
+        .onChange(of: overviewShowing) { _, showing in
+            guard !showing, focusHeld else { return }
+            focusHeld = false
+            if isVisible { focusRequest += 1 }
+        }
     }
 
     // MARK: - Drawing
@@ -1810,7 +1833,10 @@ private struct KeystrokeField: UIViewRepresentable {
     }
 
     final class Coordinator {
-        var lastFocusRequest = -1
+        /// Starts where `focusRequest` does, so a first `updateUIView` is not
+        /// a request of its own: the keyboard comes only when the terminal
+        /// asks for it, which it does not while the shell's grid is up.
+        var lastFocusRequest = 0
         var lastDismissRequest = 0
         /// Retained because nothing else owns it: the input view holds the
         /// hosting controller's VIEW, and a controller referenced only through

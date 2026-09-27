@@ -966,7 +966,7 @@ struct ShellScreen: View {
         .onChange(of: liveRunners) { _, _ in elsewhere = readElsewhere() }
         // A crossing the new runner cannot honor, or one somebody has since
         // switched away from. See `settleCrossing`.
-        .onChange(of: answeredRunners) { _, _ in settleCrossing() }
+        .onChange(of: runnerReports) { _, _ in settleCrossing() }
         .onChange(of: openableCount) { _, _ in settleCrossing() }
         .onChange(of: hosts.selected?.id) { _, _ in settleCrossing() }
         .task(id: pullRequestKey) { await readPullRequest() }
@@ -1557,13 +1557,14 @@ struct ShellScreen: View {
                 get: { requestedTab(in: map) },
                 set: { taken in
                     guard taken == nil else { return }
-                    // A crossing is taken only when nothing outranked it:
-                    // `requestedTab` asks the terminals first.
-                    if pendingTerminal == nil, createdTerminal == nil, boardTerminal == nil,
-                        crossing != nil
-                    {
-                        crossing = nil
-                        UserDefaults.standard.removeObject(forKey: Self.crossingKey)
+                    // Only the asker that was honored is spent. A crossing is
+                    // honored when no terminal asker resolved, and a deep link
+                    // still waiting on its runner must survive it — so this
+                    // asks which one `requestedTab` answered with, rather than
+                    // which ones are set.
+                    if case .crossing = requested(in: map)?.asker {
+                        spendCrossing()
+                        return
                     }
                     // Only the LINK arms `linkedTab`. Whatever rest a deep link
                     // produces is not a choice and must not be written down as
@@ -1689,10 +1690,9 @@ struct ShellScreen: View {
     ///
     /// Only reachable with "Connect every runner at once" turned off, because
     /// that is the only setting under which a runner's worktrees are in the
-    /// grid as a memory rather than as panes. It is not a teardown of this
-    /// screen any more — `RootView` stopped keying the tree on the selected
-    /// runner — but it IS a teardown of the other runner's connection, which is
-    /// what one-runner-at-a-time means.
+    /// grid as a memory rather than as panes. It IS a teardown of the other
+    /// runner's connection, which is what one-runner-at-a-time means, and not
+    /// of this screen: see the next paragraph for what keeps it.
     ///
     /// **Landed by a request, not by `seed`.** The note used to be honored only
     /// by `seed`, and that worked for as long as the switch tore this screen
@@ -1745,21 +1745,51 @@ struct ShellScreen: View {
     /// Asked of the SELECTION and not of the live set for the first half: the
     /// store brings the new runner up a turn after the tap, so for that turn
     /// it is not live and a live-set test would drop every crossing at once.
+    ///
+    /// And a third: the runner stopped on its way — it failed, or it is
+    /// holding a fingerprint question (`report(_:)` says `.stalled`). Held
+    /// through that, the crossing would fire whenever the runner next
+    /// answered — after a Retry, a network change or a trust, with the grid
+    /// being searched or a sheet up over it — and close the grid onto a
+    /// worktree nobody had asked for since. A runner that fails AFTER
+    /// answering is not stalled by `report`'s rule, and by then the crossing
+    /// has landed or been dropped.
+    ///
+    /// **Everything here is read off the runner's own connection**, the
+    /// answer and the worktrees together. The merged `map` is published a
+    /// turn after a connection changes (`FleetStore.publish` runs off
+    /// `objectWillChange`), so asking the connection whether it answered and
+    /// the map whether it has the worktree could see a runner that answered
+    /// without the worktree for that turn, and drop a crossing that was about
+    /// to land.
+    ///
+    /// The decision is `ShellCrossingRule.keeps`, in AgentKit, where
+    /// `swift test` reaches every arm of it.
     private func settleCrossing() {
         guard let crossing else { return }
-        let picked = hosts.selected?.id.uuidString == crossing.runner
-        let answered = fleet.runners.first(where: {
-            $0.host.id.uuidString == crossing.runner
-        })?.connection.hasFleet ?? false
-        guard !picked || (answered && tab(forCrossing: crossing, in: map) == nil) else { return }
-        self.crossing = nil
+        let runner = fleet.runners.first { $0.host.id.uuidString == crossing.runner }
+        let keeps = ShellCrossingRule.keeps(
+            picked: hosts.selected?.id.uuidString == crossing.runner,
+            report: runner.map { report($0) },
+            hasWorktree: runner?.connection.fleet.workspaces.contains {
+                $0.id == crossing.workspace
+            } ?? false)
+        if !keeps { spendCrossing() }
+    }
+
+    /// Forget a crossing, here and in the note a relaunch would read.
+    private func spendCrossing() {
+        crossing = nil
         UserDefaults.standard.removeObject(forKey: Self.crossingKey)
     }
 
-    /// The runners that have said what they have, as ids, for `settleCrossing`
-    /// to watch: a runner answering with nothing on it changes no count.
-    private var answeredRunners: Set<String> {
-        Set(fleet.runners.filter { $0.connection.hasFleet }.map(\.host.id.uuidString))
+    /// Each runner and what it has said, in `report(_:)`'s vocabulary, for
+    /// `settleCrossing` to watch: a runner answering with nothing on it
+    /// changes no count, and one that fails changes nothing else it watches.
+    private var runnerReports: [String: ShellBringUp.Report] {
+        Dictionary(
+            fleet.runners.map { ($0.host.id.uuidString, report($0)) },
+            uniquingKeysWith: { first, _ in first })
     }
 
     /// The selection follows where you MOVE, with every runner connected.
@@ -1942,11 +1972,27 @@ struct ShellScreen: View {
     /// talking to. A worktree rather than a terminal, so it resolves through
     /// `tab(forCrossing:in:)`, but it is honored the same way and at the same
     /// moment — see `select(runner:landingOn:)`.
+    ///
+    /// The crossing is asked only when no terminal asker RESOLVED, not only
+    /// when none is set: a deep link to a pane no runner has yet waits on
+    /// `dropUnknownTerminal`, and a crossing must not wait behind it.
     private func requestedTab(in map: ShellFleetMap) -> String? {
-        if let id = pendingTerminal ?? createdTerminal ?? boardTerminal {
-            return tab(forTerminal: id, in: map)
+        requested(in: map)?.tab
+    }
+
+    /// Which asker a request answers, so the one taken is the one spent.
+    private enum Asker { case terminal, crossing }
+
+    private func requested(in map: ShellFleetMap) -> (tab: String, asker: Asker)? {
+        if let id = pendingTerminal ?? createdTerminal ?? boardTerminal,
+            let tab = tab(forTerminal: id, in: map)
+        {
+            return (tab, .terminal)
         }
-        return crossing.flatMap { tab(forCrossing: $0, in: map) }
+        if let crossing, let tab = tab(forCrossing: crossing, in: map) {
+            return (tab, .crossing)
+        }
+        return nil
     }
 
     /// The shell's tab for a terminal, on whichever runner it is, or nil when

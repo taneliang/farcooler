@@ -96,3 +96,42 @@ struct ShellBringUpTests {
         #expect(!sentence.contains("\"api\""))
     }
 }
+
+/// When a tapped card on another runner stops waiting to be landed on.
+struct ShellCrossingRuleTests {
+    private func keeps(
+        picked: Bool = true, _ report: ShellBringUp.Report?, has: Bool = false
+    ) -> Bool {
+        ShellCrossingRule.keeps(picked: picked, report: report, hasWorktree: has)
+    }
+
+    /// On its way, or not brought up yet: the ordinary wait.
+    @Test func aRunnerOnItsWayKeepsTheCrossing() {
+        #expect(keeps(nil))
+        #expect(keeps(.pending))
+    }
+
+    /// Answered with the worktree: kept, and the request lands it.
+    @Test func aRunnerThatAnsweredWithTheWorktreeKeepsIt() {
+        #expect(keeps(.answered, has: true))
+    }
+
+    /// Answered without it: the worktree went while the card was a memory.
+    @Test func aRunnerThatAnsweredWithoutTheWorktreeDropsIt() {
+        #expect(!keeps(.answered, has: false))
+    }
+
+    /// **Failed, or asking about its fingerprint: dropped.** Kept, it would
+    /// land whenever the runner next answered, over whatever is on screen then.
+    @Test func aStalledRunnerDropsTheCrossing() {
+        #expect(!keeps(.stalled))
+        #expect(!keeps(.stalled, has: true))
+    }
+
+    /// Another runner picked since: dropped whatever this one is doing.
+    @Test func anotherRunnerPickedDropsTheCrossing() {
+        for report in [nil] + ShellBringUp.Report.allCases.map(Optional.some) {
+            #expect(!keeps(picked: false, report, has: true))
+        }
+    }
+}

@@ -1446,7 +1446,10 @@ final class TerminalScrollTests: XCTestCase {
         }
         let json = "[\(entry(a, "Runner A")),\(entry(b, "Runner B"))]"
         let hex = Data(json.utf8).map { String(format: "%02x", $0) }.joined()
-        app.launchArguments += ["-hosts", "<\(hex)>", "-hosts.last", a] + extra
+        // `<slow-a>` in `extra` stands for Runner A's id, which is only made
+        // here. See `testACrossingIsDroppedWhenAnotherRunnerIsPicked`.
+        app.launchArguments += ["-hosts", "<\(hex)>", "-hosts.last", a]
+            + extra.map { $0 == "<slow-a>" ? a : $0 }
         runnerIDs = (a, b)
         app.launch()
         return app
@@ -1737,10 +1740,16 @@ final class TerminalScrollTests: XCTestCase {
                 + "above `ShellScreen` unmounted it. `.id(host)` on `RootView` would do this, and so "
                 + "does `FleetView.phases` falling back to its waiting screen for as long as no "
                 + "runner has a fleet, which is every switch with one runner at a time")
+        // Where the grid will close onto: B's first worktree, where a launch
+        // on B lands — not A's old index, which names whatever B keeps at
+        // that number (`ShellFleet.reseat(_:holding:after:)`). The shell was
+        // on a terminal, which is never the first worktree in this fixture,
+        // so the two answers differ.
+        XCTAssertNotEqual(wsBefore, "0", "the switch was tapped from ws=0, so this proves nothing")
         XCTAssertEqual(
-            Self.field(probe.value as? String ?? "", "ws"), wsBefore,
-            "the shell no longer stands where the switch was tapped (it was on ws=\(wsBefore ?? "?"), "
-                + "the probe reads \(now))")
+            Self.field(probe.value as? String ?? "", "ws"), "0",
+            "after the switch the shell stands on A's old index (it was on ws=\(wsBefore ?? "?"), "
+                + "the probe reads \(now)), not on B's first worktree")
         XCTAssertTrue(
             hasAnswered(other),
             "Runner B never answered: its heading reads "
@@ -1753,6 +1762,44 @@ final class TerminalScrollTests: XCTestCase {
             "Runner A still reads as live after the switch to B "
                 + "(\(mine.exists ? mine.label : "no heading")): one runner at a time means A "
                 + "is retired, and its cards must be the cached \"can't say\" ones")
+
+        // No keyboard over the grid. B's panes mounted under it when B's
+        // fleet landed, and a terminal used to take the keyboard on mount
+        // whatever was over it, covering half the cards. The key row is the
+        // signal rather than the software keyboard, which a hardware keyboard
+        // attached by XCUITest can hide: the row comes up with first
+        // responder either way.
+        let keyRow = app.buttons[Self.terminalHideKeyboard]
+        XCTAssertFalse(
+            keyRow.waitForExistence(timeout: 5),
+            "a keyboard came up over the grid after the switch: a pane under the overview took "
+                + "first responder")
+
+        // And closing the grid onto one of B's terminals still arrives with
+        // one: the held focus is made when the grid goes, by the pane it goes
+        // to. `scrolling` is the demo worktree whose resting tab is a terminal.
+        let scrolling = app.buttons.matching(
+            NSPredicate(
+                format: "identifier BEGINSWITH %@ AND label == %@",
+                "shell-card-\(runnerIDs.b)", "scrolling")
+        ).firstMatch
+        XCTAssertTrue(scrolling.waitForExistence(timeout: 10), "B has no live `scrolling` card")
+        scrolling.tap()
+        let closed = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                Self.field(probe.value as? String ?? "", "overview") == "0"
+            }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [closed], timeout: 20), .completed,
+            "the grid never closed onto B's scrolling: \(probe.value ?? "")")
+        XCTAssertNotEqual(
+            Self.field(probe.value as? String ?? "", "tab"), "0",
+            "B's scrolling rests on its Diff tab, so there is no terminal to raise a keyboard: "
+                + "\(probe.value ?? "")")
+        XCTAssertTrue(
+            keyRow.waitForExistence(timeout: 10),
+            "closing the grid onto B's terminal raised no keyboard: the focus held while the "
+                + "grid was up was never made")
     }
 
     /// **A tapped card on the runner you left lands on its worktree, in the
@@ -1798,8 +1845,11 @@ final class TerminalScrollTests: XCTestCase {
             XCTWaiter.wait(for: [answered], timeout: 60), .completed,
             "Runner B never answered: its heading reads \(other.exists ? other.label : "nothing")")
 
-        // A card of A's, for a worktree other than the one the bar is on, so
-        // that landing on it is a move the bar can be seen to make.
+        // A card of A's for a worktree the bar is not on, so that landing on
+        // it is a move the bar can be seen to make — and not A's FIRST
+        // worktree either, which is where a relaunch lands on its own, so
+        // that the relaunch below can tell a spent note from a kept one.
+        // The last of A's cards, in the fixture `boarding`.
         let cards = app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH 'shell-elsewhere-'"))
         let appeared = XCTNSPredicateExpectation(
@@ -1807,9 +1857,13 @@ final class TerminalScrollTests: XCTestCase {
         XCTAssertEqual(
             XCTWaiter.wait(for: [appeared], timeout: 20), .completed,
             "Runner A left no cached cards behind after the switch")
+        let barNow = Self.workspaceName(bar.label)
+        let all = cards.allElementsBoundByIndex
         let card = try XCTUnwrap(
-            cards.allElementsBoundByIndex.first { Self.workspaceName($0.label) != here },
-            "every cached card of A's names \(here), the worktree the bar is already on")
+            all.dropFirst().last {
+                ![here, barNow].contains(Self.workspaceName($0.label))
+            },
+            "no cached card of A's names a worktree other than \(here), \(barNow) and A's first")
         let wanted = Self.workspaceName(card.label)
         let mountBefore = Self.field(probe.value as? String ?? "", "mount")
         card.tap()
@@ -1829,6 +1883,98 @@ final class TerminalScrollTests: XCTestCase {
             Self.field(probe.value as? String ?? "", "mount"), mountBefore,
             "the card landed in a NEW shell (the probe reads \(probe.value ?? "")): the crossing "
                 + "was honored by a remount's `seed`, not by the shell it was tapped in")
+
+        // The note is spent. `select` writes it down for an app killed before
+        // the runner answers, and `seed` honors it on the next launch — so a
+        // note left behind by a crossing that has LANDED steers every later
+        // launch onto that worktree. Relaunched, the shell must open where a
+        // launch on A opens, which is not `wanted`.
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(probe.waitForExistence(timeout: 180), "the shell never stood up again")
+        let opened = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                bar.exists && !Self.workspaceName(bar.label).isEmpty
+            }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [opened], timeout: 60), .completed,
+            "the relaunched shell's bar names nothing")
+        XCTAssertNotEqual(
+            Self.workspaceName(bar.label), wanted,
+            "the relaunch opened on \(wanted), the crossing that had already landed: its note "
+                + "was never spent, and it will steer every launch until something reads it")
+    }
+
+    /// **A crossing is dropped when somebody picks another runner before it
+    /// lands.**
+    ///
+    /// Tap one of A's cards while on B, then switch to B again before A has
+    /// answered, then back to A from its heading. Without the drop the
+    /// request is still waiting when A answers the second time, and closes
+    /// the grid onto a worktree two choices stale. `ShellCrossingRule` has
+    /// the rule; this is the wiring (`ShellScreen.settleCrossing`).
+    ///
+    /// Runner A is dialed six seconds late (`-debugSlowRunner`, a debug-only
+    /// hook in `FleetStore.bringUp`), so B can be picked while A is still on
+    /// its way: the demo runner answers in about three seconds, about as long
+    /// as a heading's menu takes to drive.
+    func testACrossingIsDroppedWhenAnotherRunnerIsPicked() throws {
+        let app = launchTwoRunners(
+            ["-\(Self.everyRunnerAtOnce)", "<false/>", "-debugSlowRunner", "<slow-a>"])
+        _ = try openATerminalInTheShell(app)
+        let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
+        XCTAssertTrue(probe.waitForExistence(timeout: 30), "the shell never stood up")
+
+        func heading(_ id: String) -> XCUIElement {
+            app.descendants(matching: .any).matching(identifier: "shell-section-\(id)").firstMatch
+        }
+        func answered(_ id: String) -> XCTNSPredicateExpectation {
+            let h = heading(id)
+            return XCTNSPredicateExpectation(
+                predicate: NSPredicate { _, _ in
+                    h.exists && h.label.contains("Connected") && !h.label.contains("No worktrees")
+                }, object: nil)
+        }
+
+        // Onto B, so A's cards are a memory.
+        try openOverview(app)
+        try switchToRunner(app, id: runnerIDs.b)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [answered(runnerIDs.b)], timeout: 60), .completed,
+            "Runner B never answered")
+
+        // Tap A's last card, and pick B again at once: A is retired before it
+        // can answer, B is dialed afresh.
+        let cards = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH 'shell-elsewhere-'"))
+        let appeared = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in cards.count > 1 }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [appeared], timeout: 20), .completed,
+            "Runner A left no cached cards behind after the switch")
+        let card = try XCTUnwrap(cards.allElementsBoundByIndex.last)
+        let tapped = Self.workspaceName(card.label)
+        card.tap()
+        try switchToRunner(app, id: runnerIDs.b)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [answered(runnerIDs.b)], timeout: 60), .completed,
+            "Runner B never answered the second time")
+
+        // Back to A from its heading, which lands nowhere of its own.
+        try switchToRunner(app, id: runnerIDs.a)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [answered(runnerIDs.a)], timeout: 60), .completed,
+            "Runner A never answered")
+
+        // A short watch: a held crossing lands as soon as A's fleet is in.
+        let landed = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                Self.field(probe.value as? String ?? "", "overview") != "1"
+            }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [landed], timeout: 8), .timedOut,
+            "the grid closed when A answered (the probe reads \(probe.value ?? "")): the "
+                + "crossing to \(tapped) survived B being picked in between")
     }
 
     /// **With every runner connected, a move onto another runner's worktree

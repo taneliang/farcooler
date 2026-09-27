@@ -296,6 +296,24 @@ struct ShellNavigationTests {
         #expect(after.tab(at: after.reseat(at, holding: "b2"))?.id == "b2")
     }
 
+    /// **A fleet that arrives after an empty one lands on its first worktree.**
+    ///
+    /// A one-runner-at-a-time switch: A is retired, the fleet empties, B
+    /// answers. The shell's index is A's, and clamping it would stand the shell
+    /// on whatever B keeps at that number.
+    @Test func aFleetArrivingAfterAnEmptyOneLandsOnItsFirstWorktree() {
+        let empty = ShellFleet(workspaces: [])
+        let fleet = Self.crossing()
+        let at = ShellPosition(workspace: 1, tab: 2)
+        let landed = fleet.reseat(at, holding: "gone", after: empty)
+        #expect(landed.workspace == 0)
+        #expect(landed.tab == fleet.workspaces[0].resumeTab)
+        // Across an ordinary poll, the anchor-less answer is still the clamp.
+        #expect(fleet.reseat(at, holding: "gone", after: fleet) == fleet.clamping(at))
+        // And an anchor that IS here wins either way.
+        #expect(fleet.reseat(at, holding: "b2", after: empty) == at)
+    }
+
     /// A tab inserted before this one inside the same workspace moves it too.
     @Test func aTabInsertedAheadMovesTheAnchoredPosition() {
         var fleet = Self.crossing()
