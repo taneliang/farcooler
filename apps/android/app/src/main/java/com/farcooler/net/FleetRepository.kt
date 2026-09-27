@@ -109,9 +109,7 @@ class FleetRepository(
 
     init {
         scope.launch {
-            combine(hosts.hosts, hosts.selectedId, settings.allRunnersAtOnce) { all, selected, everything ->
-                if (everything) all else all.filter { it.id == selected }
-            }.collect { wanted -> reconcile(wanted) }
+            combine(hosts.hosts, hosts.selectedId, settings.allRunnersAtOnce, ::wantedRunners).collect { wanted -> reconcile(wanted) }
         }
     }
 
@@ -278,3 +276,16 @@ class FleetRepository(
     // The narrower rule is untouched: `List<Terminal>.landingTerminal` still
     // decides which PANE a worktree opens on, through `Backstack.rule`.
 }
+
+/** The runners to talk to: every one, or with "Connect every runner at once" off, the one picked. */
+fun wantedRunners(all: List<Runner>, selected: String?, everything: Boolean): List<Runner> =
+    if (everything) all else all.filter { it.id == selected }
+
+/**
+ * The runners Settings offers to pick between: every one, when the app talks
+ * to only the one picked and there is more than one to pick. Without it the
+ * one caller of `RunnerStore.select` was `add`, and with the setting off the
+ * runner added last was the only one the app could reach.
+ */
+fun switchableRunners(all: List<Runner>, everything: Boolean): List<Runner> =
+    if (everything || all.size < 2) emptyList() else all

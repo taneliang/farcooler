@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -31,6 +32,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -56,6 +58,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.account.AppVersion
 import com.farcooler.account.Registration
@@ -66,6 +70,7 @@ import com.farcooler.data.Settings
 import com.farcooler.data.TerminalFontChoice
 import com.farcooler.data.Themes
 import com.farcooler.net.Connection
+import com.farcooler.net.switchableRunners
 import kotlinx.coroutines.launch
 
 /**
@@ -336,6 +341,8 @@ fun SettingsScreen(
     val pushError by model.push.lastError.collectAsStateWithLifecycle()
     val pushRegistered by model.push.registered.collectAsStateWithLifecycle()
     val connections by model.fleet.active.collectAsStateWithLifecycle()
+    val runners by model.hosts.hosts.collectAsStateWithLifecycle()
+    val picked by model.hosts.selectedId.collectAsStateWithLifecycle()
 
     LaunchedEffect(connections) { connections.forEach { it.loadDaemonBuild() } }
 
@@ -437,6 +444,25 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // The runner you picked, and the way to pick another: off, this is
+            // the only place that can.
+            for (runner in switchableRunners(runners, allRunners)) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .selectable(
+                            selected = runner.id == picked,
+                            role = Role.RadioButton,
+                            onClick = { model.hosts.select(runner) },
+                        )
+                        .testTag("runner-choice-${runner.id}"),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(selected = runner.id == picked, onClick = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(runner.displayLabel, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
             SettingRow("Reshape panes to this screen", reshape) {
                 model.settings.setReshapePanes(it)
             }
