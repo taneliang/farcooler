@@ -1319,9 +1319,12 @@ async fn a_daemon_under_the_stub_switch_never_starts_claude() {
     let opened = session.create_terminal(worktree_id, "claude", "claude", false).await;
 
     // Until a process under the pane is the stub's `sleep` (its last word:
-    // nothing after it can start claude) or the trap has run. Under the
-    // pane, not in it: tmux wraps the command in its own shell, and the
-    // login shell keeps the foreground.
+    // nothing after it can start claude) or the trap has run. The pane's
+    // process OR one under it: with bash as the login shell, every shell in
+    // the chain (tmux's `-c` wrapper, `env`, `bash -ilc`, the stub's `sh -c
+    // exec`) runs a single command and so execs it, and the pane's own
+    // process becomes `sleep`. fish forks instead and keeps the foreground,
+    // so there `sleep` is a grandchild.
     let install = std::fs::read_to_string(daemon.dir.path().join("install-id")).expect("install id");
     let tmux = farcooler_core::programs::find("tmux").expect("tmux");
     let mut panes = String::new();
@@ -1353,7 +1356,9 @@ async fn a_daemon_under_the_stub_switch_never_starts_claude() {
     assert!(stub_running, "the claude pane is not running the stub: {panes}");
 }
 
-/// Whether some descendant of process `pid` is running `program`.
+/// Whether process `pid`, or some descendant of it, is running `program`.
+/// Compared by basename: `comm` is `/bin/sleep` on macOS and `sleep` on
+/// Linux.
 fn runs_under(pid: &str, program: &str) -> bool {
     let out = std::process::Command::new("ps").args(["-ax", "-o", "pid=,ppid=,comm="]).output().expect("ps");
     let table: Vec<(String, String, String)> = String::from_utf8_lossy(&out.stdout)
@@ -1363,11 +1368,15 @@ fn runs_under(pid: &str, program: &str) -> bool {
             Some((w.next()?.to_string(), w.next()?.to_string(), w.collect::<Vec<_>>().join(" ")))
         })
         .collect();
+    let is_program = |comm: &str| comm.rsplit('/').next() == Some(program);
+    if table.iter().any(|(p, _, comm)| p == pid && is_program(comm)) {
+        return true;
+    }
     let mut parents = vec![pid.to_string()];
     while let Some(parent) = parents.pop() {
         for (child, ppid, comm) in &table {
             if *ppid == parent {
-                if comm.rsplit('/').next() == Some(program) {
+                if is_program(comm) {
                     return true;
                 }
                 parents.push(child.clone());
