@@ -556,7 +556,9 @@ pub(crate) mod test_agent {
     /// for, so a stubbed launch followed by `; codex` is refused. Separators
     /// are found without regard to quoting, so a prompt holding one and then
     /// an agent's name (`'fix it; ask codex'`) is refused too -- the safe
-    /// direction, and no test's prompt does.
+    /// direction, and no test's prompt does. That refusal's message names
+    /// the separator and the quoting rather than `agent_program`, which a
+    /// stubbed launch has already gone through.
     ///
     /// **What it still cannot see:** a program named through a variable, an
     /// alias, `eval` or a wrapper script; and any agent not in `AGENTS`. It
@@ -570,6 +572,7 @@ pub(crate) mod test_agent {
         );
         // One command at a time: a separator ends what a stub in front of it
         // can vouch for.
+        let mut stubbed_earlier = false;
         for segment in command.split(|c: char| ";&|()<>$`\n".contains(c)) {
             let words: Vec<&str> = segment
                 .split(|c: char| c.is_whitespace() || c == '\'' || c == '"')
@@ -580,17 +583,32 @@ pub(crate) mod test_agent {
                 if !AGENTS.contains(&program) {
                     continue;
                 }
+                if words[..i].contains(&MARKER) {
+                    // Everything after a stubbed agent in this command is its
+                    // arguments -- `--preset claude`, a prompt that names an
+                    // agent -- which the stub never reads.
+                    break;
+                }
+                // Quote-blind on purpose: every launch nests its prompt in
+                // `shell_quote` inside an `-ilc '...'`, so honoring only the
+                // outer quotes would put a stubbed launch and a real `; codex`
+                // after it in one segment. What this can do is say which of
+                // its two refusals this is.
                 assert!(
-                    words[..i].contains(&MARKER),
+                    !stubbed_earlier,
+                    "a daemon unit test's command names `{program}` after the stub, but past one of \
+                     `;&|()<>$`, a backtick or a newline, so the stub does not vouch for it. This check \
+                     splits on those without regard to quoting: if that separator is inside a quoted \
+                     prompt or payload, reword it; if it is not, a real `{program}` was about to start: \
+                     {command}"
+                );
+                panic!(
                     "a daemon unit test was about to start a real `{program}` in a tmux pane. Every launch \
                      names its program through `agent_program`, which stubs it under test; this one did \
                      not: {command}"
                 );
-                // Everything after a stubbed agent in this command is its
-                // arguments -- `--preset claude`, a prompt that names an
-                // agent -- which the stub never reads.
-                break;
             }
+            stubbed_earlier |= words.contains(&MARKER);
         }
     }
 }
@@ -4886,6 +4904,29 @@ mod test_agent_tests {
             "{} '/Applications/Far Cooler.app/Contents/MacOS/farcooler' agent-host --terminal x",
             test_agent::PROGRAM
         ));
+    }
+
+    /// A stubbed launch whose quoted prompt holds a separator and then an
+    /// agent's name is refused (the check is quote-blind), but the message
+    /// must not blame `agent_program`, which that launch went through. A
+    /// command with no stub at all still gets the `agent_program` message.
+    #[test]
+    fn a_separator_in_a_stubbed_prompt_is_refused_for_what_it_is() {
+        let refusal = |command: &str| {
+            std::panic::catch_unwind(|| test_agent::refuse_a_real_agent(command))
+                .err()
+                .and_then(|p| p.downcast::<String>().ok())
+                .unwrap_or_else(|| panic!("not refused: {command}"))
+        };
+        let shell = farcooler_core::shell::login_shell();
+        let inner = format!("{} claude --prompt {}", test_agent::PROGRAM, shell_quote("fix the parser; then ask codex"));
+        let command = format!("{shell} -ilc {}", shell_quote(&inner));
+        let message = refusal(&command);
+        assert!(message.contains("without regard to quoting"), "misleading refusal: {message}");
+        assert!(!message.contains("agent_program"), "blames agent_program for a stubbed launch: {message}");
+
+        let message = refusal(&format!("{shell} -ilc 'claude --resume x'"));
+        assert!(message.contains("agent_program"), "an unstubbed launch must name agent_program: {message}");
     }
 }
 
