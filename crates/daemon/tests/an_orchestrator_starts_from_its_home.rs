@@ -22,15 +22,25 @@ use farcooler_transport::{Client, ClientError, HandshakeConfig, Peer, UnixListen
 
 type SocketClient = Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>;
 
-/// The stand-in, in a directory that lives as long as this process: one
-/// program for every test here, since the daemon reads the variable once.
-static STAND_IN: LazyLock<tempfile::TempDir> = LazyLock::new(|| {
-    let dir = tempfile::tempdir().unwrap();
-    let script = dir.path().join("stand-in");
+/// The stand-in, one program for every test here, since the daemon reads the
+/// variable once.
+///
+/// **In the build's own scratch directory, not `$TMPDIR`**
+/// (`CARGO_TARGET_TMPDIR`, `target/tmp`). A process-long `TempDir` in a
+/// `static` is never dropped, so each run used to leave one behind in
+/// `$TMPDIR`. Here there is one file at one path, the same bytes every run,
+/// written to a private name and renamed, so a run reads the whole file
+/// even with another run of this binary writing it. It writes its records
+/// into the orchestrator's home, which each test's `Harness` removes.
+static STAND_IN: LazyLock<PathBuf> = LazyLock::new(|| {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    std::fs::create_dir_all(dir).unwrap();
+    let script = dir.join("an-orchestrator-stand-in");
+    let private = dir.join(format!("an-orchestrator-stand-in.{}", std::process::id()));
     std::fs::write(
-        &script,
+        &private,
         "#!/bin/sh\n\
-         out=\"$(dirname \"$0\")/record-$FARCOOLER_WORKSPACE-$$\"\n\
+         out=\"$(dirname \"$FARCOOLER_CHARTER\")/record-$$\"\n\
          {\n\
            echo \"cwd=$(pwd -P)\"\n\
            for a in \"$@\"; do echo \"arg=$a\"; done\n\
@@ -42,7 +52,8 @@ static STAND_IN: LazyLock<tempfile::TempDir> = LazyLock::new(|| {
     )
     .unwrap();
     use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::rename(&private, &script).unwrap();
     let program = script.to_str().unwrap();
     assert!(
         program.chars().all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c)),
@@ -53,7 +64,7 @@ static STAND_IN: LazyLock<tempfile::TempDir> = LazyLock::new(|| {
     // runtime threads or a process, and the first to arrive sets it while the
     // others wait on the `LazyLock`.
     unsafe { std::env::set_var("FARCOOLER_STAND_IN_AGENT", program) };
-    dir
+    script
 });
 
 /// A daemon on a private socket, database and tmux server, as in
@@ -149,17 +160,22 @@ async fn start_orchestrator(
     }
 }
 
+/// `workspace`'s home in `h`'s daemon, where the stand-in writes.
+fn home(h: &Harness, workspace: &str) -> PathBuf {
+    h.dir.path().join("state").join("workspaces").join(workspace)
+}
+
 /// What the stand-in wrote for each launch in `workspace`, oldest first,
 /// waiting up to ten seconds for there to be `count`.
-async fn records(workspace: &str, count: usize) -> Vec<Vec<(String, String)>> {
+async fn records(h: &Harness, workspace: &str, count: usize) -> Vec<Vec<(String, String)>> {
     for _ in 0..100 {
-        let mut found: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(STAND_IN.path())
+        let mut found: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(home(h, workspace))
             .unwrap()
             .flatten()
             .map(|e| e.path())
             .filter(|p| {
                 let name = p.file_name().unwrap().to_string_lossy();
-                name.starts_with(&format!("record-{workspace}-")) && !name.ends_with(".tmp")
+                name.starts_with("record-") && !name.ends_with(".tmp")
             })
             .map(|p| (std::fs::metadata(&p).unwrap().modified().unwrap(), p))
             .collect();
@@ -201,7 +217,7 @@ async fn a_second_orchestrator_is_refused_unless_replacing() {
     assert_eq!(first.workspace_id.as_deref(), Some(main.id.as_ref()));
     // Launched, before anything replaces it: a pane stopped this early can
     // be killed before its shell reaches the stand-in.
-    records(&workspace_id(&main), 1).await;
+    records(&h, &workspace_id(&main), 1).await;
 
     match start_orchestrator(&mut client, main.id.clone(), "claude", false).await {
         Err(ClientError::Daemon { code, what, message, .. }) => {
@@ -216,7 +232,7 @@ async fn a_second_orchestrator_is_refused_unless_replacing() {
     assert_ne!(first.id, second.id);
     assert_eq!(second.role, farcooler_protocol::v1::TerminalRole::Orchestrator as i32);
     // The replacement really launched, rather than only being recorded.
-    records(&workspace_id(&main), 2).await;
+    records(&h, &workspace_id(&main), 2).await;
 }
 
 /// The pane a real claude would have been started in: the home, pointed back
@@ -230,8 +246,8 @@ async fn a_claude_orchestrator_is_started_from_its_home_with_the_recipe() {
     start_orchestrator(&mut client, main.id.clone(), "claude", false).await.expect("started");
 
     let id = workspace_id(&main);
-    let record = records(&id, 1).await.remove(0);
-    let home = h.dir.path().join("state").join("workspaces").join(&id);
+    let record = records(&h, &id, 1).await.remove(0);
+    let home = home(&h, &id);
     let resolved = |p: &Path| p.canonicalize().unwrap().to_string_lossy().into_owned();
     assert_eq!(value(&record, "cwd"), [resolved(&home)]);
     let args = value(&record, "arg");
@@ -244,4 +260,21 @@ async fn a_claude_orchestrator_is_started_from_its_home_with_the_recipe() {
     assert_eq!(value(&record, "charter"), [home.join("charter.md").to_str().unwrap()]);
     assert_eq!(value(&record, "actor"), ["manager"]);
     assert_eq!(value(&record, "claude_md"), ["1"]);
+}
+
+/// The stand-in isn't left in `$TMPDIR`: it's one file in the build's scratch
+/// directory, and what it records goes into a home the test removes.
+#[tokio::test]
+async fn the_stand_in_leaves_nothing_in_the_temporary_directory() {
+    let h = start().await;
+    let temporary = std::env::temp_dir().canonicalize().unwrap();
+    let program = STAND_IN.canonicalize().unwrap();
+    assert!(!program.starts_with(&temporary), "{} is in {}", program.display(), temporary.display());
+    assert!(program.starts_with(Path::new(env!("CARGO_TARGET_TMPDIR")).canonicalize().unwrap()));
+
+    let mut client = Client::connect(&h.socket, "test-client", "0.0.0").await.expect("connect");
+    let main = main_workspace(&h, &mut client).await;
+    start_orchestrator(&mut client, main.id.clone(), "claude", false).await.expect("started");
+    records(&h, &workspace_id(&main), 1).await;
+    assert!(home(&h, &workspace_id(&main)).starts_with(h.dir.path()), "removed with the test's directory");
 }
