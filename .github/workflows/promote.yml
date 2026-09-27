@@ -154,21 +154,35 @@ jobs:
     needs: [tag, build]
     runs-on: ubuntu-latest
     steps:
+      # Main, because that is where the baseline is committed. But main is NOT
+      # what shipped: this job waits on the whole release build, and anything
+      # that lands on main in that window would be recorded as if the tag had
+      # carried it. A wire change made during the build would become the
+      # baseline, and the shipped app's meaning would be owed nothing.
       - uses: actions/checkout@v4
         with:
           ref: main
       - name: Commit the baseline this channel now owes compatibility to
+        env:
+          TAG: ${{ needs.tag.outputs.tag }}
+          BASELINE: proto/baseline/${{ inputs.channel }}.proto
         run: |
           set -euo pipefail
+          # The proto from the tag itself, which the checkout above (depth 1,
+          # main only) does not have.
+          git fetch --no-tags --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
           mkdir -p proto/baseline
-          cp proto/farcooler.proto "proto/baseline/${{ inputs.channel }}.proto"
-          if git diff --quiet; then
+          git show "$TAG:proto/farcooler.proto" > "$BASELINE"
+          # Staged, then compared: `git diff` ignores untracked files, so the
+          # FIRST baseline for a channel always looked unchanged and was never
+          # committed.
+          git add "$BASELINE"
+          if git diff --cached --quiet; then
             echo "baseline unchanged"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "proto/baseline/${{ inputs.channel }}.proto"
           git commit -m "chore: ${{ inputs.channel }} wire baseline at ${{ needs.tag.outputs.tag }}
 
           What this channel now owes compatibility to. Recorded by the promotion
