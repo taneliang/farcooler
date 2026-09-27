@@ -42,6 +42,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.plus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -457,6 +459,15 @@ class Connection(
     private val _fleet = MutableStateFlow(Fleet.EMPTY)
     val fleet: StateFlow<Fleet> = _fleet.asStateFlow()
 
+    /**
+     * The parent of this connection's own derived flows ([link]), a child of
+     * [scope]'s job: the app's teardown cancels it, and so does [close].
+     * Without it every connection torn down — one per runner switch with
+     * "Connect every runner at once" off — left its collector running in the
+     * app's scope for good.
+     */
+    private val derived = SupervisorJob(scope.coroutineContext[Job])
+
     /** Which link read [fleet]: set on every fleet read, and aged by every new link. */
     private val _fleetRead = MutableStateFlow(FleetRead.NEVER)
 
@@ -468,7 +479,7 @@ class Connection(
      * this, not [phase]. See [RunnerLink.given].
      */
     val link: StateFlow<RunnerLink> = combine(_phase, _fleetRead) { phase, read -> phase.link.given(read) }
-        .stateIn(scope, SharingStarted.Eagerly, RunnerLink.CONNECTING)
+        .stateIn(scope + derived, SharingStarted.Eagerly, RunnerLink.CONNECTING)
 
     /** A new link, which has read nothing yet: the fleet on screen is an earlier one's. */
     private fun linkCameUp() {
@@ -2038,6 +2049,7 @@ class Connection(
         poller?.cancel()
         reconnector?.cancel()
         boardReads.close()
+        derived.cancel()
         core.close()
     }
 
