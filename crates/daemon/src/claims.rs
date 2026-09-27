@@ -1,7 +1,10 @@
 //! Which workspace a worktree belongs to, when nobody said.
 //!
 //! A worktree is claimed by the first of three signals to name it, and the
-//! claim sticks (`Store::claim_worktree`); only `worktree assign` moves one.
+//! claim sticks (`Store::claim_worktree`); only `worktree assign` moves one,
+//! and `reconcile`, which gives a main checkout another workspace holds back
+//! to Main. A main checkout is Main's alone: no signal here claims it for
+//! any other workspace.
 //!
 //! 1. **Explicit**: `worktree create` or dispatch names the workspace. That
 //!    happens in `Service::create_worktree_with` and `adopt_branch`, and the
@@ -284,8 +287,11 @@ fn judge(
                     ledger.mark_changed();
                     Ok(Observed::Claimed(worktree.id))
                 }
-                // Claimed by someone else between the read and the write.
-                // Judged again at the next observation.
+                // Claimed by someone else between the read and the write,
+                // or a main checkout, which only Main may claim. Judged
+                // again at the next observation: the main checkout is
+                // Main's by the next reconcile pass, and this terminal
+                // then reads as a foreign writer there.
                 None => Ok(Observed::Nothing),
             }
         }
