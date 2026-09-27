@@ -93,6 +93,7 @@ async fn a_stream_or_stdio_session_adopts_no_charter_and_the_daemon_does() {
     let stream = tokio::process::Command::new(env!("CARGO_BIN_EXE_farcoolerd"))
         .args(["--stream", &uuid::Uuid::now_v7().to_string()])
         .env("FARCOOLER_HOME", &home)
+        .env("FARCOOLER_TEST_STUB_AGENTS", "1")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)

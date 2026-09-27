@@ -60,6 +60,9 @@ async fn start() -> Harness {
     // needed here is the directory ABOVE it, which the writer anchors to.
     let home = dir.path().join("home");
     std::fs::create_dir(&home).unwrap();
+    // The daemon's library, without cfg(test): stub every agent launch and
+    // refuse a real one (`agent_program`).
+    farcooler_daemon::service::stub_agents_in_this_process();
     let service = Arc::new(
         Service::open_in(dir.path().to_path_buf())
             .await

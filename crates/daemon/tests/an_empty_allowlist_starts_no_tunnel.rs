@@ -62,6 +62,9 @@ async fn test_service(root: &Path) -> Service {
         std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
 
+    // The daemon's library, without cfg(test): stub every agent launch and
+    // refuse a real one (`agent_program`).
+    farcooler_daemon::service::stub_agents_in_this_process();
     Service::open_in(root.to_path_buf())
         .await
         .expect("service")

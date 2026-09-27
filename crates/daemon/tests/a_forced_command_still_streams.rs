@@ -485,6 +485,7 @@ async fn start() -> Runner {
     // own errors down the session's stderr.
     let scaffolding = format!(
         "environment=\"HOME={}\",environment=\"FARCOOLER_HOME={}\",\
+         environment=\"FARCOOLER_TEST_STUB_AGENTS=1\",\
          environment=\"PATH={}:/usr/bin:/bin:/usr/sbin:/sbin\"",
         home.display(),
         runtime.display(),
@@ -611,6 +612,7 @@ async fn start() -> Runner {
 async fn listening_daemon_in(runtime: &Path, home: &Path) -> DaemonChild {
     let child = Command::new(env!("CARGO_BIN_EXE_farcoolerd"))
         .env("FARCOOLER_HOME", runtime)
+        .env("FARCOOLER_TEST_STUB_AGENTS", "1")
         .env("HOME", home)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())

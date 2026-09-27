@@ -539,7 +539,8 @@ fn scaffold(path: &Path, home: &Path, runtime: &Path, bin: &Path, devices: &[&De
     for device in devices {
         let line = device.line();
         let prefix = format!(
-            "environment=\"HOME={}\",environment=\"FARCOOLER_HOME={}\",environment=\"PATH={}\"",
+            "environment=\"HOME={}\",environment=\"FARCOOLER_HOME={}\",\
+             environment=\"FARCOOLER_TEST_STUB_AGENTS=1\",environment=\"PATH={}\"",
             home.display(),
             runtime.display(),
             path_for_forced_command(home, bin, &line)

@@ -47,6 +47,7 @@ fn eight_daemons_started_at_once_leave_exactly_one_running() {
         .map(|_| {
             Command::new(daemon_binary())
                 .env("FARCOOLER_HOME", home.path())
+                .env("FARCOOLER_TEST_STUB_AGENTS", "1")
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()

@@ -72,6 +72,9 @@ async fn runner_with_devices(client_ids: &[&str]) -> (Service, tempfile::TempDir
 async fn open_service(root: &Path) -> Service {
     let home = root.join("home");
     std::fs::create_dir_all(&home).expect("a scratch home");
+    // The daemon's library, without cfg(test): stub every agent launch and
+    // refuse a real one (`agent_program`).
+    farcooler_daemon::service::stub_agents_in_this_process();
     Service::open_in(root.to_path_buf())
         .await
         .expect("service")

@@ -327,7 +327,8 @@ async fn start(client_id: &str, scope: Scope) -> Runner {
     // have this test's ssh session reading — and on revoke, rewriting — the
     // developer's own fence.
     let scaffolding = format!(
-        "environment=\"HOME={}\",environment=\"FARCOOLER_HOME={}\",environment=\"PATH={}\"",
+        "environment=\"HOME={}\",environment=\"FARCOOLER_HOME={}\",\
+             environment=\"FARCOOLER_TEST_STUB_AGENTS=1\",environment=\"PATH={}\"",
         home.display(),
         runtime.display(),
         path_for_forced_command(&home, &bin, &line)
@@ -413,6 +414,7 @@ async fn start(client_id: &str, scope: Scope) -> Runner {
 async fn listening_daemon_in(runtime: &Path, home: &Path) -> DaemonChild {
     let child = Command::new(env!("CARGO_BIN_EXE_farcoolerd"))
         .env("FARCOOLER_HOME", runtime)
+        .env("FARCOOLER_TEST_STUB_AGENTS", "1")
         .env("HOME", home)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())

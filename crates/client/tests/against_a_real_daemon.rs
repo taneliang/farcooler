@@ -119,7 +119,24 @@ async fn start_with_a_scratch_home() -> (Daemon, PathBuf) {
 /// reaches, so a real `claude` started by a regression would still be signed
 /// in. That is why the launch must never search for it.
 async fn start_with_a_stand_in_agent() -> Daemon {
-    spawn_with(true, true).await
+    spawn_with(true, Some(Launch::StandIn)).await
+}
+
+/// A daemon fenced off from the real agent exactly as
+/// `start_with_a_stand_in_agent`'s is (the scratch HOME, the trap first on
+/// every login shell's PATH, the stripped environment) but with no stand-in
+/// named: its agent launches are left to `FARCOOLER_TEST_STUB_AGENTS`, which
+/// every daemon here is started with.
+async fn start_with_only_the_stub_switch() -> Daemon {
+    spawn_with(true, Some(Launch::StubOnly)).await
+}
+
+/// What a trapped daemon's agent launches run. See `spawn_with`.
+enum Launch {
+    /// `FARCOOLER_STAND_IN_AGENT` names the stand-in.
+    StandIn,
+    /// Nothing but `FARCOOLER_TEST_STUB_AGENTS`.
+    StubOnly,
 }
 
 /// Variables removed from the stand-in daemon's environment, and so from every
@@ -198,30 +215,38 @@ fn stand_in_path(stand_in: &StandIn) -> String {
 }
 
 async fn spawn(scratch_home: bool) -> Daemon {
-    spawn_with(scratch_home, false).await
+    spawn_with(scratch_home, None).await
 }
 
-async fn spawn_with(scratch_home: bool, stand_in_agent: bool) -> Daemon {
+/// `trapped`, when given, installs the trap and the stand-in under the
+/// daemon's directory and starts it in their environment; only
+/// `Launch::StandIn` also names the stand-in.
+async fn spawn_with(scratch_home: bool, trapped: Option<Launch>) -> Daemon {
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("farcoolerd.sock");
 
     let mut command = std::process::Command::new(daemon_binary());
     command
         .env("FARCOOLER_HOME", dir.path())
+        // Never the real agent: the daemon stubs every launch and refuses
+        // one it cannot vouch for (`agent_program`). A stand-in, below,
+        // still wins over the stub.
+        .env("FARCOOLER_TEST_STUB_AGENTS", "1")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     if scratch_home {
         command.env("HOME", dir.path());
     }
-    if stand_in_agent {
+    if let Some(launch) = trapped {
         let stand_in = StandIn::under(dir.path());
         stand_in.install(dir.path());
         for name in stripped_agent_environment() {
             command.env_remove(name);
         }
-        command
-            .env("PATH", stand_in_path(&stand_in))
-            .env("FARCOOLER_STAND_IN_AGENT", &stand_in.program);
+        command.env("PATH", stand_in_path(&stand_in));
+        if let Launch::StandIn = launch {
+            command.env("FARCOOLER_STAND_IN_AGENT", &stand_in.program);
+        }
     }
     let process = command.spawn().expect("spawn farcoolerd");
 
@@ -1248,6 +1273,108 @@ async fn a_board_and_the_pane_working_it_come_back_through_the_client() {
         "the agent pane resolved `claude` by searching, and found the trap"
     );
     assert!(stand_in.ran.exists(), "the agent pane never ran the stand-in");
+}
+
+/// **A daemon started with `FARCOOLER_TEST_STUB_AGENTS` never starts a real
+/// agent** (ov-10). Integration tests build the daemon without `cfg(test)`,
+/// so a `claude` pane here would run whatever `claude` its login shell
+/// finds. With the switch, which every harness here sets, it runs the unit
+/// tests' stub instead.
+///
+/// The `claude` a bare name would find is the trap, a fake that only leaves a
+/// marker, and that is checked BEFORE anything is launched: if the trap were
+/// not first, a regression would reach the developer's real Claude Code.
+/// Take the switch out of the daemon and this goes red on the trap's marker.
+#[tokio::test]
+async fn a_daemon_under_the_stub_switch_never_starts_claude() {
+    let daemon = start_with_only_the_stub_switch().await;
+    let stand_in = StandIn::under(daemon.dir.path());
+    assert_eq!(
+        bare_claude_resolves_to(&daemon, &stand_in),
+        stand_in.trap_dir.join("claude").display().to_string(),
+        "the trap is not first for a bare claude, so launching one could start the real agent"
+    );
+
+    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("demo");
+    std::fs::create_dir(&repo).unwrap();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "commit.gpgsign", "false"],
+        vec!["config", "user.name", "t"],
+        vec!["commit", "-q", "--allow-empty", "-m", "base"],
+    ] {
+        std::process::Command::new("git").args(&args).current_dir(&repo).status().unwrap();
+    }
+    register_root_and_repository(&daemon.socket, dir.path(), &repo).await;
+    let repositories = session.repositories().await.expect("repositories");
+    let repository = farcooler_client::session::uuid_of(&repositories[0].id);
+    let worktree = session
+        .create_worktree(repository, "stub lane", "feat/stub", "HEAD", "", false)
+        .await
+        .expect("create_worktree");
+    let worktree_id = farcooler_client::session::uuid_of(&worktree.id);
+    let opened = session.create_terminal(worktree_id, "claude", "claude", false).await;
+
+    // Until a process under the pane is the stub's `sleep` (its last word:
+    // nothing after it can start claude) or the trap has run. Under the
+    // pane, not in it: tmux wraps the command in its own shell, and the
+    // login shell keeps the foreground.
+    let install = std::fs::read_to_string(daemon.dir.path().join("install-id")).expect("install id");
+    let tmux = farcooler_core::programs::find("tmux").expect("tmux");
+    let mut panes = String::new();
+    let mut stub_running = false;
+    for _ in 0..200 {
+        if stand_in.trapped.exists() {
+            break;
+        }
+        let out = std::process::Command::new(&tmux)
+            .args(["-L", &format!("farcooler-{}", install.trim()), "list-panes", "-a", "-F"])
+            .arg("#{pane_pid} #{pane_start_command}")
+            .output()
+            .expect("tmux list-panes");
+        panes = String::from_utf8_lossy(&out.stdout).into_owned();
+        let stubs: Vec<&str> = panes
+            .lines()
+            .filter(|l| l.contains("farcooler-test-stub-agent"))
+            .filter_map(|l| l.split(' ').next())
+            .collect();
+        stub_running = stubs.iter().any(|pid| runs_under(pid, "sleep"));
+        if stub_running {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(!stand_in.trapped.exists(), "the claude pane started `claude`, and found the trap");
+    assert!(!stand_in.ran.exists(), "no stand-in was named, so none may run");
+    opened.expect("a claude pane opens, on the stub");
+    assert!(stub_running, "the claude pane is not running the stub: {panes}");
+}
+
+/// Whether some descendant of process `pid` is running `program`.
+fn runs_under(pid: &str, program: &str) -> bool {
+    let out = std::process::Command::new("ps").args(["-ax", "-o", "pid=,ppid=,comm="]).output().expect("ps");
+    let table: Vec<(String, String, String)> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| {
+            let mut w = l.split_whitespace();
+            Some((w.next()?.to_string(), w.next()?.to_string(), w.collect::<Vec<_>>().join(" ")))
+        })
+        .collect();
+    let mut parents = vec![pid.to_string()];
+    while let Some(parent) = parents.pop() {
+        for (child, ppid, comm) in &table {
+            if *ppid == parent {
+                if comm.rsplit('/').next() == Some(program) {
+                    return true;
+                }
+                parents.push(child.clone());
+            }
+        }
+    }
+    false
 }
 
 /// Two workstreams in one repository come back through the client apart: in

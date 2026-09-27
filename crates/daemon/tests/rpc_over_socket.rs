@@ -88,6 +88,9 @@ async fn start(scope: Scope) -> Harness {
     let home = dir.path().join("home");
     std::fs::create_dir(&home).unwrap();
     let authorized_keys = home.join(".ssh").join("authorized_keys");
+    // The daemon's library, without cfg(test): stub every agent launch and
+    // refuse a real one (`agent_program`).
+    farcooler_daemon::service::stub_agents_in_this_process();
     let service = Arc::new(
         Service::open_in(dir.path().to_path_buf())
             .await

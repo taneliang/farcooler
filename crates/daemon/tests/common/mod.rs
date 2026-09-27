@@ -145,6 +145,9 @@ pub fn stdio_command(dir: &std::path::Path, extra: &[&str]) -> Command {
         .arg("--stdio")
         .args(extra)
         .env("FARCOOLER_HOME", dir)
+        // Never the real agent: the daemon stubs every launch and refuses
+        // one it cannot vouch for (`agent_program`).
+        .env("FARCOOLER_TEST_STUB_AGENTS", "1")
         // Deliberately noisy: if any of this reaches stdout the handshake
         // breaks, which is exactly what `stdio_transport.rs` exists to catch.
         .env("RUST_LOG", "debug");
@@ -159,6 +162,7 @@ pub fn stdio_command(dir: &std::path::Path, extra: &[&str]) -> Command {
 pub async fn listening_daemon(dir: &std::path::Path) -> DaemonChild {
     let child = Command::new(env!("CARGO_BIN_EXE_farcoolerd"))
         .env("FARCOOLER_HOME", dir)
+        .env("FARCOOLER_TEST_STUB_AGENTS", "1")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)

@@ -119,6 +119,9 @@ async fn start() -> Harness {
     LazyLock::force(&STAND_IN);
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("farcoolerd.sock");
+    // The daemon's library, without cfg(test): stub every agent launch and
+    // refuse a real one (`agent_program`).
+    farcooler_daemon::service::stub_agents_in_this_process();
     let service = Arc::new(Service::open_in(dir.path().join("state")).await.expect("service"));
 
     // Registered here rather than over the socket: adding a root is
