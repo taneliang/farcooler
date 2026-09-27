@@ -785,6 +785,11 @@ impl HookIngress {
                 continue;
             };
             self.start_transcript_tail(terminal, hook.agent, &f);
+            // A store read, and a write when it claims. Nothing waits on it
+            // today: this side never answers a hook, and a hook that isn't
+            // gating hangs up once it has written. A gating hook that comes
+            // back waits for its verdict within `hook::HOOK_DEADLINE`
+            // (400 ms), so its reply goes before this, not after (ov-14).
             self.observe_cwd(terminal, hook.agent, &f);
 
             let events =
