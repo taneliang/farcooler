@@ -83,8 +83,9 @@ pub enum TaskCmd {
         /// `45s`, `10m`, `2h`, `3d`.
         ///
         /// A different question rather than a filter on the same one — oldest
-        /// first, and finished work left out — so it cannot be combined with
-        /// `--status`, which the runner ignores in this mode.
+        /// first, and only In Progress and In Review, where an agent should be
+        /// working — so it cannot be combined with `--status`, which the
+        /// runner ignores in this mode.
         #[arg(long = "stale-for", conflicts_with = "status")]
         stale_for: Option<String>,
     },

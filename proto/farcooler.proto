@@ -2659,8 +2659,11 @@ message TaskListRequest {
   TaskStatus status = 2;
   // When set and non-zero, answer with the tasks that have sat in their
   // current status longer than this instead — the staleness view, whose whole
-  // point is a task in `todo` that a manager assumed was in flight. `done` and
-  // `cancelled` are excluded from it outright.
+  // point is a task a manager assumed was in flight that stopped. Only
+  // IN_PROGRESS and IN_REVIEW are listed, the statuses where an agent is meant
+  // to be working and the rule every board draws: BACKLOG and TODO are not
+  // expected to move, NEEDS_DECISION waits on the owner, and DONE and
+  // CANCELLED have stopped for good.
   optional uint64 stale_after_millis = 3;
 }
 

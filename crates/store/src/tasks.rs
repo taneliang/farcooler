@@ -973,15 +973,18 @@ impl Store {
     /// than `threshold`, oldest-sitting first.
     ///
     /// The failure mode this whole arrangement is built to surface is not an
-    /// agent doing the wrong thing -- it is a task sitting in `todo` that a
-    /// manager assumed was in flight. `status_since` is on the row precisely
-    /// so this never has to read a history to answer; see `set_task_status`
-    /// for where that column is actually kept honest.
+    /// agent doing the wrong thing -- it is a task a manager assumed was in
+    /// flight that stopped. `status_since` is on the row precisely so this
+    /// never has to read a history to answer; see `set_task_status` for where
+    /// that column is actually kept honest.
     ///
-    /// `done` and `cancelled` are excluded outright, not merely treated as
-    /// unlikely to qualify: a finished task sits still forever, and a
-    /// staleness view that lists every completed task next to the ones that
-    /// actually need attention is a view nobody reads.
+    /// Only `in_progress` and `in_review`, the rule every board draws
+    /// (AgentKit's `TaskRow.staleness(at:)`, Android's `TaskRow.isStale`):
+    /// the two statuses where an agent is meant to be working. `backlog` and
+    /// `todo` wait their turn and are not expected to move, `needs_decision`
+    /// waits on the owner, and `done` and `cancelled` sit still forever. A
+    /// staleness view that listed a month-old backlog beside the one stalled
+    /// lane is a view nobody reads (ov-28).
     pub fn list_tasks_stale_for(&self, repository: Uuid, threshold: Duration) -> Result<Vec<Task>> {
         let cutoff = now_millis() - threshold.as_millis() as i64;
         let conn = self.conn();
@@ -989,7 +992,7 @@ impl Store {
             .prepare(&format!(
                 "SELECT {TASK_COLUMNS} FROM tasks
                   WHERE repository_id = ?1
-                    AND status NOT IN ('done', 'cancelled')
+                    AND status IN ('in_progress', 'in_review')
                     AND status_since < ?2
                   ORDER BY status_since, rowid"
             ))
@@ -2659,8 +2662,10 @@ mod tests {
     fn a_task_that_has_not_moved_can_be_found_by_how_long_it_has_sat() {
         let store = seeded();
         let old = store.create_task(repo(), "forgotten", Actor::User).unwrap();
+        store.set_task_status(old.id, TaskStatus::InProgress, Actor::Manager).unwrap();
         store.backdate_status_since_for_test(old.id, Duration::from_secs(3 * 86_400));
-        store.create_task(repo(), "fresh", Actor::User).unwrap();
+        let fresh = store.create_task(repo(), "fresh", Actor::User).unwrap();
+        store.set_task_status(fresh.id, TaskStatus::InProgress, Actor::Manager).unwrap();
 
         let stale = store.list_tasks_stale_for(repo(), Duration::from_secs(86_400)).unwrap();
         assert_eq!(stale.len(), 1);
@@ -2680,8 +2685,10 @@ mod tests {
     fn several_stale_tasks_sort_worst_stall_first() {
         let store = seeded();
         let less_stale = store.create_task(repo(), "less stale", Actor::User).unwrap();
+        store.set_task_status(less_stale.id, TaskStatus::InProgress, Actor::Manager).unwrap();
         store.backdate_status_since_for_test(less_stale.id, Duration::from_secs(2 * 86_400));
         let more_stale = store.create_task(repo(), "more stale", Actor::User).unwrap();
+        store.set_task_status(more_stale.id, TaskStatus::InReview, Actor::Manager).unwrap();
         store.backdate_status_since_for_test(more_stale.id, Duration::from_secs(5 * 86_400));
 
         let stale = store.list_tasks_stale_for(repo(), Duration::from_secs(86_400)).unwrap();
@@ -2716,6 +2723,38 @@ mod tests {
         assert!(store.list_tasks_stale_for(repo(), Duration::from_secs(86_400)).unwrap().is_empty());
     }
 
+    /// Which statuses the staleness view lists: a week-old card in each of
+    /// the seven, and only the two where an agent is meant to be working come
+    /// back. The same rule the boards draw (ov-28); a query written back as
+    /// "everything but done and cancelled" lists backlog, todo and
+    /// needs_decision here and goes red.
+    #[test]
+    fn only_active_work_is_listed_as_stale() {
+        let store = seeded();
+        let every = [
+            TaskStatus::Backlog,
+            TaskStatus::Todo,
+            TaskStatus::NeedsDecision,
+            TaskStatus::InProgress,
+            TaskStatus::InReview,
+            TaskStatus::Done,
+            TaskStatus::Cancelled,
+        ];
+        for status in every {
+            let t = store.create_task(repo(), status.as_str(), Actor::User).unwrap();
+            store.set_task_status(t.id, status, Actor::Manager).unwrap();
+            store.backdate_status_since_for_test(t.id, Duration::from_secs(7 * 86_400));
+        }
+        let mut listed: Vec<TaskStatus> = store
+            .list_tasks_stale_for(repo(), Duration::from_secs(86_400))
+            .unwrap()
+            .into_iter()
+            .map(|t| t.status)
+            .collect();
+        listed.sort_by_key(|s| s.as_str());
+        assert_eq!(listed, [TaskStatus::InProgress, TaskStatus::InReview]);
+    }
+
     /// Staleness is scoped to one repository, for the same reason
     /// `search_does_not_leak_across_repositories` exists: the brief's own
     /// fixture never registers a second repository, so it cannot distinguish
@@ -2725,7 +2764,15 @@ mod tests {
         let store = seeded();
         let other = store.register_repository_for_test("Other Thing");
         let theirs = store.create_task(other, "theirs, forgotten", Actor::User).unwrap();
+        // In progress, so it WOULD be listed if the query were not scoped:
+        // a backlog task here would pass this test by the status rule alone.
+        store.set_task_status(theirs.id, TaskStatus::InProgress, Actor::Manager).unwrap();
         store.backdate_status_since_for_test(theirs.id, Duration::from_secs(3 * 86_400));
+        assert_eq!(
+            store.list_tasks_stale_for(other, Duration::from_secs(86_400)).unwrap().len(),
+            1,
+            "the control: it is stale on its own board"
+        );
 
         let ours_stale = store.list_tasks_stale_for(repo(), Duration::from_secs(86_400)).unwrap();
         assert!(ours_stale.is_empty(), "another repository's stale task must not appear in ours");

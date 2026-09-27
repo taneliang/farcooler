@@ -246,9 +246,10 @@ fn announce(watcher: &Watcher, task: &Task, actor: Actor) {
 ///
 /// `stale_after_millis` swaps the question rather than filtering the answer,
 /// because staleness is a different query with a different order — oldest
-/// sitting first, `done` and `cancelled` excluded outright. A staleness view
-/// that listed every finished task beside the ones needing attention is a view
-/// nobody reads.
+/// sitting first, and only `in_progress` and `in_review`, where an agent is
+/// meant to be working (see `Store::list_tasks_stale_for`). A staleness view
+/// that listed every finished or waiting task beside the ones needing
+/// attention is a view nobody reads.
 pub fn list(svc: &Service, req: &pb::TaskListRequest) -> Result<pb::TaskList> {
     let repository = required_id(&req.repository_id)?;
     let tasks = match req.stale_after_millis.filter(|ms| *ms > 0) {
