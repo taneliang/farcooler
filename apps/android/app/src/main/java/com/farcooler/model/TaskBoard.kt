@@ -166,6 +166,13 @@ data class TaskRow(
          * same words; Android's `DateUtils` says "2 hours ago". Floors, so a
          * card is never called older than it is; negative is "just now".
          */
+        /**
+         * How long until the wall clock next crosses a minute, so a ticking
+         * card redraws as the minute turns rather than up to a minute late.
+         * Always in (0, 60 s]: exactly on a boundary waits a whole minute.
+         */
+        fun untilNextMinuteMs(nowMs: Long): Long = 60_000L - Math.floorMod(nowMs, 60_000L)
+
         fun ago(elapsedMs: Long): String {
             val ms = maxOf(0L, elapsedMs)
             val minute = 60_000L
@@ -175,7 +182,8 @@ data class TaskRow(
                 ms < hour -> "${ms / minute}m ago"
                 ms < DAY_MS -> "${ms / hour}h ago"
                 ms < 30 * DAY_MS -> "${ms / DAY_MS}d ago"
-                ms < 365 * DAY_MS -> "${ms / (30 * DAY_MS)}mo ago"
+                // 30-day months, stopping at 11: day 360 is not "12mo ago".
+                ms < 365 * DAY_MS -> "${minOf(11L, ms / (30 * DAY_MS))}mo ago"
                 else -> "${ms / (365 * DAY_MS)}y ago"
             }
         }

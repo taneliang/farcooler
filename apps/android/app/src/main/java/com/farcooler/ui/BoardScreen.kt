@@ -44,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -70,6 +71,7 @@ import com.farcooler.model.Workspace
 import com.farcooler.model.landingWorkspace
 import com.farcooler.net.Connection
 import com.farcooler.net.TerminalRef
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // A repository's task board on Android: a Board row on the front door, the
@@ -349,7 +351,7 @@ private fun TaskCardRow(
     onOpen: () -> Unit,
     onJump: (Terminal) -> Unit,
 ) {
-    val now = System.currentTimeMillis()
+    val now = rememberMinuteClock()
     ListItem(
         overlineContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -367,6 +369,25 @@ private fun TaskCardRow(
             .clickable(onClick = onOpen)
             .testTag("board-card-${row.key}"),
     )
+}
+
+/**
+ * The wall clock, as of the last minute boundary, and moving on each one.
+ *
+ * The board recomposes only when a task changes, so a card that read the clock
+ * once would still say "Added just now" five hours later on a quiet board. One
+ * coroutine per card on screen, asleep between minutes; it stops with the card.
+ * The wait is [TaskRow.untilNextMinuteMs], which `TaskBoardTest` checks.
+ */
+@Composable
+private fun rememberMinuteClock(): Long {
+    val now by produceState(System.currentTimeMillis()) {
+        while (true) {
+            delay(TaskRow.untilNextMinuteMs(value))
+            value = System.currentTimeMillis()
+        }
+    }
+    return now
 }
 
 @Composable
@@ -518,7 +539,7 @@ fun TaskDetailScreen(
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    CardDetails(row.copy(acceptance = emptyList()), System.currentTimeMillis())
+                    CardDetails(row.copy(acceptance = emptyList()), rememberMinuteClock())
                 }
             }
             if (presence != TaskAgentPresence.Unsaid) {

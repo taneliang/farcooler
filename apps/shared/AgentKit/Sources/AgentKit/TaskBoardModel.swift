@@ -286,6 +286,9 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
     /// Floors rather than rounds — "1h ago" until two full hours have passed
     /// — so a card never claims to be older than it is. Negative (a runner
     /// clock ahead of this one) is "just now", the answer `stoppedFor` gives.
+    /// Months are 30 days and stop at 11: days 360 to 364 would otherwise
+    /// read "12mo ago", a unit that should have rolled over, and rolling it
+    /// early to "1y ago" would call the card older than it is.
     public static func ago(_ interval: TimeInterval) -> String {
         let seconds = max(0, interval)
         let minute: TimeInterval = 60
@@ -296,7 +299,7 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
         case ..<hour: return "\(Int(seconds / minute))m ago"
         case ..<day: return "\(Int(seconds / hour))h ago"
         case ..<(30 * day): return "\(Int(seconds / day))d ago"
-        case ..<(365 * day): return "\(Int(seconds / (30 * day)))mo ago"
+        case ..<(365 * day): return "\(min(11, Int(seconds / (30 * day))))mo ago"
         default: return "\(Int(seconds / (365 * day)))y ago"
         }
     }
@@ -591,8 +594,15 @@ public struct WireTask: Decodable, Sendable {
         // Unlike `status_since`, a missing clock here is quiet rather than
         // loud: the worst a card without it does is carry no time line, and
         // 1970 would be "Added 56y ago" on every card of an older runner.
-        createdAt = (try c.decodeIfPresent(Int64.self, forKey: .createdAt)).flatMap { $0 > 0 ? $0 : nil }
-        updatedAt = (try c.decodeIfPresent(Int64.self, forKey: .updatedAt)).flatMap { $0 > 0 ? $0 : nil }
+        //
+        // And a malformed one — a string, a fraction — costs only the time,
+        // never the board: `try?` rather than `try`, which Android's
+        // `longOrNull` already does. A synthesized throw here would fail
+        // `WireTaskList` and show "no tasks" over a line nobody needed.
+        createdAt = ((try? c.decodeIfPresent(Int64.self, forKey: .createdAt)) ?? nil)
+            .flatMap { $0 > 0 ? $0 : nil }
+        updatedAt = ((try? c.decodeIfPresent(Int64.self, forKey: .updatedAt)) ?? nil)
+            .flatMap { $0 > 0 ? $0 : nil }
     }
 
     /// This wire row as a card, given the status it was placed under.

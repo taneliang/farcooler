@@ -503,6 +503,34 @@ private struct TaskColumnView: View {
     }
 }
 
+/// A card's two clock sentences, redrawn on the minute.
+///
+/// "Hasn’t moved in 3 days" in orange, or else the quiet "Updated 2h ago" /
+/// "Added 3d ago" — both composed by AgentKit against the moment handed in.
+/// The board itself redraws only when a task changes, so without a clock of
+/// its own a card filed at six would still read "Added just now" at eleven
+/// on a quiet board. `TimelineView` scoped to these two lines and nothing
+/// else: a tick redraws the sentences, not the card or the board around it.
+private struct CardTimeLines: View {
+    let row: TaskRow
+    let staleSize: CGFloat
+    let timeSize: CGFloat
+
+    var body: some View {
+        TimelineView(.everyMinute) { context in
+            if let note = row.stalenessNote(at: context.date) {
+                Text(note)
+                    .font(.system(size: staleSize))
+                    .foregroundStyle(.orange)
+            } else if let time = row.timeNote(at: context.date) {
+                Text(time)
+                    .font(.system(size: timeSize))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
 /// One card.
 private struct TaskCardRow: View {
     let row: TaskRow
@@ -549,18 +577,10 @@ private struct TaskCardRow: View {
                     .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
                     .foregroundStyle(Color.accentColor)
             }
-            if let note = row.stalenessNote(at: Date()) {
-                Text(note)
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(.orange)
-            }
-            // "Updated 2h ago" or "Added 3d ago", quiet, on every card. Nil
-            // on a stale one, whose orange sentence already says how long.
-            if let time = row.timeNote(at: Date()) {
-                Text(time)
-                    .font(.system(size: WorkspaceStyle.PaneText.minimum))
-                    .foregroundStyle(.secondary)
-            }
+            CardTimeLines(
+                row: row,
+                staleSize: WorkspaceStyle.PaneText.secondary,
+                timeSize: WorkspaceStyle.PaneText.minimum)
             // How far along it is, and who is on it: the two things a card
             // says about the work rather than about the task.
             if row.acceptanceProgress != nil || presence.title != nil {
@@ -822,16 +842,10 @@ private struct TaskCard: View {
                 }
             }
         }
-        if let note = row.stalenessNote(at: Date()) {
-            Text(note)
-                .font(.system(size: WorkspaceStyle.PaneText.body))
-                .foregroundStyle(.orange)
-        }
-        if let time = row.timeNote(at: Date()) {
-            Text(time)
-                .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(.secondary)
-        }
+        CardTimeLines(
+            row: row,
+            staleSize: WorkspaceStyle.PaneText.body,
+            timeSize: WorkspaceStyle.PaneText.secondary)
         if !row.intent.isEmpty {
             section("Intent") {
                 Text(row.intent).font(.system(size: WorkspaceStyle.PaneText.body))

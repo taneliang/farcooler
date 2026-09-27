@@ -210,6 +210,17 @@ class TaskBoardTest {
         assertEquals("Added 3d ago", waiting.timeNote(3 * day))
     }
 
+    /** A ticking card wakes as the minute turns, never early and never a minute late. */
+    @Test
+    fun theCardClockWakesOnTheNextMinute() {
+        assertEquals(60_000L, TaskRow.untilNextMinuteMs(0))
+        assertEquals(60_000L, TaskRow.untilNextMinuteMs(120_000))
+        assertEquals(1L, TaskRow.untilNextMinuteMs(59_999))
+        assertEquals(59_999L, TaskRow.untilNextMinuteMs(1))
+        assertEquals(30_000L, TaskRow.untilNextMinuteMs(1_757_170_830_000))
+        assertEquals("a clock before 1970 still waits forward", 1_000L, TaskRow.untilNextMinuteMs(-1_000))
+    }
+
     /** AgentKit's `theRelativeTimeIsShortAndNeverRoundsUp`, value for value. */
     @Test
     fun theRelativeTimeIsShortAndNeverRoundsUp() {
@@ -227,7 +238,9 @@ class TaskBoardTest {
         assertEquals("1d ago", TaskRow.ago(d))
         assertEquals("29d ago", TaskRow.ago(30 * d - 1_000))
         assertEquals("1mo ago", TaskRow.ago(30 * d))
-        assertEquals("12mo ago", TaskRow.ago(365 * d - 1_000))
+        assertEquals("11mo ago", TaskRow.ago(330 * d))
+        assertEquals("11mo ago", TaskRow.ago(360 * d))
+        assertEquals("11mo ago", TaskRow.ago(365 * d - 1_000))
         assertEquals("1y ago", TaskRow.ago(365 * d))
         assertEquals("2y ago", TaskRow.ago(800 * d))
     }

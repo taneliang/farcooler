@@ -263,24 +263,39 @@ private struct TaskBoardCardRow: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(GlancePalette.amber(scheme))
             }
-            if let note = row.stalenessNote(at: Date()) {
-                Text(note)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            // "Updated 2h ago" or "Added 3d ago" on every card; nil on a
-            // stale one, whose sentence above already says how long.
-            if let time = row.timeNote(at: Date()) {
-                Text(time)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+            CardTimeLines(row: row, timeFont: .caption2)
             if let progress = row.acceptanceProgress {
                 AcceptanceLine(progress: progress)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(.rect)
+    }
+}
+
+/// A card's two clock sentences, redrawn on the minute.
+///
+/// "Hasn’t moved in 3 days", or else "Updated 2h ago" / "Added 3d ago" —
+/// both composed by AgentKit against the moment handed in. The board redraws
+/// only when a task changes, so without a clock of its own a card filed at six
+/// would still read "Added just now" at eleven. `TimelineView` scoped to these
+/// lines alone, so a tick redraws the sentences and not the board.
+private struct CardTimeLines: View {
+    let row: TaskRow
+    let timeFont: Font
+
+    var body: some View {
+        TimelineView(.everyMinute) { context in
+            if let note = row.stalenessNote(at: context.date) {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if let time = row.timeNote(at: context.date) {
+                Text(time)
+                    .font(timeFont)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
@@ -312,16 +327,7 @@ private struct TaskCardDetail: View {
                             .font(.caption.weight(.medium))
                             .foregroundStyle(GlancePalette.amber(scheme))
                     }
-                    if let note = row.stalenessNote(at: Date()) {
-                        Text(note)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let time = row.timeNote(at: Date()) {
-                        Text(time)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    CardTimeLines(row: row, timeFont: .caption)
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("board-detail-heading")

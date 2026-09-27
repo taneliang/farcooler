@@ -188,7 +188,9 @@ func onlyActiveWorkGoesStale(status: TaskStatus) {
     #expect(TaskRow.ago(d) == "1d ago")
     #expect(TaskRow.ago(30 * d - 1) == "29d ago")
     #expect(TaskRow.ago(30 * d) == "1mo ago")
-    #expect(TaskRow.ago(365 * d - 1) == "12mo ago")
+    #expect(TaskRow.ago(330 * d) == "11mo ago")
+    #expect(TaskRow.ago(360 * d) == "11mo ago", "12mo is a unit that should have rolled over")
+    #expect(TaskRow.ago(365 * d - 1) == "11mo ago")
     #expect(TaskRow.ago(365 * d) == "1y ago")
     #expect(TaskRow.ago(800 * d) == "2y ago")
 }
@@ -342,6 +344,27 @@ private let realBoardJSON = """
     #expect(row.createdAt == nil)
     #expect(row.updatedAt == nil)
     #expect(row.timeNote(at: Date()) == nil)
+}
+
+/// A time that is not an integer costs only the time, never the board.
+///
+/// Android's `longOrNull` already reads it as absent; a `try` here would
+/// fail the whole `WireTaskList` and draw "no tasks" for a board full of
+/// them, over the quietest line on the card.
+@Test func aMalformedClockCostsOnlyTheClock() throws {
+    let odd = """
+        {"tasks":[{"id":"a","key":"fc-10","title":"Odd","status":"backlog",
+                   "created_at":"yesterday","updated_at":1.5},
+                  {"id":"b","key":"fc-11","title":"Fine","status":"backlog",
+                   "created_at":1757170800000,"updated_at":1757170800000}]}
+        """
+    let board = try TaskBoardModel.decode(Data(odd.utf8))
+    #expect(board.rows.count == 2, "a malformed time cost a row, or the board")
+    let bad = try #require(board.rows.first { $0.key == "fc-10" })
+    #expect(bad.createdAt == nil)
+    #expect(bad.updatedAt == nil)
+    let fine = try #require(board.rows.first { $0.key == "fc-11" })
+    #expect(fine.createdAt == Date(timeIntervalSince1970: 1_757_170_800))
 }
 
 /// A producer that passes an older runner's proto3 zero straight through
