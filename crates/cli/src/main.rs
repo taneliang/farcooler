@@ -4306,9 +4306,14 @@ mod tests {
             let mut bytes = Vec::new();
             prost::encoding::encode_key(tag, prost::encoding::WireType::LengthDelimited, &mut bytes);
             bytes.push(0);
-            let Some(payload) = Event::decode(bytes.as_slice()).ok().and_then(|e| e.payload) else {
-                continue;
-            };
+            // An unknown tag decodes to no payload, and is skipped. A known
+            // one that refuses a zero-length body isn't a message at all —
+            // a scalar in the oneof — and this walk can't build it, so it
+            // says so rather than stepping over a kind it never asked about.
+            let event = Event::decode(bytes.as_slice()).unwrap_or_else(|e| {
+                panic!("event tag {tag} can't be built as an empty message, so this walk can't ask about it: {e}")
+            });
+            let Some(payload) = event.payload else { continue };
             kinds += 1;
             assert_eq!(
                 event_json(payload).is_none(),
