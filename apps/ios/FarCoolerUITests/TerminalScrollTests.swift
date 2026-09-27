@@ -1648,9 +1648,20 @@ final class TerminalScrollTests: XCTestCase {
         let other = app.descendants(matching: .any)
             .matching(identifier: "shell-section-\(runnerIDs.b)").firstMatch
         func isLive(_ heading: XCUIElement) -> Bool {
-            // The link words `ShellScreen.linkWord` gives a CONNECTED runner's
-            // heading. One that is not connected says when it was last seen.
+            // Any of the link words `ShellScreen.linkWord` gives a runner the
+            // phone is talking to. One it is not talking to says when it was
+            // last seen. Used only for the precondition: "Connecting" is a
+            // runner with no fleet yet, so it proves nothing about the switch.
             ["Connected", "Connecting", "Reconnecting"].contains { heading.label.contains($0) }
+        }
+        /// Runner B has ANSWERED: its heading says "Connected" and has cards
+        /// under it. `ShellOverview.header` shows "No worktrees" for a section
+        /// with none, so its absence on a connected heading is B's fleet, in
+        /// the grid. This, not "Connecting", is the moment a shell that
+        /// survived the retirement of A could still be rebuilt.
+        func hasAnswered(_ heading: XCUIElement) -> Bool {
+            heading.exists && heading.label.contains("Connected")
+                && !heading.label.contains("No worktrees")
         }
 
         // And now the runner change.
@@ -1669,26 +1680,52 @@ final class TerminalScrollTests: XCTestCase {
             isLive(other),
             "Runner B is already connected (\(other.label)), so \"Connect every runner at once\" "
                 + "is still on and there is no switch to make")
+        let wsBefore = Self.field(probe.value as? String ?? "", "ws")
         try switchToRunner(app, id: runnerIDs.b)
 
-        let stayed = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in
-                probe.exists && Self.field(probe.value as? String ?? "", "overview") == "1"
-            }, object: nil)
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [stayed], timeout: 30), .completed,
-            "the shell the runner was switched in is gone (the probe reads "
-                + "\(probe.exists ? probe.value as? String ?? "" : "nothing")): something above "
-                + "`ShellScreen` unmounted it. `.id(host)` on `RootView` would do this, and so "
+        // A remount is a probe that is gone or reads `overview=0`: every
+        // shell mounts with its grid closed (`ShellScreen.seed` opens on a
+        // pane), and nothing on this path closes the grid on purpose.
+        func remounted() -> Bool {
+            !probe.exists || Self.field(probe.value as? String ?? "", "overview") != "1"
+        }
+
+        // 1. Until B has answered, or the shell has gone. Nothing is asserted
+        // from inside this wait: `overview=1` is already true before the tap,
+        // so a wait that ended on it would end on the old state.
+        _ = XCTWaiter.wait(
+            for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate { _, _ in hasAnswered(other) || remounted() },
+                object: nil)],
+            timeout: 30)
+
+        // 2. And a short watch after it, for a rebuild that waits for B's
+        // fleet to land rather than happening when A is retired. Any sample
+        // of a remount ends it early; a watch that times out is the good
+        // answer.
+        _ = XCTWaiter.wait(
+            for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate { _, _ in remounted() }, object: nil)],
+            timeout: 5)
+
+        // 3. Asserted once, on the state after B answered.
+        let now = probe.exists ? probe.value as? String ?? "" : "nothing — the probe is gone"
+        XCTAssertFalse(
+            remounted(),
+            "the shell the runner was switched in is gone (the probe reads \(now)): something "
+                + "above `ShellScreen` unmounted it. `.id(host)` on `RootView` would do this, and so "
                 + "does `FleetView.phases` falling back to its waiting screen for as long as no "
                 + "runner has a fleet, which is every switch with one runner at a time")
-
-        let switched = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in other.exists && isLive(other) }, object: nil)
         XCTAssertEqual(
-            XCTWaiter.wait(for: [switched], timeout: 30), .completed,
-            "Runner B's heading reads \(other.exists ? other.label : "nothing — it is gone"): "
-                + "the switch did not happen, so the grid staying open proved nothing")
+            Self.field(probe.value as? String ?? "", "ws"), wsBefore,
+            "the shell no longer stands where the switch was tapped (it was on ws=\(wsBefore ?? "?"), "
+                + "the probe reads \(now))")
+        XCTAssertTrue(
+            hasAnswered(other),
+            "Runner B never answered: its heading reads "
+                + "\(other.exists ? other.label : "nothing, because the grid it is in is gone"). "
+                + "Without B's fleet in the grid the checks above were made before the moment "
+                + "that matters")
     }
 
     /// `FleetSettings.allRunnersAtOnceKey`, spelled out: this bundle cannot
