@@ -35,6 +35,18 @@ set -u
 
 python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "$@" >> "$FAKE_LOG"
 
+# Flags a shell didn't split (`"$FLAGS"` holding `--repo x --actor manager`)
+# reach the real CLI as one argument, and clap refuses it. Refuse it here too,
+# so an agent sees the error it would see for real.
+for a in "$@"; do
+  case "$a" in
+    --*" "*)
+      echo "error: unexpected argument '$a' found" >&2
+      exit 2
+      ;;
+  esac
+done
+
 for a in "$@"; do
   if [ "$a" = "--help" ] || [ "$a" = "-h" ] || [ "$a" = "help" ]; then
     if [ -n "${REAL_FARCOOLER:-}" ] && [ -x "$REAL_FARCOOLER" ]; then
