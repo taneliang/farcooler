@@ -518,9 +518,9 @@ class Connection(
      *
      * - Every board, one at a time and without waiting on it, when a link
      *   comes up and its repositories are known ([loadBoardsDetached]).
-     * - Every board when the runner's build lands on a link whose boards were
-     *   never read — the first `host` read failed and a later poll installed
-     *   it (see [loadDaemonBuild]).
+     * - Every board when the runner's build lands on a link whose sweep was
+     *   refused for want of it — the first `host` read failed and a later
+     *   poll installed it (see [loadDaemonBuild]).
      * - One board on its `task` notice, and every board on `resync`.
      * - On a runner with no live event channel, every board on the poll at
      *   most once a minute, because nothing would tell this app a board moved.

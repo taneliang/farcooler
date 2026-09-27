@@ -140,18 +140,49 @@ private let panes = [
     #expect(try #require(landed.first).agents == 2)
 }
 
-/// A link whose build lands before its boards were read owes a sweep; one
-/// whose boards were read does not; and a new link owes one again. The case
-/// this exists for: the first `host` read on a reconnect failed, the sweep
-/// that followed refused every board, and a later poll installed the build.
+/// A link whose sweep was refused for want of a build owes one when the build
+/// lands; one whose boards were read does not; and a new link owes nothing
+/// until its own sweep is refused. The case this exists for: the first
+/// `host` read on a reconnect failed, the sweep that followed refused every
+/// board, and a later poll installed the build.
 @Test func aBuildThatLandsLateReadsTheBoardsItsLinkNeverRead() {
     var sweep = BoardSweep()
     sweep.linkCameUp()
-    #expect(sweep.owedWhenBuildLands, "no board was read on this link yet")
+    sweep.refused()
+    #expect(sweep.owedWhenBuildLands, "the sweep on this link read nothing")
     sweep.swept()
     #expect(!sweep.owedWhenBuildLands, "this link already read its boards")
     sweep.linkCameUp()
+    sweep.refused()
     #expect(sweep.owedWhenBuildLands, "a new link has read nothing")
+}
+
+/// **A build landing on the ordinary path starts no sweep of its own** (ov-20
+/// R-M8). Every link-up reads the build first and then sweeps; the build
+/// landing before that sweep started one too, so every connect and reconnect
+/// read every board twice. Only a sweep already refused is owed.
+///
+/// Mutation: `owedWhenBuildLands` back to `!sweptOnThisLink`. Red.
+@Test func aBuildLandingBeforeTheSweepStartsNoSecondSweep() {
+    var sweep = BoardSweep()
+    sweep.linkCameUp()
+    #expect(!sweep.owedWhenBuildLands, "no sweep has been refused on this link")
+}
+
+/// **A sweep stops at the link it was started on** (ov-20 R-M8). A sweep
+/// still going when its link dropped used to carry on over the new link,
+/// beside the new link's own sweep, and every board they shared cost a read
+/// and a trailing re-read.
+///
+/// Mutation: `isCurrent` answering true for any link. Red.
+@Test func aSweepFromAnEarlierLinkIsNotCurrent() {
+    var sweep = BoardSweep()
+    sweep.linkCameUp()
+    let first = sweep.link
+    #expect(sweep.isCurrent(first))
+    sweep.linkCameUp()
+    #expect(!sweep.isCurrent(first), "the link it started on is gone")
+    #expect(sweep.isCurrent(sweep.link))
 }
 
 // MARK: - Boards by workspace

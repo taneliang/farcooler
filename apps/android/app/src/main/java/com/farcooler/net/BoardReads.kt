@@ -150,11 +150,19 @@ class BoardReads(
      * so an open one is read again whatever notices a dropped link lost.
      */
     suspend fun sweep(boards: List<WorkspaceSummary>) {
-        if (!canRead()) return
+        if (!canRead()) {
+            ledger.refused()
+            return
+        }
         lastSweepAt = clock()
         owedOnReturn = false
+        val link = ledger.link
         if (boards.isNotEmpty()) ledger.swept()
-        for (board in withImplicit(boards)) readOne(board)
+        for (board in withImplicit(boards)) {
+            // Its link is gone: the new one has its own sweep.
+            if (!ledger.isCurrent(link)) return
+            readOne(board)
+        }
     }
 
     /**

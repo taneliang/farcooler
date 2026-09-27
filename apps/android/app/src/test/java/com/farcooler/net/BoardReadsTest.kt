@@ -199,6 +199,48 @@ class BoardReadsTest {
         assertEquals("already swept on this link", 1, reads.started)
     }
 
+    /**
+     * **A build landing on the ordinary path starts no sweep of its own**
+     * (ov-20 R-M8). A link-up reads the build and then sweeps; the build
+     * landing first started a sweep too, and every connect read every board
+     * twice. Only a sweep already refused is owed.
+     *
+     * Mutation: `owedWhenBuildLands` back to `!sweptOnThisLink`. Red: 1 read.
+     */
+    @Test
+    fun aBuildLandingBeforeTheSweepReadsNothing() = runTest {
+        val reads = Reads()
+        val boards = BoardReads(connection(), canRead = { true }, read = reads::read)
+        boards.ledger.linkCameUp()
+
+        val landed = launch { boards.buildLanded(listOf(ws("a"))) }
+        runCurrent()
+        assertEquals("the link-up's own sweep is on its way", 0, reads.started)
+        landed.join()
+    }
+
+    /**
+     * **A sweep stops at the link it started on** (ov-20 R-M8). One still
+     * going when its link dropped read on over the new link, beside the new
+     * link's own sweep.
+     *
+     * Mutation: `isCurrent` answering true for any link. Red: b is read.
+     */
+    @Test
+    fun aSweepStopsWhenItsLinkIsGone() = runTest {
+        val reads = Reads()
+        val boards = BoardReads(connection(), canRead = { true }, read = reads::read)
+        boards.ledger.linkCameUp()
+
+        val sweep = launch { boards.sweep(listOf(ws("a"), ws("b"))) }
+        runCurrent()
+        boards.ledger.linkCameUp()
+        reads.answer()
+        runCurrent()
+        sweep.join()
+        assertEquals(listOf("a"), reads.order)
+    }
+
     // ---- boards by workspace ----
 
     private val main = WorkspaceSummary(id = "w-main", name = "Main", isMain = true, repository = "r1")

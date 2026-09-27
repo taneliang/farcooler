@@ -536,24 +536,46 @@ object RunnerBoards {
 }
 
 /**
- * Whether a link still owes its boards a read. A new link clears it; a sweep
- * that read the repositories sets it. When the runner's build lands on a link
- * that still owes one — its first `host` read failed and a later poll installed
- * it — the boards are read then, rather than never on that link.
+ * Whether a link still owes its boards a read, and which link a sweep is for.
+ * The iPhone's `BoardSweep`, and the same rules.
+ *
+ * A new link clears it; a sweep that read the repositories sets it. When the
+ * runner's build lands on a link whose sweep was refused for want of it —
+ * its first `host` read failed and a later poll installed it — the boards are
+ * read then, rather than never on that link. Only a refused sweep is owed:
+ * every link-up reads the build and then sweeps, so sweeping when the build
+ * lands as well read every board twice on every connect.
+ *
+ * And a sweep belongs to its link: [link] moves with each new one, and a
+ * sweep no longer [isCurrent] stops rather than read on over the new link.
  */
 class BoardSweep {
     var sweptOnThisLink: Boolean = false
         private set
+    var refusedOnThisLink: Boolean = false
+        private set
+    var link: Int = 0
+        private set
 
     fun linkCameUp() {
         sweptOnThisLink = false
+        refusedOnThisLink = false
+        link += 1
     }
 
     fun swept() {
         sweptOnThisLink = true
     }
 
-    val owedWhenBuildLands: Boolean get() = !sweptOnThisLink
+    /** A sweep on this link could not read, and read nothing. */
+    fun refused() {
+        refusedOnThisLink = true
+    }
+
+    val owedWhenBuildLands: Boolean get() = refusedOnThisLink && !sweptOnThisLink
+
+    /** Whether a sweep started on [link] is still this link's. */
+    fun isCurrent(link: Int): Boolean = link == this.link
 }
 
 /**

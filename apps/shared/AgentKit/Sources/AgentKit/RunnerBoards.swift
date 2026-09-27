@@ -196,28 +196,51 @@ public enum RunnerBoards {
     }
 }
 
-/// Whether a link still owes its boards a read.
+/// Whether a link still owes its boards a read, and which link a sweep is for.
 ///
 /// A new link clears it; a sweep that read the repositories sets it. When the
-/// runner's build lands on a link that still owes one, the boards are read
-/// then: a sweep started before the build was known refused every board (it
-/// cannot know the runner keeps one), and without this the overview's rows
-/// would go on showing what the previous link read until some board happened
-/// to move. The first `host` read on a new link failing is exactly when that
-/// happens — a reconnect over a link still coming up.
+/// runner's build lands on a link whose sweep was refused for want of it,
+/// the boards are read then: a sweep started before the build was known
+/// refused every board (it cannot know the runner keeps one), and without
+/// this the overview's rows would go on showing what the previous link read
+/// until some board happened to move. The first `host` read on a new link
+/// failing is exactly when that happens — a reconnect over a link still
+/// coming up.
+///
+/// Only a refused sweep is owed. Every link-up reads the build and then
+/// sweeps, so a build landing with no sweep refused yet has one on its way;
+/// sweeping for it too read every board twice on every connect.
+///
+/// And a sweep belongs to its link: `link` is bumped by each new one, and a
+/// sweep that finds itself no longer `isCurrent` stops, rather than reading
+/// on over the new link beside that link's own sweep.
 public struct BoardSweep: Equatable, Sendable {
     public private(set) var sweptOnThisLink = false
+    public private(set) var refusedOnThisLink = false
+    public private(set) var link = 0
 
     public init() {}
 
-    /// A new link: its boards have not been read on it.
-    public mutating func linkCameUp() { sweptOnThisLink = false }
+    /// A new link: its boards have not been read on it, and a sweep still
+    /// going from the last one is no longer current.
+    public mutating func linkCameUp() {
+        sweptOnThisLink = false
+        refusedOnThisLink = false
+        link += 1
+    }
 
     /// This link's boards were read.
     public mutating func swept() { sweptOnThisLink = true }
 
+    /// A sweep on this link found no build to say whether the runner keeps a
+    /// board, and read nothing.
+    public mutating func refused() { refusedOnThisLink = true }
+
     /// Whether the build landing now should start a sweep.
-    public var owedWhenBuildLands: Bool { !sweptOnThisLink }
+    public var owedWhenBuildLands: Bool { refusedOnThisLink && !sweptOnThisLink }
+
+    /// Whether a sweep started on `link` is still this link's.
+    public func isCurrent(_ link: Int) -> Bool { link == self.link }
 }
 
 extension TaskBoardModel {

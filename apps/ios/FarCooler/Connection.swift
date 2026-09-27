@@ -875,8 +875,9 @@ final class Connection: ObservableObject {
         daemon = build
         lastDaemon = build
         // Boards this link never read — `loadBoards` refused them while the
-        // build was missing. Detached, so the poll that installed the build
-        // does not wait on a sweep.
+        // build was missing. Not the ordinary link-up, whose own sweep comes
+        // after this. Detached, so the poll that installed the build does not
+        // wait on a sweep.
         if boardSweep.owedWhenBuildLands { loadBoardsDetached() }
         // Read from the same call, which is already made once per connection.
         //
@@ -1241,12 +1242,24 @@ final class Connection: ObservableObject {
     /// ahead of the next keystroke. So the sweep is detached, so nothing waits
     /// on it to start, and serial, so it never has more than one read ahead of
     /// anything else.
+    ///
+    /// A sweep belongs to the link it started on (`BoardSweep.link`): one
+    /// still going when that link dropped stops at its next board, rather
+    /// than reading on over the new link beside the new link's own sweep.
     func loadBoards() async {
-        guard phase == .connected, daemon?.can("tasks") == true else { return }
+        guard phase == .connected else { return }
+        guard daemon?.can("tasks") == true else {
+            // No build yet to say whether the runner keeps a board: owed
+            // when it lands. See `BoardSweep`.
+            if daemon == nil { boardSweep.refused() }
+            return
+        }
         lastBoardsRead = Date()
+        let link = boardSweep.link
         let list = boardList
         if !list.isEmpty { boardSweep.swept() }
         for board in list {
+            guard boardSweep.isCurrent(link) else { return }
             await readBoard(board)
         }
     }

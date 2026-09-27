@@ -525,14 +525,18 @@ class TaskBoardTest {
 
     // ---- a late build, and landing ----
 
+    /** Owed only once this link's sweep was refused, and not once its boards were read. */
     @Test
     fun aBuildThatLandsLateReadsTheBoardsItsLinkNeverRead() {
         val sweep = BoardSweep()
         sweep.linkCameUp()
+        assertFalse("no sweep refused yet: the link-up's own is on its way", sweep.owedWhenBuildLands)
+        sweep.refused()
         assertTrue(sweep.owedWhenBuildLands)
         sweep.swept()
         assertFalse(sweep.owedWhenBuildLands)
         sweep.linkCameUp()
+        sweep.refused()
         assertTrue(sweep.owedWhenBuildLands)
     }
 
