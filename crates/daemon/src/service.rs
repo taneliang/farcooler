@@ -3677,49 +3677,66 @@ impl Service {
         Ok(dir)
     }
 
-    /// Where a Claude Code orchestrator's chat runs, and the arguments its
-    /// adapter gets after its own (`agent-host --adapter-arg`), when `term`
-    /// is one and `hosted` is what the chat will host. `None` for every
-    /// other pane, whose chat runs in its worktree.
+    /// Where an orchestrator's chat runs, and the arguments its adapter gets
+    /// after its own (`agent-host --adapter-arg`), when `term` is one and
+    /// `hosted` is what the chat will host. `None` for every other pane,
+    /// whose chat runs in its worktree as stored.
     ///
-    /// **The home**, as in terminal mode, because Claude Code files a
-    /// conversation under its working directory: the orchestrator's is under
-    /// the home's, and the chat's `--resume` and its history
-    /// (`farcooler_claude::backend::transcript_for`) look there. From the
-    /// main checkout the chat would find neither. Then `--add-dir <main>`,
-    /// and `autoMemoryDirectory` as inline JSON to `--settings`, which
-    /// Claude Code takes as a file or a JSON string. Only the memory, not
-    /// the terminal's settings file: a chat reports through the shim, and no
-    /// chat is handed Far Cooler's hooks. The recipe's variables reach it
-    /// from the pane's own line (`with_pane_env`).
+    /// **Claude Code on its native backend: the home**, as in terminal mode,
+    /// because Claude Code files a conversation under its working directory:
+    /// the orchestrator's is under the home's, and the chat's `--resume` and
+    /// its history (`farcooler_claude::backend::transcript_for`) look there.
+    /// From the main checkout the chat would find neither. Then `--add-dir
+    /// <main>`, and `autoMemoryDirectory` as inline JSON to `--settings`,
+    /// which Claude Code takes as a file or a JSON string. Only the memory,
+    /// not the terminal's settings file: a chat reports through the shim,
+    /// and no chat is handed Far Cooler's hooks. The recipe's variables
+    /// reach it from the pane's own line (`with_pane_env`).
     ///
-    /// **Claude Code's native backend only.** An ACP adapter configured in
-    /// its place (`[adapters.claude]`) is a different program, and these
-    /// are claude's flags. Codex already chats from the main checkout, where
-    /// its terminal runs. A Cursor chat runs in the main checkout, which is
-    /// the root its terminal's `--workspace` names; its adapter takes no
-    /// such flag.
+    /// **Claude Code on an ACP adapter (the built-in one) is refused.** Its
+    /// adapter takes none of claude's flags, and from the main checkout its
+    /// `session/load` can't find the conversation filed under the home, so
+    /// it starts a fresh one (`farcooler_acp::session`), the record takes
+    /// that id, and the orchestrator's own conversation is orphaned. A
+    /// toggle that loses the conversation is refused rather than taken, as
+    /// `set_pane_mode` refuses swapping the agent.
+    ///
+    /// **Codex: the resolved main checkout**, where its terminal runs, and
+    /// with no arguments: its chat takes the directory as `thread/start`'s
+    /// `cwd`, and codex keys hook trust by the resolved path (see
+    /// `orchestrator`). **Cursor:** the main checkout, the root its
+    /// terminal's `--workspace` names; its ACP adapter takes no such flag,
+    /// and its chats are kept by that root, not the home.
+    ///
+    /// The shim appends the arguments only to a native adapter
+    /// (`agent_host::resolve_with`), so a config changed between this read
+    /// and the shim's hands an ACP adapter no flags it doesn't know.
     fn orchestrator_chat(
         &self,
         term: &models::Terminal,
         hosted: Option<&str>,
     ) -> Result<Option<(String, Vec<String>)>> {
         use crate::orchestrator::{Harness, extra_args, working_directory};
-        let Some((Harness::Claude, launch)) = self.orchestrator_launch(term) else { return Ok(None) };
-        let native = self
-            .registry()
-            .adapter("claude")
-            .is_some_and(|a| a.backend == farcooler_core::activity::AdapterBackend::Native);
-        if hosted != Some("claude") || !native {
-            return Ok(None);
+        use farcooler_core::activity::AdapterBackend;
+        let Some((harness, launch)) = self.orchestrator_launch(term) else { return Ok(None) };
+        let backend = hosted.and_then(|h| self.registry().adapter(h).map(|a| a.backend));
+        let dir = |h| working_directory(h, &launch).to_string_lossy().into_owned();
+        match (harness, hosted, backend) {
+            (Harness::Claude, Some("claude"), Some(AdapterBackend::Native)) => {
+                self.orchestrator_home(&self.store.get_workspace(launch.workspace)?)?;
+                let mut args = extra_args(Harness::Claude, &launch);
+                if let Some(memory) = &launch.memory_dir {
+                    args.push("--settings".into());
+                    args.push(serde_json::json!({ "autoMemoryDirectory": memory.to_string_lossy() }).to_string());
+                }
+                Ok(Some((dir(Harness::Claude), args)))
+            }
+            (Harness::Claude, Some("claude"), Some(AdapterBackend::Acp)) => Err(DomainError::InvalidArgument {
+                what: "an orchestrator's conversation can't move into a chat on claude's ACP adapter, which would start a new one; set backend = \"native\" under [adapters.claude], or keep it in terminal mode",
+            }),
+            (Harness::Codex, Some("codex"), _) => Ok(Some((dir(Harness::Codex), Vec::new()))),
+            _ => Ok(None),
         }
-        self.orchestrator_home(&self.store.get_workspace(launch.workspace)?)?;
-        let mut args = extra_args(Harness::Claude, &launch);
-        if let Some(memory) = &launch.memory_dir {
-            args.push("--settings".into());
-            args.push(serde_json::json!({ "autoMemoryDirectory": memory.to_string_lossy() }).to_string());
-        }
-        Ok(Some((working_directory(Harness::Claude, &launch).to_string_lossy().into_owned(), args)))
     }
 
     /// `workspace`'s home, made if it's missing, or the refusal an
@@ -4502,12 +4519,12 @@ impl Service {
                     .as_deref()
                     .map(|h| format!(" --preset {}", shell_quote(h)))
                     .unwrap_or_default();
-                // A Claude Code orchestrator's chat runs where its terminal
-                // did, with the same recipe (`orchestrator_chat`); every
+                // An orchestrator's chat runs where its conversation is, with
+                // its recipe, or is refused (`orchestrator_chat`); every
                 // other chat runs in its worktree.
                 let recipe = match self.orchestrator_chat(&term, harness.as_deref())? {
-                    Some((home, args)) => {
-                        dir = home;
+                    Some((at, args)) => {
+                        dir = at;
                         args.iter().map(|a| format!(" --adapter-arg {}", shell_quote(a))).collect()
                     }
                     None => String::new(),
@@ -7403,11 +7420,38 @@ mod orchestrator_launch_tests {
         let _ = svc.stop_terminal(term.id).await;
     }
 
+    /// Start `preset`'s orchestrator in `main`, then draw what the chat
+    /// toggle identifies as that agent in its pane, as
+    /// `a_pane_that_looks_like_claude` does.
+    async fn an_orchestrator_that_looks_like(
+        svc: &Service,
+        ws: &models::Worktree,
+        main: Uuid,
+        preset: &str,
+        marker: &str,
+    ) -> models::Terminal {
+        let term = svc.start_orchestrator(main, preset, true).await.expect("started");
+        let pane = svc.pane_of(term.id).await.expect("a pane");
+        svc.tmux
+            .respawn_pane(&pane.pane_id, &ws.worktree_path, &format!("printf '{marker}\\n'; sleep 600"))
+            .await
+            .expect("respawn");
+        for _ in 0..200 {
+            svc.inventory.refresh().await;
+            let screen = svc.screen(term.id).await.map(|(text, _, _)| text).unwrap_or_default();
+            if screen.contains(marker) {
+                return term;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        panic!("the pane never drew {marker}");
+    }
+
     /// And so does one switched into a chat, on Claude Code's native
     /// backend: the shim runs in the home, where the conversation is filed,
     /// and hands the adapter `--add-dir` and the memory directory. On the
-    /// built-in ACP adapter, whose program these flags aren't for, the chat
-    /// runs in the main checkout as any other does.
+    /// built-in ACP adapter the switch is refused, and the pane is left
+    /// as it was: that chat would start a new conversation.
     #[tokio::test]
     async fn an_orchestrator_switched_into_a_chat_keeps_its_recipe() {
         let (dir, svc, ws) = a_worktree().await;
@@ -7423,27 +7467,13 @@ mod orchestrator_launch_tests {
             } else {
                 farcooler_core::activity::Registry::built_in()
             });
-            let term = svc.start_orchestrator(main.id, "claude", true).await.expect("started");
-            // What the chat toggle identifies as Claude Code, as
-            // `a_pane_that_looks_like_claude` draws it.
-            let pane = svc.pane_of(term.id).await.expect("a pane");
-            svc.tmux
-                .respawn_pane(&pane.pane_id, &ws.worktree_path, "printf '? for shortcuts\\n'; sleep 600")
-                .await
-                .expect("respawn");
-            for _ in 0..200 {
-                svc.inventory.refresh().await;
-                let screen = svc.screen(term.id).await.map(|(text, _, _)| text).unwrap_or_default();
-                if screen.contains("? for shortcuts") {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-            }
-            svc.set_pane_mode(term.id, models::PaneMode::Agent, false).await.expect("a chat");
+            let term = an_orchestrator_that_looks_like(&svc, &ws, main.id, "claude", "? for shortcuts").await;
+            let switched = svc.set_pane_mode(term.id, models::PaneMode::Agent, false).await;
 
             let command = pane_start_command(&svc, term.id).await;
-            assert!(command.contains("agent-host"), "{command}");
             if native {
+                switched.expect("a chat");
+                assert!(command.contains("agent-host"), "{command}");
                 assert_eq!(arg_after(&command, "--worktree"), home.to_string_lossy(), "{command}");
                 assert_eq!(pane_path(&svc, term.id).await, resolved(&home));
                 assert!(
@@ -7456,11 +7486,45 @@ mod orchestrator_launch_tests {
                 let settings = serde_json::json!({ "autoMemoryDirectory": memory.to_string_lossy() });
                 assert!(command.replace("\\\"", "\"").contains(&format!("'{settings}'")), "{command}");
             } else {
-                assert_eq!(arg_after(&command, "--worktree"), ws.worktree_path, "{command}");
-                assert!(!command.contains("--adapter-arg"), "{command}");
+                match switched {
+                    Err(DomainError::InvalidArgument { what }) => {
+                        assert!(what.contains("ACP adapter") && what.contains("backend = \"native\""), "{what}")
+                    }
+                    other => panic!("an orchestrator's ACP chat must be refused: {other:?}"),
+                }
+                assert!(!command.contains("agent-host"), "the pane is left as it was: {command}");
+                let record = svc.store.get_terminal(term.id).unwrap();
+                assert_eq!(record.pane_mode, models::PaneMode::Terminal);
+                assert_eq!(record.agent_session_id, term.agent_session_id, "the conversation is kept");
             }
             let _ = svc.stop_terminal(term.id).await;
         }
+    }
+
+    /// A codex orchestrator's chat runs in the resolved main checkout, as its
+    /// terminal does, not the path as stored.
+    #[tokio::test]
+    async fn a_codex_orchestrators_chat_runs_in_the_resolved_repository() {
+        let (dir, svc, ws) = a_worktree().await;
+        let main = main_of(&svc, &ws);
+        let repo = resolved(Path::new(&ws.worktree_path));
+        // The main checkout stored through a link, as a repository
+        // registered by a path that isn't its resolved one is.
+        let link = dir.path().join("linked-repo");
+        std::os::unix::fs::symlink(&repo, &link).unwrap();
+        let ws = svc
+            .store
+            .update_worktree(ws.id, ws.resource_version, &ws.branch, link.to_str().unwrap(), ws.hidden, ws.creation_failed)
+            .unwrap();
+        assert_ne!(Path::new(&ws.worktree_path), repo);
+        let term = an_orchestrator_that_looks_like(&svc, &ws, main.id, "codex", "OpenAI Codex").await;
+        svc.set_pane_mode(term.id, models::PaneMode::Agent, false).await.expect("a chat");
+
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(command.contains("agent-host"), "{command}");
+        assert_eq!(arg_after(&command, "--worktree"), repo.to_string_lossy(), "{command}");
+        assert!(!command.contains("--adapter-arg"), "{command}");
+        let _ = svc.stop_terminal(term.id).await;
     }
 }
 

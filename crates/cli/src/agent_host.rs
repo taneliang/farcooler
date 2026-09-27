@@ -227,13 +227,21 @@ pub fn resolve(
 /// `--adapter-arg`s the daemon hands a workspace's Claude Code orchestrator,
 /// so its chat runs with the recipe its terminal does. Empty for every
 /// other pane.
+///
+/// **Only onto a native adapter.** The daemon sends them only when its own
+/// registry says native (`Service::orchestrator_chat`), and they are
+/// claude's flags. This process reads the config again, and if it changed
+/// in between and now names an ACP adapter, that program is not handed
+/// flags it doesn't know.
 pub fn resolve_with(
     registry: &farcooler_core::activity::Registry,
     preset: Option<&str>,
     extra: Vec<String>,
 ) -> Option<farcooler_core::activity::AdapterSpec> {
     let mut spec = resolve(registry, preset)?;
-    spec.args.extend(extra);
+    if spec.backend == farcooler_core::activity::AdapterBackend::Native {
+        spec.args.extend(extra);
+    }
     Some(spec)
 }
 
@@ -928,11 +936,19 @@ mod tests {
         };
         assert_eq!(adapter_args, ["--add-dir", "/src/My Repo"]);
 
-        let registry = farcooler_core::activity::Registry::built_in();
-        let own = resolve(&registry, Some("claude")).expect("claude has an adapter").args;
-        let spec = resolve_with(&registry, Some("claude"), adapter_args).expect("claude has an adapter");
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config.toml");
+        std::fs::write(&config, "[adapters.claude]\nbackend = \"native\"\nprogram = \"claude\"\n").unwrap();
+        let native = farcooler_core::config::registry_from(&config);
+        let own = resolve(&native, Some("claude")).expect("claude has an adapter").args;
+        let spec = resolve_with(&native, Some("claude"), adapter_args.clone()).expect("claude has an adapter");
         assert_eq!(spec.args[..own.len()], own[..]);
         assert_eq!(spec.args[own.len()..], ["--add-dir", "/src/My Repo"]);
+
+        // The built-in ACP adapter is another program: it gets none of them.
+        let built_in = farcooler_core::activity::Registry::built_in();
+        let acp = resolve_with(&built_in, Some("claude"), adapter_args).expect("claude has an adapter");
+        assert_eq!(acp.args, resolve(&built_in, Some("claude")).unwrap().args);
     }
 
     #[test]

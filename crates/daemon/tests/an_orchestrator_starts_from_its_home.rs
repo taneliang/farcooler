@@ -25,15 +25,14 @@ type SocketClient = Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::Ow
 /// The stand-in, one program for every test here, since the daemon reads the
 /// variable once.
 ///
-/// **In the build's own scratch directory, not `$TMPDIR`**
-/// (`CARGO_TARGET_TMPDIR`, `target/tmp`). A process-long `TempDir` in a
-/// `static` is never dropped, so each run used to leave one behind in
-/// `$TMPDIR`. Here there is one file at one path, the same bytes every run,
-/// written to a private name and renamed, so a run reads the whole file
-/// even with another run of this binary writing it. It writes its records
-/// into the orchestrator's home, which each test's `Harness` removes.
+/// **One file at one fixed path** (`stand_in_dir`), the same bytes every
+/// run. A process-long `TempDir` in a `static` is never dropped, so each run
+/// used to leave a directory behind in `$TMPDIR`. It's written to a private
+/// name and renamed, so a run reads the whole file even with another run of
+/// this binary writing it. It writes its records into the orchestrator's
+/// home, which each test's `Harness` removes.
 static STAND_IN: LazyLock<PathBuf> = LazyLock::new(|| {
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let dir = &stand_in_dir();
     std::fs::create_dir_all(dir).unwrap();
     let script = dir.join("an-orchestrator-stand-in");
     let private = dir.join(format!("an-orchestrator-stand-in.{}", std::process::id()));
@@ -55,10 +54,7 @@ static STAND_IN: LazyLock<PathBuf> = LazyLock::new(|| {
     std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o755)).unwrap();
     std::fs::rename(&private, &script).unwrap();
     let program = script.to_str().unwrap();
-    assert!(
-        program.chars().all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c)),
-        "the daemon runs `false` for a stand-in path it can't use: {program}"
-    );
+    assert!(plain(&script), "the daemon runs `false` for a stand-in path it can't use: {program}");
     // SAFETY: `set_var` is sound only while no other thread reads the
     // environment. Every test here forces this before it starts a daemon,
     // runtime threads or a process, and the first to arrive sets it while the
@@ -66,6 +62,35 @@ static STAND_IN: LazyLock<PathBuf> = LazyLock::new(|| {
     unsafe { std::env::set_var("FARCOOLER_STAND_IN_AGENT", program) };
     script
 });
+
+/// Whether the daemon takes `path` as a stand-in: letters, digits and
+/// `/._-` only (`stand_in_program`).
+fn plain(path: &Path) -> bool {
+    path.to_str().is_some_and(|p| p.chars().all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c)))
+}
+
+/// Where the stand-in lives: the build's scratch directory
+/// (`CARGO_TARGET_TMPDIR`, `target/tmp`), or, when that path isn't one the
+/// daemon takes (a checkout under `~/My Projects`), a directory of this
+/// user's own in the temporary directory, by a fixed name. Fixed either way,
+/// so a run reuses the file the last one wrote rather than leaving its own.
+///
+/// The fallback is refused if it's a link or someone else's: in a shared
+/// `/tmp` another account could make it first.
+fn stand_in_dir() -> PathBuf {
+    let target = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    if plain(&target) {
+        return target;
+    }
+    // SAFETY: `getuid` has no preconditions and cannot fail.
+    let uid = unsafe { libc::getuid() };
+    let dir = std::env::temp_dir().join(format!("farcooler-orchestrator-stand-in-{uid}"));
+    let _ = std::fs::create_dir(&dir);
+    let meta = std::fs::symlink_metadata(&dir).unwrap();
+    use std::os::unix::fs::MetadataExt;
+    assert!(meta.is_dir() && meta.uid() == uid, "{} isn't this user's own directory", dir.display());
+    dir
+}
 
 /// A daemon on a private socket, database and tmux server, as in
 /// `rpc_over_socket.rs`, with one repository registered and a client at
@@ -262,15 +287,18 @@ async fn a_claude_orchestrator_is_started_from_its_home_with_the_recipe() {
     assert_eq!(value(&record, "claude_md"), ["1"]);
 }
 
-/// The stand-in isn't left in `$TMPDIR`: it's one file in the build's scratch
-/// directory, and what it records goes into a home the test removes.
+/// The stand-in is one file at a fixed path, not one per run, and it's in
+/// the build's scratch directory whenever the daemon can take that path.
+/// What it records goes into a home the test removes.
 #[tokio::test]
-async fn the_stand_in_leaves_nothing_in_the_temporary_directory() {
+async fn the_stand_in_is_one_file_not_one_per_run() {
     let h = start().await;
-    let temporary = std::env::temp_dir().canonicalize().unwrap();
-    let program = STAND_IN.canonicalize().unwrap();
-    assert!(!program.starts_with(&temporary), "{} is in {}", program.display(), temporary.display());
-    assert!(program.starts_with(Path::new(env!("CARGO_TARGET_TMPDIR")).canonicalize().unwrap()));
+    assert_eq!(stand_in_dir(), stand_in_dir(), "fixed, not made fresh");
+    assert_eq!(*STAND_IN, stand_in_dir().join("an-orchestrator-stand-in"));
+    let target = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    if plain(target) {
+        assert_eq!(STAND_IN.parent(), Some(target));
+    }
 
     let mut client = Client::connect(&h.socket, "test-client", "0.0.0").await.expect("connect");
     let main = main_workspace(&h, &mut client).await;
