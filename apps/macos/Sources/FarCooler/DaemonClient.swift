@@ -1263,8 +1263,13 @@ final class DaemonClient: ObservableObject {
         // `--next`/`--prev` step through a pane order the app already holds, so
         // the target is knowable here and the assumption is as safe as it is for
         // a pane named outright.
-        let stepped = named.flatMap { id in layouts[worktree.id]?.first { $0.id == id } }
-        if let group = stepped ?? activeGroup(worktree.id), !group.panes.isEmpty,
+        // A named layout this copy doesn't hold assumes nothing: falling back to
+        // `activeGroup` could draw the ring in an orchestrator's window.
+        let stepped =
+            named == nil
+            ? activeGroup(worktree.id)
+            : layouts[worktree.id]?.first { $0.id == named }
+        if let group = stepped, !group.panes.isEmpty,
             let current = group.panes.firstIndex(where: \.focused)
         {
             let delta = step == "--prev" ? -1 : 1

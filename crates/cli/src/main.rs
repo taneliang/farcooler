@@ -269,6 +269,11 @@ enum DaemonCmd {
 /// among the main checkout's layouts, but the daemon never picks one for a
 /// verb that names none: an orchestrator's window is reached only by naming
 /// it. A client showing a particular layout names it.
+///
+/// A number counts every layout `layout show` lists, orchestrators' included,
+/// so it can differ from the app's bar, which leaves them out. Where a verb
+/// also names a pane (a split beside it, a focus, a break), the pane settles
+/// the layout and `--layout` is ignored.
 #[derive(Subcommand)]
 enum LayoutCmd {
     /// Show a worktree's layouts and where tmux has put every pane.

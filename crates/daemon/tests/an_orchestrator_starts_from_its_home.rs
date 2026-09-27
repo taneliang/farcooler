@@ -698,3 +698,78 @@ async fn the_checkouts_fallback_is_never_the_orchestrators_window() {
     assert!(index(&o.id) < index(&s.checkout), "the orchestrator's window is the older one");
     assert_eq!((o.panes.len(), o.panes[0].zoomed, &o.name), (1, false, &name));
 }
+
+/// A worktree, made over the wire with a shell in its first window.
+async fn a_worktree(h: &Harness, client: &mut SocketClient, task: &str) -> farcooler_protocol::v1::Worktree {
+    let mut create = request("worktree.create");
+    create.target_resource_id = Some(bytes::Bytes::copy_from_slice(h.repository.as_bytes()));
+    create.payload = Some(request::Payload::WorktreeCreate(farcooler_protocol::v1::WorktreeCreate {
+        task_name: task.into(),
+        branch: format!("feat/{task}"),
+        base_revision: "HEAD".into(),
+        terminal_preset: "shell".into(),
+        adopt_existing: false,
+        fork_only: false,
+        workspace_id: None,
+    }));
+    let Some(result::Value::Worktree(w)) = client.call(create).await.expect("worktree.create").value else {
+        panic!("wrong result")
+    };
+    w
+}
+
+/// In a plain worktree none of whose windows is active, `layout select
+/// --next` starts from the first, the one the fallback shows, so it moves to
+/// the second. With one layout it does nothing, and tmux's active window
+/// stays in the other worktree.
+#[tokio::test]
+async fn select_next_with_none_active_starts_from_the_fallback() {
+    use farcooler_protocol::v1::LayoutUpdate;
+    let h = start().await;
+    let mut client = Client::connect(&h.socket, "test-client", "0.0.0").await.expect("connect");
+    let two = a_worktree(&h, &mut client, "two").await;
+    let second = another_shell_window(&mut client, &two.id, false).await;
+    let one = a_worktree(&h, &mut client, "one").await;
+    let elsewhere = a_worktree(&h, &mut client, "elsewhere").await;
+    let theirs = layout_call(&mut client, "layout.list", &elsewhere.id, LayoutUpdate::default()).await;
+    let focus = LayoutUpdate { focus: Some(theirs.items[0].panes[0].terminal_id.clone()), ..Default::default() };
+    layout_call(&mut client, "layout.focus", &elsewhere.id, focus).await;
+
+    let next = LayoutUpdate { step: Some(1), ..Default::default() };
+    let list = layout_call(&mut client, "layout.group.select", &one.id, next.clone()).await;
+    assert!(list.items.len() == 1 && !list.items[0].active, "one layout steps nowhere: {list:?}");
+    let theirs = layout_call(&mut client, "layout.list", &elsewhere.id, LayoutUpdate::default()).await;
+    assert!(theirs.items[0].active, "and tmux's active window stays where it was");
+
+    let before = layout_call(&mut client, "layout.list", &two.id, LayoutUpdate::default()).await;
+    assert!(before.items.len() == 2 && before.items.iter().all(|g| !g.active), "{before:?}");
+    let list = layout_call(&mut client, "layout.group.select", &two.id, next).await;
+    assert!(window_of(&list, &second).active, "--next shows the second, not the first again: {list:?}");
+}
+
+/// A pane named outright is zoomed even when the worktree has no default
+/// layout: here the main checkout's only window is the orchestrator's.
+#[tokio::test]
+async fn zooming_a_named_pane_needs_no_default_layout() {
+    use farcooler_protocol::v1::LayoutUpdate;
+    let h = start().await;
+    let mut client = Client::connect(&h.socket, "test-client", "0.0.0").await.expect("connect");
+    let workspace = main_workspace(&h, &mut client).await;
+    let orchestrator =
+        start_orchestrator(&mut client, workspace.id.clone(), "claude", false).await.expect("started").id;
+    records(&h, &workspace_id(&workspace), 1).await;
+    let main = main_checkout(&mut client).await.id;
+
+    for off in [false, true] {
+        let zoom = LayoutUpdate { zoom: Some(orchestrator.clone()), unzoom: off, ..Default::default() };
+        let mut r = request("layout.zoom");
+        r.target_resource_id = Some(main.clone());
+        r.payload = Some(request::Payload::LayoutUpdate(zoom));
+        client.call(r).await.unwrap_or_else(|e| panic!("zoom, off {off}: {e:?}"));
+    }
+    // With nothing named there is nothing to act on, and it says so.
+    let mut r = request("layout.zoom");
+    r.target_resource_id = Some(main.clone());
+    r.payload = Some(request::Payload::LayoutUpdate(LayoutUpdate::default()));
+    assert!(client.call(r).await.is_err(), "no default layout for the checkout");
+}

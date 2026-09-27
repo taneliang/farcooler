@@ -87,18 +87,17 @@ fn tmux_preset(preset: LayoutPreset) -> Preset {
 /// `None` when there's nowhere to go.
 ///
 /// With none of them active (tmux's active window is an orchestrator's, or
-/// another worktree's), forward lands on the first and back on the last.
+/// another worktree's), the start is the fallback `active_layout` shows, the
+/// first. So forward lands on the second and back on the last, and a single
+/// layout steps nowhere rather than pulling tmux's active window over from
+/// another worktree.
 fn step_from(at: Option<usize>, count: usize, delta: i64) -> Option<usize> {
-    match at {
-        _ if count == 0 => None,
-        Some(_) if count < 2 => None,
-        Some(i) => {
-            let n = count as i64;
-            Some((((i as i64 + delta) % n + n) % n) as usize)
-        }
-        None if delta < 0 => Some(count - 1),
-        None => Some(0),
+    if count < 2 {
+        return None;
     }
+    let n = count as i64;
+    let at = at.unwrap_or(0) as i64;
+    Some((((at + delta) % n + n) % n) as usize)
 }
 
 /// A drop edge, as tmux's split arguments.
@@ -332,9 +331,15 @@ impl Service {
         terminal: Option<Uuid>,
         off: bool,
     ) -> Result<Vec<LayoutView>> {
-        let view = self.resolve(worktree, group).await?;
+        // A named terminal settles the window, so nothing else is resolved:
+        // a main checkout whose only windows are orchestrators' has no
+        // default layout, and zooming a pane named outright mustn't need one.
         if off {
-            self.tmux.unzoom(&view.window.window_id).await?;
+            let window = match terminal {
+                Some(id) => self.pane_of(id).await?.window_id,
+                None => self.resolve(worktree, group).await?.window.window_id,
+            };
+            self.tmux.unzoom(&window).await?;
             return self.layout(worktree).await;
         }
         match terminal {
@@ -349,6 +354,7 @@ impl Service {
                 }
             }
             None => {
+                let view = self.resolve(worktree, group).await?;
                 let pane = view.focused().ok_or(DomainError::NotFound)?;
                 self.tmux.toggle_zoom(&pane.pane_id).await?;
             }
@@ -493,14 +499,17 @@ mod tests {
     }
 
     #[test]
-    fn stepping_wraps_and_starts_at_an_end_when_none_is_active() {
+    fn stepping_wraps_and_starts_at_the_fallback_when_none_is_active() {
         assert_eq!(step_from(Some(0), 3, 1), Some(1));
         assert_eq!(step_from(Some(2), 3, 1), Some(0));
         assert_eq!(step_from(Some(0), 3, -1), Some(2));
         assert_eq!(step_from(Some(0), 1, 1), None, "one layout shows itself already");
-        assert_eq!(step_from(None, 1, 1), Some(0), "but not when another is on screen");
-        assert_eq!(step_from(None, 3, 1), Some(0));
+        // None active: the start is the fallback, the first, which is the one
+        // `active_layout` and the Mac already treat as shown.
+        assert_eq!(step_from(None, 3, 1), Some(1), "the second, not the first again");
         assert_eq!(step_from(None, 3, -1), Some(2));
+        assert_eq!(step_from(None, 1, 1), None, "and never pulls tmux over from another worktree");
+        assert_eq!(step_from(None, 1, -1), None);
         assert_eq!(step_from(None, 0, 1), None);
     }
 
