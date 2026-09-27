@@ -203,6 +203,10 @@ final class DaemonClient: ObservableObject {
     /// repositories, roots and layouts on every reconnection, not only at
     /// bring-up. Not fired for a `refresh()` that merely confirms an
     /// already-`.connected` client is still up.
+    ///
+    /// Also called when the runner says this client's event stream fell
+    /// behind (`eventsMissed()`), which is a reconnection's news problem
+    /// without the reconnection: the link is up, and events were still lost.
     var onReconnect: (() -> Void)?
 
     /// How long to wait before the next attempt, in seconds.
@@ -491,6 +495,14 @@ final class DaemonClient: ObservableObject {
                     self.boardMoved(event)
                 }
             },
+            onMissed: { [weak self] in
+                Task { @MainActor in
+                    // Stale-guarded like every other arm here, for the reason
+                    // `onEvent` states.
+                    guard let self, self.streamGeneration == generation else { return }
+                    await self.eventsMissed()
+                }
+            },
             onEnd: { [weak self] in
                 Task { @MainActor in
                     // Stale: either this stream was deliberately stopped, or
@@ -769,7 +781,7 @@ final class DaemonClient: ObservableObject {
                 // received before the drop — the panes were dead and the app
                 // said nothing, because as far as it knew it was connected.
                 linkGeneration += 1
-                onReconnect?()
+                rereadMissedNews()
                 // Which build is on the other end of the link that just came
                 // up. Cleared first: whatever was read before belongs to the
                 // previous link, and a daemon that went away and came back is
@@ -965,16 +977,52 @@ final class DaemonClient: ObservableObject {
     /// Its own events, plus every reconnection: a write made while the event
     /// stream was down — a daemon restart, a network flap, a laptop asleep —
     /// sends no event anybody hears, and the sidebar's amber count is a number
-    /// people act on. `linkGeneration` moves exactly when the link comes back,
-    /// so adding it re-reads every board once per reconnection and never
-    /// otherwise.
+    /// people act on. `missedNewsGeneration` moves exactly when the link comes
+    /// back or the runner says it dropped this stream's events, so adding it
+    /// re-reads every board once for each and never otherwise.
     ///
     /// Which news moves which board is AgentKit's `BoardNotice.touches`, the
     /// rule the phones follow too, asked here of every kind of news heard.
     func boardGeneration(for board: WorkspaceSummary) -> Int {
-        boardNews.reduce(linkGeneration) { sum, heard in
+        boardNews.reduce(missedNewsGeneration) { sum, heard in
             heard.key.notice.touches(board) ? sum + heard.value : sum
         }
+    }
+
+    /// Bumped whenever news this client was owed may never have arrived:
+    /// every reconnection, and every `events_missed`.
+    ///
+    /// Apart from `linkGeneration`, which boards used to count by, because the
+    /// two mean different things. That one says the link was replaced, and every
+    /// pane restarts its own stream on it; a stream that fell behind lost
+    /// only its lines, and a pane whose bytes were never at risk would flash
+    /// through a reattach for nothing.
+    @Published private(set) var missedNewsGeneration = 0
+
+    /// Re-read everything the event stream would have told this client:
+    /// every board, and through `onReconnect` the layouts (with the
+    /// repositories, roots and themes a reconnection seeds alongside them).
+    /// The fleet and the diff counts are `refresh()`'s, which every caller
+    /// has either just run or runs next.
+    ///
+    /// One path for both ways news goes missing, so a read added to one can't
+    /// be forgotten in the other.
+    private func rereadMissedNews() {
+        missedNewsGeneration += 1
+        onReconnect?()
+    }
+
+    /// The runner dropped events it owed this stream (`events_missed`): the
+    /// `farcooler events` connection fell more than a backlog behind — a slow
+    /// request, most likely — and what it missed is gone.
+    ///
+    /// What the phones do with `resync`, and what a reconnection does here,
+    /// minus replacing the link: the fleet (and with it the diff counts), then
+    /// every board and layout. Internal rather than private so the suite can
+    /// hand it the news the stream would have.
+    func eventsMissed() async {
+        await refresh()
+        rereadMissedNews()
     }
 
     /// Who caused the last board move, verbatim: `user`, `manager`, or

@@ -453,6 +453,46 @@ struct BoardSidebarTests {
         client.stopEvents()
     }
 
+    /// **A stream that fell behind re-reads everything it feeds** (ov-49).
+    /// The runner drops events a connection can't keep up with and says so
+    /// with one `events_missed` line; that line used to fall into the
+    /// stream's `default`, so a Mac that fell behind went on showing boards,
+    /// panes and layouts nobody would ever tell it had moved. Now it is the
+    /// phones' `resync`: the fleet, every board, and what a reconnection
+    /// seeds — without replacing the link, which would restart every pane.
+    @Test func aStreamThatFellBehindReReadsEverythingItFeeds() async {
+        // The line `event_json` in crates/cli/src/main.rs prints.
+        var missed = 0
+        EventStream.dispatch(
+            Data(#"{"kind":"events_missed"}"#.utf8), decoder: JSONDecoder(), onMissed: { missed += 1 })
+        #expect(missed == 1, "the stream dropped the line that says lines were dropped")
+
+        let reads = Reads()
+        let client = client(reads)
+        var asked: [[String]] = []
+        let runner = client.commandRunnerForTesting
+        client.commandRunnerForTesting = { args in
+            asked.append(args)
+            return await runner!(args)
+        }
+        var seeded = 0
+        client.onReconnect = { seeded += 1 }
+        await client.refresh()  // the link comes up
+        let store = TaskBoardStore(client: client, workspace: Self.summary(Self.main, "Main", isMain: true))
+        await store.readIfNeverRead()
+        let link = client.linkGeneration
+        asked = []
+        seeded = 0
+
+        await client.eventsMissed()
+        #expect(asked.contains(["worktree", "list", "--json"]), "the fleet wasn’t re-read")
+        #expect(seeded == 1, "layouts weren’t re-read")
+        await store.reloadIfMoved()
+        #expect(reads.count(Self.main) == 2, "the board wasn’t re-read")
+        #expect(client.linkGeneration == link, "the link was replaced, so every pane would reattach")
+        client.stopEvents()
+    }
+
     // MARK: - A replacement store is read
 
     @MainActor

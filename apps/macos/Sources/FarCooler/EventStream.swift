@@ -192,6 +192,11 @@ final class EventStream {
     private let onChangeSet: @Sendable () -> Void
     /// A repository's board moved. See `TaskEvent`.
     private let onTask: @Sendable (TaskEvent) -> Void
+    /// The runner dropped events it owed this stream (`events_missed`): it
+    /// fell more than a backlog behind, and what was lost is gone. Carries
+    /// nothing, because the only answer is to re-read everything the lines
+    /// above would have said — the phones' `resync`.
+    private let onMissed: @Sendable () -> Void
     private let onEnd: @Sendable () -> Void
 
     init(
@@ -200,6 +205,7 @@ final class EventStream {
         onFleet: @escaping @Sendable () -> Void = {},
         onChangeSet: @escaping @Sendable () -> Void = {},
         onTask: @escaping @Sendable (TaskEvent) -> Void = { _ in },
+        onMissed: @escaping @Sendable () -> Void = {},
         onEnd: @escaping @Sendable () -> Void = {}
     ) {
         self.onEvent = onEvent
@@ -207,6 +213,7 @@ final class EventStream {
         self.onFleet = onFleet
         self.onChangeSet = onChangeSet
         self.onTask = onTask
+        self.onMissed = onMissed
         self.onEnd = onEnd
     }
 
@@ -232,14 +239,15 @@ final class EventStream {
         let buffer = LineBuffer()
         let handle = out.fileHandleForReading
         outputHandle = handle
-        handle.readabilityHandler = { [onEvent, onLayout, onFleet, onChangeSet, onTask] h in
+        handle.readabilityHandler = { [onEvent, onLayout, onFleet, onChangeSet, onTask, onMissed] h in
             let chunk = h.availableData
             if chunk.isEmpty { return }
             let decoder = JSONDecoder()
             for line in buffer.take(chunk) {
                 Self.dispatch(
                     line, decoder: decoder, onEvent: onEvent, onLayout: onLayout,
-                    onFleet: onFleet, onChangeSet: onChangeSet, onTask: onTask)
+                    onFleet: onFleet, onChangeSet: onChangeSet, onTask: onTask,
+                    onMissed: onMissed)
             }
         }
 
@@ -270,7 +278,8 @@ final class EventStream {
         onLayout: (LayoutEvent) -> Void = { _ in },
         onFleet: () -> Void = {},
         onChangeSet: () -> Void = {},
-        onTask: (TaskEvent) -> Void = { _ in }
+        onTask: (TaskEvent) -> Void = { _ in },
+        onMissed: () -> Void = {}
     ) {
         // Dispatched on `kind` rather than by trying each shape in turn.
         // Guessing worked while there was one shape; with two, a layout
@@ -294,6 +303,11 @@ final class EventStream {
             if let event = try? decoder.decode(TaskEvent.self, from: line) {
                 onTask(event)
             }
+        // Not a resource: news that some of the lines above never came. It
+        // used to fall into `default` below, which is how a Mac that fell
+        // behind went on showing boards nobody would ever tell it had moved.
+        case "events_missed":
+            onMissed()
         // Resources this app does not track yet are skipped, not an error.
         default: return
         }
