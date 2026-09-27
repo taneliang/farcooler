@@ -144,9 +144,9 @@ fun AgentScreen(
     // And only while the runner answers. Reconnecting, the fleet is the one
     // read before the link went, and "Working" under the transcript and a Stop
     // button from it would be the only things on screen claiming to know.
-    val runnerPhase by connection.phase.collectAsStateWithLifecycle()
+    val runnerLink by connection.link.collectAsStateWithLifecycle()
     val isWorking =
-        runnerPhase.link == RunnerLink.ANSWERING && terminal?.agent == AgentActivity.WORKING
+        runnerLink == RunnerLink.ANSWERING && terminal?.agent == AgentActivity.WORKING
     val harness = terminal?.preset?.takeIf { it.isNotEmpty() }
         ?.replaceFirstChar { it.uppercase() } ?: "the agent"
 

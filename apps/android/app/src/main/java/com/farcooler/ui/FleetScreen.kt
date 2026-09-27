@@ -80,6 +80,7 @@ import com.farcooler.model.WorktreeOrder
 import com.farcooler.model.StateKind
 import com.farcooler.model.Terminal
 import com.farcooler.model.Worktree
+import com.farcooler.model.said
 import com.farcooler.net.Connection
 import com.farcooler.net.FleetEntry
 import com.farcooler.net.HostKeyQuestion
@@ -439,11 +440,11 @@ private fun FleetBody(
         // Without the orchestrators, which are their workspaces' own rows.
         val listed = entry.worktree.terminals.filter { it.id !in orchestrators }
         items(listed, key = { "${entry.host.id}/${it.id}" }) { terminal ->
-            val phase by entry.connection.phase.collectAsStateWithLifecycle()
+            val link by entry.connection.link.collectAsStateWithLifecycle()
             TerminalRow(
                 terminal = terminal,
                 ordinal = numbering[terminal.id],
-                answering = phase.link == RunnerLink.ANSWERING,
+                answering = link == RunnerLink.ANSWERING,
                 onClick = {
                     onSelect(TerminalRef(entry.host.id, entry.worktree.id, terminal.id))
                 },
@@ -497,12 +498,12 @@ private fun FleetBody(
                 if (orchestrator != null) {
                     val (entry, terminal) = orchestrator
                     item(key = "$hostId/orchestrator/${heading.id}") {
-                        val phase by entry.connection.phase.collectAsStateWithLifecycle()
+                        val link by entry.connection.link.collectAsStateWithLifecycle()
                         Box(Modifier.testTag("fleet-orchestrator-${heading.id}")) {
                             TerminalRow(
                                 terminal = terminal,
                                 ordinal = null,
-                                answering = phase.link == RunnerLink.ANSWERING,
+                                answering = link == RunnerLink.ANSWERING,
                                 onClick = {
                                     onSelect(TerminalRef(entry.host.id, entry.worktree.id, terminal.id))
                                 },
@@ -561,9 +562,9 @@ private fun FleetBody(
                 // added a runner to yet is empty, not broken.
                 // Collected, not read: see `runnerCounts`.
                 val counts by remember(connections) {
-                    runnerCounts(connections.map { it.phase to it.fleet })
+                    runnerCounts(connections.map { it.link to it.fleet })
                 }.collectAsStateWithLifecycle(
-                    connections.map { runnerCount(it.phase.value, it.fleet.value) }
+                    connections.map { runnerCount(it.link.value, it.fleet.value) }
                 )
                 val down = fleetReading(counts) == FleetReading.RuntimeDown
                 val tint =
@@ -1233,13 +1234,14 @@ internal fun TerminalRow(
             .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        // Centred on the FIRST LINE, by giving the dot a box exactly that line
+        // Centered on the FIRST LINE, by giving the dot a box exactly that line
         // tall — not by a hardcoded top padding, which is what iOS had to
         // correct: a measured offset is right at one text size and wrong at
         // every other, and the first line's height moves with the type scale
         // while a number in a source file does not.
         Box(Modifier.height(firstLineHeight()), contentAlignment = Alignment.Center) {
-            ProcessDot(kind)
+            // What the runner last said, only while it answers. See [said].
+            ProcessDot(kind.said(answering))
         }
         Spacer(Modifier.width(10.dp))
 

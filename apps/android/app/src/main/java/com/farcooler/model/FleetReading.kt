@@ -24,6 +24,41 @@ enum class RunnerLink {
     AWAY,
 }
 
+/** Which link read the fleet a runner's rows are drawn from. See [given]. */
+enum class FleetRead {
+    /** No link has read one: the rows are empty. */
+    NEVER,
+
+    /** A link before this one did, and this one has not yet. */
+    EARLIER_LINK,
+
+    /** The link that is up now. */
+    THIS_LINK,
+}
+
+/**
+ * This link, weakened by what its fleet can vouch for.
+ *
+ * A reconnect is Connected for a host read and a fleet read before it has
+ * heard anything, and until then the rows on screen are the last link's:
+ * agents that may have exited since. So a connected runner answers only once
+ * this link has read its fleet — the iPhone's `hasFleet`. Before that it is
+ * away, with the old rows, or on a first link, which has none, connecting.
+ */
+fun RunnerLink.given(read: FleetRead): RunnerLink = when {
+    this != RunnerLink.ANSWERING || read == FleetRead.THIS_LINK -> this
+    read == FleetRead.NEVER -> RunnerLink.CONNECTING
+    else -> RunnerLink.AWAY
+}
+
+/**
+ * A pane's process state, as far as its runner can vouch for it: what it
+ * last said while it answers, and "can't say" — the hollow neutral dot —
+ * while it doesn't. An exited grey dot or a lost red ring from a fleet read
+ * before the link went is a claim about now nobody made.
+ */
+fun StateKind.said(answering: Boolean): StateKind = if (answering) this else StateKind.UNKNOWN
+
 /**
  * What a surface may say about the fleet's panes. The Mac's
  * `FleetStore.Reading`, and the same four answers.
@@ -78,6 +113,10 @@ fun fleetReading(runners: List<RunnerCount>): FleetReading {
 /**
  * The drawer's footer: "3 live · 2 runners", or why it can't say.
  *
+ * The count is the answering runners' only, so the footer says how many of
+ * the runners it is from when that is not all of them: "3 live · 1 of 2
+ * runners". "2 runners" alone read as three across both.
+ *
  * "No runners" first, and not colored by anyone: an app nobody has added a
  * runner to yet is empty, not broken.
  */
@@ -85,8 +124,10 @@ fun liveSummary(runners: List<RunnerCount>): String {
     if (runners.isEmpty()) return "No runners"
     return when (val reading = fleetReading(runners)) {
         is FleetReading.Live -> {
-            val count = if (runners.size == 1) "1 runner" else "${runners.size} runners"
-            "${reading.count} live · $count"
+            val answering = runners.count { it.link == RunnerLink.ANSWERING }
+            val all = if (runners.size == 1) "1 runner" else "${runners.size} runners"
+            val from = if (answering == runners.size) all else "$answering of $all"
+            "${reading.count} live · $from"
         }
         FleetReading.RuntimeDown -> "tmux unavailable"
         FleetReading.Connecting -> "Connecting…"
@@ -110,8 +151,10 @@ fun reassurance(runners: List<RunnerCount>, where: String, worktrees: Int): Stri
     return when (val reading = fleetReading(runners)) {
         FleetReading.Connecting -> "Connecting…"
         FleetReading.Unsaid -> "Can’t say what’s running until a runner answers."
-        FleetReading.RuntimeDown, is FleetReading.Live -> {
-            val working = (reading as? FleetReading.Live)?.count ?: 0
+        // Not "Nothing is running": with tmux down, no pane could be read.
+        FleetReading.RuntimeDown -> "Can’t say what’s running$where: tmux isn’t answering."
+        is FleetReading.Live -> {
+            val working = reading.count
             if (working == 0 && worktrees == 0) {
                 "Nothing is running$where yet."
             } else {

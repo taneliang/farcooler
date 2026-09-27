@@ -324,7 +324,7 @@ private fun AgentRow(
     // Blocked and done hold whether or not the runner answers, which is every
     // row this screen lists; the mark and the status only lose a claim about
     // now. Read anyway, so the row says the same thing here as in the drawer.
-    val answering = connection?.phase?.collectAsStateWithLifecycle()?.value?.link ==
+    val answering = connection?.link?.collectAsStateWithLifecycle()?.value ==
         RunnerLink.ANSWERING
     Column(modifier) {
         TerminalRow(
@@ -511,13 +511,16 @@ private fun Reassurance(
     working: Map<String, Int>,
     worktrees: Int,
 ) {
-    val phases = connections.map { connection ->
-        key(connection.host.id) { connection.phase.collectAsStateWithLifecycle().value }
+    val runners = connections.map { connection ->
+        key(connection.host.id) {
+            val link by connection.link.collectAsStateWithLifecycle()
+            val fleet by connection.fleet.collectAsStateWithLifecycle()
+            // Healthy too: without it the front door could never say tmux is
+            // down, and said "Nothing is running" instead.
+            RunnerCount(link, working[connection.host.id] ?: 0, fleet.runtimeHealthy)
+        }
     }
-    val silent = phases.count { it !is Connection.Phase.Connected }
-    val runners = connections.zip(phases) { connection, phase ->
-        RunnerCount(phase.link, working[connection.host.id] ?: 0)
-    }
+    val silent = runners.count { it.link != RunnerLink.ANSWERING }
     val where = if (connections.size == 1) " on ${connections[0].host.displayLabel}" else ""
 
     Column(

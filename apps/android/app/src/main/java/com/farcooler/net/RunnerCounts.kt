@@ -2,14 +2,15 @@ package com.farcooler.net
 
 import com.farcooler.model.Fleet
 import com.farcooler.model.RunnerCount
+import com.farcooler.model.RunnerLink
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
 
-/** One runner's link and last fleet, as the drawer's footer counts them. */
-fun runnerCount(phase: Connection.Phase, fleet: Fleet): RunnerCount =
-    RunnerCount(phase.link, fleet.livePanes, fleet.runtimeHealthy)
+/** One runner's link and last fleet, as the drawer's footer counts them. See [Connection.link]. */
+fun runnerCount(link: RunnerLink, fleet: Fleet): RunnerCount =
+    RunnerCount(link, fleet.livePanes, fleet.runtimeHealthy)
 
 /**
  * Each runner's link and last count, moving whenever any runner's phase or
@@ -24,10 +25,10 @@ fun runnerCount(phase: Connection.Phase, fleet: Fleet): RunnerCount =
  * dashed. Collected, it moves the moment the phase does.
  */
 fun runnerCounts(
-    runners: List<Pair<StateFlow<Connection.Phase>, StateFlow<Fleet>>>,
+    runners: List<Pair<StateFlow<RunnerLink>, StateFlow<Fleet>>>,
 ): Flow<List<RunnerCount>> {
     if (runners.isEmpty()) return flowOf(emptyList())
-    return combine(runners.map { (phase, fleet) -> combine(phase, fleet, ::runnerCount) }) {
+    return combine(runners.map { (link, fleet) -> combine(link, fleet, ::runnerCount) }) {
         it.toList()
     }
 }

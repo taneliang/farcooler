@@ -1,6 +1,8 @@
 package com.farcooler.net
 
 import com.farcooler.model.RunnerLink
+import com.farcooler.model.FleetRead
+import com.farcooler.model.given
 
 import com.farcooler.core.ClientCore
 import com.farcooler.data.Identity
@@ -41,6 +43,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
@@ -452,6 +457,24 @@ class Connection(
     private val _fleet = MutableStateFlow(Fleet.EMPTY)
     val fleet: StateFlow<Fleet> = _fleet.asStateFlow()
 
+    /** Which link read [fleet]: set on every fleet read, and aged by every new link. */
+    private val _fleetRead = MutableStateFlow(FleetRead.NEVER)
+
+    /**
+     * How far this runner's rows can be believed: [Phase.link], and answering
+     * only once this link has read the fleet. A reconnect is Connected for a
+     * host read and a fleet read before that, and until then the rows are the
+     * last link's. Every surface that asks "is this runner answering" reads
+     * this, not [phase]. See [RunnerLink.given].
+     */
+    val link: StateFlow<RunnerLink> = combine(_phase, _fleetRead) { phase, read -> phase.link.given(read) }
+        .stateIn(scope, SharingStarted.Eagerly, RunnerLink.CONNECTING)
+
+    /** A new link, which has read nothing yet: the fleet on screen is an earlier one's. */
+    private fun linkCameUp() {
+        if (_fleetRead.value == FleetRead.THIS_LINK) _fleetRead.value = FleetRead.EARLIER_LINK
+    }
+
     private val _repositories = MutableStateFlow<List<Repository>>(emptyList())
     val repositories: StateFlow<List<Repository>> = _repositories.asStateFlow()
 
@@ -741,6 +764,7 @@ class Connection(
         }
 
         if (mine != attempt) return
+        linkCameUp()
         _phase.value = Phase.Connected
         // A link nobody has told anything yet. See [WatchingClaim.reset].
         watching.reset()
@@ -839,6 +863,7 @@ class Connection(
         }
 
         if (_phase.value !is Phase.Reconnecting) return
+        linkCameUp()
         _phase.value = Phase.Connected
         // Before the reads below, so anything watching for a new link learns
         // about it in the same turn the link exists.
@@ -1030,6 +1055,7 @@ class Connection(
             val data = core.call("fleet")
             val fleet = json.decodeFromJsonElement(Fleet.serializer(), data)
             _fleet.value = fleet
+            _fleetRead.value = FleetRead.THIS_LINK
             onFleet?.invoke(fleet)
             // And end `done` for whatever is on screen, from the same fleet.
             // Here as well as on the taps, because an agent finishing while you

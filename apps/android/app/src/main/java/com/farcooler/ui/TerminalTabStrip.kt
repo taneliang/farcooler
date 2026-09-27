@@ -48,6 +48,7 @@ import com.farcooler.model.ShellClose
 import com.farcooler.model.StateKind
 import com.farcooler.model.Terminal
 import com.farcooler.model.Worktree
+import com.farcooler.model.said
 
 /**
  * One worktree's tabs: its agents, and its diff.
@@ -157,6 +158,12 @@ fun TerminalTabStrip(
      * may own. See `FleetLayout.orchestratorTitles`.
      */
     titles: Map<String, String> = emptyMap(),
+    /**
+     * Whether this worktree's runner is answering. While it isn't, every
+     * chip's dot says "can't say" rather than what the last fleet said. See
+     * `StateKind.said`.
+     */
+    answering: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     data class Chip(
@@ -301,7 +308,7 @@ fun TerminalTabStrip(
                     // collapse when it does: the box is claimed whether or not
                     // anything occupies it, so a pane starting or dying does not
                     // shove every chip after it sideways.
-                    ProcessDot(chip.kind)
+                    ProcessDot(chip.kind.said(answering))
                     Spacer(Modifier.width(6.dp))
                     Text(
                         // Capped, because a chip carries the CONVERSATION's name

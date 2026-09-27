@@ -24,18 +24,18 @@ class RunnerCountsTest {
      */
     @Test
     fun `the footer hears a runner drop`() = runBlocking {
-        val phase = MutableStateFlow<Connection.Phase>(Connection.Phase.Connected)
+        val link = MutableStateFlow(RunnerLink.ANSWERING)
         val fleet = MutableStateFlow(Fleet(runtimeHealthy = true, livePanes = 3))
-        val counts = runnerCounts(listOf(phase to fleet))
+        val counts = runnerCounts(listOf(link to fleet))
 
         assertEquals("3 live · 1 runner", liveSummary(counts.first()))
 
-        phase.value = Connection.Phase.Reconnecting(attempt = 1)
+        link.value = Connection.Phase.Reconnecting(attempt = 1).link
         val dropped = counts.first()
         assertEquals(RunnerLink.AWAY, dropped.single().link)
         assertEquals("Not connected", liveSummary(dropped))
 
-        phase.value = Connection.Phase.Connected
+        link.value = RunnerLink.ANSWERING
         fleet.value = Fleet(runtimeHealthy = true, livePanes = 5)
         assertEquals("5 live · 1 runner", liveSummary(counts.first()))
     }

@@ -45,6 +45,7 @@ import com.farcooler.model.ShellClose
 import com.farcooler.model.Terminal
 import com.farcooler.model.Worktree
 import com.farcooler.model.reviewAgentTargets
+import com.farcooler.model.RunnerLink
 import com.farcooler.net.Connection
 import com.farcooler.net.TerminalRef
 import kotlinx.coroutines.Dispatchers
@@ -146,6 +147,7 @@ fun WorktreeScreen(
     val entries by model.fleet.entries.collectAsStateWithLifecycle()
     val connections by model.fleet.active.collectAsStateWithLifecycle()
     val runnerFleet by connection.fleet.collectAsStateWithLifecycle()
+    val runnerLink by connection.link.collectAsStateWithLifecycle()
     // An orchestrator's tab is called after its workspace — "Billing
     // Orchestrator" — since the main checkout it runs in may be another
     // workspace's. See [FleetLayout.orchestratorTitles].
@@ -433,6 +435,7 @@ fun WorktreeScreen(
             worktree = worktree,
             counts = counts,
             titles = orchestratorTitles,
+            answering = runnerLink == RunnerLink.ANSWERING,
             current = panes.current,
             onSelect = { model.choose(route.hostId, route.worktreeId, it) },
             // **Asks only where there is something to interrupt.**

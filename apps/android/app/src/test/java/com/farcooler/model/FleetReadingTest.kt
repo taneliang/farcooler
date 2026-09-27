@@ -31,7 +31,7 @@ class FleetReadingTest {
             runner(RunnerLink.AWAY, 4),
         )
         assertEquals(FleetReading.Live(3), fleetReading(runners))
-        assertEquals("3 live · 2 runners", liveSummary(runners))
+        assertEquals("3 live · 1 of 2 runners", liveSummary(runners))
 
         val lostHealthy = listOf(
             runner(RunnerLink.ANSWERING, 0, healthy = false),
@@ -88,5 +88,72 @@ class FleetReadingTest {
         )
         assertEquals("Nothing is running.", reassurance(emptyList(), "", worktrees = 0))
         assertEquals("No runners", liveSummary(emptyList()))
+    }
+
+    /**
+     * **The count says whose it is.** "3 live · 2 runners" read as three
+     * across both, when the second runner was not answering and none of its
+     * panes were in the three. With every runner answering, the plain count.
+     *
+     * Mutation: the runner count taken from every runner again. Red.
+     */
+    @Test
+    fun `the footer names how many runners the count is from`() {
+        val both = listOf(runner(RunnerLink.ANSWERING, 3), runner(RunnerLink.ANSWERING, 1))
+        assertEquals("4 live · 2 runners", liveSummary(both))
+        val one = listOf(runner(RunnerLink.ANSWERING, 3), runner(RunnerLink.CONNECTING, 0))
+        assertEquals("3 live · 1 of 2 runners", liveSummary(one))
+        assertEquals("1 live · 1 runner", liveSummary(listOf(runner(RunnerLink.ANSWERING, 1))))
+    }
+
+    /**
+     * **tmux not answering is not "nothing is running".** It put RuntimeDown on
+     * Live's arm with a count of zero, so a runner whose panes could not be
+     * read at all said none were running.
+     *
+     * Mutation: RuntimeDown back on Live's arm. Red: "Nothing is running on studio."
+     */
+    @Test
+    fun `the front door cannot say what runs when tmux is down`() {
+        val down = listOf(runner(RunnerLink.ANSWERING, 0, healthy = false))
+        assertEquals(
+            "Can’t say what’s running on studio: tmux isn’t answering.",
+            reassurance(down, " on studio", worktrees = 2),
+        )
+        assertEquals(
+            "Can’t say what’s running: tmux isn’t answering.",
+            reassurance(down + runner(RunnerLink.ANSWERING, 0, healthy = false), "", worktrees = 0),
+        )
+    }
+
+    /**
+     * **A link that has not read the fleet yet does not vouch for it** (ov-22
+     * M3). A reconnect is Connected a host read and a fleet read before it has
+     * heard anything, and the fleet on screen until then is the last link's —
+     * agents that may have exited since. So: away, with that fleet; and on a
+     * first link, which has no fleet to show, still connecting.
+     */
+    @Test
+    fun `a connected runner answers only once this link has read its fleet`() {
+        assertEquals(RunnerLink.AWAY, RunnerLink.ANSWERING.given(FleetRead.EARLIER_LINK))
+        assertEquals(RunnerLink.CONNECTING, RunnerLink.ANSWERING.given(FleetRead.NEVER))
+        assertEquals(RunnerLink.ANSWERING, RunnerLink.ANSWERING.given(FleetRead.THIS_LINK))
+        // Nothing weaker is made stronger by a read.
+        assertEquals(RunnerLink.AWAY, RunnerLink.AWAY.given(FleetRead.THIS_LINK))
+        assertEquals(RunnerLink.CONNECTING, RunnerLink.CONNECTING.given(FleetRead.THIS_LINK))
+    }
+
+    /**
+     * **A pane's dot says "can't say" while its runner isn't answering**
+     * (ov-22 M9). An exited grey dot, a lost red ring, or no dot for running,
+     * is each a claim about now from a fleet read before the link went.
+     */
+    @Test
+    fun `a process dot says only what an answering runner says`() {
+        assertEquals(StateKind.UNKNOWN, StateKind.EXITED.said(answering = false))
+        assertEquals(StateKind.UNKNOWN, StateKind.RUNNING.said(answering = false))
+        assertEquals(StateKind.UNKNOWN, StateKind.LOST.said(answering = false))
+        assertEquals(StateKind.LOST, StateKind.LOST.said(answering = true))
+        assertEquals(StateKind.RUNNING, StateKind.RUNNING.said(answering = true))
     }
 }
