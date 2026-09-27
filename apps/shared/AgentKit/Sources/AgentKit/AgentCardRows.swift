@@ -300,7 +300,13 @@ public struct AgentCardLayout: Sendable, Equatable {
     public let counts: String?
     /// The header's ring, on the same precedence every other surface uses.
     public let mark: GlanceMark
-    /// One ring per agent in the fleet, in tier order.
+    /// One ring per agent the header counts, in tier order: blocked, to
+    /// review, in flight.
+    ///
+    /// **Not one per agent in the fleet.** An agent the
+    /// relay counts in no tier (a working row quiet for an hour, which the
+    /// relay drops from "in flight", or a row in no tier the card draws) is in
+    /// `more` and so in "+N more", and has no ring.
     ///
     /// **From the tier counts, not from the rows**, because there are only ever
     /// a handful of rows and the fleet is what this is about. That is also its

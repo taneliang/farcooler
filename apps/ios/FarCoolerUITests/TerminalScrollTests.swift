@@ -1492,7 +1492,7 @@ final class TerminalScrollTests: XCTestCase {
         // A pane raises the keyboard on appear, and the shell's bar
         // deliberately does not move for one (`ShellRootView.body`) — so with
         // a software keyboard up the bar is entirely BEHIND it and a press at
-        // the bar's own centre lands on a key. Which of the two states a run
+        // the bar's own center lands on a key. Which of the two states a run
         // gets is not this test's choice: XCUITest attaches a hardware
         // keyboard to the simulator and does not always detach it, so this
         // failed in one run and passed in the next with no code between them.
@@ -2293,11 +2293,18 @@ final class TerminalScrollTests: XCTestCase {
     /// Tap a card in the overview, scrolling the grid until it can be hit.
     ///
     /// The last row of cached cards sits at the bottom edge of the display,
-    /// over the shell's bar, and a tap at a card's centre there lands on the
-    /// bar: the card never hears it and nothing happens. `isHittable` says yes
-    /// to it all the same, so the test is the card's place on the display: it
-    /// is scrolled up until its centre is 200 points clear of the bottom edge,
-    /// well above the bar.
+    /// and a tap at a card's center there is lost: the card never hears it and
+    /// nothing happens. `isHittable` says yes to it all the same, so the test
+    /// is the card's place on the display: it is scrolled up until its center
+    /// is 200 points clear of the bottom edge.
+    ///
+    /// Not the shell's bar, which is what this used to blame: while the grid
+    /// is up the bar is transparent and takes no hits (`allowsHitTesting(!overview)`
+    /// in `ShellRootView`, and the page layer is gated the same way). The
+    /// likelier occluder is the overview's bottom toolbar and its search
+    /// field (`.searchable(placement: .toolbar)` in `ShellOverview`), which a
+    /// person sees and scrolls past. Unconfirmed: a run that logs the element
+    /// hit at that point would settle it.
     private func tapInGrid(_ app: XCUIApplication, _ card: XCUIElement) throws {
         let grid = app.descendants(matching: .any).matching(identifier: "shell-overview").firstMatch
         let limit = app.frame.height - 200
@@ -2309,7 +2316,7 @@ final class TerminalScrollTests: XCTestCase {
         }
         XCTAssertTrue(
             card.isHittable && card.frame.midY <= limit,
-            "\(card.label) cannot be scrolled clear of the bar: \(card.frame)")
+            "\(card.label) cannot be scrolled clear of the bottom edge: \(card.frame)")
         card.tap()
     }
 

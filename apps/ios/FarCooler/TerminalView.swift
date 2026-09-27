@@ -1426,7 +1426,7 @@ struct TerminalView: View {
             if overviewShowing { focusHeld = true } else { focusRequest += 1 }
         }
         //
-        // Made only by the pane the grid closes ONTO. Every neighbour the
+        // Made only by the pane the grid closes ONTO. Every neighbor the
         // track mounted under the grid held one too, and releasing them all
         // would leave the keyboard with whichever asked last.
         .onChange(of: overviewShowing) { _, showing in
