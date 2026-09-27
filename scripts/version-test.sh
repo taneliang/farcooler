@@ -201,8 +201,11 @@ rm -rf "$dir"
 # a home screen that truncates at about twelve characters. Stable is bare on all
 # three, because that is what an existing install already answers to.
 dir="$(scratch)"
-check "stable takes no suffix" \
-  "" "$(cd "$dir" && FARCOOLER_CHANNEL=stable ./scripts/version.sh app-suffix)"
+# Captured first, for both empty answers in this file: a substitution inside
+# check's argument list doesn't trip `set -e`, so a version.sh that crashed
+# and printed nothing would have matched "" and passed.
+got="$(cd "$dir" && FARCOOLER_CHANNEL=stable ./scripts/version.sh app-suffix)" || got="<exited $?>"
+check "stable takes no suffix" "" "$got"
 check "canary's suffix is its own name" \
   ".canary" "$(cd "$dir" && FARCOOLER_CHANNEL=canary ./scripts/version.sh app-suffix)"
 check "stable keeps the bare app name" \
@@ -248,7 +251,8 @@ check "canary has its own feed" \
 check "preview has its own feed" \
   "https://updates.farcooler.com/preview/appcast.xml" \
   "$(cd "$dir" && FARCOOLER_CHANNEL=preview ./scripts/version.sh feed-url)"
-check "local has no feed at all" "" "$(at "$dir" feed-url)"
+got="$(at "$dir" feed-url)" || got="<exited $?>"
+check "local has no feed at all" "" "$got"
 feeds="$(
   for c in stable canary preview; do
     (cd "$dir" && FARCOOLER_CHANNEL=$c ./scripts/version.sh feed-url)
