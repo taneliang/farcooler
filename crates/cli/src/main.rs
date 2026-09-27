@@ -262,6 +262,13 @@ enum DaemonCmd {
 /// tmux command with the identity bookkeeping done for you. The names are tmux's
 /// on purpose: a great many people already know that `z` zooms and that a layout
 /// is called `main-vertical`.
+///
+/// A verb that acts on a layout takes `--layout` to say which: its number, its
+/// name, or its tmux window id (`@3`). Without it, the verb acts on the layout
+/// tmux calls active, and tmux marks one window active for the whole runner,
+/// not one per worktree. Every orchestrator's window is among the main
+/// checkout's layouts, so after something focuses one, "active" in the main
+/// checkout is the orchestrator's. A client showing a particular layout names it.
 #[derive(Subcommand)]
 enum LayoutCmd {
     /// Show a worktree's layouts and where tmux has put every pane.
@@ -279,6 +286,9 @@ enum LayoutCmd {
         /// What to run. Defaults to your shell.
         #[arg(long, default_value = "shell")]
         preset: String,
+        /// The layout whose focused pane is split when no pane is named.
+        #[arg(long)]
+        layout: Option<String>,
     },
     /// Move an existing pane against another, on an edge.
     ///
@@ -292,9 +302,18 @@ enum LayoutCmd {
     },
     /// Set the arrangement: even-horizontal, even-vertical, main-vertical,
     /// main-horizontal, tiled.
-    Preset { worktree: String, preset: String },
+    Preset {
+        worktree: String,
+        preset: String,
+        #[arg(long)]
+        layout: Option<String>,
+    },
     /// Next arrangement of the same panes. tmux's `prefix Space`.
-    Cycle { worktree: String },
+    Cycle {
+        worktree: String,
+        #[arg(long)]
+        layout: Option<String>,
+    },
     /// Move focus: a terminal, `--next`, `--prev`, or `--pane N`.
     Focus {
         worktree: String,
@@ -305,6 +324,9 @@ enum LayoutCmd {
         prev: bool,
         #[arg(long, value_name = "N")]
         pane: Option<u32>,
+        /// The layout `--next`, `--prev` and `--pane` count in.
+        #[arg(long)]
+        layout: Option<String>,
     },
     /// Fill the layout with one pane. tmux's `prefix z`.
     Zoom {
@@ -312,6 +334,8 @@ enum LayoutCmd {
         terminal: Option<String>,
         #[arg(long)]
         off: bool,
+        #[arg(long)]
+        layout: Option<String>,
     },
     /// Exchange two panes' positions.
     Swap { worktree: String, a: String, b: String },
@@ -331,11 +355,28 @@ enum LayoutCmd {
         cells: i32,
     },
     /// Pull a pane out into a layout of its own. tmux's `break-pane`.
-    Break { worktree: String, terminal: Option<String> },
+    Break {
+        worktree: String,
+        terminal: Option<String>,
+        /// The layout whose focused pane is pulled out when no pane is named.
+        #[arg(long)]
+        layout: Option<String>,
+    },
     /// Name a layout.
-    Rename { worktree: String, name: String },
+    Rename {
+        worktree: String,
+        name: String,
+        #[arg(long)]
+        layout: Option<String>,
+    },
     /// Tell tmux the size of the viewport showing this layout, in cells.
-    Viewport { worktree: String, columns: u32, rows: u32 },
+    Viewport {
+        worktree: String,
+        columns: u32,
+        rows: u32,
+        #[arg(long)]
+        layout: Option<String>,
+    },
     /// Show a different layout: by number, by name, or the next one.
     Select {
         worktree: String,
@@ -2167,7 +2208,7 @@ async fn layout(runner: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
         | LayoutCmd::Split { worktree, .. }
         | LayoutCmd::Move { worktree, .. }
         | LayoutCmd::Preset { worktree, .. }
-        | LayoutCmd::Cycle { worktree }
+        | LayoutCmd::Cycle { worktree, .. }
         | LayoutCmd::Focus { worktree, .. }
         | LayoutCmd::Zoom { worktree, .. }
         | LayoutCmd::Swap { worktree, .. }
@@ -2252,18 +2293,19 @@ async fn layout(runner: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
         LayoutCmd::Select { group, prev, .. } => match group {
             Some(given) => {
                 let existing = fetch_layout(&mut link, worktree_id).await?;
-                let found = match given.parse::<usize>() {
-                    Ok(n) if n >= 1 && n <= existing.len() => existing[n - 1].id.clone(),
-                    _ => existing
-                        .iter()
-                        .find(|g| g.name.eq_ignore_ascii_case(given) || g.id == *given)
-                        .map(|g| g.id.clone())
-                        .ok_or_else(|| format!("no layout matching \"{given}\""))?,
-                };
-                update.group_id = found;
+                update.group_id = find_layout(&existing, given)?;
             }
             None => update.step = Some(if *prev { -1 } else { 1 }),
         },
+    }
+    if let Some(given) = named_layout(&cmd) {
+        // A window id goes as it is: it's what the app sends on every
+        // keystroke, and the daemon refuses one that isn't this worktree's.
+        update.group_id = if is_window_id(given) {
+            given.to_string()
+        } else {
+            find_layout(&fetch_layout(&mut link, worktree_id).await?, given)?
+        };
     }
 
     let request = if matches!(cmd, LayoutCmd::Show { .. }) {
@@ -2280,6 +2322,45 @@ async fn layout(runner: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
     let terminals = list_terminals(&mut link, Some(worktree_id)).await?;
     print_layout(&list, &terminals, json);
     Ok(())
+}
+
+/// The layout a verb's `--layout` names, as given.
+fn named_layout(cmd: &LayoutCmd) -> Option<&str> {
+    match cmd {
+        LayoutCmd::Split { layout, .. }
+        | LayoutCmd::Preset { layout, .. }
+        | LayoutCmd::Cycle { layout, .. }
+        | LayoutCmd::Focus { layout, .. }
+        | LayoutCmd::Zoom { layout, .. }
+        | LayoutCmd::Break { layout, .. }
+        | LayoutCmd::Rename { layout, .. }
+        | LayoutCmd::Viewport { layout, .. } => layout.as_deref(),
+        // A move, a swap and a resize name their panes, and a pane is in one
+        // layout. `select` names the layout it shows as its argument.
+        LayoutCmd::Show { .. }
+        | LayoutCmd::Move { .. }
+        | LayoutCmd::Swap { .. }
+        | LayoutCmd::Resize { .. }
+        | LayoutCmd::Select { .. } => None,
+    }
+}
+
+/// Whether `given` is a tmux window id, `@` and digits.
+fn is_window_id(given: &str) -> bool {
+    given.strip_prefix('@').is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// The window id of the layout `given` names among `existing`: its number
+/// counting from one, its name, or its window id.
+fn find_layout(existing: &[farcooler_protocol::v1::PaneGroup], given: &str) -> Result<String, String> {
+    match given.parse::<usize>() {
+        Ok(n) if n >= 1 && n <= existing.len() => Ok(existing[n - 1].id.clone()),
+        _ => existing
+            .iter()
+            .find(|g| g.name.eq_ignore_ascii_case(given) || g.id == *given)
+            .map(|g| g.id.clone())
+            .ok_or_else(|| format!("no layout matching \"{given}\"")),
+    }
 }
 
 /// A drop edge by name.
@@ -3636,6 +3717,52 @@ pub(crate) fn resolve<'a, T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every verb that acts on a layout takes `--layout`, and it comes back
+    /// as given: the app names the window it shows, so the main checkout's
+    /// row never acts on an orchestrator's window tmux calls active.
+    #[test]
+    fn every_verb_that_acts_on_a_layout_can_name_it() {
+        for line in [
+            "farcooler layout split main --layout @3",
+            "farcooler layout preset main tiled --layout @3",
+            "farcooler layout cycle main --layout @3",
+            "farcooler layout focus main --next --layout @3",
+            "farcooler layout focus main --pane 2 --layout @3",
+            "farcooler layout zoom main --layout @3",
+            "farcooler layout zoom main --off --layout @3",
+            "farcooler layout break main --layout @3",
+            "farcooler layout rename main shells --layout @3",
+            "farcooler layout viewport main 100 30 --layout @3",
+        ] {
+            let cli = Cli::try_parse_from(line.split_whitespace()).unwrap_or_else(|e| panic!("{line}: {e}"));
+            let Command::Layout(cmd) = cli.command else { panic!("{line}: not a layout verb") };
+            assert_eq!(named_layout(&cmd), Some("@3"), "{line}");
+        }
+        let cli = Cli::try_parse_from("farcooler layout zoom main".split_whitespace()).expect("parses");
+        let Command::Layout(cmd) = cli.command else { panic!("not a layout verb") };
+        assert_eq!(named_layout(&cmd), None, "naming none is still tmux's active layout");
+    }
+
+    #[test]
+    fn a_layout_is_named_by_number_name_or_window_id() {
+        let group = |id: &str, name: &str| farcooler_protocol::v1::PaneGroup {
+            id: id.into(),
+            name: name.into(),
+            ..Default::default()
+        };
+        let existing = [group("@4", "orchestrator"), group("@7", "shells")];
+        assert_eq!(find_layout(&existing, "2").as_deref(), Ok("@7"));
+        assert_eq!(find_layout(&existing, "Shells").as_deref(), Ok("@7"));
+        assert_eq!(find_layout(&existing, "@4").as_deref(), Ok("@4"));
+        assert!(find_layout(&existing, "3").is_err());
+        assert!(find_layout(&existing, "@9").is_err());
+
+        assert!(is_window_id("@0") && is_window_id("@12"));
+        for not in ["@", "@x", "3", "shells", "@1 ", "%3"] {
+            assert!(!is_window_id(not), "{not:?}");
+        }
+    }
 
     #[test]
     fn a_refusal_carries_its_stable_code_word_under_json() {
