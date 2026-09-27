@@ -55,7 +55,7 @@ class TaskBoardTest {
                           {"id": "a2", "text": "two", "met": false}],
            "constraints": [], "labels": ["ios"], "workspace_id": "w1"},
           {"id": "t2", "key": "-20", "title": "Phones", "status": "in_progress",
-           "status_since": 2000, "created_at": null, "updated_at": 0,
+           "status_since": 2000, "created_at": 0, "updated_at": 0,
            "acceptance": [], "labels": []},
           {"id": "t3", "key": "-9", "title": "From the future", "status": "parked"},
           {"id": "t4", "title": "No key, so not drawable", "status": "todo"}
@@ -89,9 +89,16 @@ class TaskBoardTest {
         assertNull(second.createdAt)
         assertNull(second.updatedAt)
         assertNull(second.timeNote(3000))
-        val bare = TaskBoard.decode("""{"tasks": [{"id": "b", "key": "-1", "title": "x", "status": "backlog"}]}""")
-        assertNull(bare.row("b")!!.createdAt)
-        assertNull(bare.row("b")!!.timeNote(3000))
+        val bare = TaskBoard.decode(
+            """{"tasks": [{"id": "b", "key": "-1", "title": "x", "status": "backlog"},
+                          {"id": "n", "key": "-2", "title": "y", "status": "backlog",
+                           "created_at": null, "updated_at": null}]}""",
+        )
+        for (id in listOf("b", "n")) {
+            assertNull(id, bare.row(id)!!.createdAt)
+            assertNull(id, bare.row(id)!!.updatedAt)
+            assertNull(id, bare.row(id)!!.timeNote(3000))
+        }
     }
 
     /** A status this build does not know is shown, not dropped; a row it cannot draw is skipped. */

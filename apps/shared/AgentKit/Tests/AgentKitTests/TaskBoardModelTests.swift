@@ -353,6 +353,7 @@ private let realBoardJSON = """
         """
     let row = try #require(try TaskBoardModel.decode(Data(zero.utf8)).rows.first)
     #expect(row.createdAt == nil)
+    #expect(row.updatedAt == nil)
     #expect(row.timeNote(at: Date()) == nil)
 }
 
