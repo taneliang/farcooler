@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -446,21 +448,27 @@ fun SettingsScreen(
             )
             // The runner you picked, and the way to pick another: off, this is
             // the only place that can.
-            for (runner in switchableRunners(runners, allRunners)) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .selectable(
-                            selected = runner.id == picked,
-                            role = Role.RadioButton,
-                            onClick = { model.hosts.select(runner) },
-                        )
-                        .testTag("runner-choice-${runner.id}"),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(selected = runner.id == picked, onClick = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(runner.displayLabel, style = MaterialTheme.typography.bodyMedium)
+            //
+            // One radio group, each row a 48dp target: `RadioButton(onClick =
+            // null)` hands its touch to the row and gives up its own minimum.
+            Column(Modifier.selectableGroup()) {
+                for (runner in switchableRunners(runners, allRunners)) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .selectable(
+                                selected = runner.id == picked,
+                                role = Role.RadioButton,
+                                onClick = { model.hosts.select(runner) },
+                            )
+                            .testTag("runner-choice-${runner.id}"),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = runner.id == picked, onClick = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(runner.displayLabel, style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
             }
             SettingRow("Reshape panes to this screen", reshape) {
