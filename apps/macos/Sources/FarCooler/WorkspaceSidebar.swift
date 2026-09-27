@@ -313,8 +313,7 @@ extension ContentView {
     /// worktree's layouts the bar offers, and the window's title.
     ///
     /// A worktree's own pane gets that worktree's own layouts — `ownLayouts`,
-    /// without the windows of orchestrators drawn in their own rows — and its
-    /// title. A pane in a layout that isn't one of those (a shell moved into
+    /// without the orchestrators' windows — and its title. A pane in a layout that isn't one of those (a shell moved into
     /// an orchestrator's window) gets that layout alone.
     ///
     /// An orchestrator's pane is in the checkout only because that is where
@@ -322,11 +321,10 @@ extension ContentView {
     /// checkout's other layouts are Main's shells and the other workspaces'
     /// orchestrators — and it is titled with its workspace, as the board is.
     static func detailFrame(
-        _ worktree: Worktree, layouts: [PaneGroup]?, holding group: PaneGroup, seat: SidebarEntry?,
-        seated: Set<String> = []
+        _ worktree: Worktree, layouts: [PaneGroup]?, holding group: PaneGroup, seat: SidebarEntry?
     ) -> (groups: [PaneGroup], title: String, subtitle: String) {
         guard let seat, let workspace = seat.workspace else {
-            let own = ownLayouts(layouts ?? [group], without: seated)
+            let own = ownLayouts(layouts ?? [group], of: worktree)
             let groups = own.contains { $0.id == group.id } ? own : [group]
             return (groups, worktree.windowTitle, worktree.windowSubtitle)
         }
@@ -336,14 +334,20 @@ extension ContentView {
         return ([group], workspace.name, subtitle)
     }
 
-    /// The terminals `rows` draw in orchestrator rows: what `ownLayouts`
-    /// leaves out of the checkout they run in.
-    static func seatedOrchestrators(in rows: [SidebarEntry]) -> Set<String> {
-        Set(rows.compactMap { $0.kind == .orchestrator ? $0.orchestrator?.terminal.id : nil })
+    /// The orchestrators the runner lists in `worktree`, by their role:
+    /// what `ownLayouts` leaves out of the checkout they run in.
+    ///
+    /// By role rather than by the orchestrator rows the sidebar draws. Those
+    /// decide which orchestrators get a row of their own, and there are none
+    /// when the fleet read carries no workspaces for the runner — an older
+    /// CLI, or before the first read — while the orchestrators' windows are
+    /// still in the checkout's session. `worktree` is the runner's, not a
+    /// row's: a row's has the orchestrators drawn elsewhere taken out.
+    static func orchestrators(in worktree: Worktree) -> Set<String> {
+        Set(worktree.terminals.filter(\.isOrchestrator).map(\.id))
     }
 
-    /// A worktree's layouts without the windows of orchestrators drawn in
-    /// their own rows.
+    /// `worktree`'s layouts without its orchestrators' windows.
     ///
     /// The runner opens every workspace's orchestrator as a tmux window in
     /// the main checkout's session, so the checkout's layouts include
@@ -351,15 +355,20 @@ extension ContentView {
     /// the checkout's bar, or picked as the checkout's layout because tmux
     /// calls it the active window since it was last focused, it would put
     /// Billing's orchestrator under Main's checkout.
-    static func ownLayouts(_ groups: [PaneGroup], without seated: Set<String>) -> [PaneGroup] {
-        guard !seated.isEmpty else { return groups }
-        return groups.filter { !$0.terminals.contains(where: seated.contains) }
+    ///
+    /// A stopped orchestrator the runner no longer seats is drawn among the
+    /// checkout's terminals, and its window is left out all the same:
+    /// selecting it shows that window alone. See `detailFrame`.
+    static func ownLayouts(_ groups: [PaneGroup], of worktree: Worktree) -> [PaneGroup] {
+        let orchestrators = orchestrators(in: worktree)
+        guard !orchestrators.isEmpty else { return groups }
+        return groups.filter { !$0.terminals.contains(where: orchestrators.contains) }
     }
 
     /// The layout selecting a worktree's own row shows: the active one of its
     /// own layouts, else the first of them. Nil when it has none.
-    static func shownLayout(_ groups: [PaneGroup]?, without seated: Set<String>) -> PaneGroup? {
-        let own = ownLayouts(groups ?? [], without: seated)
+    static func shownLayout(_ groups: [PaneGroup]?, of worktree: Worktree) -> PaneGroup? {
+        let own = ownLayouts(groups ?? [], of: worktree)
         return own.first { $0.isActive } ?? own.first
     }
 

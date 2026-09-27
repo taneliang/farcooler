@@ -323,11 +323,18 @@ struct ContentView: View {
             // Bring that layout forward on the runner too, so the ⌃B commands
             // it answers itself — zoom, a preset, ⌃B o — act on the panes on
             // screen rather than on Billing's orchestrator.
+            //
+            // Only then: when tmux's active window is an orchestrator's, the
+            // one case where the row's choice differs from the runner's. Any
+            // other row shows the window tmux already calls active, and
+            // selecting it moves nothing on the runner.
             if case .worktree(let host, let wsID) = new,
                 let worktree = worktree(host: host, id: wsID),
                 let c = store.client(for: worktree),
-                let shown = Self.shownLayout(c.layouts[wsID], without: seatedOrchestrators),
-                !shown.isActive
+                let active = c.activeGroup(wsID),
+                active.terminals.contains(where: Self.orchestrators(in: worktree).contains),
+                let shown = Self.shownLayout(c.layouts[wsID], of: worktree),
+                shown.id != active.id
             {
                 Task {
                     await act(on: worktree) { client in
@@ -1508,11 +1515,10 @@ struct ContentView: View {
     /// which is a compile error with no line number worth reading.
     private func worktreeRow(_ ws: Worktree, usable: Bool) -> some View {
         let client = store.client(for: ws)
-        // `ws` is the row's worktree, without the orchestrators drawn in rows
-        // of their own: whatever else the runner lists in it is one of those.
-        let listed = worktree(host: ws.host ?? "", id: ws.id)?.terminals.map(\.id) ?? []
-        let seated = Set(listed).subtracting(ws.terminals.map(\.id))
-        let tiled = Set(Self.shownLayout(client?.layouts[ws.id], without: seated)?.terminals ?? [])
+        // The runner's worktree, not the row's `ws`: the row's has the
+        // orchestrators drawn in rows of their own taken out.
+        let listed = worktree(host: ws.host ?? "", id: ws.id) ?? ws
+        let tiled = Set(Self.shownLayout(client?.layouts[ws.id], of: listed)?.terminals ?? [])
         return WorktreeSection(
             worktree: ws,
             isExpanded: expanded.contains(ws.id),
@@ -1760,8 +1766,7 @@ struct ContentView: View {
                 let rows = Self.sidebarRows(fleet: store.fleet)
                 tiled(
                     ws, client: c, group: group,
-                    seat: Self.orchestratorRow(for: selection, in: rows),
-                    seated: Self.seatedOrchestrators(in: rows))
+                    seat: Self.orchestratorRow(for: selection, in: rows))
             } else if let ws = worktree(host: host, id: wsID),
                 let term = ws.terminals.first(where: { $0.id == termID })
             {
@@ -1804,10 +1809,10 @@ struct ContentView: View {
             // `ownLayouts`.
             if let ws = worktree(host: host, id: wsID),
                 let c = store.client(for: ws),
-                let group = Self.shownLayout(c.layouts[wsID], without: seatedOrchestrators),
+                let group = Self.shownLayout(c.layouts[wsID], of: ws),
                 !group.terminals.isEmpty
             {
-                tiled(ws, client: c, group: group, seated: seatedOrchestrators)
+                tiled(ws, client: c, group: group)
             } else if let ws = worktree(host: host, id: wsID) {
                 WorktreeDetail(
                     worktree: ws,
@@ -1863,11 +1868,9 @@ struct ContentView: View {
     /// fixed in one copy and not the other, so dropping a pane behaved differently
     /// depending on which sidebar row you had clicked last.
     private func tiled(
-        _ ws: Worktree, client: DaemonClient, group: PaneGroup, seat: SidebarEntry? = nil,
-        seated: Set<String>
+        _ ws: Worktree, client: DaemonClient, group: PaneGroup, seat: SidebarEntry? = nil
     ) -> some View {
-        let frame = Self.detailFrame(
-            ws, layouts: client.layouts[ws.id], holding: group, seat: seat, seated: seated)
+        let frame = Self.detailFrame(ws, layouts: client.layouts[ws.id], holding: group, seat: seat)
         return TileView(
             groups: frame.groups,
             showing: group.id,
@@ -2082,12 +2085,6 @@ struct ContentView: View {
         return (worktree, terminal)
     }
 
-    /// The terminals the sidebar draws in orchestrator rows, which the main
-    /// checkout they run in doesn't offer as its own. See `ownLayouts`.
-    private var seatedOrchestrators: Set<String> {
-        Self.seatedOrchestrators(in: Self.sidebarRows(fleet: store.fleet))
-    }
-
     /// The layout `detail` draws for `ws` under the current selection, and
     /// the layouts its bar offers beside it. Nil when it draws none.
     ///
@@ -2097,19 +2094,17 @@ struct ContentView: View {
     /// can be an orchestrator's.
     private func onScreen(in ws: Worktree) -> (group: PaneGroup, groups: [PaneGroup])? {
         guard let c = store.client(for: ws) else { return nil }
-        let rows = Self.sidebarRows(fleet: store.fleet)
-        let seated = Self.seatedOrchestrators(in: rows)
         if case .terminal(let host, let id, let terminal) = selection,
             host == (ws.host ?? ""), id == ws.id,
             let group = c.group(holding: terminal, in: id)
         {
             let frame = Self.detailFrame(
                 ws, layouts: c.layouts[id], holding: group,
-                seat: Self.orchestratorRow(for: selection, in: rows), seated: seated)
+                seat: Self.orchestratorRow(for: selection, in: Self.sidebarRows(fleet: store.fleet)))
             return (group, frame.groups)
         }
-        guard let group = Self.shownLayout(c.layouts[ws.id], without: seated) else { return nil }
-        return (group, Self.ownLayouts(c.layouts[ws.id] ?? [], without: seated))
+        guard let group = Self.shownLayout(c.layouts[ws.id], of: ws) else { return nil }
+        return (group, Self.ownLayouts(c.layouts[ws.id] ?? [], of: ws))
     }
 
     // MARK: - Attention
