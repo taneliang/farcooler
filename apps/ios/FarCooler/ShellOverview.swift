@@ -453,6 +453,10 @@ private struct ShellElsewhereCard: View {
         // card different from the one above it and a label reading only the
         // branch would be two cards with one name.
         .accessibilityLabel("\(worktree.name), on \(worktree.server ?? "another runner")")
+        // What its marks say, which VoiceOver had no way to hear: each tab's
+        // mark as `RunnerDirectory.decayed` left it, so a runner nobody is
+        // talking to says "Can’t say" about now rather than what it last said.
+        .accessibilityValue(worktree.tabs.map { "\($0.title): \($0.mark.phrase)" }.joined(separator: ", "))
     }
 }
 
@@ -924,6 +928,11 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Done", action: onDismiss)
                             .accessibilityIdentifier("shell-overview-done")
+                            // Nothing to close onto: a runner switched to that
+                            // has not answered yet, or answered with no
+                            // worktrees. Closing then showed an empty shell
+                            // with the runner's status left behind in here.
+                            .disabled(fleet.isEmpty)
                             // Opacity rather than an `if`, because a toolbar
                             // item that comes and goes is a toolbar that
                             // re-lays-out, and this one is only ever invisible

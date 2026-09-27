@@ -172,6 +172,11 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// release lands.
     private let onRest: ((ShellPosition, ShellArrival) -> Void)?
 
+    /// Called when the grid opens and when it closes: true while it is up.
+    /// A pane under the grid is not being read, so the screen that owns the
+    /// claim of attention stops claiming one while this is true.
+    private let onOverview: ((Bool) -> Void)?
+
     /// Where the shell is. The one thing a commit re-seats.
     ///
     /// **A pair of INDICES, which is not an identity, and the fleet it indexes
@@ -604,6 +609,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         openingOnOverview: Bool = false,
         request: Binding<String?> = .constant(nil),
         onRest: ((ShellPosition, ShellArrival) -> Void)? = nil,
+        onOverview: ((Bool) -> Void)? = nil,
         runnerSections: ShellOverviewRunners = ShellOverviewRunners(),
         @ViewBuilder runners: @escaping () -> Trouble = { EmptyView() },
         onCross: @escaping (ShellServerGroup, ShellWorktree) -> Void = { _, _ in },
@@ -624,6 +630,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         self.runners = runners
         _request = request
         self.onRest = onRest
+        self.onOverview = onOverview
         _position = State(initialValue: initial)
         _overview = State(initialValue: openingOnOverview)
         // Opening ON the overview is the same state a landing leaves behind:
@@ -1008,6 +1015,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
             honorRequest()
         }
         .onChange(of: position) { _, at in settle(at, in: fleet, as: .moved) }
+        .onChange(of: overview, initial: true) { _, up in onOverview?(up) }
         // THE FLEET MOVED UNDER THE SHELL.
         //
         // Every poll, from every runner, rebuilds `fleet` whole — so this fires

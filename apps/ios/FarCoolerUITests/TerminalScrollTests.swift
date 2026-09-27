@@ -1446,10 +1446,11 @@ final class TerminalScrollTests: XCTestCase {
         }
         let json = "[\(entry(a, "Runner A")),\(entry(b, "Runner B"))]"
         let hex = Data(json.utf8).map { String(format: "%02x", $0) }.joined()
-        // `<slow-a>` in `extra` stands for Runner A's id, which is only made
-        // here. See `testACrossingIsDroppedWhenAnotherRunnerIsPicked`.
+        // `<slow-a>` and `<slow-b>` in `extra` stand for the runners' ids,
+        // which are only made here. See
+        // `testACrossingIsDroppedWhenAnotherRunnerIsPicked`.
         app.launchArguments += ["-hosts", "<\(hex)>", "-hosts.last", a]
-            + extra.map { $0 == "<slow-a>" ? a : $0 }
+            + extra.map { $0 == "<slow-a>" ? a : $0 == "<slow-b>" ? b : $0 }
         runnerIDs = (a, b)
         app.launch()
         return app
@@ -1763,6 +1764,24 @@ final class TerminalScrollTests: XCTestCase {
                 + "(\(mine.exists ? mine.label : "no heading")): one runner at a time means A "
                 + "is retired, and its cards must be the cached \"can't say\" ones")
 
+        // And A's cards say it too, not only its heading (ov-27 M4). Every
+        // claim about now on a runner this phone is not talking to decays to
+        // "Can’t say" (`RunnerDirectory.decayed`); only latched facts — needs
+        // you, a finished turn, an unread diff — hold. Read off each cached
+        // card's spoken marks.
+        let cached = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH 'shell-elsewhere-'"))
+        XCTAssertGreaterThan(cached.count, 0, "Runner A left no cached cards after the switch")
+        let spoken = cached.allElementsBoundByIndex.map { $0.value as? String ?? "" }
+        for marks in spoken {
+            XCTAssertFalse(
+                marks.contains("producing") || marks.contains("Nothing wanted"),
+                "a cached card claims to know what A is doing now: \(marks)")
+        }
+        XCTAssertTrue(
+            spoken.contains { $0.contains("Can’t say") },
+            "no cached card says it can't say: \(spoken)")
+
         // No keyboard over the grid. B's panes mounted under it when B's
         // fleet landed, and a terminal used to take the keyboard on mount
         // whatever was over it, covering half the cards. The key row is the
@@ -1975,6 +1994,90 @@ final class TerminalScrollTests: XCTestCase {
             XCTWaiter.wait(for: [landed], timeout: 8), .timedOut,
             "the grid closed when A answered (the probe reads \(probe.value ?? "")): the "
                 + "crossing to \(tapped) survived B being picked in between")
+    }
+
+    /// **Nothing is being read while the grid is up** (ov-27).
+    ///
+    /// A pane under the open grid was claimed as the one being read: its
+    /// pushes suppressed, and a finished turn in it marked seen on the
+    /// runner, though nobody could see it. The case reported was B's first
+    /// pane after a runner switch, whose fleet landing re-seats the shell
+    /// under the grid; any pane the grid is opened over is the same case, and
+    /// this fixture can reach that one (B's first worktree rests on its Diff
+    /// tab, which has no terminal to claim). The claim comes back when the
+    /// grid closes onto the pane.
+    func testNoPaneIsReadWhileTheGridIsUp() throws {
+        let app = launch()
+        _ = try openATerminalInTheShell(app)
+        let watch = app.descendants(matching: .any).matching(identifier: "shell-watch").firstMatch
+        XCTAssertTrue(watch.waitForExistence(timeout: 10), "the screen has no watch probe")
+        let claimed = watch.value as? String ?? ""
+        XCTAssertNotEqual(claimed, "watch=", "the terminal at rest is not claimed, so this proves nothing")
+
+        try openOverview(app)
+        let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
+        XCTAssertEqual(Self.field(probe.value as? String ?? "", "overview"), "1")
+        let released = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in watch.value as? String == "watch=" }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [released], timeout: 5), .completed,
+            "the pane under the grid is still claimed as read: \(watch.value ?? "")")
+
+        app.buttons["shell-overview-done"].tap()
+        let back = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in watch.value as? String == claimed }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [back], timeout: 10), .completed,
+            "closing the grid onto the pane did not claim it again: \(watch.value ?? "")")
+    }
+
+    /// **The grid stays up while the runner switched to has nothing to land
+    /// on** (ov-27 M3).
+    ///
+    /// Done, tapped while B was still connecting, closed the grid onto an
+    /// empty shell: the theme's ground and a bar naming nothing, with B's
+    /// status row left behind in the overview. Runner B is dialed six seconds
+    /// late (`-debugSlowRunner`), so the switch leaves a window in which B
+    /// has no fleet.
+    func testTheGridStaysUpWhileTheNewRunnerHasNothingToLandOn() throws {
+        let app = launchTwoRunners(
+            ["-\(Self.everyRunnerAtOnce)", "<false/>", "-debugSlowRunner", "<slow-b>"])
+        _ = try openATerminalInTheShell(app)
+        let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
+        XCTAssertTrue(probe.waitForExistence(timeout: 30), "the shell never stood up")
+
+        try openOverview(app)
+        try switchToRunner(app, id: runnerIDs.b)
+        // A is retired and B not yet dialed: nothing to land on. Waited for,
+        // so the check below is made in the gap and not before the switch.
+        let empty = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                Self.field(probe.value as? String ?? "", "worktrees") == "0"
+            }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [empty], timeout: 5), .completed,
+            "the switch never emptied the fleet (\(probe.value ?? "")), so there is no gap to test")
+
+        let done = app.buttons["shell-overview-done"]
+        XCTAssertTrue(done.exists, "the overview has no Done")
+        XCTAssertFalse(done.isEnabled, "Done is offered with nothing to land on")
+        done.tap()
+        XCTAssertEqual(
+            Self.field(probe.value as? String ?? "", "overview"), "1",
+            "the grid closed onto an empty shell: \(probe.value ?? "")")
+
+        // And the other way out by touch, the pull-down from the top of the
+        // grid (`ShellGestureTests.testAPullDownFromTheTopOfTheGridStillClosesIt`).
+        let high = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.30))
+        let low = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.70))
+        high.press(
+            forDuration: 0.05, thenDragTo: low, withVelocity: .slow, thenHoldForDuration: 0.3)
+        XCTAssertEqual(
+            Self.field(probe.value as? String ?? "", "worktrees"), "0",
+            "B answered before the pull, so it tested nothing: \(probe.value ?? "")")
+        XCTAssertEqual(
+            Self.field(probe.value as? String ?? "", "overview"), "1",
+            "the pull-down closed the grid onto an empty shell: \(probe.value ?? "")")
     }
 
     /// **With every runner connected, a move onto another runner's worktree

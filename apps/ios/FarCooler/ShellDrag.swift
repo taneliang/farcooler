@@ -1106,7 +1106,8 @@ extension ShellRootView {
         pullingOut = false
         let thrown = pullReleaseVelocity(velocity)
         pullMoved = nil
-        guard ShellGesture.pullCommits(down: down, velocity: thrown) else {
+        // Nothing to close onto: see `closeOverview`.
+        guard ShellGesture.pullCommits(down: down, velocity: thrown), !fleet.isEmpty else {
             return abandonPullOut()
         }
         withAnimation(Self.settleOpen, completionCriteria: .logicallyComplete) {
@@ -1173,7 +1174,14 @@ extension ShellRootView {
         }
     }
 
+    /// Close the grid onto the pane at rest.
+    ///
+    /// Not onto nothing. With an empty fleet — a runner switched to that has
+    /// not answered yet, or answered with no worktrees — this showed the
+    /// theme's ground and a bar naming nothing, and the runner's status stayed
+    /// in the grid it had just closed. Done is disabled then as well.
     func closeOverview() {
+        guard !fleet.isEmpty else { return }
         flyOut {
             overview = false
             reveal = 0

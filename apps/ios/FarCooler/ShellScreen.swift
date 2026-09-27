@@ -1060,6 +1060,7 @@ struct ShellScreen: View {
             markVisible()
         }
         .onDisappear { Notifier.shared.visibleTerminal = nil }
+        .overlay(alignment: .topLeading) { watchProbe }
         // The two ways of starting work, moved here from the worktree list's
         // toolbar with their flows untouched: both were sheets there and both
         // are sheets here.
@@ -1678,6 +1679,12 @@ struct ShellScreen: View {
                 markVisible(arrived)
                 follow(arrived, as: linked ? .linked : arrival)
             },
+            // The grid opening and closing: nothing is read while it is up.
+            // See `markVisible`.
+            onOverview: { up in
+                overviewUp = up
+                markVisible()
+            },
             // A section per runner, each with its own menu — which is where the
             // runner menu that stood in the toolbar went. See
             // `ShellOverviewRunners`.
@@ -2095,6 +2102,26 @@ struct ShellScreen: View {
 
     // MARK: - The one writer of `visibleTerminal`
 
+    /// What `markVisible` last told the runner is being read, for the probe.
+    @State private var watching: String?
+
+    /// Whether the grid is up, as `ShellRootView` reports it. Nothing is
+    /// being read while it is: see `markVisible`.
+    @State private var overviewUp = false
+
+    /// The one way a UI test can ask which pane this screen says is being
+    /// read: `watch=<terminal id>`, or `watch=` for none. A one-point element
+    /// for the reason `ShellRootView.probe` is one. `Notifier` is not
+    /// observable, so the probe reads this screen's own copy.
+    private var watchProbe: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.001))
+            .frame(width: 1, height: 1)
+            .accessibilityElement()
+            .accessibilityIdentifier("shell-watch")
+            .accessibilityValue("watch=\(watching ?? "")")
+    }
+
     /// Which pane the runner should believe is being read.
     ///
     /// Nil on the Changes tab, and that is the honest answer rather than a
@@ -2102,14 +2129,24 @@ struct ShellScreen: View {
     /// suppressed and no agent's finished turn should be marked seen.
     /// `Connection.markVisibleSeen` reads exactly this and reports an empty
     /// watch list for it.
+    ///
+    /// And nil while the grid is up. The pane at rest is under it, and nobody
+    /// is reading it: claimed, its pushes were suppressed and a finished turn
+    /// in it marked seen — after a runner switch, on a pane of the new
+    /// runner's the person had never seen (ov-27). The grid closing claims
+    /// the pane it closes onto.
     private func markVisible(_ ref: ShellPaneRef? = nil) {
-        let at = ref ?? restingRef
+        let resting = ref ?? restingRef
+        let at = overviewUp ? nil : resting
         Notifier.shared.visibleTerminal = at?.pane.terminal?.id
+        watching = at?.pane.terminal?.id
         // Claimed on the runner the pane is on, and only there. Every other
         // runner clears its own watch on its own next poll — `Connection.refresh`
         // has always ended with this call — so fanning out here would be N round
-        // trips to say the same thing the polls are already saying.
-        Task { await connection(at)?.markVisibleSeen() }
+        // trips to say the same thing the polls are already saying. The resting
+        // pane's runner even with the grid up, so its claim is given back now
+        // rather than on that runner's next poll.
+        Task { await connection(resting)?.markVisibleSeen() }
     }
 
     // MARK: - The Changes tab's header
