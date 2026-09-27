@@ -180,7 +180,7 @@ KNOWN = {"stripe over paddle": r"paddle",
 # gives fc-3 one constraint already, which `task set --constraint` would drop
 # unless the split read it first and wrote it back.
 IN_FLIGHT = "fc-3"
-REVIEW = KNOWN["the owner reviews billing"] + r"|owner\b.*\breview|review.*\bowner"
+REVIEW = KNOWN["the owner reviews billing"] + r"|owner\b.*\b(?:review|seen|looked|approved)|review.*\bowner"
 KEPT = r"payload"
 # Main's id, as the world's pane.env exports it.
 MAIN_WS = "00000000-0000-0000-0000-00000000a001"
