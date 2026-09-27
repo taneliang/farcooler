@@ -213,6 +213,26 @@ struct FleetPublicationTests {
         #expect(publication.merged(at: now).complete == false)
     }
 
+    /// **A runner that stopped answering is not heard from** (ov-22 M2). Its
+    /// rows stay, marked lost, and it may have started agents since that
+    /// nobody has been told about, so the merge can't say it has them all.
+    /// It counted toward `complete` like an answering runner, and the widget
+    /// dropped its hedge, the watch its partial footer.
+    ///
+    /// Mutation: `complete` ignoring `lost`. Red.
+    @Test func aLostRunnerLeavesTheFleetIncomplete() {
+        var publication = FleetPublication()
+        publication.keeping(runners: ["a", "b"])
+        publication.record(runner: "a", snapshot: snapshot([agent("t1", machine: "l")]))
+        publication.record(runner: "b", snapshot: snapshot([agent("t2", machine: "g")]))
+        publication.keeping(runners: ["a", "b"], answering: ["a"])
+        #expect(publication.merged(at: now).complete == false)
+
+        // Heard from again, it vouches for its agents again.
+        publication.record(runner: "b", snapshot: snapshot([agent("t2", machine: "g")]))
+        #expect(publication.merged(at: now).complete)
+    }
+
     @Test func everyLiveRunnerHeardFromIsComplete() {
         var publication = FleetPublication()
         publication.keeping(runners: ["a", "b"])
@@ -473,4 +493,25 @@ struct FleetTraceSumTests {
         #expect(fleet?.code(12) == 7173, "the fast runner's anchor set the axis")
         #expect(kept.fleetTraceAnchor == nil)
     }
+}
+
+/// **The writer acts on a membership only when it moved** (ov-22 M8).
+/// `FleetStore.publish` runs on every change any connection publishes, several
+/// times a second while an agent produces, and each write reloads every widget
+/// timeline and crosses to the watch: unguarded, it wedged the main thread.
+/// The guard lived in the app, where nothing could test it.
+///
+/// Mutation: `moved` always true. Red.
+@Test func theWriterActsOnAMembershipOnlyWhenItMoves() {
+    var kept = KeptMembership()
+    let first = kept.moved(runners: ["a"], answering: ["a"])
+    #expect(first, "the first is always news")
+    let same = kept.moved(runners: ["a"], answering: ["a"])
+    #expect(!same, "the same again is not")
+    let dropped = kept.moved(runners: ["a"], answering: [])
+    #expect(dropped, "a link going is")
+    let still = kept.moved(runners: ["a"], answering: [])
+    #expect(!still)
+    let added = kept.moved(runners: ["a", "b"], answering: [])
+    #expect(added, "a runner added is")
 }

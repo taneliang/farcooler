@@ -36,7 +36,8 @@ import Foundation
 ///   going quiet does not remove its rows; that is what keeps a mental map of
 ///   the fleet stable while a laptop sleeps, and it is what `confidence(in:at:)`
 ///   already ages honestly using each agent's own `observedAt`.
-/// - **`complete`** is true only when EVERY live runner has been heard from. It
+/// - **`complete`** is true only when EVERY live runner has been heard from,
+///   and none of them has stopped answering since. It
 ///   means "these are all the agents there are", and a fleet where one of three
 ///   runners has never answered is a fleet with agents missing from it. The
 ///   surfaces hedge on it — "from notifications" on the widget, a partial footer
@@ -163,11 +164,13 @@ public struct FleetPublication {
 
         // Every live runner heard from, and not merely "somebody was". See the
         // header: `complete` asserts that these are all the agents there are.
+        // And a runner that stopped answering has not been heard from: its
+        // rows are the last ones read, and it may have started agents since.
         let expected = live?.count ?? contributions.count
         let complete =
             contributions.count >= expected
             && !contributions.isEmpty
-            && contributions.allSatisfy(\.snapshot.complete)
+            && contributions.allSatisfy { $0.snapshot.complete && !$0.lost }
 
         let counted = contributions.compactMap(\.snapshot.reviewsWaiting)
 
@@ -200,5 +203,33 @@ public struct FleetPublication {
             reviewsWaiting: counted.isEmpty ? nil : counted.reduce(0, +),
             fleetTrace: fleet?.trace.encoded,
             fleetTraceAnchor: fleet?.anchor)
+    }
+}
+
+/// The membership the snapshot writer last acted on, and whether a new one
+/// moved from it.
+///
+/// **The guard is load-bearing rather than thrifty.** `FleetStore.publish`
+/// runs on every change any connection publishes — several times a second
+/// while an agent is producing — and a write ends in
+/// `WidgetCenter.reloadAllTimelines()` and a round trip to the watch. Called
+/// unguarded it wedged the main thread badly enough to time a UI test out.
+/// Adding or removing a runner, or a runner's link going or coming back, is
+/// not a per-poll event and must not be priced like one. Here rather than in
+/// `FleetSnapshotWriter`, where it was, because the iOS target has no tests.
+public struct KeptMembership: Sendable {
+    /// Nil before anyone has said, which is what makes the first call news.
+    private var runners: Set<String>?
+    private var answering: Set<String>?
+
+    public init() {}
+
+    /// Whether this membership differs from the last one acted on. Records it
+    /// when it does.
+    public mutating func moved(runners: Set<String>, answering: Set<String>) -> Bool {
+        guard runners != self.runners || answering != self.answering else { return false }
+        self.runners = runners
+        self.answering = answering
+        return true
     }
 }

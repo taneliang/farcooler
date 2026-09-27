@@ -43,6 +43,17 @@ struct ShellRunnerLabel: Identifiable, Hashable, Sendable {
     /// runner that has said nothing gets no drag.
     var keepsOrder: Bool = false
 
+    /// Whether a runner is answering: connected, and its fleet read on this
+    /// link. The one rule for every claim about now — a card's marks, a
+    /// heading, "Working…" — and Android's `RunnerLink.given`.
+    ///
+    /// Not `.connected` alone. `start` and `reconnect` set it and then await
+    /// the fleet, so for a round trip after every reconnect the fleet on
+    /// screen is the last link's, and agents in it may have exited since.
+    static func answering(connected: Bool, fleetReadOnThisLink: Bool) -> Bool {
+        connected && fleetReadOnThisLink
+    }
+
     /// Whether a runner running this build keeps an order: whether it
     /// advertises `worktree_order` (`farcooler_protocol::capability`).
     ///

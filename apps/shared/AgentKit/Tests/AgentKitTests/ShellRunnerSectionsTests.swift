@@ -365,3 +365,15 @@ struct ShellSelectionTests {
         #expect(!follows(.moved, every: false))
     }
 }
+
+/// **A connected runner answers only once this link has read its fleet**
+/// (ov-22 M3). `start` and `reconnect` set `.connected` and then await the
+/// fleet, so for a round trip every card, tab and "Working…" was the last
+/// link's fleet said as live. Android's `RunnerLink.given`, and the same rule.
+///
+/// Mutation: `answering` reading `connected` alone. Red.
+@Test func aConnectedRunnerAnswersOnlyOnceItsLinkHasReadTheFleet() {
+    #expect(!ShellRunnerLabel.answering(connected: true, fleetReadOnThisLink: false))
+    #expect(ShellRunnerLabel.answering(connected: true, fleetReadOnThisLink: true))
+    #expect(!ShellRunnerLabel.answering(connected: false, fleetReadOnThisLink: true))
+}

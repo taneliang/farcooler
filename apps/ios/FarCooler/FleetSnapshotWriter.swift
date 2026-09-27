@@ -46,19 +46,9 @@ enum FleetSnapshotWriter {
     @MainActor
     static func keep(runners: Set<String>, answering: Set<String>) {
         // **Only when the membership actually moved**, and that guard is
-        // load-bearing rather than thrifty. `FleetStore.publish` runs on every
-        // change any connection publishes — several times a second while an
-        // agent is producing — and the write below ends in
-        // `WidgetCenter.reloadAllTimelines()` and a Bluetooth round trip to the
-        // watch. Called unguarded it wedged the main thread badly enough to
-        // time a UI test out. Adding or removing a runner is not a per-poll
-        // event and must not be priced like one.
-        //
-        // A runner's link going or coming back is not a per-poll event either,
-        // so it is priced the same way.
-        guard runners != kept || answering != keptAnswering else { return }
-        kept = runners
-        keptAnswering = answering
+        // load-bearing rather than thrifty; see `KeptMembership`, which is
+        // where it is tested.
+        guard kept.moved(runners: runners, answering: answering) else { return }
         // Written here rather than left to the next poll. A retirement is
         // followed by nothing at all on the retired runner's part, and a store
         // that has just dropped its last connection has no next poll from
@@ -83,14 +73,9 @@ enum FleetSnapshotWriter {
         publish(at: Date())
     }
 
-    /// The membership `keep(runners:)` last acted on. Nil before anyone has
-    /// said, which is what makes the first call always a write.
+    /// The membership `keep(runners:answering:)` last acted on.
     @MainActor
-    private static var kept: Set<String>?
-
-    /// The runners `keep(runners:answering:)` last knew to be answering.
-    @MainActor
-    private static var keptAnswering: Set<String>?
+    private static var kept = KeptMembership()
 
     /// `@MainActor` because `WatchLinkHost` is, and because the one caller —
     /// `Connection.refresh` — already is. Nothing here is slow enough to be

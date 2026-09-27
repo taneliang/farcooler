@@ -58,6 +58,21 @@ final class Connection: ObservableObject {
     /// un-know what the runner last said, and the screens that render this hold
     /// their contents through a reconnect rather than emptying. See `refresh`.
     @Published private(set) var hasFleet = false
+
+    /// Whether `fleet` was read on the link that is up now. Cleared by every
+    /// new link (`forgetDaemonBuild`), set by the fleet read that follows.
+    /// `hasFleet` says a runner has ever answered; this says it has answered
+    /// since the link came back. See `isAnswering`.
+    @Published private(set) var fleetOnThisLink = false
+
+    /// Whether this runner is answering: connected, and its fleet read on
+    /// this link. Every claim about now — a card's marks, a heading, a
+    /// "Working…" — asks this, not `phase`: for a round trip after a
+    /// reconnect the fleet is the last link's. See
+    /// `ShellRunnerLabel.answering`.
+    var isAnswering: Bool {
+        ShellRunnerLabel.answering(connected: phase == .connected, fleetReadOnThisLink: fleetOnThisLink)
+    }
     @Published private(set) var repositories: [Repository] = []
 
     /// What each worktree has changed, by worktree id, or empty until the
@@ -825,6 +840,7 @@ final class Connection: ObservableObject {
     /// capability gate answers as for a runner nobody has asked, which is the
     /// refusing answer, for one round trip.
     private func forgetDaemonBuild() {
+        fleetOnThisLink = false
         daemon = nil
         daemonLink += 1
         boardSweep.linkCameUp()
@@ -917,6 +933,7 @@ final class Connection: ObservableObject {
             // and THEN await this call, so there is a whole round trip during
             // which the app is connected and knows nothing.
             hasFleet = true
+            fleetOnThisLink = true
 
             // What this daemon can do, asked once per connection, on its first
             // fleet. The overview reads it to decide whether a runner's cards
@@ -2094,6 +2111,7 @@ final class Connection: ObservableObject {
     func standIn(on fleet: Fleet) {
         self.fleet = fleet
         hasFleet = true
+        fleetOnThisLink = true
         phase = .connected
     }
     #endif

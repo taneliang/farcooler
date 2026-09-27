@@ -186,7 +186,7 @@ struct AgentView: View {
     /// one read before the link went, and a "Working…" swept under the
     /// transcript from it would be the one thing on screen claiming to know.
     private var isWorking: Bool {
-        connection.phase == .connected && paneTerminal?.agent == .working
+        connection.isAnswering && paneTerminal?.agent == .working
     }
 
     #if DEBUG

@@ -369,9 +369,9 @@ struct ShellFleetMap {
                 tabs: tabs)
                 // "Can't say" for every claim about now while the runner isn't
                 // answering: its fleet is the one read before the link went,
-                // kept so the grid doesn't move. `.connected` and nothing
-                // weaker, the rule the board's pills and the Mac's count use.
-                .said(answering: connection.phase == .connected),
+                // kept so the grid doesn't move. Connected, and read on this
+                // link: see `Connection.isAnswering`.
+                .said(answering: connection.isAnswering),
             refs
         )
     }
@@ -1428,7 +1428,7 @@ struct ShellScreen: View {
         fleet.runners.map { runner in
             ShellRunnerLabel(
                 id: runner.host.id.uuidString, name: runner.host.label,
-                isAnswering: runner.connection.phase == .connected,
+                isAnswering: runner.connection.isAnswering,
                 detail: Self.linkWord(runner.connection.phase),
                 // Asked of the runner as a whole — see the rule's own note.
                 keepsOrder: ShellRunnerLabel.keepsOrder(daemon: runner.connection.daemon))
