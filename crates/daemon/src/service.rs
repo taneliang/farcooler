@@ -1587,7 +1587,19 @@ fn terminal_mode_command(
         }
     } else if preset.starts_with("codex") {
         if resumable {
-            format!("{} -ilc '{} resume {session_id} {CODEX_NO_UPDATE_CHECK}'", shell(), agent_program("codex"))
+            // An orchestrator's `--cd` too, as on a fresh launch: `codex
+            // resume --help` (0.153.4) lists `-C, --cd <DIR>`. `shell_quote`
+            // for claude's reason, and with no orchestrator the payload holds
+            // no quote, so this is the `'codex resume …'` it always was.
+            let orchestrator = orchestrator_flags(crate::orchestrator::Harness::Codex, extras);
+            format!(
+                "{} -ilc {}",
+                shell(),
+                shell_quote(&format!(
+                    "{} resume {session_id} {CODEX_NO_UPDATE_CHECK}{orchestrator}",
+                    agent_program("codex")
+                ))
+            )
         } else {
             // Same reasoning as claude's clean-start branch above: a codex
             // session with no completed turn wrote no rollout, and `codex
@@ -6756,6 +6768,20 @@ mod orchestrator_launch_tests {
         let inner = unquote(command.split_once(" -ilc ").unwrap().1);
         assert!(inner.contains("--resume"), "{inner}");
         assert!(inner.contains(&format!(" --add-dir {}", shell_quote("/src/My Repo"))), "{inner}");
+    }
+
+    /// And a resumed codex orchestrator gets its `--cd`, the path as one
+    /// word, while any other resumed codex gets none.
+    #[test]
+    fn a_resumed_codex_orchestrator_still_sees_the_repository() {
+        let _real = test_agent::real_names();
+        let sid = Uuid::now_v7().to_string();
+        let command = terminal_mode_command("codex", &sid, true, &extras());
+        let inner = unquote(command.split_once(" -ilc ").unwrap().1);
+        assert!(inner.contains(&format!("codex resume {sid} ")), "{inner}");
+        assert!(inner.ends_with(&format!(" --cd {}", shell_quote("/src/My Repo"))), "{inner}");
+        let plain = terminal_mode_command("codex", &sid, true, &LaunchExtras::NONE);
+        assert!(!plain.contains("--cd"), "{plain}");
     }
 
     /// `shell_quote`'s inverse for one word, enough to read a payload back.
