@@ -259,7 +259,7 @@ jobs:
           # upload isn't retried.
           if [ "$altool_status" -ne 0 ]; then
             if grep -qE '90382|Upload limit reached' "$altool_log"; then
-              echo "::error::App Store Connect's daily upload limit for this app was reached (altool error 90382). This is not a code problem — no change here will fix it. The next push after the limit resets will upload normally."
+              echo "::error::App Store Connect's daily upload limit for this app was reached (altool error 90382). It isn't a code problem, and no change here fixes it: the next push after the limit resets uploads normally."
             fi
             exit "$altool_status"
           fi
