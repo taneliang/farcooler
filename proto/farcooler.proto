@@ -2579,6 +2579,15 @@ message Task {
   // long before any worktree does.
   optional bytes workspace_id = 11;
   repeated string labels = 12;
+  // Unix milliseconds, from when the task was filed. Zero from a runner older
+  // than this field, which a client reads as "not said" rather than 1970.
+  int64 created_at = 13;
+  // Unix milliseconds, from the last time anything on the card changed: a
+  // status move, a note, or a revision that actually changed a field. Equal to
+  // `created_at` for a card nothing has happened to since it was filed, which
+  // is how a client tells "Added" from "Updated". Zero from an older runner,
+  // as above. Blocks do not move it: a block is about another card.
+  int64 updated_at = 14;
 }
 
 message TaskList { repeated Task items = 1; }

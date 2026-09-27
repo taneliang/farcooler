@@ -1129,6 +1129,38 @@ async fn a_board_and_the_pane_working_it_come_back_through_the_client() {
     assert!(detail["notes"].is_array());
     assert!(detail["blocks"].is_array());
 
+    // The card's time line, through the phone's own route. Filed with an
+    // intent and acceptance, which `task.create` writes as a second store
+    // call after the row -- and the card must still read "Added", so the two
+    // clocks agree.
+    let created_at = rows[0]["created_at"].as_i64().expect("task.list carries created_at");
+    assert!(created_at > 0, "{created_at}");
+    assert_eq!(rows[0]["updated_at"], created_at, "a card filed with an intent read as updated");
+    assert_eq!(detail["task"]["created_at"], created_at, "task.get carries it too");
+    assert_eq!(detail["task"]["updated_at"], created_at);
+
+    // A note is a change to the card. Milliseconds apart at least, so
+    // "later" cannot tie.
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    let mut note = farcooler_transport::request("task.note");
+    note.payload = Some(Payload::TaskNoteAppend(farcooler_protocol::v1::TaskNoteAppend {
+        task_id: task.id.clone(),
+        kind: farcooler_protocol::v1::TaskNoteKind::Finding as i32,
+        body: "the phone can see it".into(),
+        actor: "user".into(),
+        ..Default::default()
+    }));
+    let noted = raw.call(note).await.expect("task.note");
+    let Some(farcooler_protocol::v1::result::Value::TaskNote(written)) = noted.value else {
+        panic!("task.note answered with something else");
+    };
+    let board = session.tasks(repository).await.expect("task.list after a note");
+    assert_eq!(board["tasks"][0]["created_at"], created_at, "creation does not move");
+    assert_eq!(board["tasks"][0]["updated_at"], written.at, "a note moves updated_at");
+    assert!(written.at > created_at);
+    let detail = session.task(task_id).await.expect("task.get after a note");
+    assert_eq!(detail["task"]["updated_at"], written.at);
+
     // A workspace with two panes: one opened for the task, one not.
     let workspace = session
         .create_workspace(repository, "board lane", "feat/board", "HEAD", "", false)

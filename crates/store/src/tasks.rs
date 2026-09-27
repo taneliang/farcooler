@@ -232,8 +232,30 @@ fn escape_like(raw: &str) -> String {
 /// Every column of `tasks` that `row_to_task` reads, in its order. Named once
 /// because several queries share it and a drifting column order is a silent
 /// field swap rather than a compile error.
+///
+/// The last one is not a column: it is `Task::updated_at`, derived here on
+/// every read as the latest of the four things that change a card -- being
+/// filed, a status move (`status_since`), a note (`task_notes.at`), and a
+/// revision (`edited_at`, see `migration_0013_task_edited_at`). Derived rather
+/// than stored so that no write path can forget to move it: every note and
+/// every move already records its own time, and a second copy of that time
+/// is a second thing to keep in step.
+///
+/// The `created` note is left out, and that is load-bearing. `create_task`
+/// stamps the row and its `Created` note with two reads of the clock, so the
+/// note can land a millisecond after `created_at` -- and a card nothing has
+/// happened to would then read "Updated just now" instead of "Added".
+///
+/// `coalesce`, because SQLite's many-argument `max` is NULL when any argument
+/// is: a task never revised (`edited_at` NULL) or with no notes but its
+/// creation must still have an answer. Every query using this reads `FROM
+/// tasks` unaliased, which is what `tasks.id` in the subquery names.
+/// `task_notes_by_task (task_id, at)` keeps the subquery to one task's notes.
 const TASK_COLUMNS: &str = "id, repository_id, key, title, status, status_since, \
-     intent, acceptance, constraints, labels, workspace_id, resource_version";
+     intent, acceptance, constraints, labels, workspace_id, resource_version, created_at, \
+     max(created_at, status_since, coalesce(edited_at, 0), \
+         coalesce((SELECT max(n.at) FROM task_notes n \
+                    WHERE n.task_id = tasks.id AND n.kind != 'created'), 0))";
 
 /// The same, for `row_to_task_note`.
 const NOTE_COLUMNS: &str = "id, task_id, kind, actor, at, body, extra, supersedes";
@@ -317,6 +339,9 @@ impl Store {
             workspace_id: None,
             labels: Vec::new(),
             resource_version: 1,
+            created_at: now,
+            // Equal, so a card nothing else has happened to reads "Added".
+            updated_at: now,
         };
 
         let mut conn = self.conn();
@@ -436,15 +461,58 @@ impl Store {
     /// the same fields must not both believe they won, while a status move
     /// touches none of these fields and so is deliberately allowed to happen
     /// underneath a revision in flight.
+    ///
+    /// A revision that changes a field dates itself in `edited_at`, which is
+    /// what moves the card's `updated_at`. One that changes nothing -- a
+    /// client writing back exactly what it read -- still bumps the version
+    /// (the write happened) but leaves the date alone: "Updated 2m ago" on a
+    /// card nobody changed is a small lie on every card a script touches.
     pub fn update_task(
         &self,
         task: Uuid,
         expected_version: u64,
         update: &TaskUpdate,
     ) -> Result<Task> {
+        self.revise_task(task, expected_version, update, true)
+    }
+
+    /// The rest of a task `create_task` has just made, which is not an update.
+    ///
+    /// `task.create` is two store calls -- `create_task` writes the title and
+    /// the `Created` note, and the intent, acceptance and the rest follow as
+    /// a revision (see `task_ops::create`). Through `update_task` that second
+    /// write would date itself a millisecond after creation, and every card
+    /// filed with an intent would read "Updated just now" from the moment it
+    /// appeared. The same write, undated.
+    ///
+    /// Version-checked like `update_task`, so it cannot land on a task that
+    /// something else has revised in between.
+    pub fn fill_in_new_task(
+        &self,
+        task: Uuid,
+        expected_version: u64,
+        update: &TaskUpdate,
+    ) -> Result<Task> {
+        self.revise_task(task, expected_version, update, false)
+    }
+
+    fn revise_task(
+        &self,
+        task: Uuid,
+        expected_version: u64,
+        update: &TaskUpdate,
+        dated: bool,
+    ) -> Result<Task> {
+        // `IS` rather than `=`: `workspace_id` is nullable, and `NULL = NULL`
+        // is NULL, which would read an unchanged empty lane as a change.
         self.run_versioned(
             "UPDATE tasks
-                SET title = ?1, intent = ?2, acceptance = ?3, constraints = ?4, labels = ?5,
+                SET edited_at = CASE
+                        WHEN ?10 AND NOT (title IS ?1 AND intent IS ?2 AND acceptance IS ?3
+                                          AND constraints IS ?4 AND labels IS ?5
+                                          AND workspace_id IS ?6)
+                        THEN ?11 ELSE edited_at END,
+                    title = ?1, intent = ?2, acceptance = ?3, constraints = ?4, labels = ?5,
                     workspace_id = ?6, resource_version = ?7
               WHERE id = ?8 AND resource_version = ?9",
             &[
@@ -457,6 +525,8 @@ impl Store {
                 &(expected_version as i64 + 1),
                 &uuid_blob(task),
                 &(expected_version as i64),
+                &dated,
+                &now_millis(),
             ],
             "SELECT 1 FROM tasks WHERE id = ?1",
             &[&uuid_blob(task)],
@@ -509,7 +579,7 @@ impl Store {
             params![status.as_str(), now, uuid_blob(task)],
         )
         .map_err(map_err)?;
-        insert_note(
+        let moved = insert_note(
             &tx,
             task,
             NoteKind::StatusChange,
@@ -520,7 +590,10 @@ impl Store {
         )?;
         tx.commit().map_err(map_err)?;
 
-        Ok(Task { status, status_since: now, ..existing })
+        // What `TASK_COLUMNS` would derive on a re-read: the move's note is
+        // the newest thing on the card, and it read the clock after `now`.
+        let updated_at = existing.updated_at.max(now).max(moved.at);
+        Ok(Task { status, status_since: now, updated_at, ..existing })
     }
 
     // ---- the notes: the record of how it got there ----
@@ -1888,6 +1961,121 @@ mod tests {
         assert_eq!(row.status_since, moved.status_since, "including the board's staleness column");
     }
 
+    // ---- when a card last changed ----
+    //
+    // `updated_at` is derived in `TASK_COLUMNS`, not stored, so each of the
+    // four things that move it gets a test through the real write, and each of
+    // the two things that must NOT move it gets one too. A clock that only
+    // ever went forward would pass every "it moved" test below while telling
+    // every card it was just updated.
+
+    /// The clocks here are milliseconds, and two writes in one test can land
+    /// in the same one. A pause long enough that "later" is strictly later.
+    fn tick() {
+        std::thread::sleep(std::time::Duration::from_millis(3));
+    }
+
+    fn revision(title: &str, intent: &str) -> TaskUpdate {
+        TaskUpdate {
+            title: title.to_string(),
+            intent: intent.to_string(),
+            acceptance: Vec::new(),
+            constraints: Vec::new(),
+            labels: Vec::new(),
+            workspace_id: None,
+        }
+    }
+
+    /// A card nothing has happened to reads "Added", so its two clocks agree.
+    ///
+    /// Its `Created` note is the one note that must not count: `create_task`
+    /// reads the clock twice, once for the row and once for the note, and a
+    /// note a millisecond later would read as an update. Pinned with a second
+    /// `created` note well after creation, because the real one usually lands
+    /// in the same millisecond and a test relying on it would pass by luck.
+    #[test]
+    fn a_card_nothing_has_happened_to_was_added_and_not_updated() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        assert_eq!(task.updated_at, task.created_at);
+        assert!(task.created_at > 0);
+
+        store.insert_note_with_at_for_test(task.id, NoteKind::Created, "t", task.created_at + 5_000);
+        let row = store.get_task(task.id).unwrap();
+        assert_eq!(row.created_at, task.created_at);
+        assert_eq!(row.updated_at, row.created_at, "a creation note read as an update");
+    }
+
+    /// The brief's own case: a note on a card is a change to the card.
+    #[test]
+    fn a_note_moves_updated_at() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        tick();
+        let note =
+            store.add_note(task.id, NoteKind::Finding, Actor::User, "it leaks", json!({})).unwrap();
+        let row = store.get_task(task.id).unwrap();
+        assert_eq!(row.updated_at, note.at);
+        assert!(row.updated_at > row.created_at, "{row:?}");
+        assert_eq!(row.created_at, task.created_at, "and creation stays where it was");
+
+        // Every read path, not just `get_task`: they share `TASK_COLUMNS`,
+        // and the board reads `list_tasks`.
+        let listed = store.list_tasks(repo(), None).unwrap();
+        assert_eq!(listed[0].updated_at, note.at);
+    }
+
+    #[test]
+    fn a_move_moves_updated_at() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        tick();
+        let moved = store.set_task_status(task.id, TaskStatus::InProgress, Actor::User).unwrap();
+        assert!(moved.updated_at > task.created_at);
+        assert_eq!(store.get_task(task.id).unwrap().updated_at, moved.updated_at);
+    }
+
+    /// A revision that changes a field moves it; one that writes back exactly
+    /// what it read does not, though the version still counts the write.
+    #[test]
+    fn a_revision_moves_updated_at_and_one_that_changes_nothing_does_not() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        tick();
+        let edited =
+            store.update_task(task.id, task.resource_version, &revision("t", "why")).unwrap();
+        assert!(edited.updated_at > task.created_at, "an edit to the intent is an update");
+
+        tick();
+        let again =
+            store.update_task(task.id, edited.resource_version, &revision("t", "why")).unwrap();
+        assert_eq!(again.resource_version, edited.resource_version + 1, "the write happened");
+        assert_eq!(again.updated_at, edited.updated_at, "and changed nothing, so dated nothing");
+    }
+
+    /// The second half of `task.create` is the act of filing, not an edit.
+    #[test]
+    fn filling_in_a_new_task_is_not_an_update() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        tick();
+        let filled =
+            store.fill_in_new_task(task.id, task.resource_version, &revision("t", "why")).unwrap();
+        assert_eq!(filled.intent, "why");
+        assert_eq!(filled.updated_at, filled.created_at, "a card filed with an intent read as updated");
+    }
+
+    /// A block names another card; it does not change this one.
+    #[test]
+    fn a_block_does_not_move_updated_at() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let other = store.create_task(repo(), "u", Actor::User).unwrap();
+        tick();
+        store.set_block(task.id, other.id, Some("needs it")).unwrap();
+        assert_eq!(store.get_task(task.id).unwrap().updated_at, task.created_at);
+    }
+
     /// A task's key is scoped to its repository, and so is every listing of
     /// it. The nearest wrong implementation forgets the `repository_id`
     /// predicate and shows one runner's whole board under every repository.
@@ -2715,6 +2903,77 @@ mod prefixless_boards {
         assert_eq!(store.tasks_with_key(Some(id(10)), "ov-1").unwrap().len(), 1);
         assert_eq!(store.tasks_with_key(None, "-1").unwrap().len(), 2, "still two boards' -1");
         assert!(store.tasks_with_key(Some(id(11)), "-1").unwrap().is_empty(), "never had one");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+/// A board from before `edited_at`, opened by this build: migration 13.
+#[cfg(test)]
+mod boards_from_before_card_times {
+    use super::*;
+
+    fn id(n: u128) -> Uuid {
+        Uuid::from_u128(0x0000_7131_0000_0000_0000_0000_0000_0000 | n)
+    }
+
+    /// A database file as a schema-12 runner left it: one board, a task with
+    /// a decision on it long after it was filed, and a task nothing happened
+    /// to but its creation.
+    fn opened() -> (std::path::PathBuf, Store) {
+        let dir = std::env::temp_dir().join(format!("farcooler-card-times-{}", Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("db.sqlite3");
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            conn.execute_batch("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);").unwrap();
+            crate::migrate::migrate_only_to(&mut conn, 12);
+            conn.execute_batch(&format!(
+                "INSERT INTO repository_roots VALUES (x'{root}', x'{host}', '/r', 0, 1);
+                 INSERT INTO repositories VALUES (x'{repo}', x'{host}', x'{root}', 'overnight', '/r/.git', '', 1, 'ov');
+                 INSERT INTO tasks (id, repository_id, key, title, status, status_since, created_at, resource_version)
+                     VALUES (x'{decided}', x'{repo}', 'ov-1', 'decided', 'backlog', 1000, 1000, 1),
+                            (x'{quiet}', x'{repo}', 'ov-2', 'quiet', 'backlog', 2000, 2000, 1);
+                 INSERT INTO task_notes (id, task_id, kind, actor, at, body, extra)
+                     VALUES (x'{n1}', x'{decided}', 'created', 'user', 1001, 'decided', '{{}}'),
+                            (x'{n2}', x'{decided}', 'decision', 'user', 5000, 'because', '{{}}'),
+                            (x'{n3}', x'{quiet}', 'created', 'user', 2001, 'quiet', '{{}}');",
+                root = id(1).simple(),
+                host = id(2).simple(),
+                repo = id(3).simple(),
+                decided = id(10).simple(),
+                quiet = id(11).simple(),
+                n1 = id(20).simple(),
+                n2 = id(21).simple(),
+                n3 = id(22).simple(),
+            ))
+            .unwrap();
+        }
+        let store = Store::open(&path).expect("a schema-12 board opens");
+        (dir, store)
+    }
+
+    /// What was already on disk answers "last updated" the moment the board
+    /// opens: the decision's time, not the migration's and not 1970. And a
+    /// revision from before the migration, which left no time, is not
+    /// invented as one -- `edited_at` is NULL until something is revised.
+    #[test]
+    fn an_old_board_reads_its_last_change_from_what_was_already_written() {
+        let (dir, store) = opened();
+        let decided = store.get_task(id(10)).unwrap();
+        assert_eq!((decided.created_at, decided.updated_at), (1000, 5000));
+        let quiet = store.get_task(id(11)).unwrap();
+        assert_eq!(
+            (quiet.created_at, quiet.updated_at),
+            (2000, 2000),
+            "a card nothing happened to reads as added, its creation note notwithstanding"
+        );
+        let edited: Option<i64> = store
+            .conn()
+            .query_row("SELECT edited_at FROM tasks WHERE id = ?1", params![uuid_blob(id(10))], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(edited, None, "no revision time was made up for the rows already there");
         std::fs::remove_dir_all(&dir).ok();
     }
 }

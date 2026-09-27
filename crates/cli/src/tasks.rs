@@ -2241,6 +2241,8 @@ mod tests {
             constraints: vec!["additive migrations only".to_string()],
             labels: vec!["board".to_string()],
             workspace_id: None,
+            created_at: now_millis() - 86_400_000,
+            updated_at: now_millis() - 7_200_000,
         };
         let task_id = task.id.clone();
         let note = |kind: NoteKind, body: &str, extra: &str| pb::TaskNote {

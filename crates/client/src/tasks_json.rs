@@ -59,6 +59,17 @@ pub fn stale_for_seconds(status_since: i64, now: i64) -> i64 {
     now.saturating_sub(status_since).max(0) / 1000
 }
 
+/// A clock a runner may not have sent, as `null` rather than as 1970.
+///
+/// `created_at` and `updated_at` are newer than the board: a runner from
+/// before them leaves both at proto3's zero, and a card reading "Added 56y
+/// ago" is worse than a card with no time on it. `status_since` is not passed
+/// through this, deliberately -- it is as old as the board, and a zero there
+/// has always read as very stale, which is the loud direction for that value.
+pub fn said(millis: i64) -> serde_json::Value {
+    if millis > 0 { json!(millis) } else { serde_json::Value::Null }
+}
+
 /// The board: `{"tasks": [...]}`, the shape `task list --json` prints and the
 /// FFI's `task.list` returns.
 pub fn list_json(tasks: &[pb::Task], now: i64) -> serde_json::Value {
@@ -87,6 +98,8 @@ pub fn task_json(task: &pb::Task, now: i64) -> serde_json::Value {
         "status": status_word(task.status),
         "status_since": task.status_since,
         "stale_for_seconds": stale_for_seconds(task.status_since, now),
+        "created_at": said(task.created_at),
+        "updated_at": said(task.updated_at),
         "intent": task.intent,
         "acceptance": task.acceptance.iter().map(|a| json!({
             "id": uuid_of(&a.id).to_string(),
@@ -157,9 +170,13 @@ mod tests {
             ],
             labels: vec!["ios".into()],
             workspace_id: Some(id(5)),
+            created_at: 500,
+            updated_at: 900,
             ..Default::default()
         };
         let row = task_json(&task, 61_000);
+        assert_eq!(row["created_at"], 500);
+        assert_eq!(row["updated_at"], 900);
         assert_eq!(row["key"], "-20");
         assert_eq!(row["status"], "needs_decision");
         assert_eq!(row["status_since"], 1_000);
@@ -179,6 +196,16 @@ mod tests {
         assert_eq!(status_word(9_999), "unknown");
         assert_eq!(status_word(pb::TaskStatus::Unspecified as i32), "unknown");
         assert_eq!(note_kind_word(9_999), "unknown");
+    }
+
+    /// A runner from before the card times sends proto3's zero for both, and
+    /// a zero that reached a client as a number would draw "Added 56y ago".
+    #[test]
+    fn a_runner_that_never_said_when_sends_null_and_not_1970() {
+        let row = task_json(&pb::Task { status_since: 1_000, ..Default::default() }, 61_000);
+        assert!(row["created_at"].is_null(), "{row}");
+        assert!(row["updated_at"].is_null(), "{row}");
+        assert_eq!(row["status_since"], 1_000, "and status_since is not touched by the rule");
     }
 
     #[test]

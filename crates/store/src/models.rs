@@ -417,9 +417,11 @@ impl AcceptanceItem {
 
 /// Current understanding, and nothing about how it was reached.
 ///
-/// Every field here may be revised freely; see `TaskNote` for the half that
-/// may not. `created_at` is on the table but not here: it orders a listing,
-/// and the question the board itself asks is `status_since`.
+/// Every field here may be revised freely, bar the three clocks, which say
+/// when things happened and are only ever written by the store; see
+/// `TaskNote` for the half that may not be revised at all. The question the
+/// board asks first is `status_since`; `created_at` and `updated_at` are the
+/// quieter line every card carries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Task {
     pub id: Uuid,
@@ -449,6 +451,17 @@ pub struct Task {
     pub workspace_id: Option<Uuid>,
     pub labels: Vec<String>,
     pub resource_version: u64,
+    /// Unix milliseconds, from when the task was filed.
+    pub created_at: i64,
+    /// Unix milliseconds, from the last time anything on the card changed: a
+    /// status move, a note, or a revision that changed a field. Equal to
+    /// `created_at` until one of those happens, which is how a board tells
+    /// "Added" from "Updated".
+    ///
+    /// Derived on every read rather than stored (see `TASK_COLUMNS` in
+    /// tasks.rs), so no write path can forget to move it. A block does not
+    /// move it: a block is a fact about another card.
+    pub updated_at: i64,
 }
 
 /// Every field of `Task` a caller may legitimately revise in place.
@@ -606,6 +619,8 @@ pub(crate) fn row_to_task(row: &Row) -> rusqlite::Result<Task> {
         labels: get_strings(row, 9)?,
         workspace_id: get_optional_uuid(row, 10)?,
         resource_version: row.get::<_, i64>(11)? as u64,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
     })
 }
 

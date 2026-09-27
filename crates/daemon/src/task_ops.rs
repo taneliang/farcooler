@@ -198,6 +198,8 @@ fn pb_task(task: &Task) -> pb::Task {
         constraints: task.constraints.clone(),
         workspace_id: task.workspace_id.map(id_bytes),
         labels: task.labels.clone(),
+        created_at: task.created_at,
+        updated_at: task.updated_at,
     }
 }
 
@@ -362,10 +364,13 @@ pub fn create(svc: &Service, watcher: &Watcher, req: &pb::TaskCreate) -> Result<
     let created = svc.store.create_task(repository, &update.title, actor)?;
     // Skipped when there is nothing to revise, so the common case is one write
     // and the task comes back at version 1 rather than at 2 for no reason.
+    // `fill_in_new_task` and not `update_task`: this is the rest of the act of
+    // filing it, and a card filed with an intent must read "Added", not
+    // "Updated" a millisecond after it appeared.
     let task = if update == blank_update(&created.title) {
         created
     } else {
-        svc.store.update_task(created.id, created.resource_version, &update)?
+        svc.store.fill_in_new_task(created.id, created.resource_version, &update)?
     };
 
     announce(watcher, &task, actor);

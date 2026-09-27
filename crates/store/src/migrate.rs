@@ -24,6 +24,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_0010_the_board,
     migration_0011_terminal_task,
     migration_0012_every_board_has_a_prefix,
+    migration_0013_task_edited_at,
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -595,6 +596,25 @@ fn migration_0012_every_board_has_a_prefix(tx: &Transaction) -> rusqlite::Result
         )?;
     }
     Ok(())
+}
+
+/// When a task's understanding was last revised, which nothing recorded.
+///
+/// A card's "Updated 2h ago" is the latest of four things, and three of them
+/// were already on disk: `created_at`, `status_since`, and every note's `at`
+/// (a status move writes a `status_change` note too). The fourth, a revision
+/// through `Store::update_task`, wrote no note on purpose and no time at all
+/// -- only `resource_version`, which counts and does not date. This is that
+/// time, and ONLY that time: "last updated" stays derived in the query
+/// (`TASK_COLUMNS` in tasks.rs) rather than kept here, so a note or a move
+/// can never be written without moving it.
+///
+/// Nullable with no backfill. A revision made before this migration left no
+/// trace of when, and the honest value for "we do not know" is NULL, which
+/// the derivation skips -- a card revised last month then falls back to its
+/// last note or move, not to "just now".
+fn migration_0013_task_edited_at(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch("ALTER TABLE tasks ADD COLUMN edited_at INTEGER;")
 }
 
 /// Every migration below `version`, applied in one transaction, with the
