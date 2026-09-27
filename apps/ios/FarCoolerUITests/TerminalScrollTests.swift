@@ -2060,6 +2060,133 @@ final class TerminalScrollTests: XCTestCase {
                 + "lands, not what is connected")
     }
 
+    /// **No keyboard rises over the grid when a switched-to runner's pane
+    /// mounts under it, and closing the grid onto that pane raises one.**
+    ///
+    /// A terminal took first responder on mount whatever was over it, so the
+    /// pane B's fleet put under the open overview raised the keyboard across
+    /// half the cards. It now holds that request until the grid goes.
+    ///
+    /// Needs B's first worktree to rest on a TERMINAL, because a switch lands
+    /// on the new runner's first worktree (`ShellFleet.reseat(_:holding:after:)`)
+    /// and the demo's first worktree, the repository's own checkout, has none.
+    /// So the test makes one there, through the pane's overflow menu as
+    /// `NewTerminalTests` does, and closes it again at the end. Both runners
+    /// serve one daemon, so the terminal made on A is B's too.
+    func testNoKeyboardRisesOverTheGridAfterARunnerSwitch() throws {
+        let app = launchTwoRunners(["-\(Self.everyRunnerAtOnce)", "<false/>"])
+        let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
+        XCTAssertTrue(probe.waitForExistence(timeout: 180), "the shell never stood up")
+        func value(_ key: String) -> Int? { Int(Self.field(probe.value as? String ?? "", key) ?? "") }
+        let onFirst = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in value("ws") == 0 && value("tab") == 0 }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [onFirst], timeout: 30), .completed,
+            "the shell did not open on the first worktree's diff: \(probe.value ?? "")")
+        let tabsBefore = try XCTUnwrap(value("tabs"))
+
+        // A terminal in the first worktree.
+        let overflow = try XCTUnwrap(
+            app.buttons.matching(identifier: "Pane options").allElementsBoundByIndex.first {
+                $0.isHittable && $0.frame.midX > app.frame.minX && $0.frame.midX < app.frame.maxX
+            }, "the first worktree's pane has no overflow menu")
+        overflow.tap()
+        let item = app.buttons["New Terminal"]
+        XCTAssertTrue(item.waitForExistence(timeout: 10), "no New Terminal in the overflow menu")
+        item.tap()
+        let grew = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in value("tabs") == tabsBefore + 1 && (value("tab") ?? 0) > 0 },
+            object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [grew], timeout: 30), .completed,
+            "New Terminal made nothing to land on: \(probe.value ?? "")")
+        let made = try XCTUnwrap(value("tab"))
+        addTeardownBlock { [unowned self] in
+            self.closeTerminal(app, tab: made, leaving: tabsBefore)
+        }
+
+        // Onto B from its heading, with the grid open.
+        try openOverview(app)
+        try switchToRunner(app, id: runnerIDs.b)
+        let other = app.descendants(matching: .any)
+            .matching(identifier: "shell-section-\(runnerIDs.b)").firstMatch
+        let answered = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                other.exists && other.label.contains("Connected")
+                    && !other.label.contains("No worktrees")
+            }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [answered], timeout: 60), .completed, "Runner B never answered")
+        let resting = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in value("ws") == 0 && (value("tab") ?? 0) > 0 },
+            object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [resting], timeout: 10), .completed,
+            "the shell is not resting on B's first worktree's terminal under the grid, so there "
+                + "is nothing here to raise a keyboard: \(probe.value ?? "")")
+
+        // The key row comes up with first responder whether or not a hardware
+        // keyboard hides the software one.
+        let keyRow = app.buttons[Self.terminalHideKeyboard]
+        XCTAssertFalse(
+            keyRow.waitForExistence(timeout: 5),
+            "a keyboard came up over the grid: B's pane took first responder under the overview")
+
+        // Done closes the grid onto that terminal, and the held request is made.
+        let done = app.buttons["shell-overview-done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 10), "the overview has no Done")
+        done.tap()
+        let closed = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in value("overview") == 0 }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [closed], timeout: 20), .completed,
+            "Done did not close the grid: \(probe.value ?? "")")
+        XCTAssertTrue(
+            keyRow.waitForExistence(timeout: 10),
+            "closing the grid onto B's terminal raised no keyboard: the request held while the "
+                + "grid was up was never made")
+    }
+
+    /// Close the terminal a test made, through the column's swipe, as
+    /// `NewTerminalTests.closeWhatThisMade` does and for its reason: the demo
+    /// runner is shared by the whole suite, and a terminal left behind is a
+    /// fixture every later test inherits. Asserted, not attempted.
+    private func closeTerminal(_ app: XCUIApplication, tab: Int, leaving tabs: Int) {
+        let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
+        if app.buttons[Self.terminalHideKeyboard].waitForExistence(timeout: 3) {
+            hideKeyboard(app)
+        }
+        let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
+        let reachable = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in bar.exists && bar.isHittable }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [reachable], timeout: 15), .completed,
+            "the bar is not reachable, so the terminal this test made was not closed")
+        bar.tap()
+        let row = app.buttons["shell-column-row-\(tab)"]
+        XCTAssertTrue(
+            row.waitForExistence(timeout: 10),
+            "the column has no row \(tab), so the terminal this test made was not closed")
+        let from = row.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
+        from.press(
+            forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: -60, dy: 0)),
+            withVelocity: .slow, thenHoldForDuration: 0.4)
+        let close = app.buttons["Close"]
+        XCTAssertTrue(
+            close.waitForExistence(timeout: 5),
+            "swiping row \(tab) revealed no Close, so the terminal this test made was not closed")
+        close.tap()
+        let confirm = app.buttons["Close Terminal"]
+        if confirm.waitForExistence(timeout: 5) { confirm.tap() }
+        let gone = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                Int(Self.field(probe.value as? String ?? "", "tabs") ?? "") == tabs
+            }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [gone], timeout: 30), .completed,
+            "the terminal this test made is still on \(runner): \(probe.value ?? "")")
+    }
+
     /// Tap a card in the overview, scrolling the grid until it can be hit.
     ///
     /// The last row of cached cards sits at the bottom edge of the display,
