@@ -703,6 +703,11 @@ pub(crate) mod agent_stub {
                 .filter(|w| !w.is_empty())
                 .collect();
             for (i, word) in words.iter().enumerate() {
+                // The stand-in itself, which a fixture may well have named
+                // `.../claude`, is not the agent it stands in for.
+                if vouches(word) {
+                    continue;
+                }
                 let program = word.rsplit('/').next().unwrap_or(word);
                 let Some(&program) = AGENTS.iter().find(|a| **a == program) else {
                     continue;
