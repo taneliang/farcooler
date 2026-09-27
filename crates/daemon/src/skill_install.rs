@@ -828,6 +828,30 @@ mod tests {
         }
     }
 
+    /// A task moved while an agent works on it keeps that agent, which never
+    /// reads the new workspace's charter, so the rules that bind it go on the
+    /// task. Both S11 pressure runs found the gap and left it: `task set
+    /// --constraint` replaces the list, and they couldn't see what was on it.
+    /// So the split reads the list before it writes it, and before the new
+    /// orchestrator starts.
+    #[test]
+    fn a_split_puts_the_new_charters_rules_on_a_task_in_flight() {
+        for h in ALL {
+            let text = skill_body(h);
+            let split = text.find("\n## Splitting a workstream off\n").expect("no split section");
+            let section = text[split..].split_whitespace().collect::<Vec<_>>().join(" ");
+            let moved = section.find("farcooler task move").expect("the split moves tasks");
+            let read = section
+                .find("farcooler task show <key> --repo <repo> --fields constraints")
+                .unwrap_or_else(|| panic!("{h:?}: the split never reads a moved task's constraints: {section}"));
+            let start = section.find("farcooler workspace start-orchestrator").expect("the split starts one");
+            assert!(moved < read && read < start, "{h:?}: {moved} {read} {start}");
+            let step = &section[moved..start];
+            assert!(step.contains("never reads the new charter"), "{h:?}: {step}");
+            assert!(step.contains("`task set --constraint` replaces the whole list"), "{h:?}: {step}");
+        }
+    }
+
     /// A dispatched agent is never told where the charter is (only an
     /// orchestrator's pane carries `FARCOOLER_CHARTER`), so what it needs from
     /// the charter has to reach it on its task.

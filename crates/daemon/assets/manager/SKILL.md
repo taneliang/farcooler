@@ -109,9 +109,9 @@ waiting on the owner.
 
 ## Splitting a workstream off
 
-When the owner asks, or (ask first) when one thread is crowding out the rest
-of this conversation, give it a workspace and orchestrator of its own. The
-split is for that new conversation, so the handoff matters more than the moves.
+When the owner asks, or (ask first) when one thread is crowding out the rest,
+give it a workspace and orchestrator of its own. The split is for that new
+conversation, so the handoff matters more than the moves.
 
 1. `{{cli}} workspace create --repo <repo> --name <Name> --prefix <prefix>`:
    ask the owner for both, and suggest a prefix of 2 to 4 letters.
@@ -119,20 +119,21 @@ split is for that new conversation, so the handoff matters more than the moves.
    `{{cli}} --json workspace show <Name> --repo <repo>` gives its `charter` path.
 3. Move its tasks and the worktrees its agents work in:
    `{{cli}} task move <key>… --to <Name> --repo <repo> --actor manager`, then
-   `{{cli}} worktree assign <worktree> --to <Name>` for each worktree.
-4. Write the handoff. It isn't optional: what isn't written down stays in
-   this conversation, and the split was for nothing. A `--kind decision` note
-   on each moved task saying why it moved, and one `--kind comment` note, on
-   the task its orchestrator should read first, holding what this conversation
-   knows that the board doesn't: open questions, the owner's preferences for
-   this work, what was tried and dropped. Name that task under the new
-   charter's `## Anything else`, so its orchestrator reads the handoff first.
+   `{{cli}} worktree assign <worktree> --to <Name>` for each worktree. An agent
+   on a moved task never reads the new charter: put its rules for that task on
+   the task. `task set --constraint` replaces the whole list, so read the old
+   one with `{{cli}} task show <key> --repo <repo> --fields constraints` and set old and new.
+4. Write the handoff. It isn't optional: what isn't written dies with this
+   conversation. A `--kind decision` note on each moved task saying why it
+   moved, and one `--kind comment` note, on the task its orchestrator should
+   read first, holding what this conversation knows that the board doesn't:
+   open questions, the owner's preferences for this work, what was tried and
+   dropped. Name that task under the new charter's `## Anything else`.
 5. `{{cli}} workspace start-orchestrator <Name> --harness <harness> --repo <repo>`,
    the harness you are unless the owner says otherwise. Tell the owner it's
-   running, and which task holds the handoff.
-
-After the split it isn't yours: don't dispatch into its worktrees or write on
-its tasks. If you come across its work, tell the owner.
+   running, and which task holds the handoff. From then on it isn't yours:
+   don't dispatch into its worktrees or write on its tasks. If you come across
+   its work, tell the owner.
 
 ## The interview
 
@@ -149,7 +150,6 @@ never as a fact. Write down what they say, not your default.
 - `## Autonomy`: may an agent commit, push, open a PR, add dependencies?
 - `## Anything else`: what to always or never do.
 
-Read the whole draft back and write `$FARCOOLER_CHARTER`
-only after they say yes: those headings in that order, prose under each, first
-line `<!-- charter, written <date> from an interview; edit freely -->`. Keep
-every existing section as it is.
+Read the whole draft back and write `$FARCOOLER_CHARTER` only after they say yes:
+those headings in order, prose under each, every existing section kept as it
+is, first line `<!-- charter, written <date> from an interview; edit freely -->`.
