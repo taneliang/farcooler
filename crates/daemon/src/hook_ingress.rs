@@ -1362,6 +1362,63 @@ mod tests {
         );
     }
 
+    /// The helper behind all three failure exits, on its own: a release
+    /// leaves an entry some other start inserted, and removes its own. The
+    /// two race tests above can only wait and see that nothing happened, so
+    /// this is the check that decides it.
+    #[test]
+    fn releasing_a_tail_slot_removes_only_the_releasers_own_entry() {
+        let tails = Mutex::new(HashMap::new());
+        let terminal = Uuid::from_u128(110);
+        let a = Arc::new(AtomicBool::new(true));
+        let b = Arc::new(AtomicBool::new(true));
+        tails.lock().unwrap().insert(terminal, a.clone());
+
+        release_tail_slot(&tails, terminal, &b);
+        assert!(tails.lock().unwrap().contains_key(&terminal), "a release by another start took this entry");
+
+        release_tail_slot(&tails, terminal, &a);
+        assert!(!tails.lock().unwrap().contains_key(&terminal), "a release by the entry's own start left it");
+    }
+
+    /// A start whose task panics, with no `forget` racing it, frees its own
+    /// slot through the `Err` arm, so the next payload can start a tail.
+    #[tokio::test]
+    async fn a_start_that_panics_releases_the_terminal_for_the_next_payload() {
+        let ingress = ingress_for_test();
+        ingress.install_sink(|_, batch| {
+            if batch.iter().any(|e| matches!(e, AgentEvent::Message { text, .. } if text == "boom")) {
+                panic!("the start's catch-up read fails here, on purpose");
+            }
+        });
+
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("rollout.jsonl");
+        std::fs::write(&path, "").expect("seed");
+        let f = Facts { transcript_path: Some(path.clone()), ..Facts::default() };
+        let terminal = Uuid::from_u128(111);
+
+        ingress.start_transcript_tail(terminal, Agent::Codex, &f);
+        assert!(ingress.is_tailing(terminal), "the start claimed the slot");
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new().append(true).open(&path).expect("open");
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": { "type": "agent_message", "phase": "commentary", "message": "boom" },
+            })
+        )
+        .expect("append");
+
+        let start = std::time::Instant::now();
+        while ingress.is_tailing(terminal) && start.elapsed() < std::time::Duration::from_secs(10) {
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert!(!ingress.is_tailing(terminal), "a start that panicked kept its slot");
+    }
+
     /// Claude already streams through `MessageDisplay` — starting a tail for
     /// it too would draw its answers a second time from the transcript.
     #[tokio::test]
