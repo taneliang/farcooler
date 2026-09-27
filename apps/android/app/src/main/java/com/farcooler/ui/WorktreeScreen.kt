@@ -450,7 +450,7 @@ fun WorktreeScreen(
             // and a second rule here would be a second answer.
             onClose = { terminal ->
                 val question = ShellClose.question(terminal, System.currentTimeMillis())
-                if (question == null) scope.launch { connection.close(terminal) }
+                if (question == null) connection.closeDetached(terminal)
                 else closing = terminal to question
             },
             modifier = Modifier.navigationBarsPadding(),
@@ -464,7 +464,7 @@ fun WorktreeScreen(
                 confirmButton = {
                     TextButton(onClick = {
                         closing = null
-                        scope.launch { connection.close(terminal) }
+                        connection.closeDetached(terminal)
                     }) {
                         // Red, because Material's dialog has no destructive
                         // role either. Same ink as the menu item that opened

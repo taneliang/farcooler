@@ -1355,6 +1355,17 @@ class Connection(
     }
 
     /**
+     * [close], in this connection's scope rather than the caller's. Its two
+     * calls must not be split: a screen left between the stop and the remove
+     * cancelled its own scope, and with it the remove, leaving the stopped
+     * pane standing as an Exited tab — the dead chip [close] exists to
+     * prevent.
+     */
+    fun closeDetached(terminal: Terminal) {
+        scope.launch { close(terminal) }
+    }
+
+    /**
      * Put a device's key into this runner's `~/.ssh/authorized_keys`.
      *
      * **The daemon owns the write**, and that is the whole reason this is one
