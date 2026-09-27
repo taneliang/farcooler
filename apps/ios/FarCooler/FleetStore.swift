@@ -279,13 +279,14 @@ final class FleetStore: ObservableObject {
         // forever, is the bug merging creates if this is missing; see
         // `FleetPublication.keeping(runners:)`.
         //
-        // And which of them are answering, by the Mac's rule: `.connected`,
-        // and nothing weaker. A runner that stays down spends most of its
-        // outage reconnecting, and its last fleet must not go on reading as
-        // working on the lock screen while it does.
+        // And which of them are answering: `.connected` and nothing weaker —
+        // a runner that stays down spends most of its outage reconnecting,
+        // and its last fleet must not go on reading as working on the lock
+        // screen while it does — and its fleet read on this link. See
+        // `Connection.isAnswering`.
         FleetSnapshotWriter.keep(
             runners: Set(mine.map { $0.0.id.uuidString }),
-            answering: Set(mine.filter { $0.1.phase == .connected }.map { $0.0.id.uuidString }))
+            answering: Set(mine.filter { $0.1.isAnswering }.map { $0.0.id.uuidString }))
 
         entries = mine.flatMap { host, connection -> [FleetEntry] in
             let counts = connection.inbox

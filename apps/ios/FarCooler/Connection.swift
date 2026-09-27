@@ -920,6 +920,8 @@ final class Connection: ObservableObject {
         // the wire, and a request that came back empty still cost the round
         // trip and the radio.
         lastRefreshAt = Date()
+        // The link this read sets out on. See `fleetOnThisLink` below.
+        let link = daemonLink
         do {
             let data = try await core.call("fleet")
             fleet = try JSONDecoder().decode(Fleet.self, from: data)
@@ -936,7 +938,10 @@ final class Connection: ObservableObject {
             // and THEN await this call, so there is a whole round trip during
             // which the app is connected and knows nothing.
             hasFleet = true
-            fleetOnThisLink = true
+            // Only for the link it was read on: a read that set out before a
+            // reconnect and answers after it must not vouch for the new link,
+            // for the reason `loadDaemonBuild` checks `daemonLink`.
+            if link == daemonLink { fleetOnThisLink = true }
 
             // What this daemon can do, asked once per connection, on its first
             // fleet. The overview reads it to decide whether a runner's cards

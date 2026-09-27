@@ -2103,24 +2103,29 @@ struct ShellScreen: View {
 
     // MARK: - The one writer of `visibleTerminal`
 
-    /// What `markVisible` last told the runner is being read, for the probe.
-    @State private var watching: String?
-
     /// Whether the grid is up, as `ShellRootView` reports it. Nothing is
     /// being read while it is: see `markVisible`.
     @State private var overviewUp = false
 
-    /// The one way a UI test can ask which pane this screen says is being
-    /// read: `watch=<terminal id>`, or `watch=` for none. A one-point element
-    /// for the reason `ShellRootView.probe` is one. `Notifier` is not
-    /// observable, so the probe reads this screen's own copy.
+    /// The one way a UI test can ask which pane the runner is told is being
+    /// read: `watch=<terminal id>`, or `watch=` for none.
+    ///
+    /// `Notifier.visibleTerminal` itself, which is what
+    /// `Connection.markVisibleSeen` claims and marks `terminal.seen` from,
+    /// and not this screen's idea of it: `markVisible` is not its only writer
+    /// (a pane's own mount task is another), and a probe of one writer passed
+    /// while the other went on claiming a pane under the grid. `Notifier` is
+    /// not observable, so it is sampled four times a second. A one-point
+    /// element for the reason `ShellRootView.probe` is one.
     private var watchProbe: some View {
-        Rectangle()
-            .fill(Color.white.opacity(0.001))
-            .frame(width: 1, height: 1)
-            .accessibilityElement()
-            .accessibilityIdentifier("shell-watch")
-            .accessibilityValue("watch=\(watching ?? "")")
+        TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+            Rectangle()
+                .fill(Color.white.opacity(0.001))
+                .frame(width: 1, height: 1)
+                .accessibilityElement()
+                .accessibilityIdentifier("shell-watch")
+                .accessibilityValue("watch=\(Notifier.shared.visibleTerminal ?? "")")
+        }
     }
 
     /// Which pane the runner should believe is being read.
@@ -2140,7 +2145,6 @@ struct ShellScreen: View {
         let resting = ref ?? restingRef
         let at = overviewUp ? nil : resting
         Notifier.shared.visibleTerminal = at?.pane.terminal?.id
-        watching = at?.pane.terminal?.id
         // Claimed on the runner the pane is on, and only there. Every other
         // runner clears its own watch on its own next poll — `Connection.refresh`
         // has always ended with this call — so fanning out here would be N round
@@ -2214,7 +2218,7 @@ extension ShellScreen {
             panes: connection.fleet.worktrees.flatMap(\.terminals),
             build: connection.daemon,
             lastKnownBuild: connection.lastDaemon,
-            connected: connection.phase == .connected)
+            connected: connection.isAnswering)
     }
 
     /// Whether a board's Agent button has a pane to land on. See `onJump` on
@@ -2259,7 +2263,7 @@ private struct BoardSheetHost: View {
             board: connection.boards[sheet.workspace.id],
             unread: connection.unreadBoards.contains(sheet.workspace.id),
             speaksOfAgents: TaskAgentLink.speaksOfAgents(
-                connected: connection.phase == .connected, build: connection.daemon),
+                connected: connection.isAnswering, build: connection.daemon),
             agents: agents(for:),
             onJump: onJump,
             onRefresh: { await connection.readBoard(sheet.workspace) },

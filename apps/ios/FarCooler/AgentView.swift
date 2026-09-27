@@ -3419,7 +3419,38 @@ struct AgentLayoutHarness: View {
 
     var body: some View {
         ShellScreen(fleet: fleetStore, hosts: hosts, pendingTerminal: $open)
-            .task { stand() }
+            .task {
+                if Self.arrivesUnderTheGrid { await arriveUnderTheGrid() } else { stand() }
+            }
+    }
+
+    /// `-late-pane`, with `-shell-overview`: the agent pane arrives under the
+    /// open grid rather than being there from the first frame — the shape of
+    /// a runner switch, where A's fleet goes, nothing is left, and B's lands
+    /// with the grid still up and its first pane mounts under it. A worktree
+    /// with no panes seats the shell, the fleet then empties, and the fixture
+    /// lands after it, each a beat apart so the shell sees every step.
+    /// `ShellFleet.reseat(_:holding:after:)` then rests on the agent pane,
+    /// which mounts at rank 0 under the grid.
+    private static var arrivesUnderTheGrid: Bool {
+        opensOnTheGrid && CommandLine.arguments.contains("-late-pane")
+    }
+
+    private func arriveUnderTheGrid() async {
+        AgentView.fixture = Self.fixture
+        PaneDraftStore.clear(pane: Self.agentPane.id)
+        let seat = Worktree(
+            id: "harness-seat", short: "seat", task: "Seat", branch: "fixture · no runner",
+            state: "ready", terminals: [])
+        for fleet in [
+            Fleet(runtimeHealthy: true, livePanes: 0, worktrees: [seat]),
+            Fleet(runtimeHealthy: true, livePanes: 0, worktrees: []),
+            Fleet(runtimeHealthy: true, livePanes: 2, worktrees: [Self.worktree]),
+        ] {
+            connection.standIn(on: fleet)
+            fleetStore.republish()
+            try? await Task.sleep(for: .seconds(1))
+        }
     }
 
     /// Fill the fixture in, then point the shell at the pane.

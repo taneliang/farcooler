@@ -1062,6 +1062,24 @@ struct TerminalView: View {
         // left running behind a screen that has stopped drawing it. Which panes
         // need one at all is `Terminal.needsTerminalSession`, in AgentKit,
         // where `swift test` reads it back.
+        // The claim that this pane is being read: whether its pushes are
+        // suppressed, and whether a finished turn in it is marked seen. About
+        // the pane you are LOOKING at rather than about a tty, so it is true
+        // of a chat as of a terminal, and a banner about the pane in front of
+        // you is the same mistake either way.
+        //
+        // **Not while the grid is up.** A pane at rest under the open grid is
+        // visible by rank and read by nobody, and a pane MOUNTS there: B's
+        // first pane after a runner switch lands under the grid. This task
+        // claimed it on mount, after `ShellScreen.markVisible` had cleared the
+        // claim for the grid, and every poll re-sent it (`markVisibleSeen`
+        // reads `Notifier`), so a turn finishing there was marked seen. Keyed
+        // on the pair, so the grid closing onto this pane claims it.
+        .task(id: isVisible && !overviewShowing) {
+            guard isVisible, !overviewShowing else { return }
+            Notifier.shared.visibleTerminal = terminal.id
+            await connection.markVisibleSeen()
+        }
         .task(id: PaneDuty(visible: isVisible, drawsGrid: live.needsTerminalSession)) {
             if isVisible {
                 // `resume`, not `relink`. Relinking rebuilt the pane from
@@ -1079,12 +1097,6 @@ struct TerminalView: View {
                 } else {
                     session.stop()
                 }
-                // Both of these are about the pane you are LOOKING at rather
-                // than about a tty, so they are outside the branch: a chat is
-                // read on screen exactly as a terminal is, and a banner about
-                // the pane in front of you is the same mistake either way.
-                Notifier.shared.visibleTerminal = terminal.id
-                await connection.markVisibleSeen()
             } else {
                 session.stop()
                 // AND IT GIVES UP THE KEYBOARD.
