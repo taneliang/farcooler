@@ -183,6 +183,9 @@ async fn run() -> Result<(), i32> {
     // into this daemon's environment is in the log from its first line. It
     // also rides on `Host`, which is where a person will see it.
     let _ = farcooler_daemon::service::stand_in_agent();
+    // The same for the integration tests' switch, which a shipped install
+    // never sets: if it is set, the log says so from the first line.
+    let _ = farcooler_daemon::service::test_stub_agents();
 
     let service = Arc::new(Service::open().await.map_err(|e| {
         eprintln!("cannot open the service: {e}");

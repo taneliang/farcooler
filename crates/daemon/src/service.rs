@@ -426,7 +426,8 @@ pub fn preset_command_with_hooks(
 }
 
 /// The program an agent launch runs: `name` itself outside tests, unless
-/// `FARCOOLER_STAND_IN_AGENT` names a stand-in (see below).
+/// `FARCOOLER_STAND_IN_AGENT` names a stand-in or `FARCOOLER_TEST_STUB_AGENTS`
+/// asks for the stub (both below).
 ///
 /// **Under test, a stub by default.** Every launch builder -- the three
 /// agent arms of `preset_command_with_hooks` and its `other` arm, the two
@@ -459,15 +460,99 @@ pub fn preset_command_with_hooks(
 /// launch is `name` exactly as before. Set but unusable — empty, relative, or
 /// with a character a shell would read — it fails CLOSED: the launch runs `false`,
 /// so a typo in a fixture opens a pane that exits, never the real agent.
+///
+/// **Outside tests, the unit tests' stub when a harness asks for it.**
+/// `FARCOOLER_TEST_STUB_AGENTS=1` in the daemon's environment (or
+/// `stub_agents_in_this_process()`, for a harness that runs the daemon's
+/// library in its own process) makes this daemon do what its unit tests do:
+/// every launch runs `agent_stub::PROGRAM`, and the tmux boundary refuses a
+/// command that names a real agent with no stub in front of it
+/// (`refuse_a_real_agent`), answering the launch with an error rather than
+/// starting it. It exists for the integration tests (`crates/daemon/tests`,
+/// `crates/client/tests`), which build this library without `cfg(test)` and
+/// so would otherwise launch the real program by name; every harness there
+/// that starts a daemon sets it. A stand-in, when one is named, still wins:
+/// it is a program a fixture chose so that it never runs the agent, and the
+/// boundary accepts it in the stub's place. Inert when unset, like the
+/// stand-in: nothing a shipped install runs sets it.
+///
+/// Its limits are the unit tests' own. It sees only the four launch paths
+/// that call `refuse_a_real_agent`; an agent reached through a variable, an
+/// alias or a wrapper script is invisible to the word check; and an agent
+/// not in `agent_stub::AGENTS` is not refused.
 fn agent_program(name: &str) -> String {
     #[cfg(test)]
     if !test_agent::REAL.with(|r| r.get()) {
-        return format!("{} {name}", test_agent::PROGRAM);
+        return format!("{} {name}", agent_stub::PROGRAM);
     }
     match stand_in_agent() {
-        None => name.to_string(),
         Some(program) => format!("{program} {name}"),
+        None if test_stub_agents() => format!("{} {name}", agent_stub::PROGRAM),
+        None => name.to_string(),
     }
+}
+
+/// The name of the variable that turns on `test_stub_agents`. See
+/// `agent_program`.
+pub const TEST_STUB_AGENTS: &str = "FARCOOLER_TEST_STUB_AGENTS";
+
+/// Set by `stub_agents_in_this_process`.
+static STUB_AGENTS_IN_THIS_PROCESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// `FARCOOLER_TEST_STUB_AGENTS` for a harness that runs this library in its
+/// own process rather than spawning `farcoolerd`, where setting the variable
+/// would mean `std::env::set_var` in a test binary whose tests run in
+/// parallel. Process-wide, and it cannot be turned off again.
+pub fn stub_agents_in_this_process() {
+    STUB_AGENTS_IN_THIS_PROCESS.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Whether this daemon launches the stub and refuses a real agent, outside
+/// `cfg(test)` (see `agent_program`). The variable is read once.
+///
+/// Always false in the daemon's own unit tests, where `cfg(test)` already
+/// stubs every launch and `real_names()` has to be able to turn that off.
+pub fn test_stub_agents() -> bool {
+    static FROM_ENV: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if cfg!(test) {
+        return false;
+    }
+    STUB_AGENTS_IN_THIS_PROCESS.load(std::sync::atomic::Ordering::SeqCst)
+        || *FROM_ENV.get_or_init(|| {
+            let on = test_stub_switch(std::env::var_os(TEST_STUB_AGENTS).as_deref());
+            if on {
+                tracing::warn!("agent launches run a stub, and a real agent is refused ({TEST_STUB_AGENTS})");
+            }
+            on
+        })
+}
+
+/// What a `FARCOOLER_TEST_STUB_AGENTS` value means: on unless absent or `0`.
+/// Set to anything else — `1`, as the harnesses write it, but also `true` or
+/// an empty value — it is on, since a harness that set it meant "not the real
+/// agent".
+fn test_stub_switch(raw: Option<&std::ffi::OsStr>) -> bool {
+    raw.is_some_and(|v| v != "0")
+}
+
+/// The tmux boundary's check, on every command a launch path is about to
+/// hand tmux. In the daemon's unit tests it is `test_agent::refuse_a_real_agent`,
+/// which panics. Outside them it does nothing unless `test_stub_agents()`,
+/// and then answers a command naming a real agent with no stub (or stand-in)
+/// in front of it with an error, so the launch never starts.
+fn refuse_a_real_agent(command: &str) -> Result<()> {
+    #[cfg(test)]
+    test_agent::refuse_a_real_agent(command);
+    #[cfg(not(test))]
+    if test_stub_agents() {
+        if let Some(refusal) = agent_stub::real_agent_in(command, stand_in_agent()) {
+            tracing::error!("{}", refusal.message(&format!("a daemon under {TEST_STUB_AGENTS}"), command));
+            return Err(DomainError::InvalidArgument {
+                what: "a real agent launch, refused by FARCOOLER_TEST_STUB_AGENTS",
+            });
+        }
+    }
+    Ok(())
 }
 
 /// The name of the variable `agent_program` reads. See there.
@@ -513,10 +598,12 @@ fn stand_in_program(raw: Option<&str>) -> Option<String> {
     Some(if plain { raw.to_string() } else { "false".to_string() })
 }
 
-#[cfg(test)]
-pub(crate) mod test_agent {
-    use std::cell::Cell;
-
+/// The stub an agent launch runs in place of the agent, and the check that
+/// refuses a real one: the daemon's unit tests (`test_agent`) and, outside
+/// them, a daemon started with `FARCOOLER_TEST_STUB_AGENTS` (`agent_program`).
+/// One copy, so the integration tests are held to the same check as the unit
+/// tests rather than to a second one that drifts.
+pub(crate) mod agent_stub {
     /// The name the stub runs under, so a test can find it in a pane's
     /// start command. It is only ever `$0` of the `sh` below, never looked up
     /// as a program.
@@ -547,7 +634,110 @@ pub(crate) mod test_agent {
     /// `opencode`, `cursor-agent`) and the shim. One of these reaching tmux
     /// without the stub earlier in the same command is a real agent about to
     /// start.
-    const AGENTS: [&str; 5] = ["claude", "codex", "opencode", "cursor-agent", "agent-host"];
+    pub(crate) const AGENTS: [&str; 5] = ["claude", "codex", "opencode", "cursor-agent", "agent-host"];
+
+    /// Why `real_agent_in` refused a command, naming the agent it found.
+    #[derive(Debug)]
+    pub(crate) enum Refusal {
+        /// An agent after the stub, but past a separator the stub does not
+        /// vouch across.
+        PastASeparator(&'static str),
+        /// An agent with no stub in front of it at all.
+        Unstubbed(&'static str),
+    }
+
+    impl Refusal {
+        /// What went wrong, for `who` ("a daemon unit test").
+        pub(crate) fn message(&self, who: &str, command: &str) -> String {
+            match self {
+                Refusal::PastASeparator(program) => format!(
+                    "{who}'s command names `{program}` after the stub, but past one of \
+                     `;&|()<>$`, a backtick or a newline, so the stub does not vouch for it. This check \
+                     splits on those without regard to quoting: if that separator is inside a quoted \
+                     prompt or payload, reword it; if it is not, a real `{program}` was about to start \
+                     (a launch that did not go through `agent_program`): {command}"
+                ),
+                Refusal::Unstubbed(program) => format!(
+                    "{who} was about to start a real `{program}` in a tmux pane. Every launch \
+                     names its program through `agent_program`, which stubs it under test; this one did \
+                     not: {command}"
+                ),
+            }
+        }
+    }
+
+    /// The first real agent `command` would start, if any. Two ways in: an
+    /// agent's program with no stub earlier in the same command, which is
+    /// what a new launch path that forgot `agent_program` would write, and
+    /// one past a separator after a stubbed launch. `stand_in`, when a daemon
+    /// was started with one, vouches for what follows it exactly as the stub
+    /// does.
+    ///
+    /// Words are split on whitespace, quotes and the shell's own
+    /// punctuation, and compared by basename, so `/opt/homebrew/bin/claude`,
+    /// `claude;` and `$(command -v claude)` are all `claude`. The first agent
+    /// in each command -- the text between two of the shell's separators --
+    /// needs the stub before it in that same command. Everything after it
+    /// there is the stub's arguments (`--preset claude`, a prompt that names
+    /// an agent) and is not checked. A separator ends what a stub vouches
+    /// for, so a stubbed launch followed by `; codex` is refused. Separators
+    /// are found without regard to quoting, so a prompt holding one and then
+    /// an agent's name (`'fix it; ask codex'`) is refused too -- the safe
+    /// direction, and no test's prompt does. That refusal's message leads
+    /// with the separator and the quoting, which is the likelier cause once
+    /// a stub has appeared, and names `agent_program` only for the other
+    /// reading: a chained launch that forgot it.
+    ///
+    /// **What it still cannot see:** a program named through a variable, an
+    /// alias, `eval` or a wrapper script; and any agent not in `AGENTS`. It
+    /// is the backstop. `agent_program` stubbing every launch builder is the
+    /// protection.
+    pub(crate) fn real_agent_in(command: &str, stand_in: Option<&str>) -> Option<Refusal> {
+        let vouches = |w: &&str| *w == MARKER || Some(*w) == stand_in;
+        // One command at a time: a separator ends what a stub in front of it
+        // can vouch for.
+        let mut stubbed_earlier = false;
+        for segment in command.split(|c: char| ";&|()<>$`\n".contains(c)) {
+            let words: Vec<&str> = segment
+                .split(|c: char| c.is_whitespace() || c == '\'' || c == '"')
+                .filter(|w| !w.is_empty())
+                .collect();
+            for (i, word) in words.iter().enumerate() {
+                let program = word.rsplit('/').next().unwrap_or(word);
+                let Some(&program) = AGENTS.iter().find(|a| **a == program) else {
+                    continue;
+                };
+                if words[..i].iter().any(vouches) {
+                    // Everything after a stubbed agent in this command is its
+                    // arguments -- `--preset claude`, a prompt that names an
+                    // agent -- which the stub never reads.
+                    break;
+                }
+                // Quote-blind on purpose: every launch nests its prompt in
+                // `shell_quote` inside an `-ilc '...'`, so honoring only the
+                // outer quotes would put a stubbed launch and a real `; codex`
+                // after it in one segment. The sound quote-aware version is
+                // to unquote the `-ilc` argument into words and run this
+                // check on those again, recursively -- more than a backstop
+                // earns, so this fails closed instead. What this can do is
+                // say which of its two refusals this is.
+                return Some(if stubbed_earlier {
+                    Refusal::PastASeparator(program)
+                } else {
+                    Refusal::Unstubbed(program)
+                });
+            }
+            stubbed_earlier |= words.iter().any(vouches);
+        }
+        None
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_agent {
+    use std::cell::Cell;
+
+    pub(crate) use super::agent_stub::{MARKER, PROGRAM};
 
     thread_local! {
         pub(crate) static REAL: Cell<bool> = const { Cell::new(false) };
@@ -583,79 +773,17 @@ pub(crate) mod test_agent {
         command.replace(&format!("{inner} "), "").replace(&format!("{PROGRAM} "), "")
     }
 
-    /// The tmux boundary's check, run on every command a test is about to
-    /// hand tmux: panics rather than start a real agent. Two ways in, both
-    /// refused -- a command built under `real_names()`, and an agent's
-    /// program with no stub earlier in the same command, which is what a new
-    /// launch path that forgot `agent_program` would write.
-    ///
-    /// Words are split on whitespace, quotes and the shell's own
-    /// punctuation, and compared by basename, so `/opt/homebrew/bin/claude`,
-    /// `claude;` and `$(command -v claude)` are all `claude`. The first agent
-    /// in each command -- the text between two of the shell's separators --
-    /// needs the stub before it in that same command. Everything after it
-    /// there is the stub's arguments (`--preset claude`, a prompt that names
-    /// an agent) and is not checked. A separator ends what a stub vouches
-    /// for, so a stubbed launch followed by `; codex` is refused. Separators
-    /// are found without regard to quoting, so a prompt holding one and then
-    /// an agent's name (`'fix it; ask codex'`) is refused too -- the safe
-    /// direction, and no test's prompt does. That refusal's message leads
-    /// with the separator and the quoting, which is the likelier cause once
-    /// a stub has appeared, and names `agent_program` only for the other
-    /// reading: a chained launch that forgot it.
-    ///
-    /// **What it still cannot see:** a program named through a variable, an
-    /// alias, `eval` or a wrapper script; and any agent not in `AGENTS`. It
-    /// is the backstop. `agent_program` stubbing every launch builder is the
-    /// protection.
+    /// The tmux boundary's check under test: panics rather than start a
+    /// real agent. Refuses a command built under `real_names()`, and
+    /// whatever `agent_stub::real_agent_in` refuses.
     pub(crate) fn refuse_a_real_agent(command: &str) {
         assert!(
             !REAL.with(|r| r.get()),
             "a test built this command with test_agent::real_names() and then launched it; \
              real names are for checking a builder's string, never for a pane: {command}"
         );
-        // One command at a time: a separator ends what a stub in front of it
-        // can vouch for.
-        let mut stubbed_earlier = false;
-        for segment in command.split(|c: char| ";&|()<>$`\n".contains(c)) {
-            let words: Vec<&str> = segment
-                .split(|c: char| c.is_whitespace() || c == '\'' || c == '"')
-                .filter(|w| !w.is_empty())
-                .collect();
-            for (i, word) in words.iter().enumerate() {
-                let program = word.rsplit('/').next().unwrap_or(word);
-                if !AGENTS.contains(&program) {
-                    continue;
-                }
-                if words[..i].contains(&MARKER) {
-                    // Everything after a stubbed agent in this command is its
-                    // arguments -- `--preset claude`, a prompt that names an
-                    // agent -- which the stub never reads.
-                    break;
-                }
-                // Quote-blind on purpose: every launch nests its prompt in
-                // `shell_quote` inside an `-ilc '...'`, so honoring only the
-                // outer quotes would put a stubbed launch and a real `; codex`
-                // after it in one segment. The sound quote-aware version is
-                // to unquote the `-ilc` argument into words and run this
-                // check on those again, recursively -- more than a backstop
-                // earns, so this fails closed instead. What this can do is
-                // say which of its two refusals this is.
-                assert!(
-                    !stubbed_earlier,
-                    "a daemon unit test's command names `{program}` after the stub, but past one of \
-                     `;&|()<>$`, a backtick or a newline, so the stub does not vouch for it. This check \
-                     splits on those without regard to quoting: if that separator is inside a quoted \
-                     prompt or payload, reword it; if it is not, a real `{program}` was about to start \
-                     (a launch that did not go through `agent_program`): {command}"
-                );
-                panic!(
-                    "a daemon unit test was about to start a real `{program}` in a tmux pane. Every launch \
-                     names its program through `agent_program`, which stubs it under test; this one did \
-                     not: {command}"
-                );
-            }
-            stubbed_earlier |= words.contains(&MARKER);
+        if let Some(refusal) = super::agent_stub::real_agent_in(command, None) {
+            panic!("{}", refusal.message("a daemon unit test", command));
         }
     }
 }
@@ -3525,12 +3653,10 @@ impl Service {
             task_key.as_deref(),
             self.pane_workspace(&term).as_ref(),
         );
-        #[cfg(test)]
-        test_agent::refuse_a_real_agent(&command);
-        let created = self
-            .tmux
-            .create_terminal_window(worktree_id, term.id, title, &dir, &command)
-            .await;
+        let created = match refuse_a_real_agent(&command) {
+            Ok(()) => self.tmux.create_terminal_window(worktree_id, term.id, title, &dir, &command).await,
+            Err(refused) => Err(refused),
+        };
 
         if let Err(e) = created {
             // No pane will ever read a prompt file for this terminal.
@@ -4030,12 +4156,10 @@ impl Service {
             task_key.as_deref(),
             self.pane_workspace(&term).as_ref(),
         );
-        #[cfg(test)]
-        test_agent::refuse_a_real_agent(&command);
-        let created = self
-            .tmux
-            .split_pane(&pane.pane_id, axis, term.id, &ws.worktree_path, &command, before)
-            .await;
+        let created = match refuse_a_real_agent(&command) {
+            Ok(()) => self.tmux.split_pane(&pane.pane_id, axis, term.id, &ws.worktree_path, &command, before).await,
+            Err(refused) => Err(refused),
+        };
 
         let pane_id = match created {
             Ok(id) => id,
@@ -4228,11 +4352,10 @@ impl Service {
         // which is what a genuinely lost terminal is: there is no rectangle
         // left to put the program back into.
         let existing = self.inventory.refresh().await.claimants(id).into_iter().next().cloned();
-        #[cfg(test)]
-        test_agent::refuse_a_real_agent(&command);
-        let respawned = match existing {
-            Some(pane) => self.tmux.respawn_pane(&pane.pane_id, &dir, &command).await,
-            None => {
+        let respawned = match (refuse_a_real_agent(&command), existing) {
+            (Err(refused), _) => Err(refused),
+            (Ok(()), Some(pane)) => self.tmux.respawn_pane(&pane.pane_id, &dir, &command).await,
+            (Ok(()), None) => {
                 self.tmux.create_terminal_window(term.worktree_id, id, &term.title, &dir, &command).await.map(|_| ())
             }
         };
@@ -4649,8 +4772,7 @@ impl Service {
             command,
         );
 
-        #[cfg(test)]
-        test_agent::refuse_a_real_agent(&command);
+        refuse_a_real_agent(&command)?;
         self.tmux.respawn_pane(&pane.pane_id, &dir, &command).await?;
         let updated = self.record_pane_mode(&term, pane_mode, session_id)?;
         // The shim died with the pane the line above respawned. Nothing told
@@ -5613,6 +5735,24 @@ mod stand_in_agent_tests {
     fn anything_else_fails_closed() {
         for raw in ["claude", "bin/claude", "/tmp/with space/claude", "/tmp/x';claude", "/tmp/$HOME"] {
             assert_eq!(stand_in_program(Some(raw)), Some("false".to_string()), "{raw}");
+        }
+    }
+}
+
+/// What a `FARCOOLER_TEST_STUB_AGENTS` value means (`test_stub_switch`).
+#[cfg(test)]
+mod test_stub_switch_tests {
+    use super::test_stub_switch;
+
+    /// Absent is every shipped daemon, and `0` is somebody turning it off:
+    /// the real agent. Anything else was set by a harness that meant "never
+    /// the real agent", so it is on.
+    #[test]
+    fn only_absent_or_zero_leaves_the_real_agent() {
+        assert!(!test_stub_switch(None));
+        assert!(!test_stub_switch(Some("0".as_ref())));
+        for raw in ["1", "true", "", "yes"] {
+            assert!(test_stub_switch(Some(raw.as_ref())), "{raw:?}");
         }
     }
 }
