@@ -254,6 +254,24 @@ pub fn end_reason(stop_reason: &str) -> EndReason {
     }
 }
 
+/// The params of a `session/new`, or of a `session/load` of `resume`:
+/// `extra`, then `cwd`, `mcpServers` and the session id, which `extra`
+/// can't replace. A resume has to look in the directory the conversation
+/// was filed under, and that's the one the connection runs in.
+pub fn session_params(
+    cwd: &str,
+    resume: Option<&str>,
+    extra: &serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Value {
+    let mut params = extra.clone();
+    params.insert("cwd".into(), cwd.into());
+    params.insert("mcpServers".into(), serde_json::json!([]));
+    if let Some(id) = resume {
+        params.insert("sessionId".into(), id.into());
+    }
+    serde_json::Value::Object(params)
+}
+
 pub struct AgentSession {
     conn: AcpConnection,
     pub session_id: String,
@@ -276,9 +294,14 @@ impl AgentSession {
     ///
     /// `resume` carries the session id from SQLite. Its absence means this is a
     /// terminal that has never been in agent pane mode.
+    ///
+    /// `extra` goes into `session/new` and `session/load` alike, beside the
+    /// params this sets (`session_params`): a workspace's Claude Code
+    /// orchestrator is handed its recipe this way. Empty for every other pane.
     pub async fn start(
         mut conn: AcpConnection,
         resume: Option<String>,
+        extra: &serde_json::Map<String, serde_json::Value>,
     ) -> Result<(Self, Vec<AgentEvent>), SessionError> {
         let init = conn
             .request(
@@ -299,6 +322,7 @@ impl AgentSession {
 
         let mut prelude = Vec::new();
         let cwd = conn.worktree.display().to_string();
+        let params = |resume: Option<&str>| session_params(&cwd, resume, extra);
 
         // The session result, not the initialize result, is where the modes
         // are. `initialize` advertises `loadSession` and the prompt
@@ -310,7 +334,7 @@ impl AgentSession {
                 let loaded = conn
                     .request(
                         "session/load",
-                        serde_json::json!({ "sessionId": id, "cwd": cwd, "mcpServers": [] }),
+                        params(Some(&id)),
                     )
                     .await;
                 match loaded {
@@ -347,10 +371,7 @@ impl AgentSession {
                         };
                         prelude.push(load_failed_event(&detail));
                         let result = conn
-                            .request(
-                                "session/new",
-                                serde_json::json!({ "cwd": cwd, "mcpServers": [] }),
-                            )
+                            .request("session/new", params(None))
                             .await?;
                         let new_id = result["sessionId"].as_str().unwrap_or(&id).to_string();
                         (new_id, result)
@@ -364,14 +385,14 @@ impl AgentSession {
                 // before this point cannot be shown.
                 prelude.push(load_unsupported_event());
                 let result = conn
-                    .request("session/new", serde_json::json!({ "cwd": cwd, "mcpServers": [] }))
+                    .request("session/new", params(None))
                     .await?;
                 let new_id = result["sessionId"].as_str().unwrap_or(&id).to_string();
                 (new_id, result)
             }
             None => {
                 let result = conn
-                    .request("session/new", serde_json::json!({ "cwd": cwd, "mcpServers": [] }))
+                    .request("session/new", params(None))
                     .await?;
                 let new_id =
                     result["sessionId"].as_str().ok_or(SessionError::Rejected)?.to_string();
@@ -925,6 +946,70 @@ mod tests {
             .await
             .expect("next_events must not hang waiting on an adapter that already exited");
         assert!(outcome.is_err(), "closure must be a reported error, not a silently empty batch");
+    }
+
+    /// A scripted adapter that writes every line it's sent to `record`,
+    /// offers `session/load` at `initialize`, and answers the session request
+    /// with `s1`.
+    fn recording(record: &Path) -> farcooler_agent_core::backend::Launch {
+        let answer = |id: u8, result: &str| {
+            format!(r#"read line; printf '%s\n' "$line" >> '{}'; printf '{{"jsonrpc":"2.0","id":{id},"result":{result}}}\n'; "#, record.display())
+        };
+        farcooler_agent_core::backend::Launch {
+            program: "/bin/sh".into(),
+            args: vec![
+                "-c".to_string(),
+                format!(
+                    "{}{}read done",
+                    answer(1, r#"{"agentCapabilities":{"loadSession":true}}"#),
+                    answer(2, r#"{"sessionId":"s1"}"#),
+                ),
+            ],
+            env: Default::default(),
+        }
+    }
+
+    /// The caller's session params reach `session/new` and `session/load`
+    /// alike, beside the `cwd` the connection runs in, which they can't
+    /// replace: a resume has to look where the conversation was filed.
+    #[tokio::test]
+    async fn the_callers_session_params_go_to_a_new_session_and_a_resumed_one() {
+        let dir = std::env::temp_dir().join(format!("farcooler-params-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cwd = dir.display().to_string();
+        let extra = serde_json::json!({
+            "additionalDirectories": ["/src/repo"],
+            "cwd": "/somewhere/else",
+            "_meta": { "claudeCode": { "options": { "projectConfigRoot": "/src/repo" } } },
+        });
+        let extra = extra.as_object().unwrap();
+        for resume in [None, Some("s0".to_string())] {
+            let record = dir.join(format!("sent-{}", resume.is_some()));
+            let _ = std::fs::remove_file(&record);
+            let conn = AcpConnection::spawn(&recording(&record), &dir).await.expect("spawn");
+            let started = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                AgentSession::start(conn, resume.clone(), extra),
+            )
+            .await
+            .expect("must not hang");
+            started.expect("started");
+            let sent: Vec<serde_json::Value> = std::fs::read_to_string(&record)
+                .unwrap()
+                .lines()
+                .map(|l| serde_json::from_str(l).unwrap())
+                .collect();
+            let (method, params) = (&sent[1]["method"], &sent[1]["params"]);
+            assert_eq!(method, if resume.is_some() { "session/load" } else { "session/new" });
+            assert_eq!(params["cwd"], cwd.as_str(), "{params}");
+            assert_eq!(params["additionalDirectories"], serde_json::json!(["/src/repo"]), "{params}");
+            assert_eq!(params["_meta"]["claudeCode"]["options"]["projectConfigRoot"], "/src/repo");
+            assert_eq!(params["mcpServers"], serde_json::json!([]), "{params}");
+            if let Some(id) = &resume {
+                assert_eq!(params["sessionId"], id.as_str(), "{params}");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

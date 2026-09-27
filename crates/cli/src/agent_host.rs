@@ -158,7 +158,7 @@ async fn start_backend(
             // with "Not authenticated" reached the user as "the ACP adapter
             // closed its connection", and the one fact naming the fix was
             // discarded one function above the screen.
-            let (agent, prelude) = AgentSession::start(conn, session).await?;
+            let (agent, prelude) = AgentSession::start(conn, session, &Default::default()).await?;
             let session_id = agent.session_id.clone();
             let modes = agent.available_modes.clone();
             let can_load = agent.can_load;
