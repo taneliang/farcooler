@@ -448,10 +448,20 @@ async fn next_event(
         match receiver.recv().await {
             Ok(event) => return Some(event),
             // A slow client missed some. Dropping the connection would be
-            // worse than the gap: the next event still arrives, and clients
-            // reconcile against a full read when they need certainty.
+            // worse than the gap: the next event still arrives. But the
+            // client is told, in place of what it lost — every event is a
+            // "re-read" notice, harmless to lose only if the client learns it
+            // missed SOMETHING, and a phone that reads its boards on their
+            // own news had no other way to.
             Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                 tracing::warn!(skipped, "client fell behind the event stream");
+                return Some(Event {
+                    event_id: ids::new_id(),
+                    sequence: 0,
+                    payload: Some(farcooler_protocol::v1::event::Payload::EventsMissed(
+                        farcooler_protocol::v1::Empty {},
+                    )),
+                });
             }
             Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
         }
@@ -503,6 +513,35 @@ async fn run_watchdog(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A connection that fell behind the event stream is told so** (ov-20
+    /// R-M9). The broadcast drops what a slow receiver missed; the daemon used
+    /// to log it and carry on, and the client never learned anything was
+    /// gone. Now the gap arrives as `events_missed`, and the events after it
+    /// as themselves.
+    #[tokio::test]
+    async fn a_connection_that_fell_behind_is_told_it_missed_some() {
+        use farcooler_protocol::v1::event::Payload;
+        let (sender, receiver) = tokio::sync::broadcast::channel::<Event>(2);
+        let fleet = || Event {
+            event_id: ids::new_id(),
+            sequence: 0,
+            payload: Some(Payload::FleetChanged(farcooler_protocol::v1::Empty {})),
+        };
+        for _ in 0..5 {
+            sender.send(fleet()).unwrap();
+        }
+        let mut events = Some(receiver);
+
+        let first = next_event(&mut events).await.expect("the gap, said");
+        assert!(
+            matches!(first.payload, Some(Payload::EventsMissed(_))),
+            "a dropped event went unmentioned: {:?}",
+            first.payload
+        );
+        let next = next_event(&mut events).await.expect("what came after the gap");
+        assert!(matches!(next.payload, Some(Payload::FleetChanged(_))));
+    }
 
     fn sample_envelope() -> WireEnvelope {
         WireEnvelope {

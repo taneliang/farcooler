@@ -223,6 +223,7 @@ fn event_line(what: &crate::session::FleetEvent) -> String {
     use crate::session::FleetEvent;
     match what {
         FleetEvent::Fleet => json!({ "event": "fleet" }),
+        FleetEvent::Resync => json!({ "event": "resync" }),
         FleetEvent::ChangeSet { worktree } => {
             json!({ "event": "change_set", "worktree": worktree.to_string() })
         }
@@ -2411,6 +2412,14 @@ unsafe fn read_str(pointer: *const c_char) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A dropped stretch of the daemon's events reaches a phone as the same
+    /// `resync` its own queue sends on overflow, which both phones already
+    /// answer by reading every board.
+    #[test]
+    fn a_resync_reaches_the_line_as_one() {
+        assert_eq!(event_line(&crate::session::FleetEvent::Resync), r#"{"event":"resync"}"#);
+    }
 
     /// The line a phone reads carries the runner's word, not just its prose.
     ///

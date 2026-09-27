@@ -418,8 +418,9 @@ final class Connection: ObservableObject {
             // A board is the exception because it is not in the fleet. A
             // `task` notice names its board — the workspace the task is on,
             // and on a move the one it left — so that a `task.list` per board
-            // it moved is what it costs, and `resync` — the queue overflowed
-            // and said nothing more specific — is every board. Which boards a
+            // it moved is what it costs, and `resync` — the queue overflowed,
+            // or the runner dropped events it owed this link
+            // (`events_missed`) — is every board. Which boards a
             // notice moves is `RunnerBoards.touched`'s to say.
             let event = notice["event"] as? String
             let moved = BoardNotice(notice: notice)
@@ -686,7 +687,9 @@ final class Connection: ObservableObject {
             // kept its event channel, and the client core queues the notices
             // that arrived meanwhile — coalesced, and collapsed to a `resync`
             // if there were too many — so each board that moved is read on
-            // its own news as the queue drains. Only a runner with no live
+            // its own news as the queue drains. A notice the runner itself
+            // dropped, for a link that fell behind its event stream, arrives
+            // as a `resync` too (`events_missed` in the proto). Only a runner with no live
             // channel had nobody to tell it; see `boardsMayHaveMissedNews`.
             // A link that did not survive comes back through `reconnect`,
             // which reads every board anyway.

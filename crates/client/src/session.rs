@@ -187,6 +187,10 @@ pub struct Session {
 /// `EventQueue` in `ffi.rs`, which is where that policy is written down.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FleetEvent {
+    /// The daemon dropped events addressed to this connection, and cannot
+    /// say which: re-read everything. The same notice the FFI's queue sends
+    /// on its own overflow (`EventQueue`).
+    Resync,
     /// Something in the fleet moved: a terminal's state, a worktree, a
     /// layout, an operation, or the set of worktrees itself.
     ///
@@ -295,6 +299,9 @@ impl FleetEvent {
             // passed, and the only symptom was a board that rendered once and
             // never moved — a bug no test in the plan could see, because every
             // board test was a model test.
+            // The daemon dropped events addressed to this connection. What
+            // they were is gone, so everything is re-read.
+            Payload::EventsMissed(_) => Some(FleetEvent::Resync),
             Payload::TaskChanged(t) => Some(FleetEvent::Task {
                 repository: uuid_of(&t.repository_id),
                 workspace: some_uuid(t.workspace_id.as_deref()),
@@ -2360,6 +2367,19 @@ fn fleet_trace_anchor(list: &farcooler_protocol::v1::TerminalList) -> Option<i64
 
 #[cfg(test)]
 mod tests {
+    /// **A connection that fell behind is a resync** (ov-20 R-M9): the daemon
+    /// dropped events addressed to it, and the one answer to "you missed some"
+    /// is to re-read everything, which is what the phones already do on the
+    /// queue's own overflow.
+    #[test]
+    fn events_missed_is_a_resync() {
+        use farcooler_protocol::v1::event::Payload;
+        assert_eq!(
+            super::FleetEvent::of(Payload::EventsMissed(farcooler_protocol::v1::Empty {})),
+            Some(super::FleetEvent::Resync)
+        );
+    }
+
     /// A runner that does not advertise `tasks` is refused a board read here,
     /// with the code the runner itself would have used, and one that does is
     /// let through. An empty list is an old runner, which has no board.

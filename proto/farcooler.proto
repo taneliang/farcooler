@@ -491,6 +491,15 @@ message Event {
     // client that already decodes this event has to be taught a new field
     // before the loop can be trusted.
     TaskChanged task_changed = 22;
+    // This connection fell behind the daemon's event stream and some events
+    // addressed to it were dropped: re-read whatever you hold.
+    //
+    // Sent in place of what was lost, to the one connection that lost it.
+    // Every event here is a "re-read" notice that is harmless to lose as long
+    // as the client learns it missed SOMETHING; without this the daemon
+    // dropped them with nothing but a line in its own log, and a phone's
+    // boards, read only on their own news, stayed where they were.
+    Empty events_missed = 23;
   }
 }
 
