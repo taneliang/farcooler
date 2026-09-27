@@ -1411,7 +1411,11 @@ final class TerminalScrollTests: XCTestCase {
     ///
     /// `hosts.last` is pinned too, so this always opens on Runner A rather
     /// than on whichever one the last run happened to leave selected.
-    private func launchTwoRunners() -> XCUIApplication {
+    ///
+    /// `extra` is appended to the launch arguments, and each runner's id is
+    /// kept in `runnerIDs`: the overview names a runner's heading by id, not
+    /// by label (see 3d105dcc), and these ids are made fresh here.
+    private func launchTwoRunners(_ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         let user = ProcessInfo.processInfo.environment["DEMO_USER"] ?? ""
         let host = ProcessInfo.processInfo.environment["DEMO_HOST"] ?? "127.0.0.1:2222"
@@ -1442,10 +1446,14 @@ final class TerminalScrollTests: XCTestCase {
         }
         let json = "[\(entry(a, "Runner A")),\(entry(b, "Runner B"))]"
         let hex = Data(json.utf8).map { String(format: "%02x", $0) }.joined()
-        app.launchArguments += ["-hosts", "<\(hex)>", "-hosts.last", a]
+        app.launchArguments += ["-hosts", "<\(hex)>", "-hosts.last", a] + extra
+        runnerIDs = (a, b)
         app.launch()
         return app
     }
+
+    /// The ids `launchTwoRunners` gave Runner A and Runner B on its last launch.
+    private var runnerIDs = (a: "", b: "")
 
     /// The workspace out of an accessibility label, whichever label it is.
     ///
@@ -1530,22 +1538,24 @@ final class TerminalScrollTests: XCTestCase {
         return Self.workspaceName(bar.label)
     }
 
-    /// Which runner the app says it is on, read off the overview's own menu.
-    private func currentRunner(_ app: XCUIApplication) throws -> String {
-        try openOverview(app)
-        let menu = app.descendants(matching: .any).matching(identifier: "runner-menu").firstMatch
-        XCTAssertTrue(menu.waitForExistence(timeout: 20), "the runner menu never appeared")
-        return menu.label
-    }
-
-    /// Pick a runner out of the overview's menu.
-    private func chooseRunner(_ app: XCUIApplication, named label: String) throws {
-        try openOverview(app)
-        let menu = app.descendants(matching: .any).matching(identifier: "runner-menu").firstMatch
-        XCTAssertTrue(menu.waitForExistence(timeout: 10), "the runner menu never appeared")
+    /// Switch to a runner from its heading in the overview, with the grid left
+    /// open. The overview must already be showing.
+    ///
+    /// What the overview's top-left runner menu did, and where it went: the
+    /// menu was removed in bc8f726f and its checkmark row became "Switch to
+    /// This Runner" on the heading of a runner this phone is not connected to
+    /// (`ShellScreen.cachedActions`). Found by the runner's ID, because two
+    /// runners can share a label.
+    private func switchToRunner(_ app: XCUIApplication, id: String) throws {
+        let menu = app.buttons["shell-section-menu-\(id)"]
+        XCTAssertTrue(
+            menu.waitForExistence(timeout: 20),
+            "the overview has no heading menu for runner \(id): \(app.debugDescription)")
         menu.tap()
-        let choice = app.buttons[label]
-        XCTAssertTrue(choice.waitForExistence(timeout: 10), "no menu entry for \(label)")
+        let choice = app.buttons["Switch to This Runner"]
+        XCTAssertTrue(
+            choice.waitForExistence(timeout: 10),
+            "runner \(id)'s heading offers no Switch to This Runner")
         choice.tap()
     }
 
@@ -1574,51 +1584,51 @@ final class TerminalScrollTests: XCTestCase {
     /// measurement. That one asserted the teardown: `RootView` keyed the whole
     /// tree `.id(host)`, so changing the selected runner destroyed `FleetView`,
     /// `ShellScreen`, `ShellRootView`, the track and every mounted pane, and
-    /// `shell-state` disappearing was that teardown observed. The key is gone
-    /// and the store holds a connection per runner, so the same probe still
-    /// answering afterwards is the port's central claim.
+    /// `shell-state` disappearing was that teardown observed. The key is gone,
+    /// so the same shell still answering afterwards is the port's central
+    /// claim.
     ///
     /// **This is the test that goes red if `.id(host)` comes back**, which is
     /// why it is worth more than the alert it replaces.
     ///
-    /// # Two assertions, and only one of them needs a fixture
+    /// # Why "Connect every runner at once" is off for it
     ///
-    /// The probe and the overview need nothing of the runner but a fleet, so
-    /// they run wherever the demo host stands up at all. The scrollback
-    /// position is the nicer evidence — it is what a person would actually
-    /// notice — and it needs a pane with history in it, which this demo host
-    /// does not always have.
+    /// With it on, which is the default, every runner is live, and there is
+    /// nothing left to switch: the overview's runner menu went in bc8f726f
+    /// because it had stopped choosing anything, and the selected runner now
+    /// only follows where you move (`ShellScreen.follow`). The one place a
+    /// runner is still CHOSEN is "Switch to This Runner" on the heading of a
+    /// runner this phone is not connected to, which exists only with the
+    /// setting off. That is the old menu's checkmark row, tapped the way the
+    /// menu was — with the grid open — so the evidence reads exactly as it
+    /// did. Passed as a launch argument, which lives in the argument domain
+    /// and is never written to the simulator's defaults.
     ///
-    /// **That split is deliberate and it is the lesson from the version this
-    /// replaces.** Its predecessor opened with `openAPaneWithScrollback` and so
-    /// could not run at all against a quiet fleet: it failed on the fixture
-    /// before reaching a single assertion about crossing runners, on `main`,
-    /// with nothing wrong with the app. A test whose subject is unreachable is
-    /// not evidence either way, so the half that can always run always runs and
-    /// the half that needs history says so when it is skipped.
+    /// # What it no longer measures
+    ///
+    /// It used to go on and compare a scrolled pane's place across the switch.
+    /// That was a claim about every runner being live: with one runner at a
+    /// time, switching retires the old runner's connection by design
+    /// (`FleetStore.reconcile`), so its panes go with it and their place is
+    /// not the shell's to keep. The shell surviving is still the whole of
+    /// what `.id(host)` would break.
+    ///
+    /// # Red, and not because of `.id(host)`
+    ///
+    /// As of 5b4989f0 this fails, and the app is what it is reporting on. The
+    /// switch retires Runner A before Runner B has a fleet, so for that moment
+    /// no runner has one, `FleetStore.hasFleet` is false, and
+    /// `FleetView.phases` swaps the whole connected screen for its waiting
+    /// screen. When B answers, a new shell mounts: seen after the switch as
+    /// `ws=0 tab=0 overview=0` on a shell that had been on ws=1 with the grid
+    /// open. Whether the shell should survive that gap is a product call, and
+    /// it is left red until somebody makes it.
     func testAChangeOfRunnerRebuildsNothing() throws {
-        let app = launchTwoRunners()
+        let app = launchTwoRunners(["-\(Self.everyRunnerAtOnce)", "<false/>"])
         _ = try openATerminalInTheShell(app)
 
         let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
         XCTAssertTrue(probe.waitForExistence(timeout: 30), "the shell never stood up")
-
-        // The place this pane was left at, when there is one to have.
-        //
-        // Optional on purpose: a two-line pane cannot be scrolled, and on such
-        // a fleet "came back at the bottom" and "came back where it was" are
-        // the same observation and prove nothing. `nil` here skips the second
-        // assertion and leaves the first one doing its job.
-        var scrolled: Int?
-        if let surface = visibleSurface(app), waitForHistory(app, timeout: 5) {
-            // **Where the swipe ENDED, not where it was when the finger left.**
-            // `position(app)` straight after a swipe stopped being the same
-            // thing when the terminal grew momentum: even `velocity: .slow`
-            // leaves the recognizer coasting, so this read caught the pane
-            // mid-flight and the comparison failed on something else entirely.
-            surface.swipeDown(velocity: .slow)
-            scrolled = settledOffset(app).flatMap { $0 > 0 ? $0 : nil }
-        }
 
         // CONTROL — inside one runner nothing is rebuilt, which it never was.
         // A control that failed would say this test cannot tell the two apart.
@@ -1630,42 +1640,36 @@ final class TerminalScrollTests: XCTestCase {
                 withVelocity: .slow, thenHoldForDuration: 0.4)
             XCTAssertTrue(probe.exists, "the shell was torn down by an ordinary swipe")
         }
-        if let scrolled {
-            XCTAssertEqual(
-                position(app)?.offset, scrolled,
-                "leaving a pane and coming back inside one runner lost its place — the control "
-                    + "for this test does not hold, so what it measures below is not the runner "
-                    + "change")
-        }
 
-        // **The SECOND control, and the one this test was wrong without.**
-        //
-        // Reaching another runner goes through the overview: a lift up to the
-        // grid, a tap in the menu, and `Done` back down. The lift is a gesture
-        // that moves the page, and it costs the pane its place all by itself —
-        // measured here, on this runner, with nothing switched. Without this
-        // number the assertion after the switch is comparing against the place
-        // the pane had before a gesture it never made, and would report the
-        // OVERVIEW's cost as the runner change's.
-        //
-        // That is exactly the mistake the test this replaces made in the other
-        // direction: it crossed runners, found the pane at the bottom, and
-        // called the teardown proven.
-        try openOverview(app)
-        let done = app.buttons["Done"]
-        if done.waitForExistence(timeout: 10) { done.tap() }
-        let afterAnOverview = position(app)?.offset
+        // Runner B, before: a heading this phone has never reached. Read here
+        // so that the switch below can be seen to have HAPPENED — without it,
+        // a tap that selected nothing would leave the grid open too, and the
+        // assertion after it would pass on nothing at all.
+        let other = app.descendants(matching: .any)
+            .matching(identifier: "shell-section-\(runnerIDs.b)").firstMatch
+        func isLive(_ heading: XCUIElement) -> Bool {
+            // The link words `ShellScreen.linkWord` gives a CONNECTED runner's
+            // heading. One that is not connected says when it was last seen.
+            ["Connected", "Connecting", "Reconnecting"].contains { heading.label.contains($0) }
+        }
 
         // And now the runner change.
         //
         // The overview is the sharp half, and it is the old test's own evidence
-        // read the other way round. The runner menu is tapped with the grid
-        // OPEN, and nothing in this app closes the overview on a runner switch
-        // — `RunnerMenu` has an `onSwitch` for callers with something to close
-        // and the shell passes none. So the grid still being open is a
-        // `ShellRootView` that is the one the tap happened in. The old test
-        // waited for it to CLOSE and called that the teardown.
-        try chooseRunner(app, named: "Runner B")
+        // read the other way round. The switch is tapped with the grid OPEN,
+        // and nothing in this app closes the overview on a runner switch —
+        // `cachedActions` sets the selection and nothing else. So the grid
+        // still being open is a `ShellRootView` that is the one the tap
+        // happened in. The old test waited for it to CLOSE and called that the
+        // teardown.
+        try openOverview(app)
+        XCTAssertTrue(
+            other.waitForExistence(timeout: 20), "the overview has no heading for Runner B")
+        XCTAssertFalse(
+            isLive(other),
+            "Runner B is already connected (\(other.label)), so \"Connect every runner at once\" "
+                + "is still on and there is no switch to make")
+        try switchToRunner(app, id: runnerIDs.b)
 
         let stayed = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in
@@ -1673,35 +1677,23 @@ final class TerminalScrollTests: XCTestCase {
             }, object: nil)
         XCTAssertEqual(
             XCTWaiter.wait(for: [stayed], timeout: 30), .completed,
-            "the shell the runner menu was tapped in is gone — `.id(host)` is back on `RootView`, "
-                + "and every mounted pane went with it")
+            "the shell the runner was switched in is gone (the probe reads "
+                + "\(probe.exists ? probe.value as? String ?? "" : "nothing")): something above "
+                + "`ShellScreen` unmounted it. `.id(host)` on `RootView` would do this, and so "
+                + "does `FleetView.phases` falling back to its waiting screen for as long as no "
+                + "runner has a fleet, which is every switch with one runner at a time")
 
-        // Out of the grid, back onto the pane that was never unmounted.
-        if done.waitForExistence(timeout: 10) { done.tap() }
-
-        if scrolled != nil {
-            // **Against the overview's own cost, not against the scroll.** A
-            // change of runner is a trip through the grid, so what this can
-            // honestly claim is that the trip costs no MORE when a runner
-            // changes at the top of it than when nothing does. The place a
-            // pane keeps across the lift itself is the overview's business and
-            // is measured — and asserted — one gesture up.
-            XCTAssertEqual(
-                position(app)?.offset, afterAnOverview,
-                "a change of runner cost the pane more than the same trip through the overview "
-                    + "with no change at the top of it. Panes are supposed to survive one now — "
-                    + "that is what the port was for, and what the crossing alert used to warn "
-                    + "about instead")
-        } else {
-            // Said out loud rather than silently skipped: this run proved the
-            // shell survives and did NOT prove anything about scrollback, and
-            // the two are different claims.
-            print(
-                "No pane in this fleet had scrollback, so the position half of this test did "
-                    + "not run. The shell-survives half did.")
-        }
+        let switched = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in other.exists && isLive(other) }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [switched], timeout: 30), .completed,
+            "Runner B's heading reads \(other.exists ? other.label : "nothing — it is gone"): "
+                + "the switch did not happen, so the grid staying open proved nothing")
     }
 
+    /// `FleetSettings.allRunnersAtOnceKey`, spelled out: this bundle cannot
+    /// see the app's types.
+    private static let everyRunnerAtOnce = "allRunnersAtOnce"
 
     // MARK: - What the pane reserves at the bottom
 
