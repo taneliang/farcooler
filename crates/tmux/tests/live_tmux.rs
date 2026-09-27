@@ -62,15 +62,26 @@ impl Drop for Reaped {
 /// against.
 ///
 /// These are integration tests against a real tmux binary, which is not a
-/// given everywhere this suite runs. A missing tmux has to make the test a
-/// skip, never a failure, or CI images without tmux installed would be red
-/// for a reason that has nothing to do with the code under test.
-async fn live_server() -> Option<Reaped> {
-    let has_tmux = tokio::process::Command::new("tmux").arg("-V").output().await.is_ok();
-    if !has_tmux {
-        return None;
+/// given on every machine this suite runs on, so off CI a missing tmux is a
+/// skip, and says so. On CI it is a failure: ci.yml installs tmux for the
+/// Rust job ("Install tmux"), so a CI run without it is a broken runner, and
+/// four tests passing having run nothing is the one outcome that must not
+/// look green. Same rule as the fish half of the launch tests.
+///
+/// Found the way the crate finds it, through `programs::find`, not a bare
+/// `tmux` on PATH: the two disagree whenever PATH lacks the install prefix,
+/// and this used to skip while every other test in the file ran tmux fine.
+async fn live_server(test: &str) -> Option<Reaped> {
+    match farcooler_core::programs::find("tmux") {
+        Some(_) => Some(unique_server()),
+        None if std::env::var_os("CI").is_some() => {
+            panic!("tmux is not installed, and CI must run {test} against a live server")
+        }
+        None => {
+            eprintln!("SKIP {test}: tmux is not installed here");
+            None
+        }
     }
-    Some(unique_server())
 }
 
 /// Wait for something to become true, rather than for a fixed number of
@@ -261,7 +272,7 @@ async fn a_scrollback_capture_stops_where_the_screen_starts() {
     // it, the history would arrive with the visible screen glued to the bottom
     // of it, and a client would open able to scroll up into a second copy of
     // what it is already showing.
-    let Some(srv) = live_server().await else { return };
+    let Some(srv) = live_server("a_scrollback_capture_stops_where_the_screen_starts").await else { return };
     let t = Uuid::now_v7();
     let win = srv
         .create_terminal_window(Uuid::now_v7(), t, "scrolled", "/tmp", "seq 1 60; sleep 30")
@@ -293,7 +304,7 @@ async fn respawning_a_pane_keeps_its_id_its_tag_and_its_place() {
     // terminal would become unidentifiable and derive as `lost`; if the
     // rectangle changed, a four-tile layout would reflow every time someone
     // opened a chat.
-    let Some(server) = live_server().await else { return };
+    let Some(server) = live_server("respawning_a_pane_keeps_its_id_its_tag_and_its_place").await else { return };
     let worktree = Uuid::now_v7();
     let terminal = Uuid::now_v7();
     let window = server
@@ -331,7 +342,7 @@ async fn respawning_a_pane_keeps_its_id_its_tag_and_its_place() {
 async fn output_lines_are_counted_off_a_real_pane() {
     use farcooler_core::trace::{ScreenShape, lines_produced};
 
-    let Some(srv) = live_server().await else { return };
+    let Some(srv) = live_server("output_lines_are_counted_off_a_real_pane").await else { return };
 
     // Ten rows, so the pane fills within the first second and everything after
     // that is a genuine scroll rather than the screen merely filling up.
@@ -420,7 +431,7 @@ async fn output_lines_are_counted_off_a_real_pane() {
 async fn a_quiet_real_pane_produces_no_output_lines() {
     use farcooler_core::trace::{ScreenShape, lines_produced};
 
-    let Some(srv) = live_server().await else { return };
+    let Some(srv) = live_server("a_quiet_real_pane_produces_no_output_lines").await else { return };
     let win = srv
         .create_terminal_window(
             Uuid::now_v7(),
