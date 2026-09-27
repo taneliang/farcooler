@@ -62,3 +62,7 @@ tokio = { workspace = true, features = ["test-util"] }
 # Test-only: building a `Timestamp` to check `turnStartedAt`'s conversion
 # without duplicating prost's own struct shape by hand.
 prost-types.workspace = true
+# Test-only: decoding an `Event` from each oneof tag in turn, so the guard
+# over `event_json` walks the proto's own list of event kinds rather than a
+# hand-kept one.
+prost.workspace = true

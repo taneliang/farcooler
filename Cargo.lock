@@ -917,6 +917,7 @@ dependencies = [
  "farcooler-tailcat",
  "farcooler-transport",
  "libc",
+ "prost",
  "prost-types",
  "serde",
  "serde_json",

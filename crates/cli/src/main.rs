@@ -3465,6 +3465,15 @@ fn event_json(payload: farcooler_protocol::v1::event::Payload) -> Option<serde_j
         // and a loop. See `FleetEvent::Task` in crates/client/src/session.rs,
         // which is the same news over the other transport.
         farcooler_protocol::v1::event::Payload::TaskChanged(t) => task_event_json(&t),
+        // The daemon dropped events it owed this connection, because it fell
+        // more than a backlog behind. What they were is gone, so a client
+        // re-reads everything this stream feeds it: the phones' `resync`,
+        // which is `FleetEvent::Resync` in crates/client/src/session.rs.
+        // Named for the wire field, as every line here is named for what the
+        // daemon sent rather than for what a client does about it.
+        farcooler_protocol::v1::event::Payload::EventsMissed(_) => serde_json::json!({
+            "kind": "events_missed",
+        }),
         // Other resources have no events yet. `None` is right: a client that
         // reacted to a line it cannot read would be worse. What is NOT right
         // is a resource that HAS a reader landing here by omission, which is
@@ -4168,6 +4177,10 @@ mod tests {
             (Payload::ChangeSetChanged(Default::default()), "change_set"),
             (Payload::StackChanged(Default::default()), "stack"),
             (Payload::TaskChanged(Default::default()), "task"),
+            // Not a resource, but the one line that says every other line
+            // may have been lost — and it fell into `_` exactly the way the
+            // board arm once did, so a Mac that fell behind never re-read.
+            (Payload::EventsMissed(farcooler_protocol::v1::Empty {}), "events_missed"),
         ];
         for (payload, kind) in kinds {
             let line = event_json(payload)
@@ -4186,6 +4199,46 @@ mod tests {
         use farcooler_protocol::v1::event::Payload;
         assert!(event_json(Payload::TerminalFrame(Default::default())).is_none());
         assert!(event_json(Payload::HostChanged(Default::default())).is_none());
+    }
+
+    /// Every kind of event the proto can carry is decided on, and none by
+    /// omission.
+    ///
+    /// The list in the test above is kept by hand, which is how
+    /// `events_missed` stayed off it: the proto gained a kind, `_ => None`
+    /// swallowed it, and that test had nothing to say because nobody had
+    /// added a row. So this one walks the proto's own oneof — every tag an
+    /// `Event` decodes a payload from — and asks `event_json` about each. A
+    /// kind added to the proto fails here until somebody either gives it a
+    /// line (and a row above) or writes its tag into `NO_READER` on purpose.
+    #[test]
+    fn every_kind_of_event_the_proto_carries_is_decided_on() {
+        use farcooler_protocol::v1::Event;
+        use prost::Message;
+        // Dropped on purpose: `host_changed`, `repository_root_changed`,
+        // `repository_changed`, `operation_changed`, `agent_events` and
+        // `terminal_frame`. See `a_payload_with_no_reader_is_still_dropped`.
+        const NO_READER: &[u32] = &[10, 11, 12, 15, 17, 20];
+        let mut kinds = 0;
+        // From 3: tags 1 and 2 are `event_id` and `sequence`, not payloads.
+        for tag in 3..256 {
+            // The tag, then a zero-length body: the default of whichever
+            // message the oneof holds at that tag.
+            let mut bytes = Vec::new();
+            prost::encoding::encode_key(tag, prost::encoding::WireType::LengthDelimited, &mut bytes);
+            bytes.push(0);
+            let Some(payload) = Event::decode(bytes.as_slice()).ok().and_then(|e| e.payload) else {
+                continue;
+            };
+            kinds += 1;
+            assert_eq!(
+                event_json(payload).is_none(),
+                NO_READER.contains(&tag),
+                "event tag {tag} is new to `event_json`: give it a line, or say in NO_READER that nothing reads it",
+            );
+        }
+        // So a walk that decoded nothing can't pass by asking nothing.
+        assert!(kinds >= 14, "the walk found {kinds} kinds of event, fewer than the proto has");
     }
 
     /// The board event carries what a client needs to act on it.
