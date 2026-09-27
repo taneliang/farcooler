@@ -107,6 +107,12 @@ data class RunnerCount(
     val link: RunnerLink,
     val count: Int,
     val runtimeHealthy: Boolean = true,
+    /**
+     * Whether its link is up, whatever its fleet can vouch for. Away and
+     * connected is a link whose first fleet read failed ([FleetRead.FAILED]):
+     * not "Not connected", which would be untrue, but can't say yet.
+     */
+    val connected: Boolean = false,
 )
 
 /**
@@ -151,7 +157,9 @@ fun liveSummary(runners: List<RunnerCount>): String {
         }
         FleetReading.RuntimeDown -> "tmux unavailable"
         FleetReading.Connecting -> "Connecting…"
-        FleetReading.Unsaid -> "Not connected"
+        // A link that is up but whose fleet can't be read is connected, and
+        // "Not connected" would be untrue of it: it can't say yet.
+        FleetReading.Unsaid -> if (runners.any { it.connected }) "Can’t say yet" else "Not connected"
     }
 }
 

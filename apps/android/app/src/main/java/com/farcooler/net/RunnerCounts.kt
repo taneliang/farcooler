@@ -9,8 +9,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
 
 /** One runner's link and last fleet, as the drawer's footer counts them. See [Connection.link]. */
-fun runnerCount(link: RunnerLink, fleet: Fleet): RunnerCount =
-    RunnerCount(link, fleet.livePanes, fleet.runtimeHealthy)
+fun runnerCount(phase: Connection.Phase, link: RunnerLink, fleet: Fleet): RunnerCount =
+    RunnerCount(link, fleet.livePanes, fleet.runtimeHealthy, connected = phase is Connection.Phase.Connected)
 
 /**
  * Each runner's link and last count, moving whenever any runner's phase or
@@ -25,10 +25,10 @@ fun runnerCount(link: RunnerLink, fleet: Fleet): RunnerCount =
  * dashed. Collected, it moves the moment the phase does.
  */
 fun runnerCounts(
-    runners: List<Pair<StateFlow<RunnerLink>, StateFlow<Fleet>>>,
+    runners: List<Triple<StateFlow<Connection.Phase>, StateFlow<RunnerLink>, StateFlow<Fleet>>>,
 ): Flow<List<RunnerCount>> {
     if (runners.isEmpty()) return flowOf(emptyList())
-    return combine(runners.map { (link, fleet) -> combine(link, fleet, ::runnerCount) }) {
+    return combine(runners.map { (phase, link, fleet) -> combine(phase, link, fleet, ::runnerCount) }) {
         it.toList()
     }
 }

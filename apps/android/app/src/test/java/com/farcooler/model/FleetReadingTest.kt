@@ -178,4 +178,20 @@ class FleetReadingTest {
         assertEquals(FleetRead.EARLIER_LINK, FleetRead.THIS_LINK.onNewLink())
         assertEquals(FleetRead.EARLIER_LINK, FleetRead.EARLIER_LINK.onNewLink())
     }
+
+    /**
+     * **A connected runner whose fleet can't be read is not "Not connected"**
+     * (ov-26 re-review). Its first read failed without the link dropping, so
+     * it reads as away — but the footer's "Not connected" was untrue of it. It
+     * says it can't say yet. A runner that really is away still says "Not
+     * connected".
+     *
+     * Mutation: the footer ignoring `connected`. Red.
+     */
+    @Test
+    fun `a connected runner with no fleet read says it cannot say yet`() {
+        val unread = RunnerCount(RunnerLink.AWAY, 0, connected = true)
+        assertEquals("Can’t say yet", liveSummary(listOf(unread)))
+        assertEquals("Not connected", liveSummary(listOf(runner(RunnerLink.AWAY, 4))))
+    }
 }

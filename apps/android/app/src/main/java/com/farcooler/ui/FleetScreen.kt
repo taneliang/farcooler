@@ -562,9 +562,9 @@ private fun FleetBody(
                 // added a runner to yet is empty, not broken.
                 // Collected, not read: see `runnerCounts`.
                 val counts by remember(connections) {
-                    runnerCounts(connections.map { it.link to it.fleet })
+                    runnerCounts(connections.map { Triple(it.phase, it.link, it.fleet) })
                 }.collectAsStateWithLifecycle(
-                    connections.map { runnerCount(it.link.value, it.fleet.value) }
+                    connections.map { runnerCount(it.phase.value, it.link.value, it.fleet.value) }
                 )
                 val down = fleetReading(counts) == FleetReading.RuntimeDown
                 val tint =
