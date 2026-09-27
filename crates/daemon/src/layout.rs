@@ -83,6 +83,24 @@ fn tmux_preset(preset: LayoutPreset) -> Preset {
     }
 }
 
+/// Where stepping `delta` from `at` lands among `count` layouts, wrapping, or
+/// `None` when there's nowhere to go.
+///
+/// With none of them active (tmux's active window is an orchestrator's, or
+/// another worktree's), forward lands on the first and back on the last.
+fn step_from(at: Option<usize>, count: usize, delta: i64) -> Option<usize> {
+    match at {
+        _ if count == 0 => None,
+        Some(_) if count < 2 => None,
+        Some(i) => {
+            let n = count as i64;
+            Some((((i as i64 + delta) % n + n) % n) as usize)
+        }
+        None if delta < 0 => Some(count - 1),
+        None => Some(0),
+    }
+}
+
 /// A drop edge, as tmux's split arguments.
 ///
 /// Four sides need only two axes and a flag: left is right with `-b`, and top is
@@ -125,13 +143,41 @@ impl Service {
             .collect())
     }
 
-    /// The layout on screen for a worktree.
+    /// The worktree's layouts a verb that names none may act on: every one
+    /// but an orchestrator's.
+    ///
+    /// Every orchestrator's window is among the main checkout's layouts
+    /// (`start_orchestrator` opens it there), so without this, "the active
+    /// layout" in the main checkout is the orchestrator's whenever the CLI or
+    /// an agent has focused it, and `farcooler layout zoom <main>` zooms the
+    /// orchestrator. An orchestrator's window is reached by naming it, which
+    /// is what its row in the app does. A window counts as an orchestrator's
+    /// when it holds any terminal whose role is `orchestrator`, stopped or
+    /// not, the same rule as the Mac's `ownLayouts`.
+    pub async fn own_layouts(&self, worktree: Uuid) -> Result<Vec<LayoutView>> {
+        let orchestrators: std::collections::HashSet<Uuid> = self
+            .store
+            .list_terminals_for_worktree(worktree)?
+            .into_iter()
+            .filter(|t| t.role == farcooler_store::models::TerminalRole::Orchestrator)
+            .map(|t| t.id)
+            .collect();
+        Ok(self
+            .layout(worktree)
+            .await?
+            .into_iter()
+            .filter(|l| !l.panes.iter().any(|p| orchestrators.contains(&p.terminal_id)))
+            .collect())
+    }
+
+    /// The layout on screen for a worktree, among its own (`own_layouts`).
     ///
     /// tmux marks one window active per SESSION, and the session spans every
     /// worktree — so "active" is read within the worktree, and a worktree whose
-    /// windows are all inactive still has to show something.
+    /// windows are all inactive still has to show something: its own first
+    /// window, never an orchestrator's.
     pub async fn active_layout(&self, worktree: Uuid) -> Result<Option<LayoutView>> {
-        let layouts = self.layout(worktree).await?;
+        let layouts = self.own_layouts(worktree).await?;
         Ok(layouts.iter().find(|l| l.window.active).or_else(|| layouts.first()).cloned())
     }
 
@@ -151,10 +197,9 @@ impl Service {
     /// The pane a verb starts from when it names none: the focused pane of
     /// the layout named, or of the active one.
     ///
-    /// The layout named, when there is one, because tmux marks one window
-    /// active for the whole runner. Every orchestrator's window is among the
-    /// main checkout's, so after the CLI or an agent focuses one, the active
-    /// window is the orchestrator's while the checkout's row is on screen.
+    /// The layout named, when there is one: a client showing one of several
+    /// layouts means that one, and an orchestrator's window is reached only
+    /// by naming it (`own_layouts`).
     pub async fn focused_pane(&self, worktree: Uuid, group: Option<&str>) -> Result<Uuid> {
         let view = self.resolve(worktree, group).await?;
         view.focused().map(|p| p.terminal_id).ok_or(DomainError::NotFound)
@@ -340,16 +385,14 @@ impl Service {
         self.layout(worktree).await
     }
 
-    /// Show the next or previous layout, wrapping.
+    /// Show the next or previous layout, wrapping, among the worktree's own
+    /// (`own_layouts`): stepping never lands on an orchestrator's window.
     pub async fn layout_group_step(&self, worktree: Uuid, delta: i64) -> Result<Vec<LayoutView>> {
-        let layouts = self.layout(worktree).await?;
-        if layouts.len() < 2 {
-            return Ok(layouts);
+        let layouts = self.own_layouts(worktree).await?;
+        let at = layouts.iter().position(|l| l.window.active);
+        if let Some(next) = step_from(at, layouts.len(), delta) {
+            self.show(&layouts[next]).await?;
         }
-        let count = layouts.len() as i64;
-        let at = layouts.iter().position(|l| l.window.active).unwrap_or(0) as i64;
-        let next = ((at + delta) % count + count) % count;
-        self.show(&layouts[next as usize]).await?;
         self.layout(worktree).await
     }
 
@@ -447,6 +490,18 @@ mod tests {
         assert_eq!(split_args(SplitSide::Right), (Axis::Horizontal, false));
         assert_eq!(split_args(SplitSide::Top), (Axis::Vertical, true));
         assert_eq!(split_args(SplitSide::Bottom), (Axis::Vertical, false));
+    }
+
+    #[test]
+    fn stepping_wraps_and_starts_at_an_end_when_none_is_active() {
+        assert_eq!(step_from(Some(0), 3, 1), Some(1));
+        assert_eq!(step_from(Some(2), 3, 1), Some(0));
+        assert_eq!(step_from(Some(0), 3, -1), Some(2));
+        assert_eq!(step_from(Some(0), 1, 1), None, "one layout shows itself already");
+        assert_eq!(step_from(None, 1, 1), Some(0), "but not when another is on screen");
+        assert_eq!(step_from(None, 3, 1), Some(0));
+        assert_eq!(step_from(None, 3, -1), Some(2));
+        assert_eq!(step_from(None, 0, 1), None);
     }
 
     #[test]

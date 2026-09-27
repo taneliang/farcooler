@@ -1190,11 +1190,11 @@ final class DaemonClient: ObservableObject {
     // written out at each call site, which is where the last set of them drifted.
     //
     // A command that acts on a layout takes the one it means as `layout`, the
-    // tmux window id of the layout on screen. Without it the runner acts on the
-    // window tmux calls active, and tmux has one active window for the whole
-    // runner. Every orchestrator's window is among the main checkout's layouts,
-    // so after the CLI or an agent focuses one, the checkout's row would zoom,
-    // rearrange or cycle the orchestrator's panes rather than its own.
+    // tmux window id of the layout on screen. Without it the runner picks the
+    // active window among the worktree's own, which is never an orchestrator's.
+    // Every orchestrator's window is among the main checkout's layouts, so the
+    // orchestrator's row reaches its window only by naming it, and a checkout
+    // with two windows of its own shows the one the app chose.
 
     /// `--layout` and the window id, or nothing for tmux's active layout.
     static func naming(_ layout: String?) -> [String] {

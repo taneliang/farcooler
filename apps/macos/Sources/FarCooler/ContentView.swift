@@ -322,8 +322,8 @@ struct ContentView: View {
             // the orchestrator's window tmux calls active (see `ownLayouts`).
             // Bring that layout forward on the runner too. This app's ⌃B
             // commands name the layout on screen (see `tile`), so they don't
-            // need it; this keeps tmux's active window in step for anything
-            // that names none, such as `farcooler layout zoom` from a shell.
+            // need it; this undoes an agent having focused the orchestrator,
+            // so tmux's active window matches the screen.
             //
             // Only then: when tmux's active window is an orchestrator's, the
             // one case where the row's choice differs from the runner's. Any
@@ -2226,9 +2226,9 @@ struct ContentView: View {
     /// CLI and for an agent driving the CLI.
     ///
     /// Each names the layout on screen (`shown`), never leaving the runner to
-    /// pick tmux's active window. In the main checkout that can be an
-    /// orchestrator's, focused by the CLI or an agent while the checkout's own
-    /// row is selected, and the checkout's ⌃B z would zoom the orchestrator.
+    /// pick one. The runner's pick for the main checkout is never an
+    /// orchestrator's window, so the orchestrator's row has to name its own,
+    /// or its ⌃B z would zoom the checkout's.
     ///
     /// This file no longer contributes geometry. Directional focus used to be
     /// worked out here from a recomputed arrangement; it is now read off the

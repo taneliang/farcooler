@@ -265,10 +265,10 @@ enum DaemonCmd {
 ///
 /// A verb that acts on a layout takes `--layout` to say which: its number, its
 /// name, or its tmux window id (`@3`). Without it, the verb acts on the layout
-/// tmux calls active, and tmux marks one window active for the whole runner,
-/// not one per worktree. Every orchestrator's window is among the main
-/// checkout's layouts, so after something focuses one, "active" in the main
-/// checkout is the orchestrator's. A client showing a particular layout names it.
+/// tmux calls active among the worktree's own. Every orchestrator's window is
+/// among the main checkout's layouts, but the daemon never picks one for a
+/// verb that names none: an orchestrator's window is reached only by naming
+/// it. A client showing a particular layout names it.
 #[derive(Subcommand)]
 enum LayoutCmd {
     /// Show a worktree's layouts and where tmux has put every pane.

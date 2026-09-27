@@ -1758,7 +1758,9 @@ message TerminalAttach {
 message LayoutUpdate {
   // The layout to act on, as a tmux window id. Empty means the worktree's
   // active one, which is what a person or an agent means by "here" almost every
-  // time.
+  // time. That's chosen among the worktree's own windows, never an
+  // orchestrator's: every orchestrator's window is among the main checkout's
+  // layouts, and is reached only by naming it here.
   string group_id = 1;
   optional LayoutPreset preset = 2;
   repeated bytes terminals = 3;

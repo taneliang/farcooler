@@ -1356,8 +1356,9 @@ impl Rpc {
                 // A no-op when there is no layout to join, which is what makes
                 // it safe to pass unconditionally from a `%` binding.
                 if p.join_active_group {
-                    let anchor = svc.layout(worktree).await.ok().and_then(|views| {
-                        let view = views.iter().find(|v| v.window.active).or(views.first())?;
+                    // The active layout among the worktree's own, so a new
+                    // pane never joins an orchestrator's window.
+                    let anchor = svc.active_layout(worktree).await.ok().flatten().and_then(|view| {
                         let pane =
                             view.panes.iter().find(|pane| pane.pane_active).or(view.panes.first())?;
                         Some(pane.terminal_id)
