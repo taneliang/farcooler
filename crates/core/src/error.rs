@@ -270,6 +270,9 @@ pub fn sentence(what: &str) -> Option<&'static str> {
         "other_repository" => "That workspace is in a different repository.",
         "orchestrator_taken" => "This workspace already has an orchestrator running.",
         "orchestrator_home" => "This workspace's folder couldn't be made, so its orchestrator wasn't started.",
+        "orchestrator_chat_acp" => {
+            "On Claude Code's ACP adapter, this orchestrator's chat would start a new conversation. Set backend = \"native\" under [adapters.claude], or keep it in terminal mode."
+        }
         "workspace" => "This terminal doesn't belong to a workspace yet.",
         "role" => "Choose a role: shell, agent or orchestrator.",
         "task_ids" => "Name at least one task to move.",
@@ -613,6 +616,7 @@ mod tests {
             "other_repository",
             "orchestrator_taken",
             "orchestrator_home",
+            "orchestrator_chat_acp",
             "workspace",
             "role",
             "task_ids",

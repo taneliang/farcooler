@@ -3698,7 +3698,8 @@ impl Service {
     /// `session/load` can't find the conversation filed under the home, so
     /// it starts a fresh one (`farcooler_acp::session`), the record takes
     /// that id, and the orchestrator's own conversation is orphaned. A
-    /// toggle that loses the conversation is refused rather than taken, as
+    /// toggle that loses the conversation is refused (`orchestrator_chat_acp`,
+    /// whose sentence names the native backend) rather than taken, as
     /// `set_pane_mode` refuses swapping the agent.
     ///
     /// **Codex: the resolved main checkout**, where its terminal runs, and
@@ -3731,9 +3732,9 @@ impl Service {
                 }
                 Ok(Some((dir(Harness::Claude), args)))
             }
-            (Harness::Claude, Some("claude"), Some(AdapterBackend::Acp)) => Err(DomainError::InvalidArgument {
-                what: "an orchestrator's conversation can't move into a chat on claude's ACP adapter, which would start a new one; set backend = \"native\" under [adapters.claude], or keep it in terminal mode",
-            }),
+            (Harness::Claude, Some("claude"), Some(AdapterBackend::Acp)) => {
+                Err(DomainError::InvalidArgument { what: "orchestrator_chat_acp" })
+            }
             (Harness::Codex, Some("codex"), _) => Ok(Some((dir(Harness::Codex), Vec::new()))),
             _ => Ok(None),
         }
@@ -7487,9 +7488,7 @@ mod orchestrator_launch_tests {
                 assert!(command.replace("\\\"", "\"").contains(&format!("'{settings}'")), "{command}");
             } else {
                 match switched {
-                    Err(DomainError::InvalidArgument { what }) => {
-                        assert!(what.contains("ACP adapter") && what.contains("backend = \"native\""), "{what}")
-                    }
+                    Err(DomainError::InvalidArgument { what }) => assert_eq!(what, "orchestrator_chat_acp"),
                     other => panic!("an orchestrator's ACP chat must be refused: {other:?}"),
                 }
                 assert!(!command.contains("agent-host"), "the pane is left as it was: {command}");
