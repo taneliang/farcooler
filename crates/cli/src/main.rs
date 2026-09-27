@@ -1135,33 +1135,13 @@ async fn status(runner: Option<&str>, json: bool) -> Fallible {
     let capabilities = link.daemon_capabilities().to_vec();
 
     if json {
-        println!(
-            "{}",
-            serde_json::json!({
-                "daemonVersion": host_facts.daemon_version,
-                "cliVersion": farcooler_protocol::BUILD,
-                // Two builds that cannot agree on what they are running is a
-                // fact a client needs, not a detail. It is how a fix that was
-                // compiled and tested goes on reproducing in the app.
-                "buildsMatch": host_facts.daemon_version == farcooler_protocol::BUILD,
-                // Distinct from `buildsMatch`, and they answer different
-                // questions. That one is "are these the same build"; this is
-                // "what can that runner do", which is the one a client acts on
-                // when it is newer than the runner it reached.
-                "capabilities": capabilities,
-                "platform": host_facts.platform,
-                "branchPrefix": host_facts.settings
-                    .as_ref()
-                    .map(|s| s.branch_prefix.clone())
-                    .unwrap_or_default(),
-                "runtimeHealthy": healthy,
-                "livePanes": host_facts.live_terminal_count,
-                "roots": roots.len(),
-                "repositories": repos.len(),
-                "worktrees": worktrees.len(),
-                "terminals": terminals.len(),
-            })
-        );
+        let counts = StatusCounts {
+            roots: roots.len(),
+            repositories: repos.len(),
+            worktrees: worktrees.len(),
+            terminals: terminals.len(),
+        };
+        println!("{}", status_json(&host_facts, &capabilities, counts));
         return Ok(());
     }
 
@@ -1183,6 +1163,9 @@ async fn status(runner: Option<&str>, json: bool) -> Fallible {
     for reason in &host_facts.self_health_reasons {
         println!("              {reason}");
     }
+    if let Some(line) = stand_in_line(&host_facts) {
+        println!("{line}");
+    }
     println!("roots         {}", roots.len());
     println!("repositories  {}", repos.len());
     println!("worktrees     {}", worktrees.len());
@@ -1197,6 +1180,78 @@ async fn status(runner: Option<&str>, json: bool) -> Fallible {
         println!("recovery: {}", runtime.tmux.recovery_command());
     }
     Ok(())
+}
+
+/// How many of each thing `status` found.
+struct StatusCounts {
+    roots: usize,
+    repositories: usize,
+    worktrees: usize,
+    terminals: usize,
+}
+
+/// `status --json`'s object.
+///
+/// A function rather than built inline in `status`, which only runs against a
+/// live runner: a key dropped from an object nothing can test is dropped
+/// without a word, and this is the object the Mac reads for its build dot and
+/// its capabilities.
+fn status_json(
+    host: &farcooler_protocol::v1::Host,
+    capabilities: &[String],
+    counts: StatusCounts,
+) -> serde_json::Value {
+    let healthy = host.self_health != farcooler_protocol::v1::SelfHealth::Degraded as i32;
+    serde_json::json!({
+        "daemonVersion": host.daemon_version,
+        "cliVersion": farcooler_protocol::BUILD,
+        // Two builds that cannot agree on what they are running is a
+        // fact a client needs, not a detail. It is how a fix that was
+        // compiled and tested goes on reproducing in the app.
+        "buildsMatch": host.daemon_version == farcooler_protocol::BUILD,
+        // Distinct from `buildsMatch`, and they answer different
+        // questions. That one is "are these the same build"; this is
+        // "what can that runner do", which is the one a client acts on
+        // when it is newer than the runner it reached.
+        "capabilities": capabilities,
+        "platform": host.platform,
+        "branchPrefix": host.settings
+            .as_ref()
+            .map(|s| s.branch_prefix.clone())
+            .unwrap_or_default(),
+        "runtimeHealthy": healthy,
+        "livePanes": host.live_terminal_count,
+        // What every agent launch on this runner runs instead of the agent,
+        // or null when agents launch as themselves. The same key, and the
+        // same null from an older runner, as the phones' `host.health`.
+        "standInAgent": stand_in_agent(host),
+        "roots": counts.roots,
+        "repositories": counts.repositories,
+        "worktrees": counts.worktrees,
+        "terminals": counts.terminals,
+    })
+}
+
+/// What every agent launch on this runner runs instead of the real agent, or
+/// `None` when agents launch as themselves — every shipped install, and every
+/// runner too old to say.
+///
+/// From `FARCOOLER_STAND_IN_AGENT` in the daemon's environment. A value that
+/// leaked out of a test or a demo makes every agent run `sleep` or `false`,
+/// and until the runner said so the only sign was one line in its own log.
+fn stand_in_agent(host: &farcooler_protocol::v1::Host) -> Option<&str> {
+    Some(host.stand_in_agent.as_str()).filter(|p| !p.is_empty())
+}
+
+/// Plain `status`'s line for a stand-in agent, or `None` when there is none.
+///
+/// Loud, like MISMATCH and UNAVAILABLE above it, because it is the same kind
+/// of news: nothing is broken that an error would name, and every agent on
+/// the runner is quietly not the agent.
+fn stand_in_line(host: &farcooler_protocol::v1::Host) -> Option<String> {
+    stand_in_agent(host).map(|program| {
+        format!("agents        STAND-IN: {program} runs instead of the real agent (FARCOOLER_STAND_IN_AGENT)")
+    })
 }
 
 async fn root(runner: Option<&str>, cmd: RootCmd, json: bool) -> Fallible {
@@ -4187,6 +4242,30 @@ mod tests {
                 .unwrap_or_else(|| panic!("a {kind} change reached a client as nothing at all"));
             assert_eq!(line["kind"], kind, "the wrong resource was named on the line");
         }
+    }
+
+    /// **A runner whose agents run a stand-in says so, in `status`** (ov-49).
+    /// The phones have said it since `Host.stand_in_agent` existed; the CLI
+    /// dropped the field, so the Mac, which reads `status --json`, and anybody
+    /// at a terminal could not see it.
+    #[test]
+    fn status_says_when_a_runners_agents_run_a_stand_in() {
+        let counts = || StatusCounts { roots: 0, repositories: 0, worktrees: 0, terminals: 0 };
+        let host = farcooler_protocol::v1::Host {
+            stand_in_agent: "/bin/sleep".into(),
+            ..Default::default()
+        };
+        assert_eq!(status_json(&host, &[], counts())["standInAgent"], "/bin/sleep");
+        let line = stand_in_line(&host).expect("plain status said nothing about the stand-in");
+        assert!(line.starts_with("agents        "), "out of step with the other rows: {line}");
+        assert!(line.contains("/bin/sleep"), "the line doesn't name the program: {line}");
+
+        // And a runner whose agents are themselves — or one too old to say —
+        // claims nothing: a null, not an empty string, and no line.
+        let host = farcooler_protocol::v1::Host::default();
+        let json = status_json(&host, &[], counts());
+        assert!(json.get("standInAgent").is_some_and(|v| v.is_null()), "{json}");
+        assert_eq!(stand_in_line(&host), None);
     }
 
     /// And a payload with no reader is still dropped.
