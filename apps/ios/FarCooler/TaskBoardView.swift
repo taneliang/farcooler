@@ -285,12 +285,17 @@ private struct CardTimeLines: View {
     let timeFont: Font
 
     var body: some View {
-        TimelineView(.everyMinute) { context in
-            if let note = row.stalenessNote(at: context.date) {
+        // The tick decides WHEN to redraw, and `Date()` what time it is.
+        // `.everyMinute` hands in the minute's start, up to sixty seconds in
+        // the past, and a sentence built on it read "Updated 9m ago" for ten
+        // minutes and "Added 4d ago" for five days, a whole unit short.
+        TimelineView(.everyMinute) { _ in
+            let now = Date()
+            if let note = row.stalenessNote(at: now) {
                 Text(note)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            } else if let time = row.timeNote(at: context.date) {
+            } else if let time = row.timeNote(at: now) {
                 Text(time)
                     .font(timeFont)
                     .foregroundStyle(.secondary)
