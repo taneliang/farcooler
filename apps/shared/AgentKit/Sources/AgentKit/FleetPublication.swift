@@ -125,9 +125,11 @@ public struct FleetPublication {
     /// stay marked until a poll records it again. Not until it answers again:
     /// a link comes up a whole SSH round trip before the first poll over it
     /// lands, and in that gap the rows are still the ones read before the link
-    /// went. Answering is `.connected` and nothing weaker; a runner that stays
+    /// went. Answering is `.connected` and nothing weaker (a runner that stays
     /// down spends most of its outage reconnecting, which is what let the
-    /// Mac's status bar count a dead runner's panes for most of an outage.
+    /// Mac's status bar count a dead runner's panes for most of an outage),
+    /// and on the phone its fleet read on this link as well: see
+    /// `ShellRunnerLabel.answering`.
     ///
     /// - Returns: what `keeping(runners:)` returns, and true as well when a
     ///   recorded runner has just been marked lost, which changes what the

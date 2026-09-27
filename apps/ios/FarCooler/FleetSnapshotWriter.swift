@@ -40,7 +40,8 @@ enum FleetSnapshotWriter {
     /// port and not step 1: it needs something that knows which runners are
     /// live, and until the store existed nothing did.
     ///
-    /// `answering` is which of them are `.connected` right now. A runner that
+    /// `answering` is which of them are answering right now: `.connected`,
+    /// and their fleet read on this link (`Connection.isAnswering`). A runner that
     /// drops out of it keeps its agents on these surfaces, but as "can't say"
     /// rather than working: see `FleetPublication.keeping(runners:answering:)`.
     @MainActor

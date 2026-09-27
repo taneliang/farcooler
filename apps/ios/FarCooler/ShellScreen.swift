@@ -1060,7 +1060,9 @@ struct ShellScreen: View {
             markVisible()
         }
         .onDisappear { Notifier.shared.visibleTerminal = nil }
+        #if DEBUG
         .overlay(alignment: .topLeading) { watchProbe }
+        #endif
         // The two ways of starting work, moved here from the worktree list's
         // toolbar with their flows untouched: both were sheets there and both
         // are sheets here.
@@ -1632,11 +1634,22 @@ struct ShellScreen: View {
         }
     }
 
+    /// Whether the shell opens with the grid up: only for the agent layout
+    /// harness's `-shell-overview`, which exists in debug builds alone. The
+    /// app itself always opens on a pane.
+    private static var opensOnTheGrid: Bool {
+        #if DEBUG
+        AgentLayoutHarness.opensOnTheGrid
+        #else
+        false
+        #endif
+    }
+
     private func shell(_ map: ShellFleetMap, from initial: ShellPosition) -> some View {
         ShellRootView(
             fleet: map.fleet,
             initial: initial,
-            openingOnOverview: AgentLayoutHarness.opensOnTheGrid,
+            openingOnOverview: Self.opensOnTheGrid,
             // A tapped Live Activity card, resolved against the fleet this
             // very body pass was built from. See `requestedTab`.
             request: Binding(
@@ -2107,6 +2120,7 @@ struct ShellScreen: View {
     /// being read while it is: see `markVisible`.
     @State private var overviewUp = false
 
+    #if DEBUG
     /// The one way a UI test can ask which pane the runner is told is being
     /// read: `watch=<terminal id>`, or `watch=` for none.
     ///
@@ -2117,6 +2131,9 @@ struct ShellScreen: View {
     /// while the other went on claiming a pane under the grid. `Notifier` is
     /// not observable, so it is sampled four times a second. A one-point
     /// element for the reason `ShellRootView.probe` is one.
+    ///
+    /// Debug builds only: the sampling redraws four times a second for as
+    /// long as the shell is up, for a probe only a UI test reads.
     private var watchProbe: some View {
         TimelineView(.periodic(from: .now, by: 0.25)) { _ in
             Rectangle()
@@ -2127,6 +2144,7 @@ struct ShellScreen: View {
                 .accessibilityValue("watch=\(Notifier.shared.visibleTerminal ?? "")")
         }
     }
+    #endif
 
     /// Which pane the runner should believe is being read.
     ///
