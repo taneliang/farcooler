@@ -392,12 +392,10 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
             }
             let now = now_millis();
             for t in &items {
-                // The staleness view picked these by how long since anything
-                // moved on them (`updated_at`), so that is the gap it prints;
-                // a plain listing says how long each has been in its status.
-                // A runner too old to send `updated_at` sends 0, and falls
-                // back to the status clock like the boards do.
-                let since = if stale.is_some() && t.updated_at > 0 { t.updated_at } else { t.status_since };
+                // How long since anything moved on it -- a move, a note, an
+                // edit -- the one clock "stale" reads everywhere, and the one
+                // `--stale-for` picked these rows by.
+                let since = tasks_json::last_moved(t);
                 println!(
                     "{:<8}  {:<14}  {:>6}  {}",
                     t.key,
@@ -825,8 +823,7 @@ fn render_show(detail: &pb::TaskDetail, fields: &[&str], notes: Option<NoteKind>
         out.push_str(&format!("title\n  {}\n", task.title));
     }
     if wants(fields, "status") {
-        let gap = spoken_gap(stale_for_seconds(task.status_since, now_millis()));
-        out.push_str(&format!("status\n  {}  for {}\n", status_word(task.status), gap));
+        out.push_str(&format!("status\n  {}  {}\n", status_word(task.status), moved_line(task, now_millis())));
     }
     if wants(fields, "intent") && !task.intent.is_empty() {
         out.push_str("intent\n");
@@ -2182,10 +2179,20 @@ fn now_millis() -> i64 {
         .unwrap_or_default()
 }
 
-/// How long a task has sat where it is. Never negative: a runner whose clock is
+/// How long since `since`, in seconds. Never negative: a runner whose clock is
 /// a little ahead of this one has not moved a task in the future.
-fn stale_for_seconds(status_since: i64, now: i64) -> i64 {
-    tasks_json::stale_for_seconds(status_since, now)
+fn stale_for_seconds(since: i64, now: i64) -> i64 {
+    tasks_json::stale_for_seconds(since, now)
+}
+
+/// `moved 2h ago`, or `moved just now`: when anything last moved on the task,
+/// on `tasks_json::last_moved`'s clock. Was `for 2h`, the time in its status,
+/// which a card with a note ten minutes ago would have printed as three days.
+fn moved_line(task: &pb::Task, now: i64) -> String {
+    match spoken_gap(stale_for_seconds(tasks_json::last_moved(task), now)).as_str() {
+        "just now" => "moved just now".to_string(),
+        gap => format!("moved {gap} ago"),
+    }
 }
 
 /// A length of time written the way a person types it: `45s`, `10m`, `2h`, `3d`.
@@ -2701,6 +2708,13 @@ mod tests {
     #[test]
     fn a_gap_is_never_negative() {
         assert_eq!(stale_for_seconds(1_000, 0), 0);
+        // `task show`: three days in status, a note two hours ago.
+        let day = 86_400_000;
+        let noted = pb::Task { status_since: 0, updated_at: 3 * day - 7_200_000, ..Default::default() };
+        assert_eq!(moved_line(&noted, 3 * day), "moved 2h ago");
+        let old_runner = pb::Task { status_since: day, ..Default::default() };
+        assert_eq!(moved_line(&old_runner, 3 * day), "moved 2d ago", "no updated_at: the status clock");
+        assert_eq!(moved_line(&pb::Task { status_since: 3 * day, ..Default::default() }, 3 * day), "moved just now");
         assert_eq!(stale_for_seconds(0, 7_200_000), 7_200);
         assert_eq!(spoken_gap(0), "just now");
         assert_eq!(spoken_gap(7_200), "2h");

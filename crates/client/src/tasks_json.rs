@@ -53,10 +53,22 @@ pub fn note_kind_word(raw: i32) -> &'static str {
     }
 }
 
-/// How long a task has sat where it is. Never negative: a runner whose clock is
-/// a little ahead of this one has not moved a task in the future.
-pub fn stale_for_seconds(status_since: i64, now: i64) -> i64 {
-    now.saturating_sub(status_since).max(0) / 1000
+/// How long since anything moved on a task, from `since` to `now` (both Unix
+/// milliseconds). Never negative: a runner whose clock is a little ahead of
+/// this one has not moved a task in the future.
+pub fn stale_for_seconds(since: i64, now: i64) -> i64 {
+    now.saturating_sub(since).max(0) / 1000
+}
+
+/// When anything last moved on a task: `updated_at` -- a move, a note or an
+/// edit -- or `status_since` from a runner too old to send it (proto3's zero).
+///
+/// The clock "stale" means everywhere: the boards' "Hasn’t moved"
+/// (AgentKit's `TaskRow.lastMoved`, Android's `lastMovedMs`), the runner's
+/// `--stale-for` sweep, this JSON's `stale_for_seconds` and the CLI's spoken
+/// gaps. The later of the two, as the boards take it.
+pub fn last_moved(task: &pb::Task) -> i64 {
+    if task.updated_at > 0 { task.updated_at.max(task.status_since) } else { task.status_since }
 }
 
 /// A clock a runner may not have sent, as `null` rather than as 1970.
@@ -97,7 +109,10 @@ pub fn task_json(task: &pb::Task, now: i64) -> serde_json::Value {
         "title": task.title,
         "status": status_word(task.status),
         "status_since": task.status_since,
-        "stale_for_seconds": stale_for_seconds(task.status_since, now),
+        // Seconds since anything moved on it (`last_moved`), not since its
+        // status changed: a note or an edit is movement. The name is kept,
+        // because agents parse it.
+        "stale_for_seconds": stale_for_seconds(last_moved(task), now),
         "created_at": said(task.created_at),
         "updated_at": said(task.updated_at),
         "intent": task.intent,
@@ -196,6 +211,20 @@ mod tests {
         assert_eq!(status_word(9_999), "unknown");
         assert_eq!(status_word(pb::TaskStatus::Unspecified as i32), "unknown");
         assert_eq!(note_kind_word(9_999), "unknown");
+    }
+
+    /// `stale_for_seconds` counts from the last movement, and a note is
+    /// movement: three days in status, a note a minute ago, is sixty seconds.
+    /// A runner with no `updated_at` falls back to the status clock.
+    #[test]
+    fn stale_for_seconds_counts_from_the_last_movement() {
+        let day = 86_400_000;
+        let noted = pb::Task { status_since: 0, updated_at: 3 * day - 60_000, ..Default::default() };
+        assert_eq!(task_json(&noted, 3 * day)["stale_for_seconds"], 60);
+        // Its status moved a day in, so the status clock and the epoch
+        // disagree, and only the fallback gives two days.
+        let old_runner = pb::Task { status_since: day, ..Default::default() };
+        assert_eq!(task_json(&old_runner, 3 * day)["stale_for_seconds"], 172_800);
     }
 
     /// A runner from before the card times sends proto3's zero for both, and
