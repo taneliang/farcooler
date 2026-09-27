@@ -30,3 +30,15 @@ pub fn write_prefixless_board_at_schema_11(path: &Path, repository: Uuid, task: 
     )
     .unwrap();
 }
+
+/// A task's `edited_at`, which no `Task` field carries: the time of the
+/// last revision that changed a field, or `None` if nothing has been
+/// revised since the column existed. For a test that has to tell "this write
+/// was dated" from "this write landed in the same millisecond as creation",
+/// which `updated_at` alone cannot.
+pub fn edited_at(store: &crate::Store, task: Uuid) -> Option<i64> {
+    store
+        .conn()
+        .query_row("SELECT edited_at FROM tasks WHERE id = ?1", params![uuid_blob(task)], |r| r.get(0))
+        .expect("the task exists")
+}

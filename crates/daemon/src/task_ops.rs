@@ -551,6 +551,59 @@ mod tests {
         assert_eq!(found.len(), 1, "the new key too");
     }
 
+    /// `task.create` is two store writes, and the second must not date
+    /// itself as an edit: a card filed with an intent reads "Added", not
+    /// "Updated". Asserted on `edited_at` rather than on the two clocks
+    /// agreeing, because the two writes usually land in one millisecond and
+    /// the clocks would agree by luck -- which is how the real-daemon test in
+    /// crates/client stays green with this call site broken. The control is
+    /// a real revision through `task.update`, which does date itself.
+    #[tokio::test]
+    async fn filing_a_task_with_an_intent_is_not_an_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        let (repository, existing) = (Uuid::now_v7(), Uuid::now_v7());
+        farcooler_store::testing::write_prefixless_board_at_schema_11(
+            &dir.path().join("farcooler.db"),
+            repository,
+            existing,
+        );
+        let svc = std::sync::Arc::new(Service::open_in(dir.path().to_path_buf()).await.unwrap());
+        let watcher = Watcher::new(svc.clone());
+
+        let filed = create(
+            &svc,
+            &watcher,
+            &pb::TaskCreate {
+                repository_id: repository.as_bytes().to_vec().into(),
+                title: "filed with an intent".into(),
+                intent: "so the card says why".into(),
+                actor: "user".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let id = Uuid::from_slice(&filed.id).unwrap();
+        assert_eq!(filed.intent, "so the card says why", "the second write landed");
+        assert_eq!(farcooler_store::testing::edited_at(&svc.store, id), None, "filing read as an edit");
+        assert_eq!(filed.updated_at, filed.created_at);
+
+        let revised = update(
+            &svc,
+            &watcher,
+            &pb::TaskUpdate {
+                task_id: filed.id.clone(),
+                expected_version: filed.resource_version,
+                title: "filed with an intent".into(),
+                intent: "a better reason".into(),
+                actor: "user".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(farcooler_store::testing::edited_at(&svc.store, id).is_some(), "the control");
+        assert!(revised.updated_at >= revised.created_at);
+    }
+
     #[test]
     fn an_unnamed_actor_is_the_person_at_the_client() {
         assert_eq!(actor_from_wire("").unwrap(), Actor::User);
