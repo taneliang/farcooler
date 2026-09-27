@@ -1,0 +1,14 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000004",
+  "turn_id": "00000000-0000-4000-8000-000000000006",
+  "transcript_path": "/tmp/fc-ws/user/.codex/sessions/2026/09/27/rollout-2026-09-27T14-08-54-00000000-0000-4000-8000-000000000004.jsonl",
+  "cwd": "/private/tmp/fc-ws/spike/repo",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-5.6-terra",
+  "permission_mode": "default",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "git status --short"
+  },
+  "tool_use_id": "exec-00000000-0000-4000-8000-000000000007"
+}

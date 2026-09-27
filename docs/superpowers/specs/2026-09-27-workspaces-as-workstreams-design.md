@@ -373,3 +373,132 @@ workspace's `repository_id` is the one constraint to lift. What it would take:
 
 Diffs are not a cost: a diff is per worktree, and every worktree is in exactly
 one repository.
+
+## Spike findings (2026-09-27)
+
+Measured on this runner with Claude Code 2.1.283, codex-cli 0.153.4 and
+cursor-agent 2026.09.23 (which updated itself to 2026.09.26 mid-spike), through
+a scratch daemon (Canary CLI `0.1.0+f805fb8d`, `FARCOOLER_HOME=/tmp/fc-ws/home`)
+over a scratch repository at `/tmp/fc-ws/spike/repo` with a nested worktree
+(`.worktrees/nested`) and a sibling one (`../sibling`). Every agent was the
+real one.
+
+**How hooks were read.** The daemon does not log a hook's `cwd` at any level,
+and `daemon ensure` sends its stderr to `/dev/null`. So a recording hook was
+added next to Far Cooler's in each harness's project hook file
+(`.claude/settings.local.json`, `.codex/hooks.json`, `.cursor/hooks.json`). It
+got the same stdin as `farcooler hook`, for Far Cooler's events and for the
+tool events Far Cooler does not register (`PreToolUse`/`PostToolUse`, and
+Cursor's `preToolUse`/`beforeShellExecution`). Raw payloads, redacted, are in
+[`2026-09-27-workspaces-spike-hooks/`](2026-09-27-workspaces-spike-hooks/):
+`<harness>-before-move.json` and `<harness>-after-move.json` are events Far
+Cooler registers today, and `<harness>-after-move-tool.json` is the tool event
+that carries the move, where there is one. Redacted: the home directory became
+`/tmp/fc-ws/user`, Claude's `scratchpad_dir` became `/tmp/fc-ws/scratchpad`,
+Cursor's `user_email` became `user@example.com`, and every session,
+conversation, turn, prompt and tool-use UUID was replaced by a placeholder
+(`00000000-0000-4000-8000-…`), consistently across files. No tokens or
+credentials were in any payload.
+
+### Hook `cwd` and process `cwd` after a move
+
+| Harness | Move | Hook `cwd` follows? | Latency | Process cwd (`lsof -a -d cwd`) follows? |
+|---|---|---|---|---|
+| Claude Code | Bash `cd .worktrees/nested && ls` | **Yes.** `PostToolUse` of that same call reports the nested path; every later hook too, including `Stop` | 0 s to `PostToolUse` (not registered today); ~5 s to `Stop` in a one-line turn, so end of turn in general | No. `claude` stays in the launch directory |
+| Claude Code | `EnterWorktree` with `path` = the sibling | **Yes.** `PostToolUse` of `EnterWorktree` reports the sibling | Same as above | **Yes**, at once: `claude` itself moves |
+| Codex | `cd .worktrees/nested && ls`, and `workdir` = the sibling | **No.** `cwd` is always the launch directory. `tool_input` carries only `command`, never the `workdir` | Never | No. Each command is a short-lived child of `codex` with `cwd` = its `workdir`, and **no controlling tty** (`??`) |
+| Cursor | `cd .worktrees/nested && ls` in its shell | **No.** Tool events send `"cwd": ""` although the shell's `cd` persists into later calls; `workspace_roots` stays the launch directory | Never | No. Each command is a new `zsh -c` child (restoring a saved shell state) with the persisted `cwd`, **no controlling tty**, alive only while it runs |
+| Cursor | a shell call with its `cwd` parameter = the sibling | **Only on tool events.** `preToolUse` and `beforeShellExecution` carry that `cwd`, spelled as given (`/tmp/…`, not `/private/tmp/…`) | 0 s, before the command runs (not registered today) | As above |
+
+Consequences for "Claiming worktrees":
+
+- **Far Cooler's registered events do not carry a move for Codex or Cursor at
+  all.** Codex's `cwd` never changes. Cursor's registered events
+  (`sessionStart`, `beforeSubmitPrompt`, `stop`) carry no `cwd`, only
+  `workspace_roots`, which does not change. "Every hook payload carries the
+  `cwd`" is false for Cursor.
+- **Signal 2 works for Claude Code only**, and with today's registrations it
+  arrives at the end of the turn (`Stop`), not per tool call. Per-tool-call
+  claiming needs `PostToolUse` registered for Claude (priced in
+  `hook_install.rs` at ~15-18 ms per call). For Cursor, registering
+  `preToolUse` would catch only calls that pass an explicit `cwd`; a `cd` in its
+  shell is invisible to hooks. For Codex, no hook sees a move.
+- **Signal 3 as written would miss Codex and Cursor.** Their commands run
+  without a controlling tty, so a per-tty scan like `foreground.rs` never sees
+  them. The walk has to follow descendants of the pane's agent process by parent
+  PID. Even then it sees a worktree only while a command is running there. For
+  Codex this is the only signal; for Cursor it is the only one for a `cd`.
+- `cwd` spelling differs: Claude and Codex report the resolved path
+  (`/private/tmp/…`), Cursor reports what the model typed. Matching must
+  canonicalize first, as `hook_ingress.rs` already does for Codex.
+- A Claude Code pane stopped while inside an `EnterWorktree` leaves
+  `activeWorktreeSession` in `~/.claude.json` for the launch directory.
+- Codex runs project hooks only after an interactive "Hooks need review" trust.
+  That trust is recorded in `~/.codex/config.toml` per hooks file (canonical
+  path) and hash, so each new worktree's `.codex/hooks.json` asks again. Launched
+  as `codex exec --cd /tmp/…` (not the resolved path), the project hooks were
+  skipped with no prompt.
+- On this runner the Homebrew `codex` could not run shell commands at all
+  ("timed out negotiating with the code-mode host"; `codex-code-mode-host` is
+  not on its path), and in a Far Cooler pane it reached for Computer Use
+  instead. The Codex rows were measured with the `codex` binary bundled in
+  ChatGPT.app, the same version, started from a shell pane.
+
+### Orchestrator context from a home outside the repository
+
+| Harness | Command, run from `/tmp/fc-ws/spike/home` | Answer |
+|---|---|---|
+| Claude Code | `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir <repo> -p …` | PINEAPPLE, told not to read files |
+| Claude Code (control) | the same without the variable | Did not know; no `CLAUDE.md` loaded |
+| Cursor | `cursor-agent --workspace /tmp/fc-ws/spike/repo -p …` | **Refused**: "Workspace Trust Required", although the pane had trusted the same directory |
+| Cursor | `cursor-agent --workspace /private/tmp/fc-ws/spike/repo -p …` | PINEAPPLE, with no tool call |
+| Codex | `codex exec --cd <repo> …` | PINEAPPLE |
+
+Cursor keeps trust as `~/.cursor/projects/<slug of the path as given>/.workspace-trusted`.
+So trust follows the literal spelling of the path. Claude Code also discovers
+skills from the added directory: a `.claude/skills/spike-mango` in the
+repository appeared in a home-launched session's skills list.
+
+### Claude Code's memory directory and added-directory settings
+
+| Launched in | Transcripts | Auto-memory directory |
+|---|---|---|
+| `repo/` | `-private-tmp-fc-ws-spike-repo` | `-private-tmp-fc-ws-spike-repo/memory` |
+| `repo/.worktrees/nested` | `-private-tmp-fc-ws-spike-repo--worktrees-nested` | `-private-tmp-fc-ws-spike-repo/memory` |
+| `../sibling` | `-private-tmp-fc-ws-spike-sibling` | `-private-tmp-fc-ws-spike-repo/memory` |
+| the home (not a repository) | `-private-tmp-fc-ws-spike-home` | `-private-tmp-fc-ws-spike-home/memory` |
+| the home, `--settings` with `autoMemoryDirectory` = the repo's | — | `-private-tmp-fc-ws-spike-repo/memory` |
+
+All under `~/.claude/projects/`. The rule observed:
+`slug(p)` = `realpath(p)` with every character outside `[A-Za-z0-9]` replaced
+by `-` (so `/.worktrees` becomes `--worktrees`). Transcripts go to
+`slug(cwd)`, and move with the session: after `EnterWorktree`, the running
+session's transcript was under `slug(sibling)`. Memory goes to
+`slug(main checkout)` for every worktree of a repository (the git common
+directory's parent), and to `slug(cwd)` outside a repository. So the
+`autoMemoryDirectory` override in the recipe is needed, and it works through
+`--settings`.
+
+**Added-directory settings do not reach a Claude Code orchestrator.** With
+`repo/.claude/settings.json` holding a `SessionStart` hook that touches
+`SETTINGS_HONORED`, the home-launched run did not create the file; the same
+`claude -p` run inside `repo/` did. A hook in `repo/.claude/settings.local.json`
+did not fire from the home either. This settles the risk under "Risks": a Claude
+Code orchestrator runs without the repository's hooks and permission
+allowlist. Far Cooler's own hooks still reach it, since they come through
+`--settings`.
+
+### Against the recipe table in "Launch recipes"
+
+No row is contradicted. Each row's context mechanism worked as written. Two
+rows need an addition:
+
+- **Cursor**: `--workspace` must get the resolved path of the main checkout,
+  or the launch must pass `--trust`. A path spelled differently from the one
+  trusted is refused (evidence: the two Cursor rows above).
+- **Codex**: nothing to change for context. `--cd` should get the resolved path
+  anyway, because Codex keys hook trust by resolved path (see above).
+
+The explanation under the table, "the git root of the working directory", is
+more precisely the main checkout: every worktree shares the main checkout's
+memory directory.

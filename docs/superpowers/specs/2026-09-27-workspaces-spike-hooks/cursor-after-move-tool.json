@@ -1,0 +1,21 @@
+{
+  "conversation_id": "00000000-0000-4000-8000-000000000008",
+  "generation_id": "00000000-0000-4000-8000-000000000010",
+  "model": "default",
+  "tool_name": "Shell",
+  "tool_input": {
+    "command": "ls",
+    "cwd": "/tmp/fc-ws/spike/sibling",
+    "timeout": 30000
+  },
+  "tool_use_id": "00000000-0000-4000-8000-000000000011",
+  "cwd": "/tmp/fc-ws/spike/sibling",
+  "session_id": "00000000-0000-4000-8000-000000000008",
+  "hook_event_name": "preToolUse",
+  "cursor_version": "2026.09.23-86fc751",
+  "workspace_roots": [
+    "/private/tmp/fc-ws/spike/repo"
+  ],
+  "user_email": "user@example.com",
+  "transcript_path": "/tmp/fc-ws/user/.cursor/projects/private-tmp-fc-ws-spike-repo/agent-transcripts/00000000-0000-4000-8000-000000000008/00000000-0000-4000-8000-000000000008.jsonl"
+}

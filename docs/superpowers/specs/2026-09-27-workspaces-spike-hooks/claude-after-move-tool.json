@@ -1,0 +1,23 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "transcript_path": "/tmp/fc-ws/user/.claude/projects/-private-tmp-fc-ws-spike-sibling/00000000-0000-4000-8000-000000000001.jsonl",
+  "cwd": "/private/tmp/fc-ws/spike/sibling",
+  "scratchpad_dir": "/tmp/fc-ws/scratchpad",
+  "prompt_id": "00000000-0000-4000-8000-000000000003",
+  "permission_mode": "auto",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "EnterWorktree",
+  "tool_input": {
+    "path": "/tmp/fc-ws/spike/sibling"
+  },
+  "tool_response": {
+    "worktreePath": "/private/tmp/fc-ws/spike/sibling",
+    "worktreeBranch": "sibling",
+    "message": "Entered worktree at /private/tmp/fc-ws/spike/sibling on branch sibling. The session is now working in the worktree. Use ExitWorktree to leave mid-session, or exit the session to be prompted."
+  },
+  "tool_use_id": "toolu_013rgHRmpXeHTj98dDjVUKsW",
+  "duration_ms": 43
+}

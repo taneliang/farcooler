@@ -1,0 +1,16 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "transcript_path": "/tmp/fc-ws/user/.claude/projects/-private-tmp-fc-ws-spike-repo/00000000-0000-4000-8000-000000000001.jsonl",
+  "cwd": "/private/tmp/fc-ws/spike/repo/.worktrees/nested",
+  "scratchpad_dir": "/tmp/fc-ws/scratchpad",
+  "prompt_id": "00000000-0000-4000-8000-000000000002",
+  "permission_mode": "auto",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "The `ls` showed `AGENTS.md` and `CLAUDE.md`, and the working directory stayed in the nested folder, with `pwd` giving `/private/tmp/fc-ws/spike/repo/.worktrees/nested`.",
+  "background_tasks": [],
+  "session_crons": []
+}
