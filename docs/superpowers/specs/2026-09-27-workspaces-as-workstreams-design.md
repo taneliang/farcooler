@@ -119,18 +119,23 @@ claim wins and sticks:
    dispatch name the workspace. Every pane Far Cooler launches carries
    `FARCOOLER_WORKSPACE`, so an agent running `farcooler worktree create` claims
    for its own workspace without a flag.
-2. **The agent's session log.** Far Cooler already reads agent session logs.
-   Claude Code records `cwd` on each transcript entry; Codex records
-   `<environment_context><cwd>` (see
-   `crates/core/fixtures/session-logs/codex-complete-turn.jsonl`). A terminal
-   whose log shows it working in an unclaimed worktree claims it for the
-   terminal's workspace. This signal does not depend on whether the harness
-   moves its own process.
+2. **The agent's hooks.** Far Cooler already installs hooks in all three
+   harnesses, and every hook payload carries the `cwd` the agent is working
+   in. `hook_ingress.rs` (`announced_terminal`) already matches a hook's `cwd`
+   to a worktree for Codex and Cursor. A hook from a terminal whose `cwd` is
+   inside an unclaimed worktree claims it for that terminal's workspace. This
+   signal does not depend on whether the harness moves its own process.
+   (Parsing session logs was considered first; hooks are the same fact,
+   already ingested, and arrive per tool call.)
 3. **The process tree.** For harnesses with no readable log: walk the pane's
    processes (as `foreground.rs` already reads the process table per tty) and
    read each working directory — `proc_pidinfo` on macOS, `/proc/<pid>/cwd` on
    Linux. Weakest, because a short-lived subshell can fall between scans.
 4. **Nothing matched:** the worktree stays unclaimed.
+
+A `cwd` is matched to the worktree with the **longest** path containing it.
+Worktrees are often nested inside the main checkout (`.worktrees/x`), and a
+shortest or first match would hand every nested worktree's activity to Main.
 
 Rules on top:
 
@@ -199,16 +204,18 @@ is refused; `--replace` closes the old pane first.
 
 ### Wake-ups and events
 
-- Board change events are keyed per workspace, not per repository, so a board
-  view re-reads only when its own board moved.
-- The wake loop delivers a change on workspace W to W's live orchestrator. Its
-  two rules are unchanged: an actor is never woken by its own writes, and
-  changes coalesce.
-- A workspace with no live orchestrator is not woken; its changes wait on the
-  board.
-- `NeedsDecision` still reaches the phone whether or not an orchestrator
-  exists, and the notification names the workspace: "Billing needs a decision
-  on bil-7".
+- Board change events carry the task's workspace, so a board view re-reads
+  only when its own board moved.
+- **The wake loop does not exist yet** (`skill_install.rs`:
+  `WAKE_LOOP_EXISTS = false`), and this work does not build it. What it does is
+  record what the wake loop will need: which terminal is a workspace's
+  orchestrator (`role`), and which workspace every terminal and task belongs
+  to. When the loop is built it delivers a change on workspace W to W's live
+  orchestrator, under its two existing rules, and a workspace with no live
+  orchestrator is not woken.
+- `NeedsDecision` is not pushed today either, and no push or Live Activity
+  payload names a repository (the "workspace" in a notification's subtitle is
+  the worktree's name). Nothing here changes push.
 
 ### Splitting is done by agents
 
@@ -239,8 +246,13 @@ behavior-free lane that lands before any new behavior:
   never puts a name on the wire, so `WorkspaceCreate workspace_create = 23`
   becoming `WorktreeCreate worktree_create = 23` is byte-identical. The new
   workspace messages take fresh tags.
-- The internal method labels in `crates/protocol/src/lib.rs`
-  (`"workspace.create"` and its kin).
+- The method labels in `crates/protocol/src/lib.rs` (`"workspace.create"` and
+  its kin), which gate capabilities. The existing `worktree.list` (worktrees
+  git has that Far Cooler has not adopted) and its `WorktreeList` /
+  `ExistingWorktree` messages would collide, so they become
+  `worktree.discover` and `DiscoveredWorktreeList` / `DiscoveredWorktree`.
+- Capability **values** advertised on the wire stay as they are; only the Rust
+  constant names change.
 - Rust, Swift, and Kotlin types and identifiers.
 - App copy: a worktree row, "New Workspace", "Find Workspace or Agent", and the
   rest become *worktree* where they mean the directory.
@@ -258,8 +270,9 @@ farcooler workspace  create --name … --prefix …
                      list | show | rename | set-prefix | delete
                      start-orchestrator <ws> --harness … [--replace]
 farcooler task       move <key>… --to <ws>
-                     list defaults to $FARCOOLER_WORKSPACE's board;
-                     --workspace <ws> or --all widens it
+                     list: --workspace <ws> names a board; otherwise
+                     $FARCOOLER_WORKSPACE's; otherwise the whole repository,
+                     each row naming its workspace
 farcooler terminal   set-role <terminal> orchestrator|agent|shell
 ```
 
@@ -285,8 +298,10 @@ the CLI.
   workspaces as they do now.
 - **iOS and Android:** the same grouping in the fleet list, and a board per
   workspace. No workspace management.
-- **Push and the Live Activity** name the workspace wherever they name the
-  repository today.
+- **Push and the Live Activity** are unchanged: none of their payloads names a
+  repository, and the worktree name they carry is still a worktree name.
+- The phones group by runner today, and Android's fleet is a flat list, so
+  grouping by workspace there is new layout, not a regrouping.
 
 ## Sequencing
 
@@ -303,9 +318,9 @@ the CLI.
 2. **Rename**, behavior-free.
 3. **Workspace model**: migration, `workspace` and `task move` CLI, home and
    charter, launch recipes, role, wake routing.
-4. **Claiming**: explicit, session log, process tree, and the cross-workspace
+4. **Claiming**: explicit, hooks, process tree, and the cross-workspace
    warning.
-5. **Apps**: Mac sidebar, then iOS and Android, then push.
+5. **Apps**: Mac sidebar, then iOS and Android.
 6. **Skill**: charter from the environment, and the splitting section.
 
 ## Testing
@@ -319,10 +334,10 @@ the CLI.
   claims are sticky.
 - **Wire**: field numbers of renamed messages are unchanged (a test over the
   descriptor, broken once on purpose to watch it go red).
-- **Claiming**: replayed Claude Code and Codex session-log fixtures, and a
+- **Claiming**: hook payload fixtures for all three harnesses, and a
   process-table fixture in `foreground.rs`'s style.
-- **Wake routing**: a change on Billing wakes Billing's orchestrator and never
-  Main's.
+- **Event routing**: a task change carries its workspace, and a board view for
+  Billing re-reads on Billing's changes and not on Main's.
 - **Apps**: AgentKit model tests for the grouping; Kotlin equivalents.
 
 ## Risks
@@ -337,7 +352,7 @@ the CLI.
   do not contribute `.claude/settings.json`, a Claude Code orchestrator runs
   without the repository's hooks and permission allowlist. Tolerable for an
   agent that does not write code; the spike settles it.
-- **A harness may trigger neither claiming signal** — most likely Cursor, which has no documented session log. Its agents'
+- **A harness may trigger neither claiming signal** — for example one whose hooks omit `cwd`. Its agents'
   worktrees then stay unclaimed until assigned: degraded, but honest.
 - **Splitting is only as good as the handoff.** The skill makes the handoff
   note a required step.
