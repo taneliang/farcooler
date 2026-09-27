@@ -238,8 +238,31 @@ jobs:
             sleep 30
           done
 
+          # altool's own output is where the 90382 signal shows up, so it's
+          # captured to a file — still streamed to the log in full via tee —
+          # rather than left to a plain pass/fail exit. `set +e` around it so
+          # `set -euo pipefail` above doesn't end the script before the exit
+          # status is read.
+          altool_log="$RUNNER_TEMP/altool-upload.log"
+          set +e
           xcrun altool --upload-app -f build/export/FarCooler.ipa -t ios \
-            --apiKey "$APP_STORE_KEY_ID" --apiIssuer "$APP_STORE_ISSUER_ID"
+            --apiKey "$APP_STORE_KEY_ID" --apiIssuer "$APP_STORE_ISSUER_ID" \
+            2>&1 | tee "$altool_log"
+          altool_status=${PIPESTATUS[0]}
+          set -e
+
+          # 2026-09-28: run 36342565304 failed here with altool's own "Upload
+          # limit reached ... (90382)" — App Store Connect's daily cap on
+          # uploads for this app. That's not a code problem, so say so
+          # plainly instead of leaving it buried under hundreds of Swift
+          # warnings. The job still fails: see the note above on why this
+          # upload isn't retried.
+          if [ "$altool_status" -ne 0 ]; then
+            if grep -qE '90382|Upload limit reached' "$altool_log"; then
+              echo "::error::App Store Connect's daily upload limit for this app was reached (altool error 90382). This is not a code problem — no change here will fix it. The next push after the limit resets will upload normally."
+            fi
+            exit "$altool_status"
+          fi
 
   # The Mac app, as a disk image you can actually install.
   #
