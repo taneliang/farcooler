@@ -380,9 +380,30 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     /// then packs that runner from its newest end, as it always did.
     public var fleetTraceAnchor: Int?
 
+    /// The runners the phone had a link to and lost, by name, when the
+    /// snapshot was assembled. Nil when there are none, and in a snapshot
+    /// written before this existed.
+    ///
+    /// **Why `complete` alone can't say this.** `complete` is false for two
+    /// different reasons: a runner nobody has heard from yet (or a fleet
+    /// assembled only from pushes), and a runner that was answering and
+    /// stopped. The surfaces said "from notifications" for both, which is the
+    /// wrong reason for the second: the phone did hear from that runner, and
+    /// what it knows is how long ago. `hedge` is where the two are told apart.
+    ///
+    /// A list of names rather than `Agent.runnerAnswering` read back off the
+    /// rows, because a lost runner with no agents leaves no rows to read, and
+    /// a push folded in by `merging(_:at:)` clears that mark on the one row it
+    /// is about while the runner stays lost.
+    ///
+    /// The third thing here that nothing on the wire supplies, for
+    /// `runnerAnswering`'s reason: it is a fact about this phone's links.
+    /// Stamped by `FleetPublication.merged(at:)` and carried by `merging`.
+    public var lostRunners: [String]?
+
     public init(
         agents: [Agent], capturedAt: Date, complete: Bool, reviewsWaiting: Int? = nil,
-        fleetTrace: Data? = nil, fleetTraceAnchor: Int? = nil
+        fleetTrace: Data? = nil, fleetTraceAnchor: Int? = nil, lostRunners: [String]? = nil
     ) {
         self.agents = agents
         self.capturedAt = capturedAt
@@ -390,6 +411,56 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         self.reviewsWaiting = reviewsWaiting
         self.fleetTrace = fleetTrace
         self.fleetTraceAnchor = fleetTraceAnchor
+        self.lostRunners = lostRunners
+    }
+
+    /// Why a surface can't present these as the whole fleet, or nil when it
+    /// can.
+    public enum Hedge: Sendable, Equatable {
+        /// The phone lost its link to these runners, named in the order they
+        /// were first heard from. Their rows are what it last read.
+        case lostTouch([String])
+        /// Not every runner has been heard from, so there may be agents
+        /// nothing has told the phone about.
+        case fromNotifications
+
+        /// Who was lost: one name, two joined by "and", or a count past that,
+        /// where a list of names wouldn't fit a widget's footer.
+        private static func naming(_ runners: [String]) -> String {
+            switch runners.count {
+            case 1: return runners[0]
+            case 2: return "\(runners[0]) and \(runners[1])"
+            default: return "\(runners.count) runners"
+            }
+        }
+
+        /// The widget's footer, after the age and a " · ". Lowercase, because
+        /// it continues a line.
+        public var footer: String {
+            switch self {
+            case let .lostTouch(runners): return "lost touch with \(Self.naming(runners))"
+            case .fromNotifications: return "from notifications"
+            }
+        }
+
+        /// The watch's footer: the same fact, and what it means for the list.
+        public var sentence: String {
+            switch self {
+            case let .lostTouch(runners):
+                let their = runners.count == 1 ? "its" : "their"
+                return "Lost touch with \(Self.naming(runners)), so \(their) agents may have changed."
+            case .fromNotifications:
+                return "From notifications, so other agents may be missing."
+            }
+        }
+    }
+
+    /// Why these may not be the whole fleet. A lost runner comes first: when
+    /// the phone has lost touch with a runner, that's the reason worth
+    /// saying, whatever else is missing.
+    public var hedge: Hedge? {
+        if let lost = lostRunners, !lost.isEmpty { return .lostTouch(lost) }
+        return complete ? nil : .fromNotifications
     }
 
     /// Nothing known yet. `complete` is false, which is the honest answer
@@ -797,7 +868,10 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
             // keeps drawing the last summed history rather than blanking each
             // time an unrelated agent notifies; the trace is history, and
             // history does not stop being true. Its anchor rides with it.
-            fleetTrace: fleetTrace, fleetTraceAnchor: fleetTraceAnchor)
+            fleetTrace: fleetTrace, fleetTraceAnchor: fleetTraceAnchor,
+            // Carried: a push comes through the relay and says nothing about
+            // whether the phone's link to that runner is back.
+            lostRunners: lostRunners)
     }
 
     /// Whether two fleets say the same thing about the same agents, in the same

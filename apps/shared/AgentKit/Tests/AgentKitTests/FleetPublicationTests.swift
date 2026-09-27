@@ -233,6 +233,62 @@ struct FleetPublicationTests {
         #expect(publication.merged(at: now).complete)
     }
 
+    // MARK: - Lost, as opposed to not heard from (ov-50)
+
+    /// **A runner that was answering and stopped is named as lost**, and the
+    /// hedge says so rather than "from notifications", which is the wrong
+    /// reason: the phone did hear from it. Heard from again, it isn't lost.
+    ///
+    /// Mutation: `merged` writing no `lostRunners`. Red.
+    @Test func aLostRunnerIsNamedAsLost() {
+        var publication = FleetPublication()
+        publication.keeping(runners: ["a", "b"])
+        publication.record(
+            runner: "a", snapshot: snapshot([agent("t1", machine: "l")]), named: "Studio")
+        publication.record(
+            runner: "b", snapshot: snapshot([agent("t2", machine: "g")]), named: "Orchard")
+        publication.keeping(runners: ["a", "b"], answering: ["a"])
+
+        let merged = publication.merged(at: now)
+        #expect(merged.lostRunners == ["Orchard"])
+        #expect(merged.hedge == .lostTouch(["Orchard"]))
+
+        publication.record(
+            runner: "b", snapshot: snapshot([agent("t2", machine: "g")]), named: "Orchard")
+        #expect(publication.merged(at: now).lostRunners == nil)
+        #expect(publication.merged(at: now).hedge == nil)
+    }
+
+    /// **A runner nobody has heard from yet is not lost.** The fleet is
+    /// incomplete, and the hedge is still "from notifications".
+    ///
+    /// Mutation: `merged` naming every contribution, lost or not, and a
+    /// `hedge` that reads `!complete` as lost. Red under each.
+    @Test func aRunnerNotYetHeardFromIsNotLost() {
+        var publication = FleetPublication()
+        publication.keeping(runners: ["a", "b"], answering: ["a"])
+        publication.record(
+            runner: "a", snapshot: snapshot([agent("t1", machine: "l")]), named: "Studio")
+
+        let merged = publication.merged(at: now)
+        #expect(merged.complete == false)
+        #expect(merged.lostRunners == nil)
+        #expect(merged.hedge == .fromNotifications)
+    }
+
+    /// A lost runner with no agents leaves no rows marked "can't say", and is
+    /// still named. The reason this is a list of names and not read back off
+    /// `runnerAnswering`.
+    @Test func aLostRunnerWithNoAgentsIsStillNamed() {
+        var publication = FleetPublication()
+        publication.record(
+            runner: "a", snapshot: snapshot([agent("t1", machine: "l")]), named: "Studio")
+        publication.record(runner: "b", snapshot: snapshot([]), named: "Orchard")
+        publication.keeping(runners: ["a", "b"], answering: ["a"])
+
+        #expect(publication.merged(at: now).hedge == .lostTouch(["Orchard"]))
+    }
+
     @Test func everyLiveRunnerHeardFromIsComplete() {
         var publication = FleetPublication()
         publication.keeping(runners: ["a", "b"])

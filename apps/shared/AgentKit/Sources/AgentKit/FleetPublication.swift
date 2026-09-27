@@ -42,6 +42,9 @@ import Foundation
 ///   runners has never answered is a fleet with agents missing from it. The
 ///   surfaces hedge on it — "from notifications" on the widget, a partial footer
 ///   on the watch — and hedging is exactly right for that state.
+/// - **`lostRunners`** names the runners whose link was lost, which is the
+///   other reason `complete` is false and needs its own words: "Lost touch
+///   with Studio", not "from notifications". See `FleetSnapshot.hedge`.
 /// - **`reviewsWaiting`** sums the runners that answered and ignores the ones
 ///   that did not. Nil only when nobody answered at all, because nil means "not
 ///   told" and one modern runner reporting 3 is being told something.
@@ -57,6 +60,9 @@ public struct FleetPublication {
     /// One runner's own projection, as its connection last polled it.
     private struct Contribution {
         var snapshot: FleetSnapshot
+        /// What to call the runner when its link is lost. See
+        /// `FleetSnapshot.lostRunners`.
+        var name: String?
         /// The link this was polled over has gone since, and no poll has
         /// landed on a new one yet. See `keeping(runners:answering:)`.
         var lost = false
@@ -75,10 +81,14 @@ public struct FleetPublication {
 
     public init() {}
 
-    /// Record what one runner just polled.
-    public mutating func record(runner: String, snapshot: FleetSnapshot) {
+    /// Record what one runner just polled, and what to call it.
+    ///
+    /// `named` is what the surfaces say when this runner's link is lost:
+    /// "Lost touch with Studio". A runner recorded without one is still
+    /// lost, and still makes the merge incomplete, but it can't be named.
+    public mutating func record(runner: String, snapshot: FleetSnapshot, named name: String? = nil) {
         if byRunner[runner] == nil { order.append(runner) }
-        byRunner[runner] = Contribution(snapshot: snapshot)
+        byRunner[runner] = Contribution(snapshot: snapshot, name: name)
     }
 
     /// Keep only these runners, forgetting anything the store has retired.
@@ -176,6 +186,10 @@ public struct FleetPublication {
 
         let counted = contributions.compactMap(\.snapshot.reviewsWaiting)
 
+        // Told apart from "not heard from" here, where the difference is
+        // known: see `FleetSnapshot.lostRunners`.
+        let lost = contributions.filter(\.lost).compactMap(\.name)
+
         let fleet = ActivityTrace.summing(
             anchored: contributions.compactMap { contribution in
                 ActivityTrace(contribution.snapshot.fleetTrace).map { trace in
@@ -204,7 +218,8 @@ public struct FleetPublication {
             complete: complete,
             reviewsWaiting: counted.isEmpty ? nil : counted.reduce(0, +),
             fleetTrace: fleet?.trace.encoded,
-            fleetTraceAnchor: fleet?.anchor)
+            fleetTraceAnchor: fleet?.anchor,
+            lostRunners: lost.isEmpty ? nil : lost)
     }
 }
 

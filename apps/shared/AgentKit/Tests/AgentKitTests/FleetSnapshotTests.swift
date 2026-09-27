@@ -168,6 +168,68 @@ struct FleetSnapshotTests {
         #expect(after.capturedAt == now)
     }
 
+    /// A push comes through the relay, not over the phone's link, so the
+    /// runner it came from is still lost after it. Dropping `lostRunners`
+    /// would put "from notifications" back on the widget with the first push.
+    ///
+    /// Mutation: `merging` not carrying `lostRunners`. Red.
+    @Test func mergingKeepsTheLostRunners() {
+        let before = FleetSnapshot(
+            agents: [agent("t1", status: "working")],
+            capturedAt: Date(timeIntervalSince1970: 0), complete: false,
+            lostRunners: ["Orchard"])
+        let after = before.merging(
+            agent("t1", status: "blocked"), at: Date(timeIntervalSince1970: 500))
+        #expect(after.hedge == .lostTouch(["Orchard"]))
+    }
+
+    // MARK: - The hedge (ov-50)
+
+    /// The two reasons a fleet isn't whole get different words: a lost runner
+    /// is named, and a fleet not yet heard from in full keeps "from
+    /// notifications". A complete fleet with nobody lost says nothing.
+    ///
+    /// Mutations: `hedge` ignoring `lostRunners`; either `footer` or
+    /// `sentence` saying "from notifications" for a lost runner. Red.
+    @Test func aLostRunnerHasItsOwnWords() {
+        let lost = FleetSnapshot(
+            agents: [], capturedAt: Date(timeIntervalSince1970: 1), complete: false,
+            lostRunners: ["Orchard"])
+        #expect(lost.hedge?.footer == "lost touch with Orchard")
+        #expect(lost.hedge?.sentence == "Lost touch with Orchard, so its agents may have changed.")
+
+        let partial = FleetSnapshot(
+            agents: [], capturedAt: Date(timeIntervalSince1970: 1), complete: false)
+        #expect(partial.hedge?.footer == "from notifications")
+        #expect(partial.hedge?.sentence == "From notifications, so other agents may be missing.")
+
+        let whole = FleetSnapshot(
+            agents: [], capturedAt: Date(timeIntervalSince1970: 1), complete: true)
+        #expect(whole.hedge == nil)
+    }
+
+    /// Two lost runners are both named; more than that are counted, which is
+    /// what fits a widget's footer.
+    @Test func severalLostRunnersAreNamedThenCounted() {
+        #expect(
+            FleetSnapshot.Hedge.lostTouch(["Studio", "Orchard"]).sentence
+                == "Lost touch with Studio and Orchard, so their agents may have changed.")
+        #expect(
+            FleetSnapshot.Hedge.lostTouch(["Studio", "Orchard", "Attic"]).footer
+                == "lost touch with 3 runners")
+    }
+
+    /// A snapshot written before `lostRunners` existed decodes, and hedges the
+    /// way it always did.
+    @Test func aSnapshotWithoutLostRunnersStillDecodes() throws {
+        let json = """
+            {"agents":[],"capturedAt":0,"complete":false}
+            """
+        let snapshot = try JSONDecoder().decode(FleetSnapshot.self, from: Data(json.utf8))
+        #expect(snapshot.lostRunners == nil)
+        #expect(snapshot.hedge == .fromNotifications)
+    }
+
     /// Merging must not re-vouch for the agents the push was not about.
     ///
     /// The one this file exists to defend. A push about A used to stamp
