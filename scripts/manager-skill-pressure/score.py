@@ -229,7 +229,8 @@ def score_split(calls, writes, has, check, changed, status, reply, d):
              if is_(c, "task", "show") and shown_key(c) == IN_FLIGHT]
     sets = [(i, c) for i, c in enumerate(map(subcommand, calls))
             if is_(c, "task", "set") and IN_FLIGHT in c and has(c, "--constraint")]
-    ruled = [(i, c) for i, c in sets
+    # The last set is the list that stands: an earlier one it replaced counts for nothing.
+    ruled = [(i, c) for i, c in sets[-1:]
              if any(re.search(REVIEW, v.lower()) for v in flags(c, "--constraint"))]
     check(f"S11 {IN_FLIGHT} was given the review rule as a constraint", bool(ruled), json.dumps([c for _, c in sets]))
     check(f"S11 {IN_FLIGHT}'s constraints were read before they were set",

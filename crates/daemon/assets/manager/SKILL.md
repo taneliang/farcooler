@@ -120,9 +120,9 @@ conversation, so the handoff matters more than the moves.
 3. Move its tasks and the worktrees its agents work in:
    `{{cli}} task move <key>… --to <Name> --repo <repo> --actor manager`, then
    `{{cli}} worktree assign <worktree> --to <Name>` for each worktree. An agent
-   on a moved task never reads the new charter: put its rules for that task on
-   the task. `task set --constraint` replaces the whole list, so read the old
-   one with `{{cli}} task show <key> --repo <repo> --fields constraints` and set old and new.
+   on a moved task never reads the new charter: put the new charter's rules on
+   the task. `task set --constraint` replaces the whole list, so read the old one
+   (`{{cli}} task show <key> --repo <repo> --fields constraints`), then set both.
 4. Write the handoff. It isn't optional: what isn't written dies with this
    conversation. A `--kind decision` note on each moved task saying why it
    moved, and one `--kind comment` note, on the task its orchestrator should

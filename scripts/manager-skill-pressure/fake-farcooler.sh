@@ -33,19 +33,27 @@ set -u
 : "${FAKE_LOG:?FAKE_LOG must name the log file}"
 : "${FAKE_BOARD:?FAKE_BOARD must name the board fixture directory}"
 
-python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "$@" >> "$FAKE_LOG"
-
 # Flags a shell didn't split (`"$FLAGS"` holding `--repo x --actor manager`)
 # reach the real CLI as one argument, and clap refuses it. Refuse it here too,
-# so an agent sees the error it would see for real.
+# so an agent sees the error it would see for real. `--body=two words` is one
+# flag, and clap takes it. A refused call goes to $FAKE_LOG.refused, not the
+# log: it read nothing and set nothing.
 for a in "$@"; do
   case "$a" in
     --*" "*)
-      echo "error: unexpected argument '$a' found" >&2
-      exit 2
+      case "${a%%" "*}" in
+        *=*) ;;
+        *)
+          python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "$@" >> "$FAKE_LOG.refused"
+          echo "error: unexpected argument '$a' found" >&2
+          exit 2
+          ;;
+      esac
       ;;
   esac
 done
+
+python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "$@" >> "$FAKE_LOG"
 
 for a in "$@"; do
   if [ "$a" = "--help" ] || [ "$a" = "-h" ] || [ "$a" = "help" ]; then
