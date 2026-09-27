@@ -432,7 +432,11 @@ const LONG_VALUED: &[&str] = &["rcfile", "init-file", "init-command", "features"
 /// An assignment whose value is quoted and holds a space arrives split
 /// across words, and the words up to the closing quote are still its value.
 /// An orchestrator's `FARCOOLER_CHARTER='…/Application Support/…'` is one;
-/// read word by word, its second half would be taken for the program.
+/// read word by word, its second half would be taken for the program. Where
+/// the quote closes is read as a shell reads it (`open_quote`), not from
+/// how a word ends: `shell_quote` writes `it' b` as `'it'\'' b'`, whose
+/// first word ends in a quote that opens, and `A='a b'c` has no word ending
+/// in one.
 fn target<'a>(words: &[&'a str]) -> Option<&'a str> {
     let mut words = words.iter();
     let mut prefix = "";
@@ -452,16 +456,11 @@ fn target<'a>(words: &[&'a str]) -> Option<&'a str> {
         }
         if let Some((name, _)) = word.split_once('=') {
             if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-                // The untrimmed word, because trimming took the closing quote.
-                let value = raw.split_once('=').map_or("", |(_, v)| v);
-                if let Some(quote) = value.chars().next().filter(|c| QUOTES.contains(c))
-                    && (value.len() == 1 || !value.ends_with(quote))
-                {
-                    for rest in words.by_ref() {
-                        if rest.trim_end_matches(';').ends_with(quote) {
-                            break;
-                        }
-                    }
+                // The untrimmed word, because trimming took its quotes.
+                let mut open = open_quote(raw, None);
+                while let Some(quote) = open {
+                    let Some(rest) = words.next() else { break };
+                    open = open_quote(rest, Some(quote));
                 }
                 continue;
             }
@@ -474,6 +473,28 @@ fn target<'a>(words: &[&'a str]) -> Option<&'a str> {
         return Some(program);
     }
     None
+}
+
+/// The quote still open at the end of `word`, which starts inside `open`.
+///
+/// As POSIX sh reads it: everything up to the next `'` is literal inside
+/// single quotes, and elsewhere a backslash escapes the character after it.
+/// fish agrees on everything `shell_quote` writes, which never puts a
+/// backslash inside single quotes.
+fn open_quote(word: &str, mut open: Option<char>) -> Option<char> {
+    let mut chars = word.chars();
+    while let Some(c) = chars.next() {
+        match (open, c) {
+            (Some('\''), '\'') | (Some('"'), '"') => open = None,
+            (Some('\''), _) => {}
+            (_, '\\') => {
+                chars.next();
+            }
+            (None, '\'' | '"') => open = Some(c),
+            _ => {}
+        }
+    }
+    open
 }
 
 /// Words that run the rest of the command rather than being it.
@@ -1086,6 +1107,30 @@ mod tests {
         assert_eq!(target_of("sh -c env A='one two three' claude"), Some("claude"));
         assert_eq!(target_of("sh -c env A='one' claude"), Some("claude"));
         assert_eq!(target_of("sh -c env A=\"one two\" claude"), Some("claude"));
+        // Read as a shell would, one quote at a time, and every case is
+        // checked before any fails, so a regression names all it broke.
+        let misread: Vec<_> = [
+            // `shell_quote` writes a `'` as `'\''`, which leaves the first
+            // half of `it' b` ending in a quote that opens, not closes.
+            (
+                "fish -c env FARCOOLER_WORKSPACE=w \
+                 FARCOOLER_CHARTER='/Users/x/Library/Application Support/it'\\'' b/charter.md' \
+                 /opt/homebrew/bin/fish -ilc 'claude'",
+                Some("fish"),
+            ),
+            // A value that goes on past its closing quote, so no word ends
+            // in one.
+            ("sh -c env A='one two'three claude", Some("claude")),
+            // A double quote a backslash escapes doesn't close the value.
+            ("sh -c env A=\"one \\\" two\" claude", Some("claude")),
+            // Never closed, as `ps` cutting a long command short leaves it.
+            ("sh -c env A='one two", Option::None),
+        ]
+        .into_iter()
+        .filter(|(args, program)| target_of(args) != *program)
+        .map(|(args, _)| (args, target_of(args)))
+        .collect();
+        assert!(misread.is_empty(), "{misread:#?}");
         assert_eq!(target_of("sh -c"), Option::None);
     }
 
