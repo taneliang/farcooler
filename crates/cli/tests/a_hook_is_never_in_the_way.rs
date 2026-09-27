@@ -530,3 +530,39 @@ async fn a_wider_deadline_waits_for_the_same_late_verdict() {
         serde_json::from_str(printed.trim()).unwrap_or_else(|e| panic!("stdout was {printed:?}: {e}"));
     assert_eq!(parsed["hookSpecificOutput"]["decision"]["message"], "Denied late");
 }
+
+/// A daemon that holds the ask and then dies before it answers.
+///
+/// The hold is the one thing that widens a hook's wait, to a minute, so it is
+/// also the one new way for a hook to be in the way. A daemon that goes away
+/// mid-hold is ordinary: a restart, a crash, a Mac put to sleep. The hook must
+/// see the connection close and leave at once, exit 0 and silent, so claude's
+/// own dialog carries on as if no hook were installed. Under `WEDGED`, so a
+/// hook that sat out the rest of the hold is caught.
+#[tokio::test]
+async fn a_held_hook_exits_zero_and_silent_when_its_daemon_dies_mid_hold() {
+    let dir = tempfile::tempdir().expect("a directory");
+    let socket = dir.path().join("h.sock");
+    let listener = tokio::net::UnixListener::bind(&socket).expect("bind");
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.expect("accept");
+        let mut reader = tokio::io::BufReader::new(&mut stream);
+        let mut line = String::new();
+        tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line).await.expect("read");
+        tokio::io::AsyncWriteExt::write_all(&mut stream, b"{\"hold_ms\":60000}\n")
+            .await
+            .expect("write");
+        // And then the daemon is gone: the stream drops here.
+    });
+    let out = run_the_hook_within(
+        WEDGED,
+        Some(SHAPE_NOT_SPEED),
+        "PermissionRequest",
+        true,
+        &socket,
+        a_payload_of(64),
+        Pipe::Closed,
+    )
+    .await;
+    it_was_never_in_the_way(&out, "a held hook whose daemon died mid-hold");
+}

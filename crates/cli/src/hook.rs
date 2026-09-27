@@ -20,12 +20,16 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use farcooler_agent_hooks::wire::{Decision, HookLine, HookVerdict, decode_line, encode_line};
+use farcooler_agent_hooks::wire::{
+    Decision, HookLine, HookVerdict, LONGEST_HOLD, decode_line, encode_line,
+};
 use farcooler_agent_hooks::Agent;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
+use tokio::time::Instant;
 
-/// The whole of the hook's patience, spent once.
+/// The first contact's patience: connect, hand over the frame, and — for a
+/// gating hook — hear the daemon's first word.
 ///
 /// A name and not a literal at the call site, because it is the knob that
 /// trades "the phone got a chance to answer" against "the agent sat still for
@@ -33,20 +37,23 @@ use tokio::net::UnixStream;
 /// daemon to say "nobody is watching", short enough that a dead one is
 /// imperceptible to the person at the keyboard.
 ///
-/// The spec allows a longer bound — on the order of a minute — but only once a
-/// client is attached and has ACCEPTED the ask, and nothing here can be told
-/// that: `HookVerdict` is the whole of the daemon's reply and it arrives once,
-/// at the end. Widening this unconditionally would mean a daemon that wedges
-/// mid-answer wedges the agent for a minute, which is the one thing this file
-/// exists to prevent. So the bound stays short until there is a signal to widen
-/// it on.
+/// It is the whole of the wait for every hook but one kind. A gating hook can
+/// wait longer, up to `LONGEST_HOLD`, and only on the daemon's word: a first
+/// line of `{"hold_ms":…}` says the ask is in front of a phone, and the hook
+/// then reads one more line for the verdict. That word has to arrive inside
+/// this deadline, so the long wait is granted by a daemon that has just shown
+/// it is alive and answering, never assumed. A daemon that wedges before its
+/// first word costs the agent 400 ms, as it always did; one that wedges mid-hold
+/// costs at most the hold. Widening this deadline itself, unconditionally,
+/// would mean a daemon that wedges wedges the agent for a minute, which is the
+/// one thing this file exists to prevent.
 ///
-/// Missing it loses a decision to the safe side, not the wrong one. The hook
-/// prints nothing, and an agent that reads nothing from a `PermissionRequest`
-/// hook asks at the keyboard exactly as it would with no hook installed
-/// (spec, "Permissions, which is the feature": "On timeout the hook returns
-/// nothing and the TUI asks as it always would"). A deny that arrives late
-/// becomes a question, never a yes.
+/// Missing it, or running out of a hold, loses a decision to the safe side,
+/// not the wrong one. The hook prints nothing, and an agent that reads nothing
+/// from a `PermissionRequest` hook asks at the keyboard exactly as it would
+/// with no hook installed (spec, "Permissions, which is the feature": "On
+/// timeout the hook returns nothing and the TUI asks as it always would"). A
+/// deny that arrives late becomes a question, never a yes.
 pub const HOOK_DEADLINE: Duration = Duration::from_millis(400);
 
 /// The most `--deadline-ms` may ask for: the spec's longest wait, "on the
@@ -64,6 +71,21 @@ pub fn deadline_from_ms(ms: u64) -> Duration {
     Duration::from_millis(ms.min(LONGEST_DEADLINE_MS))
 }
 
+/// A hold's `hold_ms`, as the wait it asks for, capped at `LONGEST_HOLD`.
+///
+/// Capped for the reason `deadline_from_ms` is: the hold is the daemon's word,
+/// and no word from it, however absurd, may remove the hook's bound.
+pub fn hold_from_ms(ms: u64) -> Duration {
+    Duration::from_millis(ms).min(LONGEST_HOLD)
+}
+
+/// The most a hook may take, first contact and hold together.
+///
+/// Only a gating hook can be held, so only a gating hook gets the hold's room.
+fn ceiling(gating: bool, deadline: Duration) -> Duration {
+    if gating { deadline + LONGEST_HOLD } else { deadline }
+}
+
 /// `deadline` is `HOOK_DEADLINE` for every hook an agent runs. It is a
 /// parameter only so the binary's own tests can take the machine's speed out
 /// of a test that is about something else; see `--deadline-ms` in `main.rs`.
@@ -72,7 +94,8 @@ pub async fn run(agent: Agent, event: String, socket: PathBuf, gating: bool, dea
     // list of blocking calls each with its own guard is only right while
     // somebody keeps adding to the list; a bound around the lot is a property,
     // and it is the property this file exists for.
-    let out = tokio::time::timeout(deadline, errand(agent, event, socket, gating, deadline))
+    let bound = ceiling(gating, deadline);
+    let out = tokio::time::timeout(bound, errand(agent, event, socket, gating, deadline))
         .await
         .unwrap_or_default();
     if !out.is_empty() {
@@ -123,6 +146,12 @@ pub async fn run(agent: Agent, event: String, socket: PathBuf, gating: bool, dea
 /// payload; codex and cursor are unmeasured, and a parent that writes and then
 /// holds the pipe open would otherwise leave this process alive forever, before
 /// it had reached a single one of the guards below.
+///
+/// And it is inside the FIRST-CONTACT deadline, not merely inside `run`'s
+/// ceiling, because a gating hook's ceiling has a hold's minute of room in it.
+/// That room is the daemon's to grant; an agent holding the pipe open must not
+/// be able to take it. So the payload, the connect, the write and the first
+/// line all share one instant, and only a hold reaches past it.
 async fn errand(
     agent: Agent,
     event: String,
@@ -130,14 +159,18 @@ async fn errand(
     gating: bool,
     deadline: Duration,
 ) -> String {
+    let by = Instant::now() + deadline;
     let mut payload = Vec::new();
-    if tokio::io::AsyncReadExt::read_to_end(&mut tokio::io::stdin(), &mut payload).await.is_err() {
+    let mut stdin = tokio::io::stdin();
+    let read = tokio::io::AsyncReadExt::read_to_end(&mut stdin, &mut payload);
+    if !matches!(tokio::time::timeout_at(by, read).await, Ok(Ok(_))) {
         return String::new();
     }
-    run_with_input(agent, event, socket, gating, payload, deadline).await
+    with_input(agent, event, socket, gating, payload, by).await
 }
 
 /// The whole of the hook, minus stdin and stdout, so it can be tested.
+#[cfg(test)]
 async fn run_with_input(
     agent: Agent,
     event: String,
@@ -145,6 +178,18 @@ async fn run_with_input(
     gating: bool,
     payload: Vec<u8>,
     deadline: Duration,
+) -> String {
+    with_input(agent, event, socket, gating, payload, Instant::now() + deadline).await
+}
+
+/// The hook from its payload on, with first contact due `by`.
+async fn with_input(
+    agent: Agent,
+    event: String,
+    socket: PathBuf,
+    gating: bool,
+    payload: Vec<u8>,
+    by: Instant,
 ) -> String {
     let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&payload) else {
         return String::new();
@@ -155,9 +200,11 @@ async fn run_with_input(
     };
     // The same bound again, over the conversation alone, so this function holds
     // the property on its own terms and a test can say so. `run`'s bound starts
-    // first and so still dominates: the process is over inside one
-    // deadline, whichever route it took to get there.
-    tokio::time::timeout(deadline, converse(&socket, &encoded, gating))
+    // first and so still dominates: the process is over inside one ceiling,
+    // whichever route it took to get there. `converse` bounds its two parts
+    // more tightly still; this is the backstop to its arithmetic.
+    let hold = if gating { LONGEST_HOLD } else { Duration::ZERO };
+    tokio::time::timeout_at(by + hold, converse(&socket, &encoded, gating, by))
         .await
         .unwrap_or_default()
 }
@@ -172,35 +219,64 @@ async fn run_with_input(
 /// fills — 8 KB of it on macOS, which a `PreToolUse` carrying a Write's content
 /// clears routinely. The write then waits for a writability that never arrives.
 ///
-/// Hence the deadline around the caller's call to this, and not around the read
+/// Hence `by` around the whole first contact, and not around the read
 /// alone. Being cut off mid-write leaves a partial line on the socket, which is
 /// the right outcome: the daemon reads whole lines, and half a frame with no
 /// newline is discarded at EOF rather than acted on.
-async fn converse(socket: &Path, encoded: &str, gating: bool) -> String {
-    let Ok(mut stream) = UnixStream::connect(socket).await else {
+///
+/// The first contact is all a non-gating hook does, and all a gating one does
+/// unless the daemon's first word is a hold. A hold buys one more line, read
+/// under the hold's own bound, and that line is the verdict. EOF or an error in
+/// the hold is the daemon gone, and ends the wait at once.
+async fn converse(socket: &Path, encoded: &str, gating: bool, by: Instant) -> String {
+    let first = tokio::time::timeout_at(by, first_contact(socket, encoded, gating)).await;
+    let Ok(Some((mut reader, verdict))) = first else {
         return String::new();
     };
-    if stream.write_all(encoded.as_bytes()).await.is_err() {
-        return String::new();
-    }
-
-    if !gating {
-        return String::new();
-    }
-
-    let mut reply = String::new();
-    let mut reader = BufReader::new(&mut stream);
-    if !matches!(reader.read_line(&mut reply).await, Ok(n) if n > 0) {
-        return String::new();
-    }
-
-    let Ok(verdict) = decode_line::<HookVerdict>(reply.trim()) else {
-        return String::new();
+    let verdict = match verdict.hold_ms {
+        None => verdict,
+        Some(ms) => {
+            let rest = tokio::time::timeout(hold_from_ms(ms), read_verdict(&mut reader)).await;
+            let Ok(Some(verdict)) = rest else {
+                return String::new();
+            };
+            verdict
+        }
     };
     let Some(decision) = verdict.decision else {
         return String::new();
     };
     claude_shaped_output(&decision).unwrap_or_default()
+}
+
+/// Connect, write the frame, and read the daemon's first line.
+///
+/// `None` for a non-gating hook, which reads nothing, and for every way the
+/// conversation can fail. The reader is handed back rather than rebuilt,
+/// because it may already hold the line after this one.
+async fn first_contact(
+    socket: &Path,
+    encoded: &str,
+    gating: bool,
+) -> Option<(BufReader<UnixStream>, HookVerdict)> {
+    let mut stream = UnixStream::connect(socket).await.ok()?;
+    stream.write_all(encoded.as_bytes()).await.ok()?;
+    if !gating {
+        return None;
+    }
+    let mut reader = BufReader::new(stream);
+    let verdict = read_verdict(&mut reader).await?;
+    Some((reader, verdict))
+}
+
+/// One line from the daemon, as a verdict. `None` at EOF, on an error, or on
+/// a line that is not one.
+async fn read_verdict(reader: &mut BufReader<UnixStream>) -> Option<HookVerdict> {
+    let mut line = String::new();
+    if !matches!(reader.read_line(&mut line).await, Ok(n) if n > 0) {
+        return None;
+    }
+    decode_line::<HookVerdict>(line.trim()).ok()
 }
 
 /// The decision, in the shape the agent expects to read on stdout.
@@ -395,5 +471,142 @@ mod tests {
         .expect("the hook must not outlive its own deadline");
 
         assert_eq!(out, "", "no answer in time means the TUI asks, as it always would");
+    }
+
+    /// What a fake daemon does once it has read the hook's frame.
+    enum Say {
+        Wait(Duration),
+        Write(&'static [u8]),
+        /// Close the connection, as a daemon that dies does.
+        HangUp,
+    }
+
+    /// A fake daemon that reads one frame and then follows `script`.
+    ///
+    /// A script that does not end in `HangUp` keeps the connection open for
+    /// as long as the test runs, so a hook that reads past what it was sent
+    /// waits rather than meeting an EOF that would let it off.
+    fn a_daemon_that(socket: &Path, script: Vec<Say>) {
+        let listener = tokio::net::UnixListener::bind(socket).expect("bind");
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut reader = tokio::io::BufReader::new(&mut stream);
+            let mut line = String::new();
+            tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line).await.expect("read");
+            for step in script {
+                match step {
+                    Say::Wait(d) => tokio::time::sleep(d).await,
+                    Say::Write(bytes) => {
+                        let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, bytes).await;
+                    }
+                    Say::HangUp => return,
+                }
+            }
+            std::future::pending::<()>().await;
+        });
+    }
+
+    const A_HOLD: &[u8] = b"{\"hold_ms\":60000}\n";
+    const A_DENY: &[u8] = b"{\"decision\":{\"behavior\":\"deny\",\"message\":\"Denied from a test\"}}\n";
+
+    /// The first-contact deadline for a test that proves the wait widened.
+    ///
+    /// Not `HOOK_DEADLINE`: the fake daemon's hold must land inside it, and a
+    /// loaded machine is entitled to take longer than 400 ms to schedule it
+    /// (see `SHAPE_NOT_SPEED`). What the test needs is a verdict that comes
+    /// after this deadline and is still printed, and `PAST_FIRST_CONTACT`
+    /// is that.
+    const FIRST_CONTACT: Duration = Duration::from_secs(1);
+    const PAST_FIRST_CONTACT: Duration = Duration::from_millis(1_500);
+
+    async fn ask(socket: PathBuf, gating: bool, deadline: Duration) -> (String, Duration) {
+        let started = std::time::Instant::now();
+        let out = tokio::time::timeout(
+            Duration::from_secs(10),
+            run_with_input(
+                Agent::Claude,
+                "PermissionRequest".to_string(),
+                socket,
+                gating,
+                b"{\"session_id\":\"abc\",\"tool_name\":\"Write\"}".to_vec(),
+                deadline,
+            ),
+        )
+        .await
+        .expect("the hook must not outlive its own bounds");
+        (out, started.elapsed())
+    }
+
+    /// The point of a hold: a verdict that comes after the first-contact
+    /// deadline still reaches the agent, because the daemon asked for the wait.
+    #[tokio::test]
+    async fn a_held_hook_prints_the_decision_that_follows_the_hold() {
+        let dir = tempfile::tempdir().expect("a directory");
+        let socket = dir.path().join("h.sock");
+        a_daemon_that(&socket, vec![
+            Say::Write(A_HOLD),
+            Say::Wait(PAST_FIRST_CONTACT),
+            Say::Write(A_DENY),
+        ]);
+        let (out, _) = ask(socket, true, FIRST_CONTACT).await;
+        let parsed: serde_json::Value =
+            serde_json::from_str(&out).unwrap_or_else(|e| panic!("hook printed {out:?}: {e}"));
+        assert_eq!(parsed["hookSpecificOutput"]["decision"]["behavior"], "deny");
+        assert_eq!(parsed["hookSpecificOutput"]["decision"]["message"], "Denied from a test");
+    }
+
+    /// A hold is bounded by what it says, not by `LONGEST_HOLD` alone.
+    #[tokio::test]
+    async fn a_held_hook_whose_daemon_goes_quiet_prints_nothing_when_the_hold_ends() {
+        let dir = tempfile::tempdir().expect("a directory");
+        let socket = dir.path().join("h.sock");
+        a_daemon_that(&socket, vec![Say::Write(b"{\"hold_ms\":300}\n")]);
+        let (out, took) = ask(socket, true, SHAPE_NOT_SPEED).await;
+        assert_eq!(out, "", "a hold that runs out leaves the agent to ask at the keyboard");
+        assert!(took < Duration::from_secs(2), "a 300 ms hold took {took:?}");
+    }
+
+    /// A daemon that goes away mid-hold frees the hook at once, not at the
+    /// end of the hold: EOF is an answer.
+    #[tokio::test]
+    async fn a_held_hook_whose_daemon_hangs_up_prints_nothing() {
+        let dir = tempfile::tempdir().expect("a directory");
+        let socket = dir.path().join("h.sock");
+        a_daemon_that(&socket, vec![Say::Write(A_HOLD), Say::HangUp]);
+        let (out, took) = ask(socket, true, SHAPE_NOT_SPEED).await;
+        assert_eq!(out, "");
+        assert!(took < Duration::from_secs(2), "a hung-up hold took {took:?}");
+    }
+
+    /// The first contact stays bounded: a hold that comes late is no hold.
+    #[tokio::test]
+    async fn a_hold_that_arrives_after_the_first_contact_deadline_is_ignored() {
+        let dir = tempfile::tempdir().expect("a directory");
+        let socket = dir.path().join("h.sock");
+        a_daemon_that(&socket, vec![
+            Say::Wait(Duration::from_millis(600)),
+            Say::Write(A_HOLD),
+            Say::Write(A_DENY),
+        ]);
+        let (out, took) = ask(socket, true, HOOK_DEADLINE).await;
+        assert_eq!(out, "", "a verdict after a late hold must not be printed");
+        assert!(took < Duration::from_secs(1), "the hook waited {took:?} past its deadline");
+    }
+
+    /// `MessageDisplay` and the rest never read, so a hold cannot slow them.
+    #[tokio::test]
+    async fn a_non_gating_hook_never_waits_for_a_hold() {
+        let dir = tempfile::tempdir().expect("a directory");
+        let socket = dir.path().join("h.sock");
+        a_daemon_that(&socket, vec![Say::Write(A_HOLD)]);
+        let (out, took) = ask(socket, false, SHAPE_NOT_SPEED).await;
+        assert_eq!(out, "");
+        assert!(took < HOOK_DEADLINE, "a non-gating hook took {took:?}");
+    }
+
+    #[test]
+    fn a_hold_is_capped_at_the_longest_hold() {
+        assert_eq!(hold_from_ms(300), Duration::from_millis(300), "under the cap: as asked");
+        assert_eq!(hold_from_ms(u64::MAX), Duration::from_secs(60));
     }
 }
