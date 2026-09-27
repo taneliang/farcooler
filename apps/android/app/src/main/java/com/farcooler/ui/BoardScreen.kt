@@ -43,8 +43,8 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -57,7 +57,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.coroutineScope
 import com.farcooler.model.BoardRow
 import com.farcooler.model.GlancePalette
 import com.farcooler.model.RunnerBoards
@@ -71,7 +73,6 @@ import com.farcooler.model.Workspace
 import com.farcooler.model.landingWorkspace
 import com.farcooler.net.Connection
 import com.farcooler.net.TerminalRef
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // A repository's task board on Android: a Board row on the front door, the
@@ -374,18 +375,20 @@ private fun TaskCardRow(
 /**
  * The wall clock, as of the last minute boundary, and moving on each one.
  *
- * The board recomposes only when a task changes, so a card that read the clock
- * once would still say "Added just now" five hours later on a quiet board. One
- * coroutine per card on screen, asleep between minutes; it stops with the card.
- * The wait is [TaskRow.untilNextMinuteMs], which `TaskBoardTest` checks.
+ * A [MinuteClock] per card on screen, asleep between minutes, started on
+ * ON_START and stopped on ON_STOP (and with the card). ON_START runs before
+ * the first frame the app draws when it comes back or the phone wakes, and
+ * [MinuteClock.start] has read the clock before it returns, so that frame is
+ * right. Started, not resumed: a board half-covered by another window is
+ * still on screen, and its cards still move on.
  */
 @Composable
 private fun rememberMinuteClock(): Long {
-    val now by produceState(System.currentTimeMillis()) {
-        while (true) {
-            delay(TaskRow.untilNextMinuteMs(value))
-            value = System.currentTimeMillis()
-        }
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val clock = remember { MinuteClock(System::currentTimeMillis) { now = it } }
+    LifecycleStartEffect(clock) {
+        clock.start(lifecycle.coroutineScope)
+        onStopOrDispose { clock.stop() }
     }
     return now
 }
