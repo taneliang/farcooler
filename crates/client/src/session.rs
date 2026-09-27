@@ -290,6 +290,9 @@ impl FleetEvent {
             Payload::HostChanged(_)
             | Payload::RepositoryRootChanged(_)
             | Payload::RepositoryChanged(_) => None,
+            // The daemon dropped events addressed to this connection. What
+            // they were is gone, so everything is re-read.
+            Payload::EventsMissed(_) => Some(FleetEvent::Resync),
             // This arm used to return `None`, with a note saying to revisit it
             // when a board existed to hear it. The Mac board is that board, so
             // here it is. Kept as a sentence rather than deleted because the
@@ -299,9 +302,6 @@ impl FleetEvent {
             // passed, and the only symptom was a board that rendered once and
             // never moved — a bug no test in the plan could see, because every
             // board test was a model test.
-            // The daemon dropped events addressed to this connection. What
-            // they were is gone, so everything is re-read.
-            Payload::EventsMissed(_) => Some(FleetEvent::Resync),
             Payload::TaskChanged(t) => Some(FleetEvent::Task {
                 repository: uuid_of(&t.repository_id),
                 workspace: some_uuid(t.workspace_id.as_deref()),
