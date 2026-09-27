@@ -242,7 +242,7 @@ pub fn holds_only_ours(text: &str, socket: &Path) -> bool {
     let Some(Value::Object(hooks)) = root.get("hooks") else { return false };
     let us = Us::here(socket);
     root.iter().all(|(k, v)| k == "hooks" || (k == "version" && v.is_number()))
-        && hooks.values().all(|list| list.as_array().is_some_and(|l| l.iter().all(|e| entry_is_ours(e, &us))))
+        && hooks.values().all(|list| list.as_array().is_some_and(|l| l.iter().all(|e| entry_is_ours_or_gone(e, &us))))
 }
 
 /// The path this binary was launched as, resolved the same way the shim's
@@ -270,6 +270,15 @@ fn binary_path() -> String {
 /// daemon's entries for ours and replace them on every launch. Another
 /// channel's daemon (its own home, its own socket) is somebody else, and the
 /// two installs sit side by side.
+///
+/// **Unless that daemon's home is gone.** The socket moves when the home
+/// does: the account's home renamed, `XDG_DATA_HOME` changed, or a scratch
+/// daemon with its own `FARCOOLER_HOME` opening codex in a real checkout. An
+/// entry in our exact grammar, through a CLI of ours, whose socket's
+/// directory no longer exists reports to nobody, and nobody else will ever
+/// clean it up. A merge replaces it and removal doesn't ask about it, the
+/// same as ours (`replaces`). A daemon that is merely stopped still has its
+/// directory, so its entries stay: the conservative side of the line.
 struct Us {
     socket: String,
 }
@@ -282,6 +291,20 @@ impl Us {
     fn wrote(&self, command: &OurCommand) -> bool {
         command.socket == self.socket && is_a_far_cooler_cli(&command.binary)
     }
+
+    /// Whether a merge takes this command out: ours (`wrote`), or a gone
+    /// home's (`home_is_gone`).
+    fn replaces(&self, command: &OurCommand) -> bool {
+        self.wrote(command) || (is_a_far_cooler_cli(&command.binary) && home_is_gone(&command.socket))
+    }
+}
+
+/// Whether the directory a socket lives in no longer exists. Only an
+/// absolute path, and only a clear "not there": a directory we can't look
+/// at (permissions, a mount that errors) may still be somebody's home.
+fn home_is_gone(socket: &str) -> bool {
+    let socket = Path::new(socket);
+    socket.is_absolute() && socket.parent().is_some_and(|dir| matches!(dir.try_exists(), Ok(false)))
 }
 
 /// Whether a binary's file name is exactly one our channels install or cargo
@@ -357,8 +380,15 @@ fn unquote_word(s: &str) -> Option<(String, &str)> {
 }
 
 /// Whether `command` is, exactly and in full, one we wrote.
+#[cfg(test)]
 fn is_our_command(command: &str, us: &Us) -> bool {
-    parse_our_command(command).is_some_and(|c| c.rendered == command && us.wrote(&c))
+    command_passes(command, &|c| us.wrote(c))
+}
+
+/// Whether `command` is, exactly and in full, in our grammar and passes
+/// `test` (`Us::wrote` or `Us::replaces`).
+fn command_passes(command: &str, test: &impl Fn(&OurCommand) -> bool) -> bool {
+    parse_our_command(command).is_some_and(|c| c.rendered == command && test(&c))
 }
 
 /// Whether an entry is exactly what we write, in either shape, and nothing
@@ -366,19 +396,32 @@ fn is_our_command(command: &str, us: &Us) -> bool {
 /// one inner hook, or cursor's flat `{"command": <ours>}`. A key we never
 /// write, a second inner hook, or a command that only begins with ours makes
 /// the entry somebody's, and a merge and `holds_only_ours` both leave it be.
+#[cfg(test)]
 fn entry_is_ours(entry: &Value, us: &Us) -> bool {
+    entry_in_our_shape(entry, &|c| us.wrote(c))
+}
+
+/// `entry_is_ours`, or the same entry naming a socket whose home is gone
+/// (`Us::replaces`). What a merge replaces and removal needn't ask about.
+fn entry_is_ours_or_gone(entry: &Value, us: &Us) -> bool {
+    entry_in_our_shape(entry, &|c| us.replaces(c))
+}
+
+/// An entry in exactly our shape whose command is in our grammar and
+/// passes `test`.
+fn entry_in_our_shape(entry: &Value, test: &impl Fn(&OurCommand) -> bool) -> bool {
     let Some(entry) = entry.as_object() else { return false };
     if entry.len() != 1 {
         return false;
     }
     if let Some(Value::String(command)) = entry.get("command") {
-        return is_our_command(command, us);
+        return command_passes(command, test);
     }
     let Some(Value::Array(inner)) = entry.get("hooks") else { return false };
     let [Value::Object(hook)] = inner.as_slice() else { return false };
     hook.len() == 2
         && hook.get("type").and_then(Value::as_str) == Some("command")
-        && hook.get("command").and_then(Value::as_str).is_some_and(|c| is_our_command(c, us))
+        && hook.get("command").and_then(Value::as_str).is_some_and(|c| command_passes(c, test))
 }
 
 /// Whether somebody's entry already runs `ours`, exactly this command, as
@@ -548,7 +591,7 @@ pub fn remove_ours(existing: &str, socket: &Path) -> String {
     if let Some(hooks_obj) = after.get_mut("hooks").and_then(Value::as_object_mut) {
         for arr in hooks_obj.values_mut() {
             let Some(list) = arr.as_array() else { continue };
-            let kept: Vec<Value> = list.iter().filter(|entry| !entry_is_ours(entry, &us)).cloned().collect();
+            let kept: Vec<Value> = list.iter().filter(|entry| !entry_is_ours_or_gone(entry, &us)).cloned().collect();
             *arr = Value::Array(kept);
         }
     }
@@ -613,6 +656,14 @@ fn hooks_object_mut(root: &mut Value) -> Option<&mut serde_json::Map<String, Val
 /// it already reports to us, so a second entry of ours would fire the hook
 /// twice (every prompt and answer drawn twice in chat). Then we add nothing.
 ///
+/// When the list already holds exactly one entry of ours and it is this
+/// one, the list stays exactly as it is, where the owner put it: moving it
+/// to the end would change their hooks' order and rewrite the file for
+/// nothing.
+///
+/// An entry naming a gone home's socket (`Us::replaces`) counts as ours
+/// here: it is dropped, and a second one beside ours means the list changes.
+///
 /// An event whose value isn't a list is left alone, for `merge`'s reason.
 fn merge_event(
     hooks_obj: &mut serde_json::Map<String, Value>,
@@ -630,9 +681,14 @@ fn merge_event(
             return;
         }
     };
-    let mut kept: Vec<Value> = existing_arr.into_iter().filter(|e| !entry_is_ours(e, us)).collect();
+    let (ours, mut kept): (Vec<Value>, Vec<Value>) =
+        existing_arr.into_iter().partition(|e| entry_is_ours_or_gone(e, us));
     if kept.iter().any(|e| entry_runs(e, command, nested)) {
         tracing::info!(event, "somebody's hook entry already runs ours; leaving it as they arranged it");
+    } else if let [only] = ours.as_slice()
+        && *only == new_entry
+    {
+        return;
     } else {
         kept.push(new_entry);
     }
@@ -1223,10 +1279,14 @@ mod tests {
 
     /// The other side of m3: another daemon's entry (another channel, with a
     /// socket of its own, at a path of its own) is not ours, and the two
-    /// installs live side by side.
+    /// installs live side by side. Its home has to exist, or the entry is a
+    /// gone home's and replaced (`Us::replaces`).
     #[test]
     fn another_daemons_entry_is_left_beside_ours() {
-        let theirs = "'/Users/x/.local/bin/farcooler-preview' hook --agent codex --event Stop --socket '/Users/x/.farcooler-preview/h.sock'";
+        let home = tempfile::tempdir().unwrap();
+        let socket = format!("{}/h.sock", home.path().display());
+        let theirs = render_command("/Users/x/.local/bin/farcooler-preview", "codex", "Stop", &socket, false);
+        let theirs = theirs.as_str();
         let existing = json!({ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": theirs } ] } ] } });
         let merged = merge_codex(&existing.to_string(), Path::new("/tmp/h.sock"));
         let stop = commands_under(&merged, "Stop");
@@ -1333,5 +1393,48 @@ mod tests {
             2,
             "codex's shape, which cursor doesn't read"
         );
+    }
+
+    /// m1-r of the re-review: an owner who moved our entry ahead of theirs
+    /// keeps that order, and the file isn't rewritten. Moving ours to the end
+    /// would run theirs first and sort their keys, for nothing.
+    #[test]
+    fn our_entry_ahead_of_theirs_stays_where_the_owner_put_it() {
+        let socket = Path::new("/tmp/h.sock");
+        let ours: Value = serde_json::from_str(&merge_codex("{}", socket)).unwrap();
+        let mut hooks = ours["hooks"].clone();
+        let theirs = json!({ "hooks": [ { "type": "command", "command": "say theirs" } ] });
+        hooks["Stop"] = json!([ours["hooks"]["Stop"][0].clone(), theirs]);
+        let owners = format!("{{\n    \"hooks\": {hooks}\n}}\n");
+        assert_eq!(merge_codex(&owners, socket), owners, "[ours, theirs] stays byte for byte");
+
+        let ours: Value = serde_json::from_str(&merge_cursor("{}", socket)).unwrap();
+        let mut hooks = ours["hooks"].clone();
+        hooks["stop"] = json!([ours["hooks"]["stop"][0].clone(), { "command": "say theirs" }]);
+        let owners = format!("{{\"version\": 1, \"hooks\": {hooks}}}");
+        assert_eq!(merge_cursor(&owners, socket), owners, "and in cursor's shape");
+    }
+
+    /// m2-r of the re-review: an entry of ours naming a socket whose home is
+    /// gone reports to nobody. A merge drops it and removal doesn't ask about
+    /// it. While that home is there, the same entry is another daemon's, and
+    /// it stays.
+    #[test]
+    fn a_gone_homes_entry_is_replaced_and_a_live_daemons_is_kept() {
+        let socket = Path::new("/tmp/h.sock");
+        let home = tempfile::tempdir().unwrap();
+        let other = home.path().join("h.sock");
+        let both = merge_codex(&merge_codex("{}", &other), socket);
+        let ours = hook_command("codex", "Stop", socket, false);
+
+        assert_eq!(commands_under(&both, "Stop").len(), 2, "a live daemon's entry stays beside ours: {both}");
+        assert_eq!(merge_codex(&both, socket), both, "and stays on the next merge");
+        assert!(!holds_only_ours(&both, socket), "removal asks about a live daemon's entry");
+
+        drop(home);
+        assert!(!other.parent().unwrap().exists());
+        assert_eq!(commands_under(&merge_codex(&both, socket), "Stop"), [ours], "a gone home's entry is dropped");
+        assert!(holds_only_ours(&both, socket), "and removal doesn't ask about it");
+        assert!(!remove_ours(&both, socket).contains("farcooler"), "removing ours takes it too");
     }
 }
