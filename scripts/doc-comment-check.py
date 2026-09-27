@@ -22,10 +22,11 @@ when an item X lost D and a different item Y gained it, and:
   - Y had a doc before, or is new (Y undocumented before is the commit that
     fixes an orphan by moving D back).
 
-An item is its kind and name within the type it sits in (`impl Foo::fn new`,
-`enum State::case idle`), found by indentation, so two overloads of one name
-count as one item and `fn new` in two impls as two. A member that moved to
-another type with its doc keeps its name, and is not a finding.
+An item is its kind and name within the type it sits in (`impl Foo :: fn new`,
+`enum State :: case idle`), found by indentation, so two overloads of one name
+count as one item and `fn new` in two impls as two. A member that moved, doc
+and all, to the type succeeding its own (its old type gone, or the new one
+new) keeps its name, and is not a finding.
 
 Rust, Swift and Kotlin: `///` runs and `/** ... */` blocks, then any
 attributes, annotations, `#if`s, plain comments and blank lines, then the item.
@@ -58,6 +59,9 @@ RUST_ATTR = re.compile(r"^\s*#!?\[")
 ANNOTATION = re.compile(r"^\s*@[A-Za-z_]")
 # Swift's conditional compilation, which can sit between a doc and its item.
 COMPILE_IF = re.compile(r"^\s*#(?:if|elseif|else|endif)\b")
+# Joins a member to the type it sits in. Spaced, because a Rust path inside an
+# impl's own key (`impl fmt::Display for Id`) already uses a bare `::`.
+SEP = " :: "
 # The kinds whose members are scoped by them.
 CONTAINER = re.compile(
     r"^(?:impl|struct|enum|trait|union|mod|class|protocol|extension|actor|object|interface) "
@@ -224,9 +228,10 @@ def parse(text):
             indent = len(line) - len(line.lstrip())
             while scope and scope[-1][0] >= indent:
                 scope.pop()
+            leaf = key
             if scope:
-                key = f"{scope[-1][1]}::{key}"
-            if CONTAINER.match(key.rsplit("::", 1)[-1]):
+                key = f"{scope[-1][1]}{SEP}{key}"
+            if CONTAINER.match(leaf):
                 scope.append((indent, key))
             keys[key] += 1
         doc = [d for d in doc if d]
@@ -239,6 +244,26 @@ def parse(text):
 def _contains(doc, part):
     k = len(part)
     return any(doc[j:j + k] == part for j in range(len(doc) - k + 1))
+
+
+def _split(key):
+    """(the type a key sits in, or "", the item itself)."""
+    scope, _, leaf = key.rpartition(SEP)
+    return scope, leaf
+
+
+def _moved_with_its_type(owner, taker, old_keys, new_keys):
+    """Whether a member went, doc and all, to the type that succeeds its own:
+    the same member name, and either its old type is gone (renamed away) or
+    the type it landed in is new. A type renamed, with a wrapper of the old
+    name forwarding the same members, is the second. Two types that were
+    both there before and after, sharing a member name, are neither: a doc
+    that crossed between them is an orphan."""
+    owner_type, owner_leaf = _split(owner)
+    taker_type, taker_leaf = _split(taker)
+    if owner_leaf != taker_leaf or owner_type == taker_type:
+        return False
+    return owner_type not in new_keys or taker_type not in old_keys
 
 
 def compare(old, new):
@@ -263,8 +288,8 @@ def compare(old, new):
             if sum(1 for k, _, _ in new_docs if k == owner) >= new_keys[owner]:
                 continue  # given a doc of its own: a deliberate move
             for taker in gained:
-                if taker.rsplit("::", 1)[-1] == owner.rsplit("::", 1)[-1]:
-                    continue  # the same item, moved to another type with its doc
+                if _moved_with_its_type(owner, taker, old_keys, new_keys):
+                    continue
                 if old_keys[taker] > sum(1 for k, _, _ in old_docs if k == taker):
                     continue  # it had no doc before: this is an orphan being fixed
                 line = next(ln for k, d, ln in new_docs if k == taker and _contains(d, doc))
@@ -470,7 +495,7 @@ fn left_agent_mode(&self) -> bool { true }
         "rust: an enum variant inserted above a documented one",
         "enum E {\n    /// Still running.\n    Busy,\n}\n",
         "enum E {\n    /// Still running.\n    Idle,\n    Busy,\n}\n",
-        [("enum E::variant Busy", "enum E::variant Idle")],
+        [("enum E :: variant Busy", "enum E :: variant Idle")],
     ),
     (
         "rust: a doc shared by two items, one of them new, is not a move",
@@ -563,7 +588,7 @@ fn left_agent_mode(&self) -> bool { true }
         "rust: a doc lands on a field inserted above the documented one",
         "struct S {\n    /// When it started.\n    pub started: i64,\n}\n",
         "struct S {\n    /// When it started.\n    pub ended: i64,\n    pub started: i64,\n}\n",
-        [("struct S::field started", "struct S::field ended")],
+        [("struct S :: field started", "struct S :: field ended")],
     ),
     (
         "a rename is not a move when another type has an item of the old name",
@@ -575,7 +600,7 @@ fn left_agent_mode(&self) -> bool { true }
         "an orphan is still one when its taker's name is undocumented elsewhere",
         "impl A {\n    /// Make an A.\n    fn new() {}\n}\n\nimpl B {\n    fn empty() {}\n}\n",
         "impl A {\n    /// Make an A.\n    fn empty() {}\n\n    fn new() {}\n}\n\nimpl B {\n    fn empty() {}\n}\n",
-        [("impl A::fn new", "impl A::fn empty")],
+        [("impl A :: fn new", "impl A :: fn empty")],
     ),
     (
         "swift: `#if` between a doc and its func, and a func added inside it",
@@ -607,6 +632,18 @@ fn left_agent_mode(&self) -> bool { true }
         "struct Surface {\n    /// Bumped on a font change.\n    var revision: Int\n}\n",
         "struct Canvas {\n    /// Bumped on a font change.\n    var revision: Int\n}\n\n"
         "struct Surface {\n    var revision: Int\n}\n",
+        [],
+    ),
+    (
+        "a real orphan across two unrelated types sharing a member name",
+        "struct A {\n    /// The row's id.\n    id: u64,\n}\n\nstruct B {\n    name: String,\n}\n",
+        "struct A {\n    id: u64,\n}\n\nstruct B {\n    /// The row's id.\n    id: u64,\n    name: String,\n}\n",
+        [("struct A :: field id", "struct B :: field id")],
+    ),
+    (
+        "a trait impl whose key holds a path still scopes its members",
+        "impl fmt::Display for A {\n    /// A's.\n    fn new() {}\n}\n\nimpl fmt::Display for B {\n    fn new() {}\n}\n",
+        "impl fmt::Display for A {\n    /// A's.\n    fn empty() {}\n}\n\nimpl fmt::Display for B {\n    fn new() {}\n}\n",
         [],
     ),
     (

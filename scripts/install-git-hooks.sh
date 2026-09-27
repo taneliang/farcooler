@@ -23,6 +23,30 @@ if hooks_path="$(git config --get core.hooksPath)" && [ "${1:-}" != "--uninstall
   echo "         Link or copy scripts/git-hooks/* into '$hooks_path' instead." >&2
 fi
 
+# The stub this script writes for a hook of that name, byte for byte.
+stub() {
+  cat <<STUB
+#!/bin/bash
+$mark
+hook="\$(git rev-parse --show-toplevel)/scripts/git-hooks/$1"
+if [ -x "\$hook" ]; then exec "\$hook" "\$@"; fi
+STUB
+}
+
+# Hooks this repo once shipped under another name. A stub for one runs nothing
+# (its target is gone) but would sit there looking installed, so both install
+# and uninstall take it out. Only when it is exactly the stub written here: a
+# hook someone else wrote, or one edited since, is left alone.
+#   pre-commit  became commit-msg, so the check can read the message's trailer
+for name in pre-commit; do
+  dest="$hooks/$name"
+  if [ -f "$dest" ] && [ ! -e "scripts/git-hooks/$name" ] \
+    && [ "$(cat "$dest")" = "$(stub "$name")" ]; then
+    rm "$dest"
+    echo "removed the retired $name stub"
+  fi
+done
+
 for src in scripts/git-hooks/*; do
   name="$(basename "$src")"
   dest="$hooks/$name"
@@ -36,12 +60,7 @@ for src in scripts/git-hooks/*; do
     echo "$dest already exists and isn't one of this repo's stubs; leaving it" >&2
     exit 1
   fi
-  cat > "$dest" <<STUB
-#!/bin/bash
-$mark
-hook="\$(git rev-parse --show-toplevel)/scripts/git-hooks/$name"
-if [ -x "\$hook" ]; then exec "\$hook" "\$@"; fi
-STUB
+  stub "$name" > "$dest"
   chmod +x "$dest"
   echo "installed $name"
 done
