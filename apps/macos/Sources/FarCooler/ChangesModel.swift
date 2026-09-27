@@ -258,7 +258,7 @@ enum ChangedFileStatus: String, Decodable {
     }
 }
 
-/// What `changes files <workspace> <sha> --json` answers.
+/// What `changes files <worktree> <sha> --json` answers.
 ///
 /// A wrapper around one list because the CLI prints an object rather than a
 /// bare array, which is what `changes.commit_files` hands the phone through the
@@ -268,7 +268,7 @@ struct CommitFiles: Decodable, Equatable {
     var files: [ChangedFile]
 }
 
-/// What `changes diff <workspace> <path> --json` answers: one file's patch, and
+/// What `changes diff <worktree> <path> --json` answers: one file's patch, and
 /// the things about it that are not lines of patch.
 ///
 /// ## Why this is not read out of the human output any more
@@ -482,16 +482,17 @@ struct InboxRow: Decodable, Equatable, Identifiable {
     ///
     /// One key that used to have two meanings, which is why `short` exists
     /// below and why nothing here keys a dictionary off this field directly.
-    /// `farcooler changes inbox --json` sent the SHORT under this name and the
-    /// FFI the phones read sent the UUID, so the Mac's inbox map and the
-    /// phones' were keyed by different things for the same call. Both producers
-    /// are `changes_json::inbox_json` now and both send the UUID here.
-    var workspaceId: String
+    /// `farcooler changes inbox --json` sent the SHORT under this key (then
+    /// called `workspace_id`) and the FFI the phones read sent the UUID, so the
+    /// Mac's inbox map and the phones' were keyed by different things for the
+    /// same call. Both producers are `changes_json::inbox_json` now and both
+    /// send the UUID here.
+    var worktreeId: String
     /// The eight characters a person types, sent alongside the UUID.
     ///
     /// Optional because a runner can be older than this app: before the two
     /// builders became one there was no `short` key, and the short was in
-    /// `workspaceId` instead. `DaemonClient.refreshChangesInbox` prefers this
+    /// `worktreeId` instead. `DaemonClient.refreshChangesInbox` prefers this
     /// and falls back, so an old runner keeps working rather than dropping every
     /// count out of the sidebar.
     var short: String?
@@ -499,11 +500,11 @@ struct InboxRow: Decodable, Equatable, Identifiable {
     var insertions: Int
     var deletions: Int
 
-    var id: String { workspaceId }
+    var id: String { worktreeId }
     var hasDiff: Bool { insertions > 0 || deletions > 0 }
 
     enum CodingKeys: String, CodingKey {
-        case workspaceId = "workspace_id"
+        case worktreeId = "worktree_id"
         case short, insertions, deletions
         case changedSinceReviewed = "changed_since_reviewed"
     }
@@ -684,7 +685,7 @@ enum DiffWalk {
 
 // MARK: - Where a review note can be sent
 
-extension Workspace {
+extension Worktree {
     /// The panes in this worktree a review note can be handed to.
     ///
     /// `isAgentPane` OR `canSwitchPaneMode`, because both are the daemon's word
@@ -695,7 +696,7 @@ extension Workspace {
     /// reason that somebody wanted to watch the tty.
     ///
     /// The phone has this filter too and the two are deliberately NOT one
-    /// function: `Workspace` and `Terminal` are declared once per app, and this
+    /// function: `Worktree` and `Terminal` are declared once per app, and this
     /// app's `canSwitchPaneMode` says `&& !isChangesPane` where the phone's
     /// does not — because a Mac can put a diff in a pane and the daemon refuses
     /// to switch that one. `ReviewAgentTarget` is shared; the two meanings of
@@ -849,7 +850,7 @@ final class ChangesStore: ObservableObject {
     @Published private(set) var generation = 0
 
     let client: DaemonClient
-    let workspace: Workspace
+    let worktree: Worktree
 
     /// What the reader wants to tell the agent, collected across the review.
     ///
@@ -861,16 +862,16 @@ final class ChangesStore: ObservableObject {
     /// `ReviewCommentQueue`.
     let comments: ReviewCommentQueue
 
-    init(client: DaemonClient, workspace: Workspace) {
+    init(client: DaemonClient, worktree: Worktree) {
         self.client = client
-        self.workspace = workspace
+        self.worktree = worktree
         // Keyed by worktree, which is what is being reviewed — so two changes
         // panes in one layout share a queue rather than writing two, and so a
         // runner that drops and comes back finds the notes still there. That
         // second case is not hypothetical: `FleetStore` builds a fresh
         // `DaemonClient` when a runner returns and `ContentView` therefore
         // builds a fresh store, which would otherwise be an empty outbox.
-        comments = ReviewCommentQueue(workspace: workspace.id) { target, text in
+        comments = ReviewCommentQueue(worktree: worktree.id) { target, text in
             guard let message = await client.agentPrompt(terminal: target.id, text: text)
             else { return nil }
             return Self.trouble(saying: message)
@@ -1056,7 +1057,7 @@ final class ChangesStore: ObservableObject {
         loading = true
         defer { loading = false }
 
-        var args = ["changes", "status", workspace.short, "--json"]
+        var args = ["changes", "status", worktree.short, "--json"]
         if fresh { args.append("--fresh") }
         if let data = await client.changesJSON(args) {
             changeSet = (try? JSONDecoder().decode(ChangeSet.self, from: data)) ?? .empty
@@ -1151,14 +1152,14 @@ final class ChangesStore: ObservableObject {
     }
 
     /// Which files one commit touched, from
-    /// `changes files <workspace> <sha> --json`.
+    /// `changes files <worktree> <sha> --json`.
     ///
     /// JSON rather than the human table, so a row arrives with the status git
     /// gave it. The table carries only the two counts and the path, and this
     /// pane badged every file in a commit with a dot for as long as that was
     /// the only thing it could ask for.
     private func readCommitFiles(_ sha: String) async {
-        let data = await client.changesJSON(["changes", "files", workspace.short, sha, "--json"])
+        let data = await client.changesJSON(["changes", "files", worktree.short, sha, "--json"])
         // The reader moved on while this was in flight. Filing an older
         // commit's list under the newer one's sha is the whole reason this is
         // checked: both answers are well-formed, and the wrong one is
@@ -1371,7 +1372,7 @@ final class ChangesStore: ObservableObject {
     /// repainted rather more than the file it was for.
     private func diff(_ path: String, context: Int = 0) async -> FileDiff {
         await client.changesDiff(
-            workspace: workspace.short, path: path, scope: scope, context: context,
+            worktree: worktree.short, path: path, scope: scope, context: context,
             commit: selectedCommit)
     }
 
@@ -1459,7 +1460,7 @@ final class ChangesStore: ObservableObject {
         // Not while a full load is running: the two would race to assign
         // `changeSet`, and the loser would be the newer answer half the time.
         guard !loading else { return }
-        let args = ["changes", "status", workspace.short, "--json"]
+        let args = ["changes", "status", worktree.short, "--json"]
         guard let data = await client.changesJSON(args),
             let next = try? JSONDecoder().decode(ChangeSet.self, from: data),
             next != changeSet
@@ -1522,7 +1523,7 @@ final class ChangesStore: ObservableObject {
     /// screen widget's count, so the reader who has just read a branch here is
     /// clearing a row they would otherwise be shown again on a device in their
     /// pocket. The sidebar's counts answer for it locally — see
-    /// `WorkspaceSection.changeCountsText` — which is the whole of what the Mac
+    /// `WorktreeSection.changeCountsText` — which is the whole of what the Mac
     /// draws from this watermark and is deliberately not more.
     ///
     /// It used to call `load()`, and that was wrong in a way nothing could have
@@ -1538,7 +1539,7 @@ final class ChangesStore: ObservableObject {
     /// floor exists to keep a fleet of polling panes off a timer, and this is a
     /// click that has to answer for itself.
     func markRead() async {
-        await client.changesMarkRead(workspace: workspace.short)
+        await client.changesMarkRead(worktree: worktree.short)
         await client.refreshChangesInbox()
     }
 }

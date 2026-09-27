@@ -273,7 +273,7 @@ async fn a_client_learns_what_the_runner_can_do_before_asking_it_anything() {
     let daemon = start().await;
     let session = Session::connect_local(&daemon.socket).await.expect("connect");
 
-    assert!(session.can(farcooler_protocol::capability::WORKSPACES));
+    assert!(session.can(farcooler_protocol::capability::WORKTREES));
     assert!(session.can(farcooler_protocol::capability::CHANGES));
     assert!(!session.can("time-travel"), "a runner must not claim what it cannot do");
 }
@@ -289,7 +289,7 @@ async fn the_fleet_shape_is_the_one_a_phone_decodes() {
     let fleet = session.fleet().await.expect("fleet");
     assert!(fleet.get("runtime_healthy").is_some_and(|v| v.is_boolean()));
     assert!(fleet.get("live_panes").is_some_and(|v| v.is_number()));
-    assert!(fleet.get("workspaces").is_some_and(|v| v.is_array()));
+    assert!(fleet.get("worktrees").is_some_and(|v| v.is_array()));
 }
 
 #[tokio::test]
@@ -313,11 +313,11 @@ async fn a_daemon_that_goes_away_mid_session_reads_as_a_dropped_link() {
 }
 
 #[tokio::test]
-async fn a_workspace_created_through_the_client_comes_back_in_the_fleet() {
+async fn a_worktree_created_through_the_client_comes_back_in_the_fleet() {
     let daemon = start().await;
     let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
 
-    // A real repository, because workspace creation makes a real worktree.
+    // A real repository, because worktree creation makes a real worktree.
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("demo");
     std::fs::create_dir(&repo).unwrap();
@@ -337,21 +337,21 @@ async fn a_workspace_created_through_the_client_comes_back_in_the_fleet() {
     assert_eq!(repositories.len(), 1, "the repository must be visible to a second session");
 
     let repository = farcooler_client::session::uuid_of(&repositories[0].id);
-    let workspace = session
-        .create_workspace(repository, "phone task", "feat/phone", "HEAD", "", false)
+    let worktree = session
+        .create_worktree(repository, "phone task", "feat/phone", "HEAD", "", false)
         .await
-        .expect("create_workspace");
-    assert_eq!(workspace.task_name, "phone task");
+        .expect("create_worktree");
+    assert_eq!(worktree.task_name, "phone task");
 
     let fleet = session.fleet().await.expect("fleet");
-    let workspaces = fleet["workspaces"].as_array().unwrap();
+    let worktrees = fleet["worktrees"].as_array().unwrap();
     // Two: the one just created, plus the main checkout that registering the
     // repository adopts automatically.
-    assert_eq!(workspaces.len(), 2);
+    assert_eq!(worktrees.len(), 2);
     let created =
-        workspaces.iter().find(|w| w["task"] == "phone task").expect("created workspace present");
+        worktrees.iter().find(|w| w["task"] == "phone task").expect("created worktree present");
     assert_eq!(created["branch"], "feat/phone");
-    // Derived, never stored — and a fresh workspace with no terminals is ready.
+    // Derived, never stored — and a fresh worktree with no terminals is ready.
     assert_eq!(created["state"], "ready");
     assert!(created["terminals"].as_array().unwrap().is_empty());
 }
@@ -377,24 +377,24 @@ async fn hiding_and_unhiding_round_trips_through_the_client() {
 
     let repositories = session.repositories().await.expect("repositories");
     let repository = farcooler_client::session::uuid_of(&repositories[0].id);
-    let workspace = session
-        .create_workspace(repository, "reversible", "feat/rev", "HEAD", "", false)
+    let worktree = session
+        .create_worktree(repository, "reversible", "feat/rev", "HEAD", "", false)
         .await
         .expect("create");
-    let id = farcooler_client::session::uuid_of(&workspace.id);
+    let id = farcooler_client::session::uuid_of(&worktree.id);
 
-    session.hide_workspace(id).await.expect("hide");
+    session.hide_worktree(id).await.expect("hide");
     let fleet = session.fleet().await.expect("fleet");
-    let workspaces = fleet["workspaces"].as_array().unwrap();
+    let worktrees = fleet["worktrees"].as_array().unwrap();
     let reversible =
-        workspaces.iter().find(|w| w["task"] == "reversible").expect("its own workspace present");
+        worktrees.iter().find(|w| w["task"] == "reversible").expect("its own worktree present");
     assert_eq!(reversible["state"], "hidden");
 
-    session.unhide_workspace(id).await.expect("unhide");
+    session.unhide_worktree(id).await.expect("unhide");
     let fleet = session.fleet().await.expect("fleet");
-    let workspaces = fleet["workspaces"].as_array().unwrap();
+    let worktrees = fleet["worktrees"].as_array().unwrap();
     let reversible =
-        workspaces.iter().find(|w| w["task"] == "reversible").expect("its own workspace present");
+        worktrees.iter().find(|w| w["task"] == "reversible").expect("its own worktree present");
     assert_eq!(reversible["state"], "ready");
 }
 
@@ -405,7 +405,7 @@ async fn hiding_and_unhiding_round_trips_through_the_client() {
 /// is asserted as a LATENCY, not merely as an arrival, because "an event
 /// arrives eventually" was already true of the three-second poll it replaces.
 ///
-/// `workspace.hide` is the trigger because it announces synchronously in the
+/// `worktree.hide` is the trigger because it announces synchronously in the
 /// handler — see `crates/daemon/src/rpc.rs:1088` — so what is measured is the
 /// path and not a reconcile pass's timer.
 #[tokio::test]
@@ -429,11 +429,11 @@ async fn fleet_news_reaches_a_subscriber_in_a_round_trip_not_a_poll_interval() {
 
     let repositories = session.repositories().await.expect("repositories");
     let repository = farcooler_client::session::uuid_of(&repositories[0].id);
-    let workspace = session
-        .create_workspace(repository, "pushed", "feat/push", "HEAD", "", false)
+    let worktree = session
+        .create_worktree(repository, "pushed", "feat/push", "HEAD", "", false)
         .await
         .expect("create");
-    let id = farcooler_client::session::uuid_of(&workspace.id);
+    let id = farcooler_client::session::uuid_of(&worktree.id);
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let subscription = session
@@ -448,7 +448,7 @@ async fn fleet_news_reaches_a_subscriber_in_a_round_trip_not_a_poll_interval() {
     while tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await.is_ok() {}
 
     let started = std::time::Instant::now();
-    session.hide_workspace(id).await.expect("hide");
+    session.hide_worktree(id).await.expect("hide");
     let news = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
         .await
         .expect("fleet news must arrive without waiting out a poll interval")
@@ -463,7 +463,7 @@ async fn fleet_news_reaches_a_subscriber_in_a_round_trip_not_a_poll_interval() {
     eprintln!("fleet news arrived {elapsed:?} after the change");
 
     // And the subscription is still open afterwards: one event does not end it.
-    session.unhide_workspace(id).await.expect("unhide");
+    session.unhide_worktree(id).await.expect("unhide");
     tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
         .await
         .expect("a second change is pushed too")
@@ -495,14 +495,14 @@ async fn subscribing_to_a_terminal_with_no_agent_session_is_empty_not_an_error()
 
     let repositories = session.repositories().await.expect("repositories");
     let repository = farcooler_client::session::uuid_of(&repositories[0].id);
-    let workspace = session
-        .create_workspace(repository, "agent test", "feat/agent-empty", "HEAD", "", false)
+    let worktree = session
+        .create_worktree(repository, "agent test", "feat/agent-empty", "HEAD", "", false)
         .await
-        .expect("create_workspace");
-    let workspace_id = farcooler_client::session::uuid_of(&workspace.id);
+        .expect("create_worktree");
+    let worktree_id = farcooler_client::session::uuid_of(&worktree.id);
 
     let terminal = session
-        .create_terminal(workspace_id, "shell", "shell", false)
+        .create_terminal(worktree_id, "shell", "shell", false)
         .await
         .expect("create_terminal");
     let terminal_id = farcooler_client::session::uuid_of(&terminal.id);
@@ -519,7 +519,7 @@ async fn a_failed_call_arrives_as_an_error_not_a_dropped_session() {
     let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
 
     let missing = uuid::Uuid::now_v7();
-    assert!(session.hide_workspace(missing).await.is_err());
+    assert!(session.hide_worktree(missing).await.is_err());
 
     // Still usable.
     assert!(session.fleet().await.is_ok());
@@ -557,7 +557,7 @@ async fn a_refusal_keeps_the_reason_the_runner_named_it_by() {
 
     // Nothing by that id. "Refresh, it's gone" — not "try again".
     let missing = uuid::Uuid::now_v7();
-    let e = session.hide_workspace(missing).await.expect_err("no such workspace");
+    let e = session.hide_worktree(missing).await.expect_err("no such worktree");
     assert_eq!(word(e), "not-found");
 
     // A location that can never be allowlisted. "Pick a folder inside it."
@@ -618,11 +618,11 @@ async fn removing_a_clean_worktree_needs_no_typed_name() {
 
     let repositories = session.repositories().await.expect("repositories");
     let repository = farcooler_client::session::uuid_of(&repositories[0].id);
-    let workspace = session
-        .create_workspace(repository, "clean removal", "feat/clean-removal", "HEAD", "", false)
+    let worktree = session
+        .create_worktree(repository, "clean removal", "feat/clean-removal", "HEAD", "", false)
         .await
         .expect("create");
-    let id = farcooler_client::session::uuid_of(&workspace.id);
+    let id = farcooler_client::session::uuid_of(&worktree.id);
 
     use farcooler_client::actions::RemoveWorktreeOutcome;
     let outcome = session.remove_worktree(id, "").await.expect("remove");
@@ -650,18 +650,18 @@ async fn removing_a_dirty_worktree_needs_the_task_name_typed() {
 
     let repositories = session.repositories().await.expect("repositories");
     let repository = farcooler_client::session::uuid_of(&repositories[0].id);
-    let workspace = session
-        .create_workspace(repository, "dirty removal", "feat/dirty-removal", "HEAD", "", false)
+    let worktree = session
+        .create_worktree(repository, "dirty removal", "feat/dirty-removal", "HEAD", "", false)
         .await
         .expect("create");
-    let id = farcooler_client::session::uuid_of(&workspace.id);
+    let id = farcooler_client::session::uuid_of(&worktree.id);
 
     // Find the worktree on disk and dirty it. The daemon derives "dirty" from
     // git status, so this has to be a real uncommitted change, not a flag.
     let fleet = session.fleet().await.expect("fleet");
-    let workspaces = fleet["workspaces"].as_array().unwrap();
+    let worktrees = fleet["worktrees"].as_array().unwrap();
     let created =
-        workspaces.iter().find(|w| w["task"] == "dirty removal").expect("workspace present");
+        worktrees.iter().find(|w| w["task"] == "dirty removal").expect("worktree present");
     let worktree_path = created["worktree"].as_str().expect("worktree path");
     std::fs::write(std::path::Path::new(worktree_path).join("untracked.txt"), "uncommitted")
         .unwrap();
@@ -1161,14 +1161,14 @@ async fn a_board_and_the_pane_working_it_come_back_through_the_client() {
     let detail = session.task(task_id).await.expect("task.get after a note");
     assert_eq!(detail["task"]["updated_at"], written.at);
 
-    // A workspace with two panes: one opened for the task, one not.
-    let workspace = session
-        .create_workspace(repository, "board lane", "feat/board", "HEAD", "", false)
+    // A worktree with two panes: one opened for the task, one not.
+    let worktree = session
+        .create_worktree(repository, "board lane", "feat/board", "HEAD", "", false)
         .await
-        .expect("create_workspace");
-    let workspace_id = farcooler_client::session::uuid_of(&workspace.id);
+        .expect("create_worktree");
+    let worktree_id = farcooler_client::session::uuid_of(&worktree.id);
     let mut open = farcooler_transport::request("terminal.create");
-    open.target_resource_id = Some(bytes::Bytes::copy_from_slice(workspace_id.as_bytes()));
+    open.target_resource_id = Some(bytes::Bytes::copy_from_slice(worktree_id.as_bytes()));
     open.required_capabilities =
         vec![farcooler_protocol::capability::TERMINAL_TASK.to_string()];
     open.payload = Some(Payload::TerminalCreate(farcooler_protocol::v1::TerminalCreate {
@@ -1182,12 +1182,12 @@ async fn a_board_and_the_pane_working_it_come_back_through_the_client() {
         panic!("terminal.create answered with something else");
     };
     let plain = session
-        .create_terminal(workspace_id, "not on it", "shell", false)
+        .create_terminal(worktree_id, "not on it", "shell", false)
         .await
         .expect("a pane nobody dispatched");
 
     let fleet = session.fleet().await.expect("fleet");
-    let terminals: Vec<&serde_json::Value> = fleet["workspaces"]
+    let terminals: Vec<&serde_json::Value> = fleet["worktrees"]
         .as_array()
         .unwrap()
         .iter()

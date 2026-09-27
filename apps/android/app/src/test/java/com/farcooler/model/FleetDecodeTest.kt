@@ -33,7 +33,7 @@ class FleetDecodeTest {
         {
           "runtime_healthy": true,
           "live_panes": 4,
-          "workspaces": [
+          "worktrees": [
             {
               "id": "8f14e45f-ce5b-4a5e-9c2b-000000000001",
               "short": "8f14e4",
@@ -84,7 +84,7 @@ class FleetDecodeTest {
 
     private val terminal: Terminal
         get() = json.decodeFromString(Fleet.serializer(), payload)
-            .workspaces.first().terminals.first()
+            .worktrees.first().terminals.first()
 
     @Test
     fun everyTerminalFieldOnTheWireLandsOnTheModel() {
@@ -127,8 +127,8 @@ class FleetDecodeTest {
     }
 
     @Test
-    fun everyWorkspaceFieldOnTheWireLandsOnTheModel() {
-        val w = json.decodeFromString(Fleet.serializer(), payload).workspaces.first()
+    fun everyWorktreeFieldOnTheWireLandsOnTheModel() {
+        val w = json.decodeFromString(Fleet.serializer(), payload).worktrees.first()
         assertEquals("1c383cd3-0b0f-4a63-b8a1-000000000002", w.repository)
         assertEquals("Widen the model", w.task)
         assertEquals("widen-the-model", w.branch)
@@ -152,12 +152,12 @@ class FleetDecodeTest {
         // been reinstalled since these landed must cost one row its detail, not
         // the entire fleet its screen.
         val old = """
-            {"runtime_healthy":true,"live_panes":1,"workspaces":[
+            {"runtime_healthy":true,"live_panes":1,"worktrees":[
               {"id":"w","short":"w","task":"t","branch":"b","state":"active",
                "terminals":[{"id":"t1","short":"t1","title":"","preset":"zsh",
                              "state":"running","epoch":1}]}]}
         """.trimIndent()
-        val w = json.decodeFromString(Fleet.serializer(), old).workspaces.first()
+        val w = json.decodeFromString(Fleet.serializer(), old).worktrees.first()
         // A runner too old to keep an order says nothing rather than 0, which is
         // what lets the fleet screen offer no drag instead of offering one that
         // silently springs back on the next refresh.
@@ -241,13 +241,13 @@ class FleetDecodeTest {
         // survive a newer runner, which is why it stays. It is tested here so
         // the trade is stated somewhere rather than assumed.
         val ahead = """
-            {"runtime_healthy":true,"live_panes":1,"workspaces":[
+            {"runtime_healthy":true,"live_panes":1,"worktrees":[
               {"id":"w","short":"w","task":"t","branch":"b","state":"active",
                "somethingNewer":{"a":1},
                "terminals":[{"id":"t1","short":"t1","title":"","preset":"zsh",
                              "state":"running","epoch":1,"tokenBudget":42}]}]}
         """.trimIndent()
         val fleet = json.decodeFromString(Fleet.serializer(), ahead)
-        assertEquals("t1", fleet.workspaces.first().terminals.first().id)
+        assertEquals("t1", fleet.worktrees.first().terminals.first().id)
     }
 }

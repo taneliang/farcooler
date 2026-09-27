@@ -107,7 +107,7 @@ enum FleetSnapshotWriter {
         // off two `Date()` calls a few microseconds apart would be inventing a
         // difference that does not exist.
         let now = Date()
-        let agents = fleet.workspaces.flatMap(\.terminals).compactMap { terminal in
+        let agents = fleet.worktrees.flatMap(\.terminals).compactMap { terminal in
             snapshotAgent(terminal, machine: machine, at: now)
         }
         // THIS runner's projection, which used to be the whole file.

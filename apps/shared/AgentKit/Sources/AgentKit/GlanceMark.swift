@@ -63,8 +63,8 @@ public struct GlanceMark: Hashable, Sendable {
         /// exactly the sense it is true of a diff.
         ///
         /// **`reviewsWaiting` and `unreadDiff` are still fleet- and
-        /// workspace-level and have no per-agent version.** `reviewsWaiting`
-        /// is a fleet-wide scalar and `unreadDiff` is per WORKSPACE;
+        /// worktree-level and have no per-agent version.** `reviewsWaiting`
+        /// is a fleet-wide scalar and `unreadDiff` is per WORKTREE;
         /// `ShellScreen.swift:141-147` and `ShellNavigation.swift:116-124`
         /// both refuse to invent a per-agent version, and that refusal stands
         /// — a ring meaning "this AGENT has unread changes" would be a fact

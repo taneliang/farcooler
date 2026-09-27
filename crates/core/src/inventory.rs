@@ -15,7 +15,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaggedPane {
     pub daemon_id: Uuid,
-    pub workspace_id: Uuid,
+    pub worktree_id: Uuid,
     pub terminal_id: Uuid,
     pub schema_version: u32,
     /// Stable tmux pane id (`%12`). Diagnostic, never identity.

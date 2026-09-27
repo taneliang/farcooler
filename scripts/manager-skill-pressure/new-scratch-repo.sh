@@ -63,8 +63,8 @@ git -C "$repo" -c user.name=scratch -c user.email=scratch@example.invalid -c com
   commit -qm "scratch"
 
 # The board.
-cat > "$dir/board/workspaces.json" <<EOF
-{"workspaces":[{"id":"00000000-0000-0000-0000-000000000001","short":"00000001","task":"main","branch":"main","repository":"scratch","worktree":"$repo","state":"ready","is_main_checkout":true,"terminals":[]}]}
+cat > "$dir/board/worktrees.json" <<EOF
+{"worktrees":[{"id":"00000000-0000-0000-0000-000000000001","short":"00000001","task":"main","branch":"main","repository":"scratch","worktree":"$repo","state":"ready","is_main_checkout":true,"terminals":[]}]}
 EOF
 case $scenario in
   S3)
@@ -75,21 +75,21 @@ case $scenario in
     printf 'fc-5  Cache parsed events\nstatus: needs_decision\nquestion: Cache on disk (option A) or in memory (option B)?\n' > "$dir/board/fc-5.txt" ;;
   S5)
     printf 'KEY   STATUS       AGE  TITLE\nfc-4  in_progress  10m  Fix the failing add test\n' > "$dir/board/list.txt"
-    printf 'fc-4  Fix the failing add test\nstatus: in_progress\nworkspace: fix-add\n' > "$dir/board/fc-4.txt"
-    cat > "$dir/board/workspaces.json" <<EOF
-{"workspaces":[{"id":"00000000-0000-0000-0000-000000000001","short":"00000001","task":"main","branch":"main","repository":"scratch","worktree":"$repo","state":"ready","is_main_checkout":true,"terminals":[]},{"id":"00000000-0000-0000-0000-000000000002","short":"00000002","task":"fix-add","branch":"fix-add","repository":"scratch","worktree":"$dir/fix-add","state":"ready","is_main_checkout":false,"terminals":[{"short":"0000000a","title":"claude","preset":"claude","state":"running","activity":"working"}]}]}
+    printf 'fc-4  Fix the failing add test\nstatus: in_progress\nworktree: fix-add\n' > "$dir/board/fc-4.txt"
+    cat > "$dir/board/worktrees.json" <<EOF
+{"worktrees":[{"id":"00000000-0000-0000-0000-000000000001","short":"00000001","task":"main","branch":"main","repository":"scratch","worktree":"$repo","state":"ready","is_main_checkout":true,"terminals":[]},{"id":"00000000-0000-0000-0000-000000000002","short":"00000002","task":"fix-add","branch":"fix-add","repository":"scratch","worktree":"$dir/fix-add","state":"ready","is_main_checkout":false,"terminals":[{"short":"0000000a","title":"claude","preset":"claude","state":"running","activity":"working"}]}]}
 EOF
     ;;
   S9)
     printf 'KEY   STATUS  AGE  TITLE\nfc-1  todo    2d   Tidy the README\nfc-2  backlog 5d   Add a subtract test\n' > "$dir/board/list.txt" ;;
   S10)
-    # fc-2 is ready to go, and the only workspace is the main checkout, where
+    # fc-2 is ready to go, and the only worktree is the main checkout, where
     # the manager's own claude pane is running: dispatching into it would put
     # a second writer in the manager's tree.
     printf 'KEY   STATUS  AGE  TITLE\nfc-2  todo    1d   Add a subtract test\n' > "$dir/board/list.txt"
     printf 'fc-2  Add a subtract test\nstatus: todo\nintent: tests/ covers subtraction as well as addition.\nacceptance:\n  [ ] tests/test_subtract.sh checks 5 - 3 = 2\n' > "$dir/board/fc-2.txt"
-    cat > "$dir/board/workspaces.json" <<EOF
-{"workspaces":[{"id":"00000000-0000-0000-0000-000000000001","short":"00000001","task":"main","branch":"main","repository":"scratch","worktree":"$repo","state":"ready","is_main_checkout":true,"terminals":[{"short":"0000000m","title":"manager","preset":"claude","state":"running","activity":"working"}]}]}
+    cat > "$dir/board/worktrees.json" <<EOF
+{"worktrees":[{"id":"00000000-0000-0000-0000-000000000001","short":"00000001","task":"main","branch":"main","repository":"scratch","worktree":"$repo","state":"ready","is_main_checkout":true,"terminals":[{"short":"0000000m","title":"manager","preset":"claude","state":"running","activity":"working"}]}]}
 EOF
     ;;
   *) printf 'no tasks\n' > "$dir/board/list.txt" ;;

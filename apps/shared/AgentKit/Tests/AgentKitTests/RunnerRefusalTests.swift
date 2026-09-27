@@ -25,10 +25,14 @@ import Testing
 /// Every word here is one a runner can really send.
 ///
 /// The other half of this wire is `farcooler_core::error::word`, which is
-/// exhaustive over `ErrorCode` and cannot see Swift. So this reads the proto
-/// itself and checks each raw value names a code that is declared there — the
-/// one drift that would break all fourteen at once, silently, by turning every
-/// sentence back into the generic one.
+/// exhaustive over `ErrorCode` and cannot see Swift. So this reads that table
+/// for the code each raw value is written for, and the proto for that code's
+/// declaration — the one drift that would break all fourteen at once, silently,
+/// by turning every sentence back into the generic one.
+///
+/// Through the table and not by spelling the word in capitals, because a word
+/// can outlive its code's name: `workspaces-exist` is what the runner still
+/// sends for `ERROR_CODE_WORKTREES_EXIST`, and the apps match on the word.
 @Test func everyWordNamesACodeTheProtocolDeclares() throws {
     // `#filePath` is this file inside the checkout, so the proto is findable
     // from it without the test knowing anything about the runner it is on.
@@ -36,14 +40,25 @@ import Testing
     // …/apps/shared/AgentKit/Tests/AgentKitTests/<this file>
     for _ in 0..<6 { root.deleteLastPathComponent() }
     let proto = root.appendingPathComponent("proto/farcooler.proto")
+    let words = root.appendingPathComponent("crates/core/src/error.rs")
 
     // Loudly, not by skipping: a guard that quietly passes when it cannot find
     // what it guards is the failure mode this repo keeps finding.
     let text = try String(contentsOf: proto, encoding: .utf8)
+    let table = try String(contentsOf: words, encoding: .utf8)
 
     for refusal in RunnerRefusal.allCases {
-        let declared = "ERROR_CODE_" + refusal.rawValue.uppercased().replacingOccurrences(
-            of: "-", with: "_")
+        let arm = try Regex("ErrorCode::([A-Za-z]+) => \"\(refusal.rawValue)\"")
+        guard let code = table.firstMatch(of: arm)?.output[1].substring else {
+            Issue.record("\(refusal.rawValue) is not a word `error::word` writes")
+            continue
+        }
+        // `WorktreesExist` → `WORKTREES_EXIST`, prost's naming of the variant.
+        let screaming = code.reduce(into: "") { out, c in
+            if c.isUppercase, !out.isEmpty { out.append("_") }
+            out.append(c.uppercased())
+        }
+        let declared = "ERROR_CODE_" + screaming
         #expect(
             text.contains(declared),
             "\(refusal.rawValue) is not a code the protocol declares (\(declared))")
@@ -64,7 +79,7 @@ import Testing
 @Test func theWordIsReadOffTheLineTheCoreWrites() {
     let refused: [String: Any] = [
         "ticket": 7, "ok": false, "disconnected": false,
-        "error": "workspaces still exist under this resource",
+        "error": "worktrees still exist under this resource",
         "code": "workspaces-exist",
     ]
     #expect(RunnerRefusal.word(inAnswerLine: refused) == "workspaces-exist")
@@ -73,7 +88,7 @@ import Testing
             forWord: RunnerRefusal.word(inAnswerLine: refused),
             message: refused["error"] as? String ?? "",
             otherwise: "Generic."
-        ).sentence == RunnerRefusal.workspacesExist.sentence)
+        ).sentence == RunnerRefusal.worktreesExist.sentence)
 
     // A dropped link carries no code at all — the key is absent, not null.
     let dropped: [String: Any] = [
@@ -164,7 +179,7 @@ import Testing
 /// The transcript goes because we have a diagnosis of our own — the same
 /// scoping `RunnerTrouble.showsTheRunnersOwnWords` uses. The core's `Display`
 /// under one of these says strictly less than the sentence above it
-/// ("workspaces still exist under this resource" under "Remove those first"),
+/// ("worktrees still exist under this resource" under "Remove those first"),
 /// so keeping it would be noise rather than diagnosis.
 @Test func aKnownWordSpeaksForItselfAndNeedsNoTranscript() {
     for refusal in RunnerRefusal.allCases {
@@ -222,7 +237,7 @@ import Testing
 ///
 /// A table whose rows say the same thing is a `switch` with extra steps: the
 /// whole reason these are separate codes is that the moves are different — stop
-/// what is running, remove the workspaces, install tmux, pick another name.
+/// what is running, remove the worktrees, install tmux, pick another name.
 @Test func eachRefusalSaysSomethingOfItsOwn() {
     var seen = Set<String>()
     for refusal in RunnerRefusal.allCases {

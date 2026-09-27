@@ -3,7 +3,7 @@ package com.farcooler.ui
 import com.farcooler.model.Terminal
 
 /**
- * Which of a workspace's tabs are mounted, which one is on screen, and which
+ * Which of a worktree's tabs are mounted, which one is on screen, and which
  * one goes when there are more than this phone should hold.
  *
  * The bookkeeping behind the mounted-pane discipline, kept out of the
@@ -14,7 +14,7 @@ import com.farcooler.model.Terminal
  *
  * ## Why anything is mounted at all
  *
- * The screen now split into `ui/WorkspaceScreen.kt` and `ui/TerminalPane.kt`
+ * The screen now split into `ui/WorktreeScreen.kt` and `ui/TerminalPane.kt`
  * built ONE [com.farcooler.net.TerminalSession] and
  * re-pointed it with `switchTo` on every tab tap, and `ui/AgentScreen.kt` built
  * a fresh [com.farcooler.net.AgentStream] per terminal id. So switching tabs
@@ -47,7 +47,7 @@ import com.farcooler.model.Terminal
  * the daemon's replay of the whole of tmux's history — plus a dedicated
  * emulator thread. That is native RSS, which is exactly what Android's
  * low-memory killer counts, and it is not the JVM heap anybody is watching. A
- * workspace with eight `claude` panes visited in one sitting would hold eight
+ * worktree with eight `claude` panes visited in one sitting would hold eight
  * of them.
  *
  * So [MOUNT_LIMIT] panes, and the one evicted is the one shown longest ago.
@@ -62,7 +62,7 @@ import com.farcooler.model.Terminal
  * history for a terminal, and `terminal.agent_subscribe` replays the transcript
  * from the cursor the new stream starts at — so what is actually lost is *where
  * you were*, not what was there. And the half-typed message survives even that,
- * because the workspace screen buckets each pane's saveable state under
+ * because the worktree screen buckets each pane's saveable state under
  * [Pane.id] in a `SaveableStateHolder`, which deliberately keeps the state of
  * keys that have left the composition. Nothing here has to know that; it is
  * written down because it is what makes a cap bearable.
@@ -137,7 +137,7 @@ data class PaneDeck(
      * thread, not merely a stale view.
      *
      * **Never prunes to nothing.** A poll that briefly returns an empty
-     * workspace — a reconnect, a runner mid-restart — would otherwise unmount
+     * worktree — a reconnect, a runner mid-restart — would otherwise unmount
      * every pane and throw away exactly the state this type exists to keep. A
      * runner that is genuinely gone is handled a level up, where `AppModel`
      * takes the whole route off the stack.
@@ -178,7 +178,7 @@ data class PaneDeck(
          * How many PANES stay mounted.
          *
          * **Five: three, plus a previous and a next.** The three are what "the
-         * agents I am working with" means in one worktree — `AGENTS_PER_WORKSPACE`
+         * agents I am working with" means in one worktree — `AGENTS_PER_WORKTREE`
          * in `model/NeedsYou.kt` independently arrived at three for the front
          * door, and the agreement is not a coincidence, since both are asking
          * how many agents of one worktree a person holds in their head at once.
@@ -190,7 +190,7 @@ data class PaneDeck(
          * with its neighbours either side, genuinely mounted and genuinely
          * drawn — that is what makes the incoming terminal real rather than a
          * placeholder that appears on commit — and either neighbour can sit in
-         * another workspace, since the content track walks one flat sequence
+         * another worktree, since the content track walks one flat sequence
          * across the whole fleet (`model/Shell.kt`).
          *
          * ## This was three, and raising it was a decision rather than a drift
@@ -198,7 +198,7 @@ data class PaneDeck(
          * The argument below is still correct and is the reason the number is
          * argued at all rather than picked. What changed is which risk is worth
          * taking: the alternative on the table was a PLACEHOLDER neighbour — the
-         * workspace's name and its last few lines, with a real pane built only
+         * worktree's name and its last few lines, with a real pane built only
          * on commit — which would have kept the budget at three and bought it
          * with a page turn that lands on something that then has to become a
          * terminal. The owner's call was to raise the limit and **watch for real
@@ -222,7 +222,7 @@ data class PaneDeck(
          *
          * **The Changes tab does not count against it and is never evicted.**
          * This is a budget for emulators, streams and native scrollback, and
-         * that tab has none of the three — it is asked for by workspace id and
+         * that tab has none of the three — it is asked for by worktree id and
          * holds nothing on the runner. Spending a slot on it would evict an
          * agent to buy nothing.
          *
@@ -241,7 +241,7 @@ data class PaneDeck(
          */
         const val MOUNT_LIMIT = 5
 
-        /** A workspace opening on one tab, with nothing else mounted yet. */
+        /** A worktree opening on one tab, with nothing else mounted yet. */
         fun opening(pane: Pane) = PaneDeck(pane, listOf(pane), listOf(pane))
     }
 }

@@ -6,7 +6,7 @@ import Testing
 
 /// A pane you come back to is not a black rectangle.
 ///
-/// Switching workspaces destroys every `TerminalRenderView` in the layout you
+/// Switching worktrees destroys every `TerminalRenderView` in the layout you
 /// left — the panes are keyed by terminal, so a different layout is a different
 /// set of ids — and the emulator is the only thing that holds what the terminal
 /// looked like. Kept, the pane draws its last frame in the turn it mounts;

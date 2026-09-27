@@ -333,13 +333,13 @@ private let realBoardJSON = """
        "created_at":1757170800000,"updated_at":1757260900000,"intent":"Make it move",
        "acceptance":[{"id":"0198f2c0-0000-7000-8000-00000000000a","text":"It moves","met":false}],
        "constraints":["No new migrations"],"labels":["board"],
-       "workspace_id":"0198f2c0-0000-7000-8000-0000000000ee"},
+       "worktree_id":"0198f2c0-0000-7000-8000-0000000000ee"},
       {"id":"0198f2c0-0000-7000-8000-000000000002","short":"00000002",
        "repository_id":"0198f2c0-0000-7000-8000-0000000000ff","resource_version":1,
        "key":"fc-2","title":"Decide the threshold","status":"needs_decision",
        "status_since":1757260800000,"stale_for_seconds":120,
        "created_at":null,"updated_at":null,"intent":"",
-       "acceptance":[],"constraints":[],"labels":[],"workspace_id":null}
+       "acceptance":[],"constraints":[],"labels":[],"worktree_id":null}
     ]}
     """
 
@@ -355,7 +355,7 @@ private let realBoardJSON = """
     #expect(doing.labels == ["board"])
     #expect(doing.constraints == ["No new migrations"])
     #expect(doing.acceptance.map(\.text) == ["It moves"])
-    #expect(doing.workspaceID == "0198f2c0-0000-7000-8000-0000000000ee")
+    #expect(doing.worktreeID == "0198f2c0-0000-7000-8000-0000000000ee")
     // Milliseconds on the wire, seconds in Foundation. Getting this wrong by a
     // factor of a thousand puts every task in 1970 and marks the whole board
     // stale, which looks like a working feature.
@@ -364,7 +364,7 @@ private let realBoardJSON = """
     #expect(doing.updatedAt == Date(timeIntervalSince1970: 1_757_260_900))
 
     let asking = try #require(board.columns.first { $0.status == .needsDecision }?.rows.first)
-    #expect(asking.workspaceID == nil, "a task with no lane was given one")
+    #expect(asking.worktreeID == nil, "a task with no lane was given one")
     // `null` is what `tasks_json` sends for a runner too old to say.
     #expect(asking.createdAt == nil)
     #expect(asking.updatedAt == nil)

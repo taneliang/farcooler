@@ -122,8 +122,8 @@ object QuickAgents {
 /**
  * The presets a terminal can be created with.
  *
- * The Mac offers this on every workspace; the iOS app only ever creates a
- * terminal as part of Quick Task, so a workspace that needed a second pane —
+ * The Mac offers this on every worktree; the iOS app only ever creates a
+ * terminal as part of Quick Task, so a worktree that needed a second pane —
  * an agent and a shell to watch it, which is the ordinary layout on the Mac —
  * could not get one from a phone at all. `shell` is first because it is the one
  * a second pane is usually for.

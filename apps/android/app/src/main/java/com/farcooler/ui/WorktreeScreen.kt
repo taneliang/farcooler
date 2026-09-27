@@ -42,7 +42,7 @@ import com.farcooler.core.TerminalPalette
 import com.farcooler.model.InboxRow
 import com.farcooler.model.ShellClose
 import com.farcooler.model.Terminal
-import com.farcooler.model.Workspace
+import com.farcooler.model.Worktree
 import com.farcooler.model.reviewAgentTargets
 import com.farcooler.net.Connection
 import com.farcooler.net.TerminalRef
@@ -113,7 +113,7 @@ import kotlinx.coroutines.withContext
  * the hand holding the phone. The SCOPE changed; the position did not.
  */
 @Composable
-fun WorkspaceScreen(
+fun WorktreeScreen(
     model: AppModel,
     route: Route.Terminal,
     /**
@@ -132,7 +132,7 @@ fun WorkspaceScreen(
     onOpenDrawer: () -> Unit,
 ) {
     val connection = model.fleet.connection(route.hostId) ?: run {
-        // The runner this workspace was on is gone — removed in settings, or
+        // The runner this worktree was on is gone — removed in settings, or
         // its connection torn down and rebuilt. Saying so beats a blank screen.
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("That runner is no longer connected.")
@@ -155,9 +155,9 @@ fun WorkspaceScreen(
     val foreground by model.foreground.collectAsState()
 
     val entry = entries.firstOrNull {
-        it.host.id == route.hostId && it.workspace.id == route.workspaceId
+        it.host.id == route.hostId && it.worktree.id == route.worktreeId
     }
-    val workspace: Workspace? = entry?.workspace
+    val worktree: Worktree? = entry?.worktree
     val counts: InboxRow? = entry?.counts
 
     // Where the app has been TOLD to be, which is not the same as the rule's
@@ -168,32 +168,32 @@ fun WorkspaceScreen(
     // states on `WorkspaceView.select`: a rule that keeps running would move a
     // screen somebody is reading.
     val requested = Backstack.resolve(
-        focus[Backstack.key(route.hostId, route.workspaceId)]?.pane,
-        workspace?.terminals.orEmpty(),
+        focus[Backstack.key(route.hostId, route.worktreeId)]?.pane,
+        worktree?.terminals.orEmpty(),
     )
 
-    // The rule's one turn: the tab this workspace opens on. After this the deck
+    // The rule's one turn: the tab this worktree opens on. After this the deck
     // is the authority and nothing recomputes it.
     //
     // **Built once and then never null again**, which is not defensiveness. A
     // reconnect can empty a runner's fleet for a poll, and `paneOf` answers null
-    // for a workspace with no panes — so recomputing this on every composition
+    // for a worktree with no panes — so recomputing this on every composition
     // and bailing out on null would take the whole subtree out of the
     // composition, disposing every mounted session, on a blip. That is the
     // hazard `PaneDeck.prune` refuses one level down, and refusing it there is
     // worth nothing if this level hands it back. It cost only one session before
     // this phase, which is why the shape survived until now.
     var deck by remember { mutableStateOf(model.paneOf(route)?.let { PaneDeck.opening(it) }) }
-    // The cold case: a workspace opened from a restored stack, before its runner
+    // The cold case: a worktree opened from a restored stack, before its runner
     // has finished its handshake. `remember`'s initializer already covers the
     // ordinary case, so this never costs a frame of "Waiting" on a fleet that is
     // already here.
-    LaunchedEffect(requested, workspace) {
+    LaunchedEffect(requested, worktree) {
         if (deck == null) model.paneOf(route)?.let { deck = PaneDeck.opening(it) }
     }
     LaunchedEffect(requested) { requested?.let { pane -> deck = deck?.select(pane) } }
-    LaunchedEffect(workspace?.terminals) {
-        val terminals = workspace?.terminals ?: return@LaunchedEffect
+    LaunchedEffect(worktree?.terminals) {
+        val terminals = worktree?.terminals ?: return@LaunchedEffect
         deck = deck?.prune(terminals)
     }
 
@@ -206,14 +206,14 @@ fun WorkspaceScreen(
     // to an agent that is gone is a line in the saved state that can never be
     // spent again.
     val everMounted = remember { mutableSetOf<String>() }
-    LaunchedEffect(deck?.mounted, workspace?.terminals) {
+    LaunchedEffect(deck?.mounted, worktree?.terminals) {
         val mounted = deck?.mounted ?: return@LaunchedEffect
         mounted.forEach { everMounted += it.id }
-        // Only against a workspace the runner has actually described. A null or
+        // Only against a worktree the runner has actually described. A null or
         // empty terminal list is a reconnect or a runner mid-restart, and
         // acting on it would delete every draft on the evidence of a poll that
         // answered nothing — the same trap `PaneDeck.prune` refuses.
-        val terminals = workspace?.terminals?.takeIf { it.isNotEmpty() }
+        val terminals = worktree?.terminals?.takeIf { it.isNotEmpty() }
             ?: return@LaunchedEffect
         val alive = terminals.map { Pane.Terminal(it.id).id }.toSet() + Pane.CHANGES_ID
         // Minus whatever is on screen right now. The prune above and this run
@@ -298,7 +298,7 @@ fun WorkspaceScreen(
     val panes = deck
     if (panes == null) {
         // Only reachable before the runner has answered anything at all. The
-        // moment it does and the workspace turns out to be empty,
+        // moment it does and the worktree turns out to be empty,
         // `AppModel.settle` takes the route off the stack in the same turn.
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("Waiting for that runner.")
@@ -316,11 +316,11 @@ fun WorkspaceScreen(
             .background(Color(TerminalPalette.BACKGROUND))
             .imePadding()
     ) {
-        // The shell's content track. The fleet is rebuilt from the workspace on
+        // The shell's content track. The fleet is rebuilt from the worktree on
         // every poll, so a pane that appears becomes a neighbour without anyone
         // telling the track; `rememberUpdatedState` inside `paneTrack` is what
         // makes an in-flight swipe see it.
-        val fleet = trackFleet(workspace, route.workspaceId, route.hostId)
+        val fleet = trackFleet(worktree, route.worktreeId, route.hostId)
         val position = fleet.position(panes.current.id)
         val track = rememberPaneTrack()
 
@@ -341,7 +341,7 @@ fun WorkspaceScreen(
                         // nothing that is on the track — see
                         // `PaneDeckTest.aTrackWithBothNeighboursEvictsNothing`.
                         fleet.tab(step.position)?.let {
-                            model.choose(route.hostId, route.workspaceId, Pane.parse(it.id))
+                            model.choose(route.hostId, route.worktreeId, Pane.parse(it.id))
                         }
                     }
                 )
@@ -363,9 +363,9 @@ fun WorkspaceScreen(
                                 is Pane.Terminal -> TerminalPane(
                                     model = model,
                                     ref = TerminalRef(
-                                        route.hostId, route.workspaceId, pane.terminalId),
+                                        route.hostId, route.worktreeId, pane.terminalId),
                                     connection = connection,
-                                    workspace = workspace,
+                                    worktree = worktree,
                                     showRunner = connections.size > 1,
                                     // Everything this pane costs the runner
                                     // follows this and nothing else.
@@ -384,7 +384,7 @@ fun WorkspaceScreen(
                                     model = model,
                                     connection = connection,
                                     route = route,
-                                    workspace = workspace,
+                                    worktree = worktree,
                                     showRunner = connections.size > 1,
                                     runnerLabel = connection.host.displayLabel,
                                     // Not `live`: this tab costs the runner
@@ -419,14 +419,14 @@ fun WorkspaceScreen(
         // `choose`, not `open`: this strip is the ONE writer of the remembered
         // focus. A chip is a person saying where they want to be, which is
         // exactly what a fleet row and a tapped notification are not — see
-        // [Focus]. And because the strip is scoped to this workspace, a chip
-        // never moves the navigation stack at all: `choose` finds the workspace
+        // [Focus]. And because the strip is scoped to this worktree, a chip
+        // never moves the navigation stack at all: `choose` finds the worktree
         // it is already on and installs nothing.
         TerminalTabStrip(
-            workspace = workspace,
+            worktree = worktree,
             counts = counts,
             current = panes.current,
-            onSelect = { model.choose(route.hostId, route.workspaceId, it) },
+            onSelect = { model.choose(route.hostId, route.worktreeId, it) },
             // **Asks only where there is something to interrupt.**
             // `ShellClose` answers null for a pane whose process has already
             // gone, and null means close it now — a dialog in front of every
@@ -569,7 +569,7 @@ private fun ChangesTab(
     model: AppModel,
     connection: Connection,
     route: Route.Terminal,
-    workspace: Workspace?,
+    worktree: Worktree?,
     showRunner: Boolean,
     runnerLabel: String,
     visible: Boolean,
@@ -582,10 +582,10 @@ private fun ChangesTab(
     // a long patch does not hold the fleet. `reviewAgentTargets` is the shared
     // filter — both words for "an agent is in here", minus a `changes` pane,
     // which is the diff of the thing being reviewed.
-    val agents = remember(workspace) { workspace?.reviewAgentTargets().orEmpty() }
+    val agents = remember(worktree) { worktree?.reviewAgentTargets().orEmpty() }
     ChangesPane(
-        store = connection.changes.store(route.workspaceId),
-        workspace = workspace,
+        store = connection.changes.store(route.worktreeId),
+        worktree = worktree,
         showRunner = showRunner,
         runnerLabel = runnerLabel,
         fontFamily = TerminalFonts.family(fontChoice),
@@ -596,9 +596,9 @@ private fun ChangesTab(
             connection.composerHandoff.offer(target.id, text)
             // `choose`, not `open`: this is a person saying where they want to
             // be, which is exactly what [Focus] means by a CHOSEN pane — and
-            // because the pane is in this workspace, it moves the tab without
+            // because the pane is in this worktree, it moves the tab without
             // touching the navigation stack.
-            model.choose(route.hostId, route.workspaceId, Pane.Terminal(target.id))
+            model.choose(route.hostId, route.worktreeId, Pane.Terminal(target.id))
         },
         onOpenDrawer = onOpenDrawer,
     )

@@ -91,7 +91,7 @@ pub fn install_id_path() -> Result<PathBuf> {
     Ok(ensure_runtime_dir()?.join("install-id"))
 }
 
-/// Where managed worktrees are created, one directory per workspace.
+/// Where managed worktrees are created, one directory per worktree.
 pub fn worktrees_dir() -> Result<PathBuf> {
     let d = ensure_runtime_dir()?.join("worktrees");
     std::fs::create_dir_all(&d).map_err(|_| DomainError::OperationFailed)?;
@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn stable_keeps_the_directory_it_has_always_had() {
         // An existing install must not move. If this ever changes, every
-        // workspace and terminal a user already has disappears on upgrade.
+        // worktree and terminal a user already has disappears on upgrade.
         let release = runtime_dir_for(Channel::Stable).unwrap();
         let historic = directories::ProjectDirs::from("com", "farcooler", "FarCooler")
             .unwrap()

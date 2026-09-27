@@ -1,10 +1,10 @@
 import SwiftUI
 
-// The bar that IS the workspace, and the column it grows into.
+// The bar that IS the worktree, and the column it grows into.
 //
 // One bar at the bottom, the way Safari's bar is the tab. It carries the
-// workspace's name and a ribbon of its tabs; swiping it sideways changes
-// workspace, dragging it up unfurls those tabs as a column with the selection
+// worktree's name and a ribbon of its tabs; swiping it sideways changes
+// worktree, dragging it up unfurls those tabs as a column with the selection
 // following the finger, and a tap holds that column open. The gesture lives in
 // `ShellRootView` and the arithmetic in `AgentKit/ShellNavigation.swift` — this
 // file draws, and decides nothing.
@@ -26,8 +26,8 @@ import SwiftUI
 /// most is the fifth row of that table — the CURRENT tab is an ELONGATED
 /// version of its own state, never a solid "selected" pill. A pill would
 /// replace the one thing the mark is for: the ribbon has to keep saying what
-/// each tab is doing while it says which one you are on, and a workspace where
-/// the current tab is the one you cannot read the state of is a workspace you
+/// each tab is doing while it says which one you are on, and a worktree where
+/// the current tab is the one you cannot read the state of is a worktree you
 /// have to open the column to understand.
 ///
 /// Elongation is therefore the only thing `isCurrent` changes. Same fill, same
@@ -82,11 +82,11 @@ struct ShellMarkView: View {
     }
 }
 
-/// The workspace's tabs, in their fixed order, as marks.
+/// The worktree's tabs, in their fixed order, as marks.
 ///
-/// Never re-sorted by activity: the ribbon is a map of the workspace, and a
+/// Never re-sorted by activity: the ribbon is a map of the worktree, and a
 /// map whose landmarks move is one you have to read every time instead of
-/// remembering. `ShellWorkspace` makes the same point about the same order.
+/// remembering. `ShellWorktree` makes the same point about the same order.
 struct ShellRibbon: View {
     let tabs: [ShellTab]
     let current: Int
@@ -97,7 +97,7 @@ struct ShellRibbon: View {
     /// ribbon and the menu were two independently drawn sets of the same
     /// information, and a person watching the menu open saw one set of dots
     /// appear while another set stayed where it was — which says these are two
-    /// pictures of a workspace rather than one workspace with its agents in
+    /// pictures of a worktree rather than one worktree with its agents in
     /// it. A dot IS the agent, so opening the menu has to be the dots moving.
     ///
     /// What travels here is a frame, which is the one thing
@@ -119,7 +119,7 @@ struct ShellRibbon: View {
     /// Separate from `current`, and the split is between two different jobs
     /// one number was doing. `current` sizes the SLOTS, which is layout: the
     /// ribbon has to reserve the same space whichever row a finger is over, or
-    /// the workspace's name would shuffle sideways as the selection walked the
+    /// the worktree's name would shuffle sideways as the selection walked the
     /// menu.
     ///
     /// **Unused now, and kept only so the two slot questions stay separable.**
@@ -154,24 +154,24 @@ struct ShellRibbon: View {
     /// follows you to the tab, it does not arrive before you.
     ///
     /// **That one frame of lag is only tolerable while it is a lag about the
-    /// SAME workspace**, which is what `shownFor` is for. See `elongated`.
+    /// SAME worktree**, which is what `shownFor` is for. See `elongated`.
     @State private var shown: Int = -1
     /// The tabs `shown` is an index into.
     ///
     /// Without this, the lag above becomes a lie the moment a crossing swaps
     /// the whole tab set underneath the bar. This view is at a fixed place in
     /// the bar track — the middle of three — so a crossing does not rebuild
-    /// it; it hands the same `ShellRibbon` a different workspace's `tabs` and
+    /// it; it hands the same `ShellRibbon` a different worktree's `tabs` and
     /// a different `current`, and `shown` goes on holding an index into a
-    /// workspace that is no longer on screen. For the one frame before
+    /// worktree that is no longer on screen. For the one frame before
     /// `onChange` catches up, the elongated capsule sits on whichever tab of
-    /// the ARRIVING workspace happens to share that index — a tab that has
-    /// never been open, in a workspace you have just this instant reached.
+    /// the ARRIVING worktree happens to share that index — a tab that has
+    /// never been open, in a worktree you have just this instant reached.
     /// That is the flash, and the animation then makes it worse by sliding
     /// the mark from the wrong tab to the right one, which reads as having
     /// been on the wrong one.
     ///
-    /// The ids rather than a count or the workspace's own id: two workspaces
+    /// The ids rather than a count or the worktree's own id: two worktrees
     /// can have the same number of tabs, and the ribbon is about the tabs.
     @State private var shownFor: [String] = []
 
@@ -202,14 +202,14 @@ struct ShellRibbon: View {
         .onAppear { seat() }
         .onChange(of: current) { _, moved in
             // Only where the tabs are the tabs `shown` belongs to. Crossing a
-            // workspace changes `current` too, and animating THAT would be the
-            // capsule sliding between two workspaces' tabs as though it had
+            // worktree changes `current` too, and animating THAT would be the
+            // capsule sliding between two worktrees' tabs as though it had
             // walked from one to the other.
             guard shownFor == tabIDs else { return seat() }
             withAnimation(ShellMotion.ribbon) { shown = moved }
         }
-        // A workspace arriving under this bar re-seats rather than travels.
-        // Unanimated, because nothing moved: a different workspace's ribbon is
+        // A worktree arriving under this bar re-seats rather than travels.
+        // Unanimated, because nothing moved: a different worktree's ribbon is
         // a different set of dots, and a capsule that slid into place across
         // that change would be claiming a journey between two tabs that have
         // never been on screen together.
@@ -241,7 +241,7 @@ struct ShellRibbon: View {
     ///
     /// The slot keeps its space either way, which is why it is a `Color.clear`
     /// with a frame rather than an `if`. A ribbon whose dots left the layout
-    /// as well as the screen would slide the workspace's name sideways every
+    /// as well as the screen would slide the worktree's name sideways every
     /// time the menu opened.
     @ViewBuilder
     private func slot(_ tab: ShellTab, holds: Bool, marked: Bool) -> some View {
@@ -259,13 +259,13 @@ struct ShellRibbon: View {
     }
 }
 
-/// The workspace's tabs as a column, unfurling upward out of the bar.
+/// The worktree's tabs as a column, unfurling upward out of the bar.
 ///
 /// **Tab 0 at the TOP, in the ribbon's own order.** A menu reads top to
 /// bottom, and this one has a ribbon of the same tabs two points below it
 /// whose leftmost mark is tab 0 — so the leftmost mark and the topmost row
 /// have to be the same tab or the two halves of one bar disagree about which
-/// end a workspace starts at.
+/// end a worktree starts at.
 ///
 /// The rows used to be reversed, putting tab 0 nearest the bar so that the
 /// first `rowHeight` of lift selected it. That is the same decision as this
@@ -275,7 +275,7 @@ struct ShellRibbon: View {
 /// enough to be at the top of the column is on tab 0. The mapping lives in the
 /// pure model where a test can hold it; this file only draws.
 ///
-/// There is deliberately **no workspace row here.** The bar sitting directly
+/// There is deliberately **no worktree row here.** The bar sitting directly
 /// beneath already carries the name and the ribbon, and repeating it was
 /// removed in review — a header on a column whose header is two points below
 /// it is the same word twice.
@@ -297,7 +297,7 @@ struct ShellColumn: View {
     /// Whether a row may be swiped to reveal Close.
     ///
     /// **The pinned column only, and that is the owner's third constraint
-    /// verbatim**: *"if the user swipes up from the workspace bar, they should
+    /// verbatim**: *"if the user swipes up from the worktree bar, they should
     /// not be able to delete terminals that way"*. A dragged column is the
     /// middle of a navigation gesture — a thumb travelling up the phone with
     /// the page in it — and putting a destructive action inside it would mean
@@ -538,7 +538,7 @@ struct ShellColumn: View {
             // color that means two things means neither.
             //
             // (The same contradiction sits in the brief's own §4, which
-            // outlines the current workspace's card in amber. Flagged rather
+            // outlines the current worktree's card in amber. Flagged rather
             // than silently resolved.)
             isSelected ? AnyShapeStyle(.fill.tertiary) : AnyShapeStyle(.clear))
     }
@@ -566,7 +566,7 @@ private struct ShellRowPress: ButtonStyle {
     }
 }
 
-/// One workspace's bar, and the column of its tabs, as ONE piece of glass.
+/// One worktree's bar, and the column of its tabs, as ONE piece of glass.
 ///
 /// **One surface, morphed — never two stacked.** The column used to be its own
 /// sheet floating a few points above the bar, and that is glass on glass: "Always
@@ -601,10 +601,10 @@ private struct ShellRowPress: ButtonStyle {
 /// window; the rows never move relative to each other, because nothing ever asks
 /// them to lay out again.
 struct ShellBar: View {
-    /// The workspace this bar is. Nil off the ends of the fleet, where the
+    /// The worktree this bar is. Nil off the ends of the fleet, where the
     /// slot exists so the track keeps its three positions but has nothing to
     /// draw.
-    let workspace: ShellWorkspace?
+    let worktree: ShellWorktree?
     /// Which of its tabs is current, or -1 on a bar that is not the one you
     /// are in — a neighbour sliding past must not claim a current tab it does
     /// not have.
@@ -652,7 +652,7 @@ struct ShellBar: View {
     /// So a bar that cannot open a menu does not build one. What that costs is
     /// nothing on screen — a neighbour's column window is already zero points
     /// tall at zero opacity — and what it saves is two whole lists composed on
-    /// every frame of every workspace swipe.
+    /// every frame of every worktree swipe.
     var showsColumn = true
 
     /// The identity the glass keeps across the morph.
@@ -660,16 +660,16 @@ struct ShellBar: View {
     /// One namespace per bar rather than one shared across the three on the
     /// track, because the three are three different surfaces on three
     /// different screens; giving them one identity would ask the platform to
-    /// morph a workspace's bar into its neighbour's as they slide past.
+    /// morph a worktree's bar into its neighbour's as they slide past.
     @Namespace private var glass
 
-    /// The namespace the workspace's dots share between the ribbon and the
+    /// The namespace the worktree's dots share between the ribbon and the
     /// menu. One per bar, like the glass's, and for the same reason: the
     /// three bars on the track are three different screens, and one namespace
-    /// across them would ask a workspace's dot to fly into its neighbour's.
+    /// across them would ask a worktree's dot to fly into its neighbour's.
     @Namespace private var marks
 
-    private var tabs: [ShellTab] { workspace?.tabs ?? [] }
+    private var tabs: [ShellTab] { worktree?.tabs ?? [] }
 
     /// The column at its natural size — the size its rows are laid out at, and
     /// the only size they are ever laid out at.
@@ -693,7 +693,7 @@ struct ShellBar: View {
             // INTERACTIVE glass, because this surface is the control.
             //
             // The bar is the one thing on this screen you put a finger ON and
-            // move — sideways for the next workspace, up for the column — and
+            // move — sideways for the next worktree, up for the column — and
             // without this it was the only draggable thing in the app that did
             // not acknowledge being touched. iOS 26 draws that acknowledgement
             // itself, at the render layer and at the point of contact: the
@@ -722,10 +722,10 @@ struct ShellBar: View {
         // the band between them live rather than merely occupied.
         .contentShape(.rect)
         // One label for the whole surface rather than an element per mark: the
-        // ribbon is a picture of the workspace, and read out dot by dot it is
+        // ribbon is a picture of the worktree, and read out dot by dot it is
         // forty words that say nothing.
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(workspace.map { "Workspace \($0.name)" } ?? "No workspace")
+        .accessibilityLabel(worktree.map { "Worktree \($0.name)" } ?? "No worktree")
     }
 
     private static let surfaceID = "shell-bar-surface"
@@ -843,22 +843,22 @@ struct ShellBar: View {
     @ViewBuilder
     private var barRow: some View {
         Group {
-            if let workspace {
+            if let worktree {
                 HStack(spacing: 12) {
                     ShellRibbon(
-                        tabs: workspace.tabs, current: currentTab, marks: marks,
+                        tabs: worktree.tabs, current: currentTab, marks: marks,
                         menuOpen: columnHeight > 0,
                         // While the menu is open the dot's frame comes from
                         // the row it is standing in, so the drawing has to
                         // agree with that row or a dot would be elongated to
                         // one width and drawn at another.
                         menuMark: columnHeight > 0 ? columnSelection : nil)
-                    Text(workspace.name)
+                    Text(worktree.name)
                         .font(.system(size: 17, weight: .medium))
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: 8)
-                    if let server = workspace.server {
+                    if let server = worktree.server {
                         // Mono, because it came off a machine. See the type
                         // rule in the brief: if it is mono, it is data.
                         Text(server)

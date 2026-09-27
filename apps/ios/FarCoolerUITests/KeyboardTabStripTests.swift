@@ -18,12 +18,12 @@ import XCTest
 /// | Then | Now |
 /// | --- | --- |
 /// | the tab strip's frame | `shell-bar`'s frame |
-/// | `workspace-tab-changes`'s `value == "current"` | `shell-state`'s `tab=` |
+/// | `worktree-tab-changes`'s `value == "current"` | `shell-state`'s `tab=` |
 /// | a lift is a tap on a chip | a lift on the bar, which is how a tab is chosen |
 /// | the switcher sheet's `fleet-terminal-<id>` row | an overview card, `shell-card-<id>` |
 ///
 /// **Two of the old assertions have no equivalent and are not replaced.** The
-/// changes pane's "Review options" menu and the "Switch workspace" button were
+/// changes pane's "Review options" menu and the "Switch worktree" button were
 /// items in `WorkspaceView`'s navigation-bar toolbar, and the test checked
 /// their ORDER within it — that the switcher stayed rightmost as the contextual
 /// menu came and went. There is no navigation bar over a pane any more and
@@ -33,7 +33,7 @@ import XCTest
 final class KeyboardTabStripTests: XCTestCase {
     func testTheBarRemainsInteractiveAfterKeyboardDismissal() throws {
         #if targetEnvironment(simulator)
-        throw XCTSkip("This regression needs a real iPhone with a configured workspace.")
+        throw XCTSkip("This regression needs a real iPhone with a configured worktree.")
         #endif
 
         let app = XCUIApplication()
@@ -115,7 +115,7 @@ final class KeyboardTabStripTests: XCTestCase {
         // And it still ANSWERS, which is the half the frame check cannot make.
         // A lift onto the first row is how a tab is chosen in the shell — the
         // column unfurls one row per 34 points, and the first row is the diff,
-        // which every workspace has. That is the same move the Changes chip
+        // which every worktree has. That is the same move the Changes chip
         // used to be.
         try XCTSkipUnless(home != 0, "This pane is already the first tab; nothing to move to.")
         lift(bar, by: 20)
@@ -134,9 +134,9 @@ final class KeyboardTabStripTests: XCTestCase {
 
         // The cross-worktree jump, which used to be the switcher sheet in the
         // toolbar and is the overview now. Same shape of assertion: reach every
-        // workspace on the runner from inside a pane, and land in one.
+        // worktree on the runner from inside a pane, and land in one.
         try XCTSkipUnless(
-            (field("workspaces") ?? 0) > 1, "One workspace: there is nowhere to cross to.")
+            (field("worktrees") ?? 0) > 1, "One worktree: there is nowhere to cross to.")
         let ws = try XCTUnwrap(field("ws"))
         lift(bar, by: 320)
         let opened = XCTNSPredicateExpectation(
@@ -176,7 +176,7 @@ final class KeyboardTabStripTests: XCTestCase {
 ///
 /// Unlike the suite above, these run on a simulator: `AgentLayoutHarness` mounts
 /// the real `AgentView` over a canned conversation, which is the only way this
-/// screen can be exercised without an enrolled runner, a workspace and a turn in
+/// screen can be exercised without an enrolled runner, a worktree and a turn in
 /// flight. The transcript publishes its measurements as its accessibility value
 /// in debug builds — see `AgentLayoutProbe` — and `inset` is the number the
 /// reported bug was: the room the conversation leaves for the composer resting
@@ -294,7 +294,7 @@ final class AgentTranscriptScrollTests: XCTestCase {
     /// **The docked composer never sits on top of the shell's bar.**
     ///
     /// The owner's report: "in the GUI agent experience, the Message Claude box
-    /// shows up directly on top of the workspace slider". The two live in
+    /// shows up directly on top of the worktree slider". The two live in
     /// different WINDOWS — the composer is an `inputAccessoryView` and is laid
     /// out in the keyboard's, the bar in the app's — so neither can see the
     /// other and, with the keyboard down, both want the strip at the bottom of

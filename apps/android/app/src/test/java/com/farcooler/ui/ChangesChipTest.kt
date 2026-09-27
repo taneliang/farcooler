@@ -17,12 +17,12 @@ import org.junit.Test
  */
 class ChangesChipTest {
     private fun row(insertions: Int, deletions: Int) =
-        InboxRow(workspaceId = "w", insertions = insertions, deletions = deletions)
+        InboxRow(worktreeId = "w", insertions = insertions, deletions = deletions)
 
     /**
      * There is no hover on a phone, so the accessibility label is the only place
      * the chip itself can say what its numbers mean — and they are not the
-     * branch total the workspace list shows under Branch.
+     * branch total the worktree list shows under Branch.
      */
     @Test
     fun theChipTellsAScreenReaderWhatItIsCounting() {

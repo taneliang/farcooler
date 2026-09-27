@@ -1,19 +1,19 @@
 import Combine
 import SwiftUI
 
-/// One workspace, the runner it is on, and what that runner said about its
+/// One worktree, the runner it is on, and what that runner said about its
 /// diff.
 ///
 /// Android's `FleetEntry`, on a phone that had no equivalent because it never
 /// had more than one runner to merge. The runner is CARRIED rather than looked
 /// up, and that is the whole reason this type exists instead of a bare
-/// `[Workspace]`: a merged list has to get from a workspace back to the session
+/// `[Worktree]`: a merged list has to get from a worktree back to the session
 /// that can act on it, and looking that up by searching every connection for a
 /// matching id is a search that answers with the FIRST match rather than with
 /// nothing when it is wrong.
 ///
 /// **The reason originally recorded here was that ids collide, and that is
-/// wrong about this app.** `Workspace.id` decodes the daemon's full UUIDv7 —
+/// wrong about this app.** `Worktree.id` decodes the daemon's full UUIDv7 —
 /// `uuid_of(&w.id).to_string()` in `crates/client/src/session.rs` — and the
 /// eight hex characters are the separate `short` field, which nothing in these
 /// apps uses as an identity. Two daemons' UUIDv7s differ in 62 random bits. The
@@ -22,7 +22,7 @@ import SwiftUI
 struct FleetEntry: Identifiable {
     let host: Runner
     let connection: Connection
-    let workspace: Workspace
+    let worktree: Worktree
     /// This worktree's `changes.inbox` row, or nil while its runner has not
     /// answered. Carried here rather than looked up by the screens that want
     /// it, for the same reason the runner is: this is the app's one merged
@@ -31,14 +31,14 @@ struct FleetEntry: Identifiable {
     let counts: InboxRow?
 
     /// Unique across the fleet, and says which runner it is on — which
-    /// `workspace.id` does not.
+    /// `worktree.id` does not.
     ///
-    /// The same composition `ShellIdentity.workspace` makes, deliberately: the
+    /// The same composition `ShellIdentity.worktree` makes, deliberately: the
     /// store's merged list and the shell's fleet have to agree on what one
-    /// workspace is called, or a card tapped in the overview and the pane it
+    /// worktree is called, or a card tapped in the overview and the pane it
     /// opens are two different lookups.
     var id: String {
-        ShellIdentity.workspace(runner: host.id.uuidString, workspace: workspace.id)
+        ShellIdentity.worktree(runner: host.id.uuidString, worktree: worktree.id)
     }
 }
 
@@ -73,7 +73,7 @@ struct FleetEntry: Identifiable {
 /// why" to live. That somewhere is `RunnerStatusRow`.
 @MainActor
 final class FleetStore: ObservableObject {
-    /// Every workspace on every connected runner, in runner order.
+    /// Every worktree on every connected runner, in runner order.
     @Published private(set) var entries: [FleetEntry] = []
 
     /// One per runner currently being talked to, in the order they are listed.
@@ -289,10 +289,10 @@ final class FleetStore: ObservableObject {
 
         entries = mine.flatMap { host, connection -> [FleetEntry] in
             let counts = connection.inbox
-            return connection.fleet.workspaces.map { workspace in
+            return connection.fleet.worktrees.map { worktree in
                 FleetEntry(
-                    host: host, connection: connection, workspace: workspace,
-                    counts: counts[workspace.id])
+                    host: host, connection: connection, worktree: worktree,
+                    counts: counts[worktree.id])
             }
         }
     }
@@ -303,8 +303,8 @@ final class FleetStore: ObservableObject {
     /// to — which the battery gate makes an ordinary answer rather than an
     /// error.
     ///
-    /// By runner id and never by workspace id, for `FleetEntry.id`'s reason: a
-    /// workspace id says nothing about which runner it is on, so answering from
+    /// By runner id and never by worktree id, for `FleetEntry.id`'s reason: a
+    /// worktree id says nothing about which runner it is on, so answering from
     /// one means searching every connection and taking the first match.
     func connection(for host: UUID) -> Connection? { connections[host] }
 

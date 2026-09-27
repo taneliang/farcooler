@@ -266,7 +266,7 @@ const UPDATED_AT: &str = updated_at_sql!();
 /// `task_notes_by_task (task_id, at)` keeps the subquery to one task's notes.
 const TASK_COLUMNS: &str = concat!(
     "id, repository_id, key, title, status, status_since, \
-     intent, acceptance, constraints, labels, workspace_id, resource_version, created_at, ",
+     intent, acceptance, constraints, labels, worktree_id, resource_version, created_at, ",
     updated_at_sql!()
 );
 
@@ -349,7 +349,7 @@ impl Store {
             intent: String::new(),
             acceptance: Vec::new(),
             constraints: Vec::new(),
-            workspace_id: None,
+            worktree_id: None,
             labels: Vec::new(),
             resource_version: 1,
             created_at: now,
@@ -477,7 +477,7 @@ impl Store {
     ///
     /// A revision that changes a field dates itself in `edited_at`, which is
     /// what moves the card's `updated_at`. Every field `TaskUpdate` carries
-    /// counts, `workspace_id` included: linking a card to a lane, or
+    /// counts, `worktree_id` included: linking a card to a lane, or
     /// unlinking it, is a change to the card, and the dispatch that links one
     /// moves it at the same moment anyway. One that changes nothing -- a
     /// client writing back exactly what it read -- still bumps the version
@@ -526,17 +526,17 @@ impl Store {
         update: &TaskUpdate,
         dated: bool,
     ) -> Result<Task> {
-        // `IS` rather than `=`: `workspace_id` is nullable, and `NULL = NULL`
+        // `IS` rather than `=`: `worktree_id` is nullable, and `NULL = NULL`
         // is NULL, which would read an unchanged empty lane as a change.
         self.run_versioned(
             "UPDATE tasks
                 SET edited_at = CASE
                         WHEN ?10 AND NOT (title IS ?1 AND intent IS ?2 AND acceptance IS ?3
                                           AND constraints IS ?4 AND labels IS ?5
-                                          AND workspace_id IS ?6)
+                                          AND worktree_id IS ?6)
                         THEN ?11 ELSE edited_at END,
                     title = ?1, intent = ?2, acceptance = ?3, constraints = ?4, labels = ?5,
-                    workspace_id = ?6, resource_version = ?7
+                    worktree_id = ?6, resource_version = ?7
               WHERE id = ?8 AND resource_version = ?9",
             &[
                 &update.title,
@@ -544,7 +544,7 @@ impl Store {
                 &acceptance_to_json(&update.acceptance),
                 &strings_to_json(&update.constraints),
                 &strings_to_json(&update.labels),
-                &update.workspace_id.map(uuid_blob),
+                &update.worktree_id.map(uuid_blob),
                 &(expected_version as i64 + 1),
                 &uuid_blob(task),
                 &(expected_version as i64),
@@ -864,7 +864,7 @@ impl Store {
         // resource a call is ABOUT and an argument it carries. `task` above is
         // the row being written and answers `NotFound` when it is not there,
         // the way `Rpc::target` does. `blocked_by` is a reference this write
-        // takes, the way `optional_id(.., "workspace_id")` is -- and naming
+        // takes, the way `optional_id(.., "worktree_id")` is -- and naming
         // the field is the only thing that lets a caller tell which of the two
         // ids it got wrong.
         let blocker_exists = tx
@@ -1544,7 +1544,7 @@ mod tests {
                     }],
                     constraints: vec!["never blocks the reactor".to_string()],
                     labels: vec!["daemon".to_string()],
-                    workspace_id: None,
+                    worktree_id: None,
                 },
             )
             .unwrap();
@@ -1577,7 +1577,7 @@ mod tests {
             acceptance: Vec::new(),
             constraints: Vec::new(),
             labels: Vec::new(),
-            workspace_id: None,
+            worktree_id: None,
         };
         store.update_task(task.id, task.resource_version, &update).expect("the first write wins");
 
@@ -1961,7 +1961,7 @@ mod tests {
                     acceptance: Vec::new(),
                     constraints: Vec::new(),
                     labels: Vec::new(),
-                    workspace_id: None,
+                    worktree_id: None,
                 },
             )
             .expect("a status move is not a competing revision");
@@ -2027,7 +2027,7 @@ mod tests {
             acceptance: Vec::new(),
             constraints: Vec::new(),
             labels: Vec::new(),
-            workspace_id: None,
+            worktree_id: None,
         }
     }
 

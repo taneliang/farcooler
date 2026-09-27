@@ -24,7 +24,7 @@ import Foundation
 
 /// A runner as the overview names it.
 struct ShellRunnerLabel: Identifiable, Hashable, Sendable {
-    /// The runner's id, which is what `ShellWorkspace.runner` carries. Not the
+    /// The runner's id, which is what `ShellWorktree.runner` carries. Not the
     /// label: two runners on one box can share that.
     var id: String
     /// What the section's header says.
@@ -44,11 +44,11 @@ struct ShellRunnerLabel: Identifiable, Hashable, Sendable {
     var keepsOrder: Bool = false
 
     /// Whether a runner running this build keeps an order: whether it
-    /// advertises `workspace_order` (`farcooler_protocol::capability`).
+    /// advertises `worktree_order` (`farcooler_protocol::capability`).
     ///
     /// **The capability and never the ordinals.** `ordinal` is a proto3 scalar
     /// with no presence, prost decodes an old daemon's silence as 0, and
-    /// `Session::fleet` puts `"ordinal"` on every workspace regardless — so a
+    /// `Session::fleet` puts `"ordinal"` on every worktree regardless — so a
     /// runner too old to store an order looks, on the wire, exactly like a new
     /// one whose ranks happen to be 0. This used to read `ordinal != nil`,
     /// which was therefore true for every runner there has ever been, and an
@@ -58,7 +58,7 @@ struct ShellRunnerLabel: Identifiable, Hashable, Sendable {
     /// Nil — a runner nobody has asked yet — is refused, not guessed at.
     /// `Connection.refresh` asks once per connection, on its first fleet.
     static func keepsOrder(daemon: DaemonBuild?) -> Bool {
-        daemon?.keepsWorkspaceOrder ?? false
+        daemon?.keepsWorktreeOrder ?? false
     }
 }
 
@@ -88,7 +88,7 @@ struct ShellRunnerSection: Identifiable, Hashable {
     ///   drop among a subset is a drop whose meaning depends on cards nobody
     ///   can see.
     /// - **The runner is answering.** Otherwise the write has nowhere to go.
-    /// - **The runner keeps an order**, which is its `workspace_order`
+    /// - **The runner keeps an order**, which is its `worktree_order`
     ///   capability — see `ShellRunnerLabel.keepsOrder(daemon:)`. A runner too
     ///   old to store one would refuse the call and the card would spring back
     ///   with no error.
@@ -134,16 +134,16 @@ struct ShellRunnerSection: Identifiable, Hashable {
 /// The WHOLE section, first on screen first, and not "move this one to N". The
 /// runner permutes exactly the rows it is named among the ranks those rows
 /// already hold and leaves everything else where it was
-/// (`Store::reorder_workspaces`), so a section that leaves hidden worktrees out
+/// (`Store::reorder_worktrees`), so a section that leaves hidden worktrees out
 /// reorders cleanly around them — but only within one runner's table, which is
 /// why this carries a runner and nothing from any other.
 struct ShellReorderRequest: Hashable, Sendable {
     /// The runner, by id.
     var runner: String
-    /// The shell's own workspace ids, in the order asked for.
+    /// The shell's own worktree ids, in the order asked for.
     var order: [String]
 
-    /// The daemon's own workspace ids, resolved from the shell's, or nil.
+    /// The daemon's own worktree ids, resolved from the shell's, or nil.
     ///
     /// **All or nothing.** A worktree removed between the lift and the drop
     /// resolves to nothing, and dropping it from the list would send a SHORTER
@@ -151,13 +151,13 @@ struct ShellReorderRequest: Hashable, Sendable {
     /// rest around a card the phone still believes it moved. One that resolves
     /// to a different runner is the wrong table entirely. Either way the drop
     /// is not sent, and the card goes back to where the runner has it.
-    func workspaceIDs(
-        resolving resolve: (String) -> (runner: String, workspace: String)?
+    func worktreeIDs(
+        resolving resolve: (String) -> (runner: String, worktree: String)?
     ) -> [String]? {
         var resolved: [String] = []
         for id in order {
             guard let found = resolve(id), found.runner == runner else { return nil }
-            resolved.append(found.workspace)
+            resolved.append(found.worktree)
         }
         return resolved
     }
@@ -233,15 +233,15 @@ extension ShellFleet {
     ) -> [ShellRunnerSection] {
         let searching = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return runners.compactMap { runner in
-            let mine = workspaces.indices.filter {
-                workspaces[$0].runner == runner.id && !workspaces[$0].isHidden
+            let mine = worktrees.indices.filter {
+                worktrees[$0].runner == runner.id && !worktrees[$0].isHidden
             }
-            var shown = ShellFleet.matching(query, in: mine, of: workspaces)
+            var shown = ShellFleet.matching(query, in: mine, of: worktrees)
             if searching && shown.isEmpty { return nil }
             if let order = pending.order(for: runner.id) {
                 let byID = Dictionary(
-                    shown.map { (workspaces[$0].id, $0) }, uniquingKeysWith: { first, _ in first })
-                shown = permuting(shown.map { workspaces[$0].id }, into: order)
+                    shown.map { (worktrees[$0].id, $0) }, uniquingKeysWith: { first, _ in first })
+                shown = permuting(shown.map { worktrees[$0].id }, into: order)
                     .compactMap { byID[$0] }
             }
             let canReorder =
@@ -249,7 +249,7 @@ extension ShellFleet {
                 && runner.keepsOrder
             return ShellRunnerSection(
                 runner: runner,
-                cards: shown.map { ShellCard(id: workspaces[$0].id, index: $0) },
+                cards: shown.map { ShellCard(id: worktrees[$0].id, index: $0) },
                 canReorder: canReorder)
         }
     }
@@ -261,14 +261,14 @@ extension ShellFleet {
     /// What `ShellHarness` does in place of a runner, so the drag can be driven
     /// against a canned fleet and the grid seen to answer it.
     func reordered(_ request: ShellReorderRequest) -> ShellFleet {
-        let ids = workspaces.map(\.id)
+        let ids = worktrees.map(\.id)
         let mine = Set(
-            workspaces.filter { $0.runner == request.runner }.map(\.id))
+            worktrees.filter { $0.runner == request.runner }.map(\.id))
         let order = request.order.filter { mine.contains($0) }
         let byID = Dictionary(
-            workspaces.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            worktrees.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return ShellFleet(
-            workspaces: permuting(ids, into: order).compactMap { byID[$0] })
+            worktrees: permuting(ids, into: order).compactMap { byID[$0] })
     }
 }
 

@@ -2,7 +2,7 @@ import Foundation
 
 /// What each terminal last looked like, kept after its view has gone.
 ///
-/// The Mac throws a pane away when you switch to another workspace: the panes
+/// The Mac throws a pane away when you switch to another worktree: the panes
 /// are keyed by terminal in `TileView`, so a different layout is a different
 /// set of ids, and SwiftUI destroys every `TerminalRenderView` and builds new
 /// ones. Each new one starts on an empty emulator and waits for a replay, which

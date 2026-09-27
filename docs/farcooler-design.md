@@ -23,22 +23,21 @@ Revised again during `/plan-eng-review` on 2026-07-26. The load-bearing changes:
 > deliberately: renaming a proto message needs a version and a compatibility
 > window, not a vocabulary decision.
 
-> **Vocabulary note, 2026-08-22.** *Workspace* and *worktree* are both real
-> words in this product and each has a job. **Workspace** is anything a person
-> navigates, lists, counts, searches for, or switches between — the container,
-> with its terminals, its agents and its diff. **Worktree** is the directory on
-> disk and the git object itself, especially where it is being created or
-> destroyed, and where git's own constraints are being reported. See
-> [`workspaces.md`](workspaces.md).
+> **Vocabulary note, 2026-09-27.** Where this document says *workspace* — one
+> worktree and branch for one task — the product now says **worktree**, and
+> *workspace* is kept for a level above it: a line of work with its own board
+> and orchestrator, which owns the worktrees its agents use. See
+> [`workspaces.md`](workspaces.md). This replaces a 2026-08-22 note that gave
+> both words to the one-worktree object.
 >
 > The prose below is left as it was written, for the same reason the note above
-> gives. Principle 4 — "a workspace is a repository worktree and branch for one
-> task, plus its terminals and agent processes" — is the sentence that teaches
-> the relationship and is correct as it stands. The wire protocol still says
-> `worktree` in `workspace.remove_worktree`, `worktree.file_search` and the
-> `worktree_missing` state, and the CLI still spells its command
-> `workspace remove-worktree`: renaming either needs a version and a
-> compatibility window, not a vocabulary decision.
+> gives, so Principle 4's "a workspace is a repository worktree and branch for
+> one task" and the `workspace.*` methods in the protocol tables are the
+> vocabulary of the time. The CLI and the wire have since been renamed: the
+> command is `farcooler worktree` (`list`, `create`, `hide`, `unhide`,
+> `reorder`, `remove`, …), the methods are `worktree.*`, and
+> `workspace.remove_worktree` is now `worktree.remove`. The protobuf field
+> numbers did not change, so the rename never reached the bytes.
 
 > **Scope note, 2026-08-21.** Four constraints below are now contradicted by the
 > shipped product, and the contradiction is deliberate in every case:

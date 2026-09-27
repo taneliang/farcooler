@@ -32,7 +32,7 @@ class QuickTaskTest {
 
     @Test
     fun aSlugIsNeverEmpty() {
-        // git refuses an empty ref, and a workspace with no branch is a failure
+        // git refuses an empty ref, and a worktree with no branch is a failure
         // in the middle of a flow rather than at the start of it.
         assertEquals("task", TaskSlug.slug("!!!"))
         assertEquals("task", TaskSlug.slug(""))

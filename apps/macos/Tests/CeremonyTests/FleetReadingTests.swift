@@ -14,10 +14,10 @@ struct FleetReadingTests {
     private static func fleet(healthy: Bool = true, live: Int, rows: [String] = []) -> Fleet {
         Fleet(
             runtimeHealthy: healthy, livePanes: live,
-            workspaces: rows.map {
-                Workspace(
+            worktrees: rows.map {
+                Worktree(
                     id: $0, short: $0, task: $0, branch: "feat/\($0)", repository: "overnight",
-                    host: "", worktree: "/tmp/\($0)", state: "active", terminals: [])
+                    host: "", path: "/tmp/\($0)", state: "active", terminals: [])
             })
     }
 
@@ -101,7 +101,7 @@ struct FleetReadingTests {
         #expect(merged.reading == .runtimeDown)
         #expect(merged.fleet.runtimeHealthy == false)
         #expect(merged.fleet.livePanes == 0)
-        #expect(merged.fleet.workspaces.map(\.id) == ["here", "there"])
+        #expect(merged.fleet.worktrees.map(\.id) == ["here", "there"])
 
         let live = FleetStore.merge([
             ("", .connected, Self.fleet(live: 1, rows: ["here"])),

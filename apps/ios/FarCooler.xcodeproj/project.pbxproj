@@ -164,7 +164,7 @@
 		8B376F9E067550C8BB02D4A0 /* ShellPaneScrollTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A910AA73FC4572AB46D62BA; };
 		3E68F15DECF855E2AC954924 /* TerminalScrollTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5F87A8855875DBA804ED023; };
 		1281ACAA57A35D838D040D2D /* NewTerminalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53DCACD09C565F2D85AAD687; };
-		8F72D077F2A555CEB93438F4 /* ShellWorkspaceMenuTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0A83BA6702D55D9A73872CD; };
+		E347A3C437F65AFE86A2AA04 /* ShellWorktreeMenuTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE24E93573865B19AA453EAC; };
 		BB5F5C98CDEB52668DEFA741 /* ShellGridLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 611D2E68288951CEA4C7F488; };
 		7FE401BCE9B15CBBAE19C906 /* ShellColumnCloseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5BACF1D6647550D83E72131; };
 		5E56AE26EA37573BB9DA7ADB /* FarCoolerActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 519B5ED0E0F35300BA7F8EDA; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -303,7 +303,7 @@
 		6A910AA73FC4572AB46D62BA /* ShellPaneScrollTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellPaneScrollTests.swift; sourceTree = "<group>"; };
 		F5F87A8855875DBA804ED023 /* TerminalScrollTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalScrollTests.swift; sourceTree = "<group>"; };
 		53DCACD09C565F2D85AAD687 /* NewTerminalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewTerminalTests.swift; sourceTree = "<group>"; };
-		B0A83BA6702D55D9A73872CD /* ShellWorkspaceMenuTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellWorkspaceMenuTests.swift; sourceTree = "<group>"; };
+		AE24E93573865B19AA453EAC /* ShellWorktreeMenuTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellWorktreeMenuTests.swift; sourceTree = "<group>"; };
 		611D2E68288951CEA4C7F488 /* ShellGridLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellGridLayoutTests.swift; sourceTree = "<group>"; };
 		D5BACF1D6647550D83E72131 /* ShellColumnCloseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellColumnCloseTests.swift; sourceTree = "<group>"; };
 		C58051F3AA0C5DE2A3B15416 /* farcooler_vt.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = farcooler_vt.xcframework; path = Frameworks/farcooler_vt.xcframework; sourceTree = "<group>"; };
@@ -463,7 +463,7 @@
 				6A910AA73FC4572AB46D62BA /* ShellPaneScrollTests.swift */,
 				F5F87A8855875DBA804ED023 /* TerminalScrollTests.swift */,
 				53DCACD09C565F2D85AAD687 /* NewTerminalTests.swift */,
-				B0A83BA6702D55D9A73872CD /* ShellWorkspaceMenuTests.swift */,
+				AE24E93573865B19AA453EAC /* ShellWorktreeMenuTests.swift */,
 				611D2E68288951CEA4C7F488 /* ShellGridLayoutTests.swift */,
 				D5BACF1D6647550D83E72131 /* ShellColumnCloseTests.swift */,
 			);
@@ -1016,7 +1016,7 @@
 				8B376F9E067550C8BB02D4A0 /* ShellPaneScrollTests.swift in Sources */,
 				3E68F15DECF855E2AC954924 /* TerminalScrollTests.swift in Sources */,
 				1281ACAA57A35D838D040D2D /* NewTerminalTests.swift in Sources */,
-				8F72D077F2A555CEB93438F4 /* ShellWorkspaceMenuTests.swift in Sources */,
+				E347A3C437F65AFE86A2AA04 /* ShellWorktreeMenuTests.swift in Sources */,
 				BB5F5C98CDEB52668DEFA741 /* ShellGridLayoutTests.swift in Sources */,
 				7FE401BCE9B15CBBAE19C906 /* ShellColumnCloseTests.swift in Sources */,
 			);

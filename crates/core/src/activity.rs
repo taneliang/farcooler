@@ -442,7 +442,7 @@ impl Registry {
                         "Not in allowlist:",
                         "Skip & tell the agent what to do instead",
                         "Run Everything (shift+tab)",
-                        // The trust gate. First screen of a new workspace, and
+                        // The trust gate. First screen in a new worktree, and
                         // everything is behind it.
                         "Trust this workspace",
                         "Do you trust the contents of this directory?",
@@ -1466,7 +1466,7 @@ Do you want to allow this command?
         assert_eq!(r.classify("cursor-agent", working), AgentActivity::Working);
         assert_eq!(r.classify("cursor-agent", blocked), AgentActivity::Blocked);
         assert_eq!(r.classify("cursor-agent", idle), AgentActivity::Idle);
-        // The first screen a new workspace shows, and it blocks everything behind
+        // The first screen a new worktree shows, and it blocks everything behind
         // it, so a pane sitting on it is precisely a pane that needs you.
         assert_eq!(r.classify("cursor-agent", trust), AgentActivity::Blocked);
     }
@@ -1812,7 +1812,7 @@ Do you want to allow this command?
         assert_eq!(r.describe_pane("vim module.rs", "", "Mac", Option::None, "Mac"), "vim module.rs");
     }
 
-    /// Codex's title is the directory, which the workspace row already says.
+    /// Codex's title is the directory, which the worktree row already says.
     #[test]
     fn codex_is_not_named_after_its_directory() {
         let r = Registry::built_in();

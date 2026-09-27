@@ -467,7 +467,7 @@ mod tests {
 
     #[test]
     fn plain_arguments_are_passed_through_unquoted() {
-        assert_eq!(shell_join(&["workspace".into(), "list".into()]), "workspace list");
+        assert_eq!(shell_join(&["worktree".into(), "list".into()]), "worktree list");
         assert_eq!(shell_quote("feat/auth-2"), "feat/auth-2");
         assert_eq!(shell_quote("--branch"), "--branch");
     }

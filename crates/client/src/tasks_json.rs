@@ -123,7 +123,7 @@ pub fn task_json(task: &pb::Task, now: i64) -> serde_json::Value {
         })).collect::<Vec<_>>(),
         "constraints": task.constraints,
         "labels": task.labels,
-        "workspace_id": task.workspace_id.as_ref().map(|b| uuid_of(b).to_string()),
+        "worktree_id": task.worktree_id.as_ref().map(|b| uuid_of(b).to_string()),
     })
 }
 
@@ -184,7 +184,7 @@ mod tests {
                 pb::TaskAcceptanceItem { id: id(4), text: "two".into(), met: false },
             ],
             labels: vec!["ios".into()],
-            workspace_id: Some(id(5)),
+            worktree_id: Some(id(5)),
             created_at: 500,
             updated_at: 900,
             ..Default::default()
@@ -199,7 +199,7 @@ mod tests {
         assert_eq!(row["acceptance"][0]["met"], true);
         assert_eq!(row["acceptance"][1]["text"], "two");
         assert_eq!(row["labels"][0], "ios");
-        assert_eq!(row["workspace_id"], uuid_of(&id(5)).to_string());
+        assert_eq!(row["worktree_id"], uuid_of(&id(5)).to_string());
         assert_eq!(row["id"], uuid_of(&id(1)).to_string());
         for key in ["intent", "constraints", "title", "short", "repository_id"] {
             assert!(row.get(key).is_some(), "{key} is missing");

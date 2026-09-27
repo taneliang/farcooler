@@ -151,7 +151,7 @@ Landed on `main` during the same week and not yet ported here. All three are
 reachable over the client FFI, so each is a screen rather than a protocol
 change:
 
-- **Remove a worktree** (`workspace.remove_worktree`), with the two-phase
+- **Remove a worktree** (`worktree.remove`), with the two-phase
   confirmation macOS uses.
 - **Add a repository root and register a repository**
   (`repository_root.add`, `repository.register`), so a machine can be set up

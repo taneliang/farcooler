@@ -2,9 +2,11 @@
 
 A terminal-first command center for parallel coding agents on runners you own.
 
-A **workspace** is one git worktree plus one branch for one task, along with its
-terminals and agent processes. Far Cooler lets you run several at once and see,
-truthfully, which are alive. Both words are real, and each has a job — see
+A **worktree** is one directory git made and its branch, for one task, along
+with its terminals and agent processes. Far Cooler lets you run several at once
+and see, truthfully, which are alive. *Workspace* is reserved for the level
+above: a line of work with its own board and orchestrator, which owns the
+worktrees its agents use. Each word has one job — see
 [`docs/workspaces.md`](docs/workspaces.md).
 
 A **runner** is one `farcoolerd`: one Unix user, on one host, with its own
@@ -19,13 +21,13 @@ Deferred work: [`TODOS.md`](TODOS.md).
 
 **Runtime state is derived, never stored.**
 
-SQLite holds only what must outlive tmux: which workspaces exist, which branch
+SQLite holds only what must outlive tmux: which worktrees exist, which branch
 each is on, and what you *intended* each terminal to be doing. tmux is the sole
 authority on whether a process is alive right now.
 
-The same rule decides what a workspace is called. Its name is its worktree's
-directory read back as prose, never a stored title — so there is no name that
-can disagree with the directory it describes, and none to keep in sync. Not the
+The same rule decides what a worktree is called. Its name is its directory
+read back as prose, never a stored title — so there is no name that can
+disagree with the directory it describes, and none to keep in sync. Not the
 branch: one worktree hosts a stack of commits over its life, so naming it after
 the branch inside it would rename it every time the work moved forward.
 
@@ -94,19 +96,19 @@ farcooler root add ~/Dev
 # 2. Register a repository inside it.
 farcooler repo register ~/Dev/my-project
 
-# 3. Create task workspaces. Each is a real git worktree on a new branch.
+# 3. Create worktrees. Each is a real git worktree on a new branch.
 farcooler repo list                       # note the id
 # The name becomes the worktree's directory, and cannot be changed later.
-farcooler workspace create <repo-id> "add auth"   --branch feat/auth
-farcooler workspace create <repo-id> "fix parser" --branch fix/parser
+farcooler worktree create <repo-id> "add auth"   --branch feat/auth
+farcooler worktree create <repo-id> "fix parser" --branch fix/parser
 
 # 4. Launch a terminal in each.
-farcooler workspace list                  # note the workspace ids
-farcooler terminal create <ws-id> --preset claude
-farcooler terminal create <ws-id> --preset shell
+farcooler worktree list                   # note the worktree ids
+farcooler terminal create <worktree-id> --preset claude
+farcooler terminal create <worktree-id> --preset shell
 
 # 5. See the fleet, with every state derived fresh from tmux.
-farcooler workspace list
+farcooler worktree list
 ```
 
 ```
@@ -249,10 +251,10 @@ what an arrow key sends, and never speaks the protocol — see
 
 - Repository roots are allowlisted. `/`, system directories, your home directory
   itself, and any path nesting inside an existing root are refused.
-- Workspace creation never silently reuses an existing branch or worktree path.
+- Worktree creation never silently reuses an existing branch or worktree path.
 - A failed metadata write rolls back only a provably clean, untouched worktree.
   A dirty one is preserved with the artifacts left in place.
-- Hiding a workspace never touches git, and is never refused for a running
+- Hiding a worktree never touches git, and is never refused for a running
   terminal — it is a view preference, not a lifecycle step. Removing a worktree
   is the one that is refused while a managed terminal is running.
 - Git is the source of truth for which worktrees exist. Registering a
@@ -265,7 +267,7 @@ what an arrow key sends, and never speaks the protocol — see
 ## Status
 
 Working today: the Mac-first local slice. Repository roots, repositories,
-workspaces with real git worktrees, terminals in a private tmux server, derived
+worktrees with their branches, terminals in a private tmux server, derived
 fleet state, input and output, restart, loss dismissal, hide/unhide, and the
 SwiftUI app.
 

@@ -34,23 +34,23 @@ pub struct ReviewedMark {
 }
 
 impl Store {
-    pub fn review_base(&self, workspace_id: Uuid) -> Result<Option<String>> {
+    pub fn review_base(&self, worktree_id: Uuid) -> Result<Option<String>> {
         self.conn()
             .query_row(
-                "SELECT base_ref FROM review_bases WHERE workspace_id = ?1",
-                params![uuid_blob(workspace_id)],
+                "SELECT base_ref FROM review_bases WHERE worktree_id = ?1",
+                params![uuid_blob(worktree_id)],
                 |r| r.get(0),
             )
             .optional()
             .map_err(map_err)
     }
 
-    pub fn set_review_base(&self, workspace_id: Uuid, base_ref: &str) -> Result<()> {
+    pub fn set_review_base(&self, worktree_id: Uuid, base_ref: &str) -> Result<()> {
         self.conn()
             .execute(
-                "INSERT INTO review_bases (workspace_id, base_ref) VALUES (?1, ?2)
-                 ON CONFLICT(workspace_id) DO UPDATE SET base_ref = excluded.base_ref",
-                params![uuid_blob(workspace_id), base_ref],
+                "INSERT INTO review_bases (worktree_id, base_ref) VALUES (?1, ?2)
+                 ON CONFLICT(worktree_id) DO UPDATE SET base_ref = excluded.base_ref",
+                params![uuid_blob(worktree_id), base_ref],
             )
             .map_err(map_err)?;
         Ok(())
@@ -58,14 +58,14 @@ impl Store {
 
     pub fn mark_reviewed(
         &self,
-        workspace_id: Uuid,
+        worktree_id: Uuid,
         branch: &str,
         head_commit: &str,
         worktree_digest: &str,
         now_millis: i64,
     ) -> Result<()> {
         self.mark_reviewed_with_gate(
-            workspace_id,
+            worktree_id,
             branch,
             head_commit,
             worktree_digest,
@@ -78,7 +78,7 @@ impl Store {
     #[allow(clippy::too_many_arguments)]
     pub fn mark_reviewed_with_gate(
         &self,
-        workspace_id: Uuid,
+        worktree_id: Uuid,
         branch: &str,
         head_commit: &str,
         worktree_digest: &str,
@@ -89,16 +89,16 @@ impl Store {
         self.conn()
             .execute(
                 "INSERT INTO review_reviewed
-                 (workspace_id, branch, head_commit, worktree_digest, gate_head, gate_index, marked_at)
+                 (worktree_id, branch, head_commit, worktree_digest, gate_head, gate_index, marked_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                 ON CONFLICT(workspace_id, branch) DO UPDATE SET
+                 ON CONFLICT(worktree_id, branch) DO UPDATE SET
                    head_commit = excluded.head_commit,
                    worktree_digest = excluded.worktree_digest,
                    gate_head = excluded.gate_head,
                    gate_index = excluded.gate_index,
                    marked_at = excluded.marked_at",
                 params![
-                    uuid_blob(workspace_id),
+                    uuid_blob(worktree_id),
                     branch,
                     head_commit,
                     worktree_digest,
@@ -111,15 +111,15 @@ impl Store {
         Ok(())
     }
 
-    pub fn reviewed_mark(&self, workspace_id: Uuid, branch: &str) -> Result<Option<ReviewedMark>> {
+    pub fn reviewed_mark(&self, worktree_id: Uuid, branch: &str) -> Result<Option<ReviewedMark>> {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(
                 "SELECT head_commit, worktree_digest, gate_head, gate_index, marked_at
-                 FROM review_reviewed WHERE workspace_id = ?1 AND branch = ?2",
+                 FROM review_reviewed WHERE worktree_id = ?1 AND branch = ?2",
             )
             .map_err(map_err)?;
-        stmt.query_row(params![uuid_blob(workspace_id), branch], |r| {
+        stmt.query_row(params![uuid_blob(worktree_id), branch], |r| {
             Ok(ReviewedMark {
                 head_commit: r.get(0)?,
                 worktree_digest: r.get(1)?,
@@ -200,7 +200,7 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/tmp/root", 1).unwrap();
         let repo = s.create_repository(host, root.id, "r", "/tmp/root/r/.git", "").unwrap();
-        let ws = s.create_workspace(repo.id, "feat/x", "/tmp/root/r-wt", false).unwrap();
+        let ws = s.create_worktree(repo.id, "feat/x", "/tmp/root/r-wt", false).unwrap();
 
         assert!(s.reviewed_mark(ws.id, "feat/x").unwrap().is_none());
         s.mark_reviewed_with_gate(ws.id, "feat/x", "head", "digest", 11, 22, 99).unwrap();
@@ -217,7 +217,7 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/tmp/root", 1).unwrap();
         let repo = s.create_repository(host, root.id, "r", "/tmp/root/r/.git", "").unwrap();
-        let ws = s.create_workspace(repo.id, "feat/x", "/tmp/root/r-wt", false).unwrap();
+        let ws = s.create_worktree(repo.id, "feat/x", "/tmp/root/r-wt", false).unwrap();
 
         assert!(s.review_base(ws.id).unwrap().is_none());
         s.set_review_base(ws.id, "release/2").unwrap();

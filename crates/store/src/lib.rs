@@ -23,7 +23,7 @@ pub mod testing;
 
 pub use models::{
     AcceptanceItem, Actor, IdempotencyRecord, NoteHit, NoteKind, Repository, RepositoryRoot, Task,
-    TaskBlock, TaskNote, TaskStatus, TaskUpdate, Terminal, TerminalUpdate, Workspace,
+    TaskBlock, TaskNote, TaskStatus, TaskUpdate, Terminal, TerminalUpdate, Worktree,
 };
 pub use store::{IDEMPOTENCY_RETENTION_MILLIS, Store};
 pub use tasks::derive_prefix;

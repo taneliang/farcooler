@@ -34,7 +34,7 @@ struct TaskComposerView: View {
 
     private enum Phase: Equatable {
         case idle
-        case creatingWorkspace
+        case creatingWorktree
         case startingAgent
         case sending
         case done(String)
@@ -53,7 +53,7 @@ struct TaskComposerView: View {
 
     private var isWorking: Bool {
         switch phase {
-        case .creatingWorkspace, .startingAgent, .sending: return true
+        case .creatingWorktree, .startingAgent, .sending: return true
         case .idle, .done, .failed: return false
         }
     }
@@ -165,7 +165,7 @@ struct TaskComposerView: View {
         switch phase {
         case .idle:
             EmptyView()
-        case .creatingWorkspace:
+        case .creatingWorktree:
             ProgressRow("Creating worktree…")
         case .startingAgent:
             ProgressRow("Starting \(QuickAgents.agent(agentID).name)…")
@@ -214,10 +214,10 @@ struct TaskComposerView: View {
         let preset = QuickAgents.preset(agent: agentID, model: model)
 
         Task {
-            phase = .creatingWorkspace
-            let workspaceID: String
+            phase = .creatingWorktree
+            let worktreeID: String
             do {
-                workspaceID = try await connection.createWorkspace(
+                worktreeID = try await connection.createWorktree(
                     repository: repository.id, name: name, branch: branch, base: "")
             } catch {
                 let why = ClientCore.trouble(error, after: "Couldn’t create the worktree.")
@@ -230,7 +230,7 @@ struct TaskComposerView: View {
             let terminalID: String
             do {
                 terminalID = try await connection.createTerminal(
-                    workspace: workspaceID, title: agentID, preset: preset)
+                    worktree: worktreeID, title: agentID, preset: preset)
             } catch {
                 let why = ClientCore.trouble(error, after: "Created the worktree, but couldn’t start \(agentName).")
                 phase = .failed(why.sentence, transcript: why.transcript)
@@ -246,7 +246,7 @@ struct TaskComposerView: View {
             pollLoop: for _ in 0..<60 {
                 try? await Task.sleep(for: .seconds(1))
                 await connection.refresh()
-                guard let current = connection.terminal(terminalID, in: workspaceID) else {
+                guard let current = connection.terminal(terminalID, in: worktreeID) else {
                     continue
                 }
                 switch current.agent {

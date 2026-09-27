@@ -12,22 +12,22 @@ import Testing
 /// them are rules where being wrong looks perfectly normal on a screenshot.
 ///
 /// The fixtures are shaped for the questions rather than for realism. The one
-/// that matters is `crossing`: a fleet whose workspaces have DIFFERENT numbers
-/// of tabs, because a fleet where every workspace has two tabs cannot tell
-/// "the previous workspace's last tab" apart from "the previous workspace's
+/// that matters is `crossing`: a fleet whose worktrees have DIFFERENT numbers
+/// of tabs, because a fleet where every worktree has two tabs cannot tell
+/// "the previous worktree's last tab" apart from "the previous worktree's
 /// tab 1".
 struct ShellNavigationTests {
-    /// Three workspaces, 2 / 3 / 1 tabs. Every index in this fleet is
+    /// Three worktrees, 2 / 3 / 1 tabs. Every index in this fleet is
     /// distinguishable from every other by number alone.
     private static func crossing() -> ShellFleet {
-        ShellFleet(workspaces: [
-            ShellWorkspace(
+        ShellFleet(worktrees: [
+            ShellWorktree(
                 id: "a", name: "alpha",
                 tabs: [tab("a0", .working), tab("a1", .working)]),
-            ShellWorkspace(
+            ShellWorktree(
                 id: "b", name: "beta",
                 tabs: [tab("b0", .working), tab("b1", .working), tab("b2", .working)]),
-            ShellWorkspace(id: "c", name: "gamma", tabs: [tab("c0", .working)]),
+            ShellWorktree(id: "c", name: "gamma", tabs: [tab("c0", .working)]),
         ])
     }
 
@@ -36,7 +36,7 @@ struct ShellNavigationTests {
     /// **A TEST vocabulary, and deliberately no longer the app's.** `ShellMark`
     /// was an enum of exactly these names in the app itself, and it is retired
     /// — `ShellTab.mark` says why. What the navigation and precedence tests
-    /// need is still a one-word way to say "a workspace with a blocked tab in
+    /// need is still a one-word way to say "a worktree with a blocked tab in
     /// it", and spelling three axes at forty call sites would bury the thing
     /// each test is actually about. So the shorthand stays here, where it is
     /// scenery, and the app holds a `GlanceMark`.
@@ -83,41 +83,41 @@ struct ShellNavigationTests {
     // MARK: - The flat sequence
 
     /// The rule the whole content gesture is: walking backward off the FIRST
-    /// tab of a workspace lands on the PREVIOUS workspace's LAST tab.
+    /// tab of a worktree lands on the PREVIOUS worktree's LAST tab.
     ///
     /// Landing on its tab 0 instead would be the same bug in both directions —
     /// swipe back then forward and you are somewhere you did not start — and
-    /// it is invisible in a fleet where every workspace has the same number of
+    /// it is invisible in a fleet where every worktree has the same number of
     /// tabs, which is why `beta` has three and `alpha` has two.
-    @Test func backwardOffAWorkspaceLandsOnThePreviousOnesLastTab() {
+    @Test func backwardOffAWorktreeLandsOnThePreviousOnesLastTab() {
         let fleet = Self.crossing()
         let step = fleet.step(
-            from: ShellPosition(workspace: 1, tab: 0), .previous, along: .content)
-        #expect(step?.position == ShellPosition(workspace: 0, tab: 1))
-        #expect(step?.crossesWorkspace == true)
+            from: ShellPosition(worktree: 1, tab: 0), .previous, along: .content)
+        #expect(step?.position == ShellPosition(worktree: 0, tab: 1))
+        #expect(step?.crossesWorktree == true)
     }
 
-    /// And forward off the last tab lands on the next workspace's FIRST.
-    @Test func forwardOffAWorkspaceLandsOnTheNextOnesFirstTab() {
+    /// And forward off the last tab lands on the next worktree's FIRST.
+    @Test func forwardOffAWorktreeLandsOnTheNextOnesFirstTab() {
         let fleet = Self.crossing()
         let step = fleet.step(
-            from: ShellPosition(workspace: 0, tab: 1), .next, along: .content)
-        #expect(step?.position == ShellPosition(workspace: 1, tab: 0))
-        #expect(step?.crossesWorkspace == true)
+            from: ShellPosition(worktree: 0, tab: 1), .next, along: .content)
+        #expect(step?.position == ShellPosition(worktree: 1, tab: 0))
+        #expect(step?.crossesWorktree == true)
     }
 
-    /// Within a workspace nothing is crossed, and the flag says so — which is
-    /// what keeps the bar still for a swipe that does not change workspace.
-    @Test func aStepInsideAWorkspaceIsNotACrossing() {
+    /// Within a worktree nothing is crossed, and the flag says so — which is
+    /// what keeps the bar still for a swipe that does not change worktree.
+    @Test func aStepInsideAWorktreeIsNotACrossing() {
         let fleet = Self.crossing()
         let step = fleet.step(
-            from: ShellPosition(workspace: 1, tab: 0), .next, along: .content)
-        #expect(step?.position == ShellPosition(workspace: 1, tab: 1))
-        #expect(step?.crossesWorkspace == false)
+            from: ShellPosition(worktree: 1, tab: 0), .next, along: .content)
+        #expect(step?.position == ShellPosition(worktree: 1, tab: 1))
+        #expect(step?.crossesWorktree == false)
     }
 
     /// Walking the whole fleet forward from the very first tab visits every
-    /// tab of every workspace in order, exactly once, and then stops.
+    /// tab of every worktree in order, exactly once, and then stops.
     ///
     /// The sequence is asserted as a whole rather than one step at a time
     /// because "flat" is a property of the walk, not of any single step: a
@@ -126,7 +126,7 @@ struct ShellNavigationTests {
     @Test func theSequenceIsFlatAcrossTheWholeFleet() {
         let fleet = Self.crossing()
         var seen: [ShellPosition] = []
-        var at = ShellPosition(workspace: 0, tab: 0)
+        var at = ShellPosition(worktree: 0, tab: 0)
         seen.append(at)
         while let step = fleet.step(from: at, .next, along: .content) {
             at = step.position
@@ -135,9 +135,9 @@ struct ShellNavigationTests {
         }
         #expect(
             seen == [
-                ShellPosition(workspace: 0, tab: 0), ShellPosition(workspace: 0, tab: 1),
-                ShellPosition(workspace: 1, tab: 0), ShellPosition(workspace: 1, tab: 1),
-                ShellPosition(workspace: 1, tab: 2), ShellPosition(workspace: 2, tab: 0),
+                ShellPosition(worktree: 0, tab: 0), ShellPosition(worktree: 0, tab: 1),
+                ShellPosition(worktree: 1, tab: 0), ShellPosition(worktree: 1, tab: 1),
+                ShellPosition(worktree: 1, tab: 2), ShellPosition(worktree: 2, tab: 0),
             ])
         // And backward is the same walk in reverse, which is the property that
         // makes a swipe undoable by the opposite swipe.
@@ -150,55 +150,55 @@ struct ShellNavigationTests {
         #expect(back == seen.reversed())
     }
 
-    /// A workspace with no tabs is stepped OVER, not landed on: a swipe that
+    /// A worktree with no tabs is stepped OVER, not landed on: a swipe that
     /// arrived on nothing could not be swiped out of the same way.
-    @Test func anEmptyWorkspaceIsSteppedOver() {
-        let fleet = ShellFleet(workspaces: [
-            ShellWorkspace(id: "a", name: "alpha", tabs: [Self.tab("a0", .working)]),
-            ShellWorkspace(id: "empty", name: "empty", tabs: []),
-            ShellWorkspace(id: "c", name: "gamma", tabs: [Self.tab("c0", .working)]),
+    @Test func anEmptyWorktreeIsSteppedOver() {
+        let fleet = ShellFleet(worktrees: [
+            ShellWorktree(id: "a", name: "alpha", tabs: [Self.tab("a0", .working)]),
+            ShellWorktree(id: "empty", name: "empty", tabs: []),
+            ShellWorktree(id: "c", name: "gamma", tabs: [Self.tab("c0", .working)]),
         ])
         #expect(
-            fleet.step(from: ShellPosition(workspace: 0, tab: 0), .next, along: .content)?.position
-                == ShellPosition(workspace: 2, tab: 0))
+            fleet.step(from: ShellPosition(worktree: 0, tab: 0), .next, along: .content)?.position
+                == ShellPosition(worktree: 2, tab: 0))
         #expect(
-            fleet.step(from: ShellPosition(workspace: 2, tab: 0), .previous, along: .content)?
-                .position == ShellPosition(workspace: 0, tab: 0))
+            fleet.step(from: ShellPosition(worktree: 2, tab: 0), .previous, along: .content)?
+                .position == ShellPosition(worktree: 0, tab: 0))
     }
 
-    /// The bar walks WORKSPACES, and — where nobody has ever chosen a tab in
+    /// The bar walks WORKTREES, and — where nobody has ever chosen a tab in
     /// one — at its first tab, in both directions.
-    @Test func theBarStepsWholeWorkspacesAtTheirFirstTab() {
+    @Test func theBarStepsWholeWorktreesAtTheirFirstTab() {
         let fleet = Self.crossing()
         #expect(
-            fleet.step(from: ShellPosition(workspace: 1, tab: 2), .next, along: .bar)?.position
-                == ShellPosition(workspace: 2, tab: 0))
+            fleet.step(from: ShellPosition(worktree: 1, tab: 2), .next, along: .bar)?.position
+                == ShellPosition(worktree: 2, tab: 0))
         #expect(
-            fleet.step(from: ShellPosition(workspace: 1, tab: 2), .previous, along: .bar)?.position
-                == ShellPosition(workspace: 0, tab: 0))
-        #expect(fleet.step(from: ShellPosition(workspace: 0, tab: 0), .previous, along: .bar) == nil)
-        #expect(fleet.step(from: ShellPosition(workspace: 2, tab: 0), .next, along: .bar) == nil)
+            fleet.step(from: ShellPosition(worktree: 1, tab: 2), .previous, along: .bar)?.position
+                == ShellPosition(worktree: 0, tab: 0))
+        #expect(fleet.step(from: ShellPosition(worktree: 0, tab: 0), .previous, along: .bar) == nil)
+        #expect(fleet.step(from: ShellPosition(worktree: 2, tab: 0), .next, along: .bar) == nil)
     }
 
-    // MARK: - Reopening a workspace where you left it
+    // MARK: - Reopening a worktree where you left it
 
     /// **The bar swipe lands on the tab you last had open, not on tab 0.**
     ///
-    /// Crossing to a workspace by name is going back to a place, and a place
+    /// Crossing to a worktree by name is going back to a place, and a place
     /// you come back to should be where you left it — the same argument
     /// `docs/jobs-to-be-done.md` F4 makes about the app surviving being put
     /// down every ninety seconds. Landing on tab 0 is the app half-remembering.
     @Test func theBarStepLandsOnTheRememberedTab() {
-        let fleet = ShellFleet(workspaces: [
-            ShellWorkspace(id: "a", name: "alpha", tabs: [Self.tab("a0", .working)]),
-            ShellWorkspace(
+        let fleet = ShellFleet(worktrees: [
+            ShellWorktree(id: "a", name: "alpha", tabs: [Self.tab("a0", .working)]),
+            ShellWorktree(
                 id: "b", name: "beta", resume: 2,
                 tabs: [Self.tab("b0", .working), Self.tab("b1", .working), Self.tab("b2", .working)]
             ),
         ])
         #expect(
-            fleet.step(from: ShellPosition(workspace: 0, tab: 0), .next, along: .bar)?.position
-                == ShellPosition(workspace: 1, tab: 2))
+            fleet.step(from: ShellPosition(worktree: 0, tab: 0), .next, along: .bar)?.position
+                == ShellPosition(worktree: 1, tab: 2))
     }
 
     /// **And the content swipe does not.** It walks one flat sequence and has
@@ -209,22 +209,22 @@ struct ShellNavigationTests {
     /// The same fleet as the test above, so what is being checked is the
     /// difference between the two tracks and nothing else.
     @Test func theContentStepIgnoresTheRememberedTab() {
-        let fleet = ShellFleet(workspaces: [
-            ShellWorkspace(id: "a", name: "alpha", tabs: [Self.tab("a0", .working)]),
-            ShellWorkspace(
+        let fleet = ShellFleet(worktrees: [
+            ShellWorktree(id: "a", name: "alpha", tabs: [Self.tab("a0", .working)]),
+            ShellWorktree(
                 id: "b", name: "beta", resume: 2,
                 tabs: [Self.tab("b0", .working), Self.tab("b1", .working), Self.tab("b2", .working)]
             ),
         ])
         #expect(
-            fleet.step(from: ShellPosition(workspace: 0, tab: 0), .next, along: .content)?.position
-                == ShellPosition(workspace: 1, tab: 0))
+            fleet.step(from: ShellPosition(worktree: 0, tab: 0), .next, along: .content)?.position
+                == ShellPosition(worktree: 1, tab: 0))
         // And backward off `beta` still lands on `alpha`'s LAST tab rather
         // than on anything remembered — `alpha` has no memory, but the rule is
         // the sequence's, not the absence of one.
         #expect(
-            fleet.step(from: ShellPosition(workspace: 1, tab: 0), .previous, along: .content)?
-                .position == ShellPosition(workspace: 0, tab: 0))
+            fleet.step(from: ShellPosition(worktree: 1, tab: 0), .previous, along: .content)?
+                .position == ShellPosition(worktree: 0, tab: 0))
     }
 
     /// A remembered tab that has since gone is not honoured as an index.
@@ -233,13 +233,13 @@ struct ShellNavigationTests {
     /// the caller was holding can be one poll out of date. Out of range lands
     /// on the first tab rather than trapping or landing on the last.
     @Test func aRememberedTabThatIsGoneFallsBackToTheFirst() {
-        let workspace = ShellWorkspace(
+        let worktree = ShellWorktree(
             id: "b", name: "beta", resume: 5,
             tabs: [Self.tab("b0", .working), Self.tab("b1", .working)])
-        #expect(workspace.resumeTab == 0)
-        #expect(ShellWorkspace(id: "e", name: "e", resume: 0, tabs: []).resumeTab == 0)
+        #expect(worktree.resumeTab == 0)
+        #expect(ShellWorktree(id: "e", name: "e", resume: 0, tabs: []).resumeTab == 0)
         #expect(
-            ShellWorkspace(id: "n", name: "n", tabs: [Self.tab("n0", .working)]).resumeTab == 0)
+            ShellWorktree(id: "n", name: "n", tabs: [Self.tab("n0", .working)]).resumeTab == 0)
     }
 
     // MARK: - Finding a pane that is already mounted
@@ -247,28 +247,28 @@ struct ShellNavigationTests {
     /// **A retained pane is found by ID, wherever the fleet has moved it.**
     ///
     /// This is what lets `ShellPaneTrack` mount a pane once and place it by
-    /// slot: a workspace that gains a terminal renumbers every index after it,
+    /// slot: a worktree that gains a terminal renumbers every index after it,
     /// and a pane looked up by cached index would silently start naming a
     /// different tab. Nil is the prune rule — a pane whose id no longer
     /// resolves is a pane for something the runner has forgotten.
     @Test func aTabIsFoundByIdAcrossTheWholeFleet() {
         let fleet = Self.crossing()
-        #expect(fleet.position(ofTab: "b2") == ShellPosition(workspace: 1, tab: 2))
-        #expect(fleet.position(ofTab: "c0") == ShellPosition(workspace: 2, tab: 0))
+        #expect(fleet.position(ofTab: "b2") == ShellPosition(worktree: 1, tab: 2))
+        #expect(fleet.position(ofTab: "c0") == ShellPosition(worktree: 2, tab: 0))
         #expect(fleet.position(ofTab: "gone") == nil)
-        #expect(fleet.tab(at: ShellPosition(workspace: 1, tab: 2))?.id == "b2")
-        #expect(fleet.tab(at: ShellPosition(workspace: 9, tab: 0)) == nil)
-        #expect(fleet.tab(at: ShellPosition(workspace: 2, tab: 4)) == nil)
+        #expect(fleet.tab(at: ShellPosition(worktree: 1, tab: 2))?.id == "b2")
+        #expect(fleet.tab(at: ShellPosition(worktree: 9, tab: 0)) == nil)
+        #expect(fleet.tab(at: ShellPosition(worktree: 2, tab: 4)) == nil)
     }
 
     /// The same tab, after a terminal is inserted before it: a new index, the
     /// same identity. The pane must move, not be rebuilt.
     @Test func insertingATabMovesTheOnesAfterItRatherThanRenamingThem() {
         var fleet = Self.crossing()
-        #expect(fleet.position(ofTab: "b1") == ShellPosition(workspace: 1, tab: 1))
-        fleet.workspaces[1].tabs.insert(Self.tab("b-new", .working), at: 0)
-        #expect(fleet.position(ofTab: "b1") == ShellPosition(workspace: 1, tab: 2))
-        #expect(fleet.position(ofTab: "b-new") == ShellPosition(workspace: 1, tab: 0))
+        #expect(fleet.position(ofTab: "b1") == ShellPosition(worktree: 1, tab: 1))
+        fleet.worktrees[1].tabs.insert(Self.tab("b-new", .working), at: 0)
+        #expect(fleet.position(ofTab: "b1") == ShellPosition(worktree: 1, tab: 2))
+        #expect(fleet.position(ofTab: "b-new") == ShellPosition(worktree: 1, tab: 0))
     }
 
     // MARK: - Where the shell sits when the fleet is re-merged
@@ -277,22 +277,22 @@ struct ShellNavigationTests {
     ///
     /// Two runners on a cold launch. The first answers, the shell opens on its
     /// second worktree, and seconds later the second runner answers — its
-    /// worktrees go in ahead, in runner-list order, and `(workspace: 1)` is now
+    /// worktrees go in ahead, in runner-list order, and `(worktree: 1)` is now
     /// somebody else's checkout. The value did not move, so nothing downstream
     /// can see that everything under it did.
     @Test func aRunnerArrivingAheadDoesNotTakeTheShellWithIt() {
         let before = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 2)
+        let at = ShellPosition(worktree: 1, tab: 2)
         #expect(before.tab(at: at)?.id == "b2")
 
         var after = before
-        after.workspaces.insert(
-            ShellWorkspace(id: "z", name: "zulu", tabs: [Self.tab("z0", .working)]), at: 0)
+        after.worktrees.insert(
+            ShellWorktree(id: "z", name: "zulu", tabs: [Self.tab("z0", .working)]), at: 0)
 
         // The index alone is now a different runner's worktree.
         #expect(after.tab(at: at)?.id != "b2")
         // Anchored to the tab, the shell stays on the pane somebody is reading.
-        #expect(after.reseat(at, holding: "b2") == ShellPosition(workspace: 2, tab: 2))
+        #expect(after.reseat(at, holding: "b2") == ShellPosition(worktree: 2, tab: 2))
         #expect(after.tab(at: after.reseat(at, holding: "b2"))?.id == "b2")
     }
 
@@ -302,31 +302,31 @@ struct ShellNavigationTests {
     /// answers. The shell's index is A's, and clamping it would stand the shell
     /// on whatever B keeps at that number.
     @Test func aFleetArrivingAfterAnEmptyOneLandsOnItsFirstWorktree() {
-        let empty = ShellFleet(workspaces: [])
+        let empty = ShellFleet(worktrees: [])
         let fleet = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 2)
+        let at = ShellPosition(worktree: 1, tab: 2)
         let landed = fleet.reseat(at, holding: "gone", after: empty)
-        #expect(landed.workspace == 0)
-        #expect(landed.tab == fleet.workspaces[0].resumeTab)
+        #expect(landed.worktree == 0)
+        #expect(landed.tab == fleet.worktrees[0].resumeTab)
         // Across an ordinary poll, the anchor-less answer is still the clamp.
         #expect(fleet.reseat(at, holding: "gone", after: fleet) == fleet.clamping(at))
         // And an anchor that IS here wins either way.
         #expect(fleet.reseat(at, holding: "b2", after: empty) == at)
     }
 
-    /// A tab inserted before this one inside the same workspace moves it too.
+    /// A tab inserted before this one inside the same worktree moves it too.
     @Test func aTabInsertedAheadMovesTheAnchoredPosition() {
         var fleet = Self.crossing()
-        fleet.workspaces[1].tabs.insert(Self.tab("b-new", .working), at: 0)
+        fleet.worktrees[1].tabs.insert(Self.tab("b-new", .working), at: 0)
         #expect(
-            fleet.reseat(ShellPosition(workspace: 1, tab: 1), holding: "b1")
-                == ShellPosition(workspace: 1, tab: 2))
+            fleet.reseat(ShellPosition(worktree: 1, tab: 1), holding: "b1")
+                == ShellPosition(worktree: 1, tab: 2))
     }
 
     /// Nothing moved, so nothing moves. The anchored position is the position.
     @Test func anUnchangedFleetSeatsTheShellWhereItAlreadyIs() {
         let fleet = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 2)
+        let at = ShellPosition(worktree: 1, tab: 2)
         #expect(fleet.reseat(at, holding: "b2") == at)
     }
 
@@ -336,33 +336,33 @@ struct ShellNavigationTests {
     /// they were not looking at went away.
     @Test func aVanishedTabClampsRatherThanGoingBackToTheStart() {
         var fleet = Self.crossing()
-        fleet.workspaces[1].tabs.removeLast()
+        fleet.worktrees[1].tabs.removeLast()
         #expect(
-            fleet.reseat(ShellPosition(workspace: 1, tab: 2), holding: "b2")
-                == ShellPosition(workspace: 1, tab: 1))
+            fleet.reseat(ShellPosition(worktree: 1, tab: 2), holding: "b2")
+                == ShellPosition(worktree: 1, tab: 1))
     }
 
-    /// A whole workspace gone clamps to the last one there is, not to nothing.
+    /// A whole worktree gone clamps to the last one there is, not to nothing.
     /// The TAB clamps within it too, and independently: `beta` is three tabs
     /// long, so tab 0 stays tab 0 rather than being carried to the end.
-    @Test func aVanishedWorkspaceClampsToTheEndOfTheFleet() {
+    @Test func aVanishedWorktreeClampsToTheEndOfTheFleet() {
         var fleet = Self.crossing()
-        fleet.workspaces.removeLast()
+        fleet.worktrees.removeLast()
         #expect(
-            fleet.reseat(ShellPosition(workspace: 2, tab: 0), holding: "c0")
-                == ShellPosition(workspace: 1, tab: 0))
+            fleet.reseat(ShellPosition(worktree: 2, tab: 0), holding: "c0")
+                == ShellPosition(worktree: 1, tab: 0))
         #expect(
-            fleet.reseat(ShellPosition(workspace: 2, tab: 7), holding: "c0")
-                == ShellPosition(workspace: 1, tab: 2))
+            fleet.reseat(ShellPosition(worktree: 2, tab: 7), holding: "c0")
+                == ShellPosition(worktree: 1, tab: 2))
     }
 
     /// A fleet with nothing in it hands the position back untouched. There is
     /// nothing to clamp to, and a fleet that empties under a finger is ordinary
-    /// — the same reason `tabCount(ofWorkspace:)` answers 0 rather than
+    /// — the same reason `tabCount(ofWorktree:)` answers 0 rather than
     /// trapping.
     @Test func anEmptyFleetLeavesThePositionAlone() {
-        let fleet = ShellFleet(workspaces: [])
-        let at = ShellPosition(workspace: 1, tab: 2)
+        let fleet = ShellFleet(worktrees: [])
+        let at = ShellPosition(worktree: 1, tab: 2)
         #expect(fleet.reseat(at, holding: "b2") == at)
     }
 
@@ -371,38 +371,38 @@ struct ShellNavigationTests {
     @Test func noAnchorClamps() {
         let fleet = Self.crossing()
         #expect(
-            fleet.reseat(ShellPosition(workspace: 9, tab: 9), holding: nil)
-                == ShellPosition(workspace: 2, tab: 0))
+            fleet.reseat(ShellPosition(worktree: 9, tab: 9), holding: nil)
+                == ShellPosition(worktree: 2, tab: 0))
     }
 
     // MARK: - Rubber banding
 
     /// The rubber band engages at the two true ends of the FLEET and nowhere
-    /// else — in particular not at a workspace boundary, which is the mistake
+    /// else — in particular not at a worktree boundary, which is the mistake
     /// that would make the fleet feel like a list of separate lists.
     @Test func rubberBandingIsOnlyAtTheTwoEndsOfTheFleet() {
         let fleet = Self.crossing()
-        let first = ShellPosition(workspace: 0, tab: 0)
-        let last = ShellPosition(workspace: 2, tab: 0)
+        let first = ShellPosition(worktree: 0, tab: 0)
+        let last = ShellPosition(worktree: 2, tab: 0)
         #expect(fleet.rubberBands(at: first, .previous, along: .content))
         #expect(fleet.rubberBands(at: last, .next, along: .content))
         #expect(!fleet.rubberBands(at: first, .next, along: .content))
         #expect(!fleet.rubberBands(at: last, .previous, along: .content))
         // The boundaries in between: last tab of `alpha`, first tab of `beta`.
         #expect(
-            !fleet.rubberBands(at: ShellPosition(workspace: 0, tab: 1), .next, along: .content))
+            !fleet.rubberBands(at: ShellPosition(worktree: 0, tab: 1), .next, along: .content))
         #expect(
-            !fleet.rubberBands(at: ShellPosition(workspace: 1, tab: 0), .previous, along: .content))
+            !fleet.rubberBands(at: ShellPosition(worktree: 1, tab: 0), .previous, along: .content))
     }
 
-    /// From the BAR the ends are the ends of the workspace list, so the first
-    /// workspace's last tab still rubber-bands forward — the bar is not
+    /// From the BAR the ends are the ends of the worktree list, so the first
+    /// worktree's last tab still rubber-bands forward — the bar is not
     /// walking tabs.
-    @Test func theBarsEndsAreTheWorkspaceListsEnds() {
+    @Test func theBarsEndsAreTheWorktreeListsEnds() {
         let fleet = Self.crossing()
-        #expect(fleet.rubberBands(at: ShellPosition(workspace: 0, tab: 0), .previous, along: .bar))
-        #expect(!fleet.rubberBands(at: ShellPosition(workspace: 0, tab: 1), .next, along: .bar))
-        #expect(fleet.rubberBands(at: ShellPosition(workspace: 2, tab: 0), .next, along: .bar))
+        #expect(fleet.rubberBands(at: ShellPosition(worktree: 0, tab: 0), .previous, along: .bar))
+        #expect(!fleet.rubberBands(at: ShellPosition(worktree: 0, tab: 1), .next, along: .bar))
+        #expect(fleet.rubberBands(at: ShellPosition(worktree: 2, tab: 0), .next, along: .bar))
     }
 
     @Test func aRubberBandedDragMovesAThirdAsFar() {
@@ -518,7 +518,7 @@ struct ShellNavigationTests {
     /// draw a page turn through UIKit's slop and then take it back.
     ///
     /// The off-screen entry is not decoration. The pane track mounts the
-    /// NEIGHBOURING workspaces' panes and holds them, so a diff two panes away
+    /// NEIGHBOURING worktrees' panes and holds them, so a diff two panes away
     /// is laid out and reporting the whole time — and if its rectangle were
     /// not what excluded it, every drag anywhere would find its hunks.
     @Test func onlyTheScrollerUnderTheFingerAnswers() {
@@ -639,7 +639,7 @@ struct ShellNavigationTests {
         let fleet = Self.crossing()
         #expect(
             fleet.barRelease(
-                axis: .vertical, dx: 0, up: 0, at: ShellPosition(workspace: 1, tab: 0))
+                axis: .vertical, dx: 0, up: 0, at: ShellPosition(worktree: 1, tab: 0))
                 == .abandon)
     }
 
@@ -691,13 +691,13 @@ struct ShellNavigationTests {
     /// way faster than thinking before doing."*
     ///
     /// Ninety points sideways is well past the seventy that commits, so under
-    /// the lock this gesture WAS a workspace crossing and the counter-example
+    /// the lock this gesture WAS a worktree crossing and the counter-example
     /// below says so in the same breath. The turn is then straight up, and
     /// the axis changes hands at 126 points of lift — 1.4 × 90, which is
     /// `ShellMetrics.redirect` and nothing else.
     @Test func aDragThatTurnsUpwardOutOfASidewaysSwipeReachesTheColumn() {
         let fleet = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 0)  // three tabs
+        let at = ShellPosition(worktree: 1, tab: 0)  // three tabs
         let path = leg(from: (0, 0), to: (-90, 0)) + leg(from: (-90, 0), to: (-90, 200))
         let run = drive(path, tabCount: 3)
 
@@ -746,7 +746,7 @@ struct ShellNavigationTests {
                 == .land(tab: 0))
 
         // The counter-example, and it is the same ninety points: a gesture
-        // that does NOT turn is the workspace crossing it always was.
+        // that does NOT turn is the worktree crossing it always was.
         let straight = drive(leg(from: (0, 0), to: (-90, 0)), tabCount: 3)
         #expect(straight.frame.axis == .horizontal)
         #expect(straight.flips == 0)
@@ -755,10 +755,10 @@ struct ShellNavigationTests {
                 axis: straight.frame.axis, dx: straight.frame.sideways, up: 0, at: at)
                 == .commit(
                     ShellStep(
-                        position: ShellPosition(workspace: 2, tab: 0), crossesWorkspace: true)))
+                        position: ShellPosition(worktree: 2, tab: 0), crossesWorktree: true)))
     }
 
-    /// **And the mirror: a lift that turns sideways crosses the workspace.**
+    /// **And the mirror: a lift that turns sideways crosses the worktree.**
     /// *"…or vice versa."*
     ///
     /// The half that looks like it already worked and did not. A lifted page
@@ -774,9 +774,9 @@ struct ShellNavigationTests {
     /// rather than incidental: leaving a menu you have opened and are reading
     /// should look like a decision, and the ratio makes it cost more the
     /// further into the menu you are.
-    @Test func aLiftThatTurnsSidewaysOutOfAnOpenColumnCrossesTheWorkspace() {
+    @Test func aLiftThatTurnsSidewaysOutOfAnOpenColumnCrossesTheWorktree() {
         let fleet = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 2)  // three tabs
+        let at = ShellPosition(worktree: 1, tab: 2)  // three tabs
         let path = leg(from: (0, 0), to: (0, 100)) + leg(from: (0, 100), to: (-220, 100))
         let run = drive(path, tabCount: 3)
 
@@ -796,7 +796,7 @@ struct ShellNavigationTests {
             fleet.barRelease(axis: run.frame.axis, dx: run.frame.sideways, up: 0, at: at)
                 == .commit(
                     ShellStep(
-                        position: ShellPosition(workspace: 2, tab: 0), crossesWorkspace: true)))
+                        position: ShellPosition(worktree: 2, tab: 0), crossesWorktree: true)))
 
         // The counter-example: the same lift, turned sideways by a hundred
         // points rather than two hundred and twenty. That is a long way for a
@@ -1051,7 +1051,7 @@ struct ShellNavigationTests {
                 "the finger's place went missing at \(up) points of lift")
         }
 
-        // A one-tab workspace is where an uncharged handover was worst: its
+        // A one-tab worktree is where an uncharged handover was worst: its
         // column runs out after 44 points, so the same turn would have put
         // the page most of the way into the overview in one frame.
         let single = drive(
@@ -1158,7 +1158,7 @@ struct ShellNavigationTests {
     /// never visibly reached the overview must not open it.
     @Test func aReleaseReadsTheFingersRealPlaceRatherThanTheRawTravel() {
         let fleet = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 0)  // three tabs
+        let at = ShellPosition(worktree: 1, tab: 0)  // three tabs
         let travelled: CGFloat = 220
         let realPlace: CGFloat = 180  // travelled - 40, the low start
 
@@ -1219,7 +1219,7 @@ struct ShellNavigationTests {
         // Past the column's top edge, and past the margin above it.
         #expect(ShellGesture.columnRow(above: 3 * row + bias, tabCount: 3) == 0)
         #expect(ShellGesture.columnRow(above: 3 * row + bias + 1, tabCount: 3) == nil)
-        // A workspace with no tabs has no rows to hit.
+        // A worktree with no tabs has no rows to hit.
         #expect(ShellGesture.columnRow(above: 10, tabCount: 0) == nil)
     }
 
@@ -1265,7 +1265,7 @@ struct ShellNavigationTests {
     /// none still toggles.
     @Test func aTapWithARowUnderItLandsRatherThanTogglingTheColumn() {
         let fleet = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 0)
+        let at = ShellPosition(worktree: 1, tab: 0)
         #expect(fleet.barRelease(axis: nil, dx: 0, up: 0, at: at, row: 2) == .land(tab: 2))
         #expect(fleet.barRelease(axis: nil, dx: 0, up: 0, at: at, row: nil) == .toggleColumn)
     }
@@ -1291,7 +1291,7 @@ struct ShellNavigationTests {
     /// to choose three different tabs.
     @Test func theChosenRowFollowsTheFingerAndNotHowFarItHasTravelled() {
         let fleet = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 0)  // three tabs
+        let at = ShellPosition(worktree: 1, tab: 0)  // three tabs
         // 60 points above the bar's top edge is inside the MIDDLE row of a
         // three-tab column, which is tab 1.
         let above: CGFloat = 60
@@ -1365,7 +1365,7 @@ struct ShellNavigationTests {
     /// little, which must cost nothing, and a tab you chose.
     @Test func theSelectionStillFollowsTheFingerThroughAnOpenColumn() {
         let fleet = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 0)  // three tabs
+        let at = ShellPosition(worktree: 1, tab: 0)  // three tabs
         func release(up: CGFloat, above: CGFloat) -> ShellRelease {
             fleet.barRelease(
                 axis: .vertical, dx: 0, up: up, at: at,
@@ -1388,14 +1388,14 @@ struct ShellNavigationTests {
     // MARK: - The overview
 
     /// The overview starts where the column runs out, so it is always the same
-    /// gesture — keep going — whether the workspace has one tab or nine.
+    /// gesture — keep going — whether the worktree has one tab or nine.
     @Test func theOverviewBeginsWhereTheColumnRunsOut() {
         #expect(ShellGesture.overviewProgress(up: 102, tabCount: 3) == 0)
         #expect(ShellGesture.overviewProgress(up: ShellMetrics.rowHeight * 3 + ShellMetrics.overRun / 2, tabCount: 3) == 0.5)
         #expect(ShellGesture.overviewProgress(up: ShellMetrics.rowHeight * 3 + ShellMetrics.overRun, tabCount: 3) == 1)
         #expect(ShellGesture.overviewProgress(up: 400, tabCount: 3) == 1)
         #expect(ShellGesture.overviewProgress(up: 0, tabCount: 3) == 0)
-        // A one-tab workspace reaches it 68 points sooner, and that is the
+        // A one-tab worktree reaches it 68 points sooner, and that is the
         // point: the distance is measured from the end of the column.
         #expect(ShellGesture.overviewProgress(up: ShellMetrics.rowHeight + ShellMetrics.overRun, tabCount: 1) == 1)
     }
@@ -1420,14 +1420,14 @@ struct ShellNavigationTests {
         // which is what leaves the rest of the travel to the overview alone.
         #expect(ShellGesture.columnProgress(up: join + ShellMetrics.overRun, tabCount: 3) == 1)
 
-        // A workspace with no tabs has no column to be a fraction of.
+        // A worktree with no tabs has no column to be a fraction of.
         #expect(ShellGesture.columnProgress(up: 10, tabCount: 0) == 1)
     }
 
     /// The page does not move at all until the lift has passed the tabs.
     ///
     /// The rule the whole lift now rests on: picking a tab is a light action
-    /// taken inside the workspace, so the column opens over a page that has
+    /// taken inside the worktree, so the column opens over a page that has
     /// not moved, and the page only becomes a card once the finger has gone
     /// past the last row. Asserted against the join rather than against a
     /// number, so a `rowHeight` that moves again cannot make this pass while
@@ -1450,7 +1450,7 @@ struct ShellNavigationTests {
         #expect(ShellGesture.pageRise(up: join + 400, tabCount: 3) == 400)
         #expect(ShellGesture.overviewProgress(up: join + 400, tabCount: 3) == 1)
 
-        // A workspace with no tabs has no column to hold the page still.
+        // A worktree with no tabs has no column to hold the page still.
         #expect(ShellGesture.pageRise(up: 10, tabCount: 0) == 10)
     }
 
@@ -1472,22 +1472,22 @@ struct ShellNavigationTests {
         }
     }
 
-    /// Precedence sorts WORKSPACES, and one stale tab is not a stale
-    /// workspace — only a workspace nothing has been heard from is.
-    @Test func precedenceRanksWorkspacesNotTabs() {
-        let working = ShellWorkspace(
+    /// Precedence sorts WORKTREES, and one stale tab is not a stale
+    /// worktree — only a worktree nothing has been heard from is.
+    @Test func precedenceRanksWorktreesNotTabs() {
+        let working = ShellWorktree(
             id: "w", name: "w", tabs: [Self.tab("t", .working), Self.tab("s", .stale)])
-        let allStale = ShellWorkspace(
+        let allStale = ShellWorktree(
             id: "s", name: "s", tabs: [Self.tab("s0", .stale), Self.tab("s1", .stale)])
-        let diff = ShellWorkspace(
+        let diff = ShellWorktree(
             id: "d", name: "d", tabs: [Self.tab("d0", .stale), Self.tab("d1", .unreadDiff)])
-        let blocked = ShellWorkspace(
+        let blocked = ShellWorktree(
             id: "b", name: "b", tabs: [Self.tab("b0", .unreadDiff), Self.tab("b1", .needsYou)])
         #expect(working.precedence == .working)
         #expect(allStale.precedence == .allStale)
         #expect(diff.precedence == .unreadDiff)
-        #expect(blocked.precedence == .needsYou, "needs-you outranks a diff in the same workspace")
-        #expect(ShellWorkspace(id: "e", name: "e", tabs: []).precedence == .working)
+        #expect(blocked.precedence == .needsYou, "needs-you outranks a diff in the same worktree")
+        #expect(ShellWorktree(id: "e", name: "e", tabs: []).precedence == .working)
     }
 
     /// **A finished turn sorts on the top rung while drawing the rung below
@@ -1503,41 +1503,41 @@ struct ShellNavigationTests {
     /// been this app's single definition of "interrupt someone" since before
     /// the glance vocabulary existed.
     @Test func aFinishedTurnSortsWithTheBlockedOnesRatherThanWithTheDiffs() {
-        let done = ShellWorkspace(id: "d", name: "d", tabs: [Self.tab("d0", .done)])
+        let done = ShellWorktree(id: "d", name: "d", tabs: [Self.tab("d0", .done)])
         #expect(done.tabs[0].mark.attention == .toReview, "done is the review tier, and draws it")
         #expect(done.precedence == .needsYou, "and it still sorts where a person is wanted")
 
         // The other half, and the reason the rung below did not widen: a diff
         // draws the SAME ring and must not be lifted by it.
-        let diff = ShellWorkspace(id: "f", name: "f", tabs: [Self.tab("f0", .unreadDiff)])
+        let diff = ShellWorktree(id: "f", name: "f", tabs: [Self.tab("f0", .unreadDiff)])
         #expect(diff.tabs[0].mark.attention == .toReview)
         #expect(diff.precedence == .unreadDiff, "a diff is not an agent asking for you")
     }
 
-    /// An idle agent is not a stale one, and a workspace full of idle agents
-    /// is not a workspace we have stopped hearing from.
+    /// An idle agent is not a stale one, and a worktree full of idle agents
+    /// is not a worktree we have stopped hearing from.
     ///
     /// `allStale` reads the link axis now rather than a case called `stale`,
     /// and the two are easy to conflate: `idle` and `stale` were ONE case
     /// under `ShellMark` for every purpose except the one this rung is about.
-    @Test func aWorkspaceOfIdleAgentsIsNotAWorkspaceGoneQuiet() {
-        let idle = ShellWorkspace(
+    @Test func aWorktreeOfIdleAgentsIsNotAWorktreeGoneQuiet() {
+        let idle = ShellWorktree(
             id: "i", name: "i", tabs: [Self.tab("i0", .idle), Self.tab("i1", .idle)])
         #expect(idle.precedence == .working, "idle is a live answer; it just is not a busy one")
-        let gone = ShellWorkspace(
+        let gone = ShellWorktree(
             id: "g", name: "g", tabs: [Self.tab("g0", .idle), Self.tab("g1", .stale)])
-        #expect(gone.precedence == .working, "one tab we have not heard from is not the workspace")
+        #expect(gone.precedence == .working, "one tab we have not heard from is not the worktree")
     }
 
     /// Search is a substring over names, case- and diacritic-blind, and keeps
     /// the order it filters — which is the runner's, not precedence's.
     @Test func searchFiltersByNameAndKeepsTheOrder() {
         let runner = ShellRunnerLabel(id: "r", name: "r")
-        let fleet = ShellFleet(workspaces: [
-            ShellWorkspace(id: "0", name: "feat/retries", runner: "r", tabs: [Self.tab("x", .working)]),
-            ShellWorkspace(
+        let fleet = ShellFleet(worktrees: [
+            ShellWorktree(id: "0", name: "feat/retries", runner: "r", tabs: [Self.tab("x", .working)]),
+            ShellWorktree(
                 id: "1", name: "fix/RETRY-storm", runner: "r", tabs: [Self.tab("x", .needsYou)]),
-            ShellWorkspace(id: "2", name: "chore/deps", runner: "r", tabs: [Self.tab("x", .working)]),
+            ShellWorktree(id: "2", name: "chore/deps", runner: "r", tabs: [Self.tab("x", .working)]),
         ])
         func order(_ query: String) -> [Int] {
             fleet.runnerSections([runner], matching: query).first?.cards.map(\.index) ?? []
@@ -1557,28 +1557,28 @@ struct ShellNavigationTests {
     /// Both halves asserted, because each fails on its own: a filter with no
     /// section loses the way back from hiding, and a section that also left
     /// the card in place would draw it twice.
-    @Test func hidingTakesAWorkspaceOutOfTheGridAndIntoItsOwnSection() {
-        let fleet = ShellFleet(workspaces: [
-            ShellWorkspace(id: "0", name: "shown-a", tabs: [Self.tab("x", .working)]),
-            ShellWorkspace(
+    @Test func hidingTakesAWorktreeOutOfTheGridAndIntoItsOwnSection() {
+        let fleet = ShellFleet(worktrees: [
+            ShellWorktree(id: "0", name: "shown-a", tabs: [Self.tab("x", .working)]),
+            ShellWorktree(
                 id: "1", name: "put-away", isHidden: true, tabs: [Self.tab("x", .needsYou)]),
-            ShellWorkspace(id: "2", name: "shown-b", tabs: [Self.tab("x", .working)]),
+            ShellWorktree(id: "2", name: "shown-b", tabs: [Self.tab("x", .working)]),
         ])
         #expect(fleet.hiddenOrder() == [1])
         #expect(
-            fleet.workspaces.count == 3,
-            "hiding is a view preference; the workspace keeps its place in the fleet")
+            fleet.worktrees.count == 3,
+            "hiding is a view preference; the worktree keeps its place in the fleet")
     }
 
     /// The hidden section keeps the runner's order too: nothing in the grid is
     /// sorted by what an agent is doing.
     @Test func theHiddenSectionKeepsFleetOrder() {
-        let fleet = ShellFleet(workspaces: [
-            ShellWorkspace(id: "0", name: "working", tabs: [Self.tab("x", .working)]),
-            ShellWorkspace(
+        let fleet = ShellFleet(worktrees: [
+            ShellWorktree(id: "0", name: "working", tabs: [Self.tab("x", .working)]),
+            ShellWorktree(
                 id: "1", name: "quiet-hidden", isHidden: true, tabs: [Self.tab("x", .working)]),
-            ShellWorkspace(id: "2", name: "diff", tabs: [Self.tab("x", .unreadDiff)]),
-            ShellWorkspace(
+            ShellWorktree(id: "2", name: "diff", tabs: [Self.tab("x", .unreadDiff)]),
+            ShellWorktree(
                 id: "3", name: "loud-but-hidden", isHidden: true,
                 tabs: [Self.tab("x", .needsYou)]),
         ])
@@ -1587,9 +1587,9 @@ struct ShellNavigationTests {
 
     /// A worktree you hid is still a worktree you can ask for by name.
     @Test func searchReachesIntoTheHiddenSection() {
-        let fleet = ShellFleet(workspaces: [
-            ShellWorkspace(id: "0", name: "feat/retries", tabs: [Self.tab("x", .working)]),
-            ShellWorkspace(
+        let fleet = ShellFleet(worktrees: [
+            ShellWorktree(id: "0", name: "feat/retries", tabs: [Self.tab("x", .working)]),
+            ShellWorktree(
                 id: "1", name: "fix/RETRY-storm", isHidden: true, tabs: [Self.tab("x", .working)]),
         ])
         #expect(fleet.hiddenOrder(matching: "retr") == [1])
@@ -1601,10 +1601,10 @@ struct ShellNavigationTests {
     @Test func aServerGroupKeepsItsRunnersOrderAndDropsHiddenWorktrees() {
         let group = ShellServerGroup(
             id: "r1", name: "gpu-box-2",
-            workspaces: [
-                ShellWorkspace(id: "a", name: "working", tabs: [Self.tab("x", .working)]),
-                ShellWorkspace(id: "b", name: "needs", tabs: [Self.tab("x", .needsYou)]),
-                ShellWorkspace(
+            worktrees: [
+                ShellWorktree(id: "a", name: "working", tabs: [Self.tab("x", .working)]),
+                ShellWorktree(id: "b", name: "needs", tabs: [Self.tab("x", .needsYou)]),
+                ShellWorktree(
                     id: "c", name: "put-away", isHidden: true, tabs: [Self.tab("x", .needsYou)]),
             ])
         #expect(group.order() == [0, 1], "the loud one is not lifted")
@@ -1618,7 +1618,7 @@ struct ShellNavigationTests {
         func group(_ name: String, _ seen: Date?) -> ShellServerGroup {
             ShellServerGroup(
                 id: name, name: name, lastSeen: seen,
-                workspaces: [ShellWorkspace(id: "w", name: "w", tabs: [Self.tab("x", .working)])])
+                worktrees: [ShellWorktree(id: "w", name: "w", tabs: [Self.tab("x", .working)])])
         }
         let arranged = ShellServerGroup.arrange([
             group("march", now.addingTimeInterval(-90 * 86_400)),
@@ -1634,13 +1634,13 @@ struct ShellNavigationTests {
     @Test func aServerGroupWithNothingToShowIsDrawnUntilASearchEmptiesIt() {
         let full = ShellServerGroup(
             id: "r1", name: "gpu-box-2",
-            workspaces: [
-                ShellWorkspace(id: "a", name: "feat/queue", tabs: [Self.tab("x", .working)])
+            worktrees: [
+                ShellWorktree(id: "a", name: "feat/queue", tabs: [Self.tab("x", .working)])
             ])
         let allHidden = ShellServerGroup(
             id: "r2", name: "eu-runner-1",
-            workspaces: [
-                ShellWorkspace(
+            worktrees: [
+                ShellWorktree(
                     id: "b", name: "feat/queue", isHidden: true, tabs: [Self.tab("x", .working)])
             ])
         #expect(
@@ -1661,13 +1661,13 @@ struct ShellNavigationTests {
     }
 
     private func directory(
-        _ runner: String, label: String, at seen: Date, workspaces: [String],
+        _ runner: String, label: String, at seen: Date, worktrees: [String],
         hidden: [String] = [], mark: String = "working"
     ) -> RunnerDirectory {
         RunnerDirectory(
             runner: runner, label: label, seenAt: seen,
-            workspaces: (workspaces + hidden).map { name in
-                RunnerDirectory.Workspace(
+            worktrees: (worktrees + hidden).map { name in
+                RunnerDirectory.Worktree(
                     id: "\(runner)-\(name)", name: name, isHidden: hidden.contains(name),
                     tabs: [RunnerDirectory.Tab(title: "Diff", mark: mark)], tail: ["$ ▌"])
             })
@@ -1683,27 +1683,53 @@ struct ShellNavigationTests {
         let defaults = scratchDefaults()
         let then = Date(timeIntervalSince1970: 1_000)
         RunnerDirectoryStore.record(
-            directory("a", label: "gpu-box-2", at: then, workspaces: ["one", "two"]),
+            directory("a", label: "gpu-box-2", at: then, worktrees: ["one", "two"]),
             in: defaults)
         RunnerDirectoryStore.record(
-            directory("b", label: "eu-runner-1", at: then, workspaces: ["far"]), in: defaults)
+            directory("b", label: "eu-runner-1", at: then, worktrees: ["far"]), in: defaults)
         RunnerDirectoryStore.record(
-            directory("a", label: "gpu-box-2", at: then + 60, workspaces: ["one"]), in: defaults)
+            directory("a", label: "gpu-box-2", at: then + 60, worktrees: ["one"]), in: defaults)
 
         let all = RunnerDirectoryStore.read(from: defaults)
         #expect(all.count == 2, "a third record about a known runner is not a third entry")
         let a = all.first { $0.runner == "a" }
-        #expect(a?.workspaces.map(\.name) == ["one"], "the removed worktree stayed removed")
+        #expect(a?.worktrees.map(\.name) == ["one"], "the removed worktree stayed removed")
         #expect(a?.seenAt == then + 60)
-        #expect(all.first { $0.runner == "b" }?.workspaces.map(\.name) == ["far"])
+        #expect(all.first { $0.runner == "b" }?.worktrees.map(\.name) == ["far"])
+    }
+
+    /// A directory written before worktrees were called worktrees still reads.
+    ///
+    /// The cache is on disk under `runnerDirectories`, and the builds before
+    /// the rename wrote each runner's cards under `workspaces`. The property
+    /// was renamed and the key was not: a key that followed it would fail the
+    /// whole decode, `read` would answer `[]`, and every runner this phone is
+    /// not connected to would lose its cards on the upgrade.
+    @Test func aDirectoryWrittenBeforeTheRenameStillReads() throws {
+        let defaults = scratchDefaults()
+        let written = """
+            [{"runner":"a","label":"gpu-box-2","seenAt":1000,
+              "workspaces":[{"id":"w1","name":"one","isHidden":false,
+                             "tabs":[{"title":"Diff","mark":"quiet"}],"tail":[]}]}]
+            """
+        defaults.set(Data(written.utf8), forKey: "runnerDirectories")
+
+        let all = RunnerDirectoryStore.read(from: defaults)
+        #expect(all.first?.worktrees.map(\.name) == ["one"])
+
+        RunnerDirectoryStore.record(
+            directory("b", label: "b", at: Date(timeIntervalSince1970: 2_000), worktrees: ["w"]),
+            in: defaults)
+        let raw = try #require(defaults.data(forKey: "runnerDirectories"))
+        #expect(String(decoding: raw, as: UTF8.self).contains("\"workspaces\""))
     }
 
     /// A runner somebody deleted stops turning up in the grid.
     @Test func forgettingDropsRunnersThatAreNoLongerKnown() {
         let defaults = scratchDefaults()
         let then = Date(timeIntervalSince1970: 1_000)
-        RunnerDirectoryStore.record(directory("a", label: "a", at: then, workspaces: ["w"]), in: defaults)
-        RunnerDirectoryStore.record(directory("b", label: "b", at: then, workspaces: ["w"]), in: defaults)
+        RunnerDirectoryStore.record(directory("a", label: "a", at: then, worktrees: ["w"]), in: defaults)
+        RunnerDirectoryStore.record(directory("b", label: "b", at: then, worktrees: ["w"]), in: defaults)
         RunnerDirectoryStore.forget(runners: ["a"], in: defaults)
         #expect(RunnerDirectoryStore.read(from: defaults).map(\.runner) == ["a"])
     }
@@ -1775,12 +1801,12 @@ struct ShellNavigationTests {
     /// doesn't move, and every claim about now in it becomes "can't say":
     /// the working and idle tabs, and the quiet Diff. Blocked, done and an
     /// unread diff hold, and so does what sorts to the top. The same
-    /// `RunnerDirectory.decayed` rule, over a live workspace.
+    /// `RunnerDirectory.decayed` rule, over a live worktree.
     ///
     /// Mutation: `said(answering:)` returning `self` whatever `answering` is.
     /// Red on every quiet tab.
     @Test func aRunnerThatIsntAnsweringCantSayWhatItsAgentsAreDoing() {
-        let workspace = ShellWorkspace(
+        let worktree = ShellWorktree(
             id: "w", name: "feat/queue",
             tabs: [
                 Self.tab("diff", .unreadDiff), Self.tab("blocked", .needsYou),
@@ -1789,30 +1815,30 @@ struct ShellNavigationTests {
                 ShellTab(id: "quiet-diff", title: "Diff", mark: GlanceMark(attention: .quiet, core: nil)),
             ])
 
-        #expect(workspace.said(answering: true) == workspace, "answering, nothing changes")
+        #expect(worktree.said(answering: true) == worktree, "answering, nothing changes")
 
-        let lost = workspace.said(answering: false)
+        let lost = worktree.said(answering: false)
         #expect(lost.tabs.map(\.mark) == [
-            workspace.tabs[0].mark, workspace.tabs[1].mark, workspace.tabs[2].mark,
+            worktree.tabs[0].mark, worktree.tabs[1].mark, worktree.tabs[2].mark,
             .unsaid, .unsaid, .unsaid,
         ])
-        #expect(lost.tabs.map(\.wantsAttention) == workspace.tabs.map(\.wantsAttention))
+        #expect(lost.tabs.map(\.wantsAttention) == worktree.tabs.map(\.wantsAttention))
         #expect(
             RunnerDirectory.decayed("working").mark == .unsaid,
             "a remembered runner and a reconnecting one say the same thing")
     }
 
     /// And one whose every tab was a claim about now sorts where a remembered
-    /// one does: below the workspaces that can still say they're working.
-    @Test func aReconnectingRunnersQuietWorkspaceSortsAsStale() {
-        let workspace = ShellWorkspace(
+    /// one does: below the worktrees that can still say they're working.
+    @Test func aReconnectingRunnersQuietWorktreeSortsAsStale() {
+        let worktree = ShellWorktree(
             id: "w", name: "feat/queue",
             tabs: [
                 ShellTab(id: "diff", title: "Diff", mark: GlanceMark(attention: .quiet, core: nil)),
                 Self.tab("working", .working),
             ])
-        #expect(workspace.precedence == .working)
-        #expect(workspace.said(answering: false).precedence == .allStale)
+        #expect(worktree.precedence == .working)
+        #expect(worktree.said(answering: false).precedence == .allStale)
     }
 
     /// The cache becomes a group the grid can draw: the runner's label on
@@ -1820,18 +1846,18 @@ struct ShellNavigationTests {
     @Test func aCachedRunnerBecomesAGroupTheGridCanDraw() {
         let seen = Date(timeIntervalSince1970: 1_000)
         let group = directory(
-            "a", label: "gpu-box-2", at: seen, workspaces: ["feat/queue"], hidden: ["old"],
+            "a", label: "gpu-box-2", at: seen, worktrees: ["feat/queue"], hidden: ["old"],
             mark: "needsYou"
         ).group()
         #expect(group.id == "a", "a tap has to name the runner, not its label")
         #expect(group.name == "gpu-box-2")
         #expect(group.lastSeen == seen)
         #expect(group.order().count == 1, "the hidden one is not drawn")
-        #expect(group.workspaces[0].server == "gpu-box-2", "a cached card names its runner")
-        #expect(group.workspaces[0].tabs[0].mark.attention == .needsYou)
+        #expect(group.worktrees[0].server == "gpu-box-2", "a cached card names its runner")
+        #expect(group.worktrees[0].tabs[0].mark.attention == .needsYou)
         #expect(
-            group.workspaces[0].tabs[0].wantsAttention,
-            "the sort flag has to survive the cache, or a remembered blocked workspace sinks")
+            group.worktrees[0].tabs[0].wantsAttention,
+            "the sort flag has to survive the cache, or a remembered blocked worktree sinks")
     }
 
     // MARK: - Momentum
@@ -1883,7 +1909,7 @@ struct ShellNavigationTests {
     /// could not leave with one where you could not stay.
     @Test func aFlickUpFromOverAMenuRowEscapesToTheOverview() {
         let fleet = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 0)  // three tabs
+        let at = ShellPosition(worktree: 1, tab: 0)  // three tabs
         // Sixty points up is inside the middle row of a three-tab column, and
         // 148 points short of the overview.
         let up: CGFloat = 60
@@ -1916,7 +1942,7 @@ struct ShellNavigationTests {
     /// 499 points, and the two cannot be tuned apart.
     @Test func theVelocityThatEscapesFromALiftIsAKnownNumber() {
         let fleet = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 0)  // three tabs
+        let at = ShellPosition(worktree: 1, tab: 0)  // three tabs
         let up: CGFloat = 60
         let needed = ShellGesture.columnFull(tabCount: 3) + ShellMetrics.overRun - up
         let velocity = needed * 1000 / ShellGesture.project(velocity: 1000)
@@ -1941,8 +1967,8 @@ struct ShellNavigationTests {
     /// swipes."*
     @Test func aShortFlickAcrossAPaneTurnsThePageAndADeliberateDragDoesNot() {
         let fleet = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 0)
-        let next = ShellStep(position: ShellPosition(workspace: 1, tab: 1), crossesWorkspace: false)
+        let at = ShellPosition(worktree: 1, tab: 0)
+        let next = ShellStep(position: ShellPosition(worktree: 1, tab: 1), crossesWorktree: false)
         #expect(
             fleet.contentRelease(axis: .horizontal, dx: -40, at: at, dxVelocity: -600)
                 == .commit(next))
@@ -1974,25 +2000,25 @@ struct ShellNavigationTests {
     /// so both come off one number.
     @Test func aDragFlickedBackTheOtherWayTurnsThePageTheWayItIsHeaded() {
         let fleet = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 0)
+        let at = ShellPosition(worktree: 1, tab: 0)
         #expect(
             fleet.contentRelease(axis: .horizontal, dx: 30, at: at, dxVelocity: -1500)
                 == .commit(
                     ShellStep(
-                        position: ShellPosition(workspace: 1, tab: 1), crossesWorkspace: false)),
+                        position: ShellPosition(worktree: 1, tab: 1), crossesWorktree: false)),
             "dragged 30 points right, thrown 718 points left")
     }
 
     /// The bar's own page turn projects too, and a flick along it crosses
-    /// workspaces.
-    @Test func aFlickAlongTheBarCrossesWorkspaces() {
+    /// worktrees.
+    @Test func aFlickAlongTheBarCrossesWorktrees() {
         let fleet = Self.crossing()
-        let middle = ShellPosition(workspace: 1, tab: 2)
+        let middle = ShellPosition(worktree: 1, tab: 2)
         #expect(
             fleet.barRelease(axis: .horizontal, dx: -30, up: 0, at: middle, dxVelocity: -1500)
                 == .commit(
                     ShellStep(
-                        position: ShellPosition(workspace: 2, tab: 0), crossesWorkspace: true)))
+                        position: ShellPosition(worktree: 2, tab: 0), crossesWorktree: true)))
         #expect(
             fleet.barRelease(axis: .horizontal, dx: -30, up: 0, at: middle) == .springBack,
             "and thirty points placed deliberately is still thirty points")
@@ -2003,22 +2029,22 @@ struct ShellNavigationTests {
     /// The bar's four answers, at the thresholds themselves.
     @Test func theBarCommitsAtSeventyPointsAndNotAtSixtyNine() {
         let fleet = Self.crossing()
-        let middle = ShellPosition(workspace: 1, tab: 2)
+        let middle = ShellPosition(worktree: 1, tab: 2)
         #expect(fleet.barRelease(axis: .horizontal, dx: -69, up: 0, at: middle) == .springBack)
         #expect(
             fleet.barRelease(axis: .horizontal, dx: -70, up: 0, at: middle)
                 == .commit(
                     ShellStep(
-                        position: ShellPosition(workspace: 2, tab: 0), crossesWorkspace: true)))
+                        position: ShellPosition(worktree: 2, tab: 0), crossesWorktree: true)))
         #expect(
             fleet.barRelease(axis: .horizontal, dx: 70, up: 0, at: middle)
                 == .commit(
                     ShellStep(
-                        position: ShellPosition(workspace: 0, tab: 0), crossesWorkspace: true)))
+                        position: ShellPosition(worktree: 0, tab: 0), crossesWorktree: true)))
         // Far enough, but there is nothing there.
         #expect(
             fleet.barRelease(
-                axis: .horizontal, dx: 200, up: 0, at: ShellPosition(workspace: 0, tab: 0))
+                axis: .horizontal, dx: 200, up: 0, at: ShellPosition(worktree: 0, tab: 0))
                 == .springBack)
     }
 
@@ -2028,7 +2054,7 @@ struct ShellNavigationTests {
     /// which is the one case the mapping this replaced also got right.
     @Test func theBarsVerticalArmAbandonsLandsOrOpensTheOverview() {
         let fleet = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 0)  // three tabs
+        let at = ShellPosition(worktree: 1, tab: 0)  // three tabs
         func release(up: CGFloat) -> ShellRelease {
             fleet.barRelease(
                 axis: .vertical, dx: 0, up: up, at: at,
@@ -2085,7 +2111,7 @@ struct ShellNavigationTests {
     /// way to state it now: the answer depends on how the finger got there.
     @Test func aSidewaysArcWhileChoosingARowStillChoosesTheRow() {
         let fleet = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 0)  // three tabs
+        let at = ShellPosition(worktree: 1, tab: 0)  // three tabs
         // A thumb sweeping to the middle of a three-tab column, arcing 24
         // points across on the way — leaning further the higher it goes,
         // which is what a pivot does.
@@ -2124,26 +2150,26 @@ struct ShellNavigationTests {
                 axis: swiped.frame.axis, dx: swiped.frame.sideways, up: 0, at: at)
                 == .commit(
                     ShellStep(
-                        position: ShellPosition(workspace: 2, tab: 0), crossesWorkspace: true)))
+                        position: ShellPosition(worktree: 2, tab: 0), crossesWorktree: true)))
     }
 
     /// Lifted into the overview AND far enough sideways: the page is carried
-    /// into the neighbouring workspace's cell.
+    /// into the neighbouring worktree's cell.
     ///
     /// Both axes answered off one release — the lift says you are staying up,
     /// the sideways says which card you are holding when you get there.
-    @Test func aLiftedPageCanBeCarriedToTheNeighbouringWorkspace() {
+    @Test func aLiftedPageCanBeCarriedToTheNeighbouringWorktree() {
         let fleet = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 2)
+        let at = ShellPosition(worktree: 1, tab: 2)
         let up = ShellGesture.columnFull(tabCount: 3) + ShellMetrics.overRun
         #expect(
             fleet.barRelease(axis: .vertical, dx: -ShellMetrics.pageCommit, up: up, at: at)
-                == .carry(ShellStep(position: ShellPosition(workspace: 2, tab: 0), crossesWorkspace: true)))
+                == .carry(ShellStep(position: ShellPosition(worktree: 2, tab: 0), crossesWorktree: true)))
         // The bar's own step, so it lands on the neighbour's FIRST tab and not
         // on the tab you happened to be looking at.
         #expect(
             fleet.barRelease(axis: .vertical, dx: ShellMetrics.pageCommit, up: up, at: at)
-                == .carry(ShellStep(position: ShellPosition(workspace: 0, tab: 0), crossesWorkspace: true)))
+                == .carry(ShellStep(position: ShellPosition(worktree: 0, tab: 0), crossesWorktree: true)))
         // A point short of the commit is not a carry, and the lift's own
         // answer stands.
         #expect(
@@ -2152,9 +2178,9 @@ struct ShellNavigationTests {
     }
 
     /// **A fast upward fling reaches the overview and does NOT carry.** The
-    /// owner's report: *"when I fling the workspace up, quite often it
-    /// animates the workspace to the n-1th or n+1th grid square… if my fling
-    /// is angled too much it picks either the previous or next workspace to
+    /// owner's report: *"when I fling the worktree up, quite often it
+    /// animates the worktree to the n-1th or n+1th grid square… if my fling
+    /// is angled too much it picks either the previous or next worktree to
     /// land on, seemingly assuming I already switched to it (clearly I
     /// didn't)."*
     ///
@@ -2172,7 +2198,7 @@ struct ShellNavigationTests {
     /// which way the thumb was actually going.
     @Test func aFastAngledFlingReachesTheOverviewWithoutCarrying() {
         let fleet = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 0)  // three tabs
+        let at = ShellPosition(worktree: 1, tab: 0)  // three tabs
         // Past the last row and still climbing: the page is in your hand.
         let up = ShellGesture.columnFull(tabCount: 3) + 8
         #expect(ShellGesture.pageIsHeld(up: up, tabCount: 3))
@@ -2204,10 +2230,10 @@ struct ShellNavigationTests {
     /// however it got there.
     @Test func aLiftedPageFlickedSidewaysStillCarries() {
         let fleet = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 2)
+        let at = ShellPosition(worktree: 1, tab: 2)
         let up = ShellGesture.columnFull(tabCount: 3) + ShellMetrics.overRun
         let next = ShellRelease.carry(
-            ShellStep(position: ShellPosition(workspace: 2, tab: 0), crossesWorkspace: true))
+            ShellStep(position: ShellPosition(worktree: 2, tab: 0), crossesWorktree: true))
         // Placed: seventy points of drawn card, nothing moving.
         #expect(fleet.barRelease(axis: .vertical, dx: -70, up: up, at: at) == next)
         // Flicked from forty points — short of the commit on translation
@@ -2232,7 +2258,7 @@ struct ShellNavigationTests {
                 dxVelocity: -1500, upVelocity: 0)
                 == .commit(
                     ShellStep(
-                        position: ShellPosition(workspace: 2, tab: 0), crossesWorkspace: true)))
+                        position: ShellPosition(worktree: 2, tab: 0), crossesWorktree: true)))
     }
 
     /// **The angle at which a release stops carrying, as a number.**
@@ -2251,7 +2277,7 @@ struct ShellNavigationTests {
     /// committed translation would be a different bug.
     @Test func theCarryTakesTheMomentumOnlyWithin35PointFiveDegreesOfHorizontal() {
         let fleet = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 2)
+        let at = ShellPosition(worktree: 1, tab: 2)
         let up = ShellGesture.columnFull(tabCount: 3) + ShellMetrics.overRun
         let speed: CGFloat = 3000
         let boundary = atan(1 / ShellMetrics.redirect)  // from horizontal
@@ -2263,7 +2289,7 @@ struct ShellNavigationTests {
                 dxVelocity: -speed * sin(radians), upVelocity: speed * cos(radians))
         }
         let carried = ShellRelease.carry(
-            ShellStep(position: ShellPosition(workspace: 2, tab: 0), crossesWorkspace: true))
+            ShellStep(position: ShellPosition(worktree: 2, tab: 0), crossesWorktree: true))
         // Twenty-four points of drawn card — the thumb's arc, which cannot
         // commit on its own. Only the momentum could carry it, and only
         // past the angle.
@@ -2279,7 +2305,7 @@ struct ShellNavigationTests {
         // lateral shadow, and is refused the same way — `abs` on the vertical
         // is what makes the two symmetric. The row under the thumb wins,
         // which is the answer a gesture that is not escaping should get; the
-        // bug would have crossed a workspace on the way down. Eight points
+        // bug would have crossed a worktree on the way down. Eight points
         // past the last row is the TOP of the column, so the row is tab 0 —
         // `columnRow` counts down from the bar and inverts.
         let lowered = ShellGesture.columnFull(tabCount: 3) + 8
@@ -2294,8 +2320,8 @@ struct ShellNavigationTests {
     /// lift's answer stands on its own.
     @Test func aCarryOffTheEndOfTheFleetIsJustTheOverview() {
         let fleet = Self.crossing()
-        let first = ShellPosition(workspace: 0, tab: 0)
-        let last = ShellPosition(workspace: 2, tab: 0)
+        let first = ShellPosition(worktree: 0, tab: 0)
+        let last = ShellPosition(worktree: 2, tab: 0)
         #expect(
             fleet.barRelease(
                 axis: .vertical, dx: 200,
@@ -2313,21 +2339,21 @@ struct ShellNavigationTests {
     ///
     /// The composition the two axes are supposed to have — the height decides
     /// whether you end up in the overview, the sideways decides which
-    /// workspace — read at the height where the first answer is "no".
+    /// worktree — read at the height where the first answer is "no".
     @Test func aPartialLiftFlickedSidewaysIsAnOrdinaryCrossing() {
         let fleet = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 2)
+        let at = ShellPosition(worktree: 1, tab: 2)
         let up = ShellGesture.columnFull(tabCount: 3) + 1
         #expect(
             fleet.barRelease(axis: .vertical, dx: -200, up: up, at: at)
-                == .commit(ShellStep(position: ShellPosition(workspace: 2, tab: 0), crossesWorkspace: true)))
+                == .commit(ShellStep(position: ShellPosition(worktree: 2, tab: 0), crossesWorktree: true)))
     }
 
     /// No axis is a tap, and a tap is the only thing that toggles the pin.
     @Test func noAxisIsATap() {
         let fleet = Self.crossing()
         #expect(
-            fleet.barRelease(axis: nil, dx: 3, up: 2, at: ShellPosition(workspace: 0, tab: 0))
+            fleet.barRelease(axis: nil, dx: 3, up: 2, at: ShellPosition(worktree: 0, tab: 0))
                 == .toggleColumn)
     }
 
@@ -2335,29 +2361,29 @@ struct ShellNavigationTests {
     /// content resolves to nothing — the pane keeps its own scroll gesture.
     @Test func theContentCommitsAlongTheFlatSequence() {
         let fleet = Self.crossing()
-        let at = ShellPosition(workspace: 1, tab: 0)
+        let at = ShellPosition(worktree: 1, tab: 0)
         #expect(
             fleet.contentRelease(axis: .horizontal, dx: -70, at: at)
                 == .commit(
                     ShellStep(
-                        position: ShellPosition(workspace: 1, tab: 1), crossesWorkspace: false)))
+                        position: ShellPosition(worktree: 1, tab: 1), crossesWorktree: false)))
         #expect(
             fleet.contentRelease(axis: .horizontal, dx: 70, at: at)
                 == .commit(
                     ShellStep(
-                        position: ShellPosition(workspace: 0, tab: 1), crossesWorkspace: true)))
+                        position: ShellPosition(worktree: 0, tab: 1), crossesWorktree: true)))
         #expect(fleet.contentRelease(axis: .vertical, dx: -200, at: at) == .springBack)
         #expect(fleet.contentRelease(axis: nil, dx: -200, at: at) == .springBack)
     }
 
     /// A fleet that emptied under the finger springs back rather than trapping.
     @Test func aPositionTheFleetNoLongerHasIsSurvivable() {
-        let fleet = ShellFleet(workspaces: [])
-        let gone = ShellPosition(workspace: 4, tab: 9)
+        let fleet = ShellFleet(worktrees: [])
+        let gone = ShellPosition(worktree: 4, tab: 9)
         #expect(fleet.step(from: gone, .next, along: .content) == nil)
         #expect(fleet.barRelease(axis: .horizontal, dx: -200, up: 0, at: gone) == .springBack)
         #expect(fleet.barRelease(axis: .vertical, dx: 0, up: 200, at: gone) == .openOverview)
-        #expect(fleet.tabCount(ofWorkspace: 4) == 0)
+        #expect(fleet.tabCount(ofWorktree: 4) == 0)
         #expect(fleet.first == nil)
     }
 

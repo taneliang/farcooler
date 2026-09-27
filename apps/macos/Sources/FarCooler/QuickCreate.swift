@@ -29,7 +29,7 @@ struct QuickCreate: View {
     /// Every runner's repositories, tagged the same way `FleetStore.repositories`
     /// tags them. Carried together rather than flattened to a bare `[Repository]`
     /// so the picker below can name the runner, not just the project — see
-    /// `NewWorkspaceSheet`, which tags the same way for the same reason.
+    /// `NewWorktreeSheet`, which tags the same way for the same reason.
     let projects: [(host: String, repository: Repository)]
     @Binding var project: String
     /// Start the task. Returns once its agent's terminal exists — `nil` — or
@@ -39,7 +39,7 @@ struct QuickCreate: View {
     ///
     /// `host` comes from `chosen` below, the same picker selection that
     /// resolved `project` — not re-derived by the caller from `project`
-    /// alone. `NewWorkspaceSheet.Choice` carries host and repository
+    /// alone. `NewWorktreeSheet.Choice` carries host and repository
     /// together for exactly this reason: a repository chosen without its
     /// host, handed to whatever runner happens to be "current" downstream,
     /// is how a task starts on the wrong one with no error at all.
@@ -92,7 +92,7 @@ struct QuickCreate: View {
 
     /// Whether more than one runner has a repository on offer — the picker
     /// names the runner alongside the repository only when that distinction
-    /// is real, same rule `NewWorkspaceSheet` follows.
+    /// is real, same rule `NewWorktreeSheet` follows.
     private var multipleHosts: Bool {
         Set(projects.map(\.host)).count > 1
     }
@@ -157,7 +157,7 @@ struct QuickCreate: View {
         guard !description.isEmpty else { return nil }
         if !hasWords { return "Add a word to say what you want done." }
         if let problem = TaskPrompt.problem(description) { return problem }
-        if chosen == nil { return "Pick a project for the new workspace." }
+        if chosen == nil { return "Pick a project for the new worktree." }
         return nil
     }
 
@@ -315,7 +315,7 @@ struct QuickCreate: View {
         let request = TaskRequest(
             description: description, name: name, host: chosen.host,
             project: chosen.repository.id, preset: Agents.preset(agent: agent, model: model),
-            workspace: leftover?.workspace)
+            worktree: leftover?.worktree)
         // Which opening of the panel this is, so a start that finishes after
         // the panel was closed and opened again cannot close the new one.
         let opening = submission.opening
@@ -339,7 +339,7 @@ struct TaskRequest: Equatable {
     var preset: String
     /// A worktree an earlier start made and could not start the agent in,
     /// to start it in now instead of making another. `name` is its name.
-    var workspace: String? = nil
+    var worktree: String? = nil
 }
 
 /// A task start in flight, and how the last one ended.
@@ -352,14 +352,14 @@ final class TaskSubmission: ObservableObject {
     private(set) var opening = 0
     /// The worktree the last start made without starting its agent, until a
     /// start succeeds or the draft is emptied. The panel starts the next
-    /// attempt in it (`TaskRequest.workspace`) rather than making another.
+    /// attempt in it (`TaskRequest.worktree`) rather than making another.
     @Published private(set) var left: Left?
 
     /// A worktree made for a task whose agent did not start, and where.
     struct Left: Equatable {
         var host: String
         var project: String
-        var workspace: String
+        var worktree: String
         var name: String
     }
 
@@ -402,8 +402,8 @@ final class TaskSubmission: ObservableObject {
 ///
 /// Beside `Branch` because they are the two halves of the same question, asked
 /// of the same typed words. The rule below is the daemon's, mirrored: a
-/// workspace has no stored name any more, so the directory a worktree is
-/// created in IS its name, and a client offering to create one has to show
+/// worktree has no stored name any more, so the directory it is created in
+/// IS its name, and a client offering to create one has to show
 /// which directory that will be. A preview computed by a rule merely close to
 /// the daemon's is a preview of a path that never gets created — the same trap
 /// `Branch.slug` avoids by applying the prefix here rather than on the far side.
@@ -417,7 +417,7 @@ enum WorktreeName {
     /// runs of dashes collapse, and the ends are trimmed.
     ///
     /// Case survives, unlike a branch slug. The directory is read back as the
-    /// workspace's name, so `Rate Limiting` has to come out spelled the way it
+    /// worktree's name, so `Rate Limiting` has to come out spelled the way it
     /// went in.
     static func slug(_ s: String) -> String {
         s.unicodeScalars

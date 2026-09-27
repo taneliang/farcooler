@@ -105,15 +105,15 @@ pub fn change_set_json(cs: &pb::ChangeSet) -> serde_json::Value {
 /// is older. It carries `elsewhere`, which the CLI printed to a person and
 /// dropped from `--json` — a machine format strictly poorer than the human one
 /// it sits beside, and the count exists precisely to admit that a triage list is
-/// incomplete. It sends the full UUID under `workspace_id` and the short
+/// incomplete. It sends the full UUID under `worktree_id` and the short
 /// separately, which is what every other `--json` in the CLI does (`id` plus
-/// `short` on repositories, workspaces, terminals, layouts and the `watch`
+/// `short` on repositories, worktrees, terminals, layouts and the `watch`
 /// event stream) — the inbox was the one place that broke the CLI's own
 /// convention. And `watch --json` tells a script "this worktree's diff moved,
 /// go re-read `changes inbox`" while handing it a full UUID, so the two
 /// surfaces designed to be used together could not be joined on an id.
 ///
-/// One key with two meanings was the `Workspace.repository` trap, and that one
+/// One key with two meanings was the `Worktree.repository` trap, and that one
 /// cost a release (`07e75e8`). This is the same trap closed rather than
 /// documented, because unlike `repository` neither meaning was load-bearing:
 /// both halves fit in one object.
@@ -132,14 +132,14 @@ pub fn inbox_json(inbox: &pb::ChangesInbox) -> serde_json::Value {
 
 /// One worktree's line in that inbox.
 ///
-/// `workspace_id` is the FULL UUID and `short` is the eight characters a person
-/// types — the CLI used to send the short under `workspace_id` and no `short`
+/// `worktree_id` is the FULL UUID and `short` is the eight characters a person
+/// types — the CLI used to send the short under `worktree_id` and no `short`
 /// at all, so a reader could not tell which it had been given without measuring
 /// the string.
-pub fn inbox_row_json(w: &pb::InboxWorkspace) -> serde_json::Value {
+pub fn inbox_row_json(w: &pb::InboxWorktree) -> serde_json::Value {
     json!({
-        "workspace_id": uuid_of(&w.workspace_id).to_string(),
-        "short": short(&w.workspace_id),
+        "worktree_id": uuid_of(&w.worktree_id).to_string(),
+        "short": short(&w.worktree_id),
         "task_name": w.task_name,
         "branch": w.branch,
         "changed_since_reviewed": w.changed_since_reviewed,

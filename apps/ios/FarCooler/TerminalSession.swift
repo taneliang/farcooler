@@ -23,7 +23,7 @@ import SwiftUI
 /// back.
 ///
 /// This never decides whether a terminal is "live" — the host does, the same
-/// way `Connection` never computes a workspace's state. An unreadable screen
+/// way `Connection` never computes a worktree's state. An unreadable screen
 /// is reported exactly as the host phrased it.
 @MainActor
 final class TerminalSession: ObservableObject {

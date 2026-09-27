@@ -7,22 +7,22 @@ import XCTest
 /// the card reads and removal is a call the screen makes. What can be wrong is
 /// entirely about the gesture and the menu — a `contextMenu` attached to a view
 /// the button style has already consumed the press of, an item that reads
-/// `Hide` on a workspace that is already hidden, and above all `Remove
+/// `Hide` on a worktree that is already hidden, and above all `Remove
 /// Worktree…` appearing on the repository's own checkout. None of those is
 /// reachable without pressing a card.
 ///
 /// No runner and no daemon. `-shell-harness` stands the shell on a canned
-/// fleet — workspace 0 is the primary checkout in every fixture, and
+/// fleet — worktree 0 is the primary checkout in every fixture, and
 /// `-shell-hidden` puts every fifth one from index 3 away — so this suite
 /// never skips, the way `ShellGestureTests` never does and for the same
 /// reason.
 ///
 /// What is deliberately NOT here is the removal ceremony itself. The typed
 /// name and the confirmation before it are `RemoveWorktreeFlow`, they are
-/// driven by what `workspace.remove_worktree` answers, and a fixture has no
+/// driven by what `worktree.remove` answers, and a fixture has no
 /// runner to answer. Asserting them against a harness would be asserting that
 /// this file's own stub says yes.
-final class ShellWorkspaceMenuTests: XCTestCase {
+final class ShellWorktreeMenuTests: XCTestCase {
     private func launch(_ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-shell-harness", "-shell-overview", "-shell-4"] + extra
@@ -36,7 +36,7 @@ final class ShellWorkspaceMenuTests: XCTestCase {
     /// menu recognizes at around half a second, and the card is inside a
     /// `ButtonStyle` that highlights on touch-down and a grid that has a
     /// simultaneous drag gesture over it — a press near the threshold is a
-    /// press that intermittently resolves as a tap, which OPENS the workspace
+    /// press that intermittently resolves as a tap, which OPENS the worktree
     /// and leaves the assertion below failing for a reason that has nothing to
     /// do with what it is about.
     private func openMenu(on card: XCUIElement, in app: XCUIApplication) {
@@ -51,7 +51,7 @@ final class ShellWorkspaceMenuTests: XCTestCase {
         ).firstMatch
         XCTAssertTrue(
             anyItem.waitForExistence(timeout: 5),
-            "long-pressing a workspace card put no menu up: \(app.debugDescription)")
+            "long-pressing a worktree card put no menu up: \(app.debugDescription)")
     }
 
     /// **The two things a card can do besides open.**
@@ -59,15 +59,15 @@ final class ShellWorkspaceMenuTests: XCTestCase {
     /// Both, in one test, because the menu is one object: a version that
     /// offered only `Hide` and a version that offered only `Remove Worktree…`
     /// are both wrong, and separate tests would let one of them pass alone.
-    func testLongPressingAWorkspaceCardOffersHideAndRemoveWorktree() throws {
+    func testLongPressingAWorktreeCardOffersHideAndRemoveWorktree() throws {
         let app = launch()
-        // `ws-1` and not `ws-0`: workspace 0 is the fixture's primary checkout,
+        // `ws-1` and not `ws-0`: worktree 0 is the fixture's primary checkout,
         // which is the case the next test is about.
         openMenu(on: app.buttons["shell-card-ws-1"], in: app)
 
         XCTAssertTrue(
             app.buttons["Hide"].exists,
-            "a workspace that is showing was not offered Hide")
+            "a worktree that is showing was not offered Hide")
         XCTAssertTrue(
             app.buttons["Remove Worktree…"].exists,
             "an ordinary worktree was not offered removal: \(app.debugDescription)")
@@ -79,8 +79,8 @@ final class ShellWorkspaceMenuTests: XCTestCase {
     /// The Mac's rule, kept: *"A daemon-side refusal is a safety net; the
     /// button should not be there to press."* Removing the primary checkout
     /// would offer to delete the directory the repository itself lives in, and
-    /// `Workspace.isPrimaryCheckout` records that the phone once offered it on
-    /// every workspace in the fleet — the flag was decoded under the Mac's
+    /// `Worktree.isPrimaryCheckout` records that the phone once offered it on
+    /// every worktree in the fleet — the flag was decoded under the Mac's
     /// spelling and was nil for all of them.
     ///
     /// `Hide` is asserted present in the same breath, so a menu that failed to
@@ -105,10 +105,10 @@ final class ShellWorkspaceMenuTests: XCTestCase {
     /// now the phone's only way to reverse it: the grid's Hidden section
     /// reveals a card, and before this there was nothing to do to the card it
     /// revealed.
-    func testAHiddenWorkspaceIsOfferedUnhideInsteadOfHide() throws {
+    func testAHiddenWorktreeIsOfferedUnhideInsteadOfHide() throws {
         let app = launch(["-shell-hidden"])
 
-        // The fixture hides every fifth workspace from index 3, and the
+        // The fixture hides every fifth worktree from index 3, and the
         // section it puts them in is collapsed until it is asked for.
         let section = app.descendants(matching: .any)
             .matching(identifier: "shell-hidden-section").firstMatch

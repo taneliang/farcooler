@@ -22,9 +22,9 @@ import os
 //
 // `-shell-4` is the common case, `-shell-10` a busy afternoon, and `-shell-40`
 // is the requirement that killed every other design. A bar that shows the
-// workspaces as a strip has to compress to fit them, and at forty a compressed
+// worktrees as a strip has to compress to fit them, and at forty a compressed
 // strip is forty illegible slivers — which is why the bar here shows exactly
-// ONE workspace and the fleet lives in the overview. 40 is therefore not an
+// ONE worktree and the fleet lives in the overview. 40 is therefore not an
 // edge case to survive; it is the case the design was chosen for, and a change
 // to the shell that has not been looked at with `-shell-40` has not been
 // looked at.
@@ -67,8 +67,8 @@ struct ShellHarness: View {
 
             ShellRootView(
                 fleet: fleet,
-                initial: ShellPosition(workspace: 0, tab: 0),
-                // `-shell-overview` lands straight on the all-workspaces view.
+                initial: ShellPosition(worktree: 0, tab: 0),
+                // `-shell-overview` lands straight on the all-worktrees view.
                 // Reaching it otherwise takes a drag past the last row, which
                 // is exactly the state a screenshot most wants and a script
                 // least reliably produces.
@@ -173,33 +173,33 @@ struct ShellHarness: View {
         CommandLine.arguments.contains("-shell-hidden")
     }
 
-    /// The one runner every canned workspace is on.
+    /// The one runner every canned worktree is on.
     static let runner = "harness"
 
-    /// `count` workspaces, with tab counts and states that vary the way a real
+    /// `count` worktrees, with tab counts and states that vary the way a real
     /// fleet's do.
     ///
-    /// Deliberately not `count` identical workspaces. The three things this
+    /// Deliberately not `count` identical worktrees. The three things this
     /// fixture has to be able to show wrong are the crossing rule (a swipe off
-    /// the end of a workspace), the ribbon (four different marks side by side)
+    /// the end of a worktree), the ribbon (four different marks side by side)
     /// and the overview's cards (four different tails in a row, and a drag that
-    /// has something to move) — and a fleet where every workspace has two
+    /// has something to move) — and a fleet where every worktree has two
     /// working tabs shows none of them. The numbers come off the index so the
     /// fixture is reproducible: the same flag always produces the same fleet,
     /// which is what makes a screenshot comparable to the last one.
     static func canned(count: Int) -> ShellFleet {
         ShellFleet(
-            workspaces: (0..<count).map { index in
+            worktrees: (0..<count).map { index in
                 // Tab counts that vary, and NOT in ascending order: a fleet
-                // whose workspaces get steadily bigger reads as a pattern, and
+                // whose worktrees get steadily bigger reads as a pattern, and
                 // a fixture that looks designed stops being a stand-in for one
                 // that is not. Three at the front because that is the size the
                 // column and the overview threshold are usually looked at, and
-                // a one-tab workspace in the middle because the column's own
+                // a one-tab worktree in the middle because the column's own
                 // ends and the overview's reach both depend on the count and
                 // both have to be reachable by flag alone.
                 let tabs = [3, 2, 5, 1, 4][index % 5]
-                return ShellWorkspace(
+                return ShellWorktree(
                     id: "ws-\(index)",
                     name: Self.names[index % Self.names.count]
                         + (index >= Self.names.count ? "-\(index / Self.names.count + 1)" : ""),
@@ -208,16 +208,16 @@ struct ShellHarness: View {
                     // says nothing, the rest name themselves.
                     //
                     // **Except when the grid has real sections.** These
-                    // workspaces are the LIVE fleet, and a live card that
+                    // worktrees are the LIVE fleet, and a live card that
                     // names `eu-runner-1` while sitting under a `this-mac`
                     // heading is a fixture contradicting itself — which in the
                     // app cannot happen, because `ShellFleetMap.of` leaves
-                    // `server` nil for every workspace on the runner it is
+                    // `server` nil for every worktree on the runner it is
                     // connected to. So the bar's fixture and the grid's
                     // fixture take turns.
                     server: CommandLine.arguments.contains("-shell-servers") || index % 3 == 0
                         ? nil : Self.servers[index % Self.servers.count],
-                    // FIVE tails against a four-workspace mark cycle, and the
+                    // FIVE tails against a four-worktree mark cycle, and the
                     // count is the point rather than the stride.
                     //
                     // `index % 4` put an identical tail on every card in a
@@ -237,13 +237,13 @@ struct ShellHarness: View {
                     // few things away in. Coprime with neither cycle above, so
                     // it does not line up with the marks or the tails.
                     isHidden: Self.hides && index % 5 == 3,
-                    // Workspace 0 is the repository's own checkout, in every
+                    // Worktree 0 is the repository's own checkout, in every
                     // fixture and unconditionally.
                     //
                     // Unconditional because of what it makes reachable: the
                     // card menu's `Remove Worktree…` is ABSENT for the primary
                     // checkout and present for everything else, and a fixture
-                    // where every workspace answered the same way could show
+                    // where every worktree answered the same way could show
                     // neither half of that rule working. One in four (or ten,
                     // or forty) is also what a real runner looks like — a
                     // repository has one checkout and many worktrees.
@@ -255,7 +255,7 @@ struct ShellHarness: View {
                         ShellTab(
                             id: "ws-\(index)-tab-\(tab)",
                             title: tab == 0 ? "Diff" : Self.agents[tab % Self.agents.count],
-                            // Tab 0 is the diff, in every workspace. "`Diff` is
+                            // Tab 0 is the diff, in every worktree. "`Diff` is
                             // a tab like any other, first in the list" — and
                             // only a diff tab is ever `unreadDiff`, which is a
                             // model rule rather than a style choice. A fixture
@@ -263,8 +263,8 @@ struct ShellHarness: View {
                             // ring at the wrong end of every ribbon, and a
                             // ribbon is only learnable because the marks do
                             // not move.
-                            mark: mark(workspace: index, tab: tab).mark,
-                            wantsAttention: mark(workspace: index, tab: tab).wantsAttention,
+                            mark: mark(worktree: index, tab: tab).mark,
+                            wantsAttention: mark(worktree: index, tab: tab).wantsAttention,
                             // Tab 0 is the diff and cannot be closed; every
                             // other tab is a terminal and can. The SAME split
                             // `ShellFleetMap.one(_:naming:now:)` makes over a
@@ -286,28 +286,28 @@ struct ShellHarness: View {
     ///
     /// **Nothing asserts that every arm below is reachable**, and the paragraph
     /// after this one is what that costs — the app has no unit-test target, so
-    /// this file is checked by being looked at. `-shell` with enough workspaces
+    /// this file is checked by being looked at. `-shell` with enough worktrees
     /// is the check: the cycles are `% 4` on the diff and `% 5` on the agents
-    /// against tab counts of `[3, 2, 5, 1, 4]`, so ten workspaces show every
+    /// against tab counts of `[3, 2, 5, 1, 4]`, so ten worktrees show every
     /// arm. If an arm is ever made unreachable again it will go unnoticed the
     /// same way, which is an argument for the target and not for a comment.
     ///
     /// Tab 0 is the diff, so "the first AGENT" is tab 1. This read `tab == 0`
     /// while the fixture put the diff last, and moving the diff to the front
-    /// left that arm unreachable — every workspace would have quietly
+    /// left that arm unreachable — every worktree would have quietly
     /// rendered as working, and the amber mark the whole ribbon exists for
     /// would have been absent from every screenshot.
-    static func mark(workspace: Int, tab: Int) -> (mark: GlanceMark, wantsAttention: Bool) {
+    static func mark(worktree: Int, tab: Int) -> (mark: GlanceMark, wantsAttention: Bool) {
         // The diff, which is never an agent and so never states a core.
         if tab == 0 {
             return (
-                GlanceMark(attention: workspace % 4 == 0 ? .toReview : .quiet, core: nil), false
+                GlanceMark(attention: worktree % 4 == 0 ? .toReview : .quiet, core: nil), false
             )
         }
         // Five agent states over a cycle coprime with neither the tab counts
         // (period 5 — hence the `+ tab`, which walks the residues) nor the
-        // four-workspace diff cycle above.
-        switch (workspace + tab) % 5 {
+        // four-worktree diff cycle above.
+        switch (worktree + tab) % 5 {
         case 0: return (GlanceMark(attention: .needsYou, core: .atAPrompt), true)
         // Done: the review tier, and it wants you even though it does not draw
         // the amber ring. See `ShellTab.wantsAttention`.
@@ -351,7 +351,7 @@ struct ShellHarness: View {
             RunnerDirectory(
                 runner: "runner-gpu", label: "gpu-box-2",
                 seenAt: now.addingTimeInterval(-2 * 60 * 60),
-                workspaces: [
+                worktrees: [
                     directory("fix/token-refresh", mark: "needsYou"),
                     directory("feat/queue-drain", mark: "working"),
                     directory("chore/put-away", mark: "working", isHidden: true),
@@ -360,15 +360,15 @@ struct ShellHarness: View {
             RunnerDirectory(
                 runner: "runner-eu", label: twinLabels ? "gpu-box-2" : "eu-runner-1",
                 seenAt: now.addingTimeInterval(-9 * 60),
-                workspaces: [directory("spike/watch-sync", mark: "unreadDiff")]
+                worktrees: [directory("spike/watch-sync", mark: "unreadDiff")]
             ).group(),
         ]
     }
 
     private static func directory(
         _ name: String, mark: String, isHidden: Bool = false
-    ) -> RunnerDirectory.Workspace {
-        RunnerDirectory.Workspace(
+    ) -> RunnerDirectory.Worktree {
+        RunnerDirectory.Worktree(
             id: name, name: name, isHidden: isHidden,
             tabs: [
                 RunnerDirectory.Tab(title: "Diff", mark: mark),
@@ -523,8 +523,8 @@ enum HarnessBoard {
 ///
 /// It stands in for a terminal and says so. The crossing note beside the title
 /// is not a placeholder, though — it is the real behavior: when the pane
-/// sliding in belongs to a DIFFERENT workspace, its title carries that
-/// workspace's name in muted text, so the crossing is visible while it is
+/// sliding in belongs to a DIFFERENT worktree, its title carries that
+/// worktree's name in muted text, so the crossing is visible while it is
 /// still abandonable rather than a surprise you find after committing to it.
 struct ShellPanePlaceholder: View {
     let slot: ShellPaneSlot
@@ -547,7 +547,7 @@ struct ShellPanePlaceholder: View {
     /// made here, against the same `ShellPaneTrack` the app uses.
     @State private var born = UUID().uuidString.prefix(8)
 
-    private var workspace: ShellWorkspace { slot.workspace }
+    private var worktree: ShellWorktree { slot.worktree }
     private var tab: ShellTab { slot.tab }
     private var isCrossing: Bool { slot.isCrossing }
 
@@ -576,7 +576,7 @@ struct ShellPanePlaceholder: View {
                 // scroll views, and a fixture that merely looked like a diff
                 // would have none of them.
                 ChangesView(
-                    store: changes, workspaceName: workspace.name, agents: [],
+                    store: changes, worktreeName: worktree.name, agents: [],
                     pullRequest: nil)
                     // Where the shell's furniture is, told to the pane the same
                     // way `ShellPaneRealView` tells a real one. Without it the
@@ -605,7 +605,7 @@ struct ShellPanePlaceholder: View {
 
             // SF Mono, because everything under here came off a machine — or
             // would have, in the commit that puts a terminal in this slot.
-            Text("\(workspace.id) · \(tab.id)")
+            Text("\(worktree.id) · \(tab.id)")
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.tertiary)
 
@@ -654,7 +654,7 @@ struct ShellPanePlaceholder: View {
             Text(tab.title)
                 .font(.system(size: 17, weight: .medium))
             if isCrossing {
-                Text(workspace.name)
+                Text(worktree.name)
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             }

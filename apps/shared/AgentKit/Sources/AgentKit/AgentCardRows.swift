@@ -535,7 +535,7 @@ public struct AgentCardLayout: Sendable, Equatable {
     /// blocked beats review beats working.
     ///
     /// A status WORD rather than a `FleetSnapshot.Glance`, which is the type
-    /// that looks right here and is not: its `review` rung counts WORKSPACES
+    /// that looks right here and is not: its `review` rung counts WORKTREES
     /// whose diff moved, as its own doc says, while the relay's `review` counts
     /// agents whose turn is over — `all.filter(row => row.status === 'done')` in
     /// `services/relay/src/index.ts`. Two counts of different things, and

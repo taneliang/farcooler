@@ -17,14 +17,14 @@ use crate::{Fallible, connect_to, expect_value, req, req_for, short_bytes, uuid_
 pub enum ChangesCmd {
     /// What this worktree's branch changed.
     Status {
-        workspace: String,
+        worktree: String,
         /// Recompute rather than trusting the cache.
         #[arg(long)]
         fresh: bool,
     },
     /// One file's diff.
     Diff {
-        workspace: String,
+        worktree: String,
         path: String,
         /// A commit, instead of the whole branch.
         #[arg(long)]
@@ -46,9 +46,9 @@ pub enum ChangesCmd {
         context: Option<u32>,
     },
     /// Which files a commit touched.
-    Files { workspace: String, sha: String },
+    Files { worktree: String, sha: String },
     /// Mark this worktree as read.
-    Read { workspace: String },
+    Read { worktree: String },
     /// What has changed, across every worktree.
     ///
     /// The counts are everything the worktree has changed — committed work,
@@ -71,13 +71,13 @@ pub async fn changes(runner: Option<&str>, cmd: ChangesCmd, json: bool) -> Falli
     let mut link = connect_to(runner).await?;
 
     match cmd {
-        ChangesCmd::Status { workspace, fresh } => {
-            let id = crate::resolve_workspace_id(&mut link, &workspace).await?;
+        ChangesCmd::Status { worktree, fresh } => {
+            let id = crate::resolve_worktree_id(&mut link, &worktree).await?;
             let r = link
                 .call(with(
                     req("changes.change_set"),
                     request::Payload::ChangeSetRequest(pb::ChangeSetRequest {
-                        workspace_id: crate::id_bytes(id),
+                        worktree_id: crate::id_bytes(id),
                         selector: None,
                         fresh,
                     }),
@@ -137,8 +137,8 @@ pub async fn changes(runner: Option<&str>, cmd: ChangesCmd, json: bool) -> Falli
             }
         }
 
-        ChangesCmd::Diff { workspace, path, commit, staged, unstaged, local, context } => {
-            let id = crate::resolve_workspace_id(&mut link, &workspace).await?;
+        ChangesCmd::Diff { worktree, path, commit, staged, unstaged, local, context } => {
+            let id = crate::resolve_worktree_id(&mut link, &worktree).await?;
             let selector = pb::DiffSelector {
                 kind: Some(match (&commit, staged, unstaged, local) {
                     (Some(sha), ..) => pb::diff_selector::Kind::Commit(sha.clone()),
@@ -152,7 +152,7 @@ pub async fn changes(runner: Option<&str>, cmd: ChangesCmd, json: bool) -> Falli
                 .call(with(
                     req("changes.file_diff"),
                     request::Payload::FileDiffRequest(pb::FileDiffRequest {
-                        workspace_id: crate::id_bytes(id),
+                        worktree_id: crate::id_bytes(id),
                         selector: Some(selector),
                         path: path.clone(),
                         from_hunk: 0,
@@ -209,13 +209,13 @@ pub async fn changes(runner: Option<&str>, cmd: ChangesCmd, json: bool) -> Falli
             }
         }
 
-        ChangesCmd::Files { workspace, sha } => {
-            let id = crate::resolve_workspace_id(&mut link, &workspace).await?;
+        ChangesCmd::Files { worktree, sha } => {
+            let id = crate::resolve_worktree_id(&mut link, &worktree).await?;
             let r = link
                 .call(with(
                     req("changes.commit_files"),
                     request::Payload::CommitFilesRequest(pb::CommitFilesRequest {
-                        workspace_id: crate::id_bytes(id),
+                        worktree_id: crate::id_bytes(id),
                         sha,
                     }),
                 ))
@@ -233,12 +233,12 @@ pub async fn changes(runner: Option<&str>, cmd: ChangesCmd, json: bool) -> Falli
                 println!("+{:<5} -{:<5} {}", f.insertions, f.deletions, f.path);
             }
         }
-        ChangesCmd::Read { workspace } => {
-            let id = crate::resolve_workspace_id(&mut link, &workspace).await?;
+        ChangesCmd::Read { worktree } => {
+            let id = crate::resolve_worktree_id(&mut link, &worktree).await?;
             link.call(with(
                 req("changes.mark_read"),
                 request::Payload::ChangesMarkRead(pb::ChangesMarkRead {
-                    workspace_id: crate::id_bytes(id),
+                    worktree_id: crate::id_bytes(id),
                     branch: String::new(),
                 }),
             ))
@@ -255,7 +255,7 @@ pub async fn changes(runner: Option<&str>, cmd: ChangesCmd, json: bool) -> Falli
             };
             // The same object the FFI's `changes.inbox` returns, out of one
             // builder, since the two stopped being different shapes. This
-            // printed a bare array whose `workspace_id` was the eight-character
+            // printed a bare array whose `worktree_id` was the eight-character
             // short, with no `short` key and no `elsewhere` — the one `--json`
             // in this CLI that did not send an id alongside its short, and the
             // only one anywhere that told a person something it withheld from a
@@ -277,7 +277,7 @@ pub async fn changes(runner: Option<&str>, cmd: ChangesCmd, json: bool) -> Falli
                 if w.changed_since_reviewed {
                     bits.push("changed since you looked".into());
                 }
-                println!("{}  {}  {}", short_bytes(&w.workspace_id), w.task_name, bits.join(", "));
+                println!("{}  {}  {}", short_bytes(&w.worktree_id), w.task_name, bits.join(", "));
             }
             if inbox.elsewhere > 0 {
                 println!("\n{} elsewhere, outside what this client may see", inbox.elsewhere);
@@ -567,17 +567,17 @@ mod tests {
     /// the failure `NeedsYouTest` pins on the Kotlin side and this pins on the
     /// producer's.
     ///
-    /// The two that moved, and the reason the test names them: `workspace_id`
+    /// The two that moved, and the reason the test names them: `worktree_id`
     /// was the SHORT id in this command and the full UUID in the FFI — the same
     /// key with two meanings, which is the shape that cost `07e75e8` a release
-    /// under the name `Workspace.repository`. And `elsewhere` was printed to a
+    /// under the name `Worktree.repository`. And `elsewhere` was printed to a
     /// person by this very command and dropped from its `--json`.
     #[test]
     fn the_inbox_is_one_shape_with_the_id_both_ways_round() {
         let id = uuid::Uuid::parse_str("018f7c1e-0000-7000-8000-0123456789ab").expect("uuid");
         let inbox = pb::ChangesInbox {
-            items: vec![pb::InboxWorkspace {
-                workspace_id: bytes::Bytes::copy_from_slice(id.as_bytes()),
+            items: vec![pb::InboxWorktree {
+                worktree_id: bytes::Bytes::copy_from_slice(id.as_bytes()),
                 task_name: "ship the thing".to_string(),
                 branch: "feature".to_string(),
                 changed_since_reviewed: true,
@@ -589,7 +589,7 @@ mod tests {
 
         let v = inbox_json(&inbox);
         let row = &v["items"][0];
-        assert_eq!(row["workspace_id"], id.to_string(), "the full UUID, hyphens and all");
+        assert_eq!(row["worktree_id"], id.to_string(), "the full UUID, hyphens and all");
         // The last eight hex of the simple form: a UUIDv7 leads with a
         // timestamp, so the tail is the half that tells two of them apart.
         assert_eq!(row["short"], "456789ab");

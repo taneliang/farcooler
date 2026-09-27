@@ -11,7 +11,7 @@ is the box, and there can be more than one runner on it.
 
 Far Cooler drives runners over SSH. There is no Far Cooler network protocol, no
 port to open on the runner, and no second set of credentials.
-`farcooler --runner you@box workspace list` runs `ssh you@box farcoolerd --stdio`
+`farcooler --runner you@box worktree list` runs `ssh you@box farcoolerd --stdio`
 and speaks the same protocol it speaks over a local Unix socket. (`--host` still
 works: it lives in shell history and in scripts, and a vocabulary change is not a
 reason to break either.)
@@ -110,9 +110,9 @@ Every command takes `--runner`:
 ```bash
 farcooler --runner you@box status
 farcooler --runner you@box repo register ~/code/api
-farcooler --runner you@box workspace create api "add auth" --branch feat/auth
-farcooler --runner you@box terminal create <workspace> --preset claude
-farcooler --runner you@box workspace list
+farcooler --runner you@box worktree create api "add auth" --branch feat/auth
+farcooler --runner you@box terminal create <worktree> --preset claude
+farcooler --runner you@box worktree list
 ```
 
 Live terminal commands work too, and go over their own SSH session rather than

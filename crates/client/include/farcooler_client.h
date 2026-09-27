@@ -87,21 +87,21 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
 /*
  * Invoke a method. `args` is JSON; `{}` if it takes none.
  *
- *   fleet                  {}                     -> workspaces with derived state
+ *   fleet                  {}                     -> worktrees with derived state
  *   repositories           {}                     -> registered repositories
  *   host                   {}                     -> what that runner is, and
  *                                                    what this session may do
- *   workspace.create       {repository, task, branch, base?}
- *   workspace.hide         {workspace}
- *   workspace.unhide       {workspace}
- *   workspace.reorder      {workspaces: ["<uuid>", ...]}
- *   workspace.remove_worktree  {workspace, confirm}
+ *   worktree.create        {repository, task, branch, base?}
+ *   worktree.hide          {worktree}
+ *   worktree.unhide        {worktree}
+ *   worktree.reorder       {worktrees: ["<uuid>", ...]}
+ *   worktree.remove        {worktree, confirm}
  *                          -> {"ok": true} | {"confirmationRequired": true}
  *   repository_root.list   {}
  *   repository_root.add    {path}
  *   repository_root.remove {root, confirm}
  *                          -> {"ok": true} | {"confirmationRequired": true}
- *   terminal.create        {workspace, title, preset}
+ *   terminal.create        {worktree, title, preset}
  *   terminal.stop          {terminal}
  *   terminal.restart       {terminal}
  *   terminal.dismiss_lost  {terminal}
@@ -124,7 +124,7 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  * optional in the way an empty string is optional. They differ in when the
  * runner insists:
  *
- *   - workspace.remove_worktree only wants it when the worktree is dirty, so
+ *   - worktree.remove only wants it when the worktree is dirty, so
  *     "" is a legitimate first attempt, and `confirmationRequired` back from it
  *     means "now ask the person" rather than "you got it wrong".
  *   - repository_root.remove ALWAYS wants it, because removing a root revokes
@@ -233,7 +233,7 @@ const char *farcooler_client_poll(void *handle);
  * The line is JSON, one of:
  *
  *   {"event": "fleet"}
- *   {"event": "change_set", "workspace": "<uuid>"}
+ *   {"event": "change_set", "worktree": "<uuid>"}
  *   {"event": "stack", "repository": "<uuid>"}
  *   {"event": "task", "repository": "<uuid>", "actor": "user"}
  *   {"event": "resync"}

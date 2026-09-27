@@ -5,7 +5,7 @@ import Foundation
 // Every type here decodes something `crates/client/src/session.rs` builds with
 // `json!` and hands back across the C ABI in `ClientCore.swift`. The phone is
 // the only client that reads that producer. The Mac shells out to `farcooler
-// … --json` and decodes the CLI's output into its own `Workspace`, `Terminal`
+// … --json` and decodes the CLI's output into its own `Worktree`, `Terminal`
 // and `Fleet` in `apps/macos/Sources/FarCooler/Model.swift`, and the two
 // producers do not agree: `Session::fleet` sends `isMainCheckout` where the CLI
 // sends `is_main_checkout`, `Session::branches` sends `updatedAt` in
@@ -15,9 +15,9 @@ import Foundation
 //
 // This file's own header used to say these types were "identical to the Mac
 // app's, because both decode what one Rust crate produces — there is one
-// definition of what a workspace looks like on the wire, not one per platform".
+// definition of what a worktree looks like on the wire, not one per platform".
 // That was never true and `07e75e8` is what it cost: `is_main_checkout` was
-// copied across from the Mac, decoded to nil for every workspace on every
+// copied across from the Mac, decoded to nil for every worktree on every
 // phone, and put "Remove Worktree…" on the one worktree it must never be
 // offered for. Don't copy a key from the Mac's model. Read the producer this
 // app reads.
@@ -38,7 +38,7 @@ import Foundation
 //     to the Mac, so `import AgentKit` over there brings in nothing from here:
 //     the Mac cannot see these names, cannot shadow its own with them, and
 //     cannot start using them by accident. `302fb73` refused to hoist
-//     `reviewAgentTargets()` for exactly this reason — `Workspace` and
+//     `reviewAgentTargets()` for exactly this reason — `Worktree` and
 //     `Terminal` are declared once per app and the declarations DISAGREE, the
 //     phone's `canSwitchPaneMode` being `chatCapable == true` where the Mac's
 //     is that AND `!isChangesPane` — and moving these here does not unify them
@@ -51,7 +51,7 @@ import Foundation
 struct Fleet: Decodable {
     var runtimeHealthy: Bool
     var livePanes: Int
-    var workspaces: [Workspace]
+    var worktrees: [Worktree]
     /// Every terminal's trace added together, at one width for the whole fleet.
     ///
     /// `TerminalList.fleet_trace` on the proto wire. **Summed on the runner and
@@ -74,12 +74,12 @@ struct Fleet: Decodable {
     enum CodingKeys: String, CodingKey {
         case runtimeHealthy = "runtime_healthy"
         case livePanes = "live_panes"
-        case workspaces
+        case worktrees
         case fleetTrace
         case fleetTraceAnchor
     }
 
-    static let empty = Fleet(runtimeHealthy: false, livePanes: 0, workspaces: [])
+    static let empty = Fleet(runtimeHealthy: false, livePanes: 0, worktrees: [])
 }
 
 extension FleetSnapshot {
@@ -99,7 +99,7 @@ extension FleetSnapshot {
     }
 }
 
-struct Workspace: Decodable, Identifiable, Hashable {
+struct Worktree: Decodable, Identifiable, Hashable {
     var id: String
     var short: String
     /// Which repository this worktree belongs to, as a UUID STRING — never as
@@ -109,7 +109,7 @@ struct Workspace: Decodable, Identifiable, Hashable {
     /// `Session::fleet` sends `uuid_of(&w.repository_id).to_string()`, which is
     /// what `stack.get` and `pr.refresh` take as their repository argument. The
     /// CLI sends the repository's DISPLAY NAME under this same key, and the
-    /// Mac's `Workspace.repository` is therefore a label it puts in a window
+    /// Mac's `Worktree.repository` is therefore a label it puts in a window
     /// subtitle and matches searches against. Both clients are right about the
     /// producer they read, and nothing but this comment says so — which makes
     /// it the same trap `is_main_checkout` was, standing open. Drawing this
@@ -118,11 +118,14 @@ struct Workspace: Decodable, Identifiable, Hashable {
     ///
     /// Optional because an older daemon's fleet never carried it, and one
     /// missing field must not fail the decode of the whole fleet. Everything
-    /// repository-scoped a client can ask about a workspace — its stack, its
+    /// repository-scoped a client can ask about a worktree — its stack, its
     /// pull request — needs this.
     var repository: String?
     var task: String
     var branch: String
+    /// The worktree's directory. `worktree.worktree` reads oddly, and the Mac
+    /// calls its copy `path`; this one keeps the wire key's name because the
+    /// synthesized decoder matches on it (see `isMainCheckout`).
     var worktree: String?
     var state: String
     var terminals: [Terminal]
@@ -133,20 +136,20 @@ struct Workspace: Decodable, Identifiable, Hashable {
     /// git no longer lists this worktree, but the row carries terminals.
     var worktreeMissing: Bool { state == "worktree_missing" }
 
-    /// Whether this workspace IS the repository's own checkout — offering to
+    /// Whether this worktree IS the repository's own checkout — offering to
     /// remove it would offer to delete the directory the repository itself
     /// lives in.
     ///
     /// Named for the wire key exactly, and the spelling is the whole point.
-    /// Every property on `Workspace` and `Terminal` is, because a synthesized
+    /// Every property on `Worktree` and `Terminal` is, because a synthesized
     /// decoder matches on the property NAME; the one mapping in this file is
     /// `Fleet`'s, for the only two snake_case keys the FFI emits. This one was
     /// spelled `is_main_checkout` for as long as the phone has had it, which is
-    /// the Mac's spelling and the CLI's — `farcooler workspace list --json`
+    /// the Mac's spelling and the CLI's — `farcooler worktree list --json`
     /// sends snake_case and the Mac decodes that. The phone does not read the
     /// CLI. It reads `Session::fleet` (crates/client/src/session.rs), which
     /// sends `isMainCheckout`, so the key never matched, this was nil for every
-    /// workspace, and `isPrimaryCheckout` answered false for all of them — which
+    /// worktree, and `isPrimaryCheckout` answered false for all of them — which
     /// put "Remove Worktree…" on the one worktree it must never be offered for.
     /// Don't copy a key across from the Mac's model without checking which
     /// producer this app actually decodes.
@@ -183,8 +186,8 @@ struct Workspace: Decodable, Identifiable, Hashable {
     /// Which of several identically-labeled terminals each one is, keyed by
     /// terminal id.
     ///
-    /// Ported from the Mac app's `WorkspaceSection.ordinals`. Two `claude`
-    /// panes in one workspace are genuinely alike, so they get `1` and `2` —
+    /// Ported from the Mac app's `WorktreeSection.ordinals`. Two `claude`
+    /// panes in one worktree are genuinely alike, so they get `1` and `2` —
     /// but only when there is something to tell apart, or a lone `shell`
     /// would be numbered for no reason. Shared by the fleet list, the
     /// terminal screen's title, and its tab strip, so the same terminal is
@@ -282,7 +285,7 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// of shit, shipped in carefully authorized batches to avoid N+1 shits."
     ///
     /// Cut on the host to about 120 characters — roughly the two lines a
-    /// banner shows, less the workspace name in front of it; see
+    /// banner shows, less the worktree name in front of it; see
     /// `farcooler_core::feed::SAID_WIDTH`. This app renders it and decides
     /// nothing about it.
     ///
@@ -467,7 +470,7 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// agent pane opened a full session it never drew. `be15838` is what made
     /// that reachable: the task called `relink()`, which bails on a session
     /// nothing has started, and it became `resume()`, which starts one. The
-    /// cost is per agent pane, and a workspace can hold several: about 400 KB
+    /// cost is per agent pane, and a worktree can hold several: about 400 KB
     /// of scrollback, one of the ten concurrent sessions a default `sshd`
     /// allows this phone across its whole fleet, and a geometry poll every two
     /// seconds against a pane nobody is looking at.

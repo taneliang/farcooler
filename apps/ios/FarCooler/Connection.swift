@@ -60,7 +60,7 @@ final class Connection: ObservableObject {
     @Published private(set) var hasFleet = false
     @Published private(set) var repositories: [Repository] = []
 
-    /// What each worktree has changed, by workspace id, or empty until the
+    /// What each worktree has changed, by worktree id, or empty until the
     /// first read.
     ///
     /// The `+N -M` the Mac's sidebar has shown per row since the review surface
@@ -72,7 +72,7 @@ final class Connection: ObservableObject {
     /// in `Changes.swift` with no caller.
     ///
     /// Keyed rather than kept as the list the wire sends, because every reader
-    /// arrives with one workspace in hand and wants that workspace's row: a
+    /// arrives with one worktree in hand and wants that worktree's row: a
     /// fleet of twenty rows each scanning a twenty-entry array is quadratic
     /// work to answer a question a dictionary answers once.
     ///
@@ -122,7 +122,7 @@ final class Connection: ObservableObject {
     /// `ChangesStores` for why they cannot live in the view.
     lazy var changesStores = ChangesStores(core: core)
 
-    /// The tab each worktree was last left on, by workspace id — and only ever
+    /// The tab each worktree was last left on, by worktree id — and only ever
     /// a tab somebody CHOSE. `ShellScreen.remember(_:leaving:)` is the one
     /// writer; `PaneFocus` is where it sits in the order of authority.
     ///
@@ -142,14 +142,14 @@ final class Connection: ObservableObject {
     /// would be gone by the time anyone came back to read it — the same
     /// argument `ChangesStores` makes above. A `Connection` is one per runner,
     /// owned by `FleetStore` and retired with the runner, so this is created
-    /// once per runner and dies with it: workspace and terminal ids are
+    /// once per runner and dies with it: worktree and terminal ids are
     /// per-runner, and a memory that outlived the runner would name nothing on
     /// the next one.
     ///
     /// It dies with the process too, and that is a change. The path and this
     /// memory were both written through to `@SceneStorage`, and both blobs went
     /// with the navigation they belonged to — see `FleetView`. What that costs
-    /// is a workspace opening on the rule's answer rather than on the tab you
+    /// is a worktree opening on the rule's answer rather than on the tab you
     /// left it on, but only across a launch; within one, the shell resumes
     /// exactly as it did.
     @Published private(set) var lastFocus: [String: PaneFocus] = [:]
@@ -433,7 +433,7 @@ final class Connection: ObservableObject {
     /// zero. What it bounds is the other end — the runner samples every second
     /// (`SAMPLE_INTERVAL` in `crates/daemon/src/watch.rs`) and an agent under
     /// load can move a row on most of them, so without a floor a busy
-    /// workspace would cost MORE round trips than the three-second poll this
+    /// worktree would cost MORE round trips than the three-second poll this
     /// replaces. Half a second is two reads a second at the very worst, and
     /// only while something is genuinely happening and somebody is watching it.
     private func fleetNewsArrived() {
@@ -913,7 +913,7 @@ final class Connection: ObservableObject {
 
             // What this daemon can do, asked once per connection, on its first
             // fleet. The overview reads it to decide whether a runner's cards
-            // can be dragged — `workspace_order` — and until now nothing on
+            // can be dragged — `worktree_order` — and until now nothing on
             // the phone asked unless somebody opened Settings. A no-op once
             // answered, and it swallows its own failure.
             if daemon == nil { await loadDaemonBuild() }
@@ -969,9 +969,9 @@ final class Connection: ObservableObject {
             // Here rather than in a view: a notification about an agent must
             // not depend on which screen happens to be open, and this is the
             // one place that learns what every agent is doing.
-            for workspace in fleet.workspaces {
-                for terminal in workspace.terminals {
-                    Notifier.shared.report(terminal: terminal, workspace: workspace.task)
+            for worktree in fleet.worktrees {
+                for terminal in worktree.terminals {
+                    Notifier.shared.report(terminal: terminal, worktree: worktree.task)
                 }
             }
 
@@ -1059,7 +1059,7 @@ final class Connection: ObservableObject {
         await reportWatching(Notifier.shared.visibleTerminal.map { [$0] } ?? [])
         guard let id = Notifier.shared.visibleTerminal else { return }
         guard
-            let terminal = fleet.workspaces.lazy.flatMap(\.terminals).first(where: { $0.id == id }),
+            let terminal = fleet.worktrees.lazy.flatMap(\.terminals).first(where: { $0.id == id }),
             terminal.agent == .done
         else { return }
         guard markingSeen.insert(id).inserted else { return }
@@ -1157,7 +1157,7 @@ final class Connection: ObservableObject {
     /// What to call the repository a worktree belongs to, or nil when this
     /// connection cannot say yet.
     ///
-    /// `Workspace.repository` is a UUID string on a phone — `uuid_of(&w
+    /// `Worktree.repository` is a UUID string on a phone — `uuid_of(&w
     /// .repository_id).to_string()`, `crates/client/src/session.rs:274` —
     /// where the Mac's model carries a name it can print. So anything here that
     /// wanted to group or label rows by repository had 36 characters of hex and
@@ -1173,8 +1173,8 @@ final class Connection: ObservableObject {
     /// nothing in either case. Showing the UUID instead would put an internal
     /// identifier in front of somebody as though it were the name of their
     /// repository, and it would be the widest thing on the row.
-    func repositoryName(for workspace: Workspace) -> String? {
-        guard let id = workspace.repository else { return nil }
+    func repositoryName(for worktree: Worktree) -> String? {
+        guard let id = worktree.repository else { return nil }
         return repositoryNames[id]
     }
 
@@ -1288,7 +1288,7 @@ final class Connection: ObservableObject {
     ///
     /// One call rather than one per row, which is what the RPC exists for: the
     /// daemon answers from counts it already holds plus a cheap two-syscall
-    /// gate — see `InboxWorkspace.changed_since_reviewed` in
+    /// gate — see `InboxWorktree.changed_since_reviewed` in
     /// proto/farcooler.proto — so a quiet fleet costs almost nothing, while a
     /// call per worktree would put a `git` on the three-second timer for every
     /// row on screen. The Mac made the same choice for the same reason.
@@ -1307,7 +1307,7 @@ final class Connection: ObservableObject {
         // stays "not told" rather than becoming a confident zero.
         inboxRead = true
         inbox = Dictionary(
-            reply.items.map { ($0.workspaceId, $0) }, uniquingKeysWith: { _, latest in latest })
+            reply.items.map { ($0.worktreeId, $0) }, uniquingKeysWith: { _, latest in latest })
     }
 
     /// Merge whatever this runner defines into the picker.
@@ -1618,18 +1618,18 @@ final class Connection: ObservableObject {
     }
 
     /// `name` names the worktree's directory. The wire key is still `task`,
-    /// which is what it was called when a workspace carried a typed-out task
+    /// which is what it was called when a worktree carried a typed-out task
     /// alongside its directory; renaming the key would strand every shipped
     /// app for nothing.
     /// `adopt` takes an EXISTING branch over instead of creating one. The
     /// worktree is then named after that branch, so `name` is ignored — the
     /// daemon says so too, and this passes it anyway rather than pretending the
     /// two calls have different shapes.
-    func createWorkspace(
+    func createWorktree(
         repository: String, name: String, branch: String, adopt: Bool = false
     ) async {
         _ = try? await core.call(
-            "workspace.create",
+            "worktree.create",
             // A shell, because a worktree with nothing running in it is a
             // directory. This is the manual form; the quick-task flow below
             // creates its own agent terminal and asks for none.
@@ -1760,29 +1760,29 @@ final class Connection: ObservableObject {
     // which step failed because it prints one banner; QuickTaskView has a
     // progress row to keep honest ("creating worktree" vs. "starting agent"),
     // and it cannot narrate steps it was never told about individually. The
-    // fire-and-refresh `createWorkspace` above stays as it is, unchanged, for
+    // fire-and-refresh `createWorktree` above stays as it is, unchanged, for
     // the manual form next to it — that flow only needs the new row to show up.
 
     private struct IdentifiedReply: Decodable { var id: String }
 
-    /// Create a workspace and hand back its id.
+    /// Create a worktree and hand back its id.
     ///
     /// Throws instead of swallowing the error, because the caller has nothing
     /// to create a terminal in if this fails and needs to say so rather than
     /// press on silently.
-    func createWorkspace(repository: String, name: String, branch: String, base: String)
+    func createWorktree(repository: String, name: String, branch: String, base: String)
         async throws -> String
     {
         let data = try await core.call(
-            "workspace.create",
+            "worktree.create",
             ["repository": repository, "task": name, "branch": branch, "base": base])
         return try JSONDecoder().decode(IdentifiedReply.self, from: data).id
     }
 
     /// Create a terminal and hand back its id, the same way.
-    func createTerminal(workspace: String, title: String, preset: String) async throws -> String {
+    func createTerminal(worktree: String, title: String, preset: String) async throws -> String {
         let data = try await core.call(
-            "terminal.create", ["workspace": workspace, "title": title, "preset": preset])
+            "terminal.create", ["worktree": worktree, "title": title, "preset": preset])
         return try JSONDecoder().decode(IdentifiedReply.self, from: data).id
     }
 
@@ -1826,18 +1826,18 @@ final class Connection: ObservableObject {
     /// there is no new tab afterwards — so a silent failure and a successful
     /// one that is simply slow look identical, and the only thing on screen
     /// says nothing happened either way.
-    func createTerminal(in workspace: Workspace) async -> NewTerminalResult {
+    func createTerminal(in worktree: Worktree) async -> NewTerminalResult {
         do {
             let id = try await createTerminal(
-                workspace: workspace.id,
-                title: "Terminal \(workspace.terminals.count + 1)",
+                worktree: worktree.id,
+                title: "Terminal \(worktree.terminals.count + 1)",
                 preset: "shell")
             await refresh()
             return .created(id)
         } catch {
             // Refreshed on the way out as well as on the way through. A
             // refusal is still news about the fleet — and one likely cause of
-            // it is this side holding a workspace the runner no longer has.
+            // it is this side holding a worktree the runner no longer has.
             await refresh()
             if let core = error as? ClientCore.CoreError, case .disconnected = core {
                 return .disconnected
@@ -1846,13 +1846,13 @@ final class Connection: ObservableObject {
         }
     }
 
-    func hideWorkspace(_ workspace: Workspace) async {
-        _ = try? await core.call("workspace.hide", ["workspace": workspace.id])
+    func hideWorktree(_ worktree: Worktree) async {
+        _ = try? await core.call("worktree.hide", ["worktree": worktree.id])
         await refresh()
     }
 
-    func unhideWorkspace(_ workspace: Workspace) async {
-        _ = try? await core.call("workspace.unhide", ["workspace": workspace.id])
+    func unhideWorktree(_ worktree: Worktree) async {
+        _ = try? await core.call("worktree.unhide", ["worktree": worktree.id])
         await refresh()
     }
 
@@ -1861,19 +1861,19 @@ final class Connection: ObservableObject {
     /// The whole section the overview drew, by the daemon's own ids — never
     /// "move this one to N", and never another runner's ids: the runner
     /// permutes exactly the rows it is named among the ranks they already hold
-    /// (`Store::reorder_workspaces`), and each runner keeps its own table. The
-    /// Mac's `DaemonClient.reorderWorkspaces` is the same call over the CLI.
+    /// (`Store::reorder_worktrees`), and each runner keeps its own table. The
+    /// Mac's `DaemonClient.reorderWorktrees` is the same call over the CLI.
     /// Which ids go here is decided in AgentKit — see `ShellReorderRequest`.
     ///
     /// Refreshed on the way out whether it worked or not, and that is what the
     /// overview's pending order relies on: when this returns, the fleet on
     /// this connection is the runner's answer, so dropping the drawn order then
     /// shows either the drop or — for a refusal — the card back where it was.
-    /// A refusal is otherwise swallowed, like `hideWorkspace`'s: the card going
+    /// A refusal is otherwise swallowed, like `hideWorktree`'s: the card going
     /// back IS the sentence.
-    func reorderWorkspaces(_ workspaces: [String]) async {
-        guard workspaces.count > 1 else { return }
-        _ = try? await core.call("workspace.reorder", ["workspaces": workspaces])
+    func reorderWorktrees(_ worktrees: [String]) async {
+        guard worktrees.count > 1 else { return }
+        _ = try? await core.call("worktree.reorder", ["worktrees": worktrees])
         await refresh()
     }
 
@@ -1889,13 +1889,13 @@ final class Connection: ObservableObject {
         case failed(String, word: String?)
     }
 
-    /// `confirm` must be the workspace's exact name, unless the worktree is
+    /// `confirm` must be the worktree's exact name, unless the worktree is
     /// clean, in which case it may be empty.
-    func removeWorktree(_ workspace: Workspace, confirm: String) async -> RemoveWorktreeResult {
+    func removeWorktree(_ worktree: Worktree, confirm: String) async -> RemoveWorktreeResult {
         let data: Data
         do {
             data = try await core.call(
-                "workspace.remove_worktree", ["workspace": workspace.id, "confirm": confirm])
+                "worktree.remove", ["worktree": worktree.id, "confirm": confirm])
         } catch {
             await refresh()
             return .failed(error.localizedDescription, word: ClientCore.refusalWord(of: error))
@@ -1951,8 +1951,8 @@ final class Connection: ObservableObject {
         await refresh()
     }
 
-    func terminal(_ id: String, in workspace: String) -> Terminal? {
-        fleet.workspaces.first { $0.id == workspace }?.terminals.first { $0.id == id }
+    func terminal(_ id: String, in worktree: String) -> Terminal? {
+        fleet.worktrees.first { $0.id == worktree }?.terminals.first { $0.id == id }
     }
 
     /// Write down what this runner has, for the grid to draw when you are
@@ -1960,7 +1960,7 @@ final class Connection: ObservableObject {
     ///
     /// **Derived from `ShellFleetMap`, not from `fleet` directly**, and that
     /// is the whole reason this is three lines rather than thirty. The order
-    /// of a workspace's tabs, which terminal is a Changes pane, what a mark
+    /// of a worktree's tabs, which terminal is a Changes pane, what a mark
     /// means and how a tail is chosen are all decided once, in the file that
     /// draws them — a cache that mapped a fleet a second way would be a grid
     /// where a cached card and a live one disagree about the same worktree.
@@ -1984,27 +1984,27 @@ final class Connection: ObservableObject {
         // not do this work either.
         if let last = lastDirectory, now.timeIntervalSince(last.seenAt) < 60 { return }
         let map = ShellFleetMap.of(self, host: host, now: now)
-        let workspaces = map.fleet.workspaces.map { workspace in
-            RunnerDirectory.Workspace(
+        let worktrees = map.fleet.worktrees.map { worktree in
+            RunnerDirectory.Worktree(
                 // The DAEMON's own id, read back off the entry the map carries.
-                // `ShellWorkspace.id` is the shell's composite —
-                // `"\(runner)/\(workspace)"`, see `ShellIdentity` — and the
+                // `ShellWorktree.id` is the shell's composite —
+                // `"\(runner)/\(worktree)"`, see `ShellIdentity` — and the
                 // cache must hold what the wire holds: `RunnerDirectory.group()`
                 // composes its own ids from these, and a crossing note names
                 // one. Falls back to the shell's, which cannot happen — the map
-                // built this workspace from that very entry — and would be a
+                // built this worktree from that very entry — and would be a
                 // stale grid rather than a wrong RPC if it did.
-                id: map.entries[workspace.id]?.workspace.id ?? workspace.id,
-                name: workspace.name, isHidden: workspace.isHidden,
-                tabs: workspace.tabs.map {
+                id: map.entries[worktree.id]?.worktree.id ?? worktree.id,
+                name: worktree.name, isHidden: worktree.isHidden,
+                tabs: worktree.tabs.map {
                     RunnerDirectory.Tab(
                         title: $0.title, mark: RunnerDirectory.word(for: $0.mark))
                 },
-                tail: workspace.tail)
+                tail: worktree.tail)
         }
         let directory = RunnerDirectory(
             runner: host.id.uuidString, label: host.label, seenAt: now,
-            workspaces: workspaces)
+            worktrees: worktrees)
         lastDirectory = directory
         RunnerDirectoryStore.record(directory)
     }
@@ -2016,17 +2016,17 @@ final class Connection: ObservableObject {
     /// Remember the tab somebody chose in a worktree.
     ///
     /// Called from one place — `ShellScreen.remember(_:leaving:)`, when a pane
-    /// comes to rest on a different tab of the workspace it was already in. Not
-    /// from a deep link retargeting the shell, not from arriving in a workspace
+    /// comes to rest on a different tab of the worktree it was already in. Not
+    /// from a deep link retargeting the shell, not from arriving in a worktree
     /// at all, and not from a pane vanishing under the person reading it; see
     /// that function for why each of those is a change the person did not make,
     /// and `lastFocus` for what this is for.
-    func rememberFocus(_ focus: PaneFocus, in workspace: String) {
+    func rememberFocus(_ focus: PaneFocus, in worktree: String) {
         // `.none` is the absence of a choice, which is the one thing a record
         // of choices must never hold: storing it would mean "the person picked
         // no opinion", and reading it back would beat the rule with nothing.
         if case .none = focus { return }
-        lastFocus[workspace] = focus
+        lastFocus[worktree] = focus
     }
 
     #if DEBUG

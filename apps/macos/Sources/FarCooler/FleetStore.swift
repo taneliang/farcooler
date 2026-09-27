@@ -3,13 +3,13 @@ import SwiftUI
 
 /// Every runner, at once.
 ///
-/// `Fleet` is one runner's decoded `workspace list --json`; this holds N of
+/// `Fleet` is one runner's decoded `worktree list --json`; this holds N of
 /// them and publishes the merge. Views observe this one object rather than
 /// subscribing to a client per runner.
 ///
 /// Membership is always the local runner plus one client per configured runner.
 /// `Runners.all` lists remote runners only — this Mac is the implicit entry
-/// under the empty-string key, which is the same convention `workspace.host`
+/// under the empty-string key, which is the same convention `worktree.host`
 /// uses on the wire and `OpenInEditor` already reads. The keys here stay
 /// host-shaped for that reason: they are ssh targets, matching the wire.
 @MainActor
@@ -286,7 +286,7 @@ final class FleetStore: ObservableObject {
         }
         let fleet = Fleet(
             runtimeHealthy: healthy, livePanes: live,
-            workspaces: runners.flatMap(\.fleet.workspaces))
+            worktrees: runners.flatMap(\.fleet.worktrees))
         return (fleet, reading)
     }
 
@@ -355,11 +355,11 @@ final class FleetStore: ObservableObject {
 
     /// The runner a row came from.
     ///
-    /// By `workspace.host`, which the CLI stamps from the `--host` flag it was
+    /// By `worktree.host`, which the CLI stamps from the `--host` flag it was
     /// invoked with. Never by id: short ids are the last eight hex of a UUID
     /// minted per daemon, so they say nothing about which runner they are on.
-    func client(for workspace: Workspace) -> DaemonClient? {
-        clients[workspace.host ?? ""]
+    func client(for worktree: Worktree) -> DaemonClient? {
+        clients[worktree.host ?? ""]
     }
 
     func state(of host: String) -> HostState {
@@ -371,7 +371,7 @@ final class FleetStore: ObservableObject {
     /// Repositories across every runner, each tagged with the runner it is on.
     ///
     /// Not merged into a flat `[Repository]`: a repository's own short id is
-    /// eight hex characters minted per daemon, same as a workspace's, so two
+    /// eight hex characters minted per daemon, same as a worktree's, so two
     /// runners can hand back the same one for two different repositories.
     var repositories: [(host: String, repository: Repository)] {
         hosts.flatMap { host in
@@ -407,17 +407,17 @@ final class FleetStore: ObservableObject {
         return (root.root, siblings)
     }
 
-    /// One workspace's layout is per-runner as well as per-workspace, so the
+    /// One worktree's layout is per-runner as well as per-worktree, so the
     /// key carries both — a flat `[String: [PaneGroup]]` across several
     /// runners could let one runner's layout answer for another's
-    /// workspace of the same id.
+    /// worktree of the same id.
     struct LayoutKey: Hashable {
         var host: String
-        var workspace: String
+        var worktree: String
     }
 
     /// Every runner's layouts, merged. Read through `client(for:)` when a
-    /// workspace is already in hand — this exists for the one place that has
+    /// worktree is already in hand — this exists for the one place that has
     /// to watch every runner's layouts at once regardless of which is
     /// selected: `ContentView`'s `.onChange(of:)` that keeps the app looking
     /// at wherever tmux just moved focus to.
@@ -425,8 +425,8 @@ final class FleetStore: ObservableObject {
         var merged: [LayoutKey: [PaneGroup]] = [:]
         for host in hosts {
             guard let client = clients[host] else { continue }
-            for (workspace, groups) in client.layouts {
-                merged[LayoutKey(host: host, workspace: workspace)] = groups
+            for (worktree, groups) in client.layouts {
+                merged[LayoutKey(host: host, worktree: worktree)] = groups
             }
         }
         return merged
@@ -438,14 +438,14 @@ final class FleetStore: ObservableObject {
     /// and twenty of those, and a rule every one of them has to remember is a
     /// rule that gets forgotten — the failure being a command that hangs for
     /// ConnectTimeout against a runner already known to be gone.
-    func refusal(for workspace: Workspace) -> String? {
-        refusal(for: workspace.host ?? "")
+    func refusal(for worktree: Worktree) -> String? {
+        refusal(for: worktree.host ?? "")
     }
 
-    /// Same check, from a bare host rather than a workspace already on it —
+    /// Same check, from a bare host rather than a worktree already on it —
     /// for the handful of mutations (new task, resume branch, add root,
-    /// register repository, new workspace from the sidebar's own `+`) that
-    /// have no workspace in hand yet to route by.
+    /// register repository, new worktree from the sidebar's own `+`) that
+    /// have no worktree in hand yet to route by.
     func refusal(for host: String) -> String? {
         guard let client = clients[host] else {
             return "this runner is no longer configured"

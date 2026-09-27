@@ -169,7 +169,7 @@ public struct DaemonBuild: Equatable, Sendable {
     /// you when a runner has no Far Cooler installed rather than omitting it.
     public func can(_ capability: String) -> Bool {
         // A daemon that answered nothing predates capabilities entirely, so it
-        // has exactly the feature set that existed then — workspaces and
+        // has exactly the feature set that existed then — worktrees and
         // terminals. Treating silence as "can do nothing" would blank the UI
         // against every daemon older than this change.
         if capabilities.isEmpty { return capability == "workspaces" || capability == "terminals" }
@@ -177,7 +177,7 @@ public struct DaemonBuild: Equatable, Sendable {
     }
 
     /// Whether this runner keeps an order a drag can write to: whether it
-    /// advertises `workspace_order` (`farcooler_protocol::capability`).
+    /// advertises `worktree_order` (`farcooler_protocol::capability`).
     ///
     /// On the build rather than on either app's view, so the Mac's sidebar and
     /// the phone's overview ask the one question in the one spelling. The Mac
@@ -186,7 +186,7 @@ public struct DaemonBuild: Equatable, Sendable {
     /// springs back on the next read with nothing said anywhere. See
     /// `ShellRunnerLabel.keepsOrder(daemon:)` for why the capability and never
     /// the ordinals.
-    public var keepsWorkspaceOrder: Bool { can("workspace_order") }
+    public var keepsWorktreeOrder: Bool { can("workspace_order") }
 
     /// The same build, spelled the way the app spells its own.
     ///

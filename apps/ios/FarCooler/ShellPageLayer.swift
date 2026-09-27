@@ -66,7 +66,7 @@ private struct ShellFlightShape: Shape {
 extension ShellRootView {
     // MARK: - The page, and its flight
 
-    /// Everything that is the workspace you are in, as one moving object.
+    /// Everything that is the worktree you are in, as one moving object.
     ///
     /// Order matters here in a way that is easy to get wrong twice over. The
     /// clip comes BEFORE the scale, because `scaleEffect` does not change a
@@ -109,7 +109,7 @@ extension ShellRootView {
             .offset(x: flightOffset.width, y: flightOffset.height)
             // Drawn all the way in, and only handed over once it has landed.
             //
-            // The page is the current workspace's card for as long as it is in
+            // The page is the current worktree's card for as long as it is in
             // the air — the grid is holding an empty cell open for it — so it
             // cannot fade out on the way: a page that dissolved as it arrived
             // would land in a hole and leave one. What it does instead is
@@ -152,7 +152,7 @@ extension ShellRootView {
     /// which is the flight's own progress. By the time the page is on the cell
     /// it IS the card: name, tail, ribbon and subtitle, at the cell's size, in
     /// the cell's place. The handover in `land()` is then a cross-fade between
-    /// two identical drawings of one workspace in one rectangle, which is a
+    /// two identical drawings of one worktree in one rectangle, which is a
     /// cross-fade nobody can see.
     ///
     /// Laid out at the card's own size and SCALED, never re-laid-out. The
@@ -176,7 +176,7 @@ extension ShellRootView {
         // which is the exact failure this exists to remove, moved to the other
         // end of the journey.
         if let tile, tile.width > 0, tile.height > 0, pageFrame.width > 0,
-            let workspace = currentWorkspace
+            let worktree = currentWorktree
         {
             let magnify = pageFrame.width / tile.width
             // The card at the size the crop is currently drawing, said in the
@@ -185,7 +185,7 @@ extension ShellRootView {
             // as exactly `flightHeight`, which is the rectangle the clip
             // keeps. The corner travels the same way and for the same reason.
             ShellCardFace(
-                workspace: workspace, isCurrent: true,
+                worktree: worktree, isCurrent: true,
                 // The CELL's width, measured, and not the design's 168. The
                 // whole thing is scaled by `magnify` — `pageFrame.width /
                 // tile.width` — so laying it out at the tile's own width is

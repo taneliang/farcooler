@@ -59,15 +59,15 @@ extension View {
 ///
 /// It expands on its own when something inside wants the user, because a
 /// collapsed row that hides the agent asking a question defeats the point.
-struct WorkspaceSection: View {
+struct WorktreeSection: View {
     /// The one drag in flight anywhere in the sidebar. An `@ObservedObject` on
-    /// the shared instance rather than a parameter: `workspaceRow` already
+    /// the shared instance rather than a parameter: `worktreeRow` already
     /// passes eighteen arguments and its own comment records that a nineteenth
     /// pushed the enclosing expression past the type checker's budget.
-    @ObservedObject private var drag = WorkspaceDrag.shared
+    @ObservedObject private var drag = WorktreeDrag.shared
     /// This header's measured height, for deciding above-or-below.
     @State private var headerHeight: CGFloat = 0
-    let workspace: Workspace
+    let worktree: Worktree
     let isExpanded: Bool
     @Binding var selection: ContentView.Selection?
     let onToggle: () -> Void
@@ -100,7 +100,7 @@ struct WorkspaceSection: View {
     /// and is not in the environment, and the banner that shows this belongs to
     /// the window, not to one sidebar row.
     var onEditorError: (String) -> Void = { _ in }
-    /// Whether this workspace's runner can be acted on right now.
+    /// Whether this worktree's runner can be acted on right now.
     ///
     /// Reads stay live even when this is `false` — the row is still
     /// selectable and its terminals still show whatever was last read from
@@ -110,7 +110,7 @@ struct WorkspaceSection: View {
     var usable: Bool = true
     /// Whether this row can be dragged into a new place in the sidebar.
     ///
-    /// Decided by `WorkspaceDrag.offersDrag(usable:runner:)` where the runner's
+    /// Decided by `WorktreeDrag.offersDrag(usable:runner:)` where the runner's
     /// build is known, and false by default: a row nobody said could move
     /// offers no drag.
     var reorderable: Bool = false
@@ -139,15 +139,15 @@ struct WorkspaceSection: View {
     private var windowActive: Bool { controlActiveState == .key }
 
     private var isSelected: Bool {
-        selection == .workspace(host: workspace.host ?? "", id: workspace.id)
+        selection == .worktree(host: worktree.host ?? "", id: worktree.id)
     }
 
     /// Open whether or not the user opened it.
-    private var showsTerminals: Bool { isExpanded || !workspace.attention.isEmpty }
+    private var showsTerminals: Bool { isExpanded || !worktree.attention.isEmpty }
 
     private func row(_ terminal: Terminal, ordinal: Int?) -> some View {
         let id = ContentView.Selection.terminal(
-            host: workspace.host ?? "", workspace: workspace.id, terminal: terminal.id)
+            host: worktree.host ?? "", worktree: worktree.id, terminal: terminal.id)
         return TerminalRow(
             terminal: terminal,
             isSelected: selection == id,
@@ -167,7 +167,7 @@ struct WorkspaceSection: View {
             header
 
             if showsTerminals {
-                let numbering = workspace.ordinals()
+                let numbering = worktree.ordinals()
                 // Creation order, always. Sorting whatever needs you to the top
                 // put the sidebar in motion at the exact moment you were
                 // reaching for it: an agent three rows down finishes, every row
@@ -176,7 +176,7 @@ struct WorkspaceSection: View {
                 // glyph, the count in the status bar, ⌘⇧A — and a mark you can
                 // find in a stable list beats one that comes to you by moving
                 // the list.
-                ForEach(workspace.terminals) { t in
+                ForEach(worktree.terminals) { t in
                     row(t, ordinal: numbering[t.id])
                 }
             }
@@ -200,25 +200,25 @@ struct WorkspaceSection: View {
             .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(workspace.task)
+                Text(worktree.task)
                     .font(WorkspaceStyle.sidebarPrimary)
                     .lineLimit(1)
 
                 HStack(spacing: 5) {
-                    Text(workspace.isMainCheckout ? "Primary checkout" : workspace.branch)
+                    Text(worktree.isMainCheckout ? "Primary checkout" : worktree.branch)
                         .font(WorkspaceStyle.sidebarMetadata)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
 
-                    if workspace.worktreeMissing {
+                    if worktree.worktreeMissing {
                         Text("worktree gone")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(.orange)
                             .help(
                                 "This worktree’s directory is gone. If you moved it with git worktree "
-                                    + "move, the directory it moved to is a separate workspace now — this "
-                                    + "row keeps the terminals and agent transcripts from before the move.")
+                                    + "move, it’s listed again under its new path as its own row. This row "
+                                    + "keeps the terminals and agent transcripts from before the move.")
                     }
                 }
             }
@@ -226,7 +226,7 @@ struct WorkspaceSection: View {
 
             Spacer(minLength: 6)
 
-            if !showsTerminals, let waiting = workspace.attentionStatus {
+            if !showsTerminals, let waiting = worktree.attentionStatus {
                 // Attention is the only collapsed status worth permanent room.
                 // Terminal counts and "no terminals" repeat what expanding the
                 // row already says, while this dot is the reason to expand it.
@@ -243,7 +243,7 @@ struct WorkspaceSection: View {
                 // for — see `StatusGlyph.Geometry`.
                 StatusGlyph(status: waiting, inAppDiameter: 6)
                     .accessibilityLabel(
-                        "\(workspace.attention.count) waiting on you in \(workspace.task)")
+                        "\(worktree.attention.count) waiting on you in \(worktree.task)")
             }
 
             // What changed in here, at a glance, without opening anything.
@@ -302,7 +302,7 @@ struct WorkspaceSection: View {
                         // two different rows identically.
                         .accessibilityLabel(
                             "\(changes.insertions) insertions, \(changes.deletions) deletions "
-                                + "in \(workspace.task), including work that isn’t committed yet"
+                                + "in \(worktree.task), including work that isn’t committed yet"
                                 + (changes.changedSinceReviewed
                                     ? ", changed since you last looked" : ", reviewed"))
                 }
@@ -318,7 +318,7 @@ struct WorkspaceSection: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
-                    .help("New terminal in \(workspace.task)")
+                    .help("New terminal in \(worktree.task)")
                     .opacity(hovering ? (usable ? 1 : 0.45) : 0)
                     .allowsHitTesting(hovering && usable)
 
@@ -327,12 +327,12 @@ struct WorkspaceSection: View {
                         // in a list but are not currently looking at — which is the
                         // only thing this menu can do that the title bar cannot.
                         EditorMenuItems(
-                            workspace: workspace, onError: onEditorError,
+                            worktree: worktree, onError: onEditorError,
                             showsSettingsItem: false)
                         Divider()
                         Button("New terminal", action: onNewTerminal)
                         Divider()
-                        if workspace.isHidden {
+                        if worktree.isHidden {
                             Button("Unhide", action: onUnhide)
                         } else {
                             Button("Hide", action: onHide)
@@ -340,9 +340,9 @@ struct WorkspaceSection: View {
                         // Absent, not disabled, for the main checkout. A daemon-side
                         // refusal is a safety net; the button should not be there to
                         // press.
-                        if workspace.worktreeMissing && !workspace.isMainCheckout {
+                        if worktree.worktreeMissing && !worktree.isMainCheckout {
                             Button("Dismiss", action: onRemove)
-                        } else if !workspace.isMainCheckout {
+                        } else if !worktree.isMainCheckout {
                             Button("Remove Worktree…", role: .destructive, action: onRemove)
                         }
                     } label: {
@@ -377,7 +377,7 @@ struct WorkspaceSection: View {
         .padding(.horizontal, SidebarGrid.highlightInset)
         .animation(Motion.snap, value: hovering)
         .contentShape(Rectangle())
-        .onTapGesture { selection = .workspace(host: workspace.host ?? "", id: workspace.id) }
+        .onTapGesture { selection = .worktree(host: worktree.host ?? "", id: worktree.id) }
         .onHover { hovering = $0 }
         // On the ROW, not on the counts, and that is the whole of it.
         //
@@ -402,11 +402,11 @@ struct WorkspaceSection: View {
         // Offered only when `reorderable` says so, and ABSENT otherwise rather
         // than a drag that goes nowhere: a runner too old to keep an order
         // used to be handed a drag it answered with "unknown method", and the
-        // row sprang back with nothing said. See `WorkspaceDrag.offersDrag`.
-        .modifier(WorkspaceDragSource(workspace: workspace.id, enabled: reorderable))
+        // row sprang back with nothing said. See `WorktreeDrag.offersDrag`.
+        .modifier(WorktreeDragSource(worktree: worktree.id, enabled: reorderable))
         .onDrop(
             of: [.text],
-            delegate: WorkspaceDropTarget(workspace: workspace.id, height: headerHeight))
+            delegate: WorktreeDropTarget(worktree: worktree.id, height: headerHeight))
         // Where it would land, drawn on the edge the drop would insert at. An
         // insertion line rather than highlighting the row: the question is which
         // GAP the card goes in, and a lit row says "on top of this one", which
@@ -424,8 +424,8 @@ struct WorkspaceSection: View {
 
     /// The edge an insertion line goes on, or nil when this row is not where
     /// the drag would land.
-    private var dropEdge: WorkspaceOrder.Edge? {
-        drag.landing(on: workspace.id)
+    private var dropEdge: WorktreeOrder.Edge? {
+        drag.landing(on: worktree.id)
     }
 
     /// The pair, in color while there is something new here and gray once it
@@ -565,7 +565,7 @@ struct ProjectHeader: View {
                             help: "Add to \(name)",
                             items: [
                                 onNewWorktree.map {
-                                    SidebarMenuItem(title: "New Workspace in \(name)…", action: $0)
+                                    SidebarMenuItem(title: "New Worktree in \(name)…", action: $0)
                                 },
                                 // The main checkout is a place people work — a quick
                                 // build, a look at main while a worktree is
@@ -585,7 +585,7 @@ struct ProjectHeader: View {
                     if let onRemove {
                         // Its own button rather than a second item on the `+`
                         // menu: that menu is for adding things, and a destructive
-                        // action one row below "New Workspace" is a misclick away
+                        // action one row below "New Worktree" is a misclick away
                         // from removing a repository instead of branching one.
                         SidebarMenuButton(
                             systemImage: "ellipsis",
@@ -689,7 +689,7 @@ struct HostDot: View {
 /// One terminal row.
 ///
 /// A single line, deliberately. Both levels used to be two-line blocks, which
-/// gave the list no rhythm: a workspace and the terminal under it were the same
+/// gave the list no rhythm: a worktree and the terminal under it were the same
 /// shape and the same height, so nothing read as containing anything. A
 /// two-line heading over single-line items is the difference between a tree and
 /// a run of similar rectangles.
@@ -730,7 +730,7 @@ struct TerminalRow: View {
     /// answers a question nobody asked.
     var ordinal: Int?
     /// Whether this terminal's runner can be acted on right now. See
-    /// `WorkspaceSection.usable`, which this mirrors row by row.
+    /// `WorktreeSection.usable`, which this mirrors row by row.
     var usable: Bool = true
 
     /// Whether the status is worth saying at all, which most of the time it
@@ -966,33 +966,33 @@ struct TerminalRow: View {
     }
 }
 
-/// A workspace's own status, for its heading.
+/// A worktree's own status, for its heading.
 ///
-/// Workspaces have three states worth showing and no agent of their own, so
+/// Worktrees have three states worth showing and no agent of their own, so
 /// this stays a small dot: it is context for the heading rather than something
 /// to scan, and the terminals underneath carry the detail.
 ///
 /// The three are the exceptions — gone, broken, hidden. `active` was a fourth,
 /// painted green, and that was the drift: "three states worth showing" was
 /// right and the switch had grown a case for the state that is worth showing
-/// least. `derive_workspace` returns `Active` for any workspace with a live
+/// least. `derive_worktree` returns `Active` for any worktree with a live
 /// terminal, which is nearly all of them nearly all of the time, so the green
 /// was on almost every heading — and green in this app means `Status.done`,
-/// "the turn ended and nobody has looked yet". A workspace being in use and an
+/// "the turn ended and nobody has looked yet". A worktree being in use and an
 /// agent having finished are close to opposites, and they drew the same mark.
 /// That is the phones' bug — an idle `zsh` and a finished agent in one green —
 /// which the Mac was credited with not having.
 ///
-/// `Active` is also what `derive_workspace` returns when the runner is
+/// `Active` is also what `derive_worktree` returns when the runner is
 /// unreadable and every terminal derives `Unknown`, deliberately, so the green
-/// was vouching for workspaces nobody had heard from. `StatusGlyph` paints that
+/// was vouching for worktrees nobody had heard from. `StatusGlyph` paints that
 /// same not-yet-answered case `.secondary` for exactly this reason.
 ///
-/// iOS has nothing to keep in sync here: its workspace heading draws the
+/// iOS has nothing to keep in sync here: its worktree heading draws the
 /// rolled-up status of the terminals inside plus "worktree gone", and never the
-/// workspace's own state. So this is a one-platform change by construction, not
+/// worktree's own state. So this is a one-platform change by construction, not
 /// one half of a pair.
-struct WorkspaceDot: View {
+struct WorktreeDot: View {
     let state: String
 
     private var color: Color {
@@ -1001,7 +1001,7 @@ struct WorkspaceDot: View {
         case .hidden: return Color.secondary.opacity(0.4)
         // Red, not a dimmed amber. `StatusGlyph` spends amber on one state —
         // an agent is waiting on you — and a directory that is gone is not
-        // waiting for anything. It is the workspace-level `Status.lost`, and
+        // waiting for anything. It is the worktree-level `Status.lost`, and
         // `lost` is red. The soft orange was a third reading from before there
         // was a rule: less alarming than `error`, warmer than `hidden`.
         //
@@ -1009,8 +1009,8 @@ struct WorkspaceDot: View {
         // not be in a list: this dot appears once, beside a 24pt title, never
         // next to another one, and its help text names the state.
         case .worktreeMissing: return .red
-        // `active` falls here with `ready` and `creating`: a healthy workspace
-        // is a healthy workspace, and the difference between one with a live
+        // `active` falls here with `ready` and `creating`: a healthy worktree
+        // is a healthy worktree, and the difference between one with a live
         // pane and one without is a fact the rows underneath state outright.
         default: return .secondary
         }
@@ -1021,14 +1021,14 @@ struct WorkspaceDot: View {
     }
 }
 
-/// Workspace detail.
+/// Worktree detail.
 ///
 /// Used to open with a State / Terminals / Worktree key-value table, which read
 /// like a database inspector and gave the most screen to a filesystem path
-/// nobody needs. The terminals ARE the workspace, so they lead; the path is a
+/// nobody needs. The terminals ARE the worktree, so they lead; the path is a
 /// footnote you can copy when you want it.
-struct WorkspaceDetail: View {
-    let workspace: Workspace
+struct WorktreeDetail: View {
+    let worktree: Worktree
     let onNewTerminal: () -> Void
     let onHide: () -> Void
     let onUnhide: () -> Void
@@ -1040,14 +1040,14 @@ struct WorkspaceDetail: View {
             VStack(alignment: .leading, spacing: 24) {
                 header
 
-                if workspace.terminals.isEmpty {
+                if worktree.terminals.isEmpty {
                     empty
                 } else {
                     VStack(spacing: 8) {
-                        // Creation order, for the reason `WorkspaceSection`
+                        // Creation order, for the reason `WorktreeSection`
                         // gives: cards that rearrange themselves under the
                         // pointer are worse than cards you have to read.
-                        ForEach(workspace.terminals) { t in
+                        ForEach(worktree.terminals) { t in
                             terminalCard(t)
                         }
                     }
@@ -1061,18 +1061,18 @@ struct WorkspaceDetail: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         // Same title as the tiled and solo views, so switching between them does
         // not change what the window claims you are looking at.
-        .navigationTitle(workspace.windowTitle)
-        .navigationSubtitle(workspace.windowSubtitle)
+        .navigationTitle(worktree.windowTitle)
+        .navigationSubtitle(worktree.windowSubtitle)
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 10) {
-                    WorkspaceDot(state: workspace.state)
-                    Text(workspace.task).font(.system(size: 24, weight: .semibold))
+                    WorktreeDot(state: worktree.state)
+                    Text(worktree.task).font(.system(size: 24, weight: .semibold))
                 }
-                Text(workspace.branch)
+                Text(worktree.branch)
                     .font(.system(size: 13, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
@@ -1096,7 +1096,7 @@ struct WorkspaceDetail: View {
                 // Destructive actions live in a menu rather than sitting as
                 // permanent buttons next to the one you press constantly.
                 Menu {
-                    if workspace.isHidden {
+                    if worktree.isHidden {
                         Button("Unhide", action: onUnhide)
                     } else {
                         Button("Hide", action: onHide)
@@ -1104,7 +1104,7 @@ struct WorkspaceDetail: View {
                     // Absent, not disabled, for the main checkout. A
                     // daemon-side refusal is a safety net; the button should
                     // not be there to press.
-                    if !workspace.isMainCheckout {
+                    if !worktree.isMainCheckout {
                         Button("Remove Worktree…", role: .destructive, action: onRemove)
                     }
                 } label: {
@@ -1122,7 +1122,7 @@ struct WorkspaceDetail: View {
                 .font(.system(size: 28))
                 .foregroundStyle(.tertiary)
             Text("No terminals").font(.callout.weight(.medium))
-            Text("A terminal runs one agent, or one shell, inside this workspace.")
+            Text("A terminal runs one agent, or one shell, inside this worktree.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -1172,7 +1172,7 @@ struct WorkspaceDetail: View {
             Image(systemName: "folder")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
-            Text(workspace.worktree)
+            Text(worktree.path)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.tertiary)
                 .textSelection(.enabled)
@@ -1194,10 +1194,10 @@ struct WorkspaceDetail: View {
 /// gets said.
 struct HiddenWorktrees: View {
     let project: String
-    let worktrees: [Workspace]
+    let worktrees: [Worktree]
     let isExpanded: Bool
     let onToggle: () -> Void
-    let onUnhide: (Workspace) -> Void
+    let onUnhide: (Worktree) -> Void
 
     private var attention: Int {
         worktrees.flatMap(\.terminals).filter(\.status.wantsAttention).count
@@ -1226,7 +1226,7 @@ struct HiddenWorktrees: View {
                             .foregroundStyle(.tertiary)
                         if let waiting = attentionStatus {
                             StatusGlyph(status: waiting, inAppDiameter: 5)
-                                .help("\(attention) waiting on you, inside a hidden workspace")
+                                .help("\(attention) waiting on you, inside a hidden worktree")
                         }
                         Spacer(minLength: 0)
                     }
@@ -1265,9 +1265,9 @@ struct HiddenWorktrees: View {
 
 /// A repository's board, as the first row under its header.
 ///
-/// Above the workspaces because the board is about all of them: a task sits on
+/// Above the worktrees because the board is about all of them: a task sits on
 /// one repository's board whichever worktree an agent takes it into. Drawn
-/// like a workspace row — one line, the same band, the same selection pill —
+/// like a worktree row — one line, the same band, the same selection pill —
 /// because it is a place you go, not a section label.
 ///
 /// Two counts, and neither at zero. The amber one is the Needs Decision

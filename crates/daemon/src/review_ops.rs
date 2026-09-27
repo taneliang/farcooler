@@ -56,10 +56,10 @@ fn pb_base_source(s: BaseSource) -> i32 {
     }) as i32
 }
 
-fn pb_change_set(workspace_id: Uuid, c: &review::CachedChangeSet) -> pb::ChangeSet {
+fn pb_change_set(worktree_id: Uuid, c: &review::CachedChangeSet) -> pb::ChangeSet {
     let s = &c.set;
     pb::ChangeSet {
-        workspace_id: id_bytes(workspace_id),
+        worktree_id: id_bytes(worktree_id),
         version: c.version,
         branch: s.branch.clone(),
         base_ref: s.base_ref.clone(),
@@ -130,9 +130,9 @@ fn pb_hunk(h: &farcooler_review::Hunk) -> pb::Hunk {
 // helpers
 // ---------------------------------------------------------------------------
 
-/// The worktree, branch and base for a workspace.
-async fn locate(svc: &Service, workspace_id: Uuid) -> Result<(String, String, String, BaseSource)> {
-    let ws = svc.store.get_workspace(workspace_id)?;
+/// The path, branch and base for a worktree.
+async fn locate(svc: &Service, worktree_id: Uuid) -> Result<(String, String, String, BaseSource)> {
+    let ws = svc.store.get_worktree(worktree_id)?;
     let (base, source) = resolve_base(svc, &ws).await?;
     Ok((ws.worktree_path, ws.branch, base, source))
 }
@@ -159,7 +159,7 @@ async fn locate(svc: &Service, workspace_id: Uuid) -> Result<(String, String, St
 /// remote still reviews.
 pub(crate) async fn resolve_base(
     svc: &Service,
-    ws: &farcooler_store::models::Workspace,
+    ws: &farcooler_store::models::Worktree,
 ) -> Result<(String, BaseSource)> {
     if let Some(recorded) = svc.store.review_base(ws.id)? {
         return Ok((recorded, BaseSource::Recorded));
@@ -192,11 +192,11 @@ pub(crate) async fn resolve_base(
 // ---------------------------------------------------------------------------
 
 pub async fn change_set(svc: &Service, req: &pb::ChangeSetRequest) -> Result<pb::ChangeSet> {
-    let workspace_id =
-        Uuid::from_slice(&req.workspace_id).map_err(|_| DomainError::NotFound)?;
-    let (worktree, branch, base, source) = locate(svc, workspace_id).await?;
+    let worktree_id =
+        Uuid::from_slice(&req.worktree_id).map_err(|_| DomainError::NotFound)?;
+    let (worktree, branch, base, source) = locate(svc, worktree_id).await?;
 
-    // A selector naming a branch overrides the workspace's own.
+    // A selector naming a branch overrides the worktree's own.
     let branch = match req.selector.as_ref().and_then(|s| s.kind.as_ref()) {
         Some(pb::change_set_selector::Kind::Branch(b)) if !b.branch.is_empty() => b.branch.clone(),
         _ => branch,
@@ -204,29 +204,29 @@ pub async fn change_set(svc: &Service, req: &pb::ChangeSetRequest) -> Result<pb:
 
     let c = svc
         .review_cache
-        .get(workspace_id, Path::new(&worktree), &branch, &base, source, req.fresh)
+        .get(worktree_id, Path::new(&worktree), &branch, &base, source, req.fresh)
         .await?;
-    Ok(pb_change_set(workspace_id, &c))
+    Ok(pb_change_set(worktree_id, &c))
 }
 
 pub async fn commit_files(
     svc: &Service,
     req: &pb::CommitFilesRequest,
 ) -> Result<pb::FileChangeList> {
-    let workspace_id =
-        Uuid::from_slice(&req.workspace_id).map_err(|_| DomainError::NotFound)?;
-    let ws = svc.store.get_workspace(workspace_id)?;
+    let worktree_id =
+        Uuid::from_slice(&req.worktree_id).map_err(|_| DomainError::NotFound)?;
+    let ws = svc.store.get_worktree(worktree_id)?;
     let files = file_diff::commit_files(Path::new(&ws.worktree_path), &req.sha).await?;
     Ok(pb::FileChangeList { items: files.iter().map(pb_file).collect() })
 }
 
 pub async fn file_diff(svc: &Service, req: &pb::FileDiffRequest) -> Result<pb::FileDiff> {
-    let workspace_id =
-        Uuid::from_slice(&req.workspace_id).map_err(|_| DomainError::NotFound)?;
-    let (worktree, branch, base, source) = locate(svc, workspace_id).await?;
+    let worktree_id =
+        Uuid::from_slice(&req.worktree_id).map_err(|_| DomainError::NotFound)?;
+    let (worktree, branch, base, source) = locate(svc, worktree_id).await?;
     let c = svc
         .review_cache
-        .get(workspace_id, Path::new(&worktree), &branch, &base, source, false)
+        .get(worktree_id, Path::new(&worktree), &branch, &base, source, false)
         .await?;
 
     let selector = match req.selector.as_ref().and_then(|s| s.kind.as_ref()) {
@@ -268,12 +268,12 @@ pub async fn file_diff(svc: &Service, req: &pb::FileDiffRequest) -> Result<pb::F
 }
 
 pub async fn set_base(svc: &Service, req: &pb::ChangesSetBase) -> Result<pb::ChangeSet> {
-    let workspace_id =
-        Uuid::from_slice(&req.workspace_id).map_err(|_| DomainError::NotFound)?;
-    let ws = svc.store.get_workspace(workspace_id)?;
+    let worktree_id =
+        Uuid::from_slice(&req.worktree_id).map_err(|_| DomainError::NotFound)?;
+    let ws = svc.store.get_worktree(worktree_id)?;
 
     // Validated at set time, so a typo fails here rather than silently producing
-    // a wrong diff every time anybody opens the workspace.
+    // a wrong diff every time anybody opens the worktree.
     let ok = crate::git::git(
         Path::new(&ws.worktree_path),
         &["rev-parse", "--verify", "--quiet", &req.base_ref],
@@ -283,13 +283,13 @@ pub async fn set_base(svc: &Service, req: &pb::ChangesSetBase) -> Result<pb::Cha
         return Err(DomainError::BaseUnresolvable);
     }
 
-    svc.store.set_review_base(workspace_id, &req.base_ref)?;
-    svc.review_cache.invalidate(workspace_id);
+    svc.store.set_review_base(worktree_id, &req.base_ref)?;
+    svc.review_cache.invalidate(worktree_id);
 
     let c = svc
         .review_cache
         .get(
-            workspace_id,
+            worktree_id,
             Path::new(&ws.worktree_path),
             &ws.branch,
             &req.base_ref,
@@ -297,16 +297,16 @@ pub async fn set_base(svc: &Service, req: &pb::ChangesSetBase) -> Result<pb::Cha
             true,
         )
         .await?;
-    Ok(pb_change_set(workspace_id, &c))
+    Ok(pb_change_set(worktree_id, &c))
 }
 
 pub async fn mark_read(svc: &Service, req: &pb::ChangesMarkRead) -> Result<()> {
-    let workspace_id =
-        Uuid::from_slice(&req.workspace_id).map_err(|_| DomainError::NotFound)?;
-    let (worktree, branch, base, source) = locate(svc, workspace_id).await?;
+    let worktree_id =
+        Uuid::from_slice(&req.worktree_id).map_err(|_| DomainError::NotFound)?;
+    let (worktree, branch, base, source) = locate(svc, worktree_id).await?;
     let c = svc
         .review_cache
-        .get(workspace_id, Path::new(&worktree), &branch, &base, source, false)
+        .get(worktree_id, Path::new(&worktree), &branch, &base, source, false)
         .await?;
     let _ = &req.branch;
     // The gate is stored ALONGSIDE the digest, and the inbox compares gates.
@@ -315,7 +315,7 @@ pub async fn mark_read(svc: &Service, req: &pb::ChangesMarkRead) -> Result<()> {
     // cleared, which is worse than no badge.
     let gate = review::cheap_gate(Path::new(&worktree));
     svc.store.mark_reviewed_with_gate(
-        workspace_id,
+        worktree_id,
         &branch,
         &c.set.head_commit,
         &c.set.worktree_digest,
@@ -328,7 +328,7 @@ pub async fn mark_read(svc: &Service, req: &pb::ChangesMarkRead) -> Result<()> {
 /// The fleet inbox.
 ///
 /// Durable counts only, and the cheap gate for "changed since you looked".
-/// Resolving every entry's anchor here would need a change set per workspace,
+/// Resolving every entry's anchor here would need a change set per worktree,
 /// which is one `git status` per worktree per call — exactly what `watch.rs` was
 /// built to avoid.
 ///
@@ -341,7 +341,7 @@ pub async fn mark_read(svc: &Service, req: &pb::ChangesMarkRead) -> Result<()> {
 pub async fn inbox(svc: &Service) -> Result<pb::ChangesInbox> {
     let mut items = Vec::new();
 
-    for ws in svc.store.list_all_workspaces()? {
+    for ws in svc.store.list_all_worktrees()? {
         let worktree = Path::new(&ws.worktree_path);
         if !worktree.is_dir() {
             continue;
@@ -385,8 +385,8 @@ pub async fn inbox(svc: &Service) -> Result<pb::ChangesInbox> {
             continue;
         }
 
-        items.push(pb::InboxWorkspace {
-            workspace_id: id_bytes(ws.id),
+        items.push(pb::InboxWorktree {
+            worktree_id: id_bytes(ws.id),
             task_name: ws.name(),
             branch: ws.branch,
             changed_since_reviewed: changed,
@@ -463,7 +463,7 @@ fn pb_link(l: &crate::stack::StackLink) -> pb::StackLink {
 /// A worktree belonging to `repository_id`, for running git and `gh` in.
 async fn any_worktree(svc: &Service, repository_id: Uuid) -> Result<String> {
     svc.store
-        .list_workspaces_for_repository(repository_id)?
+        .list_worktrees_for_repository(repository_id)?
         .into_iter()
         .find(|w| Path::new(&w.worktree_path).is_dir())
         .map(|w| w.worktree_path)
@@ -645,7 +645,7 @@ pub async fn pr_refresh(svc: &Service, req: &pb::PrRefresh) -> Result<pb::StackL
     let worktree_path = any_worktree(svc, repository_id).await?;
     let branch = svc
         .store
-        .list_workspaces_for_repository(repository_id)?
+        .list_worktrees_for_repository(repository_id)?
         .first()
         .map(|w| w.branch.clone())
         .unwrap_or_else(|| "HEAD".into());

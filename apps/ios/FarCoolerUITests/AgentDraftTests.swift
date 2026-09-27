@@ -4,11 +4,11 @@ import XCTest
 ///
 /// **The only irreversible thing a pane's teardown costs.** The panes are tmux
 /// sessions on the runner, so nothing there ends: the scrollback refetches, the
-/// transcript is on disk, and the workspace is where it was. The words in the
+/// transcript is on disk, and the worktree is where it was. The words in the
 /// composer exist nowhere but this phone, and until `PaneDraftStore` they went
 /// with the pane — or with the process, which on a phone is killed in a pocket
 /// with no warning. `docs/jobs-to-be-done.md` F4 states the requirement in
-/// those terms; Android has met it since `WorkspaceScreen`'s
+/// those terms; Android has met it since `WorktreeScreen`'s
 /// `SaveableStateHolder` landed, and this is the phone that had not.
 ///
 /// **Needs no runner.** It stands on `-agent-layout-harness`, whose fixture is

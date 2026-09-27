@@ -453,7 +453,7 @@ extension ShellRootView {
         // `.bar` finds nothing, because it is asked about a point on the bar
         // and nothing on the bar scrolls sideways — but it is spelled out
         // rather than left to the geometry: the bar's own gesture has no
-        // handoff at all, and a claim leaking into it would be a workspace
+        // handoff at all, and a claim leaking into it would be a worktree
         // swipe silently absorbed by a diff two panes away.
         dragClaim.room = which == .content ? dragClaim.roomUnder(point) : .none
         handoff = 0
@@ -697,7 +697,7 @@ extension ShellRootView {
         // `settled`, not `settle`: the thumb went UP and the page falls DOWN,
         // so there is no momentum here to reward. See `ShellRootView.settled`,
         // which carries the trace — the bounce was thirteen frames of the
-        // whole overview kept mounted behind a workspace.
+        // whole overview kept mounted behind a worktree.
         //
         // `pageAbove` falls the same way and on the same spring as `lift`:
         // it is what `ShellPageLayer.pageRise` now reads to draw the fall,
@@ -783,7 +783,7 @@ extension ShellRootView {
     /// before the release has decided — see `rest()`. One function rather than
     /// four copies because the failure mode of a copy is silent: a new arm
     /// that forgets `reveal` leaves the grid mounted at half strength over a
-    /// workspace nobody is looking at.
+    /// worktree nobody is looking at.
     private func flatten() {
         trackX = 0
         crossing = 0
@@ -807,12 +807,12 @@ extension ShellRootView {
     /// and the page is what is in the air above it.
     ///
     /// `carrying` is the sideways half of the same release: the page was moved
-    /// far enough toward a neighbour to be handed to it, so the workspace is
+    /// far enough toward a neighbour to be handed to it, so the worktree is
     /// re-seated in the SAME animation that flies the card. Not silently, and
     /// this is the one re-seat in this file that is deliberately animated. The
     /// card that leaves your thumb is the one you were holding and the card
     /// that lands is the one you asked for, and those are different
-    /// workspaces; on one spring the pane inside it dissolves from the first
+    /// worktrees; on one spring the pane inside it dissolves from the first
     /// to the second while it travels, and the cell it came from fills back in
     /// behind it over exactly the same stretch. Re-seating it silently instead
     /// puts both of those changes in one frame at the instant of release —
@@ -877,7 +877,7 @@ extension ShellRootView {
         // the page is not a card and must not be dissolved. It used to be
         // safe by accident, because the page's opacity was a ternary that
         // read `!overview` and could not be wrong; a stored alpha can be, and
-        // the way it is wrong is a page faded to nothing over a workspace —
+        // the way it is wrong is a page faded to nothing over a worktree —
         // a blank screen with no gesture that brings it back.
         guard flights == 0, overview else { return }
         withTransaction(silent) { cellIsHole = false }
@@ -888,7 +888,7 @@ extension ShellRootView {
     ///
     /// The reverse journey, and the handover happens at the START of it: the
     /// card hands the page back before the page moves, so what grows out of
-    /// the grid is the workspace rather than a second drawing of it.
+    /// the grid is the worktree rather than a second drawing of it.
     private func flyOut(_ change: @escaping () -> Void) {
         flights += 1
         // A page growing back out of a cell has no finger on it, so it grows
@@ -944,7 +944,7 @@ extension ShellRootView {
     private func commit(_ step: ShellStep, dx: CGFloat, page: CGFloat) {
         let sign: CGFloat = dx < 0 ? -1 : 1
         withAnimation(
-            step.crossesWorkspace ? Self.settleAcross : Self.settle,
+            step.crossesWorktree ? Self.settleAcross : Self.settle,
             completionCriteria: .logicallyComplete
         ) {
             trackX = sign * page
@@ -963,7 +963,7 @@ extension ShellRootView {
             // it is not a thing that happens to the card once it has arrived.
             crossing = 0
             // A commit can now also arrive from a LIFT — a page held off the
-            // display and flicked sideways hard enough to change workspace
+            // display and flicked sideways hard enough to change worktree
             // without going all the way into the overview. The page falls back
             // onto the display as it crosses, on this one spring, which is the
             // same rule the line above states for a crossing: the card
@@ -971,10 +971,10 @@ extension ShellRootView {
             carryX = 0
             reveal = 0
             cropped = 0
-            // The column belongs to the workspace it lists, so a crossing
-            // furls it. A swipe within one workspace leaves it alone: the same
+            // The column belongs to the worktree it lists, so a crossing
+            // furls it. A swipe within one worktree leaves it alone: the same
             // list is still the right list.
-            if step.crossesWorkspace {
+            if step.crossesWorktree {
                 columnPinned = false
                 touchedRow = nil
             }
@@ -993,18 +993,18 @@ extension ShellRootView {
         }
     }
 
-    func open(workspace index: Int) {
-        guard fleet.workspaces.indices.contains(index) else { return closeOverview() }
+    func open(worktree index: Int) {
+        guard fleet.worktrees.indices.contains(index) else { return closeOverview() }
         // On the tab you last had open there, not on tab 0. Tapping a card is
-        // going to a workspace by name, which is the same kind of arrival a
-        // bar swipe is — see `ShellWorkspace.resume` for the line between that
+        // going to a worktree by name, which is the same kind of arrival a
+        // bar swipe is — see `ShellWorktree.resume` for the line between that
         // and the content swipe's continuum.
-        open(at: ShellPosition(workspace: index, tab: fleet.workspaces[index].resumeTab))
+        open(at: ShellPosition(worktree: index, tab: fleet.worktrees[index].resumeTab))
     }
 
     /// Leave the overview by growing the page out of one particular cell.
     ///
-    /// Split out of `open(workspace:)` so a deep link takes exactly the same
+    /// Split out of `open(worktree:)` so a deep link takes exactly the same
     /// journey as a tap — see `honorRequest`. Two copies of this would be two
     /// answers to "where does the page come from", and the answer is the whole
     /// of what makes the flight read as the card you touched opening.
@@ -1013,7 +1013,7 @@ extension ShellRootView {
         // you TAPPED rather than out of the one you came from.
         //
         // The page is invisible while the grid holds its card, so re-seating
-        // it on the tapped workspace costs nothing to look at — but a flight
+        // it on the tapped worktree costs nothing to look at — but a flight
         // interpolates from what was last DRAWN, and a re-seat in the same
         // update as the flight is never drawn at all. So it gets its own turn.
         //
@@ -1194,7 +1194,7 @@ extension ShellRootView {
     /// the pane host's `honorRequest` cleared first for, and the reason it did.
     ///
     /// Two ways in, because there are two places the shell can be. From the
-    /// overview it grows the page back out of the tapped workspace's cell,
+    /// overview it grows the page back out of the tapped worktree's cell,
     /// which is the same journey a tapped card makes — the deep link is a card
     /// tapped from outside the app, and it should not arrive differently. From
     /// a page it is a silent re-seat: no animation, because there is no gesture
@@ -1212,8 +1212,8 @@ extension ShellRootView {
             silent.disablesAnimations = true
             withTransaction(silent) {
                 position = target
-                // The column lists the workspace it belongs to. A link that
-                // crosses workspaces would otherwise leave it open over a list
+                // The column lists the worktree it belongs to. A link that
+                // crosses worktrees would otherwise leave it open over a list
                 // of somebody else's tabs; one that does not still moves the
                 // tab out from under the highlighted row.
                 columnPinned = false

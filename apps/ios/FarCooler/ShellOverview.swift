@@ -1,17 +1,17 @@
 import SwiftUI
 
-// Every workspace at once, arrived at by keeping going.
+// Every worktree at once, arrived at by keeping going.
 //
 // The overview is not a screen you navigate to. It is the far end of the same
 // upward drag that unfurls the column: past the last row the column dissolves
 // and this arrives in its place, so "show me everything" is the same gesture
-// as "show me this workspace's tabs", continued. That is why there is no
+// as "show me this worktree's tabs", continued. That is why there is no
 // button anywhere that opens it.
 //
-// It is also the design's answer to forty workspaces. Every strip-shaped
+// It is also the design's answer to forty worktrees. Every strip-shaped
 // design died on that number — a bar that compresses to fit forty of anything
 // is a bar with forty illegible things on it — and the answer is that the bar
-// never tries: it shows ONE workspace, and the fleet lives here, in a grid
+// never tries: it shows ONE worktree, and the fleet lives here, in a grid
 // that can scroll.
 //
 // ## The platform draws the chrome, this file draws the cards
@@ -23,7 +23,7 @@ import SwiftUI
 // field had no cancel button, no dictation, no scroll-to-dismiss, and the
 // empty state was a sentence where the platform has a whole layout. They are
 // now a `NavigationStack`, a `.searchable` and a `ContentUnavailableView`, and
-// what is left in this file is the part iOS has no opinion about: a workspace,
+// what is left in this file is the part iOS has no opinion about: a worktree,
 // drawn as a card.
 //
 // What the platform's chrome cost, and it is the one thing about it that had to
@@ -46,15 +46,15 @@ import SwiftUI
 // scroll back up through forty cards ends at the top with a large downward
 // translation behind it, so browsing the grid dismissed it. See `pullBegan`.
 
-/// Where each laid-out card is, by workspace index, in screen coordinates.
+/// Where each laid-out card is, by worktree index, in screen coordinates.
 ///
 /// The page flies INTO one of these, so they have to be the frames the grid
 /// actually laid out rather than ones computed twice — a second copy of the
 /// grid's arithmetic here would be right until somebody changed a padding.
 ///
 /// Every card and not only the current one, because the journey runs both
-/// ways. The page lands in the cell of the workspace it IS; it grows back out
-/// of the cell of the workspace you TAP, and which one that is nobody knows
+/// ways. The page lands in the cell of the worktree it IS; it grows back out
+/// of the cell of the worktree you TAP, and which one that is nobody knows
 /// until the tap. A key that only carried the current card would have the
 /// return leg starting wherever the outbound one finished.
 struct ShellTileFrame: PreferenceKey {
@@ -64,7 +64,7 @@ struct ShellTileFrame: PreferenceKey {
     }
 }
 
-/// A workspace card's FACE: everything drawn on it, and nothing about being in
+/// A worktree card's FACE: everything drawn on it, and nothing about being in
 /// a grid.
 ///
 /// Split out of the card because the flight needs to draw one too. The page
@@ -75,7 +75,7 @@ struct ShellTileFrame: PreferenceKey {
 /// views that merely looked alike would be a handover you could see, and it
 /// would drift the first time either was tuned.
 struct ShellCardFace: View {
-    let workspace: ShellWorkspace
+    let worktree: ShellWorktree
     let isCurrent: Bool
     /// How wide the card's rectangle is.
     ///
@@ -124,16 +124,16 @@ struct ShellCardFace: View {
 
     /// `server · N tabs`, with the server left out when it is the local one —
     /// the same rule the bar follows, so a card and the bar never disagree
-    /// about whether a workspace is worth naming a runner for.
-    private static func subtitle(for workspace: ShellWorkspace) -> String {
-        let tabs = "\(workspace.tabs.count) \(workspace.tabs.count == 1 ? "tab" : "tabs")"
-        guard let server = workspace.server else { return tabs }
+    /// about whether a worktree is worth naming a runner for.
+    private static func subtitle(for worktree: ShellWorktree) -> String {
+        let tabs = "\(worktree.tabs.count) \(worktree.tabs.count == 1 ? "tab" : "tabs")"
+        guard let server = worktree.server else { return tabs }
         return "\(server) · \(tabs)"
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: PaneMetrics.step) {
-            Text(workspace.name)
+            Text(worktree.name)
                 // `.subheadline`, which IS the 15 the brief asks for —
                 // said as a role rather than as a number, so it tracks the
                 // reader's text size instead of ignoring it.
@@ -143,7 +143,7 @@ struct ShellCardFace: View {
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            // What this workspace last said, which is the whole reason a
+            // What this worktree last said, which is the whole reason a
             // card beats a list row. Mono because it came off a machine.
             //
             // The one size on this card still written as a number, and
@@ -160,7 +160,7 @@ struct ShellCardFace: View {
             // being scannable. The empty case still spaces correctly
             // because the spacer is doing the work either way.
             VStack(alignment: .leading, spacing: 1) {
-                ForEach(Array(workspace.tail.suffix(3).enumerated()), id: \.offset) { _, line in
+                ForEach(Array(worktree.tail.suffix(3).enumerated()), id: \.offset) { _, line in
                     Text(line)
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.tertiary)
@@ -174,16 +174,16 @@ struct ShellCardFace: View {
 
             // The same ribbon the bar carries, at 5 rather than 6 — the
             // card is a smaller thing saying the same thing, and a second
-            // way of summarizing a workspace would be a second thing that
+            // way of summarizing a worktree would be a second thing that
             // can disagree with the bar about it.
             //
             // No current mark: `current` is -1 because the card is a
-            // WORKSPACE, and which tab you are on inside it is not a fact
-            // about the workspace. The amber outline says which workspace
+            // WORKTREE, and which tab you are on inside it is not a fact
+            // about the worktree. The amber outline says which worktree
             // you are in.
-            ShellRibbon(tabs: workspace.tabs, current: -1, size: 5)
+            ShellRibbon(tabs: worktree.tabs, current: -1, size: 5)
 
-            Text(Self.subtitle(for: workspace))
+            Text(Self.subtitle(for: worktree))
                 // Mono, because the runner's name came off a machine and
                 // the rule in the brief is that mono means data. SF Mono's
                 // digits are already tabular, so a count that changes value
@@ -259,7 +259,7 @@ struct ShellCardFace: View {
 /// *"Pressed is one step UP the hierarchy, not a lower opacity: a key that
 /// fades under a finger looks like a key that did not take the press."* On the
 /// app's primary navigation — up to forty of these, and the only way into a
-/// workspace by touch — a fade is the wrong half of the sentence.
+/// worktree by touch — a fade is the wrong half of the sentence.
 ///
 /// So this draws the same thing the key row draws: one step up. A second
 /// `TranscriptFill.container` over the one `ShellCardFace` already carries
@@ -299,13 +299,13 @@ private struct ShellCardStyle: ButtonStyle {
     }
 }
 
-/// One workspace as a card in the grid: a face, a frame it publishes, a tap
+/// One worktree as a card in the grid: a face, a frame it publishes, a tap
 /// that opens it, and a long press that says what else can be done to it.
 private struct ShellOverviewCard: View {
-    let workspace: ShellWorkspace
+    let worktree: ShellWorktree
     /// Where this card sits in the fleet, which is the key its frame is
     /// published under — the flight reads it back that way. Not its identity:
-    /// the grid identifies a card by `workspace.id`, which survives a poll
+    /// the grid identifies a card by `worktree.id`, which survives a poll
     /// that inserts a worktree above it. See `ShellCard`.
     let index: Int
     let isCurrent: Bool
@@ -331,7 +331,7 @@ private struct ShellOverviewCard: View {
 
     var body: some View {
         Button(action: onOpen) {
-            ShellCardFace(workspace: workspace, isCurrent: isCurrent, width: width)
+            ShellCardFace(worktree: worktree, isCurrent: isCurrent, width: width)
                 // Every card reports where it is: any of them can be the end
                 // of a flight, and the one that is stops being known the
                 // moment a finger lands on a different one.
@@ -365,12 +365,12 @@ private struct ShellOverviewCard: View {
         .opacity(isEmpty ? 0 : 1)
         .allowsHitTesting(!isEmpty)
         .accessibilityHidden(isEmpty)
-        .accessibilityIdentifier("shell-card-\(workspace.id)")
-        .accessibilityLabel(workspace.name)
+        .accessibilityIdentifier("shell-card-\(worktree.id)")
+        .accessibilityLabel(worktree.name)
         // A long press, which is what a card on this platform answers with
         // when there is more to do to it than the tap does. It is the same
         // set the Mac puts on a sidebar row's menu, in the same order and with
-        // the same rule about the last one — see `SidebarViews.WorkspaceRow`.
+        // the same rule about the last one — see `SidebarViews.WorktreeRow`.
         //
         // Attached AFTER the frame is published rather than around it: a
         // context menu presents a copy of this view, and a preference read out
@@ -401,11 +401,11 @@ private struct ShellOverviewCard: View {
             onToggleHidden()
         } label: {
             Label(
-                workspace.isHidden ? "Unhide" : "Hide",
-                systemImage: workspace.isHidden ? "eye" : "eye.slash")
+                worktree.isHidden ? "Unhide" : "Hide",
+                systemImage: worktree.isHidden ? "eye" : "eye.slash")
         }
 
-        if !workspace.isPrimaryCheckout {
+        if !worktree.isPrimaryCheckout {
             Button(role: .destructive, action: onRemoveWorktree) {
                 Label("Remove Worktree…", systemImage: "trash")
             }
@@ -413,16 +413,16 @@ private struct ShellOverviewCard: View {
     }
 }
 
-/// One workspace on a runner this app is not connected to.
+/// One worktree on a runner this app is not connected to.
 ///
 /// The same FACE as an ordinary card — deliberately, because it is the same
 /// thing: a worktree with a name, a ribbon and a tail. What is different is
 /// everything about it being live.
 ///
 /// - **It publishes no tile frame.** `ShellTileFrame` is keyed by an index
-///   into `fleet.workspaces`, and it is what a lifted page flies INTO. A card
+///   into `fleet.worktrees`, and it is what a lifted page flies INTO. A card
 ///   that is not in that fleet has no index to publish under, and publishing
-///   one anyway would collide with a live workspace's cell — a page flying to
+///   one anyway would collide with a live worktree's cell — a page flying to
 ///   a card that names a different worktree on a different machine.
 /// - **It is never `isCurrent`.** The amber outline means "you are here", and
 ///   you are not.
@@ -434,7 +434,7 @@ private struct ShellOverviewCard: View {
 ///   names is on a machine this app has no connection to — so the tap goes to
 ///   `onOpen`, which crosses runners and says so first.
 private struct ShellElsewhereCard: View {
-    let workspace: ShellWorkspace
+    let worktree: ShellWorktree
     /// The same cell width the live cards get. A cached runner's section is
     /// in the same grid, and a card that kept the design's 168 while its
     /// neighbours stretched would be the only ragged column on the screen.
@@ -443,15 +443,15 @@ private struct ShellElsewhereCard: View {
 
     var body: some View {
         Button(action: onOpen) {
-            ShellCardFace(workspace: workspace, isCurrent: false, width: width)
+            ShellCardFace(worktree: worktree, isCurrent: false, width: width)
         }
         .buttonStyle(ShellCardStyle())
         .dynamicTypeSize(...DynamicTypeSize.large)
-        .accessibilityIdentifier("shell-elsewhere-\(workspace.id)")
+        .accessibilityIdentifier("shell-elsewhere-\(worktree.id)")
         // Named with its runner, because that is the whole of what makes this
         // card different from the one above it and a label reading only the
         // branch would be two cards with one name.
-        .accessibilityLabel("\(workspace.name), on \(workspace.server ?? "another runner")")
+        .accessibilityLabel("\(worktree.name), on \(worktree.server ?? "another runner")")
     }
 }
 
@@ -543,17 +543,17 @@ struct ShellHeaderAction: Identifiable {
 ///
 /// One value rather than six parameters on `ShellRootView`, all of which reach
 /// exactly one view: this one. None of it is part of the fleet — see
-/// `ShellServerGroup` on why a workspace with no connection behind it must
-/// never be in `ShellFleet.workspaces` — and all of it defaults to nothing, so
+/// `ShellServerGroup` on why a worktree with no connection behind it must
+/// never be in `ShellFleet.worktrees` — and all of it defaults to nothing, so
 /// a fixture that names no runners draws a grid of one unlabeled section.
 struct ShellOverviewRunners {
     /// The runners this app is connected to, in the order the runner list is
     /// in. Each one is a section, and the cards in it are the fleet's
-    /// workspaces whose `runner` is that runner's id.
+    /// worktrees whose `runner` is that runner's id.
     var live: [ShellRunnerLabel] = []
     /// Each live runner's Board rows, one per repository with a board — see
     /// `RunnerBoards.rows`, which decides them. Drawn under the runner's
-    /// heading and above its workspaces, where the Mac's sidebar draws its
+    /// heading and above its worktrees, where the Mac's sidebar draws its
     /// Board row above a repository's.
     var boards: (ShellRunnerLabel) -> [RunnerBoardRow] = { _ in [] }
     var onOpenBoard: (ShellRunnerLabel, RunnerBoardRow) -> Void = { _, _ in }
@@ -568,7 +568,7 @@ struct ShellOverviewRunners {
     ///
     /// Awaited, and the grid draws the drop until it returns — see
     /// `ShellPendingOrders`. Whoever supplies this must have the fleet
-    /// re-read by the time it returns, which `Connection.reorderWorkspaces`
+    /// re-read by the time it returns, which `Connection.reorderWorktrees`
     /// does.
     var onReorder: (ShellReorderRequest) async -> Void = { _ in }
     /// Adding a runner, or another device: the one thing the old runner menu
@@ -588,7 +588,7 @@ struct ShellOverviewRunners {
 struct ShellOverview<Actions: View, Trouble: View>: View {
     let fleet: ShellFleet
     let current: Int
-    /// Whether the current workspace's cell is a hole rather than a card,
+    /// Whether the current worktree's cell is a hole rather than a card,
     /// because its page is in the air between the screen and that cell.
     let currentIsEmpty: Bool
     /// Whether this is the DESTINATION rather than something a lift is
@@ -644,16 +644,16 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     let onOpen: (Int) -> Void
     /// A card on another runner, tapped. The grid does not know what crossing
     /// costs; `ShellScreen` does, and it is the one that asks.
-    var onCross: (ShellServerGroup, ShellWorkspace) -> Void = { _, _ in }
+    var onCross: (ShellServerGroup, ShellWorktree) -> Void = { _, _ in }
     /// A card's menu, spent. Both default to nothing so the grid still stands
     /// on `ShellHarness`'s canned fleet, where there is no runner to tell —
     /// the same seam `actions` is, for the same reason.
     ///
-    /// The workspace and not its index: an index is a position in a fleet this
+    /// The worktree and not its index: an index is a position in a fleet this
     /// view is grouping and filtering, and the caller resolves these against a
     /// `Connection` that has moved on at least once since the grid was built.
-    var onToggleHidden: (ShellWorkspace) -> Void = { _ in }
-    var onRemoveWorktree: (ShellWorkspace) -> Void = { _ in }
+    var onToggleHidden: (ShellWorktree) -> Void = { _ in }
+    var onRemoveWorktree: (ShellWorktree) -> Void = { _ in }
     let onDismiss: () -> Void
     /// How far the pull-down out of the grid has come, in points, on every
     /// frame of it — and never called at all for a drag the gate below turned
@@ -691,10 +691,10 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     /// any.
     ///
     /// **Why this screen and not some other.** The overview IS the fleet
-    /// screen: it lists every workspace on every runner, a section per runner
+    /// screen: it lists every worktree on every runner, a section per runner
     /// in the order that runner keeps, with a search field and a real
     /// navigation bar. That is what the
-    /// pushed workspace list was, and the toolbar it had — a sparkle for
+    /// pushed worktree list was, and the toolbar it had — a sparkle for
     /// "describe it", a plus for "fill in the form" — was on that screen
     /// because it was the one place work could be started from. It still is.
     @ViewBuilder var actions: () -> Actions
@@ -712,7 +712,7 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     /// through forty cards finishes at the top with a large downward
     /// translation behind it — which is character for character the same
     /// release a deliberate pull-down produces — so browsing the grid threw
-    /// you back onto the workspace you came from, with nothing about the
+    /// you back onto the worktree you came from, with nothing about the
     /// gesture to say why.
     ///
     /// Both halves are still required: it must have begun at the top AND still
@@ -750,12 +750,12 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
 
     /// The worktrees the runners have been told to stop showing, as cards.
     ///
-    /// Identified by workspace id, like a section's cards, rather than by
+    /// Identified by worktree id, like a section's cards, rather than by
     /// index — an index names a different worktree the moment a poll inserts
     /// one above it.
     private var hidden: [ShellCard] {
         fleet.hiddenOrder(matching: search).map {
-            ShellCard(id: fleet.workspaces[$0].id, index: $0)
+            ShellCard(id: fleet.worktrees[$0].id, index: $0)
         }
     }
 
@@ -780,8 +780,8 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
             //
             // Without one this view is transparent, so the page and the bar
             // behind it — which recede to 0.2 and 0.1, not to nothing — show
-            // THROUGH the cards as legible text: a workspace name ghosted
-            // across a card that names a different workspace. The prototype
+            // THROUGH the cards as legible text: a worktree name ghosted
+            // across a card that names a different worktree. The prototype
             // avoids it by being 94% opaque over the app's ground, and nets
             // about a percent of bleed; glass alone nets far more.
             //
@@ -831,7 +831,7 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
                 // cards are what the page is flying INTO, so the destination
                 // would jump the moment the chrome resolved. An empty string
                 // changes nothing but the glyphs.
-                .navigationTitle(chrome ? "\(fleet.workspaces.count) Workspaces" : "")
+                .navigationTitle(chrome ? "\(fleet.worktrees.count) Worktrees" : "")
                 .navigationBarTitleDisplayMode(.large)
                 .toolbar {
                     // Opposite `Done`, which on this platform is the leading
@@ -921,7 +921,7 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     ///
     /// Always showing when it shows at all, and NOT `.searchToolbarBehavior(
     /// .minimize)`. Minimizing collapses the field to a glyph until it is
-    /// tapped, and this screen exists to answer "where is that workspace" at
+    /// tapped, and this screen exists to answer "where is that worktree" at
     /// forty of them: a search field you have to find first is one you have to
     /// remember is there.
     ///
@@ -951,16 +951,16 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     /// shown cards and the hidden ones: hiding changes where a card is drawn,
     /// not what it is, and two card views would be two things to keep in step.
     private func liveCard(_ index: Int, width: CGFloat) -> some View {
-        let workspace = fleet.workspaces[index]
+        let worktree = fleet.worktrees[index]
         return ShellOverviewCard(
-            workspace: workspace,
+            worktree: worktree,
             index: index,
             isCurrent: index == current,
             width: width,
             isEmpty: index == current && currentIsEmpty,
             onOpen: { onOpen(index) },
-            onToggleHidden: { onToggleHidden(workspace) },
-            onRemoveWorktree: { onRemoveWorktree(workspace) })
+            onToggleHidden: { onToggleHidden(worktree) },
+            onRemoveWorktree: { onRemoveWorktree(worktree) })
     }
 
     /// A section's cards, reorderable where the section allows it.
@@ -1013,7 +1013,7 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     /// Left-aligned across the whole grid rather than sitting over one column,
     /// and not pinned. A pinned header would sit over the cards as they scroll
     /// under it — which is right in a `List` of rows and wrong here, because
-    /// the thing it would cover is the amber outline that says which workspace
+    /// the thing it would cover is the amber outline that says which worktree
     /// you are in.
     ///
     /// `runner` is the runner's id, and it is what the accessibility
@@ -1023,7 +1023,7 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     /// a UI test asking for one of them whichever the query found first.
     ///
     /// `boards` are the runner's Board rows, drawn under its name and above its
-    /// cards — empty during a search, which is a search for a workspace. They
+    /// cards — empty during a search, which is a search for a worktree. They
     /// are chrome like the menu: faded and disabled while a lift is only
     /// revealing the grid, never added or removed by it.
     private func header(
@@ -1157,11 +1157,11 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, PaneMetrics.card)
         .accessibilityIdentifier("shell-hidden-section")
-        // "Hidden Workspaces" and not "Show Hidden Workspaces": the control is
+        // "Hidden Worktrees" and not "Show Hidden Worktrees": the control is
         // a disclosure, so what it does depends on which way it is, and a
         // label that named one direction would be wrong half the time. The
         // count is the value, which is what VoiceOver reads after the name.
-        .accessibilityLabel("Hidden Workspaces")
+        .accessibilityLabel("Hidden Worktrees")
         .accessibilityValue("\(hidden.count)")
     }
 
@@ -1306,12 +1306,12 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
                     ForEach(groups, id: \.elsewhereSectionID) { group in
                         Section {
                             ForEach(group.order(matching: search), id: \.self) { index in
-                                let workspace = group.workspaces[index]
+                                let worktree = group.worktrees[index]
                                 ShellElsewhereCard(
-                                    workspace: workspace,
+                                    worktree: worktree,
                                     width: cardWidth,
-                                    onOpen: { onCross(group, workspace) })
-                                    .id("\(group.id)/\(workspace.id)")
+                                    onOpen: { onCross(group, worktree) })
+                                    .id("\(group.id)/\(worktree.id)")
                             }
                         } header: {
                             // No drag here, and nothing that looks like one:
@@ -1388,7 +1388,7 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
                 // a large downward translation behind it, character for
                 // character the same release a deliberate pull-down produces,
                 // and reading `atTop` at the release alone is what threw the
-                // owner back onto the workspace they came from. Making the
+                // owner back onto the worktree they came from. Making the
                 // gesture continuous does not soften that — it sharpens the
                 // cost of getting it wrong, because now a scroll that was
                 // wrongly read would not merely dismiss at the end, it would

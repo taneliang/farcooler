@@ -53,7 +53,7 @@ class TaskBoardTest {
            "created_at": 500, "updated_at": 900, "intent": "why",
            "acceptance": [{"id": "a1", "text": "one", "met": true},
                           {"id": "a2", "text": "two", "met": false}],
-           "constraints": [], "labels": ["ios"], "workspace_id": "w1"},
+           "constraints": [], "labels": ["ios"], "worktree_id": "w1"},
           {"id": "t2", "key": "-20", "title": "Phones", "status": "in_progress",
            "status_since": 2000, "created_at": 0, "updated_at": 0,
            "acceptance": [], "labels": []},
@@ -71,7 +71,7 @@ class TaskBoardTest {
         assertEquals(1000L, first.statusSince)
         assertEquals("why", first.intent)
         assertEquals(listOf("ios"), first.labels)
-        assertEquals("w1", first.workspaceId)
+        assertEquals("w1", first.worktreeId)
         assertEquals(listOf(true, false), first.acceptance.map { it.met })
         assertEquals("two", first.acceptance[1].text)
         assertEquals(500L, first.createdAt)
@@ -469,12 +469,12 @@ class TaskBoardTest {
     }
 
     @Test
-    fun anAgentLandsOnItsWorkspaceOrNowhereIfItsPaneHasClosed() {
-        val workspaces = listOf(
-            Workspace(id = "w1", task = "one", terminals = listOf(pane(id = "t1"))),
-            Workspace(id = "w2", task = "two", terminals = listOf(pane(id = "t2"))),
+    fun anAgentLandsOnItsWorktreeOrNowhereIfItsPaneHasClosed() {
+        val worktrees = listOf(
+            Worktree(id = "w1", task = "one", terminals = listOf(pane(id = "t1"))),
+            Worktree(id = "w2", task = "two", terminals = listOf(pane(id = "t2"))),
         )
-        assertEquals("w2", landingWorkspace("t2", workspaces))
-        assertNull(landingWorkspace("gone", workspaces))
+        assertEquals("w2", landingWorktree("t2", worktrees))
+        assertNull(landingWorktree("gone", worktrees))
     }
 }

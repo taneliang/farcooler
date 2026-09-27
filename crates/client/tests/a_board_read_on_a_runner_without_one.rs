@@ -39,7 +39,7 @@ async fn an_old_runner(socket: &std::path::Path) -> Arc<AtomicUsize> {
                 max_control_envelope_bytes: farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES as u32,
                 max_terminal_payload_bytes: farcooler_protocol::MAX_TERMINAL_PAYLOAD_BYTES as u32,
                 capabilities: vec![
-                    farcooler_protocol::capability::WORKSPACES.to_string(),
+                    farcooler_protocol::capability::WORKTREES.to_string(),
                     farcooler_protocol::capability::TERMINALS.to_string(),
                 ],
                 ..Default::default()

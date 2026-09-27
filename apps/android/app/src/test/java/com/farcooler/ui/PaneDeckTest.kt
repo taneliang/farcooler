@@ -7,7 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Which of a workspace's tabs are alive, and which one goes when there are too
+ * Which of a worktree's tabs are alive, and which one goes when there are too
  * many.
  *
  * The half of the pane-lifetime work that a JVM can answer. What is pinned here
@@ -168,11 +168,11 @@ class PaneDeckTest {
      * decision with an argument behind it:
      *
      *   - THREE is what "the agents I am working with" means in one worktree,
-     *     the same answer `AGENTS_PER_WORKSPACE` reached independently.
+     *     the same answer `AGENTS_PER_WORKTREE` reached independently.
      *   - TWO more are the shell's track, which draws the pane you are on with
      *     a real neighbour either side — that is what makes an incoming
      *     terminal a terminal rather than a placeholder that appears on commit
-     *     — and either neighbour can sit in another workspace.
+     *     — and either neighbour can sit in another worktree.
      *
      * If this fails, the limit moved. That is allowed, and `PaneDeck`'s comment
      * says what evidence should move it (`REASON_LOW_MEMORY` in `ProcessExit`'s
@@ -249,7 +249,7 @@ class PaneDeckTest {
     }
 
     /**
-     * A poll that briefly answers nothing must not take the workspace with it.
+     * A poll that briefly answers nothing must not take the worktree with it.
      *
      * A reconnect or a runner mid-restart returns an empty fleet for a moment,
      * and unmounting every pane on that evidence would throw away exactly the
@@ -264,7 +264,7 @@ class PaneDeckTest {
 
     /** Changes is the floor: a worktree with no panes left still has a diff. */
     @Test
-    fun aWorkspaceThatLosesEveryPaneFallsToChanges() {
+    fun aWorktreeThatLosesEveryPaneFallsToChanges() {
         var deck = PaneDeck.opening(tab("a")).select(tab("b"))
         deck = deck.prune(terminals("somebody-elses-pane"))
 
@@ -304,7 +304,7 @@ class PaneDeckTest {
      * `c37f487` recorded that the composer's draft was keyed to nothing and so
      * was shared across every pane in the fleet, and said it was waiting on this
      * phase. The fix is that the composable is per pane and that each pane's
-     * `rememberSaveable` state is bucketed under this string by the workspace
+     * `rememberSaveable` state is bucketed under this string by the worktree
      * screen's `SaveableStateHolder`. So the whole guarantee reduces to these
      * ids being distinct — including against the one string that is not a
      * terminal id at all, which is exactly where a collision would be silent.

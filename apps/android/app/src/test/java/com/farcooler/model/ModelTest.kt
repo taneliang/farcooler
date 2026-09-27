@@ -83,9 +83,9 @@ class ModelTest {
 
     @Test
     fun identicalSiblingsAreNumberedAndUniqueOnesAreNot() {
-        // Two `claude` panes in one workspace are genuinely alike; a lone
+        // Two `claude` panes in one worktree are genuinely alike; a lone
         // `shell` numbered "1" answers a question nobody asked.
-        val workspace = Workspace(
+        val worktree = Worktree(
             id = "w",
             terminals = listOf(
                 terminal(id = "a", preset = "claude"),
@@ -93,7 +93,7 @@ class ModelTest {
                 terminal(id = "c", preset = "zsh"),
             ),
         )
-        val ordinals = workspace.ordinals()
+        val ordinals = worktree.ordinals()
         assertEquals(1, ordinals["a"])
         assertEquals(2, ordinals["b"])
         assertNull(ordinals["c"])
@@ -123,8 +123,8 @@ class ModelTest {
         // An agent waiting on you outranks everything else, because that is the
         // whole reason to have opened the app.
         val fleet = Fleet(
-            workspaces = listOf(
-                Workspace(
+            worktrees = listOf(
+                Worktree(
                     id = "w",
                     terminals = listOf(
                         terminal(id = "running", state = "running"),
@@ -139,8 +139,8 @@ class ModelTest {
     @Test
     fun aRunningTerminalBeatsOneThatExited() {
         val fleet = Fleet(
-            workspaces = listOf(
-                Workspace(
+            worktrees = listOf(
+                Worktree(
                     id = "w",
                     terminals = listOf(
                         terminal(id = "dead", state = "exited"),
@@ -154,8 +154,8 @@ class ModelTest {
 
     @Test
     fun aHostWithNoTerminalsHasNothingToLandOn() {
-        // Which is what sends the app to its workspace list instead.
-        assertNull(Fleet(workspaces = listOf(Workspace(id = "w"))).landingTerminal)
+        // Which is what sends the app to its worktree list instead.
+        assertNull(Fleet(worktrees = listOf(Worktree(id = "w"))).landingTerminal)
     }
 
     @Test

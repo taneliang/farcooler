@@ -40,7 +40,7 @@ struct ChangesPane: View {
 
     /// The agent panes in this worktree a review note can be sent to.
     ///
-    /// Handed in as values by `TileView`, which holds the live `Workspace`.
+    /// Handed in as values by `TileView`, which holds the live `Worktree`.
     /// This pane's store was built against the worktree as it looked when the
     /// pane opened, so asking IT would offer agents that have since exited and
     /// miss the one started five minutes ago.
@@ -98,10 +98,10 @@ struct ChangesPane: View {
             }
         }
         .background(WorkspaceStyle.document)
-        .task(id: changes.workspace.id) { await changes.loadIfNeeded() }
+        .task(id: changes.worktree.id) { await changes.loadIfNeeded() }
         // Cancelled with the view, which is what keeps this honest: the poll
         // exists only while somebody is reading the diff.
-        .task(id: changes.workspace.id) { await changes.follow() }
+        .task(id: changes.worktree.id) { await changes.follow() }
         .onCommand { command in
             guard isFocused else { return }
             switch command {
@@ -139,7 +139,7 @@ struct ChangesPane: View {
     private var problem: some View {
         let old = changes.client.changesSupported == false
         return VStack(alignment: .leading, spacing: 3) {
-            Text(old ? "This runner can’t show changes yet" : "Couldn’t read this workspace")
+            Text(old ? "This runner can’t show changes yet" : "Couldn’t read this worktree")
                 .font(WorkspaceStyle.paneTitle)
             Text(
                 old

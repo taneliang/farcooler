@@ -142,9 +142,9 @@ def main():
         # Into a new lane, or a named one that isn't the main checkout, where
         # the manager's own pane is the live agent (the world's only lane).
         busy = [c for c in dispatches
-                if has(c, "--workspace", "main") or has(c, "--workspace", "00000001")]
+                if has(c, "--worktree", "main") or has(c, "--worktree", "00000001")]
         lane = [c for c in dispatches
-                if (has(c, "--new") and has(c, "--branch")) or has(c, "--workspace")]
+                if (has(c, "--new") and has(c, "--branch")) or has(c, "--worktree")]
         check("S10 into a lane with no live agent", bool(lane) and not busy, json.dumps(dispatches))
         check("S10 no file in the repository changed", not charter_changed_only(), status)
         if reply is None:

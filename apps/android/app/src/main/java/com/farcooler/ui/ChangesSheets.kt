@@ -95,7 +95,7 @@ import kotlinx.serialization.json.Json
 // ## What these are, as objects
 //
 // `ModalBottomSheet`, which is this app's own shape for "pick one of these and
-// come straight back" — `RunnerEditorSheet`, `QuickTaskSheet`, `NewWorkspaceSheet`
+// come straight back" — `RunnerEditorSheet`, `QuickTaskSheet`, `NewWorktreeSheet`
 // and `NewTerminalSheet` are all one. iOS reaches for a `NavigationStack` in a
 // sheet with Cancel in the leading slot; the Android equivalent of that shape is
 // a bottom sheet, which also puts the content where the thumb already is rather
@@ -1021,7 +1021,7 @@ private fun AgentAction(
  * exactly where they would otherwise be told apart by nothing.
  *
  * It needs the REPOSITORY rather than the worktree, which is the daemon's own
- * shape. `Workspace.repository` is nullable, because a fleet from an older
+ * shape. `Worktree.repository` is nullable, because a fleet from an older
  * runner never carried it — so this says so rather than showing an empty list,
  * which would be a claim that the repository has no branches.
  */

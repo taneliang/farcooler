@@ -35,7 +35,7 @@ async fn eventually<T>(mut f: impl FnMut() -> Option<T>) -> Option<T> {
     None
 }
 
-/// A store holding one workspace whose worktree is `worktree`, and one pane
+/// A store holding one worktree whose directory is `worktree`, and one pane
 /// per `(command_preset, agent_session_id)` given.
 ///
 /// Store rows rather than a live `Service`: this file is about the socket and
@@ -56,7 +56,7 @@ fn store_with_intents(
     let host = Uuid::now_v7();
     let root = store.create_repository_root(host, "/repos/hooks", 1_000).unwrap();
     let repo = store.create_repository(host, root.id, "repo", "/repos/hooks/.git", "").unwrap();
-    let ws = store.create_workspace(repo.id, "feature/hooks", worktree, false).unwrap();
+    let ws = store.create_worktree(repo.id, "feature/hooks", worktree, false).unwrap();
 
     let mut ids = Vec::new();
     for (preset, session, intent) in panes {
@@ -142,7 +142,7 @@ fn confirm(store: &Store, id: Uuid) {
 fn live_pane(terminal_id: Uuid) -> TaggedPane {
     TaggedPane {
         daemon_id: Uuid::now_v7(),
-        workspace_id: Uuid::now_v7(),
+        worktree_id: Uuid::now_v7(),
         terminal_id,
         schema_version: 1,
         pane_id: "%1".into(),
@@ -472,8 +472,8 @@ async fn a_worktree_reached_through_a_symlink_is_still_the_same_worktree() {
 
 /// The worktree is what the announcement is FOR.
 ///
-/// Every other test in this file has one workspace in the store, and with one
-/// workspace a fallback that never looked at the worktree at all still binds
+/// Every other test in this file has one worktree in the store, and with one
+/// worktree a fallback that never looked at the worktree at all still binds
 /// correctly — it would go wrong only on a runner with a second one, which is
 /// every real runner. Two codex panes, one in each worktree, and only the
 /// worktree tells them apart.
@@ -486,7 +486,7 @@ async fn an_announcement_binds_inside_its_own_worktree_and_not_the_one_next_door
 
     let mut panes = Vec::new();
     for worktree in ["/wt/left", "/wt/right"] {
-        let ws = store.create_workspace(repo.id, "branch", worktree, false).unwrap();
+        let ws = store.create_worktree(repo.id, "branch", worktree, false).unwrap();
         let term = store
             .create_terminal(ws.id, "pane", "codex", TerminalIntent::Running, 80, 24)
             .unwrap();
@@ -504,26 +504,26 @@ async fn an_announcement_binds_inside_its_own_worktree_and_not_the_one_next_door
     }
 }
 
-/// Hiding a workspace hides a card. It does not stop the panes inside it.
+/// Hiding a worktree hides a card. It does not stop the panes inside it.
 ///
-/// `hide_workspace` only sets a flag and never touches git or tmux, so an
+/// `hide_worktree` only sets a flag and never touches git or tmux, so an
 /// agent in a hidden worktree keeps running and keeps firing hooks. Reading
-/// the workspaces through `list_all_workspaces` — which filters `hidden = 0`
+/// the worktrees through `list_all_worktrees` — which filters `hidden = 0`
 /// and says in its own doc that it is for summaries — would leave every codex
 /// and cursor session in a hidden worktree permanently unattached while the
-/// claude fast path, which never consults a workspace at all, kept working.
+/// claude fast path, which never consults a worktree at all, kept working.
 /// Nobody could guess that asymmetry from the symptom.
 #[tokio::test]
-async fn a_hidden_workspace_still_holds_panes_an_announcement_must_reach() {
+async fn a_hidden_worktree_still_holds_panes_an_announcement_must_reach() {
     let store = Store::open_in_memory().expect("an in-memory store");
     let host = Uuid::now_v7();
     let root = store.create_repository_root(host, "/repos/hooks", 1_000).unwrap();
     let repo = store.create_repository(host, root.id, "repo", "/repos/hooks/.git", "").unwrap();
-    let ws = store.create_workspace(repo.id, "branch", "/wt/hidden", false).unwrap();
+    let ws = store.create_worktree(repo.id, "branch", "/wt/hidden", false).unwrap();
     let term =
         store.create_terminal(ws.id, "pane", "codex", TerminalIntent::Running, 80, 24).unwrap();
-    let hidden = store.set_workspace_flags(ws.id, ws.resource_version, true, false).unwrap();
-    assert!(hidden.hidden, "the fixture is only interesting if the workspace really is hidden");
+    let hidden = store.set_worktree_flags(ws.id, ws.resource_version, true, false).unwrap();
+    assert!(hidden.hidden, "the fixture is only interesting if the worktree really is hidden");
 
     let ingress = ingress_claiming(Arc::new(store), &[term.id]);
     let f = facts(Agent::Codex, &payload(Agent::Codex, "/wt/hidden", "brand-new"));

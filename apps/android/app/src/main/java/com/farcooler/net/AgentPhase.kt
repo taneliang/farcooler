@@ -135,7 +135,7 @@ sealed interface Poll {
  * clock. This rides [AgentStream]'s existing 700 ms poll — the very thing it is
  * describing — at the cost of being at most one poll late, which nobody can
  * see, and at a saving of one coroutine per mounted pane. Android needs that
- * saving more than iOS does: [com.farcooler.ui.WorkspaceScreen] keeps several
+ * saving more than iOS does: [com.farcooler.ui.WorktreeScreen] keeps several
  * panes mounted at once (`e23718c`), so a timer here would be a timer per tab.
  */
 class AgentPhases(

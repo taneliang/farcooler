@@ -14,9 +14,9 @@ import Testing
 /// goes nowhere and says nothing. Neither is visible by looking at the pane.
 @MainActor
 struct ReviewTargetsTests {
-    private func workspace(_ terminals: String) throws -> Workspace {
+    private func worktree(_ terminals: String) throws -> Worktree {
         try JSONDecoder().decode(
-            Workspace.self,
+            Worktree.self,
             from: Data(
                 """
                 {"id":"w1","short":"w1","task":"t","branch":"feature",
@@ -39,7 +39,7 @@ struct ReviewTargetsTests {
     /// A claude the reader has flipped back to its raw terminal is still an
     /// agent holding an ACP session, and `terminal agent-prompt` reaches it.
     @Test func aChatFlippedBackToItsTerminalIsStillATarget() throws {
-        let ws = try workspace(
+        let ws = try worktree(
             terminal(id: "t1", short: "%1", preset: "claude", chatCapable: true))
         let targets = ws.reviewAgentTargets()
         #expect(targets.count == 1)
@@ -50,7 +50,7 @@ struct ReviewTargetsTests {
     }
 
     @Test func aPlainShellIsNotATarget() throws {
-        let ws = try workspace(terminal(id: "t1", short: "%1", preset: "zsh"))
+        let ws = try worktree(terminal(id: "t1", short: "%1", preset: "zsh"))
         #expect(ws.reviewAgentTargets().isEmpty)
     }
 
@@ -59,7 +59,7 @@ struct ReviewTargetsTests {
     /// switch it — so it can never hold an agent, and offering it would be a
     /// note sent into a diff.
     @Test func theDiffPaneIsNeverATarget() throws {
-        let ws = try workspace(
+        let ws = try worktree(
             terminal(
                 id: "t1", short: "%1", preset: "farcooler", title: "Changes",
                 paneMode: "changes", chatCapable: true))
@@ -70,7 +70,7 @@ struct ReviewTargetsTests {
     /// keeps its name — an ordinal exists to disambiguate, and a title already
     /// has.
     @Test func identicalAgentsAreNumberedAndNamedOnesAreNot() throws {
-        let ws = try workspace(
+        let ws = try worktree(
             [
                 terminal(id: "t1", short: "%1", preset: "claude", paneMode: "agent"),
                 terminal(id: "t2", short: "%2", preset: "claude", paneMode: "agent"),

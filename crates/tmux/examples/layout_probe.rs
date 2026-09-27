@@ -33,7 +33,7 @@ async fn main() {
     for preset in [Preset::EvenHorizontal, Preset::MainVertical, Preset::Tiled] {
         server.select_preset(&win.window_id, preset).await.expect("preset");
         let panes = server.list_tagged_panes().await.expect("list");
-        let mut mine: Vec<_> = panes.iter().filter(|p| p.workspace_id == ws).collect();
+        let mut mine: Vec<_> = panes.iter().filter(|p| p.worktree_id == ws).collect();
         mine.sort_by_key(|p| (p.top, p.left));
         println!("\n{}:", preset.as_str());
         for p in &mine {
@@ -79,7 +79,7 @@ async fn main() {
     assert_eq!(layouts.len(), 1);
 
     let panes = server.list_tagged_panes().await.expect("list");
-    let mut mine: Vec<_> = panes.iter().filter(|p| p.workspace_id == ws).collect();
+    let mut mine: Vec<_> = panes.iter().filter(|p| p.worktree_id == ws).collect();
     mine.sort_by_key(|p| p.left);
     println!("\nfinal order left-to-right:");
     for p in &mine {

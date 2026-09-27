@@ -42,7 +42,7 @@ class NeedsYouTest {
         {
           "items": [
             {
-              "workspace_id": "8f14e45f-ce5b-4a5e-9c2b-000000000001",
+              "worktree_id": "8f14e45f-ce5b-4a5e-9c2b-000000000001",
               "short": "8f14e4",
               "task_name": "Widen the model",
               "branch": "feat/widen-the-model",
@@ -60,7 +60,7 @@ class NeedsYouTest {
         val reply = json.decodeFromString(InboxReply.serializer(), payload)
         assertEquals(1, reply.items.size)
         val row = reply.items[0]
-        assertEquals("8f14e45f-ce5b-4a5e-9c2b-000000000001", row.workspaceId)
+        assertEquals("8f14e45f-ce5b-4a5e-9c2b-000000000001", row.worktreeId)
         assertTrue("changed_since_reviewed must survive the snake_case", row.changedSinceReviewed)
         assertEquals(82, row.insertions)
         assertEquals(13, row.deletions)
@@ -77,7 +77,7 @@ class NeedsYouTest {
     fun `a row with only an id decodes to a clean empty one`() {
         val reply = json.decodeFromString(
             InboxReply.serializer(),
-            """{"items":[{"workspace_id":"w"}]}""",
+            """{"items":[{"worktree_id":"w"}]}""",
         )
         val row = reply.items[0]
         assertFalse(row.changedSinceReviewed)
@@ -91,7 +91,7 @@ class NeedsYouTest {
     fun `an unknown key is ignored rather than fatal`() {
         val reply = json.decodeFromString(
             InboxReply.serializer(),
-            """{"items":[{"workspace_id":"w","insertions":3,"conflicts":7}],"nudges":1}""",
+            """{"items":[{"worktree_id":"w","insertions":3,"conflicts":7}],"nudges":1}""",
         )
         assertEquals(3, reply.items[0].insertions)
     }
@@ -111,20 +111,20 @@ class NeedsYouTest {
     // ---- what gets a section ----
 
     @Test
-    fun `only agents that want attention put a workspace on the front door`() {
+    fun `only agents that want attention put a worktree on the front door`() {
         val sections = needsYou(
             listOf(
-                input("a", workspace("w1", terminals = listOf(agent("t1", "working", 250_000_000)))),
-                input("a", workspace("w2", terminals = listOf(agent("t2", "idle", 350_000_000)))),
-                input("a", workspace("w3", terminals = listOf(agent("t3", "blocked", 99_999_399)))),
+                input("a", worktree("w1", terminals = listOf(agent("t1", "working", 250_000_000)))),
+                input("a", worktree("w2", terminals = listOf(agent("t2", "idle", 350_000_000)))),
+                input("a", worktree("w3", terminals = listOf(agent("t3", "blocked", 99_999_399)))),
             )
         )
-        assertEquals(listOf("w3"), sections.map { it.workspace.id })
+        assertEquals(listOf("w3"), sections.map { it.worktree.id })
     }
 
     /**
      * The exact case `e480559` added on iOS: an agent that finished and touched
-     * no files. Nothing else brings its workspace here, and the owner's words
+     * no files. Nothing else brings its worktree here, and the owner's words
      * are that an answer arriving is the thing this screen most needs to say.
      */
     @Test
@@ -133,7 +133,7 @@ class NeedsYouTest {
             listOf(
                 input(
                     "a",
-                    workspace("w1", terminals = listOf(agent("t1", "done", 199_999_989))),
+                    worktree("w1", terminals = listOf(agent("t1", "done", 199_999_989))),
                     counts = InboxRow("w1", changedSinceReviewed = false),
                 )
             )
@@ -144,12 +144,12 @@ class NeedsYouTest {
     }
 
     @Test
-    fun `hidden workspaces are not on the front door however loudly they ask`() {
+    fun `hidden worktrees are not on the front door however loudly they ask`() {
         val sections = needsYou(
             listOf(
                 input(
                     "a",
-                    workspace(
+                    worktree(
                         "w1",
                         state = "hidden",
                         terminals = listOf(agent("t1", "blocked", 99_999_399)),
@@ -167,7 +167,7 @@ class NeedsYouTest {
      */
     @Test
     fun `an unread diff needs both a change and a diff`() {
-        fun only(counts: InboxRow?) = needsYou(listOf(input("a", workspace("w1"), counts)))
+        fun only(counts: InboxRow?) = needsYou(listOf(input("a", worktree("w1"), counts)))
 
         assertEquals(1, only(InboxRow("w1", true, 5, 1)).size)
         assertTrue("reviewed", only(InboxRow("w1", false, 5, 1)).isEmpty())
@@ -184,24 +184,24 @@ class NeedsYouTest {
      * earlier id so that nothing but rank can produce this order.
      */
     @Test
-    fun `blocked outranks done across workspaces, from the hosts rank alone`() {
+    fun `blocked outranks done across worktrees, from the hosts rank alone`() {
         val sections = needsYou(
             listOf(
-                input("a", workspace("aaa", terminals = listOf(agent("t1", "done", 199_999_989)))),
-                input("a", workspace("zzz", terminals = listOf(agent("t2", "blocked", 99_999_939)))),
+                input("a", worktree("aaa", terminals = listOf(agent("t1", "done", 199_999_989)))),
+                input("a", worktree("zzz", terminals = listOf(agent("t2", "blocked", 99_999_939)))),
             )
         )
-        assertEquals(listOf("zzz", "aaa"), sections.map { it.workspace.id })
+        assertEquals(listOf("zzz", "aaa"), sections.map { it.worktree.id })
     }
 
     /** The same rule inside one section, which is the other half of what rank buys. */
     @Test
-    fun `blocked above finished inside one workspace`() {
+    fun `blocked above finished inside one worktree`() {
         val section = needsYou(
             listOf(
                 input(
                     "a",
-                    workspace(
+                    worktree(
                         "w1",
                         terminals = listOf(
                             agent("done-1", "done", 199_999_989),
@@ -216,17 +216,17 @@ class NeedsYouTest {
     }
 
     /**
-     * A workspace is as urgent as its MOST urgent agent. An average or a count
+     * A worktree is as urgent as its MOST urgent agent. An average or a count
      * would let a worktree with six working agents outrank one with a single
      * agent stuck for an hour.
      */
     @Test
-    fun `a workspace ranks by its lowest rank, not by how many agents it has`() {
+    fun `a worktree ranks by its lowest rank, not by how many agents it has`() {
         val sections = needsYou(
             listOf(
                 input(
                     "a",
-                    workspace(
+                    worktree(
                         "many",
                         terminals = listOf(
                             agent("m1", "done", 199_999_900),
@@ -238,11 +238,11 @@ class NeedsYouTest {
                 input(
                     "a",
                     // One agent, blocked for ten minutes.
-                    workspace("stuck", terminals = listOf(agent("s1", "blocked", 99_999_399))),
+                    worktree("stuck", terminals = listOf(agent("s1", "blocked", 99_999_399))),
                 ),
             )
         )
-        assertEquals(listOf("stuck", "many"), sections.map { it.workspace.id })
+        assertEquals(listOf("stuck", "many"), sections.map { it.worktree.id })
     }
 
     /** Oldest first inside a tier, which is what the host's subtraction encodes. */
@@ -252,7 +252,7 @@ class NeedsYouTest {
             listOf(
                 input(
                     "a",
-                    workspace(
+                    worktree(
                         "w1",
                         terminals = listOf(
                             // Blocked one minute.
@@ -278,7 +278,7 @@ class NeedsYouTest {
             listOf(
                 input(
                     "a",
-                    workspace(
+                    worktree(
                         "w1",
                         terminals = listOf(
                             agent("unranked", "blocked", null),
@@ -300,11 +300,11 @@ class NeedsYouTest {
     fun `a finished agent outranks an unread diff`() {
         val sections = needsYou(
             listOf(
-                input("a", workspace("diff"), InboxRow("diff", true, 200, 40)),
-                input("a", workspace("answer", terminals = listOf(agent("t", "done", 199_999_989)))),
+                input("a", worktree("diff"), InboxRow("diff", true, 200, 40)),
+                input("a", worktree("answer", terminals = listOf(agent("t", "done", 199_999_989)))),
             )
         )
-        assertEquals(listOf("answer", "diff"), sections.map { it.workspace.id })
+        assertEquals(listOf("answer", "diff"), sections.map { it.worktree.id })
     }
 
     /** The second tier keeps the order the fleet arrived in, with no rank invented for it. */
@@ -312,11 +312,11 @@ class NeedsYouTest {
     fun `unread diffs keep fleet order`() {
         val sections = needsYou(
             listOf(
-                input("b", workspace("second"), InboxRow("second", true, 1, 1)),
-                input("a", workspace("first"), InboxRow("first", true, 900, 900)),
+                input("b", worktree("second"), InboxRow("second", true, 1, 1)),
+                input("a", worktree("first"), InboxRow("first", true, 900, 900)),
             )
         )
-        assertEquals(listOf("second", "first"), sections.map { it.workspace.id })
+        assertEquals(listOf("second", "first"), sections.map { it.worktree.id })
     }
 
     // ---- across runners ----
@@ -331,8 +331,8 @@ class NeedsYouTest {
     fun `a blocked agent on the second runner outranks a finished one on the first`() {
         val sections = needsYou(
             listOf(
-                input("a", workspace("w-a", terminals = listOf(agent("t-a", "done", 199_999_989)))),
-                input("b", workspace("w-b", terminals = listOf(agent("t-b", "blocked", 99_999_939)))),
+                input("a", worktree("w-a", terminals = listOf(agent("t-a", "done", 199_999_989)))),
+                input("b", worktree("w-b", terminals = listOf(agent("t-b", "blocked", 99_999_939)))),
             )
         )
         assertEquals(listOf("b", "a"), sections.map { it.hostId })
@@ -347,26 +347,26 @@ class NeedsYouTest {
      */
     @Test
     fun `identical ranks on two runners break deterministically and not by input order`() {
-        val a = input("alpha", workspace("w", terminals = listOf(agent("t", "blocked", 99_999_939))))
-        val b = input("beta", workspace("w", terminals = listOf(agent("t", "blocked", 99_999_939))))
+        val a = input("alpha", worktree("w", terminals = listOf(agent("t", "blocked", 99_999_939))))
+        val b = input("beta", worktree("w", terminals = listOf(agent("t", "blocked", 99_999_939))))
 
         assertEquals(listOf("alpha", "beta"), needsYou(listOf(a, b)).map { it.hostId })
         assertEquals(listOf("alpha", "beta"), needsYou(listOf(b, a)).map { it.hostId })
     }
 
     /**
-     * Workspace ids are minted per daemon, so two runners can hold the same one.
+     * Worktree ids are minted per daemon, so two runners can hold the same one.
      * `BackstackTest` pins that the routes stay apart; this pins that the front
      * door's own identity does too, because that string is what a `LazyColumn`
      * keys its items on and a collision there would draw one section for two
      * worktrees.
      */
     @Test
-    fun `two runners sharing a workspace id are two sections with two keys`() {
+    fun `two runners sharing a worktree id are two sections with two keys`() {
         val sections = needsYou(
             listOf(
-                input("a", workspace("shared", terminals = listOf(agent("t", "blocked", 99_999_939)))),
-                input("b", workspace("shared", terminals = listOf(agent("t", "blocked", 99_999_938)))),
+                input("a", worktree("shared", terminals = listOf(agent("t", "blocked", 99_999_939)))),
+                input("b", worktree("shared", terminals = listOf(agent("t", "blocked", 99_999_938)))),
             )
         )
         assertEquals(2, sections.size)
@@ -380,7 +380,7 @@ class NeedsYouTest {
             listOf(
                 input(
                     "host-1",
-                    workspace("w", terminals = listOf(agent("t", "blocked", 99_999_939))),
+                    worktree("w", terminals = listOf(agent("t", "blocked", 99_999_939))),
                     label = "studio",
                 )
             )
@@ -402,7 +402,7 @@ class NeedsYouTest {
             listOf(
                 input(
                     "a",
-                    workspace("w", terminals = listOf(agent("t", "blocked", 99_999_939))),
+                    worktree("w", terminals = listOf(agent("t", "blocked", 99_999_939))),
                     counts,
                 )
             )
@@ -420,7 +420,7 @@ class NeedsYouTest {
             listOf(
                 input(
                     "a",
-                    workspace(
+                    worktree(
                         "w",
                         terminals = listOf(
                             agent("t1", "blocked", 99_999_939, preset = "claude"),
@@ -469,16 +469,16 @@ class NeedsYouTest {
 
     private fun input(
         hostId: String,
-        workspace: Workspace,
+        worktree: Worktree,
         counts: InboxRow? = null,
         label: String = hostId,
-    ) = NeedsYouInput(hostId, label, workspace, counts)
+    ) = NeedsYouInput(hostId, label, worktree, counts)
 
-    private fun workspace(
+    private fun worktree(
         id: String,
         state: String = "",
         terminals: List<Terminal> = emptyList(),
-    ) = Workspace(id = id, task = id, branch = "feat/$id", state = state, terminals = terminals)
+    ) = Worktree(id = id, task = id, branch = "feat/$id", state = state, terminals = terminals)
 
     private fun agent(
         id: String,

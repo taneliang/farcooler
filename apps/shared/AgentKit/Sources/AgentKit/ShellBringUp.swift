@@ -34,7 +34,7 @@ enum ShellOpening: Hashable {
     /// Every runner that is going to answer has, and not one of them has a
     /// worktree. A sentence and the ways out of it — never a spinner, because
     /// nothing is being waited for.
-    case noWorkspaces
+    case noWorktrees
 }
 
 enum ShellBringUp {
@@ -67,16 +67,16 @@ enum ShellBringUp {
     ///   makes this stable: a fleet that empties under a mounted shell does not
     ///   tear the shell down and throw away every pane in it, it leaves an
     ///   overview saying the same sentence.
-    /// - `workspaces`: how many the merge has right now. Non-zero with nothing
+    /// - `worktrees`: how many the merge has right now. Non-zero with nothing
     ///   seated is the single body pass between a fleet arriving and the
     ///   seeding that runs off it, and it is a wait with an end.
     /// - `reports`: one per runner being talked to.
     static func opening(
-        seated: ShellPosition?, workspaces: Int, reports: [Report]
+        seated: ShellPosition?, worktrees: Int, reports: [Report]
     ) -> ShellOpening {
         if let seated { return .pane(seated) }
-        if workspaces > 0 { return .waiting }
-        return reports.contains(.pending) ? .waiting : .noWorkspaces
+        if worktrees > 0 { return .waiting }
+        return reports.contains(.pending) ? .waiting : .noWorktrees
     }
 }
 
@@ -122,7 +122,7 @@ enum ShellCrossingRule {
 /// the interesting half is that there are TWO of them and which is right
 /// depends on whether anything was typed.
 enum ShellEmptyCopy {
-    static let title = "No Workspaces"
+    static let title = "No Worktrees"
     static let symbol = "rectangle.on.rectangle.slash"
 
     /// Nothing matched, versus nothing to match — and they are not the same
@@ -131,7 +131,7 @@ enum ShellEmptyCopy {
     /// empty string.
     static func description(matching search: String) -> String {
         search.isEmpty
-            ? "This runner has no workspaces yet."
-            : "No workspace matches “\(search)”."
+            ? "This runner has no worktrees yet."
+            : "No worktree matches “\(search)”."
     }
 }

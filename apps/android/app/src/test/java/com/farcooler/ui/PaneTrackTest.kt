@@ -3,7 +3,7 @@ package com.farcooler.ui
 import com.farcooler.model.ShellDirection
 import com.farcooler.model.ShellTrack
 import com.farcooler.model.Terminal
-import com.farcooler.model.Workspace
+import com.farcooler.model.Worktree
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -25,10 +25,10 @@ class PaneTrackTest {
     private fun terminal(id: String, changes: Boolean = false) =
         Terminal(id = id, title = id, paneMode = if (changes) "changes" else "agent")
 
-    private fun workspace(vararg terminals: Terminal) =
-        Workspace(id = "w", short = "auth-refactor", terminals = terminals.toList())
+    private fun worktree(vararg terminals: Terminal) =
+        Worktree(id = "w", short = "auth-refactor", terminals = terminals.toList())
 
-    private val fleet = trackFleet(workspace(terminal("t1"), terminal("t2")), "w", "laptop")
+    private val fleet = trackFleet(worktree(terminal("t1"), terminal("t2")), "w", "laptop")
 
     // ---- What the sequence is ----
 
@@ -40,7 +40,7 @@ class PaneTrackTest {
      */
     @Test
     fun theDiffLeadsAndThenThePanesInFleetOrder() {
-        val tabs = fleet.workspaces.single().tabs.map { it.id }
+        val tabs = fleet.worktrees.single().tabs.map { it.id }
         assertEquals(
             listOf(Pane.CHANGES_ID, Pane.Terminal("t1").id, Pane.Terminal("t2").id),
             tabs,
@@ -55,18 +55,18 @@ class PaneTrackTest {
     @Test
     fun aHostSideChangesPaneIsNotASecondTab() {
         val folded = trackFleet(
-            workspace(terminal("t1"), terminal("diff", changes = true)), "w", "laptop")
+            worktree(terminal("t1"), terminal("diff", changes = true)), "w", "laptop")
         assertEquals(
             listOf(Pane.CHANGES_ID, Pane.Terminal("t1").id),
-            folded.workspaces.single().tabs.map { it.id },
+            folded.worktrees.single().tabs.map { it.id },
         )
     }
 
-    /** A workspace the runner has not described yet still has its diff. */
+    /** A worktree the runner has not described yet still has its diff. */
     @Test
     fun theDiffStandsOnItsOwnBeforeTheRunnerAnswers() {
         val empty = trackFleet(null, "w", "laptop")
-        assertEquals(listOf(Pane.CHANGES_ID), empty.workspaces.single().tabs.map { it.id })
+        assertEquals(listOf(Pane.CHANGES_ID), empty.worktrees.single().tabs.map { it.id })
         assertNotNull(empty.position(Pane.CHANGES_ID))
     }
 
@@ -106,7 +106,7 @@ class PaneTrackTest {
     @Test
     fun aMountedPaneThatIsNotANeighbourIsNotDrawn() {
         val wide = trackFleet(
-            workspace(terminal("t1"), terminal("t2"), terminal("t3"), terminal("t4")),
+            worktree(terminal("t1"), terminal("t2"), terminal("t3"), terminal("t4")),
             "w", "laptop",
         )
         val here = wide.position(Pane.Terminal("t1").id)!!
@@ -114,9 +114,9 @@ class PaneTrackTest {
         assertNull(trackSlot(wide, here, Pane.Terminal("t4")))
     }
 
-    /** A pane the workspace no longer has is on no slot rather than on slot 0. */
+    /** A pane the worktree no longer has is on no slot rather than on slot 0. */
     @Test
-    fun aPaneTheWorkspaceHasLostIsOnNoSlot() {
+    fun aPaneTheWorktreeHasLostIsOnNoSlot() {
         val here = fleet.position(Pane.Terminal("t1").id)!!
         assertNull(trackSlot(fleet, here, Pane.Terminal("gone")))
     }
@@ -136,10 +136,10 @@ class PaneTrackTest {
     @Test
     fun walkingTheWholeSequenceNeverAsksForAnEvictedPane() {
         val wide = trackFleet(
-            workspace(terminal("t1"), terminal("t2"), terminal("t3"), terminal("t4")),
+            worktree(terminal("t1"), terminal("t2"), terminal("t3"), terminal("t4")),
             "w", "laptop",
         )
-        val order = wide.workspaces.single().tabs.map { Pane.parse(it.id) }
+        val order = wide.worktrees.single().tabs.map { Pane.parse(it.id) }
 
         var deck = PaneDeck.opening(order.first())
         for (pane in order) {
@@ -181,16 +181,16 @@ class PaneTrackTest {
     }
 
     /**
-     * Within one workspace nothing crosses anything. The flags exist for the day
-     * the fleet handed to the track spans workspaces and runners, and a track
+     * Within one worktree nothing crosses anything. The flags exist for the day
+     * the fleet handed to the track spans worktrees and runners, and a track
      * that reported a crossing inside one worktree would have the UI announcing
      * a move that did not happen.
      */
     @Test
-    fun aSwipeInsideOneWorkspaceCrossesNothing() {
+    fun aSwipeInsideOneWorktreeCrossesNothing() {
         val here = fleet.position(Pane.Terminal("t1").id)!!
         val step = fleet.step(here, ShellDirection.NEXT, ShellTrack.CONTENT)!!
-        assertTrue(!step.crossesWorkspace)
+        assertTrue(!step.crossesWorktree)
         assertTrue(!step.crossesRunner)
     }
 }

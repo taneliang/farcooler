@@ -13,14 +13,14 @@ import Testing
 /// is what keeps this off every branch that has not regenerated anything.
 @MainActor
 struct GeneratedOrderTests {
-    private static let workspaceJSON = """
+    private static let worktreeJSON = """
         {"id":"w1","short":"w1","task":"t","branch":"feature",
         "worktree":"/tmp/w1","state":"ready","terminals":[]}
         """
 
     private func store(_ changeSet: String, scope: DiffScope = .branch) throws -> ChangesStore {
-        let ws = try JSONDecoder().decode(Workspace.self, from: Data(Self.workspaceJSON.utf8))
-        let s = ChangesStore(client: DaemonClient(target: ""), workspace: ws)
+        let ws = try JSONDecoder().decode(Worktree.self, from: Data(Self.worktreeJSON.utf8))
+        let s = ChangesStore(client: DaemonClient(target: ""), worktree: ws)
         s.changeSet = try JSONDecoder().decode(ChangeSet.self, from: Data(changeSet.utf8))
         s.scope = scope
         return s

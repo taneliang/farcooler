@@ -49,7 +49,7 @@ struct BranchList: Decodable {
 /// tracking branch, which is what makes pushing back go where it came from.
 struct ResumeBranch: View {
     /// Every runner's repositories, tagged the same way `FleetStore.repositories`
-    /// tags them — see `QuickCreate.projects` and `NewWorkspaceSheet.repositories`
+    /// tags them — see `QuickCreate.projects` and `NewWorktreeSheet.repositories`
     /// for the same shape and the same reason: this picker is the runner
     /// selector for `resume` now, and a bare `[Repository]` cannot name one.
     let projects: [(host: String, repository: Repository)]
@@ -63,7 +63,7 @@ struct ResumeBranch: View {
     ///
     /// `host` comes from `chosen`, the same picker selection that resolved
     /// `project` — not re-derived by the caller from `project` alone once
-    /// it is stale. `NewWorkspaceSheet.Choice` carries host and repository
+    /// it is stale. `NewWorktreeSheet.Choice` carries host and repository
     /// together for the identical reason: a lookup repeated downstream, from
     /// a bare id, is exactly the shape that goes silently wrong when the
     /// picker's own list has since moved on.
@@ -89,7 +89,7 @@ struct ResumeBranch: View {
     }
 
     /// Whether more than one runner has a repository on offer — same rule
-    /// `QuickCreate` and `NewWorkspaceSheet` follow.
+    /// `QuickCreate` and `NewWorktreeSheet` follow.
     private var multipleHosts: Bool {
         Set(projects.map(\.host)).count > 1
     }

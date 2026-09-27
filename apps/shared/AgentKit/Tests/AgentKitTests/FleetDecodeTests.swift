@@ -12,7 +12,7 @@ import Testing
 /// facts are why `is_main_checkout` could be wrong for as long as the phone had
 /// it: `JSONDecoder` ignores keys nobody declared and leaves an OPTIONAL whose
 /// key never arrived as nil. Not a throw, not a warning, not a log line — a
-/// workspace that answered "no" to "are you the primary checkout?" and got
+/// worktree that answered "no" to "are you the primary checkout?" and got
 /// offered a Remove Worktree button it must never be offered. See `07e75e8`.
 ///
 /// So the spelling is what is tested. The JSON below is transcribed key-for-key
@@ -39,7 +39,7 @@ struct FleetDecodeTests {
     {
       "runtime_healthy": true,
       "live_panes": 4,
-      "workspaces": [
+      "worktrees": [
         {
           "id": "8f14e45f-ce5b-4a5e-9c2b-000000000001",
           "short": "8f14e4",
@@ -109,7 +109,7 @@ struct FleetDecodeTests {
     }
 
     private func terminal() throws -> Terminal {
-        try #require(Self.decodeFleet().workspaces.first?.terminals.first)
+        try #require(Self.decodeFleet().worktrees.first?.terminals.first)
     }
 
     /// The two snake_case keys, which are the ONLY two on this payload.
@@ -123,23 +123,23 @@ struct FleetDecodeTests {
         let fleet = try Self.decodeFleet()
         #expect(fleet.runtimeHealthy)
         #expect(fleet.livePanes == 4)
-        #expect(fleet.workspaces.count == 1)
+        #expect(fleet.worktrees.count == 1)
     }
 
-    @Test func everyWorkspaceFieldOnTheWireLandsOnTheModel() throws {
-        let workspace = try #require(Self.decodeFleet().workspaces.first)
-        #expect(workspace.id == "8f14e45f-ce5b-4a5e-9c2b-000000000001")
-        #expect(workspace.short == "8f14e4")
+    @Test func everyWorktreeFieldOnTheWireLandsOnTheModel() throws {
+        let worktree = try #require(Self.decodeFleet().worktrees.first)
+        #expect(worktree.id == "8f14e45f-ce5b-4a5e-9c2b-000000000001")
+        #expect(worktree.short == "8f14e4")
         // A UUID, not a name. The CLI sends a display name under this key and
         // the Mac reads it as one; see `repository`'s own doc comment.
-        #expect(workspace.repository == "1c383cd3-0b0f-4a63-b8a1-000000000002")
-        #expect(workspace.task == "Widen the model")
-        #expect(workspace.branch == "widen-the-model")
-        #expect(workspace.worktree == "/Users/e/src/overnight-widen")
-        #expect(workspace.state == "worktree_missing")
-        #expect(workspace.worktreeMissing)
-        #expect(!workspace.isHidden)
-        #expect(workspace.terminals.count == 1)
+        #expect(worktree.repository == "1c383cd3-0b0f-4a63-b8a1-000000000002")
+        #expect(worktree.task == "Widen the model")
+        #expect(worktree.branch == "widen-the-model")
+        #expect(worktree.worktree == "/Users/e/src/overnight-widen")
+        #expect(worktree.state == "worktree_missing")
+        #expect(worktree.worktreeMissing)
+        #expect(!worktree.isHidden)
+        #expect(worktree.terminals.count == 1)
     }
 
     /// The bug `07e75e8` fixed, standing as a test.
@@ -149,9 +149,9 @@ struct FleetDecodeTests {
     /// and `isPrimaryCheckout` answers false for the one worktree the phone must
     /// never offer to remove.
     @Test func theRepositorysOwnCheckoutSaysSo() throws {
-        let workspace = try #require(Self.decodeFleet().workspaces.first)
-        #expect(workspace.isMainCheckout == true)
-        #expect(workspace.isPrimaryCheckout)
+        let worktree = try #require(Self.decodeFleet().worktrees.first)
+        #expect(worktree.isMainCheckout == true)
+        #expect(worktree.isPrimaryCheckout)
     }
 
     /// Where the card sits, which is what makes a drag possible at all.
@@ -161,8 +161,8 @@ struct FleetDecodeTests {
     /// client knows not to offer a drag that would spring back on the next
     /// refresh.
     @Test func theRunnersOwnOrderReachesThePhone() throws {
-        let workspace = try #require(Self.decodeFleet().workspaces.first)
-        #expect(workspace.ordinal == 3)
+        let worktree = try #require(Self.decodeFleet().worktrees.first)
+        #expect(worktree.ordinal == 3)
     }
 
     @Test func everyTerminalFieldOnTheWireLandsOnTheModel() throws {
@@ -238,13 +238,13 @@ struct FleetDecodeTests {
     /// The reason every field added after the first release is optional rather
     /// than defaulted: Swift's synthesized `Decodable` throws on a missing key
     /// regardless of any default, so one absent field would fail the decode of
-    /// the WHOLE fleet and show "no workspaces" for a runner full of them.
+    /// the WHOLE fleet and show "no worktrees" for a runner full of them.
     @Test func anOlderDaemonSendingOnlyTheOriginalKeysStillDecodes() throws {
         let fleet = try Self.decodeFleet("""
         {
           "runtime_healthy": false,
           "live_panes": 0,
-          "workspaces": [
+          "worktrees": [
             {
               "id": "w",
               "short": "w",
@@ -259,20 +259,20 @@ struct FleetDecodeTests {
           ]
         }
         """)
-        let workspace = try #require(fleet.workspaces.first)
-        #expect(workspace.repository == nil)
-        #expect(workspace.worktree == nil)
-        #expect(workspace.isMainCheckout == nil)
+        let worktree = try #require(fleet.worktrees.first)
+        #expect(worktree.repository == nil)
+        #expect(worktree.worktree == nil)
+        #expect(worktree.isMainCheckout == nil)
         // A runner too old to keep an order says nothing rather than 0, which is
         // what lets a client offer no drag instead of one that silently springs
         // back on the next refresh.
-        #expect(workspace.ordinal == nil)
+        #expect(worktree.ordinal == nil)
         // Absent reads as "not the primary checkout", which is the direction
         // that OFFERS the removal — safe only because the daemon refuses it
         // independently. See `isPrimaryCheckout`.
-        #expect(!workspace.isPrimaryCheckout)
+        #expect(!worktree.isPrimaryCheckout)
 
-        let terminal = try #require(workspace.terminals.first)
+        let terminal = try #require(worktree.terminals.first)
         #expect(terminal.agent == .none)
         #expect(terminal.label == "shell")
         // Absent means "nobody said", never "it exited cleanly".
@@ -321,7 +321,7 @@ struct FleetDecodeTests {
               "live_panes": 1,
               "fleetTrace": "BASE64",
               "fleetTraceAnchor": 5960000,
-              "workspaces": [
+              "worktrees": [
                 {
                   "id": "w", "short": "w", "task": "t", "branch": "b",
                   "state": "ready",
@@ -340,7 +340,7 @@ struct FleetDecodeTests {
         let fleet = try Self.decodeFleet(json)
         #expect(fleet.fleetTrace == wire)
         #expect(fleet.fleetTraceAnchor == 5_960_000, "`Session::fleet` spells it `fleetTraceAnchor`")
-        let terminal = try #require(fleet.workspaces.first?.terminals.first)
+        let terminal = try #require(fleet.worktrees.first?.terminals.first)
         #expect(terminal.activityTrace == wire)
         // And it is a trace this build will draw, rather than 66 bytes that
         // happen to survive the trip.
@@ -368,7 +368,7 @@ struct FleetDecodeTests {
         let fleet = try Self.decodeFleet()
         #expect(fleet.fleetTrace == nil)
         #expect(fleet.fleetTraceAnchor == nil)
-        let terminal = try #require(fleet.workspaces.first?.terminals.first)
+        let terminal = try #require(fleet.worktrees.first?.terminals.first)
         #expect(terminal.activityTrace == nil)
         #expect(ActivityTrace(terminal.activityTrace) == nil)
     }
@@ -378,7 +378,7 @@ struct FleetDecodeTests {
         {
           "runtime_healthy": true,
           "live_panes": 1,
-          "workspaces": [
+          "worktrees": [
             {
               "id": "w", "short": "w", "task": "t", "branch": "b",
               "state": "active", "somethingNewer": 42,
@@ -390,7 +390,7 @@ struct FleetDecodeTests {
           ]
         }
         """)
-        #expect(fleet.workspaces.first?.terminals.first?.preset == "claude")
+        #expect(fleet.worktrees.first?.terminals.first?.preset == "claude")
     }
 }
 

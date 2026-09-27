@@ -96,7 +96,7 @@ pub struct ConfigBranches {
 
 /// What a derived branch name gets in front of it when nothing says otherwise.
 ///
-/// `feat/` because `NewWorkspaceSheet` on macOS already suggested exactly this,
+/// `feat/` because the Mac's New Worktree sheet already suggested exactly this,
 /// so it is the default users can already see rather than a new one invented
 /// here. The two creation paths disagreed — the sheet hardcoded this and the
 /// task composer used nothing — and there cannot be a customizable default

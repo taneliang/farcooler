@@ -24,7 +24,7 @@ class RemoveWorktreeTest {
      * a match.
      *
      * `crates/daemon/src/rpc.rs` compares `typed_confirmation.trim()` against
-     * `ws.name()`, which is the same string `wire::workspace` sends as the
+     * `ws.name()`, which is the same string `wire::worktree` sends as the
      * fleet's `task_name` — so this comparison and the runner's are about the
      * same name, which is the fact worth pinning.
      */
@@ -37,7 +37,7 @@ class RemoveWorktreeTest {
         assertFalse(removalNameMatches("rate limiting", "Rate Limiting"))
         assertFalse(removalNameMatches("rate limiting", "rate"))
         assertFalse(removalNameMatches("rate limiting", ""))
-        // The one input this gate must never accept: a workspace whose name did
+        // The one input this gate must never accept: a worktree whose name did
         // not arrive would otherwise be removable by typing nothing at all.
         assertFalse(removalNameMatches("", ""))
         assertFalse(removalNameMatches("", "   "))

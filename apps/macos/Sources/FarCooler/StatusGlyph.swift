@@ -62,7 +62,7 @@ struct StatusGlyph: View {
     ///
     /// Two cases and not one, mirroring `GlanceMarkView`'s own two
     /// initialisers. The spec's six diameters cover a mark that stands for a
-    /// terminal; the roll-up dots on a collapsed workspace, a hidden section
+    /// terminal; the roll-up dots on a collapsed worktree, a hidden section
     /// and the window's attention badge are 5 and 6 points, which is below
     /// anything §03 names, and those numbers are the ones this app already
     /// laid out around. `GlanceMarkView(_:inAppDiameter:)` is the sanctioned
@@ -224,7 +224,7 @@ extension Status {
     /// be narrowed to the diff counts it was actually written about, and the
     /// answer came back yes. The ban's stated reason was that a per-agent
     /// review tier would have to be INVENTED, because `reviewsWaiting` is a
-    /// fleet scalar and `unreadDiff` is per workspace; that reason never
+    /// fleet scalar and `unreadDiff` is per worktree; that reason never
     /// reached `done`, which the daemon sends per terminal
     /// (`Terminal.status`, `AgentActivity.done`), and which this codebase
     /// already treats as latched rather than passing — `confidence(in:at:)`
@@ -402,7 +402,7 @@ struct AttentionBadge: View {
 /// and hands the time in, so the string is a function of an input that moves.
 ///
 /// Scoped to ONE label, deliberately. A timeline wrapped around the sidebar
-/// would rebuild every row of every workspace once a second to move a handful
+/// would rebuild every row of every worktree once a second to move a handful
 /// of characters. `WorkingRow` in `AgentRows` already draws the same
 /// distinction, for the same reason.
 ///

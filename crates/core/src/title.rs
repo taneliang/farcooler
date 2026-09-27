@@ -193,7 +193,7 @@ fn name_from(rest: &str, program: &str, hostname: &str) -> Option<String> {
     // bash's default title is `\u@\h: \w`, which is the default on most Linux
     // distributions and therefore on most hosts anyone SSHes into. It is a
     // prompt, not a name: `e-liang@Mac: ~/Dev/overnight` in a sidebar row says
-    // where the pane is, which the workspace row already said, and hides what it
+    // where the pane is, which the worktree row already said, and hides what it
     // is running.
     //
     // The user-at-host token has to end with a colon to count. `e-liang@prod-db`
@@ -234,7 +234,7 @@ fn name_from(rest: &str, program: &str, hostname: &str) -> Option<String> {
     // A single bare word is a directory or a process, not a summary of work.
     //
     // This is what excludes codex, whose title is only the cwd basename — which
-    // the workspace row already says, so repeating it costs a row and adds
+    // the worktree row already says, so repeating it costs a row and adds
     // nothing.
     if !rest.contains(' ') {
         return None;
@@ -297,7 +297,7 @@ mod tests {
         assert_eq!(parse("Cursor Agent", "cursor-agent", "Mac.attlocal.net").name, None);
     }
 
-    /// Codex names the directory, which the workspace row already says.
+    /// Codex names the directory, which the worktree row already says.
     #[test]
     fn a_directory_name_is_not_worth_repeating() {
         assert_eq!(parse("⠋ bare", "codex", "Mac.attlocal.net").name, None);

@@ -1,7 +1,7 @@
 package com.farcooler.model
 
 /**
- * Where a dragged workspace card lands, worked out without Compose.
+ * Where a dragged worktree card lands, worked out without Compose.
  *
  * No Compose type appears in this file, which is the same rule `Shell.kt`
  * follows and for the same reason: this app has no Compose UI test dependency,
@@ -10,7 +10,7 @@ package com.farcooler.model
  * check that way — the finger is moving, the list is re-laying out, and a drop
  * that lands one card short looks exactly like a drop that lands right.
  *
- * The Swift half of this is `apps/shared/AgentKit/Sources/AgentKit/WorkspaceOrder.swift`
+ * The Swift half of this is `apps/shared/AgentKit/Sources/AgentKit/WorktreeOrder.swift`
  * and the two must agree: they drag the same cards, into the same order, on the
  * same runner. `moved` and `edge` here are that file line for line, and the test
  * cases are the same cases.
@@ -18,7 +18,7 @@ package com.farcooler.model
  * It knows nothing about activity, attention or recency, and it must never
  * learn: the whole point of a stored order is that a card stays where it was put.
  */
-object WorkspaceOrder {
+object WorktreeOrder {
 
     /** Which side of the card under the finger a drop would go. */
     enum class Edge { ABOVE, BELOW }
@@ -49,7 +49,7 @@ object WorkspaceOrder {
     /**
      * Card extents from what a lazy list has actually laid out.
      *
-     * A workspace in this list is not one item. It is a header followed by
+     * A worktree in this list is not one item. It is a header followed by
      * however many terminal rows, all siblings in one flat `LazyColumn` — so a
      * card runs from its own header to the NEXT header, and the terminals in
      * between belong to the header above them. Measuring the headers alone
@@ -71,10 +71,10 @@ object WorkspaceOrder {
     /**
      * Which card the finger is over, and which half of it.
      *
-     * [cards] are the workspace cards currently laid out, in list order, each
+     * [cards] are the worktree cards currently laid out, in list order, each
      * running from its own top to the next one's — so the terminals under a
-     * header belong to that header, and a finger anywhere in a workspace's block
-     * is over that workspace.
+     * header belong to that header, and a finger anywhere in a worktree's block
+     * is over that worktree.
      *
      * Clamped at both ends rather than answering null: dragging above the first
      * card means the front of the list and dragging below the last means the

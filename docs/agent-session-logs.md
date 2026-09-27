@@ -336,7 +336,7 @@ exactly once the leading activity glyph is stripped. Verified live — pane titl
 
 **And a file one pane holds is not another's.** The title only tells panes
 apart once BOTH have written a file to compare. Before that — a second claude
-started in a workspace where the first is already running — the running pane's
+started in a worktree where the first is already running — the running pane's
 session is the only candidate in the directory, and a rule that takes the lone
 candidate hands it straight over: both rows then show one conversation's
 summary, plan position and actions. So a file some other pane is already

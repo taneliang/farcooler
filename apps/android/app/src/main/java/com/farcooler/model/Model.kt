@@ -5,13 +5,13 @@ import kotlinx.serialization.Serializable
 
 // The shapes the client core returns. Identical to the Mac and iOS apps',
 // because all three decode what one Rust crate produces — there is one
-// definition of what a workspace looks like on the wire, not one per platform.
+// definition of what a worktree looks like on the wire, not one per platform.
 
 @Serializable
 data class Fleet(
     @SerialName("runtime_healthy") val runtimeHealthy: Boolean = false,
     @SerialName("live_panes") val livePanes: Int = 0,
-    val workspaces: List<Workspace> = emptyList(),
+    val worktrees: List<Worktree> = emptyList(),
 ) {
     companion object {
         val EMPTY = Fleet()
@@ -19,7 +19,7 @@ data class Fleet(
 }
 
 @Serializable
-data class Workspace(
+data class Worktree(
     val id: String,
     val short: String = "",
     /**
@@ -27,7 +27,7 @@ data class Workspace(
      *
      * Nullable because an older daemon's fleet never carried it, and one missing
      * field must not fail the decode of the whole fleet. Everything
-     * repository-scoped a client can ask about a workspace — its stack, its pull
+     * repository-scoped a client can ask about a worktree — its stack, its pull
      * request, the repository's display name — needs this, and none of those
      * screens exist here yet: decoded now so the one phase allowed inside this
      * file does not have to be reopened by the phase that needs it.
@@ -35,10 +35,11 @@ data class Workspace(
     val repository: String? = null,
     val task: String = "",
     val branch: String = "",
+    /** The worktree's directory, named for its wire key. */
     val worktree: String? = null,
     val state: String = "",
     /**
-     * Whether this workspace IS the repository's own checkout.
+     * Whether this worktree IS the repository's own checkout.
      *
      * Offering to remove it would offer to delete the directory the repository
      * itself lives in, and the branch is not the useful fact about it — the Mac
@@ -49,8 +50,8 @@ data class Workspace(
      * CLI at `crates/cli/src/main.rs:1575` spells the same flag
      * `is_main_checkout`, and the Mac's model spells its property to match. iOS
      * copied the Mac's property name onto the client core's payload, so
-     * `Workspace.isMainCheckout` there decodes nothing and is false for every
-     * workspace on the phone — "Primary checkout" never appears and the remove
+     * `Worktree.isMainCheckout` there decodes nothing and is false for every
+     * worktree on the phone — "Primary checkout" never appears and the remove
      * offer is made on the one worktree it must never be made on. Recorded here
      * rather than fixed, because iOS is not this agent's to edit.
      */
@@ -74,7 +75,7 @@ data class Workspace(
      * Which of several identically-labelled terminals each one is, keyed by
      * terminal id.
      *
-     * Two `claude` panes in one workspace are genuinely alike, so they get `1`
+     * Two `claude` panes in one worktree are genuinely alike, so they get `1`
      * and `2` — but only when there is something to tell apart, or a lone
      * `shell` would be numbered for no reason. Shared by the fleet list, the
      * terminal screen's title and its tab strip, so the same terminal is never
@@ -93,13 +94,13 @@ data class Workspace(
         return out
     }
 
-    /** Hidden workspaces are a view preference the daemon records for us. */
+    /** Hidden worktrees are a view preference the daemon records for us. */
     val isHidden: Boolean get() = state.equals("hidden", ignoreCase = true)
 
     /**
      * git no longer lists this worktree, but the row still carries terminals.
      *
-     * A state of the WORKSPACE and not of any pane in it, which is why the other
+     * A state of the WORKTREE and not of any pane in it, which is why the other
      * two surfaces say it once on the header rather than letting twenty
      * terminals fail separately underneath. No screen here says it yet.
      */
@@ -511,7 +512,7 @@ data class Terminal(
      * whoever routed around it would not have to reopen this file.
      *
      * `ui/Navigation.kt`'s `Pane` is what asks: such a pane is FOLDED into the
-     * workspace's Changes tab from every direction — the remembered focus, the
+     * worktree's Changes tab from every direction — the remembered focus, the
      * landing rule, the tab strip and the deck's prune — so the VT renderer is
      * no longer reachable from one. What that tab draws is still a deferral
      * until the review surface lands; what it is not is escape sequences.
@@ -757,20 +758,20 @@ data class HostHealth(
  * **`@SerialName` on three of the four, because this payload is snake_case and
  * the fleet is not.** `Session::fleet` builds camelCase keys that happen to
  * match Kotlin property names; `Session::changes_inbox` builds
- * `workspace_id` / `task_name` / `changed_since_reviewed`. Two shapes out of one
+ * `worktree_id` / `task_name` / `changed_since_reviewed`. Two shapes out of one
  * FFI, and the app decodes both with `ignoreUnknownKeys = true`, so a missing
  * annotation here would be a permanently-zero count rather than an error. See
  * `NeedsYouDecodeTest`, which transcribes that `json!` block key for key.
  *
  * Four fields of the seven on the wire. `short`, `task_name` and `branch` are
  * also sent and are deliberately not decoded: this app already has the
- * workspace from the fleet poll, and a second copy of its name is a second
+ * worktree from the fleet poll, and a second copy of its name is a second
  * thing that can be stale by three seconds. What is kept is what the fleet
  * cannot answer.
  */
 @Serializable
 data class InboxRow(
-    @SerialName("workspace_id") val workspaceId: String,
+    @SerialName("worktree_id") val worktreeId: String,
     /**
      * The change set moved since this worktree was last marked reviewed.
      *
@@ -901,7 +902,7 @@ data class DaemonBuild(
  *
  * Stated once, over a plain list, because three surfaces were asking it at
  * three scopes and each had written the answer out again: one host's fleet
- * below, the whole fleet in `net/FleetRepository.kt`, and one workspace in
+ * below, the whole fleet in `net/FleetRepository.kt`, and one worktree in
  * `ui/Navigation.kt` when the remembered tab turns out to name an agent that
  * has left. Three copies of an ordering is three chances for a phone to
  * disagree with itself about which pane matters.
@@ -913,9 +914,9 @@ val List<Terminal>.landingTerminal: Terminal?
         return firstOrNull()
     }
 
-/** The terminal a host lands on when its workspace list is skipped. */
+/** The terminal a host lands on when its worktree list is skipped. */
 val Fleet.landingTerminal: Terminal?
-    get() = workspaces.flatMap { it.terminals }.landingTerminal
+    get() = worktrees.flatMap { it.terminals }.landingTerminal
 
 /**
  * What went wrong, in two voices.

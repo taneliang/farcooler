@@ -467,7 +467,7 @@ async fn serve_stdio_session() -> Result<(), i32> {
     // A daemon already running here owns everything that is not in SQLite.
     //
     // This used to open a second `Service` unconditionally, and for anything
-    // read from the database that was fine — workspaces and terminals came back
+    // read from the database that was fine — worktrees and terminals came back
     // correct, so it looked like it worked. But an agent's TRANSCRIPT lives in
     // this process's memory (`AgentSupervisor`), and the shims that produce it
     // are connected to the sockets the FIRST daemon bound. A second service has

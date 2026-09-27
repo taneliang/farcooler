@@ -53,13 +53,13 @@ class FleetReadingTest {
         assertEquals("Not connected", liveSummary(lost))
         assertEquals(
             "Can’t say what’s running until a runner answers.",
-            reassurance(lost, " on studio", workspaces = 2),
+            reassurance(lost, " on studio", worktrees = 2),
         )
 
         val launching = listOf(runner(RunnerLink.CONNECTING, 0), runner(RunnerLink.CONNECTING, 0))
         assertEquals(FleetReading.Connecting, fleetReading(launching))
         assertEquals("Connecting…", liveSummary(launching))
-        assertEquals("Connecting…", reassurance(launching, "", workspaces = 0))
+        assertEquals("Connecting…", reassurance(launching, "", worktrees = 0))
 
         // One still on its first read and one lost: nothing will be known
         // soon about the lost one, so the fleet can't say.
@@ -73,20 +73,20 @@ class FleetReadingTest {
     @Test
     fun `the front door counts working agents on answering runners`() {
         val mixed = listOf(runner(RunnerLink.ANSWERING, 1), runner(RunnerLink.AWAY, 5))
-        assertEquals("One agent is working.", reassurance(mixed, "", workspaces = 3))
+        assertEquals("One agent is working.", reassurance(mixed, "", worktrees = 3))
         assertEquals(
             "2 agents are working on studio.",
-            reassurance(listOf(runner(RunnerLink.ANSWERING, 2)), " on studio", workspaces = 1),
+            reassurance(listOf(runner(RunnerLink.ANSWERING, 2)), " on studio", worktrees = 1),
         )
         assertEquals(
             "Nothing is running on studio yet.",
-            reassurance(listOf(runner(RunnerLink.ANSWERING, 0)), " on studio", workspaces = 0),
+            reassurance(listOf(runner(RunnerLink.ANSWERING, 0)), " on studio", worktrees = 0),
         )
         assertEquals(
             "Nothing is running.",
-            reassurance(listOf(runner(RunnerLink.ANSWERING, 0)), "", workspaces = 2),
+            reassurance(listOf(runner(RunnerLink.ANSWERING, 0)), "", worktrees = 2),
         )
-        assertEquals("Nothing is running.", reassurance(emptyList(), "", workspaces = 0))
+        assertEquals("Nothing is running.", reassurance(emptyList(), "", worktrees = 0))
         assertEquals("No runners", liveSummary(emptyList()))
     }
 }

@@ -19,7 +19,7 @@ import Foundation
 struct TerminalEvent: Sendable, Decodable {
     var id: String
     var short: String
-    var workspace: String
+    var worktree: String
     var title: String
     var preset: String
     var state: String
@@ -75,7 +75,7 @@ struct TerminalEvent: Sendable, Decodable {
     var turnFailed: Bool?
 }
 
-/// A workspace's tiling, pushed whole.
+/// A worktree's tiling, pushed whole.
 ///
 /// Whole rather than as a diff, and that is the daemon's decision showing
 /// through: layout is changed by this app, by the CLI, and by agents driving the
@@ -89,7 +89,7 @@ struct TerminalEvent: Sendable, Decodable {
 /// `layout show` returns, so this decodes the same type and there is nothing to
 /// convert or to get wrong.
 struct LayoutEvent: Sendable, Decodable {
-    var workspace: String
+    var worktree: String
     var groups: [PaneGroup]
 }
 
@@ -135,7 +135,7 @@ final class EventStream {
     private var outputHandle: FileHandle?
     private let onEvent: @Sendable (TerminalEvent) -> Void
     private let onLayout: @Sendable (LayoutEvent) -> Void
-    /// The set of workspaces changed — a worktree appeared, vanished, or moved
+    /// The set of worktrees changed — a worktree appeared, vanished, or moved
     /// between shown and hidden. Carries nothing; the reconciler that emits it
     /// can both create and delete rows in one pass, and a client re-reads the
     /// fleet rather than applying this as a delta.
@@ -144,7 +144,7 @@ final class EventStream {
     /// branch was checked out.
     ///
     /// Carries nothing either, for a different reason. The daemon deliberately
-    /// sends the workspace and a version and never the change set itself — most
+    /// sends the worktree and a version and never the change set itself — most
     /// clients are not showing a diff, and a lockfile regeneration would fan
     /// thousands of file records out to every connected device. So there is
     /// nothing here to apply as a delta, and the one thing worth doing with it is

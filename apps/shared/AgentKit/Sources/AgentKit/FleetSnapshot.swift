@@ -315,7 +315,7 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     /// needs a name. A widget and a complication have room for a number and a
     /// word; the screen that will want names is the phone's Needs You list,
     /// which runs in the app where `Connection.inbox` already holds the rows in
-    /// full. Rows here would put a per-workspace list inside a value that is
+    /// full. Rows here would put a per-worktree list inside a value that is
     /// serialized once per timeline entry into a process with a hard memory
     /// ceiling — see `FleetProvider.wakeLimit` — in order to carry something
     /// none of these surfaces would print.
@@ -323,7 +323,7 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     /// Fleet-wide rather than a field on `Agent`, because that is the shape of
     /// the fact. `changes.inbox` answers per WORKTREE and an agent is a
     /// terminal; several terminals routinely share one worktree, so hanging
-    /// this on an agent would either count a workspace once per agent in it or
+    /// this on an agent would either count a worktree once per agent in it or
     /// make every row claim its neighbor's diff.
     ///
     /// **Optional, and never defaulted to a number.** Swift's synthesized
@@ -643,7 +643,7 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     public enum Glance: Sendable, Equatable {
         /// Agents stopped, waiting on a person. Amber, and nothing else is.
         case blocked(Int)
-        /// Workspaces whose diff moved since anyone last looked. Never amber.
+        /// Worktrees whose diff moved since anyone last looked. Never amber.
         case review(Int)
         /// Agents getting on with it, with nothing waiting on you.
         case working(Int)
@@ -685,16 +685,16 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         }
 
         /// The same fact under a number that is already drawn large: "agents
-        /// need you", "workspaces to review", "agents working".
+        /// need you", "worktrees to review", "agents working".
         ///
-        /// **Workspaces**, not agents, for `review`. The two counts are counts of
-        /// different things — `changes.inbox` answers per workspace — and a
+        /// **Worktrees**, not agents, for `review`. The two counts are counts of
+        /// different things — `changes.inbox` answers per worktree — and a
         /// caption that called both of them agents would make "2 need you" and
         /// "3 to review" look like five agents.
         public var caption: String {
             switch self {
             case let .blocked(n): n == 1 ? "agent needs you" : "agents need you"
-            case let .review(n): n == 1 ? "workspace to review" : "workspaces to review"
+            case let .review(n): n == 1 ? "worktree to review" : "worktrees to review"
             case let .working(n): n == 1 ? "agent working" : "agents working"
             }
         }
@@ -1389,7 +1389,7 @@ struct RunnerDirectory: Codable, Sendable, Equatable {
     /// **The reason recorded here has stopped being true and the boundary has
     /// not.** It said a cache holding more "would be a cache somebody
     /// eventually tried to open a pane from — which is the one thing a
-    /// workspace on a runner you are not connected to cannot do", and opening a
+    /// worktree on a runner you are not connected to cannot do", and opening a
     /// pane on another runner is now the ordinary case: `FleetStore` holds a
     /// connection to each of them and the shell mounts panes across the merge.
     ///
@@ -1405,7 +1405,7 @@ struct RunnerDirectory: Codable, Sendable, Equatable {
     /// fleet now covers would be a second answer to "what is on that runner" —
     /// which is the drift a cache beside a live model always threatens, and the
     /// reason this one is deliberately the smaller of the two.
-    struct Workspace: Codable, Sendable, Equatable {
+    struct Worktree: Codable, Sendable, Equatable {
         var id: String
         var name: String
         var isHidden: Bool
@@ -1457,13 +1457,22 @@ struct RunnerDirectory: Codable, Sendable, Equatable {
     var label: String
     /// When this app last actually heard from it.
     var seenAt: Date
-    var workspaces: [Workspace]
+    var worktrees: [Worktree]
 
-    init(runner: String, label: String, seenAt: Date, workspaces: [Workspace]) {
+    /// `worktrees` is stored as `workspaces`, its name before the rename.
+    /// This is a slot on disk that installs already have, like
+    /// `RunnerDirectoryStore.key`: a key that followed the property would
+    /// fail the whole decode, and every cached runner would lose its cards.
+    enum CodingKeys: String, CodingKey {
+        case runner, label, seenAt
+        case worktrees = "workspaces"
+    }
+
+    init(runner: String, label: String, seenAt: Date, worktrees: [Worktree]) {
         self.runner = runner
         self.label = label
         self.seenAt = seenAt
-        self.workspaces = workspaces
+        self.worktrees = worktrees
     }
 }
 

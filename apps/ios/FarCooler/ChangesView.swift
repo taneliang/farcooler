@@ -78,7 +78,7 @@ struct BranchPullRequest: Equatable {
 /// What this screen never records is a JUDGMENT. There is no "reviewed" tick on
 /// a file, and that is deliberate: an agent is still editing these files, so a
 /// tick on a file that has changed twice since would be a claim the app is in
-/// no position to make. The daemon's workspace-level `changed_since_reviewed`
+/// no position to make. The daemon's worktree-level `changed_since_reviewed`
 /// watermark is the piece of review state that survives an edit, because an
 /// edit is what invalidates it. See `ReviewPosition`.
 @MainActor
@@ -86,7 +86,7 @@ struct ChangesView: View {
     /// Owned by `Connection`, not by this view — the view is destroyed on every
     /// tab switch and the scroll, the folds and the fetched diffs must not be.
     @ObservedObject var store: ChangesStore
-    let workspaceName: String
+    let worktreeName: String
 
     /// The agent panes in this worktree a review note can be sent to.
     ///
@@ -98,7 +98,7 @@ struct ChangesView: View {
 
     /// What GitHub says about this branch, and the way in to act on it.
     ///
-    /// Resolved by `ShellScreen` — which holds the workspace at rest and
+    /// Resolved by `ShellScreen` — which holds the worktree at rest and
     /// therefore the repository id `stack.get` takes — and handed down as a
     /// plain value for exactly the reason `agents` is one, above.
     ///
@@ -350,7 +350,7 @@ struct ChangesView: View {
     private var nothingHere: String {
         switch store.scope {
         case .branch: return "This branch hasn’t committed anything yet."
-        case .local: return "Nothing uncommitted. The workspace is clean."
+        case .local: return "Nothing uncommitted. The worktree is clean."
         case .commit:
             // Not "this commit is empty". A commit is compared against its
             // FIRST parent here — `Selector::Commit` in the daemon's
@@ -439,7 +439,7 @@ struct ChangesView: View {
                 Image(systemName: "arrow.triangle.branch")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(store.changeSet.branch.isEmpty ? workspaceName : store.changeSet.branch)
+                Text(store.changeSet.branch.isEmpty ? worktreeName : store.changeSet.branch)
                     .font(.subheadline.weight(.semibold).monospaced())
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -1436,7 +1436,7 @@ private struct ChangesFileHeading: View {
         // under it would show straight through. Opacity was the wrong
         // instrument for a right constraint. What ought to happen to content
         // behind a floating surface is that it BLURS, and a material is what
-        // the platform hands you to do it — the workspace tab strip floats a
+        // the platform hands you to do it — the worktree tab strip floats a
         // few points above this heading over the same scroll and has been
         // saying so the whole time.
         //
@@ -1527,7 +1527,7 @@ private struct ChangesFileHeading: View {
                 //
                 // Truncated in the MIDDLE, which matters more now that this is
                 // what stays on screen: a long leaf is `ChangesStore+Resume` or
-                // `WorkspaceDetailViewController`, and both ends of it say more
+                // `WorktreeDetailViewController`, and both ends of it say more
                 // than either end alone.
                 Text(file.name)
                     .font(.footnote.weight(.medium))
@@ -1582,7 +1582,7 @@ private struct ChangesFileHeading: View {
     ///
     /// Pinned, this is read on the way into every file's section, and the path
     /// in it would be `crates/daemon/src` spelled out once per file on a forty
-    /// file branch. `NeedsYou`'s workspace header leaves a branch out of its
+    /// file branch. `NeedsYou`'s worktree header leaves a branch out of its
     /// label for exactly that reason. What is left is the phrase that answers
     /// "which file is this" — the leaf, what happened to it, and how much
     /// moved. The directory stays on screen for the eye, and `FileIndexSheet`,
@@ -2405,8 +2405,8 @@ private struct CommentOutboxSheet: View {
     ///
     /// A picker with one entry would be a choice nobody has, and a disabled
     /// button with no explanation is the app refusing without saying why: a
-    /// workspace whose agent has exited has nowhere to send to, and that is a
-    /// fact about the workspace rather than a fault in the notes.
+    /// worktree whose agent has exited has nowhere to send to, and that is a
+    /// fact about the worktree rather than a fault in the notes.
     @ViewBuilder
     private var sendControl: some View {
         if comments.sending {
@@ -2415,7 +2415,7 @@ private struct CommentOutboxSheet: View {
                 Text("Sending…").foregroundStyle(.secondary)
             }
         } else if agents.isEmpty {
-            Text("No agent is running in this workspace, so there’s nowhere to send these yet.")
+            Text("No agent is running in this worktree, so there’s nowhere to send these yet.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         } else if agents.count == 1, let only = agents.first {
@@ -2747,7 +2747,7 @@ struct ChangesLayoutHarness: View {
         Self.standIn(store)
         return NavigationStack {
             ChangesView(
-                store: store, workspaceName: "add-retries", pullRequest: Self.pullRequest)
+                store: store, worktreeName: "add-retries", pullRequest: Self.pullRequest)
                 .navigationTitle("add-retries")
                 .navigationBarTitleDisplayMode(.inline)
         }

@@ -10,7 +10,7 @@ use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum FsGuardError {
-    #[error("path resolves outside the workspace worktree")]
+    #[error("path resolves outside the worktree")]
     Escapes,
     #[error("worktree path could not be resolved")]
     BadWorktree,

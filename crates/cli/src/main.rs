@@ -3,7 +3,7 @@
 //! Two paths out of this process, and which one a command takes follows from
 //! what it touches:
 //!
-//! - **Durable state** — roots, repositories, workspaces, terminal records —
+//! - **Durable state** — roots, repositories, worktrees, terminal records —
 //!   goes to the daemon over its Unix socket. One owner, so two commands
 //!   running at once cannot both believe they are the authority, and so a
 //!   second client can exist at all.
@@ -35,7 +35,7 @@ pub(crate) use daemon_link::{Link, connect_to, expect_value, req, req_for, with}
 use farcooler_client::actions::RemoveRootOutcome;
 use farcooler_daemon::runtime::Runtime;
 use farcooler_protocol::v1::{
-    Repository, RepositoryRoot, Terminal, TerminalState, Workspace, WorkspaceState, request, result,
+    Repository, RepositoryRoot, Terminal, TerminalState, Worktree, WorktreeState, request, result,
 };
 use uuid::Uuid;
 
@@ -106,10 +106,10 @@ enum Command {
     /// Inspect and edit the ACP adapters that make chat mode possible.
     #[command(subcommand)]
     Adapter(AdapterCmd),
-    /// Manage task workspaces (one worktree plus branch per task).
+    /// Manage worktrees: the directories and branches agents work in.
     #[command(subcommand)]
-    Workspace(WorkspaceCmd),
-    /// Manage terminals inside a workspace.
+    Worktree(WorktreeCmd),
+    /// Manage terminals inside a worktree.
     #[command(subcommand)]
     Terminal(TerminalCmd),
     /// What a worktree changed.
@@ -127,9 +127,6 @@ enum Command {
     /// that names no task means that one. See `tasks::TASK_ENV`.
     #[command(subcommand)]
     Task(tasks::TaskCmd),
-    /// Search a workspace's worktree files, for an agent chat's @-mention.
-    #[command(subcommand)]
-    Worktree(WorktreeCmd),
     /// Arrange terminals on screen: tile, zoom, focus, switch groups.
     ///
     /// Everything the Mac app's tiling does, because it is the same calls. An
@@ -137,8 +134,8 @@ enum Command {
     /// automatable, so this exists for agents as much as for people.
     #[command(subcommand)]
     Layout(LayoutCmd),
-    /// Show how to attach to a workspace's live tmux session.
-    Attach { workspace: String },
+    /// Show how to attach to a worktree's live tmux session.
+    Attach { worktree: String },
     /// Stream changes as they happen, one JSON object per line.
     ///
     /// A long-lived connection that prints only what changed. Clients used to
@@ -251,13 +248,13 @@ enum DaemonCmd {
 /// is called `main-vertical`.
 #[derive(Subcommand)]
 enum LayoutCmd {
-    /// Show a workspace's layouts and where tmux has put every pane.
-    Show { workspace: String },
+    /// Show a worktree's layouts and where tmux has put every pane.
+    Show { worktree: String },
     /// Split a pane, running something in the new half.
     ///
     /// The arbitrary-split primitive: any edge of any pane, at any depth.
     Split {
-        workspace: String,
+        worktree: String,
         /// The pane to split. Defaults to the focused one.
         terminal: Option<String>,
         /// left, right, top, or bottom.
@@ -271,7 +268,7 @@ enum LayoutCmd {
     ///
     /// A drag and drop. Works across layouts: the pane leaves the one it was in.
     Move {
-        workspace: String,
+        worktree: String,
         terminal: String,
         onto: String,
         #[arg(long, default_value = "right")]
@@ -279,12 +276,12 @@ enum LayoutCmd {
     },
     /// Set the arrangement: even-horizontal, even-vertical, main-vertical,
     /// main-horizontal, tiled.
-    Preset { workspace: String, preset: String },
+    Preset { worktree: String, preset: String },
     /// Next arrangement of the same panes. tmux's `prefix Space`.
-    Cycle { workspace: String },
+    Cycle { worktree: String },
     /// Move focus: a terminal, `--next`, `--prev`, or `--pane N`.
     Focus {
-        workspace: String,
+        worktree: String,
         terminal: Option<String>,
         #[arg(long)]
         next: bool,
@@ -295,13 +292,13 @@ enum LayoutCmd {
     },
     /// Fill the layout with one pane. tmux's `prefix z`.
     Zoom {
-        workspace: String,
+        worktree: String,
         terminal: Option<String>,
         #[arg(long)]
         off: bool,
     },
     /// Exchange two panes' positions.
-    Swap { workspace: String, a: String, b: String },
+    Swap { worktree: String, a: String, b: String },
     /// Move a divider, in cells. Negative moves it the other way.
     ///
     /// `allow_negative_numbers`, because half of every drag is negative and clap
@@ -310,7 +307,7 @@ enum LayoutCmd {
     /// left did nothing at all.
     #[command(allow_negative_numbers = true)]
     Resize {
-        workspace: String,
+        worktree: String,
         terminal: String,
         #[arg(long, default_value = "right")]
         side: String,
@@ -318,14 +315,14 @@ enum LayoutCmd {
         cells: i32,
     },
     /// Pull a pane out into a layout of its own. tmux's `break-pane`.
-    Break { workspace: String, terminal: Option<String> },
+    Break { worktree: String, terminal: Option<String> },
     /// Name a layout.
-    Rename { workspace: String, name: String },
+    Rename { worktree: String, name: String },
     /// Tell tmux the size of the viewport showing this layout, in cells.
-    Viewport { workspace: String, columns: u32, rows: u32 },
+    Viewport { worktree: String, columns: u32, rows: u32 },
     /// Show a different layout: by number, by name, or the next one.
     Select {
-        workspace: String,
+        worktree: String,
         group: Option<String>,
         #[arg(long)]
         next: bool,
@@ -488,10 +485,10 @@ enum RepoCmd {
     List,
 }
 
-/// `workspace create`'s words, as clap parsed them.
+/// `worktree create`'s words, as clap parsed them.
 ///
 /// A struct rather than the variant's own fields so the command's arm hands
-/// it to `workspace_create_from_args` whole: nothing between the parse and
+/// it to `worktree_create_from_args` whole: nothing between the parse and
 /// the request is a list of positional arguments that could be put in the
 /// wrong order — `no_terminal` and `fork_only` are two adjacent `bool`s —
 /// while a test of that function stayed green.
@@ -532,7 +529,7 @@ struct CreateArgs {
 }
 
 #[derive(Subcommand)]
-enum WorkspaceCmd {
+enum WorktreeCmd {
     /// Create a worktree and branch for one task.
     Create(CreateArgs),
     /// Show the fleet with freshly derived state.
@@ -553,7 +550,7 @@ enum WorkspaceCmd {
     Branches {
         repo: String,
     },
-    /// Put the worktrees in this order: every workspace the list you are
+    /// Put the worktrees in this order: every worktree the list you are
     /// looking at shows, the first one first.
     ///
     /// The whole visible order rather than "move this one up". A list is
@@ -562,32 +559,28 @@ enum WorkspaceCmd {
     /// alongside what it is a position among. Anything not named keeps the
     /// place it had.
     Reorder {
-        /// Workspace ids or short ids, in the order you want them.
+        /// Worktree ids or short ids, in the order you want them.
         #[arg(required = true)]
-        workspaces: Vec<String>,
+        worktrees: Vec<String>,
     },
     /// Take a worktree out of the main list. Never changes git data.
-    Hide { workspace: String },
+    Hide { worktree: String },
     /// Bring a hidden worktree back.
-    Unhide { workspace: String },
+    Unhide { worktree: String },
     /// Remove the worktree. Keeps the branch and everything committed.
-    RemoveWorktree {
-        workspace: String,
-        /// The workspace's exact name. Required only when the worktree has
+    Remove {
+        worktree: String,
+        /// The worktree's exact name. Required only when the worktree has
         /// uncommitted work in it; the daemon is what decides.
         #[arg(long)]
         confirm: Option<String>,
     },
-}
-
-#[derive(Subcommand)]
-enum WorktreeCmd {
-    /// Search file paths inside a workspace's worktree, for an agent chat's
+    /// Search file paths inside a worktree, for an agent chat's
     /// @-mention picker. Results are worktree-relative, never a runner path —
     /// the same redaction `wire.rs` applies to every other path this scope
     /// can see.
     FileSearch {
-        workspace: String,
+        worktree: String,
         query: String,
         /// 0 asks the daemon for its own default rather than this CLI
         /// inventing a second one that could drift from it.
@@ -600,7 +593,7 @@ enum WorktreeCmd {
 enum TerminalCmd {
     /// Launch a preset in a new tagged tmux window.
     Create {
-        workspace: String,
+        worktree: String,
         /// What to launch. Defaults to your shell, which is almost always
         /// right: you open a terminal and type `claude` into it, and Far Cooler
         /// notices what is running rather than being told in advance.
@@ -608,7 +601,7 @@ enum TerminalCmd {
         preset: String,
         #[arg(long)]
         title: Option<String>,
-        /// Put it straight into the workspace's active group.
+        /// Put it straight into the worktree's active group.
         ///
         /// tmux's `%`: you are looking at a layout and you want another pane in
         /// it. Does nothing when there is no layout, so it is safe to always
@@ -624,7 +617,7 @@ enum TerminalCmd {
         #[arg(long, allow_hyphen_values = true)]
         prompt: Option<String>,
         /// The board task this pane is opened to work, by key (`fc-12`), on
-        /// the workspace's own repository's board.
+        /// the worktree's own repository's board.
         ///
         /// An agent pane exports it as FARCOOLER_TASK, now and after every
         /// restart, and starts on a short message that points it at the task.
@@ -768,7 +761,7 @@ async fn main() {
     //
     // tracing_subscriber writes to stdout by default, which put warnings in the
     // middle of `--json` output: the Mac app's decode then failed, it kept its
-    // previous fleet, and a user who had just created a workspace was told
+    // previous fleet, and a user who had just created a worktree was told
     // there were none. A CLI whose machine-readable output can be corrupted by
     // an unrelated log line is broken however good the log line is.
     tracing_subscriber::fmt()
@@ -914,13 +907,12 @@ async fn run() -> Fallible {
         Command::Theme(c) => theme(runner, c, cli.json).await,
         Command::Settings(c) => settings(runner, c, cli.json).await,
         Command::Adapter(c) => adapter(runner, c, cli.json).await,
-        Command::Workspace(c) => workspace(runner, c, cli.json).await,
         Command::Terminal(c) => terminal(runner, c, cli.json).await,
         Command::Changes(c) => changes::changes(runner, c, cli.json).await,
         Command::Task(c) => tasks::task(runner, c, cli.json).await,
         Command::Worktree(c) => worktree(runner, c, cli.json).await,
         Command::Layout(c) => layout(runner, c, cli.json).await,
-        Command::Attach { workspace } => attach(runner, &workspace).await,
+        Command::Attach { worktree } => attach(runner, &worktree).await,
         Command::Events => events(runner).await,
         Command::Push(c) => push(runner, c).await,
         Command::Client(c) => clients::client(runner, c, cli.json).await,
@@ -973,7 +965,7 @@ async fn pane_host(kind: &str) -> Fallible {
         "changes" => "changes",
         other => return Err(format!("unknown pane kind: {other}").into()),
     };
-    println!("Far Cooler is drawing this workspace's {what} here.");
+    println!("Far Cooler is drawing this worktree's {what} here.");
     // No signal handling: tmux kills the pane's process group, and a wait that
     // caught SIGHUP to exit tidily would only be a slower way to be killed.
     std::future::pending::<()>().await;
@@ -1030,7 +1022,7 @@ async fn status(runner: Option<&str>, json: bool) -> Fallible {
     let mut link = connect_to(runner).await?;
     let roots = list_roots(&mut link).await?;
     let repos = list_repositories(&mut link).await?;
-    let workspaces = list_workspaces(&mut link).await?;
+    let worktrees = list_worktrees(&mut link).await?;
     let terminals = list_terminals(&mut link, None).await?;
     let host_facts = host_get(&mut link).await?;
     let healthy = host_facts.self_health != farcooler_protocol::v1::SelfHealth::Degraded as i32;
@@ -1064,7 +1056,7 @@ async fn status(runner: Option<&str>, json: bool) -> Fallible {
                 "livePanes": host_facts.live_terminal_count,
                 "roots": roots.len(),
                 "repositories": repos.len(),
-                "workspaces": workspaces.len(),
+                "worktrees": worktrees.len(),
                 "terminals": terminals.len(),
             })
         );
@@ -1091,7 +1083,7 @@ async fn status(runner: Option<&str>, json: bool) -> Fallible {
     }
     println!("roots         {}", roots.len());
     println!("repositories  {}", repos.len());
-    println!("workspaces    {}", workspaces.len());
+    println!("worktrees     {}", worktrees.len());
     println!("live panes    {}", host_facts.live_terminal_count);
 
     // The recovery command names a tmux socket on THIS runner, so it is only
@@ -1148,7 +1140,7 @@ async fn root(runner: Option<&str>, cmd: RootCmd, json: bool) -> Fallible {
                 // a wrong --confirm would think it had removed a root it still
                 // has.
                 //
-                // The same string `workspace remove` returns further down, and the same
+                // The same string `worktree remove` returns further down, and the same
                 // reason: it is the substring the daemon's own error carried, and
                 // `DaemonClient.swift` on macOS still sniffs stderr for
                 // "confirmation" to tell a name mismatch from a real failure.
@@ -1672,11 +1664,11 @@ async fn repo(runner: Option<&str>, cmd: RepoCmd, json: bool) -> Fallible {
     Ok(())
 }
 
-/// `workspace.create` for a new branch, naming `workspace_fork_only` when
+/// `worktree.create` for a new branch, naming `workspace_fork_only` when
 /// `fork_only` is set: a daemon too old to know the field then refuses the
 /// request rather than dropping it and checking out a branch a remote already
-/// has. See `capability::WORKSPACE_FORK_ONLY`.
-pub(crate) fn workspace_create_request(
+/// has. See `capability::WORKTREE_FORK_ONLY`.
+pub(crate) fn worktree_create_request(
     repository: uuid::Uuid,
     name: String,
     branch: String,
@@ -1685,8 +1677,8 @@ pub(crate) fn workspace_create_request(
     fork_only: bool,
 ) -> farcooler_protocol::v1::Request {
     let mut req = with(
-        req_for("workspace.create", repository),
-        request::Payload::WorkspaceCreate(farcooler_protocol::v1::WorkspaceCreate {
+        req_for("worktree.create", repository),
+        request::Payload::WorktreeCreate(farcooler_protocol::v1::WorktreeCreate {
             // The field kept its wire name and changed meaning: this is the
             // worktree's name now. Renaming it would have broken every
             // shipped client to say the same thing in different words.
@@ -1700,35 +1692,35 @@ pub(crate) fn workspace_create_request(
     );
     if fork_only {
         req.required_capabilities
-            .push(farcooler_protocol::capability::WORKSPACE_FORK_ONLY.to_string());
+            .push(farcooler_protocol::capability::WORKTREE_FORK_ONLY.to_string());
     }
     req
 }
 
-/// The `workspace.create` a parsed `workspace create` sends: every flag the
+/// The `worktree.create` a parsed `worktree create` sends: every flag the
 /// command line carries, as the request says it. Its own function so a test
 /// can go from the argv a client sends to the request the daemon gets.
-fn workspace_create_from_args(
+fn worktree_create_from_args(
     repository: uuid::Uuid,
     args: CreateArgs,
 ) -> farcooler_protocol::v1::Request {
     let CreateArgs { repo: _, name, branch, base, terminal, no_terminal, fork_only } = args;
     let terminal = if no_terminal { String::new() } else { terminal };
-    workspace_create_request(repository, name, branch, base, terminal, fork_only)
+    worktree_create_request(repository, name, branch, base, terminal, fork_only)
 }
 
-async fn workspace(runner: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallible {
+async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallible {
     let mut link = connect_to(runner).await?;
     match cmd {
-        WorkspaceCmd::Create(args) => {
+        WorktreeCmd::Create(args) => {
             let repos = list_repositories(&mut link).await?;
             let target = resolve_repository(&repos, &args.repo)?;
-            let r = link.call(workspace_create_from_args(uuid_of(&target.id), args)).await?;
-            let result::Value::Workspace(ws) = expect_value(r.value, "workspace")? else {
+            let r = link.call(worktree_create_from_args(uuid_of(&target.id), args)).await?;
+            let result::Value::Worktree(ws) = expect_value(r.value, "worktree")? else {
                 return Err("the daemon returned the wrong resource".into());
             };
             // `--json` names what was made, so a client acts on THIS
-            // workspace rather than guessing it from a list read before and
+            // worktree rather than guessing it from a list read before and
             // after — two creates in flight at once make that guess wrong.
             if json {
                 println!(
@@ -1742,15 +1734,15 @@ async fn workspace(runner: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Falli
                 );
                 return Ok(());
             }
-            println!("created workspace {}  {}", short_bytes(&ws.id), ws.task_name);
+            println!("created worktree {}  {}", short_bytes(&ws.id), ws.task_name);
             println!("  branch   {}", ws.branch);
             if let Some(path) = &ws.worktree_path {
                 println!("  worktree {path}");
             }
         }
 
-        WorkspaceCmd::List => {
-            let workspaces = list_workspaces(&mut link).await?;
+        WorktreeCmd::List => {
+            let worktrees = list_worktrees(&mut link).await?;
             let terminals = list_terminals(&mut link, None).await?;
             let repositories = list_repositories(&mut link).await?;
             let host_facts = host_get(&mut link).await?;
@@ -1758,7 +1750,7 @@ async fn workspace(runner: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Falli
                 host_facts.self_health != farcooler_protocol::v1::SelfHealth::Degraded as i32;
 
             if json {
-                let items: Vec<_> = workspaces
+                let items: Vec<_> = worktrees
                     .iter()
                     .map(|w| {
                         serde_json::json!({
@@ -1783,7 +1775,7 @@ async fn workspace(runner: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Falli
                                 .map(|r| r.display_name.clone())
                                 .unwrap_or_default(),
                             "worktree": w.worktree_path,
-                            "state": workspace_label(w.state()),
+                            "state": worktree_label(w.state()),
                             "is_main_checkout": w.is_main_checkout,
                             // Where this card sits on its runner. The list is
                             // already in this order, so a client that draws
@@ -1792,48 +1784,42 @@ async fn workspace(runner: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Falli
                             // it to keep each runner's stretch in order, and
                             // every client needs it to send an order back.
                             //
-                            // 0 for every workspace against a runner too old to
+                            // 0 for every worktree against a runner too old to
                             // store a rank, so a client tie-breaks rather than
                             // trusting it alone.
                             "ordinal": w.ordinal,
                             "terminals": terminals.iter()
-                                .filter(|t| t.workspace_id == w.id)
-                                .map(workspace_list_terminal_json)
+                                .filter(|t| t.worktree_id == w.id)
+                                .map(worktree_list_terminal_json)
                                 .collect::<Vec<_>>(),
                         })
                     })
                     .collect();
 
+                let branch_prefix = host_facts.settings
+                    .as_ref()
+                    .map(|s| s.branch_prefix.clone())
+                    .unwrap_or_default();
                 println!(
                     "{}",
-                    serde_json::json!({
-                        "runtime_healthy": healthy,
-                        "live_panes": host_facts.live_terminal_count,
-                        // The Mac app reads this on every refresh, which is why
-                        // it rides the envelope that call already parses rather
-                        // than costing a second subprocess per branch it names.
-                        "branch_prefix": host_facts.settings
-                            .as_ref()
-                            .map(|s| s.branch_prefix.clone())
-                            .unwrap_or_default(),
-                        "workspaces": items,
-                    })
+                    worktree_list_envelope(
+                        healthy, host_facts.live_terminal_count, branch_prefix, items)
                 );
                 return Ok(());
             }
 
-            if workspaces.is_empty() {
-                println!("no workspaces yet");
+            if worktrees.is_empty() {
+                println!("no worktrees yet");
             }
-            for w in &workspaces {
+            for w in &worktrees {
                 println!(
                     "{}  {:22}  {:8}  {}",
                     short_bytes(&w.id),
                     truncate(&w.task_name, 22),
-                    workspace_label(w.state()),
+                    worktree_label(w.state()),
                     w.branch
                 );
-                for t in terminals.iter().filter(|t| t.workspace_id == w.id) {
+                for t in terminals.iter().filter(|t| t.worktree_id == w.id) {
                     let activity = activity_label(t.activity);
                     println!(
                         "    {}  {:16}  {:8}  {:8}  {}",
@@ -1847,7 +1833,7 @@ async fn workspace(runner: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Falli
             }
         }
 
-        WorkspaceCmd::Branches { repo } => {
+        WorktreeCmd::Branches { repo } => {
             let repos = list_repositories(&mut link).await?;
             let target = resolve_repository(&repos, &repo)?;
             let r = link.call(req_for("branch.list", uuid_of(&target.id))).await?;
@@ -1886,13 +1872,13 @@ async fn workspace(runner: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Falli
             }
         }
 
-        WorkspaceCmd::Adopt { repo, branch } => {
+        WorktreeCmd::Adopt { repo, branch } => {
             let repos = list_repositories(&mut link).await?;
             let target = resolve_repository(&repos, &repo)?;
             let r = link
                 .call(with(
-                    req_for("workspace.create", uuid_of(&target.id)),
-                    request::Payload::WorkspaceCreate(farcooler_protocol::v1::WorkspaceCreate {
+                    req_for("worktree.create", uuid_of(&target.id)),
+                    request::Payload::WorktreeCreate(farcooler_protocol::v1::WorktreeCreate {
                         // Ignored for an adoption: the daemon names the worktree
                         // after the branch, so there is nothing to send.
                         task_name: String::new(),
@@ -1904,7 +1890,7 @@ async fn workspace(runner: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Falli
                     }),
                 ))
                 .await?;
-            let result::Value::Workspace(ws) = expect_value(r.value, "workspace")? else {
+            let result::Value::Worktree(ws) = expect_value(r.value, "worktree")? else {
                 return Err("the daemon returned the wrong resource".into());
             };
             println!("adopted {}  {}", short_bytes(&ws.id), ws.branch);
@@ -1913,17 +1899,17 @@ async fn workspace(runner: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Falli
             }
         }
 
-        WorkspaceCmd::Reorder { workspaces } => {
-            let all = list_workspaces(&mut link).await?;
+        WorktreeCmd::Reorder { worktrees } => {
+            let all = list_worktrees(&mut link).await?;
             // Resolved to full ids here rather than sent as typed, so a short
             // id that matches nothing fails naming the argument the user got
             // wrong instead of arriving at the daemon as a bad uuid.
-            let mut ordered = Vec::with_capacity(workspaces.len());
-            for name in &workspaces {
-                let ws = resolve(&all, name, |w| &w.id, "workspace")?;
+            let mut ordered = Vec::with_capacity(worktrees.len());
+            for name in &worktrees {
+                let ws = resolve(&all, name, |w| &w.id, "worktree")?;
                 ordered.push(uuid_of(&ws.id));
             }
-            farcooler_client::actions::reorder_workspaces(link.client_mut(), &ordered).await?;
+            farcooler_client::actions::reorder_worktrees(link.client_mut(), &ordered).await?;
             if json {
                 println!("{}", serde_json::json!({ "ok": true }));
             } else {
@@ -1931,23 +1917,23 @@ async fn workspace(runner: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Falli
             }
         }
 
-        WorkspaceCmd::Hide { workspace } => {
-            let all = list_workspaces(&mut link).await?;
-            let ws = resolve(&all, &workspace, |w| &w.id, "workspace")?;
-            farcooler_client::actions::hide_workspace(link.client_mut(), uuid_of(&ws.id)).await?;
+        WorktreeCmd::Hide { worktree } => {
+            let all = list_worktrees(&mut link).await?;
+            let ws = resolve(&all, &worktree, |w| &w.id, "worktree")?;
+            farcooler_client::actions::hide_worktree(link.client_mut(), uuid_of(&ws.id)).await?;
             println!("hidden {}  (git data untouched)", short_bytes(&ws.id));
         }
 
-        WorkspaceCmd::Unhide { workspace } => {
-            let all = list_workspaces(&mut link).await?;
-            let ws = resolve(&all, &workspace, |w| &w.id, "workspace")?;
-            farcooler_client::actions::unhide_workspace(link.client_mut(), uuid_of(&ws.id)).await?;
+        WorktreeCmd::Unhide { worktree } => {
+            let all = list_worktrees(&mut link).await?;
+            let ws = resolve(&all, &worktree, |w| &w.id, "worktree")?;
+            farcooler_client::actions::unhide_worktree(link.client_mut(), uuid_of(&ws.id)).await?;
             println!("unhidden {}", short_bytes(&ws.id));
         }
 
-        WorkspaceCmd::RemoveWorktree { workspace, confirm } => {
-            let all = list_workspaces(&mut link).await?;
-            let ws = resolve(&all, &workspace, |w| &w.id, "workspace")?;
+        WorktreeCmd::Remove { worktree, confirm } => {
+            let all = list_worktrees(&mut link).await?;
+            let ws = resolve(&all, &worktree, |w| &w.id, "worktree")?;
             // The daemon checks this too, and its check is the one that counts:
             // a client that skips the prompt must still be refused.
             use farcooler_client::actions::RemoveWorktreeOutcome;
@@ -1969,14 +1955,46 @@ async fn workspace(runner: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Falli
                 }
             }
         }
+
+        // A daemon RPC, so — like the agent channel and unlike the tmux-backed
+        // terminal reads — `connect_to(runner)` alone reaches a remote runner
+        // correctly and no `proxy()` is needed.
+        WorktreeCmd::FileSearch { worktree, query, limit } => {
+            let all = list_worktrees(&mut link).await?;
+            let ws = resolve(&all, &worktree, |w| &w.id, "worktree")?;
+            let id = uuid_of(&ws.id);
+            let r = link
+                .call(with(
+                    req("worktree.file_search"),
+                    request::Payload::WorktreeFileSearch(farcooler_protocol::v1::WorktreeFileSearch {
+                        worktree_id: id_bytes(id),
+                        query,
+                        limit,
+                    }),
+                ))
+                .await?;
+            let result::Value::WorktreeFileList(list) = expect_value(r.value, "worktree file list")?
+            else {
+                return Err("the daemon returned the wrong resource".into());
+            };
+            if json {
+                println!("{}", serde_json::json!({ "paths": list.paths }));
+            } else if list.paths.is_empty() {
+                println!("no matches");
+            } else {
+                for p in &list.paths {
+                    println!("{p}");
+                }
+            }
+        }
     }
     Ok(())
 }
 
-async fn attach(runner: Option<&str>, workspace: &str) -> Fallible {
+async fn attach(runner: Option<&str>, worktree: &str) -> Fallible {
     let mut link = connect_to(runner).await?;
-    let all = list_workspaces(&mut link).await?;
-    let ws = resolve(&all, workspace, |w| &w.id, "workspace")?;
+    let all = list_worktrees(&mut link).await?;
+    let ws = resolve(&all, worktree, |w| &w.id, "worktree")?;
 
     println!("Attaching to the live tmux session for {}.", ws.task_name);
     println!();
@@ -1986,7 +2004,7 @@ async fn attach(runner: Option<&str>, workspace: &str) -> Fallible {
     match runner {
         // The tmux socket is on the runner, so the command has to run there.
         Some(target) => {
-            println!("  ssh -t {target} farcooler attach {workspace}");
+            println!("  ssh -t {target} farcooler attach {worktree}");
         }
         None => {
             let runtime = Runtime::open().await?;
@@ -2025,8 +2043,8 @@ async fn events(runner: Option<&str>) -> Fallible {
 // ---------------------------------------------------------------------------
 // Tiling
 //
-// Every one of these is a `layout.*` call against a workspace, and every one
-// answers with the workspace's whole set of groups — so the printer is written
+// Every one of these is a `layout.*` call against a worktree, and every one
+// answers with the worktree's whole set of groups — so the printer is written
 // once and each command is a payload.
 // ---------------------------------------------------------------------------
 
@@ -2035,27 +2053,27 @@ async fn layout(runner: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
     use farcooler_protocol::v1::LayoutUpdate;
 
     let mut link = connect_to(runner).await?;
-    let workspaces = list_workspaces(&mut link).await?;
+    let worktrees = list_worktrees(&mut link).await?;
 
-    let workspace_arg = match &cmd {
-        LayoutCmd::Show { workspace }
-        | LayoutCmd::Split { workspace, .. }
-        | LayoutCmd::Move { workspace, .. }
-        | LayoutCmd::Preset { workspace, .. }
-        | LayoutCmd::Cycle { workspace }
-        | LayoutCmd::Focus { workspace, .. }
-        | LayoutCmd::Zoom { workspace, .. }
-        | LayoutCmd::Swap { workspace, .. }
-        | LayoutCmd::Resize { workspace, .. }
-        | LayoutCmd::Break { workspace, .. }
-        | LayoutCmd::Rename { workspace, .. }
-        | LayoutCmd::Viewport { workspace, .. }
-        | LayoutCmd::Select { workspace, .. } => workspace.clone(),
+    let worktree_arg = match &cmd {
+        LayoutCmd::Show { worktree }
+        | LayoutCmd::Split { worktree, .. }
+        | LayoutCmd::Move { worktree, .. }
+        | LayoutCmd::Preset { worktree, .. }
+        | LayoutCmd::Cycle { worktree }
+        | LayoutCmd::Focus { worktree, .. }
+        | LayoutCmd::Zoom { worktree, .. }
+        | LayoutCmd::Swap { worktree, .. }
+        | LayoutCmd::Resize { worktree, .. }
+        | LayoutCmd::Break { worktree, .. }
+        | LayoutCmd::Rename { worktree, .. }
+        | LayoutCmd::Viewport { worktree, .. }
+        | LayoutCmd::Select { worktree, .. } => worktree.clone(),
     };
-    let ws = resolve(&workspaces, &workspace_arg, |w| &w.id, "workspace")?;
-    let workspace_id = uuid_of(&ws.id);
+    let ws = resolve(&worktrees, &worktree_arg, |w| &w.id, "worktree")?;
+    let worktree_id = uuid_of(&ws.id);
 
-    let terminals = list_terminals(&mut link, Some(workspace_id)).await?;
+    let terminals = list_terminals(&mut link, Some(worktree_id)).await?;
     let pick = |given: &str| -> Result<bytes::Bytes, String> {
         resolve(&terminals, given, |t| &t.id, "terminal").map(|t| t.id.clone())
     };
@@ -2126,7 +2144,7 @@ async fn layout(runner: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
         }
         LayoutCmd::Select { group, prev, .. } => match group {
             Some(given) => {
-                let existing = fetch_layout(&mut link, workspace_id).await?;
+                let existing = fetch_layout(&mut link, worktree_id).await?;
                 let found = match given.parse::<usize>() {
                     Ok(n) if n >= 1 && n <= existing.len() => existing[n - 1].id.clone(),
                     _ => existing
@@ -2142,9 +2160,9 @@ async fn layout(runner: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
     }
 
     let request = if matches!(cmd, LayoutCmd::Show { .. }) {
-        req_for(method, workspace_id)
+        req_for(method, worktree_id)
     } else {
-        with(req_for(method, workspace_id), request::Payload::LayoutUpdate(update))
+        with(req_for(method, worktree_id), request::Payload::LayoutUpdate(update))
     };
     let r = link.call(request).await?;
     let result::Value::PaneGroupList(list) = expect_value(r.value, "layout")? else {
@@ -2152,7 +2170,7 @@ async fn layout(runner: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
     };
 
     // Re-read: a split creates a terminal the first listing did not have.
-    let terminals = list_terminals(&mut link, Some(workspace_id)).await?;
+    let terminals = list_terminals(&mut link, Some(worktree_id)).await?;
     print_layout(&list, &terminals, json);
     Ok(())
 }
@@ -2227,9 +2245,9 @@ fn unknown_preset(text: &str) -> String {
 
 async fn fetch_layout(
     link: &mut Link,
-    workspace: Uuid,
+    worktree: Uuid,
 ) -> Result<Vec<farcooler_protocol::v1::PaneGroup>, Box<dyn std::error::Error>> {
-    let r = link.call(req_for("layout.list", workspace)).await?;
+    let r = link.call(req_for("layout.list", worktree)).await?;
     match expect_value(r.value, "layout")? {
         result::Value::PaneGroupList(l) => Ok(l.items),
         _ => Err("the daemon returned the wrong resource".into()),
@@ -2241,7 +2259,7 @@ fn layout_json(
     terminals: &[Terminal],
 ) -> serde_json::Value {
     serde_json::json!({
-        "workspace": uuid_of(&list.workspace_id).to_string(),
+        "worktree": uuid_of(&list.worktree_id).to_string(),
         "groups": list.items.iter().map(|g| serde_json::json!({
             "id": g.id,
             "name": g.name,
@@ -2271,7 +2289,7 @@ fn layout_json(
 /// pane that knows no task). See `capability::LAUNCH_PROMPT` and
 /// `capability::TERMINAL_TASK`.
 pub(crate) fn terminal_create_request(
-    workspace: uuid::Uuid,
+    worktree: uuid::Uuid,
     title: String,
     preset: String,
     tile: bool,
@@ -2281,7 +2299,7 @@ pub(crate) fn terminal_create_request(
     let prompt = prompt.filter(|p| !p.trim().is_empty());
     let task = task.map(|k| k.trim().to_string()).filter(|k| !k.is_empty());
     let mut req = with(
-        req_for("terminal.create", workspace),
+        req_for("terminal.create", worktree),
         request::Payload::TerminalCreate(farcooler_protocol::v1::TerminalCreate {
             title,
             command_preset: preset,
@@ -2302,10 +2320,10 @@ pub(crate) fn terminal_create_request(
 async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible {
     match cmd {
         // Record changes. These write durable intent, so they go to the daemon.
-        TerminalCmd::Create { workspace, preset, title, tile, prompt, task } => {
+        TerminalCmd::Create { worktree, preset, title, tile, prompt, task } => {
             let mut link = connect_to(runner).await?;
-            let all = list_workspaces(&mut link).await?;
-            let ws = resolve(&all, &workspace, |w| &w.id, "workspace")?;
+            let all = list_worktrees(&mut link).await?;
+            let ws = resolve(&all, &worktree, |w| &w.id, "worktree")?;
             let title = title.unwrap_or_else(|| preset.clone());
             let req = terminal_create_request(uuid_of(&ws.id), title, preset, tile, prompt, task);
             let r = link.call(req).await?;
@@ -2721,47 +2739,6 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Worktree file search: a daemon RPC, so — like the agent channel above and
-// unlike the tmux-backed reads further up — `connect_to(runner)` alone reaches
-// a remote runner correctly and no `proxy()` is needed.
-// ---------------------------------------------------------------------------
-
-async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallible {
-    match cmd {
-        WorktreeCmd::FileSearch { workspace, query, limit } => {
-            let mut link = connect_to(runner).await?;
-            let all = list_workspaces(&mut link).await?;
-            let ws = resolve(&all, &workspace, |w| &w.id, "workspace")?;
-            let id = uuid_of(&ws.id);
-            let r = link
-                .call(with(
-                    req("worktree.file_search"),
-                    request::Payload::WorktreeFileSearch(farcooler_protocol::v1::WorktreeFileSearch {
-                        workspace_id: id_bytes(id),
-                        query,
-                        limit,
-                    }),
-                ))
-                .await?;
-            let result::Value::WorktreeFileList(list) = expect_value(r.value, "worktree file list")?
-            else {
-                return Err("the daemon returned the wrong resource".into());
-            };
-            if json {
-                println!("{}", serde_json::json!({ "paths": list.paths }));
-            } else if list.paths.is_empty() {
-                println!("no matches");
-            } else {
-                for p in &list.paths {
-                    println!("{p}");
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
 /// Run a command on the runner's own CLI and adopt its exit status.
 async fn proxy(runner: Option<&str>, args: &[String]) -> Fallible {
     let Some(target) = runner else { return Ok(()) };
@@ -2827,19 +2804,19 @@ async fn list_themes(
     }
 }
 
-async fn list_workspaces(link: &mut Link) -> Result<Vec<Workspace>, Box<dyn std::error::Error>> {
-    let r = link.call(req("workspace.list")).await?;
-    match expect_value(r.value, "workspaces")? {
-        result::Value::WorkspaceList(l) => Ok(l.items),
+async fn list_worktrees(link: &mut Link) -> Result<Vec<Worktree>, Box<dyn std::error::Error>> {
+    let r = link.call(req("worktree.list")).await?;
+    match expect_value(r.value, "worktrees")? {
+        result::Value::WorktreeList(l) => Ok(l.items),
         _ => Err("the daemon returned the wrong list".into()),
     }
 }
 
 async fn list_terminals(
     link: &mut Link,
-    workspace: Option<Uuid>,
+    worktree: Option<Uuid>,
 ) -> Result<Vec<Terminal>, Box<dyn std::error::Error>> {
-    let request = match workspace {
+    let request = match worktree {
         Some(id) => req_for("terminal.list", id),
         None => req("terminal.list"),
     };
@@ -2972,19 +2949,41 @@ fn task_of(t: &farcooler_protocol::v1::Terminal) -> Option<String> {
     t.task_id.as_deref().and_then(|b| Uuid::from_slice(b).ok()).map(|u| u.to_string())
 }
 
-/// One terminal, projected for a client — the shape `WorkspaceCmd::List` and
+/// `worktree list --json`'s envelope around its rows.
+///
+/// Its own function so a test can pin the key the rows ride under. The Mac
+/// decodes `worktrees`, and a later `workspaces` key (the workstreams) will sit
+/// beside it in this same object, so the two must never be confused.
+fn worktree_list_envelope(
+    healthy: bool,
+    live_panes: u32,
+    branch_prefix: String,
+    items: Vec<serde_json::Value>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "runtime_healthy": healthy,
+        "live_panes": live_panes,
+        // The Mac app reads this on every refresh, which is why it rides the
+        // envelope that call already parses rather than costing a second
+        // subprocess per branch it names.
+        "branch_prefix": branch_prefix,
+        "worktrees": items,
+    })
+}
+
+/// One terminal, projected for a client — the shape `WorktreeCmd::List` and
 /// `terminal_event_json` both need and must agree on.
 ///
 /// Pulled out for the exact reason `terminal_event_json` was: this was
-/// inline in `workspace()`'s `json!` closure until the exit code, the turn
+/// inline in `worktree()`'s `json!` closure until the exit code, the turn
 /// clock and the blocked question were all found missing from it in the same
 /// afternoon — the THIRD time this file has built a terminal's client-facing
 /// JSON by hand and left a field out, after `chatCapable` and then
 /// `exitCode`/`exitSignal` on the event side. This is the one the Mac app's
-/// `refresh()` actually calls (`workspace list --json`) — `crates/client`
+/// `refresh()` actually calls (`worktree list --json`) — `crates/client`
 /// builds a separate projection for iOS, and it is not what this app reads,
 /// however alike the two look.
-fn workspace_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Value {
+fn worktree_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Value {
     serde_json::json!({
         "id": uuid_of(&t.id).to_string(),
         "short": short_bytes(&t.id),
@@ -3081,16 +3080,16 @@ fn workspace_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_j
 fn event_json(payload: farcooler_protocol::v1::event::Payload) -> Option<serde_json::Value> {
     Some(match payload {
         farcooler_protocol::v1::event::Payload::TerminalChanged(t) => terminal_event_json(&t),
-        farcooler_protocol::v1::event::Payload::WorkspaceChanged(w) => serde_json::json!({
-            "kind": "workspace",
+        farcooler_protocol::v1::event::Payload::WorktreeChanged(w) => serde_json::json!({
+            "kind": "worktree",
             "id": uuid_of(&w.id).to_string(),
             "short": short_bytes(&w.id),
             "task": w.task_name,
-            "state": workspace_label(w.state()),
+            "state": worktree_label(w.state()),
         }),
         farcooler_protocol::v1::event::Payload::LayoutChanged(l) => serde_json::json!({
             "kind": "layout",
-            "workspace": uuid_of(&l.workspace_id).to_string(),
+            "worktree": uuid_of(&l.worktree_id).to_string(),
             "groups": l.items.iter().map(|g| serde_json::json!({
                 "id": g.id,
                 "name": g.name,
@@ -3117,8 +3116,8 @@ fn event_json(payload: farcooler_protocol::v1::event::Payload) -> Option<serde_j
         // re-reads `changes inbox`, or this worktree's change set.
         farcooler_protocol::v1::event::Payload::ChangeSetChanged(c) => serde_json::json!({
             "kind": "change_set",
-            "workspace": uuid_of(&c.workspace_id).to_string(),
-            "short": short_bytes(&c.workspace_id),
+            "worktree": uuid_of(&c.worktree_id).to_string(),
+            "short": short_bytes(&c.worktree_id),
             "version": c.version,
         }),
         // A repository's PR state was re-read, because somebody's
@@ -3200,7 +3199,7 @@ fn task_event_json(t: &farcooler_protocol::v1::TaskChanged) -> serde_json::Value
 /// which it did not, twice more: `exitCode`/`exitSignal` were missing here
 /// AND, it turned out, `list --json` had never had them either; `turnStartedAt`
 /// and `blockedQuestion` were missing from both at once. Three strikes in one
-/// function is why `workspace_list_terminal_json` above now exists as a named,
+/// function is why `worktree_list_terminal_json` above now exists as a named,
 /// tested thing instead of a second hand-built object this one could drift
 /// from again.
 fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Value {
@@ -3208,7 +3207,7 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         "kind": "terminal",
         "id": uuid_of(&t.id).to_string(),
         "short": short_bytes(&t.id),
-        "workspace": uuid_of(&t.workspace_id).to_string(),
+        "worktree": uuid_of(&t.worktree_id).to_string(),
         "title": t.title,
         "preset": label(t),
         // Which board task this pane was opened for, so a board card can go to
@@ -3285,15 +3284,15 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
     })
 }
 
-fn workspace_label(s: WorkspaceState) -> &'static str {
+fn worktree_label(s: WorktreeState) -> &'static str {
     match s {
-        WorkspaceState::Unspecified => "?",
-        WorkspaceState::Creating => "creating",
-        WorkspaceState::Ready => "ready",
-        WorkspaceState::Active => "active",
-        WorkspaceState::Error => "ERROR",
-        WorkspaceState::Hidden => "hidden",
-        WorkspaceState::WorktreeMissing => "worktree_missing",
+        WorktreeState::Unspecified => "?",
+        WorktreeState::Creating => "creating",
+        WorktreeState::Ready => "ready",
+        WorktreeState::Active => "active",
+        WorktreeState::Error => "ERROR",
+        WorktreeState::Hidden => "hidden",
+        WorktreeState::WorktreeMissing => "worktree_missing",
     }
 }
 
@@ -3325,7 +3324,7 @@ fn normalize_id(text: &str) -> String {
 ///
 /// Names first, because a repository is the one resource people know by name:
 /// they typed it when they registered it, they see it in every listing, and
-/// `farcooler workspace discover myrepo` is what anyone would write. Ids still
+/// `farcooler worktree create myrepo …` is what anyone would write. Ids still
 /// work, and an ambiguous name is refused rather than guessed at — two projects
 /// called `api` on one runner is a thing that happens.
 pub(crate) fn resolve_repository<'a>(
@@ -3350,20 +3349,20 @@ pub(crate) fn resolve_repository<'a>(
 }
 
 /// Resolve a short id suffix, refusing an ambiguous match rather than guessing.
-/// A workspace by id prefix or by task name.
-pub(crate) async fn resolve_workspace_id(
+/// A worktree by id prefix or by task name.
+pub(crate) async fn resolve_worktree_id(
     link: &mut Link,
     needle: &str,
 ) -> Result<Uuid, Box<dyn std::error::Error>> {
-    let workspaces = list_workspaces(link).await?;
+    let worktrees = list_worktrees(link).await?;
     // Name first: people type the task they gave it, and an id prefix is the
     // fallback rather than the other way round.
-    let by_name: Vec<&Workspace> =
-        workspaces.iter().filter(|w| w.task_name == needle).collect();
+    let by_name: Vec<&Worktree> =
+        worktrees.iter().filter(|w| w.task_name == needle).collect();
     if by_name.len() == 1 {
         return Ok(uuid_of(&by_name[0].id));
     }
-    let w = resolve(&workspaces, needle, |w| &w.id, "workspace")?;
+    let w = resolve(&worktrees, needle, |w| &w.id, "worktree")?;
     Ok(uuid_of(&w.id))
 }
 
@@ -3400,7 +3399,7 @@ mod tests {
         });
         assert_eq!(error_code_line(refused.as_ref(), true).as_deref(), Some("code: branch-exists"));
         assert_eq!(error_code_line(refused.as_ref(), false), None, "a person has the sentence");
-        let other: Box<dyn std::error::Error> = "no such workspace".into();
+        let other: Box<dyn std::error::Error> = "no such worktree".into();
         assert_eq!(error_code_line(other.as_ref(), true), None);
     }
 
@@ -3410,17 +3409,17 @@ mod tests {
     fn a_fork_only_create_names_the_capability_it_needs() {
         let repo = uuid::Uuid::now_v7();
         let create = |fork_only| {
-            workspace_create_request(
+            worktree_create_request(
                 repo, "fix-it".into(), "fix-it".into(), "HEAD".into(), String::new(), fork_only)
         };
         let forking = create(true);
-        assert_eq!(forking.required_capabilities, [farcooler_protocol::capability::WORKSPACE_FORK_ONLY]);
-        let Some(request::Payload::WorkspaceCreate(p)) = forking.payload else { panic!("payload") };
+        assert_eq!(forking.required_capabilities, [farcooler_protocol::capability::WORKTREE_FORK_ONLY]);
+        let Some(request::Payload::WorktreeCreate(p)) = forking.payload else { panic!("payload") };
         assert!(p.fork_only && !p.adopt_existing);
 
         let plain = create(false);
         assert!(plain.required_capabilities.is_empty(), "an older daemon is asked nothing new");
-        let Some(request::Payload::WorkspaceCreate(p)) = plain.payload else { panic!("payload") };
+        let Some(request::Payload::WorktreeCreate(p)) = plain.payload else { panic!("payload") };
         assert!(!p.fork_only);
     }
 
@@ -3470,16 +3469,16 @@ mod tests {
     #[test]
     fn the_macs_fork_only_create_parses_and_is_sent_fork_only() {
         let argv = [
-            "farcooler", "--json", "workspace", "create", "repo", "fix-it", "--branch", "el/fix-it",
+            "farcooler", "--json", "worktree", "create", "repo", "fix-it", "--branch", "el/fix-it",
             "--no-terminal", "--fork-only",
         ];
         let cli = Cli::try_parse_from(argv).expect("the Mac's argv parses");
-        let Command::Workspace(WorkspaceCmd::Create(args)) = cli.command else { panic!("workspace create") };
+        let Command::Worktree(WorktreeCmd::Create(args)) = cli.command else { panic!("worktree create") };
         assert_eq!(args.repo, "repo");
         // What the command's own arm passes: the parsed struct, whole.
-        let req = workspace_create_from_args(uuid::Uuid::now_v7(), args);
-        assert_eq!(req.required_capabilities, [farcooler_protocol::capability::WORKSPACE_FORK_ONLY]);
-        let Some(request::Payload::WorkspaceCreate(p)) = req.payload else { panic!("payload") };
+        let req = worktree_create_from_args(uuid::Uuid::now_v7(), args);
+        assert_eq!(req.required_capabilities, [farcooler_protocol::capability::WORKTREE_FORK_ONLY]);
+        let Some(request::Payload::WorktreeCreate(p)) = req.payload else { panic!("payload") };
         assert!(p.fork_only);
         assert_eq!((p.task_name.as_str(), p.branch.as_str()), ("fix-it", "el/fix-it"));
         assert!(p.terminal_preset.is_empty(), "--no-terminal");
@@ -3491,17 +3490,62 @@ mod tests {
             (&["--no-terminal"][..], false, ""),
             (&[][..], false, "shell"),
         ] {
-            let argv = ["farcooler", "workspace", "create", "repo", "n", "--branch", "b"]
+            let argv = ["farcooler", "worktree", "create", "repo", "n", "--branch", "b"]
                 .into_iter()
                 .chain(flags.iter().copied());
-            let Command::Workspace(WorkspaceCmd::Create(args)) =
+            let Command::Worktree(WorktreeCmd::Create(args)) =
                 Cli::try_parse_from(argv).expect("parses").command
             else {
-                panic!("workspace create")
+                panic!("worktree create")
             };
-            let req = workspace_create_from_args(uuid::Uuid::now_v7(), args);
-            let Some(request::Payload::WorkspaceCreate(p)) = req.payload else { panic!("payload") };
+            let req = worktree_create_from_args(uuid::Uuid::now_v7(), args);
+            let Some(request::Payload::WorktreeCreate(p)) = req.payload else { panic!("payload") };
             assert_eq!((p.fork_only, p.terminal_preset.as_str()), (fork_only, preset), "{flags:?}");
+        }
+    }
+
+    /// The rows of `worktree list --json` ride under `worktrees`, and only
+    /// the four envelope keys are there: the Mac reads this object by name.
+    #[test]
+    fn the_worktree_list_envelope_names_its_rows_worktrees() {
+        let row = serde_json::json!({ "id": "w1" });
+        let v = worktree_list_envelope(true, 2, "e/".into(), vec![row.clone()]);
+        assert_eq!(v["worktrees"], serde_json::json!([row]), "{v}");
+        let mut keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, ["branch_prefix", "live_panes", "runtime_healthy", "worktrees"]);
+    }
+
+    /// Every command that manages a worktree is under `worktree`, with the
+    /// flags it had under `workspace`. The Mac app, the manager skill and
+    /// `task dispatch`'s own advice all spell these out, so a verb left behind
+    /// fails in front of somebody as a clap error.
+    #[test]
+    fn worktree_commands_parse_where_workspace_commands_used_to() {
+        for line in [
+            "farcooler --json worktree create repo fix-it --branch fix-it --no-terminal --fork-only",
+            "farcooler worktree create repo fix-it --branch fix-it --base main --terminal claude",
+            "farcooler --json worktree list",
+            "farcooler worktree adopt repo feature",
+            "farcooler --json worktree branches repo",
+            "farcooler worktree reorder a b",
+            "farcooler worktree hide a",
+            "farcooler worktree unhide a",
+            "farcooler worktree remove a",
+            "farcooler worktree remove a --confirm a",
+            "farcooler --json worktree file-search a query --limit 5",
+        ] {
+            Cli::try_parse_from(line.split_whitespace()).unwrap_or_else(|e| panic!("{line}: {e}"));
+        }
+        // The old spellings are gone rather than kept as aliases: `workspace`
+        // comes back meaning a workstream, and a stale script should fail
+        // here instead of being read as that.
+        for line in [
+            "farcooler workspace list",
+            "farcooler workspace create repo fix-it --branch fix-it",
+            "farcooler worktree remove-worktree a",
+        ] {
+            assert!(Cli::try_parse_from(line.split_whitespace()).is_err(), "{line} still parses");
         }
     }
 
@@ -3529,7 +3573,7 @@ mod tests {
         use farcooler_protocol::v1::event::Payload;
         let kinds = [
             (Payload::TerminalChanged(Default::default()), "terminal"),
-            (Payload::WorkspaceChanged(Default::default()), "workspace"),
+            (Payload::WorktreeChanged(Default::default()), "worktree"),
             (Payload::LayoutChanged(Default::default()), "layout"),
             (Payload::FleetChanged(farcooler_protocol::v1::Empty {}), "fleet"),
             (Payload::ChangeSetChanged(Default::default()), "change_set"),
@@ -3649,7 +3693,7 @@ mod tests {
     }
 
     /// The other terminal-to-JSON function in this file, and the one the Mac
-    /// app's `refresh()` actually calls (`workspace list --json`) — see the
+    /// app's `refresh()` actually calls (`worktree list --json`) — see the
     /// function's own doc comment for why that distinction matters. Every
     /// field this stage of the branch added is checked here, because this is
     /// the function where three of them turned out to be missing at once.
@@ -3664,7 +3708,7 @@ mod tests {
             subagents: vec!["Auditing the redaction rules".to_string()],
             ..Default::default()
         };
-        let json = workspace_list_terminal_json(&t);
+        let json = worktree_list_terminal_json(&t);
         assert_eq!(json["exitCode"], serde_json::json!(101));
         assert_eq!(json["exitSignal"], serde_json::json!(null));
         assert_eq!(json["turnStartedAt"], serde_json::json!(1_700_000_000_000_i64));
@@ -3702,16 +3746,16 @@ mod tests {
     fn a_terminal_with_nothing_to_report_sends_an_empty_feed() {
         let t = farcooler_protocol::v1::Terminal::default();
         assert_eq!(terminal_event_json(&t)["feed"], serde_json::json!([]));
-        assert_eq!(workspace_list_terminal_json(&t)["feed"], serde_json::json!([]));
+        assert_eq!(worktree_list_terminal_json(&t)["feed"], serde_json::json!([]));
         assert_eq!(terminal_event_json(&t)["subagents"], serde_json::json!([]));
-        assert_eq!(workspace_list_terminal_json(&t)["subagents"], serde_json::json!([]));
+        assert_eq!(worktree_list_terminal_json(&t)["subagents"], serde_json::json!([]));
     }
 
     /// Keys the EVENT projection carries that the list one has no business
     /// carrying: an event has to say what kind of thing changed and which
-    /// workspace it is in, because it arrives on its own with no surrounding
+    /// worktree it is in, because it arrives on its own with no surrounding
     /// document. A list entry is already inside both.
-    const EVENT_ONLY: &[&str] = &["kind", "workspace"];
+    const EVENT_ONLY: &[&str] = &["kind", "worktree"];
 
     /// Keys the LIST projection carries that the event one deliberately does
     /// not. `epoch` is write-conflict bookkeeping for a client about to send a
@@ -3768,13 +3812,13 @@ mod tests {
                 .collect()
         };
         let event = keys(&terminal_event_json(&t), EVENT_ONLY);
-        let list = keys(&workspace_list_terminal_json(&t), LIST_ONLY);
+        let list = keys(&worktree_list_terminal_json(&t), LIST_ONLY);
 
         assert_eq!(
             event, list,
             "the two terminal projections disagree.\n\
              only in the event JSON: {:?}\n\
-             only in `workspace list --json`: {:?}\n\
+             only in `worktree list --json`: {:?}\n\
              Add the field to both, or name it in EVENT_ONLY/LIST_ONLY with a reason.",
             event.difference(&list).collect::<Vec<_>>(),
             list.difference(&event).collect::<Vec<_>>(),
@@ -3810,7 +3854,7 @@ mod tests {
     /// The daemon has stored `terminals.task_id` and put it on the wire since
     /// `terminal_task`, and both of these dropped it, so no app could go from
     /// a card on the board to the agent working it. The Mac reads it from
-    /// `workspace list`: a pane's task is set when it is created, and a new
+    /// `worktree list`: a pane's task is set when it is created, and a new
     /// pane's first event makes the Mac re-read the list. The event carries
     /// it too so the two projections stay one shape — which
     /// `the_two_terminal_projections_agree_on_every_field` enforces — for any
@@ -3822,7 +3866,7 @@ mod tests {
             task_id: Some(bytes::Bytes::copy_from_slice(task.as_bytes())),
             ..Default::default()
         };
-        assert_eq!(workspace_list_terminal_json(&t)["taskId"], task.to_string());
+        assert_eq!(worktree_list_terminal_json(&t)["taskId"], task.to_string());
         assert_eq!(terminal_event_json(&t)["taskId"], task.to_string());
     }
 
@@ -3835,7 +3879,7 @@ mod tests {
     fn a_terminal_with_no_task_or_a_malformed_one_names_none() {
         for task_id in [None, Some(bytes::Bytes::new()), Some(bytes::Bytes::from_static(b"nope"))] {
             let t = farcooler_protocol::v1::Terminal { task_id, ..Default::default() };
-            assert_eq!(workspace_list_terminal_json(&t)["taskId"], serde_json::json!(null));
+            assert_eq!(worktree_list_terminal_json(&t)["taskId"], serde_json::json!(null));
             assert_eq!(terminal_event_json(&t)["taskId"], serde_json::json!(null));
         }
     }
@@ -3845,7 +3889,7 @@ mod tests {
         // The ordinary case — idle, or working outside a permission prompt —
         // must not invent a clock or a question that is not there.
         let t = farcooler_protocol::v1::Terminal::default();
-        assert_eq!(workspace_list_terminal_json(&t)["turnStartedAt"], serde_json::json!(null));
-        assert_eq!(workspace_list_terminal_json(&t)["blockedQuestion"], serde_json::json!(null));
+        assert_eq!(worktree_list_terminal_json(&t)["turnStartedAt"], serde_json::json!(null));
+        assert_eq!(worktree_list_terminal_json(&t)["blockedQuestion"], serde_json::json!(null));
     }
 }

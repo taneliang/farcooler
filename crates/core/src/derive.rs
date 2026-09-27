@@ -16,7 +16,7 @@
 //!   FAILED                any                      ->   error
 //! ```
 
-use farcooler_protocol::v1::{TerminalIntent, TerminalState, WorkspaceState};
+use farcooler_protocol::v1::{TerminalIntent, TerminalState, WorktreeState};
 use uuid::Uuid;
 
 use crate::inventory::{RuntimeSnapshot, TaggedPane};
@@ -25,7 +25,7 @@ use crate::inventory::{RuntimeSnapshot, TaggedPane};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalRecord {
     pub id: Uuid,
-    pub workspace_id: Uuid,
+    pub worktree_id: Uuid,
     pub intent: TerminalIntent,
     /// True once creation verified exact tags on a live pane. Until then a
     /// terminal with no pane is still coming up, not lost.
@@ -124,27 +124,27 @@ pub fn orphaned_panes<'a>(
         .collect()
 }
 
-/// A workspace's state, from the durable facts plus its terminals.
+/// A worktree's state, from the durable facts plus its terminals.
 ///
 /// Ordered by what the user must act on. Hidden first because it is the user's
 /// own decision and outranks anything the runner noticed; a missing worktree
 /// next because every terminal in it is lost as a consequence, and reporting
 /// the consequence would send someone to restart a process in a directory that
 /// is not there.
-pub fn derive_workspace(
+pub fn derive_worktree(
     hidden: bool,
     worktree_missing: bool,
     creation_failed: bool,
     terminals: &[(TerminalRecord, DerivedTerminal)],
-) -> WorkspaceState {
+) -> WorktreeState {
     if hidden {
-        return WorkspaceState::Hidden;
+        return WorktreeState::Hidden;
     }
     if worktree_missing {
-        return WorkspaceState::WorktreeMissing;
+        return WorktreeState::WorktreeMissing;
     }
     if creation_failed {
-        return WorkspaceState::Error;
+        return WorktreeState::Error;
     }
 
     // A loss is unresolved for exactly as long as the record exists: dismissing
@@ -152,23 +152,23 @@ pub fn derive_workspace(
     // -but-still-listed state, because a row that can never say anything again
     // is not evidence, it is clutter.
     if terminals.iter().any(|(_, d)| d.state == TerminalState::Lost) {
-        return WorkspaceState::Error;
+        return WorktreeState::Error;
     }
 
     // `Unknown` counts as live here, which is a deliberate choice between three
     // claims none of which is knowledge.
     //
     // While the inventory is unreadable every terminal derives `Unknown`, so
-    // this workspace has no evidence at all. `Error` would say it is broken,
+    // this worktree has no evidence at all. `Error` would say it is broken,
     // `Ready` would say nothing is running, and `Active` says what its records
     // already intend and nothing has disproved. Only the last is recoverable
     // without alarming anyone: a tmux server that answers a second later leaves
     // the sidebar exactly where it was, instead of having flashed every
-    // workspace on the runner red and back.
+    // worktree on the runner red and back.
     //
     // The honest signal is not thrown away, it is just carried somewhere it can
     // be said properly — `runtime_healthy` on the wire, which the clients show
-    // as the runner being unreadable. A per-workspace state cannot express
+    // as the runner being unreadable. A per-worktree state cannot express
     // "ask the runner, not me".
     let any_live = terminals.iter().any(|(_, d)| {
         matches!(
@@ -176,7 +176,7 @@ pub fn derive_workspace(
             TerminalState::Running | TerminalState::Starting | TerminalState::Unknown
         )
     });
-    if any_live { WorkspaceState::Active } else { WorkspaceState::Ready }
+    if any_live { WorktreeState::Active } else { WorktreeState::Ready }
 }
 
 #[cfg(test)]
@@ -191,7 +191,7 @@ mod tests {
     fn pane(terminal_id: Uuid) -> TaggedPane {
         TaggedPane {
             daemon_id: daemon(),
-            workspace_id: Uuid::from_u128(50),
+            worktree_id: Uuid::from_u128(50),
             terminal_id,
             schema_version: 1,
             pane_id: "%1".into(),
@@ -218,7 +218,7 @@ mod tests {
     fn record(intent: TerminalIntent, confirmed: bool) -> TerminalRecord {
         TerminalRecord {
             id: Uuid::from_u128(100),
-            workspace_id: Uuid::from_u128(50),
+            worktree_id: Uuid::from_u128(50),
             intent,
             runtime_confirmed: confirmed,
             exit_code: None,
@@ -323,14 +323,14 @@ mod tests {
         assert_eq!(derive_terminal(&r, &s).state, TerminalState::Lost);
     }
 
-    /// A runner that cannot be read must not turn every workspace on it red.
+    /// A runner that cannot be read must not turn every worktree on it red.
     /// That flash — every row to Error and back — was the visible half of the
-    /// bug, and `Error` is a claim about the workspace that nothing observed.
+    /// bug, and `Error` is a claim about the worktree that nothing observed.
     #[test]
-    fn an_unreadable_runner_does_not_put_workspaces_in_error() {
+    fn an_unreadable_runner_does_not_put_worktrees_in_error() {
         let r = record(TerminalIntent::Running, true);
         let d = derive_terminal(&r, &RuntimeSnapshot::unavailable());
-        assert_eq!(derive_workspace(false, false, false, &[(r, d)]), WorkspaceState::Active);
+        assert_eq!(derive_worktree(false, false, false, &[(r, d)]), WorktreeState::Active);
     }
 
     #[test]
@@ -359,53 +359,53 @@ mod tests {
         assert!(orphaned_panes(&[r], &s, daemon()).is_empty());
     }
 
-    // ---- workspace derivation ----
+    // ---- worktree derivation ----
 
     fn derived(state: TerminalState) -> DerivedTerminal {
         DerivedTerminal { state, orphan_candidates: vec![] }
     }
 
     #[test]
-    fn workspace_is_active_when_a_terminal_runs() {
+    fn worktree_is_active_when_a_terminal_runs() {
         let r = record(TerminalIntent::Running, true);
-        let s = derive_workspace(false, false, false, &[(r, derived(TerminalState::Running))]);
-        assert_eq!(s, WorkspaceState::Active);
+        let s = derive_worktree(false, false, false, &[(r, derived(TerminalState::Running))]);
+        assert_eq!(s, WorktreeState::Active);
     }
 
     #[test]
-    fn workspace_is_ready_with_no_live_terminal() {
+    fn worktree_is_ready_with_no_live_terminal() {
         let r = record(TerminalIntent::Stopped, true);
-        let s = derive_workspace(false, false, false, &[(r, derived(TerminalState::Exited))]);
-        assert_eq!(s, WorkspaceState::Ready);
+        let s = derive_worktree(false, false, false, &[(r, derived(TerminalState::Exited))]);
+        assert_eq!(s, WorktreeState::Ready);
     }
 
     #[test]
-    fn a_lost_terminal_holds_workspace_in_error() {
+    fn a_lost_terminal_holds_worktree_in_error() {
         let r = record(TerminalIntent::Running, true);
-        let s = derive_workspace(false, false, false, &[(r, derived(TerminalState::Lost))]);
-        assert_eq!(s, WorkspaceState::Error);
+        let s = derive_worktree(false, false, false, &[(r, derived(TerminalState::Lost))]);
+        assert_eq!(s, WorktreeState::Error);
     }
 
     #[test]
     fn dismissing_the_loss_clears_the_error_by_removing_the_record() {
         // What dismissal does is delete the row — see `Service::dismiss_lost` —
-        // so from here it is simply a workspace with one terminal fewer.
-        let s = derive_workspace(false, false, false, &[]);
-        assert_eq!(s, WorkspaceState::Ready);
+        // so from here it is simply a worktree with one terminal fewer.
+        let s = derive_worktree(false, false, false, &[]);
+        assert_eq!(s, WorktreeState::Ready);
     }
 
     #[test]
     fn hidden_beats_everything_else() {
         let r = record(TerminalIntent::Running, true);
-        let s = derive_workspace(true, false, false, &[(r, derived(TerminalState::Running))]);
-        assert_eq!(s, WorkspaceState::Hidden, "hiding is the user's decision, not a symptom");
+        let s = derive_worktree(true, false, false, &[(r, derived(TerminalState::Running))]);
+        assert_eq!(s, WorktreeState::Hidden, "hiding is the user's decision, not a symptom");
     }
 
     #[test]
     fn hidden_wins_over_a_lost_terminal_too() {
         let r = record(TerminalIntent::Running, true);
-        let s = derive_workspace(true, false, false, &[(r, derived(TerminalState::Lost))]);
-        assert_eq!(s, WorkspaceState::Hidden);
+        let s = derive_worktree(true, false, false, &[(r, derived(TerminalState::Lost))]);
+        assert_eq!(s, WorktreeState::Hidden);
     }
 
     /// A missing worktree outranks a lost terminal.
@@ -416,7 +416,7 @@ mod tests {
     #[test]
     fn a_missing_worktree_outranks_a_lost_terminal() {
         let r = record(TerminalIntent::Running, true);
-        let s = derive_workspace(false, true, false, &[(r, derived(TerminalState::Lost))]);
-        assert_eq!(s, WorkspaceState::WorktreeMissing);
+        let s = derive_worktree(false, true, false, &[(r, derived(TerminalState::Lost))]);
+        assert_eq!(s, WorktreeState::WorktreeMissing);
     }
 }

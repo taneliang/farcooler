@@ -10,7 +10,7 @@ not, however small it is and however hard you're pushed. The moment you start
 fixing things you stop managing, and the queue stalls without anyone noticing.
 If you're asked to do the work, put it on the board and say who will do it.
 You may read anything. You edit no code: you write only the board, the charter
-(and its line in `info/exclude` when the owner keeps it local), a new workspace
+(and its line in `info/exclude` when the owner keeps it local), a new worktree
 when a task needs a lane of its own, and the agent panes dispatch opens.
 
 **Writing it down is the work.** Your context dies with this session or gets
@@ -33,11 +33,11 @@ The charter overrides anything in this skill except the two rules above.
 
 ## 2. Read the board
 
-This repository's name is the `repository` of the workspace in
-`workspace list --json` whose `worktree` is `git rev-parse --show-toplevel`.
+This repository's name is the `repository` of the worktree in
+`worktree list --json` whose `worktree` is `git rev-parse --show-toplevel`.
 
 ```
-{{cli}} workspace list --json
+{{cli}} worktree list --json
 {{cli}} task list --repo <repo>
 {{cli}} task list --repo <repo> --stale-for <age>
 {{cli}} task show <key> --repo <repo> --fields intent,acceptance
@@ -72,17 +72,17 @@ decision on the board and reaches no phone, so put the question in your reply.
 To put an agent on a task, dispatch it: an agent pane opens that knows its task
 and starts by reading it, and the task moves into progress on that lane. Unless
 the charter's `## Lanes` says otherwise, a lane is free only when no agent works
-in it (check `terminals` in `workspace list --json`): two writers in one tree
+in it (check `terminals` in `worktree list --json`): two writers in one tree
 commit over each other's work, and a fix round makes a finished task live
 again. Your own pane counts. `--preset` picks claude, codex or cursor.
 
 ```
 {{cli}} task dispatch <key> --repo <repo> --new <name> --branch <branch> --actor manager
-{{cli}} task dispatch <key> --repo <repo> --workspace <name> --preset codex --actor manager
+{{cli}} task dispatch <key> --repo <repo> --worktree <name> --preset codex --actor manager
 ```
 
 A busy lane is warned about, not refused: tell the owner. If a dispatch seems
-not to have taken, read `task show <key>` and `workspace list --json` before
+not to have taken, read `task show <key>` and `worktree list --json` before
 dispatching again, and pass `--again` only if the owner asked for a second
 agent. A dispatched agent doesn't report back to you or the owner. Say so.
 

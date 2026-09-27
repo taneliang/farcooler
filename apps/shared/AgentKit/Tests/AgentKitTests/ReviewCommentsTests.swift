@@ -23,7 +23,7 @@ struct ReviewCommentQueueTests {
         _ defaults: UserDefaults,
         deliver: @escaping ReviewCommentQueue.Deliver = { _, _ in nil }
     ) -> ReviewCommentQueue {
-        ReviewCommentQueue(workspace: "ws", defaults: defaults, deliver: deliver)
+        ReviewCommentQueue(worktree: "ws", defaults: defaults, deliver: deliver)
     }
 
     private func note(_ text: String, _ anchor: ReviewAnchor) -> ReviewComment {

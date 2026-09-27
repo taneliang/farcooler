@@ -53,7 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.core.TerminalPalette
 import com.farcooler.core.Vt
-import com.farcooler.model.Workspace
+import com.farcooler.model.Worktree
 import com.farcooler.net.Connection
 import com.farcooler.net.TerminalRef
 import com.farcooler.net.TerminalSession
@@ -68,7 +68,7 @@ import kotlinx.coroutines.launch
  *
  * ## One session per pane, and it is not re-pointed
  *
- * This was `TerminalScreen`: ONE composable for a whole workspace, holding one
+ * This was `TerminalScreen`: ONE composable for a whole worktree, holding one
  * [TerminalSession] built with `remember(ref.hostId)` and pointed at whichever
  * terminal the fleet-wide tab strip had last selected. F-3 in the parity
  * inventory. Every tab tap tore down the outgoing pane's emulator, its screen
@@ -78,7 +78,7 @@ import kotlinx.coroutines.launch
  * as it appears.
  *
  * Now this composable IS one pane, one session, mounted for as long as the pane
- * is mounted, and [WorkspaceScreen] holds however many of them the deck says. The
+ * is mounted, and [WorktreeScreen] holds however many of them the deck says. The
  * session's id is fixed at construction and `TerminalSession.switchTo` is gone.
  *
  * ## [live] is what this pane costs the runner
@@ -90,7 +90,7 @@ import kotlinx.coroutines.launch
  * channels.
  *
  * The tab strip lives at the BOTTOM, in thumb reach, and rises with the
- * keyboard. It belongs to [WorkspaceScreen] now, because it is the workspace's
+ * keyboard. It belongs to [WorktreeScreen] now, because it is the worktree's
  * strip rather than this pane's — but the position and the reason for it are
  * unchanged: under the title bar it would put the one control you use constantly
  * at the far end of the screen from the hand holding the phone.
@@ -100,7 +100,7 @@ fun TerminalPane(
     model: AppModel,
     ref: TerminalRef,
     connection: Connection,
-    workspace: Workspace?,
+    worktree: Worktree?,
     showRunner: Boolean,
     /**
      * Whether this pane is the one being read: the current tab, in an app that
@@ -131,11 +131,11 @@ fun TerminalPane(
     // still saying "terminal", so the button asked for the same switch every
     // time and the screen kept drawing a VT grid.
     val terminal = model.fleet.terminal(ref)
-    val ordinal = workspace?.ordinals()?.get(ref.terminalId)
+    val ordinal = worktree?.ordinals()?.get(ref.terminalId)
     val name = terminal?.displayName(ordinal) ?: "Terminal"
 
     // Keyed to nothing that can change. A pane's id is fixed for the life of
-    // this composable — [WorkspaceScreen] gives each one its own `key` — so
+    // this composable — [WorktreeScreen] gives each one its own `key` — so
     // there is nothing left for a `remember` key to guard against, and anything
     // put in one would be a way for this session to be rebuilt without the
     // pane being.
@@ -226,8 +226,8 @@ fun TerminalPane(
             .fillMaxSize()
             .background(Color(TerminalPalette.BACKGROUND))
     ) {
-        WorkspaceTopBar(
-            workspace = workspace,
+        WorktreeTopBar(
+            worktree = worktree,
             fallbackTitle = name,
             showRunner = showRunner,
             runnerLabel = connection.host.displayLabel,
@@ -384,11 +384,11 @@ fun TerminalPane(
 }
 
 /**
- * The workspace's own title bar, worn by every tab.
+ * The worktree's own title bar, worn by every tab.
  *
  * Drawn per pane rather than once above them, which is the one place this
  * screen deliberately differs from `WorkspaceView`. iOS puts its toolbar on the
- * workspace and has to route every tab's controls back up through it — its own
+ * worktree and has to route every tab's controls back up through it — its own
  * comment records what that cost when `ChangesView` contributed items from below
  * and SwiftUI merged the two trees in a different order per pane. Here the
  * controls belong to the tab that owns them: the terminal's overflow menu needs
@@ -405,8 +405,8 @@ fun TerminalPane(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WorkspaceTopBar(
-    workspace: Workspace?,
+fun WorktreeTopBar(
+    worktree: Worktree?,
     fallbackTitle: String,
     showRunner: Boolean,
     runnerLabel: String,
@@ -420,13 +420,13 @@ fun WorkspaceTopBar(
         title = {
             Column {
                 Text(
-                    workspace?.task?.ifBlank { null } ?: fallbackTitle,
+                    worktree?.task?.ifBlank { null } ?: fallbackTitle,
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 val subtitle = buildString {
-                    workspace?.branch?.takeIf { it.isNotBlank() }?.let { append(it) }
+                    worktree?.branch?.takeIf { it.isNotBlank() }?.let { append(it) }
                     if (showRunner) {
                         if (isNotEmpty()) append(" · ")
                         append(runnerLabel)

@@ -14,7 +14,7 @@ import org.junit.Test
  * The **encoding** is a wire format for a phone's own state: it is written by
  * one build of the app and read by whichever build is installed when the
  * process comes back. A route renamed on one side of that gap costs somebody
- * their place silently — no crash, no log line, just the workspace list where
+ * their place silently — no crash, no log line, just the worktree list where
  * the diff they were reading used to be. So the discriminators are asserted
  * literally rather than round-tripped, because a round trip passes happily
  * while both ends rename together.
@@ -43,7 +43,7 @@ class BackstackTest {
     fun everyRouteSurvivesTheRoundTrip() {
         val stack = listOf(
             Route.Fleet,
-            Route.Terminal("host-a", "workspace-1"),
+            Route.Terminal("host-a", "worktree-1"),
             Route.Settings,
             Route.RunnerSettings("host-b"),
         )
@@ -105,7 +105,7 @@ class BackstackTest {
      * The runner is IN the route, and two runners' routes are different routes.
      *
      * Android connects to every runner at once where iOS makes you pick one, so
-     * a workspace id alone is ambiguous here in a way it is not there: ids are
+     * a worktree id alone is ambiguous here in a way it is not there: ids are
      * minted per daemon. A stack that lost the host would restore onto whatever
      * runner happened to answer first.
      */
@@ -164,7 +164,7 @@ class BackstackTest {
      * Persisting those would make the memory a record of the app's own guesses,
      * read back tomorrow in preference to the rule that would make the guess
      * again with tomorrow's fleet in front of it — so a 3am ping would decide
-     * where that workspace opens for good.
+     * where that worktree opens for good.
      */
     @Test
     fun onlyAChosenTabIsRememberedAcrossTheProcess() {
@@ -214,7 +214,7 @@ class BackstackTest {
     }
 
     @Test
-    fun aFocusIsKeyedByRunnerAsWellAsWorkspace() {
+    fun aFocusIsKeyedByRunnerAsWellAsWorktree() {
         val live = mapOf(
             Backstack.key("host-a", "shared-id") to Focus(tab("t1"), chosen = true),
             Backstack.key("host-b", "shared-id") to Focus(tab("t2"), chosen = true),
@@ -243,7 +243,7 @@ class BackstackTest {
     }
 
     /**
-     * A remembered Changes tab survives a workspace whose panes have all gone.
+     * A remembered Changes tab survives a worktree whose panes have all gone.
      *
      * Nothing on the runner has to exist for that tab, so nothing about the
      * runner can make it stop existing — and a worktree whose last agent was
@@ -255,7 +255,7 @@ class BackstackTest {
         assertEquals(focus, Backstack.prune(focus) { _, _ -> false })
     }
 
-    // ---- Resolving a workspace's pane ----
+    // ---- Resolving a worktree's pane ----
 
     @Test
     fun theFocusWinsWhileTheAgentItNamesIsStillThere() {
@@ -273,7 +273,7 @@ class BackstackTest {
      * The case `docs/jobs-to-be-done.md` F4 is about, and the case it is not.
      *
      * A remembered diff you were reading comes back even though an agent in the
-     * same workspace has since started asking for you — that is what resumable
+     * same worktree has since started asking for you — that is what resumable
      * means. A remembered pane that DIED overnight falls through to the rule
      * rather than to a blank screen, which is the other half of the same
      * sentence.
@@ -309,7 +309,7 @@ class BackstackTest {
      * the screen routed only on `isAgentPane`, so a `changes` pane created from
      * the Mac fell through to the terminal renderer and was drawn as a grid of
      * whatever bytes are on a pane that is not a tty. Every road into a
-     * workspace goes through this function or [Backstack.rule], and both fold
+     * worktree goes through this function or [Backstack.rule], and both fold
      * such a pane into the Changes tab — including the case where it is the
      * only pane the worktree has.
      */
@@ -332,7 +332,7 @@ class BackstackTest {
      * would have picked.
      *
      * `AppModel.openChanges` writes an UNCHOSEN [Pane.Changes] into the focus
-     * map and then moves the route, so this function is what the workspace
+     * map and then moves the route, so this function is what the worktree
      * screen asks before it builds its deck. Two things have to be true for
      * that row to work, and both are asserted here rather than assumed by the
      * screen:
@@ -341,7 +341,7 @@ class BackstackTest {
      *   blocked right now — otherwise tapping "Review changes" opens on that
      *   agent and the diff is still two taps away, which is the whole defect;
      * - it answers with **no fleet at all**. Every `changes.*` RPC takes a
-     *   workspace id and nothing else, so the diff is askable during a
+     *   worktree id and nothing else, so the diff is askable during a
      *   handshake. A remembered terminal cannot resolve there, and if this one
      *   could not either, tapping the row on a runner that is still connecting
      *   would land on "Waiting for that runner." instead of on the review.
@@ -363,7 +363,7 @@ class BackstackTest {
     }
 
     @Test
-    fun aWorkspaceWithNoPanesResolvesToNothing() {
+    fun aWorktreeWithNoPanesResolvesToNothing() {
         assertNull(Backstack.chooseFocus(emptyList(), Focus(tab("t1"), chosen = true)))
         assertNull(Backstack.chooseFocus(emptyList(), null))
     }
@@ -380,7 +380,7 @@ class BackstackTest {
      * Everything from the first dead route onwards goes.
      *
      * Truncating rather than filtering, because a stack is a story: if the
-     * workspace you were reading was merged away, the runner settings screen
+     * worktree you were reading was merged away, the runner settings screen
      * you had pushed on top of it is not where you meant to end up either.
      */
     @Test
@@ -420,7 +420,7 @@ class BackstackTest {
     /**
      * The runner is part of what a route has to still name.
      *
-     * A workspace id that survives on ANOTHER runner does not save this route,
+     * A worktree id that survives on ANOTHER runner does not save this route,
      * which is the failure mode a fleet-wide app has and a one-runner-at-a-time
      * app does not.
      */
@@ -440,8 +440,8 @@ class BackstackTest {
      * the process comes back.
      *
      * `fleet` is checked alongside it because it did NOT change meaning — it is
-     * still the workspace list, it is simply no longer the root — so a stack
-     * saved before this landed restores to the workspace list rather than being
+     * still the worktree list, it is simply no longer the root — so a stack
+     * saved before this landed restores to the worktree list rather than being
      * thrown away.
      */
     @Test
@@ -459,7 +459,7 @@ class BackstackTest {
     // ---- The layering RootScreen draws from ----
 
     @Test
-    fun onlyPushedScreensAreDrawnOverTheWorkspace() {
+    fun onlyPushedScreensAreDrawnOverTheWorktree() {
         for (route in listOf(
             Route.Onboarding,
             Route.NeedsYou,

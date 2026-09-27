@@ -538,11 +538,11 @@ final class Editors: ObservableObject {
     // MARK: - Opening
 
     /// Open a worktree, and hand back what went wrong.
-    func open(_ workspace: Workspace, with editor: Editor) async -> String? {
+    func open(_ worktree: Worktree, with editor: Editor) async -> String? {
         guard let argv = editor.command(
-            path: workspace.worktree, host: workspace.host ?? "")
+            path: worktree.path, host: worktree.host ?? "")
         else {
-            return editor.unavailability(host: workspace.host ?? "")
+            return editor.unavailability(host: worktree.host ?? "")
                 ?? "\(editor.name) could not be started."
         }
         return await EditorLaunch.run(argv)

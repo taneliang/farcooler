@@ -12,7 +12,7 @@ import Testing
 /// What is this app's, and is here, is the half no view can be asked about:
 /// that `taskId` survives the decode, what "runs an agent" means for this
 /// model (a changes pane's process is `farcooler`, which `hasDetectedAgent`
-/// alone would take for one), that a pill leads to the workspace the pane is
+/// alone would take for one), that a pill leads to the worktree the pane is
 /// in, and that a board re-reads only when a runner says THAT board moved —
 /// every read is a CLI process, and every repository's row now holds one open.
 @MainActor
@@ -29,10 +29,10 @@ struct BoardSidebarTests {
         return t
     }
 
-    private static func workspace(_ id: String, _ terminals: [Terminal]) -> Workspace {
-        Workspace(
+    private static func worktree(_ id: String, _ terminals: [Terminal]) -> Worktree {
+        Worktree(
             id: id, short: id, task: id, branch: "feat/\(id)", repository: "overnight",
-            host: "", worktree: "/tmp/\(id)", state: "active", terminals: terminals)
+            host: "", path: "/tmp/\(id)", state: "active", terminals: terminals)
     }
 
     private static func row(status: TaskStatus = .inProgress) -> TaskRow {
@@ -67,14 +67,14 @@ struct BoardSidebarTests {
         #expect(!Self.terminal("e", preset: "farcooler", paneMode: "changes").runsAgent)
     }
 
-    /// The pill leads to the pane AND the workspace it is in, so the window
+    /// The pill leads to the pane AND the worktree it is in, so the window
     /// can select it by host and id without searching the fleet again.
-    @Test func aCardsAgentsAreItsLivePanesWithTheirWorkspaces() {
+    @Test func aCardsAgentsAreItsLivePanesWithTheirWorktrees() {
         let agent = Self.terminal("agent")
         let second = Self.terminal("second", state: "starting")
         let fleet = [
-            Self.workspace("lane-a", [agent, Self.terminal("shell", preset: "zsh")]),
-            Self.workspace(
+            Self.worktree("lane-a", [agent, Self.terminal("shell", preset: "zsh")]),
+            Self.worktree(
                 "lane-b",
                 [
                     Self.terminal("diff", preset: "farcooler", paneMode: "changes"),
@@ -83,10 +83,10 @@ struct BoardSidebarTests {
                     second,
                 ]),
         ]
-        let agents = BoardAgents(workspaces: fleet, runnerRecordsTasks: true)
+        let agents = BoardAgents(worktrees: fleet, runnerRecordsTasks: true)
         let live = agents.live(for: Self.row())
         #expect(live.map(\.terminal.id) == ["agent", "second"])
-        #expect(live.map(\.workspace.id) == ["lane-a", "lane-b"])
+        #expect(live.map(\.worktree.id) == ["lane-a", "lane-b"])
         #expect(live.first?.title == "claude in lane-a")
         #expect(agents.presence(for: Self.row()) == .agents(2))
         #expect(agents.tasksWithAgents(on: TaskBoardModel(columns: [
@@ -98,7 +98,7 @@ struct BoardSidebarTests {
     /// happen to say, and no "No Agent" either.
     @Test func aRunnerWithoutTerminalTaskGetsNoLink() {
         let agents = BoardAgents(
-            workspaces: [Self.workspace("lane", [Self.terminal("agent")])],
+            worktrees: [Self.worktree("lane", [Self.terminal("agent")])],
             runnerRecordsTasks: false)
         #expect(agents.live(for: Self.row()).isEmpty)
         #expect(agents.presence(for: Self.row()) == .unsaid)
@@ -111,7 +111,7 @@ struct BoardSidebarTests {
     /// closing moves it.
     @Test func aBoardSelectionIsLeftWhereItIs() {
         let board = ContentView.Selection.board(host: "", repository: "r1")
-        #expect(ContentView.healed(board, in: [Self.workspace("lane", [])]) == board)
+        #expect(ContentView.healed(board, in: [Self.worktree("lane", [])]) == board)
         #expect(ContentView.healed(board, in: []) == board)
     }
 
@@ -136,7 +136,7 @@ struct BoardSidebarTests {
 
     /// A client whose runner answers `task list` with a board of as many
     /// tasks as it has been asked so far — so which read drew the board is
-    /// readable off the board — and `workspace list` with an empty fleet.
+    /// readable off the board — and `worktree list` with an empty fleet.
     private func client(_ reads: Reads) -> DaemonClient {
         let client = DaemonClient(target: "", notifications: NotificationCenter())
         client.commandRunnerForTesting = { args in
@@ -162,8 +162,8 @@ struct BoardSidebarTests {
                 }
                 return (Data(#"{"repositories":[\#(rows.joined(separator: ","))]}"#.utf8), nil)
             }
-            if words.starts(with: ["workspace", "list"]) {
-                return (Data(#"{"runtime_healthy":true,"live_panes":0,"workspaces":[]}"#.utf8), nil)
+            if words.starts(with: ["worktree", "list"]) {
+                return (Data(#"{"runtime_healthy":true,"live_panes":0,"worktrees":[]}"#.utf8), nil)
             }
             return (Data(), nil)
         }
@@ -247,13 +247,13 @@ struct BoardSidebarTests {
         DaemonBuild(version: "0.1.0", matches: true, platform: "macos", capabilities: capabilities)
     }
 
-    /// A runner that isn't connected right now has workspaces that are the
+    /// A runner that isn't connected right now has worktrees that are the
     /// last ones read before the link went. The agents in them may have
     /// exited since, so the board says nothing about agents there: no pill,
     /// no "No Agent", no count. `.reconnecting` included — a dead runner
     /// spends most of an outage there between attempts.
     @Test func aRunnerThatIsntConnectedSaysNothingAboutAgents() {
-        let fleet = [Self.workspace("lane", [Self.terminal("agent")])]
+        let fleet = [Self.worktree("lane", [Self.terminal("agent")])]
         let board = TaskBoardModel(columns: [
             TaskBoardColumn(status: .inProgress, rows: [Self.row()])
         ])
@@ -375,30 +375,30 @@ struct BoardSidebarTests {
     // MARK: - Going to an agent
 
     /// Chosen from a menu that was open while the fleet moved: the pane when
-    /// it's still there, its workspace when only the pane has gone, and
+    /// it's still there, its worktree when only the pane has gone, and
     /// nothing — stay on the board — when both have.
     @Test func goingToAnAgentLandsWhereTheFleetIsNow() {
         let agent = Self.terminal("agent")
-        let pane = BoardPane(terminal: agent, workspace: Self.workspace("lane", [agent]))
+        let pane = BoardPane(terminal: agent, worktree: Self.worktree("lane", [agent]))
         #expect(
-            BoardPane.landing(for: pane, in: [Self.workspace("lane", [agent])])
-                == .terminal(host: "", workspace: "lane", terminal: "agent"))
+            BoardPane.landing(for: pane, in: [Self.worktree("lane", [agent])])
+                == .terminal(host: "", worktree: "lane", terminal: "agent"))
         #expect(
-            BoardPane.landing(for: pane, in: [Self.workspace("lane", [])])
-                == .workspace(host: "", id: "lane"))
-        #expect(BoardPane.landing(for: pane, in: [Self.workspace("other", [])]) == nil)
-        // Never another runner's workspace that happens to share the id.
-        var elsewhere = Self.workspace("lane", [agent])
+            BoardPane.landing(for: pane, in: [Self.worktree("lane", [])])
+                == .worktree(host: "", id: "lane"))
+        #expect(BoardPane.landing(for: pane, in: [Self.worktree("other", [])]) == nil)
+        // Never another runner's worktree that happens to share the id.
+        var elsewhere = Self.worktree("lane", [agent])
         elsewhere.host = "remote"
         #expect(BoardPane.landing(for: pane, in: [elsewhere]) == nil)
     }
 
-    /// Two agents in one workspace are two menu items you can tell apart.
-    @Test func twoAgentsInOneWorkspaceHaveDifferentMenuItems() {
+    /// Two agents in one worktree are two menu items you can tell apart.
+    @Test func twoAgentsInOneWorktreeHaveDifferentMenuItems() {
         let a = Self.terminal("a1")
         let b = Self.terminal("b2")
-        let lane = Self.workspace("lane", [a, b])
-        let panes = [BoardPane(terminal: a, workspace: lane), BoardPane(terminal: b, workspace: lane)]
+        let lane = Self.worktree("lane", [a, b])
+        let panes = [BoardPane(terminal: a, worktree: lane), BoardPane(terminal: b, worktree: lane)]
         let titles = BoardPane.titles(panes)
         #expect(titles == ["claude 1 in lane", "claude 2 in lane"])
 
@@ -407,9 +407,9 @@ struct BoardSidebarTests {
         var d = Self.terminal("d4")
         c.title = "Fix it"
         d.title = "Fix it"
-        let same = Self.workspace("same", [c, d])
+        let same = Self.worktree("same", [c, d])
         let named = BoardPane.titles([
-            BoardPane(terminal: c, workspace: same), BoardPane(terminal: d, workspace: same),
+            BoardPane(terminal: c, worktree: same), BoardPane(terminal: d, worktree: same),
         ])
         #expect(named == ["Fix it in same (c3)", "Fix it in same (d4)"])
         #expect(Set(named).count == 2)

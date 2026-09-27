@@ -3,10 +3,10 @@ import SwiftUI
 
 // The bar that belongs to a PANE, which is the platform's own navigation bar.
 //
-// ## Why there are two bars, and why only one of them is the workspace
+// ## Why there are two bars, and why only one of them is the worktree
 //
-// `ShellBar` at the bottom IS the workspace — its name, its ribbon, and the
-// surface you drag for the next workspace or lift for the column. It is
+// `ShellBar` at the bottom IS the worktree — its name, its ribbon, and the
+// surface you drag for the next worktree or lift for the column. It is
 // navigation, and nothing else may be put on it: a control added there would
 // be a control your thumb finds while it is trying to swipe, on the one
 // surface in this app whose whole job is to be dragged.
@@ -17,7 +17,7 @@ import SwiftUI
 // - **It is not in the thumb zone, and that is correct rather than a
 //   compromise.** The thumb-zone rule this shell was built under is about
 //   NAVIGATION — the thing you reach for constantly, which is why the bar that
-//   changes workspace is at the bottom of the screen and not at the top. A
+//   changes worktree is at the bottom of the screen and not at the top. A
 //   pane's own affordances at the top is ordinary iOS, and it is exactly what
 //   `WorkspaceView` — the pane host the shell replaced — did with the same
 //   controls before they were orphaned.
@@ -47,7 +47,7 @@ import SwiftUI
 // bar is — same radius, same material, same inset from the edge — and the
 // bottom bar is the one surface in this app you are meant to put a finger on
 // and drag. Two of them, one at each end of the screen, does not read as "the
-// workspace, and this pane"; it reads as two draggable bars, and the first
+// worktree, and this pane"; it reads as two draggable bars, and the first
 // question it got was why there was a second one.
 //
 // A navigation bar cannot be mistaken for that, because nothing else on the
@@ -115,7 +115,7 @@ import SwiftUI
 /// with different behavior behind them.
 ///
 /// **Remove worktree** — `Connection.removeWorktree` had no iOS caller at all
-/// after `FleetList` went. It is workspace-scoped, so the two candidate homes
+/// after `FleetList` went. It is worktree-scoped, so the two candidate homes
 /// were this bar and the overview card's context menu; this bar won because
 /// the overview was being reworked into a multi-server grid by another lane
 /// and a destructive action landing in a file that is being rewritten
@@ -124,7 +124,7 @@ import SwiftUI
 /// moment you are looking at it.
 ///
 /// **The card's menu has it too now**, which is the Mac's own arrangement —
-/// the sidebar row and the workspace detail both carry it — and it is not two
+/// the sidebar row and the worktree detail both carry it — and it is not two
 /// behaviors: the ceremony moved into `RemoveWorktreeFlow` so both doors ask
 /// for exactly the same confirmation. See `RemoveWorktreeConfirmSheet` for the
 /// typed name itself, recovered rather than rewritten.
@@ -132,8 +132,8 @@ import SwiftUI
 /// **Terminal ↔ chat** is here too, and that was the least obvious of the
 /// five. See `paneModeItem`.
 ///
-/// Hidden-workspace disclosure is deliberately NOT here. It is a question
-/// about which workspaces the fleet SHOWS, and a control on one pane that
+/// Hidden-worktree disclosure is deliberately NOT here. It is a question
+/// about which worktrees the fleet SHOWS, and a control on one pane that
 /// changes what a different screen lists is a control nobody will find twice.
 /// It belongs to the overview.
 struct ShellPaneChromeModifier: ViewModifier {
@@ -147,10 +147,10 @@ struct ShellPaneChromeModifier: ViewModifier {
     /// Images on their way into a terminal. Owned by `ShellScreen`, so a
     /// transfer started here keeps running when you swipe to another pane.
     @ObservedObject var pastes: ImagePasteQueue
-    /// The workspace this pane belongs to, read live off the fleet.
-    let workspace: Workspace?
+    /// The worktree this pane belongs to, read live off the fleet.
+    let worktree: Worktree?
     /// The terminal this pane IS, read live off the fleet — nil on a
-    /// workspace's Diff tab, which has no pane on the runner behind it.
+    /// worktree's Diff tab, which has no pane on the runner behind it.
     ///
     /// Live rather than the snapshot `ShellPaneRealView` latched, and that
     /// distinction is `TerminalView.live`'s: the latched value is the pane's
@@ -295,13 +295,13 @@ struct ShellPaneChromeModifier: ViewModifier {
     /// Every pane in the track stays MOUNTED when it is not on screen — that is
     /// the whole point of `ShellPaneTrack` — and a presentation is not part of
     /// the pane's own view, it is on the window. So a picker or a sheet left up
-    /// by a pane that has gone would be a sheet belonging to a workspace nobody
+    /// by a pane that has gone would be a sheet belonging to a worktree nobody
     /// is looking at, and in the destructive case a typed-name confirmation for
     /// a worktree that is no longer the one on screen.
     ///
     /// In practice a swipe cannot happen while a sheet is up — the sheet has
     /// the touches. This exists for the paths that do not go through a finger:
-    /// a deep link, a Live Activity tap, a workspace disappearing underneath
+    /// a deep link, a Live Activity tap, a worktree disappearing underneath
     /// the pane.
     private func dismissEverything() {
         showPhotoPicker = false
@@ -348,10 +348,10 @@ struct ShellPaneChromeModifier: ViewModifier {
     /// nothing is worse than one that is not there.
     private var hasOverflow: Bool { canCreateTerminal || canSwitchMode || canRemove }
 
-    /// Every workspace can take another terminal — including this one when the
+    /// Every worktree can take another terminal — including this one when the
     /// pane in front of you is the Diff, which has no terminal behind it and is
     /// a perfectly ordinary place to decide you want one.
-    private var canCreateTerminal: Bool { workspace != nil }
+    private var canCreateTerminal: Bool { worktree != nil }
 
     private var canSwitchMode: Bool {
         guard let live else { return false }
@@ -366,20 +366,20 @@ struct ShellPaneChromeModifier: ViewModifier {
     }
 
     private var canRemove: Bool {
-        guard let workspace else { return false }
+        guard let worktree else { return false }
         // Offering to remove the repository's own checkout would offer to
         // delete the directory the repository itself lives in.
-        return !workspace.isPrimaryCheckout
+        return !worktree.isPrimaryCheckout
     }
 
     private var overflowMenu: some View {
         Menu {
-            if canCreateTerminal, let workspace { newTerminalItem(workspace) }
+            if canCreateTerminal, let worktree { newTerminalItem(worktree) }
             if canSwitchMode, let live { paneModeItem(live) }
-            if canRemove, let workspace {
+            if canRemove, let worktree {
                 Divider()
                 Button(role: .destructive) {
-                    removing = .confirming(workspace, on: connection)
+                    removing = .confirming(worktree, on: connection)
                 } label: {
                     Label("Remove Worktree…", systemImage: "trash")
                 }
@@ -396,7 +396,7 @@ struct ShellPaneChromeModifier: ViewModifier {
     /// been a wire method since the protocol had one (`proto/farcooler.proto`,
     /// tag 24); the CLI, the Mac (⌘T, the sidebar, the palette, ⌃B c) and
     /// Android all call it, and `Connection.createTerminal` was already written
-    /// on this side — with no caller. So a workspace on the phone could show
+    /// on this side — with no caller. So a worktree on the phone could show
     /// its terminals, switch between them, scroll them and type into them, and
     /// the one thing you want first in a fresh worktree was the one thing there
     /// was no way to ask for. Nothing new crosses the wire for this; it is a
@@ -405,7 +405,7 @@ struct ShellPaneChromeModifier: ViewModifier {
     /// ## Why here and not in the column you drag up
     ///
     /// The obvious home looks like `ShellColumn`: it already lists this
-    /// workspace's terminals and it is the surface you are on at the moment you
+    /// worktree's terminals and it is the surface you are on at the moment you
     /// realise you want another one. Three things in that column's own design
     /// say no, and each is load-bearing rather than a taste:
     ///
@@ -424,7 +424,7 @@ struct ShellPaneChromeModifier: ViewModifier {
     ///   no tab behind it has no dot to fly, and inventing one would put a mark
     ///   in the ribbon for a terminal that does not exist. The column already
     ///   refuses a non-tab row on the same grounds — see its note on why there
-    ///   is deliberately no workspace row in it.
+    ///   is deliberately no worktree row in it.
     ///
     /// This bar is where the file header says a pane's capabilities go, and the
     /// bottom bar is the one surface nothing may be added to. A menu item is
@@ -438,10 +438,10 @@ struct ShellPaneChromeModifier: ViewModifier {
     /// because you want to type in it, and leaving the selection where it was
     /// means going and finding it. On a phone that is a drag and a release into
     /// a column, which is most of the cost of the thing you just did.
-    private func newTerminalItem(_ workspace: Workspace) -> some View {
+    private func newTerminalItem(_ worktree: Worktree) -> some View {
         Button {
             Task {
-                switch await connection.createTerminal(in: workspace) {
+                switch await connection.createTerminal(in: worktree) {
                 case .created(let id): onCreated(id)
                 case .disconnected: newTerminalFailure = .disconnected
                 case .refused: newTerminalFailure = .refused

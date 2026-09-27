@@ -48,13 +48,13 @@ pub struct CachedChangeSet {
 
 /// The change-set cache.
 ///
-/// Keyed by workspace and branch, because a workspace can be asked about a
+/// Keyed by worktree and branch, because a worktree can be asked about a
 /// stack link it does not have checked out.
 #[derive(Default)]
 pub struct ReviewCache {
     entries: Mutex<HashMap<(Uuid, String), CachedChangeSet>>,
     next_version: Mutex<u64>,
-    /// When this daemon last did something to each workspace that its own
+    /// When this daemon last did something to each worktree that its own
     /// caches must not survive.
     ///
     /// The two-syscall gate cannot see a file edited in place — HEAD and the
@@ -71,12 +71,12 @@ pub struct ReviewCache {
     /// an agent working in it — see `Watcher::probe_change_sets`, where both are
     /// gates that earn the `git` call and this stamp is neither.
     touched: Mutex<HashMap<Uuid, i64>>,
-    /// Per-workspace sidebar counts, as the watch loop last computed them.
+    /// Per-worktree sidebar counts, as the watch loop last computed them.
     ///
     /// Written by `Watcher::probe_change_sets` and read by everything else. The
     /// inbox used to compute these itself, once per RPC call per worktree, which
     /// was affordable only while the numbers were committed-only; a client that
-    /// polls an RPC running git per workspace is the thing that does not scale.
+    /// polls an RPC running git per worktree is the thing that does not scale.
     shortstats: Mutex<HashMap<Uuid, CachedShortstat>>,
 }
 
@@ -123,7 +123,7 @@ struct ShortstatKey {
 /// neither of them has said "nothing changed".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Counts {
-    /// The watch loop has not reached this workspace yet. True for the first
+    /// The watch loop has not reached this worktree yet. True for the first
     /// tick after the daemon starts, and after a worktree appears.
     Unknown,
     /// Probed, and nothing resolved as a base. There is no comparison to
@@ -192,14 +192,14 @@ impl ReviewCache {
         *v
     }
 
-    /// Drop a workspace's cached sets.
+    /// Drop a worktree's cached sets.
     ///
     /// Called when an agent writes a file through the daemon's own filesystem
     /// service — precise, immediate, and it covers the common case, because the
     /// agents doing the work are ACP clients of this daemon.
-    pub fn invalidate(&self, workspace_id: Uuid) {
+    pub fn invalidate(&self, worktree_id: Uuid) {
         let mut e = self.entries.lock().unwrap_or_else(|x| x.into_inner());
-        e.retain(|(ws, _), _| *ws != workspace_id);
+        e.retain(|(ws, _), _| *ws != worktree_id);
         drop(e);
         // The sidebar counts go stale with it. Leaving them alone was safe while
         // they were committed-only, because nothing can commit without moving
@@ -207,27 +207,27 @@ impl ReviewCache {
         // uncommitted work now, and the one caller here is a base change — which
         // makes every number computed against the old base wrong rather than
         // merely old.
-        self.mark_counts_stale(workspace_id);
+        self.mark_counts_stale(worktree_id);
         self.touched
             .lock()
             .unwrap_or_else(|x| x.into_inner())
-            .insert(workspace_id, now_millis());
+            .insert(worktree_id, now_millis());
     }
 
-    /// When this workspace was last written to through the daemon.
-    pub fn touched_at(&self, workspace_id: Uuid) -> Option<i64> {
-        self.touched.lock().unwrap_or_else(|x| x.into_inner()).get(&workspace_id).copied()
+    /// When this worktree was last written to through the daemon.
+    pub fn touched_at(&self, worktree_id: Uuid) -> Option<i64> {
+        self.touched.lock().unwrap_or_else(|x| x.into_inner()).get(&worktree_id).copied()
     }
 
-    /// Files changed and +/- for one workspace, as last computed.
+    /// Files changed and +/- for one worktree, as last computed.
     ///
     /// Free: this never runs git, and never can. The inbox answers every row
     /// from here, which is what lets a client poll it.
-    pub fn counts(&self, workspace_id: Uuid) -> Counts {
+    pub fn counts(&self, worktree_id: Uuid) -> Counts {
         self.shortstats
             .lock()
             .unwrap_or_else(|x| x.into_inner())
-            .get(&workspace_id)
+            .get(&worktree_id)
             .map(|c| c.counts)
             .unwrap_or(Counts::Unknown)
     }
@@ -246,24 +246,24 @@ impl ReviewCache {
     /// no syscall at all. See `counts_unproven`, which is the half of this that
     /// no watcher can replace and which every worktree still pays.
     ///
-    /// False for a workspace that has never been probed, which is how the first
+    /// False for a worktree that has never been probed, which is how the first
     /// pass after the daemon starts reaches every worktree.
-    pub fn counts_current(&self, workspace_id: Uuid, worktree: &Path) -> bool {
-        let key = self.shortstat_key(workspace_id, worktree);
+    pub fn counts_current(&self, worktree_id: Uuid, worktree: &Path) -> bool {
+        let key = self.shortstat_key(worktree_id, worktree);
         self.shortstats
             .lock()
             .unwrap_or_else(|x| x.into_inner())
-            .get(&workspace_id)
+            .get(&worktree_id)
             .is_some_and(|c| !c.stale && c.key == key)
     }
 
-    /// Whether this workspace needs recomputing for a reason no filesystem
+    /// Whether this worktree needs recomputing for a reason no filesystem
     /// event will ever report.
     ///
     /// The half of `counts_current` that costs nothing at all — no `stat`, one
     /// map lookup — and the half a watcher cannot replace. Two things reach it:
-    /// a workspace nobody has probed yet, which is how the first pass after a
-    /// daemon start reaches every worktree; and a workspace this daemon marked
+    /// a worktree nobody has probed yet, which is how the first pass after a
+    /// daemon start reaches every worktree; and a worktree this daemon marked
     /// stale itself, which is a base changing or a change set recomputed for a
     /// client. Neither of those is a write to a file, so neither moves under a
     /// watch.
@@ -272,28 +272,28 @@ impl ReviewCache {
     /// its two `stat`s. Two per worktree every three seconds is not much, and
     /// it is still a poll on a fleet whose whole property is that an idle
     /// runner does nothing.
-    pub fn counts_unproven(&self, workspace_id: Uuid) -> bool {
+    pub fn counts_unproven(&self, worktree_id: Uuid) -> bool {
         self.shortstats
             .lock()
             .unwrap_or_else(|x| x.into_inner())
-            .get(&workspace_id)
+            .get(&worktree_id)
             .is_none_or(|c| c.stale)
     }
 
-    /// Say that this workspace's counts no longer describe its worktree.
+    /// Say that this worktree's counts no longer describe its directory.
     ///
     /// For the callers that know something the key cannot express — see
     /// `CachedShortstat::stale`. The next probe pass recomputes; nothing here
     /// runs git, because both callers are already on a path that is spending it.
-    fn mark_counts_stale(&self, workspace_id: Uuid) {
+    fn mark_counts_stale(&self, worktree_id: Uuid) {
         if let Some(c) =
-            self.shortstats.lock().unwrap_or_else(|x| x.into_inner()).get_mut(&workspace_id)
+            self.shortstats.lock().unwrap_or_else(|x| x.into_inner()).get_mut(&worktree_id)
         {
             c.stale = true;
         }
     }
 
-    /// Recompute one workspace's counts and cache them.
+    /// Recompute one worktree's counts and cache them.
     ///
     /// `base_ref` is `None` for a worktree nothing resolved a base for; that is
     /// recorded rather than treated as a failure, so the inbox can leave the row
@@ -302,16 +302,16 @@ impl ReviewCache {
     /// Returns a fresh change-set version when the numbers came out DIFFERENT
     /// from the ones already cached, and `None` otherwise — which is the common
     /// answer, and the reason a fleet where an agent is thinking rather than
-    /// writing broadcasts nothing. The first probe of a workspace returns `None`
+    /// writing broadcasts nothing. The first probe of a worktree returns `None`
     /// too: nobody is showing a number for it yet, and the read a client is
     /// already making will carry it.
     pub async fn recompute_counts(
         &self,
-        workspace_id: Uuid,
+        worktree_id: Uuid,
         worktree: &Path,
         base_ref: Option<&str>,
     ) -> Option<u64> {
-        let key = self.shortstat_key(workspace_id, worktree);
+        let key = self.shortstat_key(worktree_id, worktree);
         let counts = match base_ref {
             Some(base) => match crate::change_set::shortstat(worktree, base).await {
                 Ok((files, ins, del)) => Counts::Known(files, ins, del),
@@ -327,15 +327,15 @@ impl ReviewCache {
         };
 
         // Read under the same lock the write takes, so two passes racing on one
-        // workspace cannot both decide they were the one that moved it.
+        // worktree cannot both decide they were the one that moved it.
         let mut m = self.shortstats.lock().unwrap_or_else(|x| x.into_inner());
-        let previous = m.insert(workspace_id, CachedShortstat { key, counts, stale: false });
+        let previous = m.insert(worktree_id, CachedShortstat { key, counts, stale: false });
         drop(m);
 
         previous.filter(|p| p.counts != counts).map(|_| self.bump())
     }
 
-    /// Forget the counts of workspaces that are no longer there.
+    /// Forget the counts of worktrees that are no longer there.
     ///
     /// Called from the same pass that computes them, on the same terms as the
     /// watcher's own `state.retain`: a worktree that was removed and later
@@ -347,34 +347,34 @@ impl ReviewCache {
             .retain(|id, _| live.contains(id));
     }
 
-    fn shortstat_key(&self, workspace_id: Uuid, worktree: &Path) -> ShortstatKey {
-        ShortstatKey { gate: cheap_gate(worktree), touched: self.touched_at(workspace_id) }
+    fn shortstat_key(&self, worktree_id: Uuid, worktree: &Path) -> ShortstatKey {
+        ShortstatKey { gate: cheap_gate(worktree), touched: self.touched_at(worktree_id) }
     }
 
     /// The digest of an already-cached change set, if there is one.
     ///
     /// Free: no git runs. Lets the inbox notice an in-place edit for any
-    /// workspace someone has actually been looking at, without paying for the
+    /// worktree someone has actually been looking at, without paying for the
     /// ones nobody has opened.
-    pub fn cached_digest(&self, workspace_id: Uuid, branch: &str) -> Option<String> {
+    pub fn cached_digest(&self, worktree_id: Uuid, branch: &str) -> Option<String> {
         self.entries
             .lock()
             .unwrap_or_else(|x| x.into_inner())
-            .get(&(workspace_id, branch.to_string()))
+            .get(&(worktree_id, branch.to_string()))
             .map(|c| c.set.worktree_digest.clone())
     }
 
     /// The change set, computed only if something moved.
     pub async fn get(
         &self,
-        workspace_id: Uuid,
+        worktree_id: Uuid,
         worktree: &Path,
         branch: &str,
         base_ref: &str,
         base_source: BaseSource,
         fresh: bool,
     ) -> Result<CachedChangeSet> {
-        let key = (workspace_id, branch.to_string());
+        let key = (worktree_id, branch.to_string());
         let gate = cheap_gate(worktree);
 
         if !fresh {
@@ -406,7 +406,7 @@ impl ReviewCache {
         // them costs nothing here and the next probe pass picks it up;
         // recomputing them inline would put a second `git diff` and a second
         // `git status` on the path of drawing a diff.
-        self.mark_counts_stale(workspace_id);
+        self.mark_counts_stale(worktree_id);
 
         let cached = CachedChangeSet {
             set,
@@ -420,13 +420,13 @@ impl ReviewCache {
     }
 }
 
-/// How much of one workspace's snapshots the daemon will hold.
+/// How much of one worktree's snapshots the daemon will hold.
 ///
 /// A per-entry cap alone is not a budget: sixty anchored comments in a heavy
 /// review is fifteen megabytes of file copies, on top of the attachments and on
 /// top of the replay buffers `TODOS.md` already names as the dominant term in
 /// daemon memory.
-pub const MAX_SNAPSHOT_BYTES_PER_WORKSPACE: usize = 8 * 1024 * 1024;
+pub const MAX_SNAPSHOT_BYTES_PER_WORKTREE: usize = 8 * 1024 * 1024;
 
 #[cfg(test)]
 mod tests {
@@ -514,7 +514,7 @@ mod tests {
 
     /// A worktree's `.git` is a FILE. Without following it the gate reads two
     /// missing files, returns (0, 0) forever, and every linked worktree — that
-    /// is, every workspace this product creates — caches a stale change set.
+    /// is, every worktree this product creates — caches a stale change set.
     #[test]
     fn the_cheap_gate_follows_a_linked_worktrees_gitdir_pointer() {
         let dir = tempfile::tempdir().unwrap();

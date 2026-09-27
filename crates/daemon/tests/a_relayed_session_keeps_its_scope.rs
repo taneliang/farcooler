@@ -30,11 +30,11 @@ async fn a_relayed_stdio_session_is_not_promoted_to_host_admin() {
     // And the running daemon enforces it, which is the half a handshake
     // assertion cannot see: the scope has to reach the dispatcher that refuses,
     // not just the hello that reports.
-    match client.call(request("worktree.list")).await {
+    match client.call(request("worktree.discover")).await {
         Err(ClientError::Daemon { code, .. }) => {
             assert_eq!(code, ErrorCode::ScopeDenied as i32, "a read session reached host paths");
         }
-        other => panic!("a relayed read session must not list worktrees: {other:?}"),
+        other => panic!("a relayed read session must not discover worktrees: {other:?}"),
     }
 }
 

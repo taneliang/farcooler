@@ -13,7 +13,7 @@ enum AppCommand: String {
     case nextTerminal
     case previousTerminal
     case nextAttention
-    case newWorkspace
+    case newWorktree
     case addRepository
     case showBoard
     case openInEditor
@@ -81,12 +81,12 @@ struct FarCoolerCommands: Commands {
                 .keyboardShortcut("t", modifiers: .command)
             // ⌘N, the plainest shortcut in the app, for the thing it is for.
             //
-            // "New Workspace…" and not "New Task…", which it was until the
+            // "New Worktree…" and not "New Task…", which it was until the
             // board moved into the sidebar: this makes a worktree and starts an
             // agent in it, and puts nothing on the board. With a Board row
-            // above every repository's workspaces, "task" on this item would
+            // above every repository's worktrees, "task" on this item would
             // name the other thing.
-            Button("New Workspace…") { AppCommand.newWorkspace.post() }
+            Button("New Worktree…") { AppCommand.newWorktree.post() }
                 .keyboardShortcut("n", modifiers: .command)
             Button("Add Repository…") { AppCommand.addRepository.post() }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
@@ -298,7 +298,7 @@ struct FarCoolerCommands: Commands {
                     .keyboardShortcut("p", modifiers: .command)
                 // Search is navigation here, not a nicety: worktrees are unbounded
                 // and typing is the fastest way to any of them, on any runner.
-                Button("Find Workspace or Agent") { AppCommand.search.post() }
+                Button("Find Worktree or Agent") { AppCommand.search.post() }
                     .keyboardShortcut("f", modifiers: .command)
                 Button("Reload Fleet") { AppCommand.reload.post() }
                     .keyboardShortcut("0", modifiers: .command)

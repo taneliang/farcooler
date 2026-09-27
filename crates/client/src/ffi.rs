@@ -121,7 +121,7 @@ pub struct ClientHandle {
 /// Not tuned: a client draining at any sane rate never sees more than one or
 /// two, because notices coalesce. It is the ceiling on memory a stalled reader
 /// can cost, and it is small because what sits above it is bounded too — one
-/// `Fleet`, plus one per workspace whose diff moved and one per repository
+/// `Fleet`, plus one per worktree whose diff moved and one per repository
 /// whose stack was re-read.
 const EVENT_QUEUE_LIMIT: usize = 64;
 
@@ -145,7 +145,7 @@ const EVENT_QUEUE_LIMIT: usize = 64;
 ///    sample; without this the push path would be a poll with extra steps.
 /// 3. **Overflow collapses, it does not truncate.** At the limit the whole
 ///    queue is replaced by a single `{"event":"resync"}` — "you missed some,
-///    re-read everything". Dropping the oldest would silently lose a workspace
+///    re-read everything". Dropping the oldest would silently lose a worktree
 ///    nobody re-reads; dropping the newest would lose the most recent news.
 ///    Collapsing loses only the detail of WHICH thing moved, which no client
 ///    depends on, and it is the one outcome that cannot leave a client stale.
@@ -223,8 +223,8 @@ fn event_line(what: &crate::session::FleetEvent) -> String {
     use crate::session::FleetEvent;
     match what {
         FleetEvent::Fleet => json!({ "event": "fleet" }),
-        FleetEvent::ChangeSet { workspace } => {
-            json!({ "event": "change_set", "workspace": workspace.to_string() })
+        FleetEvent::ChangeSet { worktree } => {
+            json!({ "event": "change_set", "worktree": worktree.to_string() })
         }
         FleetEvent::Stack { repository } => {
             json!({ "event": "stack", "repository": repository.to_string() })
@@ -1380,7 +1380,7 @@ async fn subscribe(open: &mut Session, events: &Arc<Mutex<EventQueue>>) {
 ///
 /// ```text
 /// {"event": "fleet"}
-/// {"event": "change_set", "workspace": "<uuid>"}
+/// {"event": "change_set", "worktree": "<uuid>"}
 /// {"event": "stack", "repository": "<uuid>"}
 /// {"event": "resync"}
 /// ```
@@ -1719,7 +1719,7 @@ async fn dispatch(
             }))
         }
 
-        "workspace.create" => {
+        "worktree.create" => {
             let base = match text("base") {
                 // A phone's form leaves this blank; HEAD is what the CLI
                 // defaults to, so both clients branch from the same place.
@@ -1734,8 +1734,8 @@ async fn dispatch(
             // older client, and absent means create — the behavior every caller
             // that predates the key already had.
             let adopt = args.get("adopt").and_then(|v| v.as_bool()).unwrap_or(false);
-            let workspace = session
-                .create_workspace(
+            let worktree = session
+                .create_worktree(
                     id("repository")?,
                     &text("task"),
                     &text("branch"),
@@ -1744,15 +1744,15 @@ async fn dispatch(
                     adopt,
                 )
                 .await?;
-            Ok(json!({ "id": uuid_of(&workspace.id).to_string() }))
+            Ok(json!({ "id": uuid_of(&worktree.id).to_string() }))
         }
 
-        "workspace.hide" => {
-            session.hide_workspace(id("workspace")?).await?;
+        "worktree.hide" => {
+            session.hide_worktree(id("worktree")?).await?;
             Ok(json!({}))
         }
-        "workspace.unhide" => {
-            session.unhide_workspace(id("workspace")?).await?;
+        "worktree.unhide" => {
+            session.unhide_worktree(id("worktree")?).await?;
             Ok(json!({}))
         }
 
@@ -1765,22 +1765,22 @@ async fn dispatch(
         // Dropping one would send a SHORTER list than the screen shows, and the
         // runner would faithfully reorder the rest around a card the client
         // still believes it moved.
-        "workspace.reorder" => {
-            let raw = strings("workspaces");
+        "worktree.reorder" => {
+            let raw = strings("worktrees");
             let mut ordered = Vec::with_capacity(raw.len());
             for s in &raw {
                 ordered.push(s.parse::<uuid::Uuid>().map_err(|_| {
-                    SessionError::Protocol(format!("{method} was given something that is not a workspace id"))
+                    SessionError::Protocol(format!("{method} was given something that is not a worktree id"))
                 })?);
             }
-            session.reorder_workspaces(&ordered).await?;
+            session.reorder_worktrees(&ordered).await?;
             Ok(json!({}))
         }
 
-        "workspace.remove_worktree" => {
+        "worktree.remove" => {
             use crate::actions::RemoveWorktreeOutcome;
             match session
-                .remove_worktree(id("workspace")?, &text("confirm"))
+                .remove_worktree(id("worktree")?, &text("confirm"))
                 .await?
             {
                 RemoveWorktreeOutcome::Removed => Ok(json!({ "ok": true })),
@@ -1799,29 +1799,29 @@ async fn dispatch(
 
         "changes.change_set" => {
             let fresh = args.get("fresh").and_then(|v| v.as_bool()).unwrap_or(false);
-            Ok(session.change_set(id("workspace")?, fresh).await?)
+            Ok(session.change_set(id("worktree")?, fresh).await?)
         }
 
         "changes.file_diff" => {
             let context = args.get("context").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
             Ok(session
-                .file_diff(id("workspace")?, &text("path"), &text("scope"), context)
+                .file_diff(id("worktree")?, &text("path"), &text("scope"), context)
                 .await?)
         }
 
         "changes.commit_files" => {
-            Ok(session.commit_files(id("workspace")?, &text("sha")).await?)
+            Ok(session.commit_files(id("worktree")?, &text("sha")).await?)
         }
 
         "changes.inbox" => Ok(session.changes_inbox().await?),
 
         "changes.mark_read" => {
-            session.changes_mark_read(id("workspace")?).await?;
+            session.changes_mark_read(id("worktree")?).await?;
             Ok(json!({}))
         }
 
         "changes.set_base" => {
-            Ok(session.changes_set_base(id("workspace")?, &text("baseRef")).await?)
+            Ok(session.changes_set_base(id("worktree")?, &text("baseRef")).await?)
         }
 
         // ---- branches, stacks and PRs ----
@@ -1889,7 +1889,7 @@ async fn dispatch(
 
         "repository_root.remove" => {
             use crate::actions::RemoveRootOutcome;
-            // The same two shapes `workspace.remove_worktree` answers with, so
+            // The same two shapes `worktree.remove` answers with, so
             // an app has one pattern for both, but they do not mean the same
             // thing here: a root always demands the name, so this can only be
             // the name being wrong. See `actions::RemoveRootOutcome`.
@@ -1922,7 +1922,7 @@ async fn dispatch(
         "terminal.create" => {
             let terminal = session
                 .create_terminal(
-                    id("workspace")?,
+                    id("worktree")?,
                     &text("title"),
                     &text("preset"),
                     args.get("tile").and_then(|v| v.as_bool()).unwrap_or(false),
@@ -2145,7 +2145,7 @@ async fn dispatch(
         "worktree.file_search" => {
             let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
             let paths = session
-                .search_worktree_files(id("workspace")?, &text("query"), limit)
+                .search_worktree_files(id("worktree")?, &text("query"), limit)
                 .await?;
             Ok(json!({ "paths": paths }))
         }
@@ -2390,9 +2390,9 @@ mod tests {
 
         let refused = line(
             Err(Lost::Call(SessionError::Refused {
-                code: farcooler_protocol::v1::ErrorCode::WorkspacesExist as i32,
+                code: farcooler_protocol::v1::ErrorCode::WorktreesExist as i32,
                 retryable: false,
-                message: "workspaces still exist under this resource".into(),
+                message: "worktrees still exist under this resource".into(),
             })),
             false,
         );
@@ -2400,7 +2400,7 @@ mod tests {
         assert_eq!(refused["code"], "workspaces-exist");
         // The prose is still there. It is the app's fallback and its transcript,
         // and carrying the word must not have cost it.
-        assert_eq!(refused["error"], "workspaces still exist under this resource");
+        assert_eq!(refused["error"], "worktrees still exist under this resource");
 
         // A runner NEWER than this build names a reason this build cannot read.
         // It must still arrive as a word: an app that reads an unknown code as
@@ -2931,16 +2931,16 @@ mod identity_tests {
     /// News about different things is not collapsed together.
     ///
     /// The other half of the rule: coalescing is by what a notice SAYS, and
-    /// two workspaces moving are two things to re-read.
+    /// two worktrees moving are two things to re-read.
     #[test]
     fn news_about_different_things_is_kept_apart() {
         use crate::session::FleetEvent;
         let mut queue = super::EventQueue::default();
         let one = uuid::Uuid::now_v7();
         let two = uuid::Uuid::now_v7();
-        queue.push(super::event_line(&FleetEvent::ChangeSet { workspace: one }));
-        queue.push(super::event_line(&FleetEvent::ChangeSet { workspace: two }));
-        queue.push(super::event_line(&FleetEvent::ChangeSet { workspace: one }));
+        queue.push(super::event_line(&FleetEvent::ChangeSet { worktree: one }));
+        queue.push(super::event_line(&FleetEvent::ChangeSet { worktree: two }));
+        queue.push(super::event_line(&FleetEvent::ChangeSet { worktree: one }));
         assert_eq!(queue.pending.len(), 2);
     }
 
@@ -2948,7 +2948,7 @@ mod identity_tests {
     /// news it could act on.
     ///
     /// Overflow COLLAPSES rather than truncates, and that is the whole safety
-    /// argument: dropping the oldest would silently lose a workspace nobody
+    /// argument: dropping the oldest would silently lose a worktree nobody
     /// then re-reads, and a client left believing it is current is the one
     /// outcome this queue must not produce. `resync` covers every notice that
     /// was thrown away because every notice only ever meant "re-read".

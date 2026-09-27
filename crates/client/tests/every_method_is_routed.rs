@@ -20,17 +20,17 @@ const FFI: &str = include_str!("../src/ffi.rs");
 /// only that an app can ask.
 const ENROLLMENT: [&str; 3] = ["client.list", "client.enroll", "client.revoke"];
 
-/// The workspace methods, for the same reason. `workspace.reorder` is the one
+/// The worktree methods, for the same reason. `worktree.reorder` is the one
 /// this list was extended for: it is the ONLY way a phone can save an order
 /// somebody dragged, and an unrouted arm would leave the drag working on screen
 /// and forgotten on the next refresh — no error, nothing in a log, and the
 /// runner perfectly capable of storing it the whole time.
-const WORKSPACES: [&str; 5] = [
-    "workspace.create",
-    "workspace.hide",
-    "workspace.unhide",
-    "workspace.reorder",
-    "workspace.remove_worktree",
+const WORKTREES: [&str; 5] = [
+    "worktree.create",
+    "worktree.hide",
+    "worktree.unhide",
+    "worktree.reorder",
+    "worktree.remove",
 ];
 
 /// The board's reads. A phone's board with no arm behind it would be a row
@@ -74,8 +74,8 @@ fn every_enrollment_method_the_daemon_serves_can_be_called() {
 }
 
 #[test]
-fn every_workspace_method_the_daemon_serves_can_be_called() {
-    for method in WORKSPACES {
+fn every_worktree_method_the_daemon_serves_can_be_called() {
+    for method in WORKTREES {
         assert!(
             FFI.contains(&format!("\"{method}\" =>")),
             "the daemon serves {method} and no app can reach it: `dispatch` has no arm for it"
@@ -91,7 +91,7 @@ fn the_header_tells_an_app_developer_these_exist() {
     const HEADER: &str = include_str!("../include/farcooler_client.h");
     for method in ENROLLMENT
         .iter()
-        .chain(WORKSPACES.iter())
+        .chain(WORKTREES.iter())
         .chain(BOARD.iter())
         .chain(TERMINALS.iter())
         .copied()

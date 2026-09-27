@@ -75,9 +75,9 @@ enum class RunnerRefusal(val word: String, val sentence: String) {
         "running-processes",
         "Something is still running there. Stop it first, then try this again."),
     /** Nothing is running, but records would be orphaned. */
-    WORKSPACES_EXIST(
+    WORKTREES_EXIST(
         "workspaces-exist",
-        "Its workspaces are still here. Remove those first, then remove the folder."),
+        "Its worktrees are still here. Remove those first, then remove the folder."),
     /** Outside every allowlisted root, or overlapping one. */
     PATH_NOT_ALLOWED(
         "path-not-allowed",
@@ -148,7 +148,7 @@ enum class RunnerRefusal(val word: String, val sentence: String) {
  *
  * The transcript is dropped wherever we have a diagnosis of our own. The core's
  * `Display` under one of these says strictly less than the sentence above it —
- * "workspaces still exist under this resource" under "Remove those first" — so
+ * "worktrees still exist under this resource" under "Remove those first" — so
  * keeping it would be noise rather than diagnosis.
  */
 fun troubleFor(word: String?, message: String?, generic: String): Trouble {

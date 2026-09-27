@@ -106,8 +106,8 @@ fn resolved(cwd: &str) -> String {
 /// needs no prefix fallback the way cursor's does.
 ///
 /// What that directory holds, though, is not one conversation per pane. Every
-/// pane in a workspace shares one `cwd` (`watch.rs` joins on
-/// `workspace.worktree_path`), so they all slug to the SAME project
+/// pane in a worktree shares one `cwd` (`watch.rs` joins on
+/// `worktree.worktree_path`), so they all slug to the SAME project
 /// directory, and Far Cooler's own chat panes -- which drive claude through
 /// the SDK rather than a terminal -- write their sessions there too. A real
 /// directory on this machine holds three SDK sessions next to four terminal
@@ -515,7 +515,7 @@ fn jsonl_files(dir: &Path) -> Vec<PathBuf> {
 ///
 /// A file another pane is already tailing is not a candidate at all, and that
 /// is what makes the one-candidate rule safe. Two claude panes in one
-/// workspace share a `cwd`, so they share a project directory; a second one
+/// worktree share a `cwd`, so they share a project directory; a second one
 /// starting up has not written its own file yet, which left the FIRST pane's
 /// session as the sole candidate — and the counting rule handed it over
 /// without ever reading a title. Both rows then showed one conversation's
@@ -610,7 +610,7 @@ mod tests {
     }
 
     /// The failure this pins is the one that motivated the whole candidate
-    /// rule: every pane in a workspace shares one `cwd`, so a chat pane and a
+    /// rule: every pane in a worktree shares one `cwd`, so a chat pane and a
     /// terminal pane slug to the SAME project directory. Open a chat in a
     /// fresh worktree and the shim's SDK session is the only file there; open
     /// a terminal beside it and type `claude`, and "the only file in the
@@ -634,11 +634,11 @@ mod tests {
         assert_eq!(found, expected);
     }
 
-    /// Two claude panes in one workspace, and the second must not adopt the
+    /// Two claude panes in one worktree, and the second must not adopt the
     /// first's conversation.
     ///
     /// This is the two-agents bug exactly as it was reported: both rows showed
-    /// the same summary and the same running task. Every pane in a workspace
+    /// the same summary and the same running task. Every pane in a worktree
     /// shares a `cwd`, so they share a project directory -- and a pane that has
     /// just started has written no file of its own yet, which left the pane
     /// ALREADY RUNNING as the only candidate. The one-candidate rule then
@@ -714,7 +714,7 @@ mod tests {
     }
 
     /// The bug this pins was found live, not reasoned about: a scratch
-    /// workspace whose worktree sat under `/tmp` never joined to its session
+    /// worktree whose directory sat under `/tmp` never joined to its session
     /// log, and its feed stayed empty for a whole turn, because claude had
     /// slugged `/private/tmp/...` while Far Cooler slugged `/tmp/...`. The two
     /// spellings name one directory and produce two slugs, and the miss is

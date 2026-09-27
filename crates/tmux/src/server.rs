@@ -8,7 +8,7 @@
 //! tmux -L farcooler-<install-id> -f <farcooler-managed.conf>
 //! ```
 //!
-//! A workspace is a daemon grouping of TAGGED WINDOWS, not a tmux session. There
+//! A worktree is a daemon grouping of TAGGED WINDOWS, not a tmux session. There
 //! is one runner-wide session.
 
 use std::path::PathBuf;
@@ -235,7 +235,7 @@ impl TmuxServer {
     }
 
     /// Kill the private server entirely. Test and uninstall use only; ordinary
-    /// workspace removal never uses `kill-session`.
+    /// worktree removal never uses `kill-session`.
     pub async fn kill_server(&self) -> Result<()> {
         let _ = self.run(&["kill-server"]).await;
         Ok(())

@@ -12,7 +12,7 @@
 
 use farcooler_protocol::v1::{
     request, result, AgentSubscribe, ErrorCode, PaneMode, RepositoryRegister, RepositoryRootAdd,
-    Scope, SetPaneMode, TerminalCreate, WorkspaceCreate,
+    Scope, SetPaneMode, TerminalCreate, WorktreeCreate,
 };
 use farcooler_transport::{request, Client, ClientError};
 use tokio::process::{ChildStdin, ChildStdout};
@@ -124,8 +124,8 @@ async fn several_requests_run_over_one_session() {
     let (_child, mut client) = spawn(dir.path()).await;
 
     for _ in 0..5 {
-        let result = client.call(request("workspace.list")).await.expect("workspace.list");
-        let Some(result::Value::WorkspaceList(list)) = result.value else { panic!("wrong result") };
+        let result = client.call(request("worktree.list")).await.expect("worktree.list");
+        let Some(result::Value::WorktreeList(list)) = result.value else { panic!("wrong result") };
         assert!(list.items.is_empty());
     }
 }
@@ -176,11 +176,11 @@ async fn host_health_is_reported_by_the_daemon_not_sampled_by_the_client() {
 // because the whole point of this file is that nothing about the daemon's
 // behavior may depend on which listener accepted the connection.
 
-/// A workspace, over stdio, ready to hold a terminal.
-async fn a_workspace(
+/// A worktree, over stdio, ready to hold a terminal.
+async fn a_worktree(
     client: &mut Client<ChildStdout, ChildStdin>,
     dir: &std::path::Path,
-) -> farcooler_protocol::v1::Workspace {
+) -> farcooler_protocol::v1::Worktree {
     let repo_path = dir.join("demo");
     std::fs::create_dir(&repo_path).unwrap();
     for args in [
@@ -211,9 +211,9 @@ async fn a_workspace(
     let result = client.call(register).await.expect("register");
     let Some(result::Value::Repository(repository)) = result.value else { panic!("wrong result") };
 
-    let mut create = request("workspace.create");
+    let mut create = request("worktree.create");
     create.target_resource_id = Some(repository.id.clone());
-    create.payload = Some(request::Payload::WorkspaceCreate(WorkspaceCreate {
+    create.payload = Some(request::Payload::WorktreeCreate(WorktreeCreate {
         task_name: "stdio".into(),
         branch: "feat/stdio".into(),
         base_revision: "HEAD".into(),
@@ -221,19 +221,19 @@ async fn a_workspace(
         adopt_existing: false,
         fork_only: false,
     }));
-    let result = client.call(create).await.expect("workspace.create");
-    let Some(result::Value::Workspace(workspace)) = result.value else { panic!("wrong result") };
-    workspace
+    let result = client.call(create).await.expect("worktree.create");
+    let Some(result::Value::Worktree(worktree)) = result.value else { panic!("wrong result") };
+    worktree
 }
 
-/// One terminal in that workspace, over stdio.
+/// One terminal in that worktree, over stdio.
 async fn a_terminal(
     client: &mut Client<ChildStdout, ChildStdin>,
-    workspace: &bytes::Bytes,
+    worktree: &bytes::Bytes,
     title: &str,
 ) -> farcooler_protocol::v1::Terminal {
     let mut create = request("terminal.create");
-    create.target_resource_id = Some(workspace.clone());
+    create.target_resource_id = Some(worktree.clone());
     create.payload = Some(request::Payload::TerminalCreate(TerminalCreate {
         title: title.into(),
         command_preset: "shell".into(),
@@ -254,8 +254,8 @@ async fn a_terminal_reports_its_pane_mode_to_a_client_over_stdio() {
     let home = tempfile::tempdir().unwrap();
     let (_child, mut client) = spawn(home.path()).await;
     let repo_root = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, repo_root.path()).await;
-    let terminal = a_terminal(&mut client, &workspace.id, "claude").await;
+    let worktree = a_worktree(&mut client, repo_root.path()).await;
+    let terminal = a_terminal(&mut client, &worktree.id, "claude").await;
 
     assert_eq!(terminal.pane_mode, PaneMode::Terminal as i32);
 }
@@ -268,8 +268,8 @@ async fn an_agent_subscribe_from_a_cursor_is_accepted_over_stdio() {
     let home = tempfile::tempdir().unwrap();
     let (_child, mut client) = spawn(home.path()).await;
     let repo_root = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, repo_root.path()).await;
-    let terminal = a_terminal(&mut client, &workspace.id, "claude").await;
+    let worktree = a_worktree(&mut client, repo_root.path()).await;
+    let terminal = a_terminal(&mut client, &worktree.id, "claude").await;
 
     let mut req = request("terminal.agent_subscribe");
     req.payload = Some(request::Payload::AgentSubscribe(AgentSubscribe {

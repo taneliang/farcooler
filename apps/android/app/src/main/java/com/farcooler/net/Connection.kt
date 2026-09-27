@@ -30,7 +30,7 @@ import com.farcooler.model.RepositoryRootList
 import com.farcooler.model.StackReply
 import com.farcooler.model.TaskBoard
 import com.farcooler.model.Terminal
-import com.farcooler.model.Workspace
+import com.farcooler.model.Worktree
 import com.farcooler.model.toJson
 import com.farcooler.core.refusalWord
 import kotlinx.coroutines.CoroutineScope
@@ -453,15 +453,15 @@ class Connection(
     val repositories: StateFlow<List<Repository>> = _repositories.asStateFlow()
 
     /**
-     * What each worktree on this runner has changed, by workspace id, or empty
+     * What each worktree on this runner has changed, by worktree id, or empty
      * until the first read.
      *
      * Keyed rather than kept as the list the wire sends, because every reader
-     * arrives with one workspace in hand and wants that workspace's row: a
+     * arrives with one worktree in hand and wants that worktree's row: a
      * fleet of twenty rows each scanning a twenty-entry array is quadratic work
      * to answer a question a map answers once.
      *
-     * Keyed by WORKSPACE alone and not by `host/workspace`, unlike almost
+     * Keyed by WORKTREE alone and not by `host/worktree`, unlike almost
      * everything else in this app — because this map belongs to one runner and
      * dies with it. [FleetRepository] is where the runners are merged, and it
      * carries the counts out on a [FleetEntry], which already names the host.
@@ -610,7 +610,7 @@ class Connection(
      * The write is what releases a pane. Compose disposes the effect that owns
      * this on the way out of the screen, and its scope goes with it, so the
      * claim is renewed from [Connection]'s own scope here rather than from the
-     * caller's — otherwise backing out of a workspace would leave the last pane
+     * caller's — otherwise backing out of a worktree would leave the last pane
      * claimed until the next poll, and leaving the app entirely would leave it
      * claimed until the runner's TTL ran out.
      */
@@ -1107,7 +1107,7 @@ class Connection(
         // `associateBy` keeps the LAST of any duplicate key, which is what a
         // runner listing one worktree twice should collapse to — the same
         // uniquing iOS spells out.
-        _inbox.value = reply.items.associateBy { it.workspaceId }
+        _inbox.value = reply.items.associateBy { it.worktreeId }
     }
 
     /**
@@ -1142,7 +1142,7 @@ class Connection(
         // disagree.
         reportWatching()
         val id = visibleTerminal ?: return
-        val terminal = _fleet.value.workspaces.flatMap { it.terminals }.firstOrNull { it.id == id }
+        val terminal = _fleet.value.worktrees.flatMap { it.terminals }.firstOrNull { it.id == id }
         if (terminal?.agent != com.farcooler.model.AgentActivity.DONE) return
         synchronized(markingSeen) { if (!markingSeen.add(id)) return }
         try {
@@ -1536,9 +1536,9 @@ class Connection(
     private data class AdapterList(val adapters: List<AdapterInfo> = emptyList())
 
     /**
-     * Hide or unhide a workspace.
+     * Hide or unhide a worktree.
      *
-     * The Mac has had this since workspace management landed and neither phone
+     * The Mac has had this since worktree management landed and neither phone
      * app ever got it, which on a runner that adopts every worktree it already
      * has means a sidebar of twenty rows and no way to put nineteen away.
      * Hiding never touches git and is never refused for a running terminal — it
@@ -1549,14 +1549,14 @@ class Connection(
      * only the last, so it documented nothing and `setHidden` had no comment at
      * all. Moved rather than rewritten: it was never wrong, only somewhere else.
      */
-    suspend fun setHidden(workspace: Workspace, hidden: Boolean) {
-        val method = if (hidden) "workspace.hide" else "workspace.unhide"
-        attempt { core.call(method, args("workspace" to workspace.id)) }
+    suspend fun setHidden(worktree: Worktree, hidden: Boolean) {
+        val method = if (hidden) "worktree.hide" else "worktree.unhide"
+        attempt { core.call(method, args("worktree" to worktree.id)) }
         refresh()
     }
 
     /**
-     * Put this runner's workspaces in this order, first on screen first.
+     * Put this runner's worktrees in this order, first on screen first.
      *
      * The whole visible order rather than "move this one up". The fleet list has
      * already dropped every hidden worktree, so an index means nothing without
@@ -1572,12 +1572,12 @@ class Connection(
      * never rearranged optimistically. The runner decides, and a card that moved
      * on screen and not on disk is the failure this whole feature removes.
      */
-    suspend fun reorderWorkspaces(ordered: List<String>) {
+    suspend fun reorderWorktrees(ordered: List<String>) {
         if (ordered.size < 2) return
         val payload = JsonObject(
-            mapOf("workspaces" to JsonArray(ordered.map { JsonPrimitive(it) }))
+            mapOf("worktrees" to JsonArray(ordered.map { JsonPrimitive(it) }))
         )
-        attempt { core.call("workspace.reorder", payload) }
+        attempt { core.call("worktree.reorder", payload) }
         refresh()
     }
 
@@ -1596,11 +1596,11 @@ class Connection(
         data object Removed : RemoveOutcome
 
         /**
-         * The worktree is dirty, so the daemon wants [Workspace.task] typed back.
+         * The worktree is dirty, so the daemon wants [Worktree.task] typed back.
          *
          * `crates/daemon/src/rpc.rs` decides this with `removal_needs_confirmation`
          * and compares the typed string against `ws.name()` — which IS the fleet's
-         * `task`, since `wire::workspace` computes that field from the same call.
+         * `task`, since `wire::worktree` computes that field from the same call.
          * Worth saying because the comparison is exact and the two names being the
          * same one is not obvious from either end alone.
          */
@@ -1618,7 +1618,7 @@ class Connection(
     /**
      * Remove a worktree. **The most destructive thing this app can ask for.**
      *
-     * `confirm` must be the workspace's exact name, unless the worktree is
+     * `confirm` must be the worktree's exact name, unless the worktree is
      * clean, in which case it may be empty.
      *
      * ## What the far end refuses, and where
@@ -1628,7 +1628,7 @@ class Connection(
      * into a destructive confirmation is a refusal that came too late to be
      * useful, which is the whole of `07e75e8`.
      *
-     * 1. **Scope.** `workspace.remove_worktree` is `Scope::HostAdmin`
+     * 1. **Scope.** `worktree.remove` is `Scope::HostAdmin`
      *    (`crates/daemon/src/rpc.rs`), and a phone enrolled through the ceremony
      *    holds `control`. That refusal cannot be predicted from this side — a key
      *    added to `authorized_keys` by hand carries no scope line and reads as
@@ -1639,7 +1639,7 @@ class Connection(
      *    canonicalized path comparison that deliberately does not trust the flag
      *    (`Service::remove_worktree`). Both run before any terminal is stopped and
      *    before any directory is touched. The caller keeps the door shut on
-     *    [Workspace.isMainCheckout] anyway, so nobody is walked through a
+     *    [Worktree.isMainCheckout] anyway, so nobody is walked through a
      *    ceremony that could never have succeeded.
      * 3. **An untrustworthy tmux inventory**, which is refused outright — and
      *    this is the one that arrives in the WORST order. The confirmation gate
@@ -1649,16 +1649,16 @@ class Connection(
      *    it offers the button.
      * 4. **A dirty worktree with the wrong name typed**, which is [RemoveOutcome.NeedsTypedName].
      *
-     * Past all four it closes every terminal in the workspace — not a reason to
+     * Past all four it closes every terminal in the worktree — not a reason to
      * refuse, since closing them is part of what was asked for — then runs
-     * `git worktree remove --force` and deletes the workspace row. **The branch
+     * `git worktree remove --force` and deletes the worktree row. **The branch
      * survives, and so does everything committed on it.**
      */
-    suspend fun removeWorktree(workspace: Workspace, confirm: String): RemoveOutcome {
+    suspend fun removeWorktree(worktree: Worktree, confirm: String): RemoveOutcome {
         val data = try {
             core.call(
-                "workspace.remove_worktree",
-                args("workspace" to workspace.id, "confirm" to confirm),
+                "worktree.remove",
+                args("worktree" to worktree.id, "confirm" to confirm),
             )
         } catch (e: Exception) {
             e.rethrowIfCancellation()
@@ -1680,7 +1680,7 @@ class Connection(
      * Create a worktree and branch, with a terminal already in it.
      *
      * [name] names the worktree's directory. The wire key is still `task`, which
-     * is what it was called when a workspace carried a typed-out task alongside
+     * is what it was called when a worktree carried a typed-out task alongside
      * its directory; renaming the key would strand every shipped app for nothing.
      *
      * `terminal` names what runs there; empty means none, which is what a caller
@@ -1700,9 +1700,9 @@ class Connection(
      *
      * False for every caller that predates it, and absent from an older client,
      * which `crates/client/src/ffi.rs` reads as false: the behavior
-     * `workspace.create` always had.
+     * `worktree.create` always had.
      */
-    suspend fun createWorkspace(
+    suspend fun createWorktree(
         repository: String,
         name: String,
         branch: String,
@@ -1710,7 +1710,7 @@ class Connection(
         adopt: Boolean = false,
     ): String {
         val data = core.call(
-            "workspace.create",
+            "worktree.create",
             args(
                 "repository" to repository,
                 "task" to name,
@@ -1724,10 +1724,10 @@ class Connection(
             ?: throw com.farcooler.core.CoreException("The host created a worktree but did not name it.")
     }
 
-    suspend fun createTerminal(workspace: String, title: String, preset: String): String {
+    suspend fun createTerminal(worktree: String, title: String, preset: String): String {
         val data = core.call(
             "terminal.create",
-            args("workspace" to workspace, "title" to title, "preset" to preset),
+            args("worktree" to worktree, "title" to title, "preset" to preset),
         )
         return data["id"]?.jsonPrimitive?.contentOrNull
             ?: throw com.farcooler.core.CoreException("The host started a terminal but did not name it.")
@@ -1775,8 +1775,8 @@ class Connection(
     // review screen must never confuse. See [ChangesSource].
 
     /** What this worktree changed, against its base. */
-    override suspend fun changeSet(workspace: String, fresh: Boolean): ChangeSet {
-        val data = core.call("changes.change_set", args("workspace" to workspace, "fresh" to fresh))
+    override suspend fun changeSet(worktree: String, fresh: Boolean): ChangeSet {
+        val data = core.call("changes.change_set", args("worktree" to worktree, "fresh" to fresh))
         return json.decodeFromJsonElement(ChangeSet.serializer(), data)
     }
 
@@ -1791,20 +1791,20 @@ class Connection(
      * and somebody will wonder why nothing passes it.
      */
     override suspend fun fileDiff(
-        workspace: String,
+        worktree: String,
         path: String,
         scope: String,
     ): FileDiffReply {
         val data = core.call(
             "changes.file_diff",
-            args("workspace" to workspace, "path" to path, "scope" to scope),
+            args("worktree" to worktree, "path" to path, "scope" to scope),
         )
         return json.decodeFromJsonElement(FileDiffReply.serializer(), data)
     }
 
     /** The files one commit touched, against its first parent. */
-    override suspend fun commitFiles(workspace: String, sha: String): List<ChangedFile> {
-        val data = core.call("changes.commit_files", args("workspace" to workspace, "sha" to sha))
+    override suspend fun commitFiles(worktree: String, sha: String): List<ChangedFile> {
+        val data = core.call("changes.commit_files", args("worktree" to worktree, "sha" to sha))
         return json.decodeFromJsonElement(CommitFilesReply.serializer(), data).files
     }
 
@@ -1814,14 +1814,14 @@ class Connection(
      * The affordance that exists because a GUESSED base produces a wrong diff
      * that looks exactly like a right one.
      */
-    override suspend fun setBase(workspace: String, baseRef: String): ChangeSet {
-        val data = core.call("changes.set_base", args("workspace" to workspace, "baseRef" to baseRef))
+    override suspend fun setBase(worktree: String, baseRef: String): ChangeSet {
+        val data = core.call("changes.set_base", args("worktree" to worktree, "baseRef" to baseRef))
         return json.decodeFromJsonElement(ChangeSet.serializer(), data)
     }
 
     /** Mark a worktree as read, which is what clears its badge everywhere. */
-    override suspend fun markRead(workspace: String) {
-        core.call("changes.mark_read", args("workspace" to workspace))
+    override suspend fun markRead(worktree: String) {
+        core.call("changes.mark_read", args("worktree" to worktree))
     }
 
     /**
@@ -1855,9 +1855,9 @@ class Connection(
      *
      * `branch.list` is one of the family the parity inventory found routed in
      * Rust and never called from Kotlin, and this is its first Kotlin caller.
-     * Scoped to a REPOSITORY rather than a workspace, which is the daemon's own
+     * Scoped to a REPOSITORY rather than a worktree, which is the daemon's own
      * shape — `Session::branches` takes a repository id — and the reason the one
-     * caller has to read [Workspace.repository] and say so when it is missing
+     * caller has to read [Worktree.repository] and say so when it is missing
      * rather than guessing.
      *
      * Throws with the rest of this section. A base picker that answered an empty
@@ -1873,7 +1873,7 @@ class Connection(
      * A branch's parent chain, and what GitHub last said along it.
      *
      * Repository-scoped and branch-scoped both, which is why the one caller has
-     * to have a [Workspace.repository] AND a branch before it offers the door —
+     * to have a [Worktree.repository] AND a branch before it offers the door —
      * an older runner's fleet carried neither, and a menu item that cannot work
      * is worse than one that is not there.
      *
@@ -1958,11 +1958,11 @@ class Connection(
     val composerHandoff = ComposerHandoff()
 
     fun terminal(id: String): Terminal? =
-        _fleet.value.workspaces.flatMap { it.terminals }.firstOrNull { it.id == id }
+        _fleet.value.worktrees.flatMap { it.terminals }.firstOrNull { it.id == id }
 
-    fun workspaceOf(terminalId: String): Workspace? =
-        _fleet.value.workspaces.firstOrNull { workspace ->
-            workspace.terminals.any { it.id == terminalId }
+    fun worktreeOf(terminalId: String): Worktree? =
+        _fleet.value.worktrees.firstOrNull { worktree ->
+            worktree.terminals.any { it.id == terminalId }
         }
 
     suspend fun close() {

@@ -39,20 +39,20 @@ class ReviewTest {
     }
 
     /**
-     * **The collision `df87410` had to solve for the front door.** Workspace ids
+     * **The collision `df87410` had to solve for the front door.** Worktree ids
      * are minted per daemon and this app connects to every runner at once, so two
      * runners can hold a worktree with the same id — and a bookmark keyed on the
-     * workspace alone would resume "where you were" in the wrong worktree.
+     * worktree alone would resume "where you were" in the wrong worktree.
      */
     @Test
-    fun `two runners holding the same workspace id keep separate bookmarks`() {
+    fun `two runners holding the same worktree id keep separate bookmarks`() {
         val storage = InMemoryReviewStorage()
-        val other = ReviewRef("host-b", ref.workspaceId)
+        val other = ReviewRef("host-b", ref.worktreeId)
         ReviewBookmarks.write(storage, ref, ReviewPosition(file = "a.rs"))
         ReviewBookmarks.write(storage, other, ReviewPosition(file = "b.rs"))
         assertEquals("a.rs", ReviewBookmarks.read(storage, ref)?.file)
         assertEquals("b.rs", ReviewBookmarks.read(storage, other)?.file)
-        assertEquals("host-a/${ref.workspaceId}", ref.key)
+        assertEquals("host-a/${ref.worktreeId}", ref.key)
     }
 
     @Test
@@ -258,11 +258,11 @@ class ReviewTest {
     }
 
     @Test
-    fun `two runners holding the same workspace id keep separate outboxes`() {
+    fun `two runners holding the same worktree id keep separate outboxes`() {
         val storage = InMemoryReviewStorage()
         queue(storage).write(ReviewAnchor(file = "a.rs"), "one")
         val other = ReviewCommentQueue(
-            ReviewRef("host-b", ref.workspaceId), storage, { _, _ -> null }
+            ReviewRef("host-b", ref.worktreeId), storage, { _, _ -> null }
         )
         assertTrue(other.state.value.pending.isEmpty())
     }
@@ -494,7 +494,7 @@ class ReviewTest {
      */
     @Test
     fun `every agent pane is a target and the diff pane is not`() {
-        val workspace = Workspace(
+        val worktree = Worktree(
             id = "w",
             terminals = listOf(
                 Terminal(id = "1", preset = "claude", paneMode = "agent", chatCapable = true),
@@ -503,7 +503,7 @@ class ReviewTest {
                 Terminal(id = "4", preset = "changes", paneMode = "changes", chatCapable = true),
             ),
         )
-        val targets = workspace.reviewAgentTargets()
+        val targets = worktree.reviewAgentTargets()
         assertEquals(listOf("1", "2"), targets.map { it.id })
         // Numbered, because two identical `claude`s are genuinely alike.
         assertEquals(listOf("claude 1", "claude 2"), targets.map { it.name })

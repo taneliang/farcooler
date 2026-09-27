@@ -25,6 +25,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_0011_terminal_task,
     migration_0012_every_board_has_a_prefix,
     migration_0013_task_edited_at,
+    migration_0014_worktrees,
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -617,6 +618,31 @@ fn migration_0013_task_edited_at(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch("ALTER TABLE tasks ADD COLUMN edited_at INTEGER;")
 }
 
+/// `workspaces` becomes `worktrees`, and every `workspace_id` that means the
+/// worktree becomes `worktree_id`.
+///
+/// The word "workspace" moves up a level to mean a workstream (migration 0015
+/// creates that table). A native rename with `legacy_alter_table` off rewrites
+/// every foreign key that names the table, so `terminals`, `tasks`,
+/// `review_bases` and `review_reviewed` follow without a rebuild. SQLite has no
+/// `ALTER INDEX`, so the two indexes are dropped and made again under their new
+/// names, each on exactly the columns it had.
+fn migration_0014_worktrees(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        r#"
+        ALTER TABLE workspaces RENAME TO worktrees;
+        ALTER TABLE terminals RENAME COLUMN workspace_id TO worktree_id;
+        ALTER TABLE tasks RENAME COLUMN workspace_id TO worktree_id;
+        ALTER TABLE review_bases RENAME COLUMN workspace_id TO worktree_id;
+        ALTER TABLE review_reviewed RENAME COLUMN workspace_id TO worktree_id;
+        DROP INDEX workspaces_one_per_path;
+        CREATE UNIQUE INDEX worktrees_one_per_path ON worktrees (repository_id, worktree_path);
+        DROP INDEX workspaces_by_ordinal;
+        CREATE INDEX worktrees_by_ordinal ON worktrees (ordinal);
+        "#,
+    )
+}
+
 /// Every migration below `version`, applied in one transaction, with the
 /// watermark set to it: a database exactly as a build that stopped at
 /// `version` left it, for a test to seed and then migrate forward.
@@ -683,7 +709,7 @@ mod tests {
         [
             "repository_roots",
             "repositories",
-            "workspaces",
+            "worktrees",
             "terminals",
             "idempotency",
             "meta",
@@ -723,12 +749,12 @@ mod tests {
         migrate(&mut conn, 5).unwrap();
 
         let hidden: bool = conn
-            .query_row("SELECT hidden FROM workspaces WHERE id = x'04'", [], |r| r.get(0))
+            .query_row("SELECT hidden FROM worktrees WHERE id = x'04'", [], |r| r.get(0))
             .unwrap();
         assert!(hidden, "an archived workspace is a hidden one");
 
         let main: bool = conn
-            .query_row("SELECT is_main_checkout FROM workspaces WHERE id = x'04'", [], |r| r.get(0))
+            .query_row("SELECT is_main_checkout FROM worktrees WHERE id = x'04'", [], |r| r.get(0))
             .unwrap();
         assert!(!main, "pre-existing rows default to not-main; reconcile corrects them");
     }
@@ -764,17 +790,17 @@ mod tests {
         migrate(&mut conn, 7).unwrap();
 
         let path: String = conn
-            .query_row("SELECT worktree_path FROM workspaces WHERE id = x'04'", [], |r| r.get(0))
+            .query_row("SELECT worktree_path FROM worktrees WHERE id = x'04'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(path, "/r/wt/rate-limiting", "the path IS the name now, so it must survive");
 
         let terminals: i64 = conn
-            .query_row("SELECT count(*) FROM terminals WHERE workspace_id = x'04'", [], |r| r.get(0))
+            .query_row("SELECT count(*) FROM terminals WHERE worktree_id = x'04'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(terminals, 1, "the terminals must still point at the workspace");
 
         let named: rusqlite::Result<String> = conn
-            .query_row("SELECT task_name FROM workspaces WHERE id = x'04'", [], |r| r.get(0));
+            .query_row("SELECT task_name FROM worktrees WHERE id = x'04'", [], |r| r.get(0));
         assert!(named.is_err(), "the column is gone, not merely ignored");
     }
 
@@ -813,7 +839,7 @@ mod tests {
         migrate(&mut conn, 8).unwrap();
 
         let mut stmt = conn
-            .prepare("SELECT branch FROM workspaces ORDER BY ordinal, worktree_path")
+            .prepare("SELECT branch FROM worktrees ORDER BY ordinal, worktree_path")
             .unwrap();
         let order: Vec<String> =
             stmt.query_map([], |r| r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap();
@@ -825,13 +851,13 @@ mod tests {
 
         // Dense and distinct, so the next create can take MAX + 1 and land
         // after everything rather than on top of something.
-        let mut stmt = conn.prepare("SELECT ordinal FROM workspaces ORDER BY ordinal").unwrap();
+        let mut stmt = conn.prepare("SELECT ordinal FROM worktrees ORDER BY ordinal").unwrap();
         let ranks: Vec<i64> =
             stmt.query_map([], |r| r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap();
         assert_eq!(ranks, vec![0, 1, 2, 3], "every row gets its own rank, not the default 0");
     }
 
-    /// One path, one row. The reconciler and `create_workspace` can race, and
+    /// One path, one row. The reconciler and `create_worktree` can race, and
     /// the index is what turns that into an error instead of a duplicate.
     #[test]
     fn one_row_per_worktree_path() {
@@ -840,12 +866,16 @@ mod tests {
         conn.execute_batch(
             "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
              INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1, '');
-             INSERT INTO workspaces VALUES (x'04', x'03', 'main', '/r/wt', 0, 0, 1, 0, 0, 0);",
+             INSERT INTO worktrees (id, repository_id, branch, worktree_path, hidden, creation_failed,
+                                    resource_version)
+                 VALUES (x'04', x'03', 'main', '/r/wt', 0, 0, 1);",
         )
         .unwrap();
 
         let second = conn.execute_batch(
-            "INSERT INTO workspaces VALUES (x'05', x'03', 'main', '/r/wt', 0, 0, 1, 0, 0, 0);",
+            "INSERT INTO worktrees (id, repository_id, branch, worktree_path, hidden, creation_failed,
+                                    resource_version)
+                 VALUES (x'05', x'03', 'main', '/r/wt', 0, 0, 1);",
         );
         assert!(second.is_err(), "a second row for the same path is refused");
     }
@@ -1059,5 +1089,119 @@ mod tests {
             .query_row("SELECT task_id FROM terminals WHERE id = x'06'", [], |r| r.get(0))
             .expect("the old terminal is still there");
         assert_eq!(task, None, "a terminal from before dispatch was opened for no task");
+    }
+
+    /// Exactly the migrations from `from` up to `to`, in one transaction, with
+    /// the watermark moved to `to`: a database as a build that stopped at `to`
+    /// would leave it.
+    ///
+    /// For a test that has to hold at one version however many come after it.
+    /// `migrate` always runs to `CURRENT_SCHEMA_VERSION`, so a test that
+    /// asserts the word `workspace` is gone would go red the day a later
+    /// migration gives the word a meaning again.
+    fn migrate_between(conn: &mut Connection, from: u32, to: u32) {
+        let tx = conn.transaction().unwrap();
+        for m in &MIGRATIONS[from as usize..to as usize] {
+            m(&tx).unwrap();
+        }
+        tx.execute("UPDATE meta SET value = ?1 WHERE key = 'schema_version'", [to.to_string()])
+            .unwrap();
+        tx.commit().unwrap();
+    }
+
+    /// 0014 is a rename and nothing else: every row survives, every reference
+    /// follows the table, and at 14 no column is still called `workspace_id`.
+    ///
+    /// Held at 14 rather than run to current, because 0015 brings the word
+    /// back with its new meaning: a `workspaces` table for workstreams, and a
+    /// `workspace_id` on worktrees, terminals and tasks naming one.
+    #[test]
+    fn a_database_from_before_the_rename_calls_every_worktree_a_worktree() {
+        let mut conn = open();
+        migrate_only_to(&mut conn, 13);
+        conn.execute_batch(
+            "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
+             INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1, 'r');
+             INSERT INTO workspaces (id, repository_id, branch, worktree_path, hidden, creation_failed,
+                                     resource_version, is_main_checkout, ordinal)
+                 VALUES (x'04', x'03', 'main', '/r', 0, 0, 1, 1, 0);
+             INSERT INTO tasks (id, repository_id, key, title, status, status_since, workspace_id,
+                                created_at, resource_version)
+                 VALUES (x'06', x'03', 'r-1', 'a task', 'active', 0, x'04', 0, 1);
+             INSERT INTO terminals (id, workspace_id, title, command_preset, intent, runtime_confirmed,
+                                    lease_generation, epoch, \"columns\", \"rows\", resource_version, task_id)
+                 VALUES (x'05', x'04', 't', 'shell', 1, 0, 0, 0, 80, 24, 1, x'06');
+             INSERT INTO review_bases (workspace_id, base_ref) VALUES (x'04', 'release/2');
+             INSERT INTO review_reviewed (workspace_id, branch, head_commit, worktree_digest, marked_at)
+                 VALUES (x'04', 'main', 'head', 'digest', 9);",
+        )
+        .unwrap();
+
+        migrate_between(&mut conn, 13, 14);
+        assert_eq!(read_schema_version(&conn).unwrap(), 14);
+
+        let path: String = conn
+            .query_row("SELECT worktree_path FROM worktrees WHERE id = x'04'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(path, "/r", "the row survives the rename");
+        for table in ["terminals", "tasks", "review_bases", "review_reviewed"] {
+            let on: Vec<u8> = conn
+                .query_row(&format!("SELECT worktree_id FROM {table}"), [], |r| r.get(0))
+                .unwrap_or_else(|e| panic!("{table} has no worktree_id: {e}"));
+            assert_eq!(on, vec![4], "{table} still points at the worktree");
+            let target: String = conn
+                .query_row(
+                    "SELECT \"table\" FROM pragma_foreign_key_list(?1) WHERE \"from\" = 'worktree_id'",
+                    [table],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|e| panic!("{table}.worktree_id is not a foreign key: {e}"));
+            assert_eq!(target, "worktrees", "{table}'s foreign key follows the table");
+        }
+
+        let stragglers: Vec<String> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT m.name FROM sqlite_master m, pragma_table_info(m.name) c
+                     WHERE m.type = 'table' AND c.name = 'workspace_id'",
+                )
+                .unwrap();
+            stmt.query_map([], |r| r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap()
+        };
+        assert!(stragglers.is_empty(), "a column still says workspace_id in {stragglers:?}");
+        let old: Vec<String> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT name FROM sqlite_master WHERE name LIKE 'workspaces%'
+                     UNION ALL
+                     SELECT m.name FROM sqlite_master m, pragma_foreign_key_list(m.name) f
+                     WHERE m.type = 'table' AND f.\"table\" = 'workspaces'",
+                )
+                .unwrap();
+            stmt.query_map([], |r| r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap()
+        };
+        assert!(old.is_empty(), "still named for, or pointing at, workspaces: {old:?}");
+
+        // The indexes come back under their new names and still do their jobs.
+        for (index, unique) in [("worktrees_one_per_path", 1), ("worktrees_by_ordinal", 0)] {
+            let found: i64 = conn
+                .query_row(
+                    "SELECT \"unique\" FROM pragma_index_list('worktrees') WHERE name = ?1",
+                    [index],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|e| panic!("{index} is missing: {e}"));
+            assert_eq!(found, unique, "{index} keeps its uniqueness");
+        }
+        let second = conn.execute_batch(
+            "INSERT INTO worktrees (id, repository_id, branch, worktree_path, hidden, creation_failed,
+                                    resource_version)
+                 VALUES (x'07', x'03', 'main', '/r', 0, 0, 1);",
+        );
+        assert!(second.is_err(), "a second row for the same path is still refused");
+
+        let broken: i64 =
+            conn.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r.get(0)).unwrap();
+        assert_eq!(broken, 0, "every reference still resolves");
     }
 }

@@ -96,7 +96,7 @@ import kotlinx.serialization.json.jsonPrimitive
  * The surface [TerminalPane] swaps in when the daemon reports the pane is
  * hosting a chat. Unlike the Mac there is no tmux rectangle to draw into: this
  * pane is always the whole screen, and the tab strip that lets you leave it
- * lives below every pane rather than below this one — [WorkspaceScreen] owns
+ * lives below every pane rather than below this one — [WorktreeScreen] owns
  * that, not this.
  *
  * ## The stream outlives the tab tap now
@@ -324,7 +324,7 @@ fun AgentScreen(
                 // Null until a session has said which — see [Transcript.backend].
                 backend = transcript.backend,
                 isWorking = isWorking,
-                workspaceId = ref.workspaceId,
+                worktreeId = ref.worktreeId,
                 terminalId = ref.terminalId,
                 connection = connection,
                 onSetConfig = { id, value -> stream.setConfig(id, value) },
@@ -792,7 +792,7 @@ private fun AgentComposer(
      */
     backend: String?,
     isWorking: Boolean,
-    workspaceId: String,
+    worktreeId: String,
     /** This pane, so it can pick up anything another pane has left for it. */
     terminalId: String,
     connection: Connection,
@@ -819,7 +819,7 @@ private fun AgentComposer(
     // pane-lifetime work, and this is it — the composable itself is per pane
     // now, so "keyed to nothing" means keyed to this pane.
     //
-    // [WorkspaceScreen] wraps each pane in a `SaveableStateHolder` bucketed by
+    // [WorktreeScreen] wraps each pane in a `SaveableStateHolder` bucketed by
     // `Pane.id`, which does two things no key here could. It makes the
     // separation certain rather than a consequence of how `rememberSaveable`
     // derives a key from the composition's shape; and it KEEPS what is written
@@ -897,7 +897,7 @@ private fun AgentComposer(
             connection.core.call(
                 "worktree.file_search",
                 Connection.args(
-                    "workspace" to workspaceId,
+                    "worktree" to worktreeId,
                     "query" to mention.prefix,
                     "limit" to 20,
                 ),

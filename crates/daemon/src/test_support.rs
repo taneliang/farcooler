@@ -60,7 +60,7 @@ impl Drop for ScratchDir {
 /// Real repositories rather than hand-written fixtures: `reconcile.rs`'s
 /// tests are about the shape of `git worktree list --porcelain`, and a
 /// hand-written fixture would only prove the author can copy it. Sharing it
-/// with `service.rs`'s tests means both get a workspace row that came from
+/// with `service.rs`'s tests means both get a worktree row that came from
 /// the same adoption path a live daemon uses.
 pub(crate) async fn fixture() -> (ScratchDir, Arc<Service>, Uuid) {
     let dir = tempfile::tempdir().unwrap();

@@ -69,16 +69,16 @@ object NotificationCopy {
      * need. That the fleet can be several runners at once is Android's, not a
      * port — see the do-not-delete list.
      */
-    fun of(terminal: Terminal, workspace: String, runner: String = ""): Announcement? =
+    fun of(terminal: Terminal, worktree: String, runner: String = ""): Announcement? =
         when (terminal.agent) {
             AgentActivity.BLOCKED -> Announcement(
                 title = "${terminal.label} needs you",
-                // The question is what a person answers, and the workspace is
+                // The question is what a person answers, and the worktree is
                 // what tells them which of three blocked codexes is asking it.
                 // Both, in that order, and the daemon's own reason for both:
                 // "codex needs you / Do you want to create haiku.txt?" is
                 // answerable and still not attributable.
-                body = body(workspace, worthSaying(terminal.blockedQuestion) ?: WAITING, runner),
+                body = body(worktree, worthSaying(terminal.blockedQuestion) ?: WAITING, runner),
                 channel = Notifier.CHANNEL_BLOCKED,
             )
 
@@ -86,14 +86,14 @@ object NotificationCopy {
                 if (terminal.turnDidFail) {
                     Announcement(
                         title = "${terminal.label} failed",
-                        body = body(workspace, DID_NOT_FINISH, runner),
+                        body = body(worktree, DID_NOT_FINISH, runner),
                         channel = Notifier.CHANNEL_DONE,
                     )
                 } else {
                     Announcement(
                         title = "${terminal.label} finished",
                         // What it finished, where there is an answer to that.
-                        // The body was the workspace name alone, which the
+                        // The body was the worktree name alone, which the
                         // title's label had very nearly already said — so the
                         // whole notification was "claude finished / add auth", a
                         // sentence about Far Cooler rather than about the work.
@@ -104,7 +104,7 @@ object NotificationCopy {
                         // and has to open where the sentence opens. The whole
                         // message is on the wire as `said`, cut from its start
                         // by the daemon.
-                        body = body(workspace, worthSaying(terminal.lastSaid), runner),
+                        body = body(worktree, worthSaying(terminal.lastSaid), runner),
                         channel = Notifier.CHANNEL_DONE,
                     )
                 }
@@ -149,12 +149,12 @@ object NotificationCopy {
      * `add-auth — Both tests pass. · studio`. Ported from `Quoted::body` in
      * `crates/daemon/src/watch.rs`, including the part that matters: any half
      * can be missing and the result still reads as a sentence. A turn can be all
-     * tool calls and say nothing, and a workspace name derived from a path can
+     * tool calls and say nothing, and a worktree name derived from a path can
      * be empty. Neither may produce a stray separator — `— Both tests pass.`
      * looks like a rendering bug, and a lock screen is not where to debug one.
      */
-    private fun body(workspace: String, text: String?, runner: String): String {
-        val name = worthSaying(workspace)
+    private fun body(worktree: String, text: String?, runner: String): String {
+        val name = worthSaying(worktree)
         val said = worthSaying(text)
         val head = when {
             name != null && said != null -> "$name — $said"

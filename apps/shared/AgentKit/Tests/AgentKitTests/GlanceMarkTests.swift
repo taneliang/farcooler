@@ -150,7 +150,7 @@ struct GlanceMarkTests {
     /// **This test used to say no agent could ever be `.toReview`.** The
     /// prohibition was narrowed rather than lifted, so the guard is narrowed
     /// with it rather than deleted: `reviewsWaiting` is still a fleet-wide
-    /// scalar and `unreadDiff` is still per WORKSPACE, `ShellScreen` and
+    /// scalar and `unreadDiff` is still per WORKTREE, `ShellScreen` and
     /// `ShellNavigation` still refuse to invent a per-agent version of either,
     /// and a ring meaning "this agent has unread changes" would still be a fact
     /// nothing on the wire has an opinion about. What changed is that `done` was

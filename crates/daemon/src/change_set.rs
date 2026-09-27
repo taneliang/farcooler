@@ -209,7 +209,7 @@ pub async fn merge_base(repo: &Path, base_ref: &str) -> Result<String> {
 /// day — and there is no periodic source for that. `commits_since` is the only
 /// thing that produces timestamped commits and it runs one `git log` per call,
 /// on the demand-driven `ReviewCache::get` path only; nothing recomputes it on
-/// a clock, so a trace built from it would be blank for every workspace nobody
+/// a clock, so a trace built from it would be blank for every worktree nobody
 /// had opened a diff for.
 ///
 /// `<git dir>/logs/HEAD` is the same fact for free. git appends one line to it
@@ -507,10 +507,10 @@ async fn working_tree_as_git_reports_it(repo: &Path) -> Result<WorkingTree> {
 ///
 /// ## Cost
 ///
-/// Two more `git diff`s, and only on `change_set` — the per-workspace review
+/// Two more `git diff`s, and only on `change_set` — the per-worktree review
 /// path behind `ReviewCache::get`, which runs it when the cheap gate or the
 /// worktree digest says the tree actually moved. `shortstat`, the call the fleet
-/// sampler puts on every workspace, does not come through here and is unchanged.
+/// sampler puts on every worktree, does not come through here and is unchanged.
 /// Both are skipped outright when their group is empty, so a clean tree pays
 /// nothing. Measured warm on a clone of this repository with one staged file,
 /// five unstaged and one untracked: 16 ms for the whole pass, against 155 ms for

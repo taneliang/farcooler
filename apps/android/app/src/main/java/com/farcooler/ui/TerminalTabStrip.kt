@@ -47,17 +47,17 @@ import com.farcooler.model.InboxRow
 import com.farcooler.model.ShellClose
 import com.farcooler.model.StateKind
 import com.farcooler.model.Terminal
-import com.farcooler.model.Workspace
+import com.farcooler.model.Worktree
 
 /**
- * One workspace's tabs: its agents, and its diff.
+ * One worktree's tabs: its agents, and its diff.
  *
  * The Mac always has its sidebar up, so switching panes there is a click away
- * regardless of which is open. A phone's workspace screen is full-bleed, and
+ * regardless of which is open. A phone's worktree screen is full-bleed, and
  * "open the drawer, find the row, tap it" is the wrong cost for something as
  * routine as glancing at a second agent.
  *
- * ## Why this is scoped to one workspace now
+ * ## Why this is scoped to one worktree now
  *
  * It used to be flat across the whole fleet, and the argument for that was
  * written down right here: the 3am case is "is the OTHER agent still blocked",
@@ -67,7 +67,7 @@ import com.farcooler.model.Workspace
  * The job the owner described is reviewing what an agent did — reading what it
  * said, judging it, looking at the change, replying — and every one of those is
  * inside ONE worktree. A flat strip cannot hold that worktree's diff, because a
- * diff belongs to a workspace and a flat strip has no workspace; and if it did
+ * diff belongs to a worktree and a flat strip has no worktree; and if it did
  * hold one it would be a lone unlabeled chip in a row of ten unrelated ones.
  * Scoped, the strip is the toggle: the agents that did the work, and the work
  * they did, side by side.
@@ -94,9 +94,9 @@ import com.farcooler.model.Workspace
  * ## Closing a terminal lives here, behind a long press
  *
  * **A `DropdownMenu` and not a swipe, per the standing Android convention**
- * that `WorkspaceSheets.kt` records for the other destructive thing in this app.
+ * that `WorktreeSheets.kt` records for the other destructive thing in this app.
  * iOS closes a terminal with the native table swipe on a row of the column its
- * workspace bar opens; this platform has neither that bar nor that column, and
+ * worktree bar opens; this platform has neither that bar nor that column, and
  * porting UIKit's gesture onto a `LazyRow` of chips would be a swipe competing
  * with the row's own scroll on a surface whose whole job is to scroll
  * sideways. What the two phones must agree on is not the gesture — it is the
@@ -105,7 +105,7 @@ import com.farcooler.model.Workspace
  *
  * - **Placement.** Inside a menu opened on the tab surface itself, which is
  *   what this strip is, rather than in the pane's always-visible overflow. The
- *   overflow in [WorkspaceTopBar] is one tap from anywhere and deliberately
+ *   overflow in [WorktreeTopBar] is one tap from anywhere and deliberately
  *   does not carry this.
  * - **Rarity.** A long press, so nothing about an ordinary tab change comes
  *   near it. There is exactly one route and it is not the fast one — *"deleting
@@ -117,21 +117,21 @@ import com.farcooler.model.Workspace
  *
  * The Changes chip gets no menu at all: it is not a terminal, there is no
  * `terminal.remove` to make about it, and it is what closing the last terminal
- * in a workspace lands on. The Mac's rule, kept — a daemon-side refusal is a
+ * in a worktree lands on. The Mac's rule, kept — a daemon-side refusal is a
  * safety net, and the item should not be there to press.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TerminalTabStrip(
     /**
-     * The workspace whose tabs these are.
+     * The worktree whose tabs these are.
      *
      * Nullable only for the moment between this screen appearing and the
      * fleet's next answer. The Changes chip stands on its own until then,
-     * because the diff is asked for by workspace id and needs nothing from the
+     * because the diff is asked for by worktree id and needs nothing from the
      * fleet to be worth a chip.
      */
-    workspace: Workspace?,
+    worktree: Worktree?,
     /** What this worktree has changed, for the Changes chip's counts. */
     counts: InboxRow?,
     current: Pane,
@@ -172,8 +172,8 @@ fun TerminalTabStrip(
         val terminal: com.farcooler.model.Terminal,
     )
 
-    val numbering = workspace?.ordinals() ?: emptyMap()
-    val chips = workspace?.terminals.orEmpty()
+    val numbering = worktree?.ordinals() ?: emptyMap()
+    val chips = worktree?.terminals.orEmpty()
         .filterNot { it.isChangesPane }
         .map { terminal ->
             Chip(
@@ -306,7 +306,7 @@ fun TerminalTabStrip(
                         //
                         // The runner is gone from the label. It was here while this
                         // strip spanned the fleet and two chips could be two
-                        // machines; a scoped strip is one workspace on one runner,
+                        // machines; a scoped strip is one worktree on one runner,
                         // and the title bar above already names it when more than
                         // one is connected.
                         chip.label,
@@ -358,8 +358,8 @@ fun TerminalTabStrip(
 /**
  * The worktree's own tab: what the branch changed.
  *
- * Always there, including on a workspace with no panes at all, because the diff
- * is asked for by workspace id — see [Pane]. That is also why it needs no
+ * Always there, including on a worktree with no panes at all, because the diff
+ * is asked for by worktree id — see [Pane]. That is also why it needs no
  * terminal, no dot and no state: nothing about it can be starting, exited or
  * lost.
  *
@@ -387,8 +387,8 @@ private fun ChangesChip(counts: InboxRow?, isCurrent: Boolean, onTap: () -> Unit
             .padding(horizontal = 10.dp, vertical = 6.dp)
             // There is no hover on a phone, so this is the only place the chip
             // can say WHAT it counts: everything the worktree has changed, not
-            // the branch total the workspace list shows under Branch. The fleet
-            // list's workspace header and the front door both say the same
+            // the branch total the worktree list shows under Branch. The fleet
+            // list's worktree header and the front door both say the same
             // clause in the same place and for the same reason.
             .semantics {
                 contentDescription = changesDescription(counts)
@@ -418,7 +418,7 @@ private fun ChangesChip(counts: InboxRow?, isCurrent: Boolean, onTap: () -> Unit
         )
         // Absent entirely on a clean worktree. `+0 -0` on every branch with
         // nothing on it is noise in the shape of information — the fleet list's
-        // workspace header leaves it out for the same reason.
+        // worktree header leaves it out for the same reason.
         if (counts != null && counts.hasDiff) {
             Spacer(Modifier.width(6.dp))
             DiffCounts(counts)
@@ -432,7 +432,7 @@ private fun ChangesChip(counts: InboxRow?, isCurrent: Boolean, onTap: () -> Unit
  *
  * Pure and out here rather than built inline, so a test can read the one clause
  * that only exists in this string: the counts are everything the worktree has
- * changed, committed or not, which is not the branch total the workspace list
+ * changed, committed or not, which is not the branch total the worktree list
  * shows under Branch.
  *
  * [lead] is the only thing the two callers differ on, because the two are the

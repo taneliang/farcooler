@@ -76,7 +76,7 @@ class Settings(context: Context) {
      * attached to that window, the Mac included. iOS made this automatic after
      * judging unreadably tiny text the worse failure — but a phone is much
      * narrower than a tablet, and someone using Far Cooler beside a Mac on the
-     * same workspace may well prefer to read a squeezed screen over squeezing
+     * same worktree may well prefer to read a squeezed screen over squeezing
      * everyone else's. So it is a choice, defaulting to the behavior iOS
      * settled on.
      */

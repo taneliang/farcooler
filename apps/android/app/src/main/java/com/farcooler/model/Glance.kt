@@ -177,8 +177,8 @@ object GlancePalette {
      * it on all three platforms; what it says now is "this is over, and you have
      * not looked".
      *
-     * **The workspace counts still have no per-agent version.** An `InboxRow` is
-     * a WORKSPACE's counts and `model/NeedsYou.kt` refuses to invent a per-agent
+     * **The worktree counts still have no per-agent version.** An `InboxRow` is
+     * a WORKTREE's counts and `model/NeedsYou.kt` refuses to invent a per-agent
      * one; that refusal stands, because the ban's reason was invented data.
      * `done` was never invented — the daemon sends it per terminal — which is
      * why it is the one thing the narrowing let in.
@@ -310,7 +310,7 @@ data class GlanceMark(
          * chroma [GlancePalette.review].
          *
          * **Still never a per-agent `reviewsWaiting` or unread-diff count** —
-         * those are a WORKSPACE's, and `model/NeedsYou.kt` refuses to invent a
+         * those are a WORKTREE's, and `model/NeedsYou.kt` refuses to invent a
          * per-agent version of either. `done` is the one agent state that
          * reaches this tier. See [GlancePalette.review].
          */
@@ -497,13 +497,13 @@ data class GlanceMark(
          * **[Attention.TO_REVIEW] is reachable from here, and `done` is the one
          * status that reaches it.** The tier used to forbid an agent's state in
          * so many words, on the stated ground that the review counts are per
-         * WORKSPACE and a per-agent version would have to be invented. That
+         * WORKTREE and a per-agent version would have to be invented. That
          * ground never reached `done` — nothing is invented, the daemon sends it
          * per terminal — so the prohibition was narrowed to the two counts it
          * was written about. `Status.glanceMark` on the Mac and
          * `GlanceMark(agent:)` on the phone make the identical mapping, which is
          * the point: one agent, one tier, three platforms. The ban still stands
-         * for the workspace counts, and [ofDiff] is still the only other way to
+         * for the worktree counts, and [ofDiff] is still the only other way to
          * this tier. See [GlancePalette.review].
          *
          * **This is not the reduction an earlier version of this file made.**
@@ -567,7 +567,7 @@ data class GlanceMark(
         }
 
         /**
-         * A workspace's diff, as a mark.
+         * A worktree's diff, as a mark.
          *
          * Both halves of the condition, and they are not the same fact.
          * [InboxRow.hasDiff] is true of every worktree with work on it and stays
@@ -600,7 +600,7 @@ data class GlanceMark(
  * **This used to hold two, and [DONE] has left it.** A finished turn was an
  * outcome here — a filled green disc, then a filled review-ink one — for exactly
  * as long as `GlanceMark.Attention.TO_REVIEW` refused an agent's state. That
- * prohibition was narrowed to the workspace counts it was written about, `done`
+ * prohibition was narrowed to the worktree counts it was written about, `done`
  * became the review tier on all three platforms, and a finished turn is now a
  * middle-weight hollow ring drawn by [GlanceMark.of] like any other mark. Hue
  * agreement was never the whole of it: the Mac and the phone draw a RING, and a
@@ -879,7 +879,7 @@ data class GlanceType(
         /** 15 / 600, −0.014em. A card header, a column row's title. */
         val cardHeader = of(15f, 600, -0.014f)
 
-        /** 13 / 600, −0.010em. Workspace names in rows. */
+        /** 13 / 600, −0.010em. Worktree names in rows. */
         val rowName = of(13f, 600, -0.010f)
 
         /**

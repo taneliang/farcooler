@@ -32,7 +32,9 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// tmux user-option keys. Names, indexes, and PIDs never establish identity.
 pub mod tags {
     pub const DAEMON_ID: &str = "@farcooler_daemon_id";
-    pub const WORKSPACE_ID: &str = "@farcooler_workspace_id";
+    // Keeps the old word: live panes already carry this tag, and a new value
+    // would untag every one of them.
+    pub const WORKTREE_ID: &str = "@farcooler_workspace_id";
     pub const TERMINAL_ID: &str = "@farcooler_terminal_id";
     pub const SCHEMA_VERSION: &str = "@farcooler_schema_version";
 }

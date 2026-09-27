@@ -107,7 +107,7 @@ const WINDOW: usize = 2 * CAPACITY * (WIDTH + 1);
 /// and about two lines tall before iOS truncates it — call it ninety
 /// characters — with roughly four in the expanded presentation a pull-down or
 /// Notification Center gives. The body is not the quote alone either: every
-/// notifier here writes it as `workspace — said`, and a worktree name plus the
+/// notifier here writes it as `worktree — said`, and a worktree name plus the
 /// dash spends ten to thirty of those characters before the agent's own words
 /// begin (the two worktrees on this machine are named `native-sdk-parity` and
 /// `ios-accessory-layout-fixes`, seventeen and twenty-six).

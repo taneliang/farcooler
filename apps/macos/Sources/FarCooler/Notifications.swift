@@ -71,8 +71,8 @@ final class Notifier {
     }
 
     /// Announce a change, if it is worth announcing.
-    func report(terminal: Terminal, workspace: String) {
-        reportFailedExit(terminal: terminal, workspace: workspace)
+    func report(terminal: Terminal, worktree: String) {
+        reportFailedExit(terminal: terminal, worktree: worktree)
 
         let activity = terminal.agent
         defer { announced[terminal.id] = activity }
@@ -95,7 +95,7 @@ final class Notifier {
             // writes this same sentence into the push it sends when this app is
             // closed. One person gets whichever of the two is delivered, about
             // one pane, and two casings of one sentence is two notifications.
-            content.body = "\(workspace) — Waiting for your answer"
+            content.body = "\(worktree) — Waiting for your answer"
             content.interruptionLevel = .timeSensitive
         case .done:
             // How the turn ENDED, which `activity` alone cannot say — the
@@ -105,11 +105,11 @@ final class Notifier {
             // most likely to be looking at.
             if terminal.status == .failedTurn {
                 content.title = "\(terminal.title) failed"
-                content.body = "\(workspace) — Its last turn didn’t finish"
+                content.body = "\(worktree) — Its last turn didn’t finish"
             } else {
                 content.title = "\(terminal.title) finished"
                 // What it finished, where there is an answer to that. The body
-                // was the workspace alone, which the title had very nearly said
+                // was the worktree alone, which the title had very nearly said
                 // already — so the whole notification was a sentence about Far
                 // Cooler rather than about the work. What follows the dash is
                 // the agent's own last words, already redacted and already cut
@@ -129,9 +129,9 @@ final class Notifier {
                 // sends the whole message cut from its start; see
                 // `Terminal.lastSaid`.
                 if let said = terminal.lastSaid, !said.isEmpty {
-                    content.body = "\(workspace) — \(said)"
+                    content.body = "\(worktree) — \(said)"
                 } else {
-                    content.body = workspace
+                    content.body = worktree
                 }
             }
         default:
@@ -159,7 +159,7 @@ final class Notifier {
     /// command has no agent to be blocked or done — so it needs its own guard
     /// and its own dedup, not a case squeezed into an enum it doesn't belong
     /// to.
-    private func reportFailedExit(terminal: Terminal, workspace: String) {
+    private func reportFailedExit(terminal: Terminal, worktree: String) {
         guard terminal.status == .failedRun else {
             // Cleared rather than left set, so a terminal that is rerun after
             // a failure — same pane, same id, `exit` and the command run
@@ -178,11 +178,11 @@ final class Notifier {
         // The code or the signal, whichever the command actually left behind
         // — never both, since a signal means there is no exit code to show.
         if let signal = terminal.exitSignal {
-            content.body = "\(workspace) — Stopped by signal \(signal)"
+            content.body = "\(worktree) — Stopped by signal \(signal)"
         } else if let code = terminal.exitCode {
-            content.body = "\(workspace) — Exit code \(code)"
+            content.body = "\(worktree) — Exit code \(code)"
         } else {
-            content.body = workspace
+            content.body = worktree
         }
         content.sound = .default
         content.interruptionLevel = .timeSensitive

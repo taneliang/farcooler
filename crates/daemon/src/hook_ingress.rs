@@ -282,11 +282,11 @@ impl HookIngress {
     /// here writes.
     ///
     /// That is not free, and the cost is worth stating rather than assuming.
-    /// `terminals` has no DECLARED index, and none on `workspace_id` — the
+    /// `terminals` has no DECLARED index, and none on `worktree_id` — the
     /// `sqlite_autoindex` behind its `BLOB PRIMARY KEY` serves `get_terminal`
-    /// and nothing on this path — so a hook costs a scan of `workspaces`, one
-    /// `canonicalize` syscall per workspace to compare it, and a scan of
-    /// `terminals` per matching workspace. At a flush every couple of seconds
+    /// and nothing on this path — so a hook costs a scan of `worktrees`, one
+    /// `canonicalize` syscall per worktree to compare it, and a scan of
+    /// `terminals` per matching worktree. At a flush every couple of seconds
     /// per session, against a fleet of panes, that is small; it is not a
     /// lookup by identity, and nothing here should be written as though it
     /// were.
@@ -307,15 +307,15 @@ impl HookIngress {
             return None;
         }
         let cwd = canonical(f.cwd.as_deref()?);
-        // Hidden rows included, deliberately. `hide_workspace` sets a flag and
+        // Hidden rows included, deliberately. `hide_worktree` sets a flag and
         // never touches git or tmux, so an agent in a hidden worktree keeps
-        // running and keeps firing hooks; `list_all_workspaces` filters
+        // running and keeps firing hooks; `list_all_worktrees` filters
         // `hidden = 0` and says in its own doc that it is for summaries.
         // Reading through that one would leave every codex and cursor session
         // in a hidden worktree unattached while claude, which never consults a
-        // workspace, kept working — an asymmetry nobody could guess from the
+        // worktree, kept working — an asymmetry nobody could guess from the
         // symptom.
-        let workspaces = match self.store.list_workspaces_in_order() {
+        let worktrees = match self.store.list_worktrees_in_order() {
             Ok(rows) => rows,
             Err(e) => {
                 tracing::warn!(error = %e, "could not read the worktrees; the announcement is dropped");
@@ -326,13 +326,13 @@ impl HookIngress {
         let snapshot = self.inventory.snapshot();
 
         let mut candidates: Vec<Uuid> = Vec::new();
-        for ws in workspaces.iter().filter(|w| canonical(Path::new(&w.worktree_path)) == cwd) {
-            let terminals = match self.store.list_terminals_for_workspace(ws.id) {
+        for ws in worktrees.iter().filter(|w| canonical(Path::new(&w.worktree_path)) == cwd) {
+            let terminals = match self.store.list_terminals_for_worktree(ws.id) {
                 Ok(rows) => rows,
                 Err(e) => {
                     tracing::warn!(
                         error = %e,
-                        workspace = %ws.id,
+                        worktree_id = %ws.id,
                         "could not read this worktree's panes; the announcement is dropped"
                     );
                     return None;

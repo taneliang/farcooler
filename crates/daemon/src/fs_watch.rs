@@ -121,15 +121,15 @@ fn fleet_budget() -> usize {
 
 /// What a registered path belongs to.
 ///
-/// Repositories and workspaces are separate subjects because they answer
+/// Repositories and worktrees are separate subjects because they answer
 /// different questions on different clocks: a repository's `worktrees`
-/// directory drives `reconcile_worktrees`, and a workspace's tree and `.git`
+/// directory drives `reconcile_worktrees`, and a worktree's tree and `.git`
 /// drive `probe_change_sets`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum Subject {
     /// A worktree's working tree, or the `.git` directory that worktree reads
     /// `HEAD` and `index` out of.
-    Workspace(Uuid),
+    Worktree(Uuid),
     /// A repository's `worktrees` directory — where a linked worktree appears
     /// and disappears.
     Repository(Uuid),
@@ -225,14 +225,14 @@ impl Route {
 /// have to invent is just the gap between two drains, which is the caller's
 /// cadence — three seconds for the change-set pass, one for the reconcile.
 ///
-/// Workspaces keep their paths and repositories do not, because the two
+/// Worktrees keep their paths and repositories do not, because the two
 /// callers ask different things of them: `probe_change_sets` needs the paths
 /// to notice a directory git cares about that did not exist when the
 /// registration walk ran, and `reconcile_worktrees` needs only the fact that
 /// something under `worktrees` moved.
 #[derive(Default)]
 struct Changed {
-    workspaces: HashMap<Uuid, HashSet<PathBuf>>,
+    worktrees: HashMap<Uuid, HashSet<PathBuf>>,
     repositories: HashSet<Uuid>,
 }
 
@@ -280,7 +280,7 @@ pub struct TreeWatcher {
 
 #[derive(Default)]
 struct Book {
-    workspaces: HashMap<Uuid, Registration>,
+    worktrees: HashMap<Uuid, Registration>,
     repositories: HashMap<Uuid, Registration>,
     /// Directories charged against `budget` across the whole fleet.
     spent: usize,
@@ -316,8 +316,8 @@ impl TreeWatcher {
                         continue;
                     }
                     match route.subject {
-                        Subject::Workspace(id) => {
-                            sink.workspaces.entry(id).or_default().insert(path.clone());
+                        Subject::Worktree(id) => {
+                            sink.worktrees.entry(id).or_default().insert(path.clone());
                         }
                         Subject::Repository(id) => {
                             sink.repositories.insert(id);
@@ -332,7 +332,7 @@ impl TreeWatcher {
             Err(error) => {
                 tracing::warn!(
                     ?error,
-                    "could not start a worktree watcher; every workspace falls back to \
+                    "could not start a worktree watcher; every worktree falls back to \
                      stat-polling its .git and to the activity gate"
                 );
                 None
@@ -348,14 +348,14 @@ impl TreeWatcher {
         }
     }
 
-    /// Whether this workspace's tree and `.git` are actually being watched.
+    /// Whether this worktree's tree and `.git` are actually being watched.
     ///
     /// False keeps the caller's own gates live for it — see `Registration::covered`.
-    pub fn covers_workspace(&self, id: Uuid) -> bool {
+    pub fn covers_worktree(&self, id: Uuid) -> bool {
         self.book
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .workspaces
+            .worktrees
             .get(&id)
             .is_some_and(|r| r.covered)
     }
@@ -382,12 +382,12 @@ impl TreeWatcher {
         self.book.lock().unwrap_or_else(|e| e.into_inner()).spent
     }
 
-    /// The workspaces something moved under, and which paths moved.
+    /// The worktrees something moved under, and which paths moved.
     ///
     /// Idempotent in the way `LogWatcher::drain` is: draining empties the map,
     /// so a second call with nothing written in between reports nothing.
-    pub fn drain_workspaces(&self) -> HashMap<Uuid, HashSet<PathBuf>> {
-        std::mem::take(&mut self.changed.lock().unwrap_or_else(|e| e.into_inner()).workspaces)
+    pub fn drain_worktrees(&self) -> HashMap<Uuid, HashSet<PathBuf>> {
+        std::mem::take(&mut self.changed.lock().unwrap_or_else(|e| e.into_inner()).worktrees)
     }
 
     /// The repositories whose set of worktrees moved.
@@ -409,16 +409,16 @@ impl TreeWatcher {
     /// in the directories git ignores, and those are not watched.
     pub fn needs_rewalk(&self, id: Uuid, paths: &HashSet<PathBuf>) -> bool {
         let book = self.book.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(reg) = book.workspaces.get(&id) else { return false };
+        let Some(reg) = book.worktrees.get(&id) else { return false };
         paths.iter().any(|path| {
             let Some(rel) = reg.relative(path) else { return false };
             !reg.dirs.contains(rel) && path.is_dir()
         })
     }
 
-    /// Bring the registered workspaces in line with the fleet.
+    /// Bring the registered worktrees in line with the fleet.
     ///
-    /// `rewalk` names workspaces whose directory set is known to be out of
+    /// `rewalk` names worktrees whose directory set is known to be out of
     /// date — see `needs_rewalk`. Everything else is a set comparison and
     /// spends nothing: this is called from a pass that runs every three
     /// seconds, and an idle fleet must cost neither git nor syscalls here.
@@ -427,20 +427,20 @@ impl TreeWatcher {
     /// per worktree, and a `watch` call per directory — so the caller runs it
     /// somewhere those are affordable. See `Watcher::probe_change_sets`, which
     /// is a detached pass for exactly this class of reason.
-    pub async fn sync_workspaces(&self, fleet: &[(Uuid, PathBuf)], rewalk: &HashSet<Uuid>) {
+    pub async fn sync_worktrees(&self, fleet: &[(Uuid, PathBuf)], rewalk: &HashSet<Uuid>) {
         let live: HashSet<Uuid> = fleet.iter().map(|(id, _)| *id).collect();
         let gone: Vec<Uuid> = {
             let book = self.book.lock().unwrap_or_else(|e| e.into_inner());
-            book.workspaces.keys().copied().filter(|id| !live.contains(id)).collect()
+            book.worktrees.keys().copied().filter(|id| !live.contains(id)).collect()
         };
         for id in gone {
-            self.forget(Subject::Workspace(id));
+            self.forget(Subject::Worktree(id));
         }
 
         for (id, worktree) in fleet {
             let stale = {
                 let book = self.book.lock().unwrap_or_else(|e| e.into_inner());
-                match book.workspaces.get(id) {
+                match book.worktrees.get(id) {
                     // A worktree that moved on disk is a different tree under
                     // the same row, and the old registration answers for a
                     // path nothing writes to any more.
@@ -449,7 +449,7 @@ impl TreeWatcher {
                 }
             };
             if stale {
-                self.register_workspace(*id, worktree).await;
+                self.register_worktree(*id, worktree).await;
             }
         }
     }
@@ -517,7 +517,7 @@ impl TreeWatcher {
         // attributed rather than dropped. Only `worktrees` and its immediate
         // children are claimed for the repository: `<common>` is WATCHED so
         // that `worktrees` being created is seen, but a write to
-        // `<common>/HEAD` belongs to a workspace, not to the set of worktrees.
+        // `<common>/HEAD` belongs to a worktree, not to the set of worktrees.
         self.add_routes(
             both_names(&worktrees)
                 .into_iter()
@@ -558,8 +558,8 @@ impl TreeWatcher {
     /// to take them all again would be tens of thousands of syscalls on a
     /// large repository and a window, however short, in which this worktree is
     /// watched by nothing at all.
-    async fn register_workspace(&self, id: Uuid, worktree: &Path) {
-        let previous = self.take(Subject::Workspace(id));
+    async fn register_worktree(&self, id: Uuid, worktree: &Path) {
+        let previous = self.take(Subject::Worktree(id));
         let held: HashSet<PathBuf> =
             previous.as_ref().map(|p| p.watched.iter().cloned().collect()).unwrap_or_default();
 
@@ -579,14 +579,14 @@ impl TreeWatcher {
             Ok(dirs) => dirs,
             Err(why) => {
                 tracing::warn!(
-                    workspace = %id,
+                    worktree_id = %id,
                     worktree = %worktree.display(),
                     reason = why,
                     "could not enumerate a worktree's directories; its edits will be found by \
                      the activity gate and the cheap gate instead"
                 );
                 self.retire(previous, &paths);
-                self.finish_workspace(id, paths, Arc::new(HashSet::new()), roots, false);
+                self.finish_worktree(id, paths, Arc::new(HashSet::new()), roots, false);
                 return;
             }
         };
@@ -600,7 +600,7 @@ impl TreeWatcher {
         let spent = self.book.lock().unwrap_or_else(|e| e.into_inner()).spent;
         if dirs.len() > MAX_DIRS_PER_WORKTREE || spent + dirs.len() > self.budget {
             tracing::warn!(
-                workspace = %id,
+                worktree_id = %id,
                 worktree = %worktree.display(),
                 directories = dirs.len(),
                 already_watching = spent,
@@ -611,7 +611,7 @@ impl TreeWatcher {
                  instead"
             );
             self.retire(previous, &paths);
-            self.finish_workspace(id, paths, Arc::new(HashSet::new()), roots, false);
+            self.finish_worktree(id, paths, Arc::new(HashSet::new()), roots, false);
             return;
         }
 
@@ -621,7 +621,7 @@ impl TreeWatcher {
             .map(|root| Route {
                 at: root.clone(),
                 scope: Scope::Filtered(dirs.clone()),
-                subject: Subject::Workspace(id),
+                subject: Subject::Worktree(id),
             })
             .collect();
         // A linked worktree's `.git` is a FILE pointing at
@@ -632,7 +632,7 @@ impl TreeWatcher {
         routes.extend(both_names(&git_dir).into_iter().map(|at| Route {
             at,
             scope: Scope::Entries(GIT_GATE_ENTRIES),
-            subject: Subject::Workspace(id),
+            subject: Subject::Worktree(id),
         }));
         self.add_routes(routes);
 
@@ -648,14 +648,14 @@ impl TreeWatcher {
 
         let registered = dirs.len();
         self.retire(previous, &paths);
-        self.finish_workspace(id, paths, dirs, roots, covered);
+        self.finish_worktree(id, paths, dirs, roots, covered);
 
         // Logged AFTER the registration is booked, so `fleet_total` includes
         // this worktree. That total is what a runner running out of inotify
         // watches would see climbing.
         if covered {
             tracing::debug!(
-                workspace = %id,
+                worktree_id = %id,
                 worktree = %worktree.display(),
                 directories = registered,
                 fleet_total = self.watched_directories(),
@@ -664,7 +664,7 @@ impl TreeWatcher {
             );
         } else {
             tracing::warn!(
-                workspace = %id,
+                worktree_id = %id,
                 worktree = %worktree.display(),
                 directories = registered,
                 "a worktree could not be fully watched; its edits will be found by the activity \
@@ -673,7 +673,7 @@ impl TreeWatcher {
         }
     }
 
-    fn finish_workspace(
+    fn finish_worktree(
         &self,
         id: Uuid,
         watched: Vec<PathBuf>,
@@ -683,7 +683,7 @@ impl TreeWatcher {
     ) {
         let mut book = self.book.lock().unwrap_or_else(|e| e.into_inner());
         book.spent += dirs.len();
-        book.workspaces.insert(id, Registration { watched, dirs, roots, covered });
+        book.worktrees.insert(id, Registration { watched, dirs, roots, covered });
     }
 
     /// Drop a subject's routes and its place in the book, keeping its watches.
@@ -704,7 +704,7 @@ impl TreeWatcher {
         }
         let mut book = self.book.lock().unwrap_or_else(|e| e.into_inner());
         let gone = match subject {
-            Subject::Workspace(id) => book.workspaces.remove(&id),
+            Subject::Worktree(id) => book.worktrees.remove(&id),
             Subject::Repository(id) => book.repositories.remove(&id),
         };
         if let Some(reg) = &gone {
@@ -956,7 +956,7 @@ mod tests {
     fn wait_for(watcher: &TreeWatcher, id: Uuid, deadline: Duration) -> bool {
         let start = Instant::now();
         loop {
-            if watcher.drain_workspaces().contains_key(&id) {
+            if watcher.drain_worktrees().contains_key(&id) {
                 return true;
             }
             if start.elapsed() > deadline {
@@ -987,7 +987,7 @@ mod tests {
     /// which ones the new stream delivered, the earliest was written 4ms to
     /// 10ms before `watch()` handed control back. A write from just before
     /// the stream existed is delivered to it all the same, asynchronously —
-    /// after `sync_workspaces` has returned, and after the drain that follows
+    /// after `sync_worktrees` has returned, and after the drain that follows
     /// it. On a runner loaded enough to stretch that delivery it lands inside
     /// the window below and fails an assertion that is about something else
     /// entirely, which is exactly how this arrived:
@@ -1006,7 +1006,7 @@ mod tests {
         let start = Instant::now();
         let mut empties = 0;
         while empties < 10 && start.elapsed() < deadline {
-            if watcher.drain_workspaces().is_empty() {
+            if watcher.drain_worktrees().is_empty() {
                 empties += 1;
             } else {
                 empties = 0;
@@ -1026,7 +1026,7 @@ mod tests {
     fn surfaced_within(watcher: &TreeWatcher, id: Uuid, window: Duration) -> HashSet<PathBuf> {
         let start = Instant::now();
         loop {
-            if let Some(paths) = watcher.drain_workspaces().remove(&id) {
+            if let Some(paths) = watcher.drain_worktrees().remove(&id) {
                 return paths;
             }
             if start.elapsed() > window {
@@ -1060,7 +1060,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_edit_with_nothing_running_surfaces_its_workspace() {
+    async fn an_edit_with_nothing_running_surfaces_its_worktree() {
         let (_dir, root) = repo("fc-fsw-edit").await;
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/main.rs"), "fn main() {}").unwrap();
@@ -1069,10 +1069,10 @@ mod tests {
 
         let watcher = TreeWatcher::start();
         let id = Uuid::now_v7();
-        watcher.sync_workspaces(&[(id, root.clone())], &HashSet::new()).await;
-        assert!(watcher.covers_workspace(id), "a plain repository must be watchable");
+        watcher.sync_worktrees(&[(id, root.clone())], &HashSet::new()).await;
+        assert!(watcher.covers_worktree(id), "a plain repository must be watchable");
         // The `add` and the `commit` above wrote into `.git`, which this
-        // workspace's own route claims. Quiet, so what surfaces below is the
+        // worktree's own route claims. Quiet, so what surfaces below is the
         // edit and not the fixture: see `wait_until_quiet`.
         wait_until_quiet(&watcher, Duration::from_secs(10));
 
@@ -1083,13 +1083,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_commit_surfaces_its_workspace_through_the_git_directory() {
+    async fn a_commit_surfaces_its_worktree_through_the_git_directory() {
         let (_dir, root) = repo("fc-fsw-commit").await;
         std::fs::write(root.join("a.txt"), "one").unwrap();
 
         let watcher = TreeWatcher::start();
         let id = Uuid::now_v7();
-        watcher.sync_workspaces(&[(id, root.clone())], &HashSet::new()).await;
+        watcher.sync_worktrees(&[(id, root.clone())], &HashSet::new()).await;
         wait_until_quiet(&watcher, Duration::from_secs(10));
 
         crate::git::git(&root, &["add", "-A"]).await.unwrap();
@@ -1112,8 +1112,8 @@ mod tests {
 
         let watcher = TreeWatcher::start();
         let id = Uuid::now_v7();
-        watcher.sync_workspaces(&[(id, root.clone())], &HashSet::new()).await;
-        assert!(watcher.covers_workspace(id));
+        watcher.sync_worktrees(&[(id, root.clone())], &HashSet::new()).await;
+        assert!(watcher.covers_worktree(id));
         // Quiet, not one drain: the fixture's own writes are still in flight
         // here and `.git/HEAD` is a path this route claims. See
         // `wait_until_quiet`, which is where the whole reason lives.
@@ -1147,7 +1147,7 @@ mod tests {
 
         let watcher = TreeWatcher::start();
         let id = Uuid::now_v7();
-        watcher.sync_workspaces(&[(id, root.clone())], &HashSet::new()).await;
+        watcher.sync_worktrees(&[(id, root.clone())], &HashSet::new()).await;
         wait_until_quiet(&watcher, Duration::from_secs(10));
 
         let fresh = root.join("added");
@@ -1164,7 +1164,7 @@ mod tests {
         // And after the re-walk it is watched, so what lands inside it is seen.
         std::fs::write(fresh.join("b.txt"), "two").unwrap();
         let one = HashSet::from([id]);
-        watcher.sync_workspaces(&[(id, root.clone())], &one).await;
+        watcher.sync_worktrees(&[(id, root.clone())], &one).await;
         // The write above is what would make this pass without the re-walk
         // having registered anything, so it has to be out of the way first.
         wait_until_quiet(&watcher, Duration::from_secs(10));
@@ -1173,17 +1173,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_workspace_that_is_gone_stops_being_watched() {
+    async fn a_worktree_that_is_gone_stops_being_watched() {
         let (_dir, root) = repo("fc-fsw-gone").await;
         std::fs::write(root.join("a.txt"), "one").unwrap();
 
         let watcher = TreeWatcher::start();
         let id = Uuid::now_v7();
-        watcher.sync_workspaces(&[(id, root.clone())], &HashSet::new()).await;
+        watcher.sync_worktrees(&[(id, root.clone())], &HashSet::new()).await;
         assert!(watcher.watched_directories() >= 1);
 
-        watcher.sync_workspaces(&[], &HashSet::new()).await;
-        assert!(!watcher.covers_workspace(id), "a removed workspace keeps no registration");
+        watcher.sync_worktrees(&[], &HashSet::new()).await;
+        assert!(!watcher.covers_worktree(id), "a removed worktree keeps no registration");
         assert_eq!(watcher.watched_directories(), 0, "and gives its budget back");
     }
 
@@ -1206,10 +1206,10 @@ mod tests {
         // Smaller than the nine directories this worktree needs.
         watcher.budget = 4;
         let id = Uuid::now_v7();
-        watcher.sync_workspaces(&[(id, root.clone())], &HashSet::new()).await;
+        watcher.sync_worktrees(&[(id, root.clone())], &HashSet::new()).await;
 
         assert!(
-            !watcher.covers_workspace(id),
+            !watcher.covers_worktree(id),
             "over budget must report as not covered so the fallback gates stay live"
         );
     }
@@ -1227,8 +1227,8 @@ mod tests {
         *watcher.watcher.lock().unwrap() = None;
 
         let id = Uuid::now_v7();
-        watcher.sync_workspaces(&[(id, root.clone())], &HashSet::new()).await;
-        assert!(!watcher.covers_workspace(id), "no backend is no coverage");
+        watcher.sync_worktrees(&[(id, root.clone())], &HashSet::new()).await;
+        assert!(!watcher.covers_worktree(id), "no backend is no coverage");
         let repo_id = Uuid::now_v7();
         watcher.sync_repositories(&[(repo_id, root.join(".git"))], &HashSet::new());
         assert!(!watcher.covers_repository(repo_id));

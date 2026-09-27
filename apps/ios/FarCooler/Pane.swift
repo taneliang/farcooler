@@ -1,9 +1,9 @@
 import Foundation
 
-/// One tab in a workspace.
+/// One tab in a worktree.
 ///
 /// Two kinds, and the second one has no object behind it on the runner. Every
-/// `changes.*` RPC takes a `workspace_id` and nothing else — see
+/// `changes.*` RPC takes a `worktree_id` and nothing else — see
 /// `Session::change_set` and `Session::file_diff` in
 /// `crates/client/src/session.rs`, which pass `None` where a terminal-scoped
 /// call passes an id — so the diff is a fact about the worktree that this app
@@ -12,7 +12,7 @@ import Foundation
 ///
 /// A `changes` pane the host DOES have is folded into this one by
 /// `Pane.init(_:)`, and filtered out of the ribbon by `ShellFleetMap.of(_:)`.
-/// Both resolve to the same `ChangesStore`, keyed by workspace on `Connection`,
+/// Both resolve to the same `ChangesStore`, keyed by worktree on `Connection`,
 /// so what has been read, what is folded, where you were and the notes you have
 /// written are one review rather than one per door.
 ///

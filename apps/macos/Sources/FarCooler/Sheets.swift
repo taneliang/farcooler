@@ -2,8 +2,8 @@ import AgentKit
 import AppKit
 import SwiftUI
 
-/// Create a workspace: one worktree plus branch for one task.
-struct NewWorkspaceSheet: View {
+/// Create a worktree: a directory and branch for one task.
+struct NewWorktreeSheet: View {
     /// Every runner's repositories, tagged the same way `FleetStore.repositories`
     /// tags them — carried together rather than flattened to a bare
     /// `[Repository]`. A repository's `short` is eight hex characters minted
@@ -11,7 +11,7 @@ struct NewWorkspaceSheet: View {
     /// runners can hand back the same one for two different repositories; the
     /// picker below has to choose host and repository together; a repository
     /// chosen without its host, submitted through whatever host happened to be
-    /// "active" elsewhere, is exactly how a workspace gets created on the wrong
+    /// "active" elsewhere, is exactly how a worktree gets created on the wrong
     /// runner with no error at all.
     let repositories: [(host: String, repository: Repository)]
     /// The repository to open on, when this was reached from a project header.
@@ -28,8 +28,8 @@ struct NewWorkspaceSheet: View {
     /// Receives host and repository together with the rest of the form, and
     /// answers with whatever the attempt came back with, or nil on success. A
     /// `String` return rather than swallowing the result is what lets this
-    /// sheet stay open and say why, the same way `RemoveWorkspaceSheet` and
-    /// `AddRepositorySheet` already do — `createWorkspace` failing used to
+    /// sheet stay open and say why, the same way `RemoveWorktreeSheet` and
+    /// `AddRepositorySheet` already do — `createWorktree` failing used to
     /// dismiss the sheet exactly as if it had succeeded.
     ///
     /// Those words are the runner's, not a sentence to set under this sheet's
@@ -112,7 +112,7 @@ struct NewWorkspaceSheet: View {
 
     var body: some View {
         SheetFrame(
-            title: "New Workspace",
+            title: "New Worktree",
             subtitle: "A worktree and branch of its own.",
             confirmTitle: "Create",
             canConfirm: canCreate,
@@ -182,7 +182,7 @@ struct NewWorkspaceSheet: View {
             // it had ever been shown: SwiftUI reused the state, `choice` was
             // already set, and the project the `+` actually named was thrown
             // away here. What makes each `+` a fresh view now is
-            // `ContentView.NewWorkspaceIntent` and `sheet(item:)`; this line no
+            // `ContentView.NewWorktreeIntent` and `sheet(item:)`; this line no
             // longer decides anything about which project is picked.
             guard choice == nil else { return }
             // The project whose header was clicked, if there was one. Matching
@@ -210,8 +210,8 @@ struct NewWorkspaceSheet: View {
 /// the first click. Demanding the typed name every time would train people to
 /// type it without reading it, which spends the one gesture meant to stop a
 /// mistake.
-struct RemoveWorkspaceSheet: View {
-    let workspace: Workspace
+struct RemoveWorktreeSheet: View {
+    let worktree: Worktree
     /// How many terminals removal is about to close.
     ///
     /// A count rather than the flag this used to be. Running terminals no longer
@@ -235,12 +235,12 @@ struct RemoveWorkspaceSheet: View {
     @State private var failure: SheetFailure?
     @State private var working = false
 
-    private var matches: Bool { typed == workspace.task }
+    private var matches: Bool { typed == worktree.task }
 
     var body: some View {
         SheetFrame(
             title: "Remove Worktree",
-            subtitle: workspace.task,
+            subtitle: worktree.task,
             confirmTitle: "Remove Worktree",
             confirmRole: .destructive,
             // No longer gated on running terminals: removal closes them, so
@@ -287,7 +287,7 @@ struct RemoveWorkspaceSheet: View {
             VStack(alignment: .leading, spacing: 14) {
                 // One callout, stating what the button will do. It used to be two,
                 // and the first was an instruction — "Stop the terminals in this
-                // workspace before removing it" — which told you to go and do by
+                // worktree before removing it" — which told you to go and do by
                 // hand the thing you had just asked for. The daemon closes them
                 // now, so the only thing worth saying is how many.
                 Callout(
@@ -306,17 +306,17 @@ struct RemoveWorkspaceSheet: View {
                     Callout(
                         icon: "exclamationmark.triangle.fill",
                         tone: .warning,
-                        text: "This workspace has uncommitted changes. Enter its name to remove it."
+                        text: "This worktree has uncommitted changes. Enter its name to remove it."
                     )
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Type the workspace name to confirm")
+                        Text("Type the worktree name to confirm")
                             .font(.callout)
                         // Not disabled any more. It was gated on running
                         // terminals, which meant the one field standing between
                         // the user and a dirty worktree could not be typed into
                         // for a reason that no longer stops removal at all.
-                        TextField("", text: $typed, prompt: Text(workspace.task))
+                        TextField("", text: $typed, prompt: Text(worktree.task))
                             .textFieldStyle(.roundedBorder)
                     }
                 }
@@ -331,7 +331,7 @@ struct RemoveWorkspaceSheet: View {
 /// Solo on its root, this is a plain destructive click: the sheet already
 /// knows and shows the exact folder name being revoked, so it supplies that
 /// as the confirmation itself rather than asking someone to retype what is
-/// already on screen — the same trust `RemoveWorkspaceSheet` places in a
+/// already on screen — the same trust `RemoveWorktreeSheet` places in a
 /// click that follows a name it already displayed. Sharing a root with other
 /// repositories is the one case with real blast radius — removing one takes
 /// every sibling with it — and gets the friction worktree removal reserves

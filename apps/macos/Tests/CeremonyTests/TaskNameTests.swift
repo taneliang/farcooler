@@ -18,7 +18,7 @@ struct TaskNameTests {
                 "can you look into why codex sometimes gets stuck if there was a prompt to update version")
                 == "codex-stuck-prompt")
         #expect(
-            TaskName.heuristic("the cmd+n panel is able to create workspaces, but the names are long")
+            TaskName.heuristic("the cmd+n panel is able to create worktrees, but the names are long")
                 == "cmd-n-panel-create")
     }
 
@@ -27,7 +27,7 @@ struct TaskNameTests {
             "Investigate memory leak in the terminal renderer after two hours of use",
             "Supercalifragilisticexpialidocious-internationalization refactor",
             String(repeating: "word ", count: 40),
-            "the cmd+n panel is able to create workspaces, but the workspace names are very long",
+            "the cmd+n panel is able to create worktrees, but the worktree names are very long",
         ] {
             let name = TaskName.heuristic(description)
             #expect(name.count <= TaskName.maxLength, "\(name)")

@@ -48,7 +48,7 @@ import com.farcooler.model.PullRequest
 import com.farcooler.model.StackLink
 import com.farcooler.model.StackReply
 import com.farcooler.model.Trouble
-import com.farcooler.model.Workspace
+import com.farcooler.model.Worktree
 import com.farcooler.model.driftSentence
 import com.farcooler.model.prChecksWord
 import com.farcooler.model.prReviewWord
@@ -59,21 +59,21 @@ import com.farcooler.core.refusalWord
 import com.farcooler.model.troubleFor
 import kotlinx.coroutines.launch
 
-// What a workspace can become, other than opened: seen, removed, or started
+// What a worktree can become, other than opened: seen, removed, or started
 // from work that already exists.
 //
 // **Phase 8**, the last of the parity program: the RPCs that were routed in Rust
 // and never called from Kotlin. `stack.get` and `pr.refresh` answer "where does
 // this branch sit and did CI pass", which is the question you ask from a phone
-// and could not; `workspace.remove_worktree` is the one destructive thing in the
+// and could not; `worktree.remove` is the one destructive thing in the
 // product, and the reason half this file is about refusing rather than doing;
 // `branch.list` behind `ResumeBranchSheet` is the one that makes
-// `workspace.create` able to pick work up instead of only starting it.
+// `worktree.create` able to pick work up instead of only starting it.
 //
-// The first two hang off `WorkspaceHeader`'s overflow menu in `FleetScreen`,
+// The first two hang off `WorktreeHeader`'s overflow menu in `FleetScreen`,
 // which is where iOS puts the same two — a `DropdownMenu` and not a swipe, per
 // the standing Android convention `cb13d31` recorded. The third is reached from
-// `NewWorkspaceSheet`, because it is a way of creating a workspace and not a
+// `NewWorktreeSheet`, because it is a way of creating a worktree and not a
 // thing done to one that exists.
 //
 // **Every runner is its own [Connection], and all three of these take one.**
@@ -357,9 +357,9 @@ private fun WarningLine(text: String) {
  * Two of them are checked here first:
  *
  * - **The primary checkout** is not offered at all, by [FleetScreen] leaving the
- *   menu item out on [Workspace.isMainCheckout]. That flag is the one `07e75e8`
+ *   menu item out on [Worktree.isMainCheckout]. That flag is the one `07e75e8`
  *   found iOS decoding under the CLI's spelling, so it was false for every
- *   workspace and the phone offered for months to remove the one worktree it
+ *   worktree and the phone offered for months to remove the one worktree it
  *   cannot. This app reads the FFI's `isMainCheckout` and `FleetDecodeTest`
  *   transcribes that key, which is what makes the guard here worth anything.
  * - **An unreachable tmux**, which is checked in the FIRST dialog. This is the
@@ -381,7 +381,7 @@ private fun WarningLine(text: String) {
 @Composable
 fun RemoveWorktreeCeremony(
     connection: Connection,
-    workspace: Workspace,
+    worktree: Worktree,
     onFinished: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -399,7 +399,7 @@ fun RemoveWorktreeCeremony(
         working = true
         failure = null
         scope.launch {
-            when (val outcome = connection.removeWorktree(workspace, confirm)) {
+            when (val outcome = connection.removeWorktree(worktree, confirm)) {
                 is Connection.RemoveOutcome.Removed -> {
                     working = false
                     onFinished()
@@ -444,7 +444,7 @@ fun RemoveWorktreeCeremony(
 
     if (typing) {
         TypedNameSheet(
-            workspace = workspace,
+            worktree = worktree,
             working = working,
             failure = failure,
             onRemove = { ask(it) },
@@ -453,7 +453,7 @@ fun RemoveWorktreeCeremony(
         return
     }
 
-    val name = workspace.task.ifBlank { workspace.branch }
+    val name = worktree.task.ifBlank { worktree.branch }
     val tmuxDown = !fleet.runtimeHealthy
     AlertDialog(
         onDismissRequest = { if (!working) onFinished() },
@@ -496,7 +496,7 @@ fun RemoveWorktreeCeremony(
  */
 @Composable
 private fun TypedNameSheet(
-    workspace: Workspace,
+    worktree: Worktree,
     working: Boolean,
     failure: Trouble?,
     onRemove: (String) -> Unit,
@@ -504,7 +504,7 @@ private fun TypedNameSheet(
 ) {
     // See `typing` above: nothing about this ceremony survives being put down.
     var typed by remember { mutableStateOf("") }
-    val matches = removalNameMatches(workspace.task, typed)
+    val matches = removalNameMatches(worktree.task, typed)
 
     SheetFrame("Remove worktree", onDismiss) {
         Text(
@@ -516,7 +516,7 @@ private fun TypedNameSheet(
             value = typed,
             onValueChange = { typed = it },
             label = { Text("Name") },
-            placeholder = { Text(workspace.task) },
+            placeholder = { Text(worktree.task) },
             singleLine = true,
             enabled = !working,
             modifier = Modifier.fillMaxWidth(),
@@ -550,7 +550,7 @@ private fun TypedNameSheet(
  * `task_name` outright and names the worktree after the branch's last segment —
  * `feat/rate-limiting` lands in a directory called `rate-limiting`. So there is
  * nothing else to fill in, which is why this is a list and not a form, and why
- * [NewWorkspaceSheet] collapses when a branch comes back from here rather than
+ * [NewWorktreeSheet] collapses when a branch comes back from here rather than
  * leaving a name field collecting something the runner will throw away.
  *
  * Before this the only way work arrived was a new branch. Picking up something
@@ -654,7 +654,7 @@ fun ResumeBranchSheet(
  * The healthy sentence ends on the reassurance deliberately: "deletes the
  * folder" is the half people read, and the branch surviving is the half that
  * decides whether this is frightening. It is also true — `remove_worktree`
- * removes the worktree and the workspace row and never the branch.
+ * removes the worktree and the worktree row and never the branch.
  */
 internal fun removalPrompt(runner: String, tmuxDown: Boolean): String =
     if (tmuxDown) {
@@ -694,13 +694,13 @@ internal fun adoptionDescription(branch: String): String {
  * Whether what was typed is the worktree's name, by the runner's own rule.
  *
  * `crates/daemon/src/rpc.rs` compares `p.typed_confirmation.trim()` against
- * `ws.name()`, and `wire::workspace` builds the fleet's `task_name` from that
+ * `ws.name()`, and `wire::worktree` builds the fleet's `task_name` from that
  * same `ws.name()` — so [expected] here really is the string the daemon will
  * compare against, and not a second name that happens to look like it.
  *
  * `trim()` on this side for the same reason it is on that side: a phone keyboard
  * adds a trailing space and refusing over one would be refusing over the
- * keyboard. Empty [expected] never matches — a workspace whose name did not
+ * keyboard. Empty [expected] never matches — a worktree whose name did not
  * arrive would otherwise be removable by typing nothing at all, which is the one
  * input this gate must never accept.
  */

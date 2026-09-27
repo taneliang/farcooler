@@ -8,7 +8,7 @@ import org.junit.Test
 /**
  * The one sentence that explains an operation with no form in front of it.
  *
- * Resuming collapses `NewWorkspaceSheet` to a branch name and a button, because
+ * Resuming collapses `NewWorktreeSheet` to a branch name and a button, because
  * `Service::adopt_branch` ignores `task_name` and derives the worktree's name
  * itself. That makes this sentence the whole of what anybody is told before a
  * directory appears on their runner — there is no name field left to imply one,

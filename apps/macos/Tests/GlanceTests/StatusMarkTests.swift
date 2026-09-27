@@ -246,7 +246,7 @@ struct StatusMarkMappingTests {
     ///
     /// **This test used to say NO per-terminal status could reach it.** The
     /// prohibition was narrowed rather than lifted — `reviewsWaiting` is still
-    /// a fleet scalar and `unreadDiff` is still per workspace, and `ShellScreen`
+    /// a fleet scalar and `unreadDiff` is still per worktree, and `ShellScreen`
     /// and `ShellNavigation` still refuse to invent a per-agent version of
     /// either — so the guard is narrowed with it and the other eleven statuses
     /// are still held out.

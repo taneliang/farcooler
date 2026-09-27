@@ -5,7 +5,7 @@
 //! pane — and it is exactly the shape of every terminal in a fleet that predates
 //! the change. `join-pane` makes the pane inherit the DESTINATION window's
 //! options instead, so the id is gone, the record derives as lost, and its
-//! workspace as error.
+//! worktree as error.
 //!
 //! An integration test cannot reach this: its fixtures are created by the current
 //! code, which already tags the pane. So the legacy shape is built by hand here.

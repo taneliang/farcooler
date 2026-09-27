@@ -7,7 +7,7 @@ import XCTest
 /// broken: `terminal.create` has been a wire method since the protocol had one,
 /// the daemon has always served it (`crates/daemon/src/rpc.rs`), and
 /// `Connection.createTerminal` was written on this side and compiled fine. It
-/// simply had no caller. A workspace on the phone could show its terminals,
+/// simply had no caller. A worktree on the phone could show its terminals,
 /// switch between them, scroll them and type into them, and the first thing
 /// anybody wants in a fresh worktree was the one thing there was no way to ask
 /// for — and every Rust test, every AgentKit test and every other test in this
@@ -17,7 +17,7 @@ import XCTest
 /// runner: a menu opened with a finger, a row tapped, and a tmux window that
 /// exists afterwards. `tabs` off `shell-state` is what makes the last part
 /// observable — the same probe `ShellGestureTests` reads, and the only place
-/// the shell says out loud how many tabs a workspace has.
+/// the shell says out loud how many tabs a worktree has.
 ///
 /// Needs a runner, like `TerminalScrollTests` and for the same reason. Stand
 /// one up with `./scripts/demo-host.sh`, then run this through
@@ -42,7 +42,7 @@ final class NewTerminalTests: XCTestCase {
         return app
     }
 
-    /// `ws`, `tab`, `workspaces`, `tabs`, … off the shell's probe.
+    /// `ws`, `tab`, `worktrees`, `tabs`, … off the shell's probe.
     ///
     /// Read by NAME, never by position: `TerminalScrollTests.field` documents
     /// what reading that string positionally cost, and this one has grown four
@@ -85,8 +85,8 @@ final class NewTerminalTests: XCTestCase {
     /// neighboring panes mounted, so every one of them contributes a
     /// navigation bar with this button on it, and `firstMatch` returns whichever
     /// the accessibility tree happens to list first. Tapping an off-screen
-    /// pane's menu would open a menu for a workspace nobody is looking at — and
-    /// on a demo fleet the neighbor is a different workspace, so the terminal
+    /// pane's menu would open a menu for a worktree nobody is looking at — and
+    /// on a demo fleet the neighbor is a different worktree, so the terminal
     /// would be created in the wrong worktree and this test would go green on
     /// exactly the bug it would have caused.
     private func visibleOverflow(_ app: XCUIApplication) -> XCUIElement? {
@@ -106,18 +106,18 @@ final class NewTerminalTests: XCTestCase {
     ///
     /// The runner is shared by the whole suite and outlives every test in it,
     /// so a terminal left here is a fixture the NEXT test inherits. It lands in
-    /// the workspace the app opens on, which on the demo runner is the
+    /// the worktree the app opens on, which on the demo runner is the
     /// repository's own checkout and otherwise has no terminal — so every
     /// later test that opens "the first terminal" opened this one instead, in
-    /// a different workspace from the one it was written against.
-    /// `TerminalScrollTests.testCrossingBackToAWorkspaceReopensTheTabYouLeft`
+    /// a different worktree from the one it was written against.
+    /// `TerminalScrollTests.testCrossingBackToAWorktreeReopensTheTabYouLeft`
     /// failed on every run after this one for exactly that reason. The runner
     /// has a CLI that could do this, and a UI test on the simulator cannot
     /// reach it; the app's own close can.
     ///
     /// The column's swipe, as `ShellColumnCloseTests` drives it, then the
     /// confirmation a running shell earns (`ShellClose.mustAsk`). Only the tab
-    /// the shell LANDED on, and only when the workspace grew by exactly one
+    /// the shell LANDED on, and only when the worktree grew by exactly one
     /// and the shell moved off the tab it started on to something that is not
     /// the diff. That is still an index, not the terminal's id: a create that
     /// landed on the wrong existing pane would pass all three checks, and this
@@ -177,7 +177,7 @@ final class NewTerminalTests: XCTestCase {
             object: nil)
         XCTAssertEqual(
             XCTWaiter.wait(for: [gone], timeout: 30), .completed,
-            "the workspace has \(state(app)["tabs"] ?? -1) tabs, not the \(tabsBefore) it started "
+            "the worktree has \(state(app)["tabs"] ?? -1) tabs, not the \(tabsBefore) it started "
                 + "with: the terminal this test made is still on \(runner)")
     }
 
@@ -220,7 +220,7 @@ final class NewTerminalTests: XCTestCase {
             object: nil)
         guard XCTWaiter.wait(for: [grew], timeout: 30) == .completed else {
             XCTFail(
-                "the workspace still has \(tabsBefore) tabs, so tapping New Terminal "
+                "the worktree still has \(tabsBefore) tabs, so tapping New Terminal "
                     + "created nothing on \(runner)")
             return
         }
@@ -228,7 +228,7 @@ final class NewTerminalTests: XCTestCase {
         let after = state(app)
         // Removed again when the test is done, pass or fail. See
         // `closeWhatThisMade` for why that is not tidiness.
-        // Only when the workspace grew by exactly one: a landing index read
+        // Only when the worktree grew by exactly one: a landing index read
         // from any other count may name an older pane.
         let landed = after["tabs"] == tabsBefore + 1 ? after["tab"] : nil
         addTeardownBlock { [unowned self] in
@@ -239,12 +239,12 @@ final class NewTerminalTests: XCTestCase {
             "one tap should add exactly one tab")
         // Landed on it. `tab` is an index into a list that just grew, so the
         // claim is only that the shell MOVED — asserting a particular index
-        // here would be asserting the daemon's ordering of a workspace's
+        // here would be asserting the daemon's ordering of a worktree's
         // terminals, which is not this app's to pin.
         XCTAssertNotEqual(
             after["tab"], tabBefore,
             "the terminal was created but the shell stayed on tab \(tabBefore)")
-        // Tab 0 is the workspace's Changes pane — see `ShellFleetMap.of` — so
+        // Tab 0 is the worktree's Changes pane — see `ShellFleetMap.of` — so
         // anything else is a terminal. Without this, a shell that merely
         // rearranged itself would satisfy the line above.
         XCTAssertGreaterThan(

@@ -35,7 +35,7 @@ import java.util.UUID
 // uses it (`ReviewAgentTarget.showsChat` exists purely to gate the Mac's
 // button), and 5a left it out because nothing called it, while recording that
 // **this app is the Mac's case rather than iOS's**: since `e23718c` the agent
-// panes of this workspace are MOUNTED beside the Changes tab, drafts and all, so
+// panes of this worktree are MOUNTED beside the Changes tab, drafts and all, so
 // a batch dropped into one is a chip away rather than a screen away. That note
 // is honored rather than re-argued — see [ReviewCommentQueue.putInComposer] and
 // [ComposerHandoff].
@@ -200,7 +200,7 @@ data class ReviewAgentTarget(
  * arrive here — and handing a review note to the diff of the thing being
  * reviewed is the one target on this list that could never receive it.
  */
-fun Workspace.reviewAgentTargets(): List<ReviewAgentTarget> {
+fun Worktree.reviewAgentTargets(): List<ReviewAgentTarget> {
     val numbering = ordinals()
     return terminals
         .filter { (it.isAgentPane || it.canSwitchPaneMode) && !it.isChangesPane }
@@ -495,7 +495,7 @@ class ReviewCommentQueue(
  * reader has already decided to hand over, in flight across one window; the
  * queue is the thing that is written down, and it is written down BEFORE this is
  * ever reached. It is also why nothing here needs a [ReviewRef]: the receipt is
- * already filed under `host/workspace`, and this is a hallway rather than a
+ * already filed under `host/worktree`, and this is a hallway rather than a
  * record.
  *
  * ## Why one per runner rather than one per app

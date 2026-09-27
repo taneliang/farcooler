@@ -18,13 +18,13 @@ pub struct ManagedWindow {
 
 impl TmuxServer {
     /// Create a tagged window running `command` with its working directory set
-    /// to the workspace worktree.
+    /// to the worktree.
     ///
     /// The working directory is passed as tmux's validated `-c` argument rather
     /// than as `cd` text, so no path is ever interpolated into a shell string.
     pub async fn create_terminal_window(
         &self,
-        workspace_id: Uuid,
+        worktree_id: Uuid,
         terminal_id: Uuid,
         title: &str,
         worktree: &str,
@@ -95,20 +95,20 @@ impl TmuxServer {
             pane_id: pane_id.to_string(),
         };
 
-        self.tag_window(&win.window_id, workspace_id).await?;
+        self.tag_window(&win.window_id, worktree_id).await?;
         self.tag_pane(&win.pane_id, terminal_id).await?;
         Ok(win)
     }
 
     /// Tag a window with what every pane in it shares.
     ///
-    /// A window is a LAYOUT: one workspace, several terminals. So the daemon,
-    /// the workspace and the schema live here and every pane inherits them in a
+    /// A window is a LAYOUT: one worktree, several terminals. So the daemon,
+    /// the worktree and the schema live here and every pane inherits them in a
     /// format string, which is why `list-panes` can still read them per pane.
-    async fn tag_window(&self, window_id: &str, workspace_id: Uuid) -> Result<()> {
+    async fn tag_window(&self, window_id: &str, worktree_id: Uuid) -> Result<()> {
         for (k, v) in [
             (tags::DAEMON_ID, self.daemon_id().to_string()),
-            (tags::WORKSPACE_ID, workspace_id.to_string()),
+            (tags::WORKTREE_ID, worktree_id.to_string()),
             (tags::SCHEMA_VERSION, SCHEMA_VERSION.to_string()),
         ] {
             let out = self.run(&["set-option", "-w", "-t", window_id, k, &v]).await?;
@@ -148,7 +148,7 @@ impl TmuxServer {
         let fmt = format!(
             "#{{pane_id}}\t#{{window_id}}\t#{{pane_width}}\t#{{pane_height}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{pane_dead}}\t#{{pane_dead_status}}\t#{{pane_current_command}}\t#{{pane_left}}\t#{{pane_top}}\t#{{window_active}}\t#{{pane_active}}\t#{{window_zoomed_flag}}\t#{{pane_tty}}\t#{{pane_title}}",
             tags::DAEMON_ID,
-            tags::WORKSPACE_ID,
+            tags::WORKTREE_ID,
             tags::TERMINAL_ID,
             tags::SCHEMA_VERSION
         );
@@ -429,7 +429,7 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<TaggedPane> {
     }
 
     let daemon_id = Uuid::parse_str(f[4].trim()).ok()?;
-    let workspace_id = Uuid::parse_str(f[5].trim()).ok()?;
+    let worktree_id = Uuid::parse_str(f[5].trim()).ok()?;
     let terminal_id = Uuid::parse_str(f[6].trim()).ok()?;
     let schema_version: u32 = f[7].trim().parse().ok()?;
 
@@ -442,7 +442,7 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<TaggedPane> {
 
     Some(TaggedPane {
         daemon_id,
-        workspace_id,
+        worktree_id,
         terminal_id,
         schema_version,
         pane_id: f[0].trim().to_string(),
@@ -671,7 +671,7 @@ mod tests {
         let t = Uuid::from_u128(3);
         let p = parse_pane_line(&line(&d.to_string(), &w.to_string(), &t.to_string())).unwrap();
         assert_eq!(p.daemon_id, d);
-        assert_eq!(p.workspace_id, w);
+        assert_eq!(p.worktree_id, w);
         assert_eq!(p.terminal_id, t);
         assert_eq!(p.pane_id, "%3");
         assert_eq!(p.window_id, "@2");
@@ -789,7 +789,7 @@ impl Preset {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManagedLayout {
     pub window_id: String,
-    pub workspace_id: Uuid,
+    pub worktree_id: Uuid,
     pub name: String,
     pub active: bool,
     /// tmux's own layout description — the split tree, verbatim.
@@ -848,11 +848,11 @@ impl TmuxServer {
         Ok(pane_id)
     }
 
-    /// Every layout the daemon owns, across every workspace.
+    /// Every layout the daemon owns, across every worktree.
     pub async fn list_layouts(&self) -> Result<Vec<ManagedLayout>> {
         let fmt = format!(
             "#{{window_id}}\t#{{window_name}}\t#{{window_active}}\t#{{window_layout}}\t#{{window_index}}\t#{{{}}}\t#{{{}}}",
-            tags::WORKSPACE_ID,
+            tags::WORKTREE_ID,
             tags::DAEMON_ID
         );
         let out = self.run(&["list-windows", "-a", "-F", &fmt]).await?;
@@ -881,7 +881,7 @@ impl TmuxServer {
                 }
                 Some(ManagedLayout {
                     window_id: f[0].trim().to_string(),
-                    workspace_id: Uuid::parse_str(f[5].trim()).ok()?,
+                    worktree_id: Uuid::parse_str(f[5].trim()).ok()?,
                     name: f[1].trim().to_string(),
                     active: f[2].trim() == "1",
                     layout: f[3].trim().to_string(),
@@ -955,7 +955,7 @@ impl TmuxServer {
         // arrangement that existed while a window held exactly one pane — loses
         // that id the instant it is joined somewhere else. The pane survives, the
         // process survives, and the daemon can no longer tell which terminal it
-        // is, so the record derives as `lost` and its workspace as `error`.
+        // is, so the record derives as `lost` and its worktree as `error`.
         //
         // Setting it here makes the move self-healing: whatever the pane's
         // identity rested on before, it rests on the pane afterwards.
@@ -974,7 +974,7 @@ impl TmuxServer {
     pub async fn break_pane(
         &self,
         pane_id: &str,
-        workspace_id: Uuid,
+        worktree_id: Uuid,
         terminal_id: Uuid,
     ) -> Result<String> {
         let out = self
@@ -991,7 +991,7 @@ impl TmuxServer {
         // A new window carries none of the old one's options, so both halves of
         // the identity have to be restated: the window's, and — for the same
         // reason as `join_pane` — the pane's.
-        self.tag_window(&window_id, workspace_id).await?;
+        self.tag_window(&window_id, worktree_id).await?;
         self.tag_pane(pane_id, terminal_id).await?;
         Ok(window_id)
     }

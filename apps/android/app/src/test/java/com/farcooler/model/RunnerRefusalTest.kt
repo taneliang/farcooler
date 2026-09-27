@@ -40,15 +40,27 @@ class RunnerRefusalTest {
      * Every word here is one a runner can really send.
      *
      * The other half of this wire is `farcooler_core::error::word`, which is
-     * exhaustive over `ErrorCode` and cannot see Kotlin. So this reads the
-     * proto itself — the one drift that would break all fourteen at once,
-     * silently, by turning every sentence back into the generic one.
+     * exhaustive over `ErrorCode` and cannot see Kotlin. So this reads that
+     * table for the code each word is written for, and the proto for that
+     * code's declaration — the one drift that would break all fourteen at
+     * once, silently, by turning every sentence back into the generic one.
+     *
+     * Through the table and not by spelling the word in capitals, because a
+     * word can outlive its code's name: `workspaces-exist` is what the runner
+     * still sends for `ERROR_CODE_WORKTREES_EXIST`, and the apps match on the
+     * word.
      */
     @Test
     fun everyWordNamesACodeTheProtocolDeclares() {
         val proto = File(repoRoot(), "proto/farcooler.proto").readText()
+        val table = File(repoRoot(), "crates/core/src/error.rs").readText()
         for (refusal in RunnerRefusal.entries) {
-            val declared = "ERROR_CODE_" + refusal.word.uppercase().replace('-', '_')
+            val arm = Regex("""ErrorCode::([A-Za-z]+) => "${Regex.escape(refusal.word)}"""")
+            val code = arm.find(table)?.groupValues?.get(1)
+            assertNotNull("${refusal.word} is not a word `error::word` writes", code)
+            // `WorktreesExist` → `WORKTREES_EXIST`, prost's naming of the variant.
+            val declared = "ERROR_CODE_" +
+                code!!.replace(Regex("(?<=.)(?=[A-Z])"), "_").uppercase()
             assertTrue(
                 "${refusal.word} is not a code the protocol declares ($declared)",
                 proto.contains(declared),
@@ -76,12 +88,12 @@ class RunnerRefusalTest {
 
         val refused = line(
             """{"ticket":7,"ok":false,"disconnected":false,""" +
-                """"error":"workspaces still exist under this resource",""" +
+                """"error":"worktrees still exist under this resource",""" +
                 """"code":"workspaces-exist"}"""
         )
         assertEquals("workspaces-exist", RunnerRefusal.wordInAnswerLine(refused))
         assertEquals(
-            RunnerRefusal.WORKSPACES_EXIST.sentence,
+            RunnerRefusal.WORKTREES_EXIST.sentence,
             troubleFor(RunnerRefusal.wordInAnswerLine(refused), "raw", "Generic.").sentence,
         )
 
@@ -178,7 +190,7 @@ class RunnerRefusalTest {
      *
      * The transcript goes because we have a diagnosis of our own. The core's
      * own text under one of these says strictly less than the sentence above it
-     * — "workspaces still exist under this resource" under "Remove those first"
+     * — "worktrees still exist under this resource" under "Remove those first"
      * — so keeping it would be noise rather than diagnosis.
      */
     @Test

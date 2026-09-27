@@ -6,7 +6,7 @@ import Foundation
 /// Holds a `Transcript` and nothing else derived: `agentMode`, the available
 /// modes and commands all arrive on the transcript itself, from the events
 /// the daemon sent — never recomputed here, for the same reason `Connection`
-/// never computes a workspace's state. `Transcript`, `AgentEvent` and
+/// never computes a worktree's state. `Transcript`, `AgentEvent` and
 /// `Sequenced` are not imported from anywhere: this target compiles
 /// `apps/shared/AgentKit/Sources/AgentKit` directly as part of the app (see
 /// `generate-project.py`'s `agentKitGroup`), because iOS has no SwiftPM

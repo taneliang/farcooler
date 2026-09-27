@@ -6,7 +6,7 @@ import Testing
 
 /// Which layout is on screen, and when it stops being the runner's decision.
 ///
-/// A workspace can hold several layouts — a terminal IS a tmux window and a
+/// A worktree can hold several layouts — a terminal IS a tmux window and a
 /// window IS a layout — and only one of them is drawn. That used to be whichever
 /// one tmux called active, which is a fact the app learns by asking: selecting a
 /// terminal in another layout sends `layout focus` to the runner, and the runner
@@ -41,7 +41,7 @@ struct ShownGroupTests {
         #expect(shown?.id == "@3", "drew the runner's active layout instead of the one asked for")
     }
 
-    @Test func the_active_layout_is_what_a_workspace_with_no_choice_falls_back_to() {
+    @Test func the_active_layout_is_what_a_worktree_with_no_choice_falls_back_to() {
         // No terminal selected, so nothing has named a layout. The runner's
         // answer is the right one here and always was.
         #expect(twoLayouts.showing("")?.id == "@1")
@@ -49,7 +49,7 @@ struct ShownGroupTests {
         #expect(twoLayouts.showing("@99")?.id == "@1")
     }
 
-    @Test func a_workspace_whose_layouts_all_deny_being_active_still_draws_one() {
+    @Test func a_worktree_whose_layouts_all_deny_being_active_still_draws_one() {
         let none = [group("@1", active: false, ["alpha"]), group("@3", active: false, ["beta"])]
         #expect(none.showing("@99")?.id == "@1")
         #expect([PaneGroup]().showing("@1") == nil)

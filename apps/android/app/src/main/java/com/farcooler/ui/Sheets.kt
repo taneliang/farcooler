@@ -46,7 +46,7 @@ import com.farcooler.model.QuickAgents
 import com.farcooler.model.TaskSlug
 import com.farcooler.model.TerminalPresets
 import com.farcooler.model.Trouble
-import com.farcooler.model.Workspace
+import com.farcooler.model.Worktree
 import com.farcooler.net.Connection
 import com.farcooler.net.rethrowIfCancellation
 import com.farcooler.core.refusalWord
@@ -355,8 +355,8 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
                         // agent never started" call for different next actions
                         // from whoever is reading this on a phone.
                         phase = "Creating worktree…"
-                        val workspaceId = runCatching {
-                            target.createWorkspace(
+                        val worktreeId = runCatching {
+                            target.createWorktree(
                                 repository,
                                 TaskSlug.name(description),
                                 TaskSlug.slug(description, branchPrefix),
@@ -390,7 +390,7 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
                         phase = "Starting $agentName…"
                         val terminalId = runCatching {
                             target.createTerminal(
-                                workspaceId,
+                                worktreeId,
                                 agentId,
                                 QuickAgents.preset(agentId, model_),
                             )
@@ -482,10 +482,10 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
     }
 }
 
-/** The form next to Quick Task, for a workspace you want to name yourself. */
+/** The form next to Quick Task, for a worktree you want to name yourself. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
+fun NewWorktreeSheet(model: AppModel, onDismiss: () -> Unit) {
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     val connections by model.fleet.active.collectAsStateWithLifecycle()
@@ -553,7 +553,7 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
                 .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("New workspace", style = MaterialTheme.typography.headlineSmall)
+            Text("New worktree", style = MaterialTheme.typography.headlineSmall)
 
             if (connected.size > 1) {
                 Picker(
@@ -611,7 +611,7 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
                                 // and iOS both send, so all three clients put
                                 // the same thing in the field the runner does
                                 // not read.
-                                target.createWorkspace(
+                                target.createWorktree(
                                     repositoryId,
                                     resuming.name,
                                     resuming.name,
@@ -698,8 +698,8 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
             }
 
             Text(
-                "A workspace is one Git worktree and one branch. Its name is the worktree’s " +
-                    "folder, so it can’t be changed later.",
+                "A worktree is a directory and branch of its own. Its name is the folder’s " +
+                    "name, so it can’t be changed later.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -711,7 +711,7 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
                     working = true
                     scope.launch {
                         runCatching {
-                            target.createWorkspace(repositoryId, trimmedName, effectiveBranch)
+                            target.createWorktree(repositoryId, trimmedName, effectiveBranch)
                         }.onFailure {
                             // See the adoption arm above: `runCatching` catches
                             // cancellation too, and a sheet dismissed mid-call
@@ -840,15 +840,15 @@ fun AddRepositorySheet(
 }
 
 /**
- * A second pane in a workspace that already has one.
+ * A second pane in a worktree that already has one.
  *
- * The Mac offers this on every workspace; iOS only ever creates a terminal as
- * part of Quick Task, so a workspace that needed an agent AND a shell to watch
+ * The Mac offers this on every worktree; iOS only ever creates a terminal as
+ * part of Quick Task, so a worktree that needed an agent AND a shell to watch
  * it — the ordinary layout on the Mac — could not get one from a phone at all.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NewTerminalSheet(connection: Connection, workspace: Workspace, onDismiss: () -> Unit) {
+fun NewTerminalSheet(connection: Connection, worktree: Worktree, onDismiss: () -> Unit) {
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     var presetId by remember { mutableStateOf(TerminalPresets.all.first().id) }
@@ -867,7 +867,7 @@ fun NewTerminalSheet(connection: Connection, workspace: Workspace, onDismiss: ()
         ) {
             Text("New terminal", style = MaterialTheme.typography.headlineSmall)
             Text(
-                workspace.task.ifBlank { workspace.branch },
+                worktree.task.ifBlank { worktree.branch },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -897,7 +897,7 @@ fun NewTerminalSheet(connection: Connection, workspace: Workspace, onDismiss: ()
                     scope.launch {
                         runCatching {
                             connection.createTerminal(
-                                workspace.id,
+                                worktree.id,
                                 presetId,
                                 if (models.isEmpty()) presetId
                                 else QuickAgents.preset(presetId, model_),
@@ -922,7 +922,7 @@ fun NewTerminalSheet(connection: Connection, workspace: Workspace, onDismiss: ()
  * it, a body, and the platform's own dismissal.
  *
  * **One frame, promoted from three.** `ChangesSheets` grew `ReviewSheetFrame`
- * first, and `WorkspaceSheets` copied it as `WorkspaceSheetFrame` with a comment
+ * first, and `WorktreeSheets` copied it as `WorktreeSheetFrame` with a comment
  * saying a second copy was cheaper than widening a composable private to a file
  * whose header explains why review sheets live apart — and ending "if a third
  * appears, promote it". Two more appeared here, so it is promoted, and this is
@@ -934,7 +934,7 @@ fun NewTerminalSheet(connection: Connection, workspace: Workspace, onDismiss: ()
  * insets are the part that is easy to get wrong once and then copy, and the
  * manifest's `adjustResize` is what makes the first of them mean anything.
  *
- * [action] is the only thing the workspace copy had that the review one did
+ * [action] is the only thing the worktree copy had that the review one did
  * not — a refresh button in `StackSheet`'s title row — and it defaults to
  * nothing, so a sheet that wants a plain title writes one.
  */

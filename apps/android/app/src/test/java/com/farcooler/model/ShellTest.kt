@@ -46,18 +46,18 @@ class ShellTest {
         ),
     )
 
-    private fun workspace(
+    private fun worktree(
         id: String,
         tabs: List<ShellTab>,
         runner: String = "laptop",
         resume: Int? = null,
-    ) = ShellWorkspace(id = id, name = id, tabs = tabs, runnerId = runner, resume = resume)
+    ) = ShellWorktree(id = id, name = id, tabs = tabs, runnerId = runner, resume = resume)
 
-    /** Two workspaces of two tabs, on one runner. Four tabs in the flat sequence. */
+    /** Two worktrees of two tabs, on one runner. Four tabs in the flat sequence. */
     private val simple = ShellFleet(
         listOf(
-            workspace("alpha", listOf(tab("a0"), tab("a1"))),
-            workspace("beta", listOf(tab("b0"), tab("b1"))),
+            worktree("alpha", listOf(tab("a0"), tab("a1"))),
+            worktree("beta", listOf(tab("b0"), tab("b1"))),
         )
     )
 
@@ -146,7 +146,7 @@ class ShellTest {
 
     /**
      * **A drag that goes sideways and then turns upward opens the column**, and
-     * the same ninety points that do not turn are the workspace crossing they
+     * the same ninety points that do not turn are the worktree crossing they
      * always were.
      *
      * The owner's ask: *"the user can start swiping horizontally, then decide
@@ -170,7 +170,7 @@ class ShellTest {
     }
 
     /**
-     * **And the mirror: a lift that turns sideways crosses the workspace.**
+     * **And the mirror: a lift that turns sideways crosses the worktree.**
      *
      * The half that looks like it already worked and did not. A lifted page
      * could go sideways, but only past the last row where the two axes stop
@@ -178,7 +178,7 @@ class ShellTest {
      * decisive it was.
      */
     @Test
-    fun `a lift that turns sideways out of an open column crosses the workspace`() {
+    fun `a lift that turns sideways out of an open column crosses the worktree`() {
         val turned = drive(leg(0f to 0f, 0f to 100f) + leg(0f to 100f, -220f to 100f), 3)
         assertEquals(ShellAxis.HORIZONTAL, turned.second.axis)
         assertEquals(1, turned.third)
@@ -314,7 +314,7 @@ class ShellTest {
         assertEquals(0f, inside.first.spentLift, 0.01f)
         assertEquals(120f, inside.second.lift, 0.01f)
 
-        // A one-tab workspace is where an uncharged handover was worst: 44dp of
+        // A one-tab worktree is where an uncharged handover was worst: 44dp of
         // column, so the same turn would have thrown the page most of the way
         // into the overview in a single frame.
         val single = drive(leg(0f to 0f, -60f to 0f) + leg(-60f to 0f, -60f to 120f), 1)
@@ -366,7 +366,7 @@ class ShellTest {
      * The column unfurls UPWARD from the bar, so the row nearest the bar is the
      * LAST tab and the arithmetic has to count from the bottom and then invert.
      * Counting the other way puts every tap one column away from where it looks,
-     * and on a two-tab workspace it puts every tap on the wrong tab.
+     * and on a two-tab worktree it puts every tap on the wrong tab.
      */
     @Test
     fun `the column row nearest the bar is the last tab`() {
@@ -435,7 +435,7 @@ class ShellTest {
     @Test
     fun `the chosen row follows the finger and not how far it has travelled`() {
         val fleet = ShellFleet(
-            listOf(workspace("alpha", listOf(tab("a0"), tab("a1"), tab("a2"))))
+            listOf(worktree("alpha", listOf(tab("a0"), tab("a1"), tab("a2"))))
         )
         val at = ShellPosition(0, 0)
         val above = 60f
@@ -493,7 +493,7 @@ class ShellTest {
 
     /**
      * **The bug, as reported: swiping down on the grid reopened the last
-     * workspace.**
+     * worktree.**
      *
      * The grid's pull-down read whether it was at the top at the RELEASE.
      * Scrolling back up through forty cards ends at the top with a large
@@ -541,14 +541,14 @@ class ShellTest {
         val start = ShellPosition(0, 0)
         val within = simple.step(start, ShellDirection.NEXT, ShellTrack.CONTENT)!!
         assertEquals(ShellPosition(0, 1), within.position)
-        assertTrue("staying inside a workspace is not a crossing", !within.crossesWorkspace)
+        assertTrue("staying inside a worktree is not a crossing", !within.crossesWorktree)
 
         val across = simple.step(ShellPosition(0, 1), ShellDirection.NEXT, ShellTrack.CONTENT)!!
         assertEquals(ShellPosition(1, 0), across.position)
-        assertTrue(across.crossesWorkspace)
+        assertTrue(across.crossesWorktree)
     }
 
-    /** Going back lands on the PREVIOUS workspace's last tab, so it reverses. */
+    /** Going back lands on the PREVIOUS worktree's last tab, so it reverses. */
     @Test
     fun `stepping back and forward returns you to where you were`() {
         val here = ShellPosition(1, 0)
@@ -568,32 +568,32 @@ class ShellTest {
             !simple.rubberBands(ShellPosition(0, 0), ShellDirection.NEXT, ShellTrack.CONTENT))
     }
 
-    /** A workspace with no tabs is not a place a page turn can land. */
+    /** A worktree with no tabs is not a place a page turn can land. */
     @Test
-    fun `an empty workspace is stepped over rather than into`() {
+    fun `an empty worktree is stepped over rather than into`() {
         val fleet = ShellFleet(
             listOf(
-                workspace("alpha", listOf(tab("a0"))),
-                workspace("empty", emptyList()),
-                workspace("gamma", listOf(tab("g0"))),
+                worktree("alpha", listOf(tab("a0"))),
+                worktree("empty", emptyList()),
+                worktree("gamma", listOf(tab("g0"))),
             )
         )
         val step = fleet.step(ShellPosition(0, 0), ShellDirection.NEXT, ShellTrack.CONTENT)!!
         assertEquals(ShellPosition(2, 0), step.position)
     }
 
-    /** The bar moves whole workspaces, and lands where that one was left. */
+    /** The bar moves whole worktrees, and lands where that one was left. */
     @Test
-    fun `the bar steps by workspace and resumes the remembered tab`() {
+    fun `the bar steps by worktree and resumes the remembered tab`() {
         val fleet = ShellFleet(
             listOf(
-                workspace("alpha", listOf(tab("a0"), tab("a1"))),
-                workspace("beta", listOf(tab("b0"), tab("b1"), tab("b2")), resume = 2),
+                worktree("alpha", listOf(tab("a0"), tab("a1"))),
+                worktree("beta", listOf(tab("b0"), tab("b1"), tab("b2")), resume = 2),
             )
         )
         val step = fleet.step(ShellPosition(0, 1), ShellDirection.NEXT, ShellTrack.BAR)!!
         assertEquals(ShellPosition(1, 2), step.position)
-        assertTrue(step.crossesWorkspace)
+        assertTrue(step.crossesWorktree)
     }
 
     /** A remembered tab that has since exited falls back to the first. */
@@ -601,8 +601,8 @@ class ShellTest {
     fun `a stale resume degrades to the first tab rather than crashing`() {
         val fleet = ShellFleet(
             listOf(
-                workspace("alpha", listOf(tab("a0"))),
-                workspace("beta", listOf(tab("b0")), resume = 7),
+                worktree("alpha", listOf(tab("a0"))),
+                worktree("beta", listOf(tab("b0")), resume = 7),
             )
         )
         assertEquals(
@@ -622,13 +622,13 @@ class ShellTest {
     fun `a step that changes machine says so`() {
         val fleet = ShellFleet(
             listOf(
-                workspace("alpha", listOf(tab("a0")), runner = "laptop"),
-                workspace("beta", listOf(tab("b0")), runner = "laptop"),
-                workspace("gamma", listOf(tab("g0")), runner = "buildbox"),
+                worktree("alpha", listOf(tab("a0")), runner = "laptop"),
+                worktree("beta", listOf(tab("b0")), runner = "laptop"),
+                worktree("gamma", listOf(tab("g0")), runner = "buildbox"),
             )
         )
         val sameMachine = fleet.step(ShellPosition(0, 0), ShellDirection.NEXT, ShellTrack.CONTENT)!!
-        assertTrue(sameMachine.crossesWorkspace)
+        assertTrue(sameMachine.crossesWorktree)
         assertTrue("alpha and beta are on one runner", !sameMachine.crossesRunner)
 
         val other = fleet.step(ShellPosition(1, 0), ShellDirection.NEXT, ShellTrack.CONTENT)!!
@@ -698,7 +698,7 @@ class ShellTest {
 
     /** Held the page and swiped: arrive at the neighbour still holding it. */
     @Test
-    fun `lifting the page and swiping carries it to the next workspace`() {
+    fun `lifting the page and swiping carries it to the next worktree`() {
         val release = simple.barRelease(
             axis = ShellAxis.VERTICAL, dx = -80f, up = 164f, at = ShellPosition(0, 0))
         assertEquals(ShellPosition(1, 0), (release as ShellRelease.Carry).step.position)
@@ -706,9 +706,9 @@ class ShellTest {
 
     /**
      * **A fast upward fling reaches the overview and does NOT carry.** The
-     * owner: *"when I fling the workspace up, quite often it animates the
-     * workspace to the n-1th or n+1th grid square… if my fling is angled too
-     * much it picks either the previous or next workspace to land on."*
+     * owner: *"when I fling the worktree up, quite often it animates the
+     * worktree to the n-1th or n+1th grid square… if my fling is angled too
+     * much it picks either the previous or next worktree to land on."*
      *
      * A thumb's arc deviates about 0.18 of its travel sideways, but its
      * TANGENT at the release leans twice as far — 0.36 — so a 3000 dp/s fling
@@ -900,21 +900,21 @@ class ShellTest {
     fun `precedence is needs-you, then an unread diff, then silence, then work`() {
         assertEquals(
             ShellPrecedence.NEEDS_YOU,
-            workspace("w", listOf(tab("a"), tab("b", wants = true))).precedence,
+            worktree("w", listOf(tab("a"), tab("b", wants = true))).precedence,
         )
         assertEquals(
             ShellPrecedence.UNREAD_DIFF,
-            workspace("w", listOf(diffTab("d", unread = true), tab("a"))).precedence,
+            worktree("w", listOf(diffTab("d", unread = true), tab("a"))).precedence,
         )
         assertEquals(
             ShellPrecedence.ALL_STALE,
-            workspace("w", listOf(tab("a", stale = true), tab("b", stale = true))).precedence,
+            worktree("w", listOf(tab("a", stale = true), tab("b", stale = true))).precedence,
         )
         assertEquals(
             ShellPrecedence.WORKING,
-            workspace("w", listOf(tab("a", stale = true), tab("b"))).precedence,
+            worktree("w", listOf(tab("a", stale = true), tab("b"))).precedence,
         )
-        assertEquals(ShellPrecedence.WORKING, workspace("w", emptyList()).precedence)
+        assertEquals(ShellPrecedence.WORKING, worktree("w", emptyList()).precedence)
     }
 
     /**
@@ -922,7 +922,7 @@ class ShellTest {
      * review ring.** `wantsAttention` is blocked OR done, and it is this app's
      * single definition of "should this interrupt someone", shared with the Mac
      * since long before the glance vocabulary. What a mark SAYS and what a list
-     * SORTS BY are different questions; a workspace whose agent just finished is
+     * SORTS BY are different questions; a worktree whose agent just finished is
      * exactly what you opened the app to see.
      *
      * **The tab used to carry no mark at all here**, an `AgentOutcome.DONE` and
@@ -932,14 +932,14 @@ class ShellTest {
      * separate field rather than something derived from the mark.
      */
     @Test
-    fun `a finished agent pulls its workspace to the top while wearing the review ring`() {
+    fun `a finished agent pulls its worktree to the top while wearing the review ring`() {
         val done = ShellTab(
             id = "d",
             title = "claude",
             mark = GlanceMark(GlanceMark.Attention.TO_REVIEW, GlanceMark.Core.AT_A_PROMPT),
             wantsAttention = true,
         )
-        val w = workspace("w", listOf(done))
+        val w = worktree("w", listOf(done))
         assertEquals(ShellPrecedence.NEEDS_YOU, w.precedence)
         assertEquals(
             "and it draws the review ring, a rung below where it sorts",
@@ -953,10 +953,10 @@ class ShellTest {
     fun `the overview sorts by rung and keeps fleet order inside one`() {
         val fleet = ShellFleet(
             listOf(
-                workspace("quiet-a", listOf(tab("q0"))),
-                workspace("blocked", listOf(tab("b0", wants = true))),
-                workspace("quiet-b", listOf(tab("q1"))),
-                workspace("review", listOf(diffTab("d", unread = true))),
+                worktree("quiet-a", listOf(tab("q0"))),
+                worktree("blocked", listOf(tab("b0", wants = true))),
+                worktree("quiet-b", listOf(tab("q1"))),
+                worktree("review", listOf(diffTab("d", unread = true))),
             )
         )
         assertEquals(listOf(1, 3, 0, 2), fleet.overviewOrder())
@@ -966,8 +966,8 @@ class ShellTest {
     fun `search filters the same order and a blank query filters nothing`() {
         val fleet = ShellFleet(
             listOf(
-                workspace("auth-refactor", listOf(tab("a"))),
-                workspace("schema-migrate", listOf(tab("b", wants = true))),
+                worktree("auth-refactor", listOf(tab("a"))),
+                worktree("schema-migrate", listOf(tab("b", wants = true))),
             )
         )
         assertEquals(listOf(1, 0), fleet.overviewOrder("   "))
@@ -992,11 +992,11 @@ class ShellTest {
         assertEquals(0, simple.tabCount(9))
     }
 
-    /** A fleet whose leading workspaces are empty still finds a first tab. */
+    /** A fleet whose leading worktrees are empty still finds a first tab. */
     @Test
-    fun `the first tab skips empty workspaces`() {
+    fun `the first tab skips empty worktrees`() {
         val fleet = ShellFleet(
-            listOf(workspace("empty", emptyList()), workspace("real", listOf(tab("r"))))
+            listOf(worktree("empty", emptyList()), worktree("real", listOf(tab("r"))))
         )
         assertEquals(ShellPosition(1, 0), fleet.first)
     }

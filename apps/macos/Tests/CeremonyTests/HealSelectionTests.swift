@@ -21,13 +21,13 @@ struct HealSelectionTests {
         return t
     }
 
-    private static func workspace(
+    private static func worktree(
         _ id: String, host: String?, repository: String? = nil, hidden: Bool = false,
         _ terminals: [Terminal]
-    ) -> Workspace {
-        Workspace(
+    ) -> Worktree {
+        Worktree(
             id: id, short: id, task: id, branch: "feat/\(id)", repository: repository,
-            host: host, worktree: "/tmp/\(id)", state: hidden ? "hidden" : "active",
+            host: host, path: "/tmp/\(id)", state: hidden ? "hidden" : "active",
             terminals: terminals)
     }
 
@@ -38,20 +38,20 @@ struct HealSelectionTests {
     @Test("A closed terminal's neighbor is in its own worktree, not another runner's")
     func aClosedTerminalsNeighborIsInItsOwnWorktree() {
         let fleet = [
-            Self.workspace("elsewhere", host: "gpu-box", [Self.terminal("busy")]),
-            Self.workspace("here", host: nil, [Self.terminal("left", state: "exited", exitCode: 0)]),
+            Self.worktree("elsewhere", host: "gpu-box", [Self.terminal("busy")]),
+            Self.worktree("here", host: nil, [Self.terminal("left", state: "exited", exitCode: 0)]),
         ]
-        let closed: Selection = .terminal(host: "", workspace: "here", terminal: "gone")
+        let closed: Selection = .terminal(host: "", worktree: "here", terminal: "gone")
         #expect(
             ContentView.healed(closed, in: fleet)
-                == .terminal(host: "", workspace: "here", terminal: "left"))
+                == .terminal(host: "", worktree: "here", terminal: "left"))
     }
 
     /// Within the worktree, whatever wants you first, then whatever is running.
     @Test("Attention first, then running, within the worktree")
     func attentionFirstThenRunning() {
         let fleet = [
-            Self.workspace(
+            Self.worktree(
                 "here", host: nil,
                 [
                     Self.terminal("idle-exit", state: "exited", exitCode: 0),
@@ -59,10 +59,10 @@ struct HealSelectionTests {
                     Self.terminal("failed", state: "exited", exitCode: 1),
                 ])
         ]
-        let closed: Selection = .terminal(host: "", workspace: "here", terminal: "gone")
+        let closed: Selection = .terminal(host: "", worktree: "here", terminal: "gone")
         #expect(
             ContentView.healed(closed, in: fleet)
-                == .terminal(host: "", workspace: "here", terminal: "failed"))
+                == .terminal(host: "", worktree: "here", terminal: "failed"))
     }
 
     /// The last terminal in a worktree lands on the worktree itself, not on a
@@ -70,19 +70,19 @@ struct HealSelectionTests {
     @Test("The last terminal closed lands on its worktree")
     func theLastTerminalClosedLandsOnItsWorktree() {
         let fleet = [
-            Self.workspace("elsewhere", host: "gpu-box", [Self.terminal("busy")]),
-            Self.workspace("here", host: nil, []),
+            Self.worktree("elsewhere", host: "gpu-box", [Self.terminal("busy")]),
+            Self.worktree("here", host: nil, []),
         ]
-        let closed: Selection = .terminal(host: "", workspace: "here", terminal: "gone")
-        #expect(ContentView.healed(closed, in: fleet) == .workspace(host: "", id: "here"))
+        let closed: Selection = .terminal(host: "", worktree: "here", terminal: "gone")
+        #expect(ContentView.healed(closed, in: fleet) == .worktree(host: "", id: "here"))
     }
 
     /// A terminal that is still there is left selected. This is what keeps a
     /// close that FAILED from moving you anywhere.
     @Test("A terminal still in the fleet stays selected")
     func aTerminalStillThereStaysSelected() {
-        let fleet = [Self.workspace("here", host: nil, [Self.terminal("a"), Self.terminal("b")])]
-        let current: Selection = .terminal(host: "", workspace: "here", terminal: "b")
+        let fleet = [Self.worktree("here", host: nil, [Self.terminal("a"), Self.terminal("b")])]
+        let current: Selection = .terminal(host: "", worktree: "here", terminal: "b")
         #expect(ContentView.healed(current, in: fleet) == current)
     }
 
@@ -92,31 +92,31 @@ struct HealSelectionTests {
     /// appends runners, and two on this runner: one in another repository,
     /// one in the removed worktree's own.
     private static let afterRemoval = [
-        workspace("theirs", host: "gpu-box", repository: "app", [terminal("busy")]),
-        workspace("other-repo", host: nil, repository: "tools", []),
-        workspace("same-repo", host: nil, repository: "app", []),
+        worktree("theirs", host: "gpu-box", repository: "app", [terminal("busy")]),
+        worktree("other-repo", host: nil, repository: "tools", []),
+        worktree("same-repo", host: nil, repository: "app", []),
     ]
-    private static let removed = workspace("gone", host: nil, repository: "app", [])
+    private static let removed = worktree("gone", host: nil, repository: "app", [])
 
     /// It used to land on the first worktree in the merged fleet: here,
     /// another runner's.
     @Test("A removed worktree's terminal lands on a sibling in its repository, on its runner")
     func aRemovedWorktreesTerminalLandsOnASiblingOnItsRunner() {
-        let selected: Selection = .terminal(host: "", workspace: "gone", terminal: "t")
+        let selected: Selection = .terminal(host: "", worktree: "gone", terminal: "t")
         #expect(
             ContentView.healed(
                 selected, in: Self.afterRemoval, was: Self.afterRemoval + [Self.removed])
-                == .workspace(host: "", id: "same-repo"))
+                == .worktree(host: "", id: "same-repo"))
     }
 
     /// A selected worktree row was left selected after the worktree went.
     @Test("A removed worktree that was selected itself is healed too")
     func aSelectedWorktreeThatIsRemovedIsHealed() {
-        let selected: Selection = .workspace(host: "", id: "gone")
+        let selected: Selection = .worktree(host: "", id: "gone")
         #expect(
             ContentView.healed(
                 selected, in: Self.afterRemoval, was: Self.afterRemoval + [Self.removed])
-                == .workspace(host: "", id: "same-repo"))
+                == .worktree(host: "", id: "same-repo"))
     }
 
     /// With the repository unknown (no previous fleet), any worktree on the
@@ -124,23 +124,23 @@ struct HealSelectionTests {
     @Test("Without the old fleet, any shown worktree on the same runner")
     func withoutTheOldFleetAnyShownWorktreeOnTheSameRunner() {
         let fleet = [
-            Self.workspace("theirs", host: "gpu-box", []),
-            Self.workspace("tucked-away", host: nil, hidden: true, []),
-            Self.workspace("shown", host: nil, []),
+            Self.worktree("theirs", host: "gpu-box", []),
+            Self.worktree("tucked-away", host: nil, hidden: true, []),
+            Self.worktree("shown", host: nil, []),
         ]
         #expect(
-            ContentView.healed(.workspace(host: "", id: "gone"), in: fleet)
-                == .workspace(host: "", id: "shown"))
+            ContentView.healed(.worktree(host: "", id: "gone"), in: fleet)
+                == .worktree(host: "", id: "shown"))
     }
 
     /// Nothing left on the runner: nothing selected, rather than a jump to
     /// another runner.
     @Test("The last worktree on a runner lands on nothing, not on another runner")
     func theLastWorktreeOnARunnerLandsOnNothing() {
-        let fleet = [Self.workspace("theirs", host: "gpu-box", [Self.terminal("busy")])]
+        let fleet = [Self.worktree("theirs", host: "gpu-box", [Self.terminal("busy")])]
         #expect(
             ContentView.healed(
-                .terminal(host: "", workspace: "gone", terminal: "t"), in: fleet,
+                .terminal(host: "", worktree: "gone", terminal: "t"), in: fleet,
                 was: fleet + [Self.removed]) == nil)
     }
 
@@ -150,7 +150,7 @@ struct HealSelectionTests {
     @Test("Removing a worktree lands in the same place whichever heal runs first")
     func removingAWorktreeLandsTheSameWhicheverHealRunsFirst() {
         let before = Self.afterRemoval + [Self.removed]
-        let selected: Selection = .terminal(host: "", workspace: "gone", terminal: "t")
+        let selected: Selection = .terminal(host: "", worktree: "gone", terminal: "t")
         // The sheet (was: [the removed worktree]) and then the fleet change.
         let sheetFirst = ContentView.healed(
             ContentView.healed(selected, in: Self.afterRemoval, was: [Self.removed]),
@@ -159,7 +159,7 @@ struct HealSelectionTests {
         let fleetFirst = ContentView.healed(
             ContentView.healed(selected, in: Self.afterRemoval, was: before),
             in: Self.afterRemoval, was: [Self.removed])
-        #expect(sheetFirst == .workspace(host: "", id: "same-repo"))
+        #expect(sheetFirst == .worktree(host: "", id: "same-repo"))
         #expect(fleetFirst == sheetFirst)
     }
 }

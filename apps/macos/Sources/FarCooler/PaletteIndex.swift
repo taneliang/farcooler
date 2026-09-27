@@ -8,21 +8,21 @@ import Foundation
 /// selection, layouts or the daemon, and the window keeps exactly one
 /// implementation of "go to that terminal" no matter who asked.
 enum PaletteAction: Hashable {
-    case openTerminal(workspace: String, terminal: String)
-    case openWorkspace(String)
-    case newTerminal(workspace: String)
+    case openTerminal(worktree: String, terminal: String)
+    case openWorktree(String)
+    case newTerminal(worktree: String)
     /// Carries what was typed, because in this panel the query IS the task
     /// description far more often than it is a search for one.
     case newTask(String)
     /// Terminal ⟷ chat, for one specific pane. The palette is one of the two
     /// places the plan names for this toggle — the other is `⌃B a` — because
     /// the pane itself grew no button for it.
-    case togglePaneMode(workspace: String, terminal: String)
+    case togglePaneMode(worktree: String, terminal: String)
 }
 
 /// One row, already resolved into the handful of things a row can draw.
 ///
-/// Flattened rather than kept as `(Workspace, Terminal)` pairs so that the grid
+/// Flattened rather than kept as `(Worktree, Terminal)` pairs so that the grid
 /// and the list render from the same value: they differ in shape, not in what
 /// they know, and two views deriving a subtitle separately is how they end up
 /// disagreeing about what a terminal is called.
@@ -42,7 +42,7 @@ struct PaletteEntry: Identifiable, Equatable {
     ///
     /// The filtered list deliberately mixes three kinds of thing, and at a
     /// glance they are indistinguishable — "auth" is as plausibly a terminal as
-    /// a workspace as the task you are about to start. One word per row is
+    /// a worktree as the task you are about to start. One word per row is
     /// cheaper than three headed sections, and sections would freeze the order
     /// of the results, which is the one thing ranking exists to decide.
     var kind: String
@@ -89,11 +89,11 @@ enum PaletteIndex {
     /// ago. Agent activity is still the tie-break for panes you have not visited,
     /// where "something happened here" is the only ordering available.
     @MainActor
-    static func recent(in workspaces: [Workspace], limit: Int = switcherLimit) -> [PaletteEntry] {
-        var live: [(workspace: Workspace, terminal: Terminal)] = []
-        for workspace in workspaces {
-            for terminal in workspace.terminals where isLive(terminal) {
-                live.append((workspace, terminal))
+    static func recent(in worktrees: [Worktree], limit: Int = switcherLimit) -> [PaletteEntry] {
+        var live: [(worktree: Worktree, terminal: Terminal)] = []
+        for worktree in worktrees {
+            for terminal in worktree.terminals where isLive(terminal) {
+                live.append((worktree, terminal))
             }
         }
 
@@ -121,40 +121,40 @@ enum PaletteIndex {
             return left.offset < right.offset
         }
 
-        return ordered.prefix(limit).map { entry(for: $0.element.terminal, in: $0.element.workspace) }
+        return ordered.prefix(limit).map { entry(for: $0.element.terminal, in: $0.element.worktree) }
     }
 
     /// Everything the query could mean, best first.
     ///
-    /// `current` is the workspace being looked at, used only when nothing else
+    /// `current` is the worktree being looked at, used only when nothing else
     /// answers the question: with no worktree matched, "new terminal" still has
     /// an obvious place to go, and offering it there beats offering nothing.
     static func matching(
-        _ query: String, in workspaces: [Workspace], current: String? = nil,
+        _ query: String, in worktrees: [Worktree], current: String? = nil,
         currentTerminal: Terminal? = nil, limit: Int = 20
     ) -> [PaletteEntry] {
         var scored: [(entry: PaletteEntry, score: Int)] = []
-        var bestWorkspace: (workspace: Workspace, score: Int)?
+        var bestWorktree: (worktree: Worktree, score: Int)?
 
-        for workspace in workspaces {
-            let fields = [workspace.task, workspace.branch, workspace.repository ?? ""]
+        for worktree in worktrees {
+            let fields = [worktree.task, worktree.branch, worktree.repository ?? ""]
             if let score = fields.compactMap({ Fuzzy.score($0, query) }).max() {
-                scored.append((entry(for: workspace), score))
-                if score > (bestWorkspace?.score ?? Int.min) {
-                    bestWorkspace = (workspace, score)
+                scored.append((entry(for: worktree), score))
+                if score > (bestWorktree?.score ?? Int.min) {
+                    bestWorktree = (worktree, score)
                 }
             }
 
-            for terminal in workspace.terminals {
+            for terminal in worktree.terminals {
                 // Matched against where it lives as well as what it is called.
                 // Nobody remembers that the agent in "refactor api" is named
                 // `claude` — there are four of those — and everybody remembers
                 // "refactor api".
-                let fields = [terminal.label, workspace.task]
+                let fields = [terminal.label, worktree.task]
                 guard let score = fields.compactMap({ Fuzzy.score($0, query) }).max() else {
                     continue
                 }
-                scored.append((entry(for: terminal, in: workspace), score))
+                scored.append((entry(for: terminal, in: worktree), score))
             }
         }
 
@@ -174,15 +174,15 @@ enum PaletteIndex {
 
         // Scoped to the pane actually being looked at, so it never floats
         // free of the terminal it would act on — unlike "new terminal" and
-        // "new workspace" below, which have an obvious home even with nothing
+        // "new worktree" below, which have an obvious home even with nothing
         // selected, this one has none without a terminal to name.
-        if let currentTerminal, let owner = workspaces.first(where: { workspace in
-            workspace.terminals.contains { $0.id == currentTerminal.id }
+        if let currentTerminal, let owner = worktrees.first(where: { worktree in
+            worktree.terminals.contains { $0.id == currentTerminal.id }
         }) {
             actions.append(
                 PaletteEntry(
                     id: "toggle-pane-mode:\(currentTerminal.id)",
-                    action: .togglePaneMode(workspace: owner.id, terminal: currentTerminal.id),
+                    action: .togglePaneMode(worktree: owner.id, terminal: currentTerminal.id),
                     title: currentTerminal.isAgentPane
                         ? "Switch \(currentTerminal.label) to Terminal"
                         : "Switch \(currentTerminal.label) to Chat",
@@ -192,13 +192,13 @@ enum PaletteIndex {
                     kind: "action"))
         }
 
-        let target = bestWorkspace?.workspace
-            ?? workspaces.first { $0.id == current }
+        let target = bestWorktree?.worktree
+            ?? worktrees.first { $0.id == current }
         if let target {
             actions.append(
                 PaletteEntry(
                     id: "new-terminal:\(target.id)",
-                    action: .newTerminal(workspace: target.id),
+                    action: .newTerminal(worktree: target.id),
                     title: "New Terminal in \(target.task)",
                     // The target is a worktree, not a project, because that is
                     // what a terminal is actually created in — a shell has to
@@ -212,7 +212,7 @@ enum PaletteIndex {
             PaletteEntry(
                 id: "new-task",
                 action: .newTask(described),
-                title: described.isEmpty ? "New Workspace…" : "New Workspace “\(described)”",
+                title: described.isEmpty ? "New Worktree…" : "New Worktree “\(described)”",
                 detail: "Describe it and go",
                 symbol: "sparkle",
                 kind: "action"))
@@ -220,26 +220,26 @@ enum PaletteIndex {
         return navigation + actions
     }
 
-    static func entry(for terminal: Terminal, in workspace: Workspace) -> PaletteEntry {
+    static func entry(for terminal: Terminal, in worktree: Worktree) -> PaletteEntry {
         PaletteEntry(
             id: "terminal:\(terminal.id)",
-            action: .openTerminal(workspace: workspace.id, terminal: terminal.id),
+            action: .openTerminal(worktree: worktree.id, terminal: terminal.id),
             title: terminal.label,
-            detail: [workspace.task, workspace.repository ?? ""]
+            detail: [worktree.task, worktree.repository ?? ""]
                 .filter { !$0.isEmpty }
                 .joined(separator: " · "),
             terminal: terminal,
             kind: "terminal")
     }
 
-    static func entry(for workspace: Workspace) -> PaletteEntry {
+    static func entry(for worktree: Worktree) -> PaletteEntry {
         PaletteEntry(
-            id: "workspace:\(workspace.id)",
-            action: .openWorkspace(workspace.id),
-            title: workspace.task,
-            detail: workspace.windowSubtitle,
+            id: "worktree:\(worktree.id)",
+            action: .openWorktree(worktree.id),
+            title: worktree.task,
+            detail: worktree.windowSubtitle,
             symbol: "arrow.triangle.branch",
-            kind: "workspace")
+            kind: "worktree")
     }
 }
 

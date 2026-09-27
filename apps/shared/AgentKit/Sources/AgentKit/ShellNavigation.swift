@@ -8,7 +8,7 @@ import Foundation
 // test target it generates, and a UI test needs a booted simulator), so a
 // threshold that lives in a `View` can only ever be checked by a person
 // swiping at it. The rules below are the ones that are wrong in ways a
-// screenshot cannot show: stepping off the end of a workspace, which axis a
+// screenshot cannot show: stepping off the end of a worktree, which axis a
 // gesture is leaning toward,
 // which end of the fleet rubber-bands, and which runner's section a card and a
 // drag belong to (`ShellRunnerSections.swift`).
@@ -203,14 +203,14 @@ enum ShellMetrics {
     static func railWidth(page: CGFloat = pageWidth) -> CGFloat { page - 2 * barInset }
 }
 
-/// Where a workspace sorts in the overview, and nowhere else.
+/// Where a worktree sorts in the overview, and nowhere else.
 ///
 /// The mechanics doc's `needsYou > unreadDiff > (all stale) > working`, as a
 /// number so it can be sorted on. `all stale` is the odd one because it is the
-/// only rank that is a property of the whole workspace rather than of some tab
-/// in it: one stale tab beside a working one is a workspace being worked in,
-/// and only a workspace where nothing has been heard from at all is a
-/// workspace that has gone quiet.
+/// only rank that is a property of the whole worktree rather than of some tab
+/// in it: one stale tab beside a working one is a worktree being worked in,
+/// and only a worktree where nothing has been heard from at all is a
+/// worktree that has gone quiet.
 enum ShellPrecedence: Int, Comparable {
     case needsYou = 0
     case unreadDiff = 1
@@ -224,8 +224,8 @@ enum ShellPrecedence: Int, Comparable {
 
 /// One tab, as the shell needs it: something to name and something to draw.
 ///
-/// Deliberately not a `Terminal`. The shell shows a workspace's tabs, and a
-/// workspace's tabs are its terminals AND its diff — see `TerminalTabStrip`'s
+/// Deliberately not a `Terminal`. The shell shows a worktree's tabs, and a
+/// worktree's tabs are its terminals AND its diff — see `TerminalTabStrip`'s
 /// `ChangesChip`, which is a tab with no terminal behind it and never can
 /// have one. A shape that could only hold terminals would have to special-case
 /// the diff at every ribbon, column row and overview card.
@@ -257,7 +257,7 @@ struct ShellTab: Identifiable, Hashable {
     /// the DIFF tab means unread changes — and those are the only two things
     /// it may ever mean here.** The prohibition the old `unreadDiff` case
     /// carried is unchanged and still binding: an unread-diff count comes from
-    /// `InboxRow`, which counts a WORKSPACE's changed lines and knows nothing
+    /// `InboxRow`, which counts a WORKTREE's changed lines and knows nothing
     /// about any agent, and `NeedsYou.swift:94-97` refuses to invent a
     /// per-agent version of it. Putting THAT on an agent tab would draw a ring
     /// meaning "this agent has unread changes", which is not a fact anything on
@@ -273,8 +273,8 @@ struct ShellTab: Identifiable, Hashable {
     /// **Carried rather than re-derived from `mark`, because it is deliberately
     /// BROADER than the amber ring.** Since `done` joined the review tier a
     /// finished turn draws the middle-weight review ring rather than the heavy
-    /// amber one — but it is still a workspace you should be shown first.
-    /// `ShellWorkspace.precedence` is the only thing that reads this and the
+    /// amber one — but it is still a worktree you should be shown first.
+    /// `ShellWorktree.precedence` is the only thing that reads this and the
     /// only place the distinction matters; what a mark SAYS and what a rank
     /// SAYS are different questions, and folding them together would silently
     /// demote every finished agent a rung. (Nothing sorts by the rank today —
@@ -286,10 +286,10 @@ struct ShellTab: Identifiable, Hashable {
     ///
     /// **False for the Diff tab and true for every other tab there is**, which
     /// is the whole of the rule and is why it is a `Bool` rather than a pane
-    /// reference. A workspace's column is one synthesized diff followed by its
+    /// reference. A worktree's column is one synthesized diff followed by its
     /// terminals (`ShellScreen.one(_:naming:now:)`), and the diff is the one
     /// row with no process behind it: it is not removable, and closing the last
-    /// terminal in a workspace lands on it rather than on nothing.
+    /// terminal in a worktree lands on it rather than on nothing.
     ///
     /// Carried rather than derived from the row's POSITION. "Row 0 is the diff"
     /// is true today and is true in exactly one file; a column that read it off
@@ -316,49 +316,49 @@ struct ShellTab: Identifiable, Hashable {
     }
 }
 
-/// One workspace: a name, and the tabs in their fixed order.
+/// One worktree: a name, and the tabs in their fixed order.
 ///
 /// **The order is fixed and is never re-sorted by activity.** The ribbon under
-/// the workspace name is a map of the workspace, and a map whose landmarks
+/// the worktree name is a map of the worktree, and a map whose landmarks
 /// move when something happens is not a map — you would have to read it every
 /// time instead of remembering it. The same argument is why nothing sorts the
-/// overview's WORKSPACES by activity either: each runner's section is in the
+/// overview's WORKTREES by activity either: each runner's section is in the
 /// order that runner keeps.
-struct ShellWorkspace: Identifiable, Hashable {
+struct ShellWorktree: Identifiable, Hashable {
     var id: String
     var name: String
     var tabs: [ShellTab]
-    /// The runner this workspace lives on, and only when it is worth saying.
+    /// The runner this worktree lives on, and only when it is worth saying.
     ///
     /// Nil for the local machine. The bar shows it after the name so a fleet
     /// spread across several runners can be told apart at a glance, and shows
     /// nothing at all for the common case — a name that is always there stops
     /// being read, and this bar has one job before it has two.
     var server: String?
-    /// The last few lines of this workspace's most recent terminal.
+    /// The last few lines of this worktree's most recent terminal.
     ///
     /// The overview card's reason to exist. A grid of forty names says which
-    /// workspaces you have; a grid of forty names each showing what its agent
+    /// worktrees you have; a grid of forty names each showing what its agent
     /// last said is the thing you actually scan. Empty is fine and draws
-    /// nothing — a workspace whose terminal has said nothing has nothing to
+    /// nothing — a worktree whose terminal has said nothing has nothing to
     /// show, and a placeholder there would be forty lies.
     var tail: [String]
-    /// Which tab this workspace should be REOPENED on, as an index into
+    /// Which tab this worktree should be REOPENED on, as an index into
     /// `tabs`.
     ///
     /// "Reopened" is the whole of the distinction, and it is why this is on the
-    /// workspace rather than being a rule inside `step`. There are two ways to
-    /// arrive at another workspace and they are not the same journey:
+    /// worktree rather than being a rule inside `step`. There are two ways to
+    /// arrive at another worktree and they are not the same journey:
     ///
     /// - **The content swipe walks a continuum.** One flat sequence of tabs
-    ///   through the whole fleet, spilling into the next workspace's nearest
+    ///   through the whole fleet, spilling into the next worktree's nearest
     ///   tab — its first going forward, its last coming back. That has to stay
     ///   literal: a sequence that skipped to a remembered tab would not be a
     ///   sequence, it would drift as you swiped back and forth, and swiping
     ///   right then left would land you somewhere you had not been. See
     ///   `contentStep`, which does not read this.
     /// - **The bar swipe, the carried lift and an overview card are all
-    ///   GOING somewhere**, by name, deliberately. Going back to a workspace
+    ///   GOING somewhere**, by name, deliberately. Going back to a worktree
     ///   should put you where you were in it, which is the same F4 argument
     ///   `docs/jobs-to-be-done.md` makes about the app being put down every
     ///   ninety seconds — landing on tab 0 is the app half-remembering.
@@ -367,8 +367,8 @@ struct ShellWorkspace: Identifiable, Hashable {
     /// already keeps: `Connection.lastFocus`, written only when a person
     /// chooses a tab. A second memory living in here would be a second thing
     /// to disagree with it. Nil means nobody has ever chosen a tab in this
-    /// workspace, and nil resolves to the first tab, which is where a
-    /// workspace nobody has an opinion about opens.
+    /// worktree, and nil resolves to the first tab, which is where a
+    /// worktree nobody has an opinion about opens.
     ///
     /// An index rather than a tab id because that is what a `ShellPosition`
     /// is, and because the caller has just built `tabs` and is the only thing
@@ -378,14 +378,14 @@ struct ShellWorkspace: Identifiable, Hashable {
     var resume: Int?
     /// Whether this worktree has been told to stop showing.
     ///
-    /// The daemon's own per-worktree view preference — `Workspace.isHidden`,
+    /// The daemon's own per-worktree view preference — `Worktree.isHidden`,
     /// `state == "hidden"` — carried into the shell's vocabulary rather than
     /// re-derived, because it is a preference somebody set on the runner and
     /// every surface has to agree about it. The Mac has honored it in its
     /// sidebar since the feature existed; this is the phone's half.
     ///
-    /// It changes where a workspace is DRAWN and nothing else. A hidden
-    /// workspace keeps its place in `workspaces`, so its position, its tabs
+    /// It changes where a worktree is DRAWN and nothing else. A hidden
+    /// worktree keeps its place in `worktrees`, so its position, its tabs
     /// and the bar's walk through the fleet are all exactly what they were —
     /// hiding is a view preference, and a preference that silently made a
     /// worktree unreachable would be a different feature. See
@@ -394,7 +394,7 @@ struct ShellWorkspace: Identifiable, Hashable {
     /// Whether this worktree IS the repository's own checkout.
     ///
     /// Carried for one reason: the overview card's menu must not offer to
-    /// remove it. `Workspace.isPrimaryCheckout` states the rule at length —
+    /// remove it. `Worktree.isPrimaryCheckout` states the rule at length —
     /// removing the primary checkout would offer to delete the directory the
     /// repository itself lives in, the daemon refuses it independently, and
     /// the flag exists so nobody is walked through a destructive confirmation
@@ -403,7 +403,7 @@ struct ShellWorkspace: Identifiable, Hashable {
     /// False is the offering answer, which is the same direction the model's
     /// own `isPrimaryCheckout` defaults in and safe for the same reason: this
     /// keeps a button off a menu, it is not what keeps the checkout safe.
-    /// `ShellHarness` sets it on one fixture workspace so the absent case is
+    /// `ShellHarness` sets it on one fixture worktree so the absent case is
     /// reachable without a runner.
     var isPrimaryCheckout: Bool
     /// The runner this worktree is on, by the runner's id, or nil for a fleet
@@ -444,7 +444,7 @@ struct ShellWorkspace: Identifiable, Hashable {
         return resume
     }
 
-    /// How loud this workspace is, as one rung.
+    /// How loud this worktree is, as one rung.
     ///
     /// **Nothing sorts by this any more.** It was the overview's sort key, and
     /// the overview is sectioned by runner in an order a person drags into
@@ -454,12 +454,12 @@ struct ShellWorkspace: Identifiable, Hashable {
     /// next surface that wants "which of these is asking for me" should read
     /// it rather than restate it; delete it if nothing has by then.
     ///
-    /// An empty workspace ranks as `working`, which is the "nothing to say"
+    /// An empty worktree ranks as `working`, which is the "nothing to say"
     /// rank: it is not waiting on anybody, has no diff to read, and has no
     /// tabs that could have gone quiet.
     ///
     /// **The order is unchanged by the move to `GlanceMark`, and each rung is
-    /// the same set of workspaces it was before.** It is worth writing down why
+    /// the same set of worktrees it was before.** It is worth writing down why
     /// the second rung did not silently widen when it started reading an
     /// attention tier rather than a case name:
     ///
@@ -473,13 +473,13 @@ struct ShellWorkspace: Identifiable, Hashable {
     ///     `done` now also produces `.toReview`: a done tab has already been
     ///     claimed by the rung above, so the only `.toReview` that can reach
     ///     this line is `ShellScreen.diffMark`'s.
-    ///   - `allStale` is a property of the WHOLE workspace and stays one. The
+    ///   - `allStale` is a property of the WHOLE worktree and stays one. The
     ///     Diff tab is broken only where the runner isn't answering, so this
-    ///     rung is reached by the remembered workspaces `RunnerDirectory.decayed`
+    ///     rung is reached by the remembered worktrees `RunnerDirectory.decayed`
     ///     builds and by a reconnecting runner's (`said(answering:)`), which is
     ///     exactly what it is for.
     ///
-    /// Android's `ShellWorkspace.precedence` states the same split at length
+    /// Android's `ShellWorktree.precedence` states the same split at length
     /// and for the same reason.
     var precedence: ShellPrecedence {
         if tabs.contains(where: \.wantsAttention) { return .needsYou }
@@ -489,23 +489,23 @@ struct ShellWorkspace: Identifiable, Hashable {
     }
 }
 
-extension ShellWorkspace {
-    /// This workspace as it may be drawn while its runner is, or isn't,
+extension ShellWorktree {
+    /// This worktree as it may be drawn while its runner is, or isn't,
     /// answering. Every tab's mark through `GlanceMark.said(answering:)`.
     ///
     /// The Diff tab too, as `RunnerDirectory.decayed` has always done for a
     /// remembered one: "nothing new to read" is a claim about now as well, and
     /// an unread diff holds. `wantsAttention` is left alone, because blocked and
     /// done are the latched states and hold.
-    func said(answering: Bool) -> ShellWorkspace {
+    func said(answering: Bool) -> ShellWorktree {
         guard !answering else { return self }
-        var workspace = self
-        workspace.tabs = tabs.map { tab in
+        var worktree = self
+        worktree.tabs = tabs.map { tab in
             var tab = tab
             tab.mark = tab.mark.said(answering: false)
             return tab
         }
-        return workspace
+        return worktree
     }
 }
 
@@ -522,42 +522,42 @@ enum ShellDirection: Hashable {
     var trackSign: CGFloat { self == .next ? -1 : 1 }
 }
 
-/// A position in the fleet: which workspace, which of its tabs.
+/// A position in the fleet: which worktree, which of its tabs.
 struct ShellPosition: Hashable {
-    var workspace: Int
+    var worktree: Int
     var tab: Int
 
-    init(workspace: Int, tab: Int) {
-        self.workspace = workspace
+    init(worktree: Int, tab: Int) {
+        self.worktree = worktree
         self.tab = tab
     }
 }
 
-/// Where a step lands, and whether taking it leaves the workspace.
+/// Where a step lands, and whether taking it leaves the worktree.
 ///
 /// The flag is not a convenience. It is what the incoming pane's title uses to
-/// name the other workspace before you commit — the crossing has to be visible
+/// name the other worktree before you commit — the crossing has to be visible
 /// while it is still abandonable — and it is what decides whether the BAR
-/// translates: within a workspace the bar holds still, because the workspace
+/// translates: within a worktree the bar holds still, because the worktree
 /// is not changing.
 struct ShellStep: Hashable {
     var position: ShellPosition
-    var crossesWorkspace: Bool
+    var crossesWorktree: Bool
 }
 
 /// Which gesture is driving the track, which decides what its neighbours are.
 ///
 /// The same three-pane track serves both, and the only difference is what
-/// `previous` and `next` mean. From the bar they mean the adjacent WORKSPACE,
-/// opened at its first tab, because the bar is the workspace. From the content
+/// `previous` and `next` mean. From the bar they mean the adjacent WORKTREE,
+/// opened at its first tab, because the bar is the worktree. From the content
 /// they mean the adjacent TAB along one flat sequence that runs through the
-/// whole fleet, so a swipe never dead-ends at a workspace boundary.
+/// whole fleet, so a swipe never dead-ends at a worktree boundary.
 enum ShellTrack: Hashable {
     case bar
     case content
 }
 
-/// The whole fleet, in the order the workspaces are shown.
+/// The whole fleet, in the order the worktrees are shown.
 ///
 /// A plain array and not a dictionary: every rule below is about adjacency,
 /// and adjacency is the order. The caller owns that order — each runner's own,
@@ -565,42 +565,42 @@ enum ShellTrack: Hashable {
 /// overview groups a COPY of the indices by runner and never reorders the
 /// array; a drag changes it only by way of the runner's answer.
 struct ShellFleet: Hashable {
-    var workspaces: [ShellWorkspace]
+    var worktrees: [ShellWorktree]
 
-    init(workspaces: [ShellWorkspace]) {
-        self.workspaces = workspaces
+    init(worktrees: [ShellWorktree]) {
+        self.worktrees = worktrees
     }
 
-    var isEmpty: Bool { workspaces.isEmpty }
+    var isEmpty: Bool { worktrees.isEmpty }
 
-    /// How many tabs the workspace at `index` has, or 0 for an index that is
+    /// How many tabs the worktree at `index` has, or 0 for an index that is
     /// not in the fleet.
     ///
     /// Answering 0 rather than trapping because every caller here is doing
     /// arithmetic on a position that a poll could have invalidated a moment
     /// ago, and a fleet that shrinks under a finger is ordinary — see
-    /// `FleetView`'s removed-workspace rule. A shell that crashed when a
-    /// workspace went away mid-gesture would be a worse answer than a shell
+    /// `FleetView`'s removed-worktree rule. A shell that crashed when a
+    /// worktree went away mid-gesture would be a worse answer than a shell
     /// that springs back.
-    func tabCount(ofWorkspace index: Int) -> Int {
-        guard workspaces.indices.contains(index) else { return 0 }
-        return workspaces[index].tabs.count
+    func tabCount(ofWorktree index: Int) -> Int {
+        guard worktrees.indices.contains(index) else { return 0 }
+        return worktrees[index].tabs.count
     }
 
     /// Whether a position names something that exists right now.
     func contains(_ position: ShellPosition) -> Bool {
-        workspaces.indices.contains(position.workspace)
-            && workspaces[position.workspace].tabs.indices.contains(position.tab)
+        worktrees.indices.contains(position.worktree)
+            && worktrees[position.worktree].tabs.indices.contains(position.tab)
     }
 
     /// The tab at a position, or nil for a position the fleet no longer has.
     ///
-    /// Nil rather than a trap for the reason `tabCount(ofWorkspace:)` gives:
+    /// Nil rather than a trap for the reason `tabCount(ofWorktree:)` gives:
     /// a poll can shrink the fleet under a finger, and every caller here is
     /// already holding a position taken a moment ago.
     func tab(at position: ShellPosition) -> ShellTab? {
         guard contains(position) else { return nil }
-        return workspaces[position.workspace].tabs[position.tab]
+        return worktrees[position.worktree].tabs[position.tab]
     }
 
     /// Where a tab is right now, by its id, or nil once the fleet has stopped
@@ -608,7 +608,7 @@ struct ShellFleet: Hashable {
     ///
     /// **This is what lets a mounted pane survive the fleet moving underneath
     /// it.** A pane is retained by tab ID and drawn at whatever SLOT that id
-    /// currently occupies, so a workspace that gains a terminal — which
+    /// currently occupies, so a worktree that gains a terminal — which
     /// renumbers every index after it — moves the panes rather than rebuilding
     /// them. An index cached at mount time would silently start naming a
     /// different tab, which is `Connection.swift:190-199`'s bug reached from
@@ -624,9 +624,9 @@ struct ShellFleet: Hashable {
     /// to be rebuilt every poll to answer questions about a handful of
     /// retained panes.
     func position(ofTab id: String) -> ShellPosition? {
-        for (w, workspace) in workspaces.enumerated() {
-            if let t = workspace.tabs.firstIndex(where: { $0.id == id }) {
-                return ShellPosition(workspace: w, tab: t)
+        for (w, worktree) in worktrees.enumerated() {
+            if let t = worktree.tabs.firstIndex(where: { $0.id == id }) {
+                return ShellPosition(worktree: w, tab: t)
             }
         }
         return nil
@@ -653,7 +653,7 @@ struct ShellFleet: Hashable {
     /// the store's entries in runner-list order, so a second runner answering —
     /// which on a cold launch happens seconds after the first — inserts its
     /// worktrees into the middle of that array and renumbers everything after
-    /// them. The value `(workspace: 0, tab: 1)` did not change; what it names
+    /// them. The value `(worktree: 0, tab: 1)` did not change; what it names
     /// did. The pane on screen becomes a different runner's worktree with no
     /// gesture, and because the VALUE held still nothing downstream can notice:
     /// `onRest` never fires, so `markVisible` goes on claiming the old pane on
@@ -665,7 +665,7 @@ struct ShellFleet: Hashable {
     /// every mounted pane. This is the half of that change that was missing:
     /// the position has to be anchored to something the merge cannot renumber,
     /// and a tab id is that thing. `ShellIdentity.tab` composes it out of the
-    /// runner, the workspace and the pane, so it survives every reordering the
+    /// runner, the worktree and the pane, so it survives every reordering the
     /// merge can perform and is not reused by anything else.
     ///
     /// Falling back to a CLAMP rather than to `first` when the tab is gone.
@@ -674,7 +674,7 @@ struct ShellFleet: Hashable {
     /// already was; sending them to the front of the fleet would be the app
     /// moving them somewhere they never asked to go. An empty fleet has nothing
     /// to clamp to and gets the position back unchanged, for
-    /// `tabCount(ofWorkspace:)`'s reason: every caller here is holding a
+    /// `tabCount(ofWorktree:)`'s reason: every caller here is holding a
     /// position a poll could have invalidated a moment ago, and a fleet that
     /// shrinks under a finger is ordinary.
     ///
@@ -699,10 +699,10 @@ struct ShellFleet: Hashable {
         _ position: ShellPosition, holding tab: String?, after previous: ShellFleet
     ) -> ShellPosition {
         if let tab, let found = self.position(ofTab: tab) { return found }
-        if previous.workspaces.isEmpty, let first {
+        if previous.worktrees.isEmpty, let first {
             return clamping(
                 ShellPosition(
-                    workspace: first.workspace, tab: workspaces[first.workspace].resumeTab))
+                    worktree: first.worktree, tab: worktrees[first.worktree].resumeTab))
         }
         return clamping(position)
     }
@@ -710,18 +710,18 @@ struct ShellFleet: Hashable {
     /// The nearest position this fleet actually has, or the one handed in when
     /// it has none at all.
     func clamping(_ position: ShellPosition) -> ShellPosition {
-        guard !workspaces.isEmpty else { return position }
-        let workspace = min(max(position.workspace, 0), workspaces.count - 1)
-        let tabs = workspaces[workspace].tabs
-        guard !tabs.isEmpty else { return ShellPosition(workspace: workspace, tab: 0) }
+        guard !worktrees.isEmpty else { return position }
+        let worktree = min(max(position.worktree, 0), worktrees.count - 1)
+        let tabs = worktrees[worktree].tabs
+        guard !tabs.isEmpty else { return ShellPosition(worktree: worktree, tab: 0) }
         return ShellPosition(
-            workspace: workspace, tab: min(max(position.tab, 0), tabs.count - 1))
+            worktree: worktree, tab: min(max(position.tab, 0), tabs.count - 1))
     }
 
     /// The first position in the fleet, or nil for a fleet with nothing in it.
     var first: ShellPosition? {
-        for (i, workspace) in workspaces.enumerated() where !workspace.tabs.isEmpty {
-            return ShellPosition(workspace: i, tab: 0)
+        for (i, worktree) in worktrees.enumerated() where !worktree.tabs.isEmpty {
+            return ShellPosition(worktree: i, tab: 0)
         }
         return nil
     }
@@ -731,61 +731,61 @@ struct ShellFleet: Hashable {
     ///
     /// Nil is the interesting answer and is the ONLY thing that rubber-bands.
     /// From the content that means the two true ends of the whole fleet: the
-    /// very first tab of the first workspace and the very last tab of the
-    /// last, and nowhere in between — walking off the end of a workspace lands
-    /// on its neighbour, so a workspace boundary is not an end.
+    /// very first tab of the first worktree and the very last tab of the
+    /// last, and nowhere in between — walking off the end of a worktree lands
+    /// on its neighbour, so a worktree boundary is not an end.
     ///
-    /// Workspaces with NO tabs are skipped rather than landed on. An empty
-    /// workspace is reachable from the bar and from the overview, which is
+    /// Worktrees with NO tabs are skipped rather than landed on. An empty
+    /// worktree is reachable from the bar and from the overview, which is
     /// where a person goes deliberately; stepping through the content into one
     /// would be a swipe that lands on nothing and then cannot be swiped out of
     /// in the same direction.
     func step(
         from position: ShellPosition, _ direction: ShellDirection, along track: ShellTrack
     ) -> ShellStep? {
-        guard workspaces.indices.contains(position.workspace) else { return nil }
+        guard worktrees.indices.contains(position.worktree) else { return nil }
         switch track {
         case .bar:
-            return barStep(from: position.workspace, direction)
+            return barStep(from: position.worktree, direction)
         case .content:
             return contentStep(from: position, direction)
         }
     }
 
-    /// The adjacent workspace, on the tab you last had open there. Always a
+    /// The adjacent worktree, on the tab you last had open there. Always a
     /// crossing — that is what the bar's gesture is for.
     ///
     /// `resumeTab` and not 0, and that is the difference between this and
-    /// `contentStep`. The bar is the workspace, so swiping it is going to
-    /// another workspace by name; arriving somewhere you have been before and
+    /// `contentStep`. The bar is the worktree, so swiping it is going to
+    /// another worktree by name; arriving somewhere you have been before and
     /// finding the tab you left is what makes the fleet a place rather than a
     /// list you re-navigate every time. The content swipe is a continuum and
-    /// stays literal — see `ShellWorkspace.resume`, which sets out both halves.
-    private func barStep(from workspace: Int, _ direction: ShellDirection) -> ShellStep? {
-        let next = direction == .next ? workspace + 1 : workspace - 1
-        guard workspaces.indices.contains(next) else { return nil }
+    /// stays literal — see `ShellWorktree.resume`, which sets out both halves.
+    private func barStep(from worktree: Int, _ direction: ShellDirection) -> ShellStep? {
+        let next = direction == .next ? worktree + 1 : worktree - 1
+        guard worktrees.indices.contains(next) else { return nil }
         return ShellStep(
-            position: ShellPosition(workspace: next, tab: workspaces[next].resumeTab),
-            crossesWorkspace: true)
+            position: ShellPosition(worktree: next, tab: worktrees[next].resumeTab),
+            crossesWorktree: true)
     }
 
-    /// The next tab along, over the whole fleet, crossing workspaces.
+    /// The next tab along, over the whole fleet, crossing worktrees.
     private func contentStep(from position: ShellPosition, _ direction: ShellDirection)
         -> ShellStep?
     {
-        let tabs = workspaces[position.workspace].tabs
+        let tabs = worktrees[position.worktree].tabs
         switch direction {
         case .next:
             if tabs.indices.contains(position.tab + 1) {
                 return ShellStep(
-                    position: ShellPosition(workspace: position.workspace, tab: position.tab + 1),
-                    crossesWorkspace: false)
+                    position: ShellPosition(worktree: position.worktree, tab: position.tab + 1),
+                    crossesWorktree: false)
             }
-            var w = position.workspace + 1
-            while workspaces.indices.contains(w) {
-                if !workspaces[w].tabs.isEmpty {
+            var w = position.worktree + 1
+            while worktrees.indices.contains(w) {
+                if !worktrees[w].tabs.isEmpty {
                     return ShellStep(
-                        position: ShellPosition(workspace: w, tab: 0), crossesWorkspace: true)
+                        position: ShellPosition(worktree: w, tab: 0), crossesWorktree: true)
                 }
                 w += 1
             }
@@ -793,21 +793,21 @@ struct ShellFleet: Hashable {
         case .previous:
             if position.tab - 1 >= 0, tabs.indices.contains(position.tab - 1) {
                 return ShellStep(
-                    position: ShellPosition(workspace: position.workspace, tab: position.tab - 1),
-                    crossesWorkspace: false)
+                    position: ShellPosition(worktree: position.worktree, tab: position.tab - 1),
+                    crossesWorktree: false)
             }
-            var w = position.workspace - 1
+            var w = position.worktree - 1
             while w >= 0 {
-                let count = workspaces[w].tabs.count
+                let count = worktrees[w].tabs.count
                 if count > 0 {
-                    // The PREVIOUS workspace's LAST tab, which is the half of
+                    // The PREVIOUS worktree's LAST tab, which is the half of
                     // this rule that is easy to get wrong: a sequence that
                     // stepped backward onto tab 0 would not be a sequence, it
                     // would be two different orders depending on which way you
                     // walked, and swiping back and forth would drift.
                     return ShellStep(
-                        position: ShellPosition(workspace: w, tab: count - 1),
-                        crossesWorkspace: true)
+                        position: ShellPosition(worktree: w, tab: count - 1),
+                        crossesWorktree: true)
                 }
                 w -= 1
             }
@@ -819,7 +819,7 @@ struct ShellFleet: Hashable {
     /// therefore be rubber-banded.
     ///
     /// Defined as "the step returned nothing" and not as "we are at a
-    /// workspace boundary", because those are different places and confusing
+    /// worktree boundary", because those are different places and confusing
     /// them is the bug: a rubber band at every boundary would make the fleet
     /// feel like a list of separate lists, which is the thing the flat
     /// sequence exists to stop it being.
@@ -914,7 +914,7 @@ enum ShellGesture {
     /// **Why the BAR can have this and the content cannot.** Two axes may be
     /// re-decided per frame only where nothing else is listening. On the bar
     /// there is no competing scroller: down does nothing, up is the column,
-    /// sideways is the workspace, and the only party that could be
+    /// sideways is the worktree, and the only party that could be
     /// interrupted is the shell itself. On the CONTENT vertical is the
     /// terminal's scrollback — a gesture the pane owns and has a regression
     /// test for — and re-deciding it per frame reintroduces `b192f17` from
@@ -1098,7 +1098,7 @@ enum ShellGesture {
     /// deliberate drag projects almost nothing past where it already is and
     /// so lands where it was pointed; a flick projects hundreds of points and
     /// escapes, which is the whole of the owner's report that a flick up from
-    /// the bar stayed in the workspace because the thumb happened to lift
+    /// the bar stayed in the worktree because the thumb happened to lift
     /// over a menu row.
     ///
     /// **What it is NOT measured against is which row you are on.** That is
@@ -1132,7 +1132,7 @@ enum ShellGesture {
     /// Above it nothing arbitrates by design, and an unconditional projection
     /// let the vertical fling's own lateral shadow answer the sideways
     /// question: the owner's *"if my fling is angled too much it picks either
-    /// the previous or next workspace to land on."*
+    /// the previous or next worktree to land on."*
     ///
     /// **The arithmetic that made it certain.** A thumb pivoting about the
     /// palm deviates about 24 points across the 132 that open a three-tab
@@ -1288,7 +1288,7 @@ enum ShellGesture {
     ///
     /// The join. Everything about this gesture is measured from it rather than
     /// from an absolute distance — the column below it, the overview above it,
-    /// and the page's own travel — so a workspace with one tab and a workspace
+    /// and the page's own travel — so a worktree with one tab and a worktree
     /// with nine both reach the same places by "keep going until there is
     /// nothing left, then keep going".
     static func columnFull(tabCount: Int) -> CGFloat {
@@ -1314,7 +1314,7 @@ enum ShellGesture {
         // The finger still drives the SELECTION — `columnRow` reads its
         // position — so it keeps choosing among rows that are all already on
         // screen. That is the part worth keeping from the original: the
-        // continuous drag from "next workspace" through the tabs and on into
+        // continuous drag from "next worktree" through the tabs and on into
         // the overview still works, it just stops hiding its options.
         //
         // The threshold is the same `openMin` a release uses to decide between
@@ -1336,7 +1336,7 @@ enum ShellGesture {
     ///
     /// Zero for the whole column phase, and that is the rule rather than an
     /// implementation detail: picking a tab is a light action taken INSIDE the
-    /// workspace, so the menu opens over a page that has not moved. The page
+    /// worktree, so the menu opens over a page that has not moved. The page
     /// only becomes something you are holding once the finger goes past the
     /// last row and there is nothing left to pick — which is exactly where
     /// `overviewProgress` starts, so the two say the same thing about the same
@@ -1383,7 +1383,7 @@ enum ShellGesture {
     ///
     /// AT AND ABOVE it they compose, and `lean` stops being asked. The lift
     /// decides WHERE you end up — holding the page, or in the overview — and
-    /// sideways decides WHICH workspace you end up holding; neither is an
+    /// sideways decides WHICH worktree you end up holding; neither is an
     /// answer to the other's question. Handing the gesture to `.horizontal`
     /// here would drop the page back onto the display while your thumb was
     /// still up in the air holding it. Owning both is what a card in the app
@@ -1416,12 +1416,12 @@ enum ShellGesture {
     ///
     /// Normalized by the column's length rather than by an absolute distance,
     /// for the reason `overRun` gives: this gesture is "keep going until there
-    /// is nothing left to reveal, then keep going", and a workspace with one
+    /// is nothing left to reveal, then keep going", and a worktree with one
     /// tab has less to reveal than one with nine. A join fixed at some number
     /// of points would fall in the middle of a nine-tab column and past the
     /// end of a one-tab one.
     ///
-    /// A workspace with no tabs has no column, so there is nothing for the
+    /// A worktree with no tabs has no column, so there is nothing for the
     /// lift to be a fraction OF; it reports fully travelled, which hands the
     /// whole gesture to `overviewProgress` and is the only answer that does
     /// not divide by zero.
@@ -1729,8 +1729,8 @@ enum ShellRelease: Hashable {
     /// Dragged past the last row, all the way into the overview.
     case openOverview
     /// Dragged past the last row AND far enough sideways: the page is carried
-    /// into the neighbouring workspace's cell and the overview opens on that
-    /// workspace instead of this one.
+    /// into the neighbouring worktree's cell and the overview opens on that
+    /// worktree instead of this one.
     ///
     /// Both axes answered at once, which is the point of it. It is not
     /// `commit` followed by `openOverview` — those are two springs and two
@@ -1815,7 +1815,7 @@ extension ShellFleet {
             else { return .springBack }
             return .commit(step)
         case .vertical:
-            let tabs = tabCount(ofWorkspace: position.workspace)
+            let tabs = tabCount(ofWorktree: position.worktree)
             // The finger's real place, where the caller has one — and `up`
             // itself where it does not, which is what `up` has always meant
             // to a caller that never told this function where the gesture
@@ -1826,8 +1826,8 @@ extension ShellFleet {
             // also where the line between the two axes competing and the two
             // axes composing is argued. Along `.bar`, because what a lifted
             // page is holding is
-            // a WORKSPACE: the cards it can be moved between are the
-            // overview's cards, and those are workspaces.
+            // a WORKTREE: the cards it can be moved between are the
+            // overview's cards, and those are worktrees.
             //
             // `pageIsHeld` reads the finger's ACTUAL place and not the
             // thrown one: it is asking whether there is a page in your hand
@@ -1921,8 +1921,8 @@ extension ShellFleet {
 // MARK: - The overview
 
 extension ShellFleet {
-    /// The hidden workspaces, in fleet order, for the section that reveals
-    /// them, as indices into `workspaces`.
+    /// The hidden worktrees, in fleet order, for the section that reveals
+    /// them, as indices into `worktrees`.
     ///
     /// A section rather than a filter, which is the Mac's rule stated again:
     /// hiding is reversible, and something reversible needs a way back that is
@@ -1934,34 +1934,34 @@ extension ShellFleet {
     /// sorted by what needed you, with the fleet's order as the tiebreak. The
     /// grid is sectioned by runner now and a runner's order is something a
     /// person drags into place, so a sort that lifted the loud ones would undo
-    /// the drag the next time an agent finished. `ShellWorkspace.precedence`
+    /// the drag the next time an agent finished. `ShellWorktree.precedence`
     /// still classifies; nothing in the overview sorts by it.
     func hiddenOrder() -> [Int] {
-        workspaces.indices.filter { workspaces[$0].isHidden }
+        worktrees.indices.filter { worktrees[$0].isHidden }
     }
 
     /// The hidden ones a search matches.
     ///
     /// Searched as well as listed, and that is the point of a section rather
     /// than a filter: somebody typing the name of a worktree they hid last
-    /// week is asking for it by name, and a grid that answered "No workspace
-    /// matches" would be lying about a workspace it is holding.
+    /// week is asking for it by name, and a grid that answered "No worktree
+    /// matches" would be lying about a worktree it is holding.
     func hiddenOrder(matching query: String) -> [Int] {
-        ShellFleet.matching(query, in: hiddenOrder(), of: workspaces)
+        ShellFleet.matching(query, in: hiddenOrder(), of: worktrees)
     }
 
     /// One needle, applied to a list of indices already in order.
     ///
-    /// `static` and taking the workspaces so `ShellServerGroup` can search its
+    /// `static` and taking the worktrees so `ShellServerGroup` can search its
     /// own the same way. Two substring rules over one grid is two grids that
     /// answer differently to the same typing.
     static func matching(
-        _ query: String, in order: [Int], of workspaces: [ShellWorkspace]
+        _ query: String, in order: [Int], of worktrees: [ShellWorktree]
     ) -> [Int] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !needle.isEmpty else { return order }
         return order.filter {
-            workspaces[$0].name.range(
+            worktrees[$0].name.range(
                 of: needle, options: [.caseInsensitive, .diacriticInsensitive]) != nil
         }
     }
@@ -1991,7 +1991,7 @@ extension ShellFleet {
 ///
 /// **Not a `ShellFleet`, and deliberately not part of one.** A `ShellFleet` is
 /// the NAVIGABLE fleet: `ShellPosition` indexes into it, the bar walks it, and
-/// `ShellPaneTrack` mounts a pane for every tab it steps onto. A workspace
+/// `ShellPaneTrack` mounts a pane for every tab it steps onto. A worktree
 /// this app has no connection to has no pane to mount and no terminal behind
 /// it, so putting one in that array would make positions that resolve to
 /// nothing — the fifth way to break "a pane must never be rebuilt", arrived at
@@ -2010,13 +2010,13 @@ struct ShellServerGroup: Identifiable, Hashable {
     /// Nil is "not told" and must not be drawn as "just now" — the same rule
     /// `FleetSnapshot.observedAt` states, for the same reason.
     var lastSeen: Date?
-    var workspaces: [ShellWorkspace]
+    var worktrees: [ShellWorktree]
 
-    init(id: String, name: String, lastSeen: Date? = nil, workspaces: [ShellWorkspace]) {
+    init(id: String, name: String, lastSeen: Date? = nil, worktrees: [ShellWorktree]) {
         self.id = id
         self.name = name
         self.lastSeen = lastSeen
-        self.workspaces = workspaces
+        self.worktrees = worktrees
     }
 
     /// This group's cards, in the order the runner gave them.
@@ -2028,8 +2028,8 @@ struct ShellServerGroup: Identifiable, Hashable {
     /// of their own: the way back from hiding is on the runner the worktree is
     /// on, and this section is not that runner.
     func order(matching query: String = "") -> [Int] {
-        let shown = workspaces.indices.filter { !workspaces[$0].isHidden }
-        return ShellFleet.matching(query, in: shown, of: workspaces)
+        let shown = worktrees.indices.filter { !worktrees[$0].isHidden }
+        return ShellFleet.matching(query, in: shown, of: worktrees)
     }
 
     /// The groups worth drawing, most recently seen first.
@@ -2082,17 +2082,17 @@ extension RunnerDirectory {
     func group() -> ShellServerGroup {
         ShellServerGroup(
             id: runner, name: label, lastSeen: seenAt,
-            workspaces: workspaces.map { workspace in
-                ShellWorkspace(
-                    id: workspace.id,
-                    name: workspace.name,
+            worktrees: worktrees.map { worktree in
+                ShellWorktree(
+                    id: worktree.id,
+                    name: worktree.name,
                     server: label,
-                    tail: workspace.tail,
-                    isHidden: workspace.isHidden,
-                    tabs: workspace.tabs.enumerated().map { index, tab in
+                    tail: worktree.tail,
+                    isHidden: worktree.isHidden,
+                    tabs: worktree.tabs.enumerated().map { index, tab in
                         let aged = RunnerDirectory.decayed(tab.mark)
                         return ShellTab(
-                            id: "\(runner)/\(workspace.id)/\(index)",
+                            id: "\(runner)/\(worktree.id)/\(index)",
                             title: tab.title,
                             mark: aged.mark,
                             wantsAttention: aged.wantsAttention)
@@ -2108,7 +2108,7 @@ extension RunnerDirectory {
     /// disk that activity is gone. Writing the word for a DONE agent
     /// separately from the word for an unread diff is what keeps a remembered
     /// finished turn on the same rung it has always sorted on — see
-    /// `ShellWorkspace.precedence`, and `word(for:)` below, which is the half
+    /// `ShellWorktree.precedence`, and `word(for:)` below, which is the half
     /// of the round trip that makes the two tellable apart.
     static func decayed(_ mark: String) -> (mark: GlanceMark, wantsAttention: Bool) {
         switch mark {

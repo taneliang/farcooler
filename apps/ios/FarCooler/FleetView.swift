@@ -80,7 +80,7 @@ struct FleetView: View {
         // the argument for it was sound while there were screens to push: the
         // path had to sit beside the `Connection`, because every route was an
         // id that means something only against THIS runner's fleet. There are
-        // no routes now. The shell is one screen — a workspace is a position in
+        // no routes now. The shell is one screen — a worktree is a position in
         // it, a tab is a position in it, and moving between them is a gesture
         // rather than a push — so a stack around it would be a stack of one
         // with a navigation bar this design puts at the BOTTOM of the display
@@ -111,17 +111,17 @@ struct FleetView: View {
             .onChange(of: scenePhase) { _, phase in
                 fleet.setActive(phase == .active)
             }
-            // A workspace leaving the fleet no longer needs anything from this
+            // A worktree leaving the fleet no longer needs anything from this
             // view.
             //
             // The rule that stood here truncated the navigation path at the
             // first route naming a worktree the runner had stopped reporting,
             // because the screen underneath was a pane host pointed at a
-            // workspace that no longer existed. The shell has no path to
-            // truncate and cannot be pointed at a workspace that is not in the
+            // worktree that no longer existed. The shell has no path to
+            // truncate and cannot be pointed at a worktree that is not in the
             // fleet: `ShellPosition` is an INDEX, resolved against whatever
             // `ShellFleetMap.of` just built, and `ShellPaneTrack` prunes the
-            // retained panes of terminals that have gone. A workspace removed
+            // retained panes of terminals that have gone. A worktree removed
             // while you are in it is the fleet renumbering under a position,
             // which is the case that shape was chosen for.
             //
@@ -356,7 +356,7 @@ struct FleetView: View {
         guard let id = pendingTerminal, !fleet.runners.isEmpty,
             fleet.runners.allSatisfy({ $0.connection.hasFleet })
         else { return }
-        let all = fleet.entries.flatMap(\.workspace.terminals)
+        let all = fleet.entries.flatMap(\.worktree.terminals)
         guard !all.contains(where: { $0.id == id }) else { return }
         pendingTerminal = nil
     }
@@ -367,7 +367,7 @@ struct FleetView: View {
     /// This is the bug those screens all had. `FleetView` is the app's only
     /// screen — the app opens onto a runner rather than a list of them — so it
     /// has no back button, and the host switcher used to live inside the
-    /// workspace list, which only existed once a connection had succeeded. Any
+    /// worktree list, which only existed once a connection had succeeded. Any
     /// phase short of `.connected` was therefore a room with no doors: "Could
     /// not connect" offered "Try again" and nothing else, and if trying again
     /// could not work — the wrong address, a runner that never
@@ -460,7 +460,7 @@ struct FleetView: View {
 /// one more thing in the same collection. This says what the collection belongs
 /// to.
 ///
-/// Split out of the workspace list because it turned out to be the app's only
+/// Split out of the worktree list because it turned out to be the app's only
 /// escape hatch, and it was attached to the one screen you cannot reach when
 /// you need an escape hatch — the connected one. It is under the connecting,
 /// approval and failure screens now and under nothing else: the connected app
@@ -505,7 +505,7 @@ struct HostSwitcherBar: View {
 ///
 /// Split out of `HostSwitcherBar` when the connected app stopped having a strip
 /// to put one on. The shell is full bleed: the only chrome it has is a piece of
-/// glass at the bottom that IS the workspace, and a second bar under it would
+/// glass at the bottom that IS the worktree, and a second bar under it would
 /// be a second thing competing for the same edge. The connected app carried
 /// this menu as a toolbar item on the overview for a while, and no longer does:
 /// the overview lists every runner, a section each, so a selector choosing
@@ -784,7 +784,7 @@ struct SheetFailureSection: View {
 /// lighter by accident. Its caller now is `ShellPaneChromeModifier` — see that type
 /// for why the door is on the pane's bar rather than on an overview card.
 struct RemoveWorktreeConfirmSheet: View {
-    let workspace: Workspace
+    let worktree: Worktree
     let onRemove: (String) async -> Connection.RemoveWorktreeResult
 
     @Environment(\.dismiss) private var dismiss
@@ -792,17 +792,17 @@ struct RemoveWorktreeConfirmSheet: View {
     @State private var working = false
     @State private var failure: SheetFailure?
 
-    private var matches: Bool { typed == workspace.task }
+    private var matches: Bool { typed == worktree.task }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Text("This workspace has uncommitted changes. Enter its name to remove it.")
+                    Text("This worktree has uncommitted changes. Enter its name to remove it.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
-                TextField("Type \(workspace.task) to confirm", text: $typed)
+                TextField("Type \(worktree.task) to confirm", text: $typed)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 if let failure {
@@ -873,18 +873,18 @@ struct RemoveWorktreeConfirmSheet: View {
 /// worktree only that daemon has, and the screen that starts it can be looking
 /// at a merged fleet: the overview's grid holds cards from every connected
 /// runner. Resolving the connection where the flow runs rather than where the
-/// menu was tapped would run `workspace.remove_worktree` against whichever
+/// menu was tapped would run `worktree.remove` against whichever
 /// runner the shell happened to be resting on, with an id that means something
 /// different over there.
 enum RemoveWorktreeRequest {
     /// "Remove worktree for X?", with a Remove and a Cancel.
-    case confirming(Workspace, on: Connection)
+    case confirming(Worktree, on: Connection)
     /// The typed-name ceremony, which is also where a refusal is reported.
-    case typing(Workspace, on: Connection)
+    case typing(Worktree, on: Connection)
 
-    var workspace: Workspace {
+    var worktree: Worktree {
         switch self {
-        case .confirming(let workspace, _), .typing(let workspace, _): return workspace
+        case .confirming(let worktree, _), .typing(let worktree, _): return worktree
         }
     }
 
@@ -905,7 +905,7 @@ enum RemoveWorktreeRequest {
 /// so the sequence lives here and the doors only decide when to open it.
 ///
 /// The sequence mirrors macOS's: a plain confirmation first, and the typed
-/// name only when the daemon asks for one. `workspace.remove_worktree` is what
+/// name only when the daemon asks for one. `worktree.remove` is what
 /// decides that — a clean worktree goes on an empty `confirm`, a dirty one
 /// answers `confirmationRequired` — so the phone never asks for a typed name
 /// the runner would not have asked for, and never skips one it would.
@@ -924,15 +924,15 @@ struct RemoveWorktreeFlow: ViewModifier {
         return false
     }
 
-    private var typing: Workspace? {
-        if case .typing(let workspace, _) = request { return workspace }
+    private var typing: Worktree? {
+        if case .typing(let worktree, _) = request { return worktree }
         return nil
     }
 
     func body(content: Content) -> some View {
         content
             .confirmationDialog(
-                "Remove worktree for \(request?.workspace.task ?? "")?",
+                "Remove worktree for \(request?.worktree.task ?? "")?",
                 isPresented: Binding(
                     get: { confirming },
                     // A dismissal that is not this flow moving on — the
@@ -946,19 +946,19 @@ struct RemoveWorktreeFlow: ViewModifier {
                 // was BUILT with. Read at tap time instead, the request can
                 // already have been cleared by the same tap's dismissal, and
                 // the Remove button would quietly do nothing.
-                presenting: request?.workspace
-            ) { workspace in
+                presenting: request?.worktree
+            ) { worktree in
                 Button("Remove", role: .destructive) {
                     // Read off the request rather than off the modifier, so the
                     // call goes to the runner the worktree is on. See
                     // `RemoveWorktreeRequest`.
                     guard let connection = request?.connection else { return }
                     Task {
-                        switch await connection.removeWorktree(workspace, confirm: "") {
+                        switch await connection.removeWorktree(worktree, confirm: "") {
                         case .ok:
                             request = nil
                         case .confirmationRequired, .failed:
-                            request = .typing(workspace, on: connection)
+                            request = .typing(worktree, on: connection)
                         }
                     }
                 }
@@ -967,14 +967,14 @@ struct RemoveWorktreeFlow: ViewModifier {
             .sheet(
                 item: Binding(
                     get: { typing },
-                    set: { workspace in if workspace == nil { request = nil } })
-            ) { workspace in
+                    set: { worktree in if worktree == nil { request = nil } })
+            ) { worktree in
                 // The connection is captured from the request that BUILT this
                 // sheet rather than read at tap time, for the same reason the
                 // dialog's `presenting:` exists one modifier up: the answer
                 // arrives after the request has been cleared.
                 let connection = request?.connection
-                RemoveWorktreeConfirmSheet(workspace: workspace) { typed in
+                RemoveWorktreeConfirmSheet(worktree: worktree) { typed in
                     // A sheet with no connection behind it cannot happen — the
                     // request that opened it carried one — and reports the
                     // runner having gone rather than claiming a removal that
@@ -982,7 +982,7 @@ struct RemoveWorktreeFlow: ViewModifier {
                     guard let connection else {
                         return .failed("This runner is no longer connected.", word: nil)
                     }
-                    return await connection.removeWorktree(workspace, confirm: typed)
+                    return await connection.removeWorktree(worktree, confirm: typed)
                 }
             }
     }
@@ -1070,7 +1070,7 @@ struct AddRepositorySheet: View {
     }
 }
 
-struct NewWorkspaceView: View {
+struct NewWorktreeView: View {
     let repositories: [Repository]
     let connection: Connection
     let onCreate: (String, String, String, Bool) async -> Void
@@ -1119,7 +1119,7 @@ struct NewWorkspaceView: View {
     }
 
     /// Both name rules are checked here, not just left to the runner, because
-    /// `createWorkspace` swallows its error: a refused name would close this
+    /// `createWorktree` swallows its error: a refused name would close this
     /// sheet on a worktree that was never created and say nothing about why.
     private var isValid: Bool {
         // Adoption has nothing to validate but the repository: the branch was
@@ -1180,14 +1180,14 @@ struct NewWorkspaceView: View {
 
                     Section {
                         Text(
-                            "A workspace contains one Git worktree and branch. Its name is also "
+                            "A worktree is a directory and branch of its own. Its name is also "
                             + "the folder name and can’t be changed later.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
                 }
             }
-            .navigationTitle("New Workspace")
+            .navigationTitle("New Worktree")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

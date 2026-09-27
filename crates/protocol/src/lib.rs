@@ -211,9 +211,12 @@ pub const CHANNEL: Channel = Channel::from_str_or_local_const(env!("FARCOOLER_CH
 /// Named per user-visible FEATURE, not per method. A client asks "does this
 /// runner do stacks", never "does it implement stack.set_parent".
 pub mod capability {
-    /// Workspaces, repositories and roots. The floor: a daemon without this is
+    /// Worktrees, repositories and roots. The floor: a daemon without this is
     /// not a daemon, and every build that has ever existed has it.
-    pub const WORKSPACES: &str = "workspaces";
+    ///
+    /// The value keeps the old word, *workspace*: shipped clients ask for it
+    /// by this name.
+    pub const WORKTREES: &str = "workspaces";
     /// Terminals, their screens and their input. Also the floor.
     pub const TERMINALS: &str = "terminals";
     /// Agent pane mode: the structured conversation, its prompts and its queue.
@@ -283,10 +286,10 @@ pub mod capability {
     /// Absent means the runner has no tunnel to be admitted to, so the client
     /// keeps reaching it by address exactly as it always did.
     pub const TUNNEL: &str = "tunnel";
-    /// Dragging workspaces into an order and having the runner keep it:
-    /// `workspace.reorder`, and the `Workspace.ordinal` that comes back.
+    /// Dragging worktrees into an order and having the runner keep it:
+    /// `worktree.reorder`, and the `Worktree.ordinal` that comes back.
     ///
-    /// Its own capability rather than part of `WORKSPACES`, for the reason
+    /// Its own capability rather than part of `WORKTREES`, for the reason
     /// `WATCHING`, `TERMINAL_STREAM` and `TUNNEL` above are their own — and
     /// here the silence it prevents is the quietest of the four. `workspaces`
     /// is the floor: every daemon that has ever existed advertises it, and none
@@ -296,11 +299,14 @@ pub mod capability {
     ///
     /// Absent means the runner has no order to keep, so a client leaves the
     /// list where the daemon put it and offers no handles.
-    pub const WORKSPACE_ORDER: &str = "workspace_order";
+    ///
+    /// The value keeps the old word, *workspace*: shipped clients ask for it
+    /// by this name.
+    pub const WORKTREE_ORDER: &str = "workspace_order";
     /// The repository task board: `task.list` through `task.search`, and the
     /// `task_changed` event that says one of them moved.
     ///
-    /// Its own capability rather than part of `WORKSPACES`, for the reason
+    /// Its own capability rather than part of `WORKTREES`, for the reason
     /// every one above it is its own. `workspaces` is the floor — every daemon
     /// that has ever existed advertises it and none before this one has a
     /// board — so a client that folded this in would draw a board against an
@@ -339,7 +345,7 @@ pub mod capability {
     /// then move a task into progress beside a pane that was never told
     /// about it. A client that sends one names this in the request.
     pub const TERMINAL_TASK: &str = "terminal_task";
-    /// `WorkspaceCreate.fork_only`: a create that makes a new branch or
+    /// `WorktreeCreate.fork_only`: a create that makes a new branch or
     /// refuses, never checking out one a remote already has.
     ///
     /// A field, so its own capability, for `LAUNCH_PROMPT`'s reason: an older
@@ -347,7 +353,10 @@ pub mod capability {
     /// which starts a new task on somebody else's commits. A client that
     /// sets it names this in the request, and a client that reads it absent
     /// keeps its own check against the branch list.
-    pub const WORKSPACE_FORK_ONLY: &str = "workspace_fork_only";
+    ///
+    /// The value keeps the old word, *workspace*: shipped clients ask for it
+    /// by this name.
+    pub const WORKTREE_FORK_ONLY: &str = "workspace_fork_only";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -355,9 +364,9 @@ pub mod capability {
     /// hellos, which makes the list diffable in a log.
     pub const ALL: &[&str] =
         &[
-            WORKSPACES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES,
-            ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL, WORKSPACE_ORDER, TASKS,
-            LAUNCH_PROMPT, TERMINAL_TASK, WORKSPACE_FORK_ONLY,
+            WORKTREES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES,
+            ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL, WORKTREE_ORDER, TASKS,
+            LAUNCH_PROMPT, TERMINAL_TASK, WORKTREE_FORK_ONLY,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -369,20 +378,20 @@ pub mod capability {
     /// of shipping an unnamed feature.
     pub fn for_method(method: &str) -> Option<&'static str> {
         Some(match method {
-            "host.get" | "host.health" | "daemon.version" | "daemon.shutdown" => WORKSPACES,
+            "host.get" | "host.health" | "daemon.version" | "daemon.shutdown" => WORKTREES,
             "repository.list"
             | "repository.register"
             | "repository_root.list"
             | "repository_root.add"
             | "repository_root.remove"
-            | "workspace.list"
-            | "workspace.create"
-            | "workspace.hide"
-            | "workspace.unhide"
-            | "workspace.remove_worktree"
-            | "branch.list"
             | "worktree.list"
-            | "worktree.file_search" => WORKSPACES,
+            | "worktree.create"
+            | "worktree.hide"
+            | "worktree.unhide"
+            | "worktree.remove"
+            | "branch.list"
+            | "worktree.discover"
+            | "worktree.file_search" => WORKTREES,
             "terminal.list"
             | "terminal.create"
             | "terminal.screen"
@@ -417,7 +426,7 @@ pub mod capability {
             "theme.list" | "theme.upsert" | "theme.delete" | "settings.set_branch_prefix" => THEMES,
             "client.list" | "client.enroll" | "client.revoke" => ENROLLMENT,
             "client.set_node_key" => TUNNEL,
-            "workspace.reorder" => WORKSPACE_ORDER,
+            "worktree.reorder" => WORKTREE_ORDER,
             "task.list"
             | "task.get"
             | "task.get_by_key"
@@ -530,6 +539,155 @@ mod tests {
         );
     }
 
+    /// Renaming a message is free on the wire only because its field numbers
+    /// do not move: protobuf never sends a name. This pins every number the
+    /// worktree rename touched, read by name out of the compiled descriptor,
+    /// so an app built before the rename still means what it sends.
+    ///
+    /// Each row is (message, field, number, type). A message-typed field also
+    /// pins which message sits at that number, so two renamed messages
+    /// swapped between tags fail here too. The messages renamed whole are
+    /// pinned field by field and must have no field the table does not name,
+    /// so a field dropped or added in passing fails as well.
+    #[test]
+    fn renamed_messages_keep_their_field_numbers() {
+        use prost::Message;
+        use prost_types::FileDescriptorSet;
+
+        let set = FileDescriptorSet::decode(
+            &include_bytes!(concat!(env!("OUT_DIR"), "/farcooler_descriptor.bin"))[..],
+        )
+        .expect("the build writes a descriptor");
+        let file = set
+            .file
+            .iter()
+            .find(|f| f.package() == "farcooler.v1")
+            .expect("farcooler.v1 is in the descriptor");
+        let message = |name: &str| {
+            file.message_type
+                .iter()
+                .find(|m| m.name() == name)
+                .unwrap_or_else(|| panic!("no message {name}"))
+        };
+
+        const WT: &str = ".farcooler.v1.Worktree";
+        let fields: &[(&str, &str, i32, &str)] = &[
+            ("Request", "worktree_create", 23, ".farcooler.v1.WorktreeCreate"),
+            ("Request", "worktree_reorder", 70, ".farcooler.v1.WorktreeReorder"),
+            ("Result", "worktree", 6, WT),
+            ("Result", "worktree_list", 7, ".farcooler.v1.WorktreeList"),
+            ("Result", "discovered_worktree_list", 15, ".farcooler.v1.DiscoveredWorktreeList"),
+            ("Event", "worktree_changed", 13, WT),
+            ("Worktree", "id", 1, ""),
+            ("Worktree", "resource_version", 2, ""),
+            ("Worktree", "repository_id", 3, ""),
+            ("Worktree", "task_name", 4, ""),
+            ("Worktree", "branch", 5, ""),
+            ("Worktree", "worktree_path_token", 6, ""),
+            ("Worktree", "worktree_path", 7, ""),
+            ("Worktree", "state", 8, ".farcooler.v1.WorktreeState"),
+            ("Worktree", "is_main_checkout", 9, ""),
+            ("Worktree", "ordinal", 10, ""),
+            ("WorktreeList", "items", 1, WT),
+            ("WorktreeReorder", "worktree_ids", 1, ""),
+            ("WorktreeCreate", "task_name", 1, ""),
+            ("WorktreeCreate", "branch", 2, ""),
+            ("WorktreeCreate", "base_revision", 3, ""),
+            ("WorktreeCreate", "terminal_preset", 4, ""),
+            ("WorktreeCreate", "adopt_existing", 5, ""),
+            ("WorktreeCreate", "fork_only", 6, ""),
+            ("DiscoveredWorktree", "path", 1, ""),
+            ("DiscoveredWorktree", "branch", 3, ""),
+            ("DiscoveredWorktree", "head", 4, ""),
+            ("DiscoveredWorktree", "suggested_name", 5, ""),
+            ("DiscoveredWorktree", "locked", 6, ""),
+            ("DiscoveredWorktreeList", "items", 1, ".farcooler.v1.DiscoveredWorktree"),
+            ("InboxWorktree", "worktree_id", 1, ""),
+            ("InboxWorktree", "task_name", 2, ""),
+            ("InboxWorktree", "branch", 3, ""),
+            ("InboxWorktree", "changed_since_reviewed", 8, ""),
+            ("InboxWorktree", "insertions", 9, ""),
+            ("InboxWorktree", "deletions", 10, ""),
+            ("ChangesInbox", "items", 1, ".farcooler.v1.InboxWorktree"),
+            ("ChangeSetSelector", "worktree", 1, ".farcooler.v1.Empty"),
+            ("WorktreeFileSearch", "worktree_id", 1, ""),
+            ("Terminal", "worktree_id", 4, ""),
+            ("PaneGroup", "worktree_id", 2, ""),
+            ("PaneGroupList", "worktree_id", 1, ""),
+            ("ChangeSetRequest", "worktree_id", 1, ""),
+            ("ChangeSetChanged", "worktree_id", 1, ""),
+            ("ChangeSet", "worktree_id", 1, ""),
+            ("CommitFilesRequest", "worktree_id", 1, ""),
+            ("FileDiffRequest", "worktree_id", 1, ""),
+            ("ChangesSetBase", "worktree_id", 1, ""),
+            ("ChangesMarkRead", "worktree_id", 1, ""),
+            ("Task", "worktree_id", 11, ""),
+            ("TaskCreate", "worktree_id", 7, ""),
+            ("TaskUpdate", "worktree_id", 8, ""),
+        ];
+        for &(m, f, number, type_name) in fields {
+            let field = message(m)
+                .field
+                .iter()
+                .find(|x| x.name() == f)
+                .unwrap_or_else(|| panic!("{m} has no field {f}"));
+            assert_eq!(field.number(), number, "{m}.{f} moved off tag {number}");
+            if !type_name.is_empty() {
+                assert_eq!(field.type_name(), type_name, "{m}.{f} carries the wrong message");
+            }
+        }
+
+        // Renamed whole: every field is in the table above, so none went
+        // missing and none arrived with the rename.
+        for m in [
+            "Worktree",
+            "WorktreeList",
+            "WorktreeReorder",
+            "WorktreeCreate",
+            "DiscoveredWorktree",
+            "DiscoveredWorktreeList",
+            "InboxWorktree",
+        ] {
+            let mut have: Vec<_> =
+                message(m).field.iter().map(|x| (x.name().to_string(), x.number())).collect();
+            let mut want: Vec<_> = fields
+                .iter()
+                .filter(|r| r.0 == m)
+                .map(|r| (r.1.to_string(), r.2))
+                .collect();
+            have.sort();
+            want.sort();
+            assert_eq!(have, want, "{m} is not the message it was before the rename");
+        }
+
+        let enum_values = |name: &str| -> Vec<(String, i32)> {
+            file.enum_type
+                .iter()
+                .find(|e| e.name() == name)
+                .unwrap_or_else(|| panic!("no enum {name}"))
+                .value
+                .iter()
+                .map(|v| (v.name().to_string(), v.number()))
+                .collect()
+        };
+        let state: Vec<(String, i32)> = [
+            ("WORKTREE_STATE_UNSPECIFIED", 0),
+            ("WORKTREE_STATE_CREATING", 1),
+            ("WORKTREE_STATE_READY", 2),
+            ("WORKTREE_STATE_ACTIVE", 3),
+            ("WORKTREE_STATE_ERROR", 4),
+            ("WORKTREE_STATE_HIDDEN", 5),
+            ("WORKTREE_STATE_WORKTREE_MISSING", 6),
+        ]
+        .map(|(n, v)| (n.to_string(), v))
+        .into();
+        assert_eq!(enum_values("WorktreeState"), state, "WorktreeState's numbers moved");
+        assert!(
+            enum_values("ErrorCode").contains(&("ERROR_CODE_WORKTREES_EXIST".to_string(), 20)),
+            "ERROR_CODE_WORKTREES_EXIST moved off 20"
+        );
+    }
+
     /// Every channel, so a match arm added to one list and forgotten in another
     /// fails here rather than shipping.
     const ALL_CHANNELS: [Channel; 4] =
@@ -570,7 +728,8 @@ mod tests {
         // it does not advertise, so the typo would present as a feature that
         // silently does not exist.
         for method in [
-            "workspace.create",
+            "worktree.create",
+            "worktree.discover",
             "terminal.create",
             "terminal.paste_file",
             "terminal.agent_prompt",
@@ -582,7 +741,7 @@ mod tests {
             "client.enroll",
             "client.set_node_key",
             "terminal.attach",
-            "workspace.reorder",
+            "worktree.reorder",
             "task.create",
             "task.note",
         ] {
@@ -602,10 +761,10 @@ mod tests {
 
     #[test]
     fn the_floor_capabilities_are_always_present() {
-        // Every daemon that has ever existed does workspaces and terminals, so
+        // Every daemon that has ever existed does worktrees and terminals, so
         // a client may assume them without asking. If either ever left this
         // list, every shipped client would break at once.
-        assert!(capability::ALL.contains(&capability::WORKSPACES));
+        assert!(capability::ALL.contains(&capability::WORKTREES));
         assert!(capability::ALL.contains(&capability::TERMINALS));
     }
 

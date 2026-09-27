@@ -12,7 +12,7 @@ struct TerminalPane: View {
     @ObservedObject private var preferences = Preferences.shared
 
     let terminal: Terminal
-    let workspace: Workspace
+    let worktree: Worktree
     let binary: String?
     let environment: [String: String]
     let hostArguments: [String]
@@ -109,8 +109,8 @@ struct TerminalPane: View {
         .prefixHint()
         // The window's own title bar, which macOS already draws. Free, native,
         // and it costs the content no vertical space.
-        .navigationTitle(workspace.windowTitle)
-        .navigationSubtitle(workspace.windowSubtitle)
+        .navigationTitle(worktree.windowTitle)
+        .navigationSubtitle(worktree.windowSubtitle)
     }
 
     /// The only state left that needs saying out loud.
@@ -142,7 +142,7 @@ struct TerminalPane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: Palette.background))
-        .navigationTitle(workspace.windowTitle)
-        .navigationSubtitle(workspace.windowSubtitle)
+        .navigationTitle(worktree.windowTitle)
+        .navigationSubtitle(worktree.windowSubtitle)
     }
 }

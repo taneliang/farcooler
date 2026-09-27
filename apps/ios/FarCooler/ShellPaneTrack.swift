@@ -13,7 +13,7 @@ import SwiftUI
 //   a tmux renegotiation. The screen is gone and the rule is not: it is
 //   `ShellRetainedPane` below.
 // - A route whose LOOKUP drove the view structure threw every pane away the
-//   moment the lookup stopped succeeding — `WorkspaceRoute`, which latched the
+//   moment the lookup stopped succeeding — `WorktreeRoute`, which latched the
 //   starting pane once for exactly this reason. There are no routes now, and
 //   the same trap is here as `ShellPaneRealView`'s `init` latch.
 // - `Connection.swift:178-206` — writing focus back into the navigation path
@@ -41,7 +41,7 @@ import SwiftUI
 //
 // It is a `ZStack` of absolutely-placed panes rather than the literal `HStack`
 // the mechanics brief describes because the two sequences the track walks are
-// not one order. From the bar the neighbours are the adjacent WORKSPACES at
+// not one order. From the bar the neighbours are the adjacent WORKTREES at
 // their first tabs; from the content they are the adjacent TABS along a flat
 // sequence through the whole fleet. One container cannot be laid out in both
 // orders at once, and a container that RE-ORDERS to answer the gesture is the
@@ -68,16 +68,16 @@ import SwiftUI
 /// swapped them would compile.
 struct ShellPaneSlot {
     var position: ShellPosition
-    var workspace: ShellWorkspace
+    var worktree: ShellWorktree
     var tab: ShellTab
-    /// This pane belongs to a workspace other than the one at rest, so its
-    /// title names that workspace: the crossing has to be visible while it is
+    /// This pane belongs to a worktree other than the one at rest, so its
+    /// title names that worktree: the crossing has to be visible while it is
     /// still abandonable.
     var isCrossing: Bool
     /// The room the shell's own furniture takes out of this pane.
     ///
     /// The display's safe area at the top, and at the bottom the safe area
-    /// plus the bar. A pane is laid out FULL BLEED — a workspace fills the
+    /// plus the bar. A pane is laid out FULL BLEED — a worktree fills the
     /// screen, which is the whole point of the shell — so this is not layout,
     /// it is the pane being told where the glass is, exactly the way the pane
     /// host it replaced told its panes where the navigation bar and the tab
@@ -204,9 +204,9 @@ extension EnvironmentValues {
 private struct ShellRetainedPane: Identifiable, Hashable {
     /// The tab this pane is, for the whole of its life.
     let tab: String
-    /// The workspace it belongs to, for the scope rule below. By id, because
-    /// a workspace index is not stable across a poll.
-    let workspace: String
+    /// The worktree it belongs to, for the scope rule below. By id, because
+    /// a worktree index is not stable across a poll.
+    let worktree: String
 
     var id: String { tab }
 }
@@ -322,7 +322,7 @@ struct ShellPaneTrack<Pane: View>: View {
             //
             // At rest all three of these are identities: a radius of zero, a
             // scale of one, and a ground the same color as the one behind it.
-            // That is what keeps a tab-to-tab swipe inside a workspace exactly
+            // That is what keeps a tab-to-tab swipe inside a worktree exactly
             // as light as it was — `crossing` is zero for one of those, and so
             // is all of this.
             .background(Themes.shared.current.backgroundColor)
@@ -356,14 +356,14 @@ struct ShellPaneTrack<Pane: View>: View {
 
     /// Every tab the fleet currently holds, as something `onChange` can
     /// compare. Sorted, because `onChange` wants a stable order and a
-    /// workspace gaining a terminal must not read as every pane moving.
+    /// worktree gaining a terminal must not read as every pane moving.
     private var fleetTabIDs: [String] {
-        fleet.workspaces.flatMap { $0.tabs.map(\.id) }.sorted()
+        fleet.worktrees.flatMap { $0.tabs.map(\.id) }.sorted()
     }
 
     /// The three positions the track is drawing, nearest neighbour first.
     private var slots: [(rank: Int, step: ShellStep?)] {
-        [(-1, previous), (0, ShellStep(position: position, crossesWorkspace: false)), (1, next)]
+        [(-1, previous), (0, ShellStep(position: position, crossesWorktree: false)), (1, next)]
     }
 
     /// Everything that has to be in the view tree this pass: the panes worth
@@ -386,7 +386,7 @@ struct ShellPaneTrack<Pane: View>: View {
 
     private func entry(at position: ShellPosition) -> ShellRetainedPane? {
         guard fleet.contains(position), let tab = fleet.tab(at: position) else { return nil }
-        return ShellRetainedPane(tab: tab.id, workspace: fleet.workspaces[position.workspace].id)
+        return ShellRetainedPane(tab: tab.id, worktree: fleet.worktrees[position.worktree].id)
     }
 
     /// Whether a retained pane is still worth keeping mounted.
@@ -400,12 +400,12 @@ struct ShellPaneTrack<Pane: View>: View {
     /// record of. `ShellFleet.position(ofTab:)` answering nil is the whole
     /// test.
     ///
-    /// **It is near.** The workspace it belongs to is the one you are in or one
-    /// of its two neighbours. Before the shell, leaving a workspace was popping
+    /// **It is near.** The worktree it belongs to is the one you are in or one
+    /// of its two neighbours. Before the shell, leaving a worktree was popping
     /// a route, which destroyed every pane in it outright; keeping the
-    /// neighbours means a swipe across a workspace boundary and straight back
+    /// neighbours means a swipe across a worktree boundary and straight back
     /// costs nothing, which is the gesture the shell has that the stack did
-    /// not. Two workspaces further and the panes go, because forty workspaces
+    /// not. Two worktrees further and the panes go, because forty worktrees
     /// of retained terminals is forty ssh streams and the reason a phone gets
     /// warm.
     ///
@@ -416,16 +416,16 @@ struct ShellPaneTrack<Pane: View>: View {
     private func inScope(_ entry: ShellRetainedPane) -> Bool {
         guard !fleet.isEmpty else { return true }
         guard fleet.position(ofTab: entry.tab) != nil else { return false }
-        return nearby.contains(entry.workspace)
+        return nearby.contains(entry.worktree)
     }
 
-    /// The workspace at rest and its two neighbours, by id.
+    /// The worktree at rest and its two neighbours, by id.
     private var nearby: Set<String> {
-        let here = position.workspace
+        let here = position.worktree
         return Set(
             (here - 1...here + 1)
-                .filter { fleet.workspaces.indices.contains($0) }
-                .map { fleet.workspaces[$0].id })
+                .filter { fleet.worktrees.indices.contains($0) }
+                .map { fleet.worktrees[$0].id })
     }
 
     /// Remember the pane at rest, and forget the ones that have gone.
@@ -457,21 +457,21 @@ struct ShellPaneTrack<Pane: View>: View {
     )? {
         for candidate in slots {
             guard let step = candidate.step, let tab = fleet.tab(at: step.position),
-                tab.id == entry.id, let workspace = workspace(at: step.position)
+                tab.id == entry.id, let worktree = worktree(at: step.position)
             else { continue }
-            // A tab inside this workspace comes in at 0.72 — real, mounted and
+            // A tab inside this worktree comes in at 0.72 — real, mounted and
             // moving, but visibly not the page you are on yet. A tab in the
-            // NEXT workspace comes in whole, because it is not arriving alone:
+            // NEXT worktree comes in whole, because it is not arriving alone:
             // its bar is arriving beside it, at full strength, and a page at
             // 72% under a bar at 100% is two things sliding in rather than one
             // screen.
             let weight: Double =
-                candidate.rank == 0 ? 1 : (step.crossesWorkspace ? 1 : 0.72)
+                candidate.rank == 0 ? 1 : (step.crossesWorktree ? 1 : 0.72)
             return (
                 candidate.rank, weight,
                 ShellPaneSlot(
-                    position: step.position, workspace: workspace, tab: tab,
-                    isCrossing: step.position.workspace != position.workspace,
+                    position: step.position, worktree: worktree, tab: tab,
+                    isCrossing: step.position.worktree != position.worktree,
                     chrome: chrome,
                     // Read off the RANK and nothing else. The pane at rest is
                     // the pane at slot zero, and `position` is re-seated
@@ -487,11 +487,11 @@ struct ShellPaneTrack<Pane: View>: View {
     /// and emphatically not visible.
     private func offTrack(_ entry: ShellRetainedPane) -> ShellPaneSlot {
         let at = fleet.position(ofTab: entry.tab)
-        let workspace = at.flatMap(self.workspace(at:))
+        let worktree = at.flatMap(self.worktree(at:))
         return ShellPaneSlot(
             position: at ?? position,
-            workspace: workspace
-                ?? ShellWorkspace(id: entry.workspace, name: "", tabs: []),
+            worktree: worktree
+                ?? ShellWorktree(id: entry.worktree, name: "", tabs: []),
             // Nothing is known about a tab that is not in the fleet any more,
             // and this one is drawn nowhere regardless. `core: nil` is the
             // mark for declining to state the agent axis rather than claiming
@@ -504,8 +504,8 @@ struct ShellPaneTrack<Pane: View>: View {
             isVisible: false)
     }
 
-    private func workspace(at position: ShellPosition) -> ShellWorkspace? {
-        fleet.workspaces.indices.contains(position.workspace)
-            ? fleet.workspaces[position.workspace] : nil
+    private func worktree(at position: ShellPosition) -> ShellWorktree? {
+        fleet.worktrees.indices.contains(position.worktree)
+            ? fleet.worktrees[position.worktree] : nil
     }
 }

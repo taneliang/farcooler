@@ -82,7 +82,7 @@ data class TaskRow(
     val intent: String = "",
     val labels: List<String> = emptyList(),
     val acceptance: List<TaskAcceptanceLine> = emptyList(),
-    val workspaceId: String? = null,
+    val worktreeId: String? = null,
     /** Unix milliseconds the task was filed, or null from a runner too old to say. */
     val createdAt: Long? = null,
     /**
@@ -282,7 +282,7 @@ data class TaskBoard(
                     labels = (t["labels"] as? JsonArray).orEmpty()
                         .mapNotNull { it.jsonPrimitive.contentOrNull },
                     acceptance = acceptance,
-                    workspaceId = text("workspace_id"),
+                    worktreeId = text("worktree_id"),
                     // Absent, `null`, or an older runner's zero: not said.
                     // No time line rather than "Added 56y ago".
                     createdAt = t["created_at"]?.jsonPrimitive?.longOrNull?.takeIf { it > 0 },
@@ -458,8 +458,8 @@ class BoardSweep {
 }
 
 /**
- * Where a board's Agent button lands: the pane's workspace on its runner, if the
+ * Where a board's Agent button lands: the pane's worktree on its runner, if the
  * runner's fleet still has that pane. Null is "the pane has closed".
  */
-fun landingWorkspace(terminalId: String, workspaces: List<Workspace>): String? =
-    workspaces.firstOrNull { workspace -> workspace.terminals.any { it.id == terminalId } }?.id
+fun landingWorktree(terminalId: String, worktrees: List<Worktree>): String? =
+    worktrees.firstOrNull { worktree -> worktree.terminals.any { it.id == terminalId } }?.id

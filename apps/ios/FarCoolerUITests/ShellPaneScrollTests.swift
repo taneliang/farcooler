@@ -120,7 +120,7 @@ final class ShellPaneScrollTests: XCTestCase {
         let app = launch(["-shell-harness", "-shell-scroll"])
         let start = try state(app)
         XCTAssertEqual(start["tab"], 0)
-        XCTAssertGreaterThan(start["tabs"] ?? 0, 1, "this workspace has nowhere to turn to")
+        XCTAssertGreaterThan(start["tabs"] ?? 0, 1, "this worktree has nowhere to turn to")
 
         swipeAcross(app, toward: -1)
         XCTAssertEqual(
@@ -398,8 +398,8 @@ final class ShellPaneScrollTests: XCTestCase {
                 "The shell never rendered against \(runner); run "
                     + "./scripts/demo-host.sh first, then ./scripts/ios-ui-tests.sh.")
         }
-        // The diff is tab 0 of every workspace — `ShellFleetMap` puts Changes
-        // first — so walking backward inside this workspace reaches it, and
+        // The diff is tab 0 of every worktree — `ShellFleetMap` puts Changes
+        // first — so walking backward inside this worktree reaches it, and
         // arriving there is also how this test knows the fleet has one.
         var guard_ = 0
         while (try state(app)["tab"] ?? 0) > 0, guard_ < 6 {
@@ -409,14 +409,14 @@ final class ShellPaneScrollTests: XCTestCase {
         try XCTSkipUnless(
             (try state(app)["tab"] ?? -1) == 0, "could not reach the diff on this runner")
         // FORWARD, which always has somewhere to go: the flat sequence runs
-        // off the end of a workspace into the next one, so a demo fleet whose
-        // first workspace is a diff and nothing else is still a fleet this can
+        // off the end of a worktree into the next one, so a demo fleet whose
+        // first worktree is a diff and nothing else is still a fleet this can
         // be asked about. What is asserted is that the shell MOVED, not which
         // way — `ShellNavigationTests` owns the sequence.
         let before = try state(app)
         try XCTSkipUnless(
-            (before["tabs"] ?? 0) > 1 || (before["workspaces"] ?? 0) > 1,
-            "one workspace with one tab: there is nowhere to turn to")
+            (before["tabs"] ?? 0) > 1 || (before["worktrees"] ?? 0) > 1,
+            "one worktree with one tab: there is nowhere to turn to")
         func place() -> String { "\(try? state(app)["ws"] ?? -1)/\(try? state(app)["tab"] ?? -1)" }
         let started = place()
 

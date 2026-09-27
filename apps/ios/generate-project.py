@@ -40,7 +40,7 @@ SOURCES = [
     "RunnerStatusRow.swift",
     # `Model.swift` was here. It is `CoreModel.swift` in `AGENTKIT_SOURCES`
     # below now — moved so the AgentKit test target can decode a fixture into
-    # `Fleet`, `Workspace` and `Terminal`, which nothing could while they sat in
+    # `Fleet`, `Worktree` and `Terminal`, which nothing could while they sat in
     # this list. See its own header for why that move is not a merge with the
     # Mac's model.
     "Notifications.swift",
@@ -54,16 +54,16 @@ SOURCES = [
     "VTCore.swift",
     "TerminalSession.swift",
     "TerminalView.swift",
-    # One tab of a workspace, and which tab somebody chose. Both were nested in
+    # One tab of a worktree, and which tab somebody chose. Both were nested in
     # screens that no longer exist — `Pane` in `WorkspaceView.swift`, the pane
     # host the shell replaced, and `PaneFocus` as `Route.Focus` inside
     # `FleetView`'s navigation enum. `TerminalTabStrip.swift` went with them:
-    # the ribbon and the column on the shell's bar are what a workspace's tabs
+    # the ribbon and the column on the shell's bar are what a worktree's tabs
     # look like now.
     "Pane.swift",
     "PaneFocus.swift",
-    # The navigation shell: one bar that IS the workspace, the column of its
-    # tabs, and the all-workspaces view. It IS the app's navigation now —
+    # The navigation shell: one bar that IS the worktree, the column of its
+    # tabs, and the all-worktrees view. It IS the app's navigation now —
     # `-shell-harness` stands it on a canned fleet and is the only flag left.
     # Its pure model lives in AgentKit so `swift test` can reach it — only the
     # views are here.
@@ -145,8 +145,8 @@ AGENTKIT_SOURCES = [
     # only UI tests — and these are the rules with no screen in them. See
     # `ShellNavigationTests`.
     "ShellNavigation.swift",
-    # What a workspace and a tab are CALLED once the shell holds more than one
-    # runner's fleet. A workspace id is eight hex characters minted per daemon,
+    # What a worktree and a tab are CALLED once the shell holds more than one
+    # runner's fleet. A worktree id is eight hex characters minted per daemon,
     # so two runners can mint the same one — and these strings are SwiftUI
     # identities and the key a mounted pane is retained under. Here for
     # `ShellNavigation.swift`'s reason: composing an id has no screen in it, and
@@ -321,7 +321,7 @@ AGENTKIT_SOURCES = [
     # keep in `SOURCES`. Only in THIS list, and that is the point of the move
     # rather than a detail of it: everything in the file is `internal`, so the
     # Mac — which depends on AgentKit as a real module and has its own
-    # `Workspace` and `Terminal` that DISAGREE with these — cannot see a single
+    # `Worktree` and `Terminal` that DISAGREE with these — cannot see a single
     # name from it. The phone compiles AgentKit's sources into its own module,
     # so on this side it is exactly the file it was, under a new name. What it
     # bought is a test: `FleetDecodeTests` decodes a fixture transcribed from
@@ -379,7 +379,7 @@ AGENTKIT_SOURCES = [
     # `apps/macos` imports AgentKit as a module and cannot.
     "NodeKeyStatus.swift",
     # The review comment queue, which the phone wrote and the Mac's diff pane
-    # now shares. Only in THIS list: it holds unsent notes keyed by workspace,
+    # now shares. Only in THIS list: it holds unsent notes keyed by worktree,
     # and the watch and the two extensions neither review a diff nor have a
     # composer to put one in. The send itself is a closure the app supplies —
     # `ReviewCommentQueue.phone` in `ChangesReview.swift` — so nothing in
@@ -596,7 +596,7 @@ UI_TEST_SOURCES = [
     # The overview card's long press. Needs no runner — it presses a card in
     # the canned fleet and reads the menu — so it cannot skip itself green when
     # the demo daemon is down.
-    "ShellWorkspaceMenuTests.swift",
+    "ShellWorktreeMenuTests.swift",
     # Where the overview's cards actually land, measured off the running app.
     # `ShellGridTests` proves the arithmetic; this proves the grid is laid out
     # by it. Needs no runner either.

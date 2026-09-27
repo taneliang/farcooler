@@ -1,6 +1,6 @@
 //! Keeping the sidebar and git in agreement about which worktrees exist.
 //!
-//! Git is the source of truth. The `workspaces` table is a cache keyed by
+//! Git is the source of truth. The `worktrees` table is a cache keyed by
 //! canonical worktree path, plus the things only Far Cooler knows: terminals,
 //! layouts, agent sessions, and whether the user hid the row.
 //!
@@ -29,10 +29,10 @@ pub struct Outcome {
     pub adopted: usize,
     pub dropped: usize,
     pub missing: usize,
-    /// A workspace that was flagged `worktree_missing` and just had that flag
+    /// A worktree that was flagged `worktree_missing` and just had that flag
     /// cleared because its worktree came back. Counted separately from
     /// `adopted` — nothing was created — but it still has to make
-    /// `is_quiet()` false: a client showing "missing" for a workspace that
+    /// `is_quiet()` false: a client showing "missing" for a worktree that
     /// just stopped being missing is stale, not merely uninformed.
     pub recovered: usize,
     /// An adopt attempt that lost a race against the unique index on
@@ -101,7 +101,7 @@ fn branch_of(worktree: &git::WorktreeInfo) -> String {
 /// Reconcile one repository against git.
 ///
 /// Takes the repository's lock, so it cannot observe the gap inside
-/// `Service::create_workspace` between `git worktree add` and the row insert.
+/// `Service::create_worktree` between `git worktree add` and the row insert.
 pub async fn repository(svc: &Service, repository_id: Uuid) -> Result<Outcome> {
     let lock = svc.repo_lock(repository_id);
     let _guard = lock.lock().await;
@@ -110,7 +110,7 @@ pub async fn repository(svc: &Service, repository_id: Uuid) -> Result<Outcome> {
     let repo_path = svc.repository_worktree(&repo);
 
     let found = git::list_worktrees(&repo_path).await?;
-    let known = svc.store.list_workspaces_for_repository(repository_id)?;
+    let known = svc.store.list_worktrees_for_repository(repository_id)?;
 
     let mut outcome = Outcome::default();
 
@@ -139,13 +139,13 @@ pub async fn repository(svc: &Service, repository_id: Uuid) -> Result<Outcome> {
             // forever.
             //
             // The name is not among them, and there used to be a careful
-            // carve-out here explaining which workspaces could have theirs
-            // re-derived from git and which could not. A workspace is named by
+            // carve-out here explaining which worktrees could have theirs
+            // re-derived from git and which could not. A worktree is named by
             // its worktree directory now, read on every access, so there is no
             // stored name to go stale and nothing to decide.
             if let Some(ws) = known.iter().find(|w| canonical_or_raw(&w.worktree_path) == path) {
                 if ws.branch != branch || ws.is_main_checkout != worktree.is_main {
-                    match svc.store.set_workspace_identity(
+                    match svc.store.set_worktree_identity(
                         ws.id,
                         ws.resource_version,
                         &branch,
@@ -153,7 +153,7 @@ pub async fn repository(svc: &Service, repository_id: Uuid) -> Result<Outcome> {
                     ) {
                         Ok(_) => outcome.healed += 1,
                         Err(e) => {
-                            tracing::warn!(path = %worktree.path, error = ?e, "could not heal a workspace against git")
+                            tracing::warn!(path = %worktree.path, error = ?e, "could not heal a worktree against git")
                         }
                     }
                 }
@@ -182,7 +182,7 @@ pub async fn repository(svc: &Service, repository_id: Uuid) -> Result<Outcome> {
             continue;
         }
 
-        match svc.store.create_workspace(
+        match svc.store.create_worktree(
             repository_id,
             &branch,
             &worktree.path,
@@ -216,27 +216,27 @@ pub async fn repository(svc: &Service, repository_id: Uuid) -> Result<Outcome> {
             // the flag, rather than leaving a row broken forever because it was
             // once missing for a tick.
             if ws.worktree_missing {
-                match svc.store.set_workspace_flags(ws.id, ws.resource_version, ws.hidden, false) {
+                match svc.store.set_worktree_flags(ws.id, ws.resource_version, ws.hidden, false) {
                     Ok(_) => outcome.recovered += 1,
-                    Err(e) => tracing::warn!(error = ?e, "could not clear a recovered workspace"),
+                    Err(e) => tracing::warn!(error = ?e, "could not clear a recovered worktree"),
                 }
             }
             continue;
         }
 
-        // The whole test. Agent sessions hang off terminals, so a workspace with
+        // The whole test. Agent sessions hang off terminals, so a worktree with
         // no terminals has no transcript either.
-        let empty = svc.store.list_terminals_for_workspace(ws.id)?.is_empty();
+        let empty = svc.store.list_terminals_for_worktree(ws.id)?.is_empty();
 
         if empty {
-            match svc.store.delete_workspace(ws.id, ws.resource_version) {
+            match svc.store.delete_worktree(ws.id, ws.resource_version) {
                 Ok(()) => outcome.dropped += 1,
-                Err(e) => tracing::warn!(error = ?e, "could not drop a vanished workspace"),
+                Err(e) => tracing::warn!(error = ?e, "could not drop a vanished worktree"),
             }
         } else if !ws.worktree_missing {
-            match svc.store.set_workspace_flags(ws.id, ws.resource_version, ws.hidden, true) {
+            match svc.store.set_worktree_flags(ws.id, ws.resource_version, ws.hidden, true) {
                 Ok(_) => outcome.missing += 1,
-                Err(e) => tracing::warn!(error = ?e, "could not flag a vanished workspace"),
+                Err(e) => tracing::warn!(error = ?e, "could not flag a vanished worktree"),
             }
         }
     }
@@ -271,7 +271,7 @@ mod tests {
     fn names(svc: &Service, repo: Uuid) -> Vec<String> {
         let mut n: Vec<String> = svc
             .store
-            .list_workspaces_for_repository(repo)
+            .list_worktrees_for_repository(repo)
             .unwrap()
             .into_iter()
             .map(|w| w.name())
@@ -283,7 +283,7 @@ mod tests {
     #[tokio::test]
     async fn registering_a_repository_adopts_its_main_checkout() {
         let (_dir, svc, repo) = fixture().await;
-        let all = svc.store.list_workspaces_for_repository(repo).unwrap();
+        let all = svc.store.list_worktrees_for_repository(repo).unwrap();
         assert_eq!(all.len(), 1, "the main checkout, and only it: {all:?}");
         assert!(all[0].is_main_checkout, "flagged, not inferred from its name");
     }
@@ -379,7 +379,7 @@ mod tests {
 
         let ws = svc
             .store
-            .list_workspaces_for_repository(repo)
+            .list_worktrees_for_repository(repo)
             .unwrap()
             .into_iter()
             .find(|w| !w.is_main_checkout)
@@ -398,7 +398,7 @@ mod tests {
         assert_eq!(out.dropped, 0, "a row with a terminal in it is never deleted for us");
         assert_eq!(out.missing, 1);
 
-        let after = svc.store.get_workspace(ws.id).unwrap();
+        let after = svc.store.get_worktree(ws.id).unwrap();
         assert!(after.worktree_missing);
     }
 
@@ -413,11 +413,11 @@ mod tests {
     /// This is what the `live` set's own `!w.prunable` filter
     /// (`reconcile.rs`, "what we have that git does not") is for, and unlike
     /// the adopt-side filter it had no test: deleting it left `live` including
-    /// the prunable path, so `gone` came out false and this workspace was
+    /// the prunable path, so `gone` came out false and this worktree was
     /// never flagged. Deleting `.filter(|w| !w.prunable)` from `live` turns
     /// this red. Verified by hand, repeatedly.
     #[tokio::test]
-    async fn a_workspace_whose_worktree_goes_prunable_is_flagged_missing() {
+    async fn a_worktree_whose_worktree_goes_prunable_is_flagged_missing() {
         let (dir, svc, repo) = fixture().await;
         let side = dir.path().join("side");
         let repo_path = dir.path().join("repo");
@@ -428,7 +428,7 @@ mod tests {
 
         let ws = svc
             .store
-            .list_workspaces_for_repository(repo)
+            .list_worktrees_for_repository(repo)
             .unwrap()
             .into_iter()
             .find(|w| !w.is_main_checkout)
@@ -447,14 +447,14 @@ mod tests {
         assert_eq!(out.dropped, 0, "a row with a terminal in it is never deleted for us");
         assert_eq!(out.missing, 1, "prunable is still gone, even though the directory remains");
 
-        let after = svc.store.get_workspace(ws.id).unwrap();
+        let after = svc.store.get_worktree(ws.id).unwrap();
         assert!(after.worktree_missing);
     }
 
     /// A worktree that comes back clears the flag rather than staying broken.
     ///
     /// Also the only test that observes `Outcome::recovered`: `is_quiet()`
-    /// folds it in specifically so that a pass which resurrects a workspace
+    /// folds it in specifically so that a pass which resurrects a worktree
     /// never reports quiet, since Task 5 gates broadcasting on that call.
     #[tokio::test]
     async fn a_returning_worktree_stops_being_missing() {
@@ -468,7 +468,7 @@ mod tests {
 
         let ws = svc
             .store
-            .list_workspaces_for_repository(repo)
+            .list_worktrees_for_repository(repo)
             .unwrap()
             .into_iter()
             .find(|w| !w.is_main_checkout)
@@ -487,7 +487,7 @@ mod tests {
             .unwrap();
         let out = repository(&svc, repo).await.unwrap();
 
-        assert!(!svc.store.get_workspace(ws.id).unwrap().worktree_missing);
+        assert!(!svc.store.get_worktree(ws.id).unwrap().worktree_missing);
         assert_eq!(out.recovered, 1);
         assert!(!out.is_quiet(), "a recovery is news, not nothing");
     }
@@ -507,15 +507,15 @@ mod tests {
 
         let ws = svc
             .store
-            .list_workspaces_for_repository(repo)
+            .list_worktrees_for_repository(repo)
             .unwrap()
             .into_iter()
             .find(|w| !w.is_main_checkout)
             .unwrap();
-        svc.store.set_workspace_flags(ws.id, ws.resource_version, true, false).unwrap();
+        svc.store.set_worktree_flags(ws.id, ws.resource_version, true, false).unwrap();
 
         repository(&svc, repo).await.unwrap();
-        assert!(svc.store.get_workspace(ws.id).unwrap().hidden);
+        assert!(svc.store.get_worktree(ws.id).unwrap().hidden);
     }
 
     /// A prunable record can point at a directory that still exists: git marks
@@ -547,16 +547,16 @@ mod tests {
     #[tokio::test]
     async fn a_pre_0006_row_gets_its_main_checkout_flag_healed() {
         let (_dir, svc, repo) = fixture().await;
-        let all = svc.store.list_workspaces_for_repository(repo).unwrap();
+        let all = svc.store.list_worktrees_for_repository(repo).unwrap();
         assert_eq!(all.len(), 1, "just the main checkout: {all:?}");
         let main = &all[0];
         assert!(main.is_main_checkout, "adoption must have gotten this right to start with");
 
         svc.store
-            .set_workspace_identity(main.id, main.resource_version, &main.branch, false)
+            .set_worktree_identity(main.id, main.resource_version, &main.branch, false)
             .unwrap();
         assert!(
-            !svc.store.get_workspace(main.id).unwrap().is_main_checkout,
+            !svc.store.get_worktree(main.id).unwrap().is_main_checkout,
             "the test must actually start from the wrong flag to mean anything"
         );
 
@@ -565,7 +565,7 @@ mod tests {
         assert_eq!(out.healed, 1, "{out:?}");
         assert!(!out.is_quiet(), "a row correcting itself is news, not nothing: {out:?}");
         assert!(
-            svc.store.get_workspace(main.id).unwrap().is_main_checkout,
+            svc.store.get_worktree(main.id).unwrap().is_main_checkout,
             "the pass must have corrected the row, not merely counted the disagreement"
         );
     }
@@ -573,7 +573,7 @@ mod tests {
     /// git owns which branch a worktree is on; the row is a cache of that.
     ///
     /// Nothing but this pass ever revisits `branch` once the row exists —
-    /// `Store::update_workspace` has no production caller at all — so a
+    /// `Store::update_worktree` has no production caller at all — so a
     /// `git checkout` typed by hand in the main checkout used to leave the
     /// sidebar naming whatever branch happened to be current when the
     /// repository was registered, permanently.
@@ -583,7 +583,7 @@ mod tests {
     #[tokio::test]
     async fn a_branch_switched_by_hand_is_picked_up() {
         let (dir, svc, repo) = fixture().await;
-        let all = svc.store.list_workspaces_for_repository(repo).unwrap();
+        let all = svc.store.list_worktrees_for_repository(repo).unwrap();
         assert_eq!(all.len(), 1, "just the main checkout: {all:?}");
         let main = &all[0];
         assert_eq!(main.branch, "main", "the fixture starts on main");
@@ -597,7 +597,7 @@ mod tests {
         assert_eq!(out.healed, 1, "{out:?}");
         assert!(!out.is_quiet(), "a row correcting itself is news, not nothing: {out:?}");
         assert_eq!(
-            svc.store.get_workspace(main.id).unwrap().branch,
+            svc.store.get_worktree(main.id).unwrap().branch,
             "feat/switched",
             "the pass must have corrected the row, not merely counted the disagreement"
         );
@@ -614,7 +614,7 @@ mod tests {
     async fn a_detached_main_checkout_heals_to_its_commit() {
         let (dir, svc, repo) = fixture().await;
         let repo_path = dir.path().join("repo");
-        let main = svc.store.list_workspaces_for_repository(repo).unwrap().remove(0);
+        let main = svc.store.list_worktrees_for_repository(repo).unwrap().remove(0);
 
         git::git(&repo_path, &["checkout", "-q", "--detach"]).await.unwrap();
         let head = git::git(&repo_path, &["rev-parse", "HEAD"]).await.unwrap();
@@ -622,7 +622,7 @@ mod tests {
 
         let out = repository(&svc, repo).await.unwrap();
         assert_eq!(out.healed, 1, "{out:?}");
-        assert_eq!(svc.store.get_workspace(main.id).unwrap().branch, expected);
+        assert_eq!(svc.store.get_worktree(main.id).unwrap().branch, expected);
 
         // And then stays put: a second pass over an unchanged detached HEAD
         // must find nothing left to correct.
@@ -632,11 +632,11 @@ mod tests {
 
     /// A worktree keeps its name while the branch inside it moves.
     ///
-    /// This is the whole reason a workspace is named by its directory. One
+    /// This is the whole reason a worktree is named by its directory. One
     /// worktree hosts a stack of commits over its life: you branch, you branch
     /// again off that, you rebase, and the branch checked out in the directory
     /// changes each time. A name taken from the branch would rename the
-    /// workspace on every one of those, so the sidebar row you were watching an
+    /// worktree on every one of those, so the sidebar row you were watching an
     /// agent work in would keep becoming a different row.
     ///
     /// The branch column still follows git — that is what `healed` counts here.
@@ -655,7 +655,7 @@ mod tests {
 
         let ws = svc
             .store
-            .list_workspaces_for_repository(repo)
+            .list_worktrees_for_repository(repo)
             .unwrap()
             .into_iter()
             .find(|w| !w.is_main_checkout)
@@ -667,7 +667,7 @@ mod tests {
         let out = repository(&svc, repo).await.unwrap();
 
         assert_eq!(out.healed, 1, "the branch column follows git: {out:?}");
-        let after = svc.store.get_workspace(ws.id).unwrap();
+        let after = svc.store.get_worktree(ws.id).unwrap();
         assert_eq!(after.branch, "feat/rate-limiting-tests");
         assert_eq!(after.name(), "rate limiting", "the name is the directory, which did not move");
     }
@@ -719,7 +719,7 @@ mod isolation_tests {
     async fn a_worktree_one_install_made_is_not_adopted_by_another() {
         let (_dir, a, b, repo_a, repo_b) = two_daemons().await;
 
-        let ws = a.create_workspace(repo_a, "rate limiting", "feat/rate", "HEAD").await.unwrap();
+        let ws = a.create_worktree(repo_a, "rate limiting", "feat/rate", "HEAD").await.unwrap();
 
         let outcome = super::repository(&b, repo_b).await.unwrap();
         assert_eq!(
@@ -728,7 +728,7 @@ mod isolation_tests {
              directory means two agents writing the same files"
         );
 
-        let seen = b.store.list_workspaces_for_repository(repo_b).unwrap();
+        let seen = b.store.list_worktrees_for_repository(repo_b).unwrap();
         assert!(
             !seen.iter().any(|w| w.worktree_path == ws.worktree_path),
             "it must not appear in the other install's fleet either"

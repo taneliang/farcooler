@@ -1,7 +1,7 @@
 import SwiftUI
 
 // The navigation shell: a screen that fills the screen, the bar that is the
-// workspace, and the overview at the end of the same drag.
+// worktree, and the overview at the end of the same drag.
 //
 // This view owns the state and reads the finger. Every threshold it applies
 // comes out of `AgentKit/ShellNavigation.swift`, which is where they can be
@@ -87,18 +87,18 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     ///
     /// All of it reaches exactly one view — `ShellOverview` — and none of it
     /// is part of the fleet. That is not an accident of plumbing, it is the
-    /// rule: `ShellPosition` indexes into `fleet.workspaces`, the bar walks it
+    /// rule: `ShellPosition` indexes into `fleet.worktrees`, the bar walks it
     /// and `ShellPaneTrack` mounts a pane for every tab it steps onto, so a
-    /// workspace with no connection behind it must never be in that array.
+    /// worktree with no connection behind it must never be in that array.
     /// See `ShellServerGroup`, which says so at length.
     private let runnerSections: ShellOverviewRunners
     /// A card on another runner, tapped.
-    private let onCross: (ShellServerGroup, ShellWorkspace) -> Void
+    private let onCross: (ShellServerGroup, ShellWorktree) -> Void
     /// A card's context menu, spent. Both reach exactly one view —
     /// `ShellOverview` — and neither means anything to a fixture, so both
     /// default to nothing. See `ShellOverviewCard.menu`.
-    private let onToggleHidden: (ShellWorkspace) -> Void
-    private let onRemoveWorktree: (ShellWorkspace) -> Void
+    private let onToggleHidden: (ShellWorktree) -> Void
+    private let onRemoveWorktree: (ShellWorktree) -> Void
     /// A pinned column's row, swiped and closed.
     ///
     /// A tab rather than a terminal, for `request`'s reason: a tab is what this
@@ -110,12 +110,12 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// in this product picks the next pane itself and this one must not:
     /// `ShellFleet.reseat(_:holding:)` already runs on every poll and already
     /// answers this exact question — the anchored tab is gone, so it clamps,
-    /// which keeps the person in the same workspace on the index that slid into
+    /// which keeps the person in the same worktree on the index that slid into
     /// the slot they were on. A second rule here would be a second answer, and
     /// the Mac's `selectNeighbour(of:)` is what that looks like when it drifts:
     /// despite the name it takes the first running terminal ANYWHERE in the
     /// fleet and jumps runners freely.
-    private let onCloseTab: (ShellWorkspace, ShellTab) -> Void
+    private let onCloseTab: (ShellWorktree, ShellTab) -> Void
     private let pane: (ShellPaneSlot) -> Pane
     /// What the overview puts in its navigation bar. See
     /// `ShellOverview.actions`.
@@ -285,12 +285,12 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// over something opaque and there is no frame where neither is all
     /// there. See `land()`.
     @State var pageAlpha: CGFloat
-    /// Whether the grid holds the current workspace's cell open rather than
+    /// Whether the grid holds the current worktree's cell open rather than
     /// drawing a card in it.
     ///
     /// Separate from `flights` on purpose, and the separation is the whole of
     /// the fix for the landing. The cell has to be a hole for as long as the
-    /// page is in the AIR — a workspace cannot be in two places — but it has
+    /// page is in the AIR — a worktree cannot be in two places — but it has
     /// to stop being one the moment the page arrives, while the page is still
     /// opaque on top of it and a frame before the page begins to dissolve.
     /// One flag for both meant the card could only appear by fading in as the
@@ -511,16 +511,16 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// Seeded rather than always false, so the harness can open ON it. A state
     /// only reachable by performing a gesture is a state nobody screenshots,
     /// and the overview is the surface most worth looking at repeatedly — it
-    /// is where forty workspaces have to stay scannable.
+    /// is where forty worktrees have to stay scannable.
     @State var overview: Bool
     @State var overviewSearch = ""
 
-    /// Where every laid-out card sits, by workspace index, in screen
+    /// Where every laid-out card sits, by worktree index, in screen
     /// coordinates.
     ///
     /// All of them and not just the current one, because the flight runs both
-    /// ways: the page lands in the cell of the workspace you are in, and it
-    /// grows back out of the cell of the workspace you TAP, which is a
+    /// ways: the page lands in the cell of the worktree you are in, and it
+    /// grows back out of the cell of the worktree you TAP, which is a
     /// different cell and is not known until the tap. A grid that only
     /// published the current card would leave the second half of that
     /// journey starting from wherever the first half ended.
@@ -592,9 +592,9 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// announce that the page has arrived somewhere it is no longer going.
     ///
     /// What it gates is the handover. While anything is in the air the PAGE is
-    /// the current workspace's card and the grid leaves that cell empty; when
+    /// the current worktree's card and the grid leaves that cell empty; when
     /// the air is clear the grid's own card is the card and the page is not
-    /// drawn at all. Two copies of one workspace, one flying over the other,
+    /// drawn at all. Two copies of one worktree, one flying over the other,
     /// is the thing this exists to prevent.
     @State var flights = 0
 
@@ -606,10 +606,10 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         onRest: ((ShellPosition, ShellArrival) -> Void)? = nil,
         runnerSections: ShellOverviewRunners = ShellOverviewRunners(),
         @ViewBuilder runners: @escaping () -> Trouble = { EmptyView() },
-        onCross: @escaping (ShellServerGroup, ShellWorkspace) -> Void = { _, _ in },
-        onToggleHidden: @escaping (ShellWorkspace) -> Void = { _ in },
-        onRemoveWorktree: @escaping (ShellWorkspace) -> Void = { _ in },
-        onCloseTab: @escaping (ShellWorkspace, ShellTab) -> Void = { _, _ in },
+        onCross: @escaping (ShellServerGroup, ShellWorktree) -> Void = { _, _ in },
+        onToggleHidden: @escaping (ShellWorktree) -> Void = { _ in },
+        onRemoveWorktree: @escaping (ShellWorktree) -> Void = { _ in },
+        onCloseTab: @escaping (ShellWorktree, ShellTab) -> Void = { _, _ in },
         @ViewBuilder overviewActions: @escaping () -> Actions,
         @ViewBuilder pane: @escaping (ShellPaneSlot) -> Pane
     ) {
@@ -656,7 +656,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// apology is right.
     static var tracking: Animation { .interactiveSpring }
 
-    /// On release, when what moved was one pane inside a workspace.
+    /// On release, when what moved was one pane inside a worktree.
     ///
     /// Every use of it is interruptible — nothing below gates input on an
     /// animation being finished, so a second swipe onto a settling one
@@ -687,7 +687,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// flying`, and THAT is not clamped. So for about a tenth of a second
     /// after a lift had visibly finished and the page was back on the display,
     /// the shell was still holding a `NavigationStack`, a `LazyVGrid` and
-    /// forty cards in the tree behind a workspace nobody was looking at — the
+    /// forty cards in the tree behind a worktree nobody was looking at — the
     /// same shape of defect the menu's `columnHeight > 0` turned out to have,
     /// found the same way. At 1.0 the trace is monotone and ends at 0.0000.
     ///
@@ -730,7 +730,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// weight is what moves; this is the other half.
     static var settleAcross: Animation { .spring(response: 0.42, dampingFraction: 0.86) }
 
-    /// A workspace growing out of its cell to fill the screen.
+    /// A worktree growing out of its cell to fill the screen.
     ///
     /// Its own spring rather than `settleAcross`, which is a CROSSING — two
     /// cards passing each other, and a different response is right for a
@@ -761,7 +761,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// Short, and a fade rather than a spring, because nothing MOVES here: the
     /// page has already arrived at the cell and the two are the same rectangle
     /// in the same place. What crosses is only what is drawn inside it — a
-    /// workspace's terminal for a workspace's name and tail — and a spring on
+    /// worktree's terminal for a worktree's name and tail — and a spring on
     /// a thing that is not travelling reads as a stutter at the end of a
     /// flight that had none.
     ///
@@ -780,10 +780,10 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// direction, which is the whole of when it is drawn over the grid.
     var flying: Bool { flights > 0 }
 
-    /// The cell this workspace's page belongs in, or nil when the grid has not
-    /// laid one out — a search that filters the current workspace out, most
+    /// The cell this worktree's page belongs in, or nil when the grid has not
+    /// laid one out — a search that filters the current worktree out, most
     /// obviously — in which case the page simply does not fly.
-    var tile: CGRect? { tiles[position.workspace] }
+    var tile: CGRect? { tiles[position.worktree] }
 
     /// The page's real width, read rather than stored.
     ///
@@ -798,7 +798,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     var body: some View {
         // Two readers, and the nesting is the point.
         //
-        // The shell is laid out FULL BLEED — a workspace fills the screen, so
+        // The shell is laid out FULL BLEED — a worktree fills the screen, so
         // the stack it lives in has to be the screen — but the bar and the
         // overview still have to clear the status bar and the home indicator.
         // `ignoresSafeArea` on a view zeroes the insets its own reader would
@@ -843,7 +843,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         // Back to front, and the order is the whole reveal.
         //
         // The overview is UNDER the page, not over it. Drawn on top it
-        // composites its cards into the page as legible text — a workspace
+        // composites its cards into the page as legible text — a worktree
         // name ghosted across a terminal, which is the double exposure
         // `ShellOverview`'s own ground is there to prevent and which no amount
         // of opacity fixes, because the page is what you are still reading.
@@ -902,7 +902,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
             // mounting the grid permanently is faster still — every lift then
             // costs 17 — but a grid in the tree at rest is a grid in the
             // ACCESSIBILITY tree at rest, and that was measured too: forty
-            // static texts and every card's button, behind the workspace
+            // static texts and every card's button, behind the worktree
             // somebody is actually in. Gating that on `overview` the way hit
             // testing already is destabilized the UI suite in a way this lane
             // could reproduce and not explain, so the version that keeps the
@@ -910,15 +910,15 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
             // ships.
             if (gestureActive && track == .bar) || lift > 0 || reveal > 0 || overview || flying {
                 ShellOverview(
-                    fleet: fleet, current: position.workspace,
+                    fleet: fleet, current: position.worktree,
                     // The cell the page is going to is a HOLE while it is on
                     // its way, and the page is what fills it when it lands.
                     //
                     // The grid reserves the space and draws nothing in it.
                     // Drawing a finished card there and flying a second copy
-                    // of the same workspace on top of it is two of one thing,
+                    // of the same worktree on top of it is two of one thing,
                     // and it is what stops the lift reading as picking the
-                    // screen up: a grid of workspaces where the one you were
+                    // screen up: a grid of worktrees where the one you were
                     // in is the one in your hand only works if it is in
                     // exactly one place at a time.
                     currentIsEmpty: cellIsHole,
@@ -939,7 +939,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
                     runnerSections: runnerSections,
                     runners: runners,
                     search: $overviewSearch,
-                    onOpen: open(workspace:),
+                    onOpen: open(worktree:),
                     onCross: onCross,
                     onToggleHidden: onToggleHidden,
                     onRemoveWorktree: onRemoveWorktree,
@@ -989,7 +989,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         // stack. The page fills this stack and the bar does not, so the
         // alignment is the only thing saying where the bar goes; left at the
         // frame's default it would centre, and the bar would sit halfway up
-        // the workspace.
+        // the worktree.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .background { screenFrameReader }
         .overlay(alignment: .topLeading) { probe }
@@ -1086,7 +1086,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     }
 
     /// Which three are ON the track depends on the track the gesture started
-    /// on: from the bar they are the adjacent WORKSPACES on the tab you last
+    /// on: from the bar they are the adjacent WORKTREES on the tab you last
     /// had open in each, and from the content they are the adjacent TABS along
     /// the flat sequence. Both neighbours are genuinely mounted and drawn at
     /// 0.72, which is what makes the incoming pane real rather than something
@@ -1163,9 +1163,9 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// Three bars, one page apart, on a track of their own.
     ///
     /// **This is the heavier of the two horizontal weights.** Within a
-    /// workspace the bar holds perfectly still and only the pane slides: the
-    /// workspace is not changing, and a bar that moved for every tab swipe
-    /// would be saying something false twice a swipe. Across workspaces the
+    /// worktree the bar holds perfectly still and only the pane slides: the
+    /// worktree is not changing, and a bar that moved for every tab swipe
+    /// would be saying something false twice a swipe. Across worktrees the
     /// bar travels a FULL PAGE, in step with the pane, so the whole screen
     /// leaves together and the neighbour's whole screen arrives — the way a
     /// browser changes tab.
@@ -1175,7 +1175,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// information and it is a completely different sentence: something moving
     /// inside a surface that is itself still says "this bar is changing what
     /// it shows", and the whole surface leaving says "you are leaving". Only
-    /// one of those is what a workspace change is, and only one of them can be
+    /// one of those is what a worktree change is, and only one of them can be
     /// told apart from a tab swipe with your eyes shut.
     private func barTrack(page: CGFloat, safeArea: EdgeInsets) -> some View {
         let width = ShellMetrics.railWidth(page: page)
@@ -1183,7 +1183,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
             neighbourBar(previousStep, page: page, width: width)
 
             ShellBar(
-                workspace: currentWorkspace,
+                worktree: currentWorktree,
                 currentTab: position.tab,
                 width: width,
                 columnHeight: menuHeight,
@@ -1194,8 +1194,8 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
                 // constraint is written down.
                 columnPinned: columnPinned,
                 onClose: { tab in
-                    guard let workspace = currentWorkspace else { return }
-                    onCloseTab(workspace, tab)
+                    guard let worktree = currentWorktree else { return }
+                    onCloseTab(worktree, tab)
                 },
                 onTouch: { touchedRow = $0 },
                 onChoose: chooseRow)
@@ -1224,8 +1224,8 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         // lift a reveal rather than a crossfade (see `shell`), and a layer
         // that is on top does not get covered by anything: the last tenth of
         // the bar was being drawn straight over the bottom row of cards, where
-        // a workspace's name and its ribbon were legible across a card that
-        // names a different workspace. No amount of ground fixes that, because
+        // a worktree's name and its ribbon were legible across a card that
+        // names a different worktree. No amount of ground fixes that, because
         // the ground is behind the bar, not in front of it — the number that
         // was wrong is this one. Content beneath glass is matte; a card is
         // content; so the bar has to be GONE by the time the grid has arrived,
@@ -1248,7 +1248,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         }
     }
 
-    /// The workspace waiting off one edge, drawn on the tab you would land on.
+    /// The worktree waiting off one edge, drawn on the tab you would land on.
     ///
     /// Not hit-testable and not in the accessibility tree: there are three
     /// bars on this track and exactly one of them is the bar. A neighbour that
@@ -1257,7 +1257,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     @ViewBuilder
     private func neighbourBar(_ step: ShellStep?, page: CGFloat, width: CGFloat) -> some View {
         ShellBar(
-            workspace: step.flatMap { workspace(at: $0.position.workspace) },
+            worktree: step.flatMap { worktree(at: $0.position.worktree) },
             currentTab: step?.position.tab ?? -1,
             width: width,
             // No column at all. See `ShellBar.showsColumn`: the two lines
@@ -1271,7 +1271,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
 
     /// How far the bar track has moved: the whole page, or nothing at all.
     ///
-    /// Nothing at all unless the swipe will actually change workspace, which
+    /// Nothing at all unless the swipe will actually change worktree, which
     /// is what makes the two weights two weights. Reading the direction off
     /// `trackX` rather than latching it when the axis is decided keeps this
     /// continuous through a drag that reverses: the answer only changes as
@@ -1279,9 +1279,9 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     ///
     /// A carried LIFT moves it too, and by the same rule rather than as a
     /// special case: a page held off the display and moved sideways is asking
-    /// for the next workspace, so the whole screen leaves together — the bar
+    /// for the next worktree, so the whole screen leaves together — the bar
     /// included — and the neighbour's bar comes in behind it saying which
-    /// workspace the card is being handed to. What would be strange is the
+    /// worktree the card is being handed to. What would be strange is the
     /// other way round: the thing under your thumb sliding a third of the way
     /// across the display while the surface it came off sits perfectly still
     /// at seven tenths opacity.
@@ -1295,10 +1295,10 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
 
     private var barX: CGFloat {
         if carryX != 0 { return carryX }
-        return crossesWorkspace(trackX) ? trackX : 0
+        return crossesWorktree(trackX) ? trackX : 0
     }
 
-    /// Whether a sideways drag of `dx` would leave this workspace.
+    /// Whether a sideways drag of `dx` would leave this worktree.
     ///
     /// The gate on both of the things that make a crossing heavier than a tab
     /// swipe: the bar travelling with the page, and the page becoming a card.
@@ -1306,16 +1306,16 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// so it stays continuous through a drag that reverses — the answer only
     /// changes as the translation passes zero, and at zero both answers are
     /// zero.
-    func crossesWorkspace(_ dx: CGFloat) -> Bool {
+    func crossesWorktree(_ dx: CGFloat) -> Bool {
         guard let direction = ShellGesture.direction(dx: dx),
             let step = fleet.step(from: position, direction, along: track)
         else { return false }
-        return step.crossesWorkspace
+        return step.crossesWorktree
     }
 
     /// How much of a card a sideways drag of `dx` has made the pages, 0…1.
     func crossProgress(_ dx: CGFloat) -> CGFloat {
-        crossesWorkspace(dx) ? ShellFlight.cardness(travel: abs(dx)) : 0
+        crossesWorktree(dx) ? ShellFlight.cardness(travel: abs(dx)) : 0
     }
 
     /// How much of the menu is showing: all of it, or none.
@@ -1403,12 +1403,12 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         withAnimation(earned ? ShellMotion.menu : ShellMotion.menuSettled) { menuOpen = wanted }
     }
 
-    var tabCount: Int { fleet.tabCount(ofWorkspace: position.workspace) }
+    var tabCount: Int { fleet.tabCount(ofWorktree: position.worktree) }
 
-    var currentWorkspace: ShellWorkspace? { workspace(at: position.workspace) }
+    var currentWorktree: ShellWorktree? { worktree(at: position.worktree) }
 
-    private func workspace(at index: Int) -> ShellWorkspace? {
-        fleet.workspaces.indices.contains(index) ? fleet.workspaces[index] : nil
+    private func worktree(at index: Int) -> ShellWorktree? {
+        fleet.worktrees.indices.contains(index) ? fleet.worktrees[index] : nil
     }
 
     /// Which column row is under the finger, or which one you are on when the
@@ -1480,8 +1480,8 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
             .accessibilityElement()
             .accessibilityIdentifier("shell-state")
             .accessibilityValue(
-                "ws=\(position.workspace) tab=\(position.tab) "
-                    + "workspaces=\(fleet.workspaces.count) tabs=\(tabCount) "
+                "ws=\(position.worktree) tab=\(position.tab) "
+                    + "worktrees=\(fleet.worktrees.count) tabs=\(tabCount) "
                     + "column=\(Int(ShellGesture.columnHeight(up: lift, tabCount: tabCount, pinned: columnPinned).rounded())) "
                     + "pinned=\(columnPinned ? 1 : 0) overview=\(overview ? 1 : 0) "
                     // The tracked way out of the overview, in hundredths, so
@@ -1520,10 +1520,10 @@ extension ShellRootView where Actions == EmptyView, Trouble == EmptyView {
         request: Binding<String?> = .constant(nil),
         onRest: ((ShellPosition, ShellArrival) -> Void)? = nil,
         runnerSections: ShellOverviewRunners = ShellOverviewRunners(),
-        onCross: @escaping (ShellServerGroup, ShellWorkspace) -> Void = { _, _ in },
-        onToggleHidden: @escaping (ShellWorkspace) -> Void = { _ in },
-        onRemoveWorktree: @escaping (ShellWorkspace) -> Void = { _ in },
-        onCloseTab: @escaping (ShellWorkspace, ShellTab) -> Void = { _, _ in },
+        onCross: @escaping (ShellServerGroup, ShellWorktree) -> Void = { _, _ in },
+        onToggleHidden: @escaping (ShellWorktree) -> Void = { _ in },
+        onRemoveWorktree: @escaping (ShellWorktree) -> Void = { _ in },
+        onCloseTab: @escaping (ShellWorktree, ShellTab) -> Void = { _, _ in },
         @ViewBuilder pane: @escaping (ShellPaneSlot) -> Pane
     ) {
         self.init(

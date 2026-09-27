@@ -25,7 +25,7 @@ import UniformTypeIdentifiers
 /// The other half of the deal is that tmux has to be laying out for the size of
 /// this view rather than for some default. See `send(viewport:for:)`.
 struct TileView: View {
-    /// Every layout in the workspace, so the bar can offer them. Which one is
+    /// Every layout in the worktree, so the bar can offer them. Which one is
     /// drawn is `showing`, below.
     let groups: [PaneGroup]
     /// Which layout to draw, by tmux window id.
@@ -37,7 +37,7 @@ struct TileView: View {
     /// somebody else's terminal, drawn live and looking exactly like the one you
     /// asked for. See `Array<PaneGroup>.showing`.
     let showing: String
-    let workspace: Workspace
+    let worktree: Worktree
     /// This worktree's diff, for whichever pane is showing it.
     ///
     /// One store per worktree rather than one per pane: two changes panes in a
@@ -63,7 +63,7 @@ struct TileView: View {
     /// and came back gets fresh streams instead of frozen ones. See
     /// `DaemonClient.linkGeneration`.
     let linkGeneration: Int
-    /// Why this workspace's runner cannot be acted on, or nil if it can —
+    /// Why this worktree's runner cannot be acted on, or nil if it can —
     /// passed down to each `TilePane`, which hands it to `AgentSurface` for
     /// an agent pane. See `AgentStream.refusal`'s own doc comment.
     let refusal: () -> String?
@@ -141,8 +141,8 @@ struct TileView: View {
         .onAppear { prefix.tiledPanes = group?.panes.count ?? 0 }
         .onChange(of: group?.panes.count ?? 0) { _, count in prefix.tiledPanes = count }
         .onDisappear { prefix.tiledPanes = 0 }
-        .navigationTitle(workspace.windowTitle)
-        .navigationSubtitle(workspace.windowSubtitle)
+        .navigationTitle(worktree.windowTitle)
+        .navigationSubtitle(worktree.windowSubtitle)
     }
 
     /// Zoom gets the tiny bit of energy `.smooth` deliberately lacks.
@@ -171,7 +171,7 @@ struct TileView: View {
                 // them mounted and streaming so un-zooming is instant.
                 ZStack(alignment: .topLeading) {
                     ForEach(group.panes) { rect in
-                        if let terminal = workspace.terminals.first(where: { $0.id == rect.id }) {
+                        if let terminal = worktree.terminals.first(where: { $0.id == rect.id }) {
                             let frame = frame(of: rect, in: group, size: size)
                             pane(terminal, rect: rect, group: group, size: frame.size)
                                 .frame(width: frame.width, height: frame.height)
@@ -258,7 +258,7 @@ struct TileView: View {
             onDrop: { dragged, side in onDropOnPane(dragged, terminal.id, side) },
             onSearchFiles: onSearchFiles,
             onSwitchPaneMode: onSwitchPaneMode,
-            reviewTargets: workspace.reviewAgentTargets()
+            reviewTargets: worktree.reviewAgentTargets()
         )
         .onTapGesture { if !isFocused { onFocus(terminal.id) } }
     }
@@ -367,7 +367,7 @@ private struct TilePane: View {
     /// The agent panes in this worktree a review note can be sent to, for the
     /// pane showing the diff.
     ///
-    /// Values rather than the `Workspace` they come from, and worked out by the
+    /// Values rather than the `Worktree` they come from, and worked out by the
     /// view that already holds it: `ChangesStore` was built once, against the
     /// worktree as it looked then, and a list of panes made from that snapshot
     /// would still be offering an agent that exited an hour ago.
@@ -662,11 +662,11 @@ private struct TilePane: View {
                 // a worktree with uncommitted work is nobody waiting. It is a
                 // diff nobody has dealt with, which is exactly what
                 // `GlancePalette.review` is the color for, and reviews are
-                // counted per WORKSPACE, which is the level this dot sits at.
+                // counted per WORKTREE, which is the level this dot sits at.
                 Circle()
                     .fill(GlancePalette.review(scheme))
                     .frame(width: 5, height: 5)
-                    .help("This workspace has uncommitted changes")
+                    .help("This worktree has uncommitted changes")
             }
 
             Button {
@@ -745,7 +745,7 @@ private struct TilePane: View {
             // A dimmed secondary rather than `.tertiary`, which is a
             // `ShapeStyle` and not a `Color` — and this is one attributed
             // string, on purpose, so the whole strip shares one baseline the
-            // way `WorkspaceSection`'s own pair does.
+            // way `WorktreeSection`'s own pair does.
             apart.foregroundColor = .secondary.opacity(0.7)
             value.append(apart)
         }

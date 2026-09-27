@@ -97,7 +97,7 @@ exit 4
 
 type StdioClient = Client<ChildStdout, ChildStdin>;
 
-/// A registered repository with one commit and a workspace on a branch off it.
+/// A registered repository with one commit and a worktree on a branch off it.
 async fn a_repository_with_a_branch(
     client: &mut StdioClient,
     root: &std::path::Path,
@@ -139,10 +139,10 @@ async fn a_repository_with_a_branch(
         panic!("wrong result")
     };
 
-    let mut create = request_for("workspace.create");
+    let mut create = request_for("worktree.create");
     create.target_resource_id = Some(repository.id.clone());
-    create.payload = Some(request::Payload::WorkspaceCreate(
-        farcooler_protocol::v1::WorkspaceCreate {
+    create.payload = Some(request::Payload::WorktreeCreate(
+        farcooler_protocol::v1::WorktreeCreate {
             task_name: "pr status".into(),
             branch: "feat/pr-status".into(),
             base_revision: "HEAD".into(),
@@ -151,7 +151,7 @@ async fn a_repository_with_a_branch(
             fork_only: false,
         },
     ));
-    client.call(create).await.expect("workspace.create");
+    client.call(create).await.expect("worktree.create");
 
     repository.id
 }

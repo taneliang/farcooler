@@ -23,7 +23,7 @@
 //!                                    -> File    yes      no
 //!                                          NEEDS_REREAD  OUTDATED
 //!                                             -> File     -> File
-//!                                      (file gone -> FILE_GONE -> Workspace)
+//!                                      (file gone -> FILE_GONE -> Worktree)
 //! ```
 
 use serde::{Deserialize, Serialize};
@@ -51,7 +51,10 @@ pub enum Anchor {
     /// not about a particular line, so this is the normal case and the capture
     /// UI must reach it without asking anything.
     None,
-    Workspace,
+    /// The whole worktree. Serialized as `"workspace"`, its name before the
+    /// rename, so an entry already written down still reads back.
+    #[serde(rename = "workspace")]
+    Worktree,
     Branch { branch: String },
     Commit { sha: String },
     File { path: String },
@@ -76,7 +79,7 @@ impl Anchor {
             Anchor::Hunk { path, .. } | Anchor::Lines { path, .. } => {
                 Anchor::File { path: path.clone() }
             }
-            Anchor::File { .. } => Anchor::Workspace,
+            Anchor::File { .. } => Anchor::Worktree,
             other => other.clone(),
         }
     }
@@ -187,7 +190,7 @@ pub fn resolve(anchor: &Anchor, manifest: &CaptureManifest, current: &Current) -
         // Altitudes with no position to lose. They are never Exact — there is no
         // line to be exact about — but they DO need re-read, and getting that
         // wrong for the unanchored case would miss the majority of all comments.
-        Anchor::None | Anchor::Workspace | Anchor::Branch { .. } | Anchor::Commit { .. } => {
+        Anchor::None | Anchor::Worktree | Anchor::Branch { .. } | Anchor::Commit { .. } => {
             let moved = current.head_commit != manifest.head_commit
                 || current.worktree_digest != manifest.worktree_digest;
             Resolution {
@@ -469,7 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn a_deleted_file_degrades_all_the_way_to_the_workspace() {
+    fn a_deleted_file_degrades_all_the_way_to_the_worktree() {
         let a = lines_anchor("TARGET", "ctx");
         let gone = Current {
             head_commit: "head".into(),
@@ -482,8 +485,8 @@ mod tests {
         assert_eq!(r.state, AnchorState::FileGone);
         assert_eq!(r.effective, Anchor::File { path: "src/x.rs".into() });
         // One rung at a time: File is the next rung down from Lines, and File's
-        // own degradation is Workspace.
-        assert_eq!(r.effective.degraded(), Anchor::Workspace);
+        // own degradation is Worktree.
+        assert_eq!(r.effective.degraded(), Anchor::Worktree);
     }
 
     #[test]
@@ -529,10 +532,19 @@ mod tests {
         let lines = lines_anchor("x", "c");
         let file = lines.degraded();
         assert!(matches!(file, Anchor::File { .. }));
-        assert_eq!(file.degraded(), Anchor::Workspace);
-        // Workspace is the floor: it degrades to itself rather than vanishing.
-        assert_eq!(Anchor::Workspace.degraded(), Anchor::Workspace);
+        assert_eq!(file.degraded(), Anchor::Worktree);
+        // Worktree is the floor: it degrades to itself rather than vanishing.
+        assert_eq!(Anchor::Worktree.degraded(), Anchor::Worktree);
         assert_eq!(Anchor::None.degraded(), Anchor::None);
+    }
+
+    #[test]
+    fn the_worktree_anchor_keeps_its_old_serialized_kind() {
+        // Renamed in code only. The value is what a stored entry holds.
+        let json = serde_json::to_value(Anchor::Worktree).unwrap();
+        assert_eq!(json, serde_json::json!({ "kind": "workspace" }));
+        let back: Anchor = serde_json::from_value(json).unwrap();
+        assert_eq!(back, Anchor::Worktree);
     }
 
     #[test]

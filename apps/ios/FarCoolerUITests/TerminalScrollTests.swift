@@ -123,15 +123,15 @@ final class TerminalScrollTests: XCTestCase {
     /// **It asks the pane, and falls back to the frame.** This used to be the
     /// frame alone — "the surface under the middle of the screen" — which is
     /// right for a neighboring TAB, laid out beside this one, and wrong for a
-    /// neighboring WORKSPACE, which is mounted at the same rect. The moment
-    /// the demo fleet grew a second workspace with a terminal in it, two
+    /// neighboring WORKTREE, which is mounted at the same rect. The moment
+    /// the demo fleet grew a second worktree with a terminal in it, two
     /// surfaces contained the middle and this returned whichever the
     /// accessibility tree listed first.
     ///
     /// It cost a day and it is worth writing down. On the fixture
     /// `scripts/demo-host.sh` builds, the pane in front had 1986 lines of
     /// scrollback and the tree ALSO held a bare two-line pane belonging to the
-    /// `crossing` workspace. Every test in this file read that one:
+    /// `crossing` worktree. Every test in this file read that one:
     /// `testTheGridTracksTheThumbBetweenRows` failed naming the two lines,
     /// three tests skipped saying the pane was too shallow, and
     /// `testASwipeScrollsIntoTheScrollback` PASSED — a swipe does move two
@@ -146,7 +146,7 @@ final class TerminalScrollTests: XCTestCase {
     /// several polling loops here rely on. It is a fallback and not a second
     /// answer: `openATerminalInTheShell` asserts the field is there before any
     /// test reads a number off a pane, because falling back silently is how the
-    /// suite spent a day measuring a workspace nobody was looking at.
+    /// suite spent a day measuring a worktree nobody was looking at.
     private func visibleSurface(_ app: XCUIApplication) -> XCUIElement? {
         let middle = CGPoint(x: app.frame.midX, y: app.frame.midY)
         let all = app.otherElements.matching(identifier: "terminal-surface")
@@ -245,9 +245,9 @@ final class TerminalScrollTests: XCTestCase {
 
     /// Walk from wherever the app opens to a terminal pane.
     ///
-    /// This used to tap "Workspaces" on the inbox and then a `fleet-terminal-`
+    /// This used to tap "Worktrees" on the inbox and then a `fleet-terminal-`
     /// row in the list behind it. Neither exists: the app opens INTO the shell,
-    /// on a workspace, and the way to another of its tabs is a swipe. So the
+    /// on a worktree, and the way to another of its tabs is a swipe. So the
     /// walk is `openATerminalInTheShell`, which is now the only walk there is —
     /// kept as a name of its own so the three tests below go on reading as
     /// "reach a terminal, then assert about the terminal".
@@ -269,7 +269,7 @@ final class TerminalScrollTests: XCTestCase {
     /// pane the fixture built for it, two tabs away, held 1986 lines.
     ///
     /// So the walk keeps going. The demo fleet's terminals are not all equal —
-    /// a workspace the daemon made carries a bare login shell, and the UI suite
+    /// a worktree the daemon made carries a bare login shell, and the UI suite
     /// adds another every time it runs, because `NewTerminalTests` creates one
     /// and iOS has no way to close it — and any of those can sit in front of
     /// the pane the assertions were written for.
@@ -318,7 +318,7 @@ final class TerminalScrollTests: XCTestCase {
                 assertion below would have measured nothing and reported success. \
                 What the shell is holding:
                 \(census(app))
-                `scripts/demo-host.sh` puts 400 lines in the 'scrolling' workspace's two \
+                `scripts/demo-host.sh` puts 400 lines in the 'scrolling' worktree's two \
                 panes. Re-run it. If it has been run and this still says two lines, the \
                 history is being lost between tmux and the phone — compare \
                 `tmux -L farcooler-$(cat "$TMPDIR/farcooler-demo-host/fc/install-id") \
@@ -722,13 +722,13 @@ final class TerminalScrollTests: XCTestCase {
         // drag ran over an end of the scrollback" is true of a broken clamp and
         // equally true of a pane that simply has nothing above it, and only the
         // first is a defect in the app — so the failure read as a terminal bug
-        // and was, twice, a fleet whose first workspace held a bare prompt.
+        // and was, twice, a fleet whose first worktree held a bare prompt.
         //
         // `openATerminalInTheShell` stops at the FIRST terminal in the flat
         // sequence, whatever that pane happens to hold. `scripts/demo-host.sh`
         // puts 400 lines into `scrolling`'s panes and nothing into anybody
         // else's, and the app grows bare panes on its own: NewTerminalTests
-        // creates one in the workspace the app opens on and iOS has no Close
+        // creates one in the worktree the app opens on and iOS has no Close
         // Terminal to undo it with, so a suite run leaves one behind for the
         // next run to walk into. Printing both numbers is what tells the two
         // apart without another run.
@@ -1004,18 +1004,18 @@ final class TerminalScrollTests: XCTestCase {
             "a horizontal swipe over a live terminal did not move the shell: \(probe.value ?? "")")
     }
 
-    /// **Coming back to a workspace reopens the tab you left it on.**
+    /// **Coming back to a worktree reopens the tab you left it on.**
     ///
     /// The owner's case, and it needs a runner because it runs through the one
     /// memory the app already keeps: `Connection.lastFocus`, written when
-    /// somebody moves between the tabs of a workspace and read back by
+    /// somebody moves between the tabs of a worktree and read back by
     /// `ShellFleetMap.resume` as the tab a deliberate arrival lands on. The
     /// pure half is `ShellNavigationTests.theBarStepLandsOnTheRememberedTab`;
     /// what only a runner can show is that the two halves are wired together.
     ///
     /// **It comes back to the DIFF, and that is the whole design of the test.**
     /// Landing on the terminal would prove nothing: `PaneFocus.rule` — the
-    /// fallback for a workspace nobody has chosen a tab in — picks the
+    /// fallback for a worktree nobody has chosen a tab in — picks the
     /// top-ranked agent, which on this runner is that same terminal, so a
     /// memory that was never written and a memory that was read back give the
     /// same answer. Parking on the diff first is the one choice the rule would
@@ -1025,7 +1025,7 @@ final class TerminalScrollTests: XCTestCase {
     /// The bar swipe rather than the content swipe, deliberately: the content
     /// walks a continuum and must stay literal, which
     /// `theContentStepIgnoresTheRememberedTab` pins from the other side.
-    func testCrossingBackToAWorkspaceReopensTheTabYouLeft() throws {
+    func testCrossingBackToAWorktreeReopensTheTabYouLeft() throws {
         let app = launch()
         _ = try openATerminalInTheShell(app)
 
@@ -1041,9 +1041,9 @@ final class TerminalScrollTests: XCTestCase {
             "This runner's terminal is already the first tab, so there is no tab behind it "
                 + "to choose.")
         try XCTSkipUnless(
-            (field("workspaces") ?? 0) > 1, "One workspace: there is nowhere to cross to.")
+            (field("worktrees") ?? 0) > 1, "One worktree: there is nowhere to cross to.")
 
-        // Back one tab, inside this workspace. That is the move that is a
+        // Back one tab, inside this worktree. That is the move that is a
         // CHOICE, and the only kind of move the memory records.
         let y = 0.42
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.22, dy: y)).press(
@@ -1058,7 +1058,7 @@ final class TerminalScrollTests: XCTestCase {
             "could not get onto the diff: \(probe.value ?? "")")
 
         // Away along the BAR, and back the same way. Two arrivals, each
-        // landing on whatever that workspace's `resume` resolved to.
+        // landing on whatever that worktree's `resume` resolved to.
         let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
         XCTAssertTrue(bar.waitForExistence(timeout: 20))
         func swipeBar(_ from: CGFloat, _ to: CGFloat) {
@@ -1077,16 +1077,16 @@ final class TerminalScrollTests: XCTestCase {
 
         // **The keyboard down before the swipe back, or the swipe is typing.**
         //
-        // An arrival along the bar lands on whatever that workspace's `resume`
+        // An arrival along the bar lands on whatever that worktree's `resume`
         // answers, and on this runner that is a terminal — which raises the
         // keyboard on appear, and the bar does not move for one. So the swipe
         // back started on a key. `openOverview` says the same about its lift.
         //
-        // This was invisible for as long as the demo's first workspace had no
+        // This was invisible for as long as the demo's first worktree had no
         // terminal: the test then opens on the SECOND one, crosses backward
-        // onto a workspace with nothing but a diff, and comes back forward —
+        // onto a worktree with nothing but a diff, and comes back forward —
         // and no keyboard was ever up when the bar was touched. Give the first
-        // workspace a terminal and the test opens there instead, crosses
+        // worktree a terminal and the test opens there instead, crosses
         // forward onto a terminal, and every run failed here with "never came
         // back". Measured at this line in such a run: one keyboard up, the
         // key row showing, and `bar.isHittable` false.
@@ -1118,10 +1118,10 @@ final class TerminalScrollTests: XCTestCase {
     /// Reach a terminal from the shell, which opens on the Diff tab.
     ///
     /// One swipe along the flat sequence, because `ShellFleetMap` puts Changes
-    /// first in every workspace and the terminals after it in fleet order.
-    /// Repeated a few times rather than once: the demo fleet's first workspace
+    /// first in every worktree and the terminals after it in fleet order.
+    /// Repeated a few times rather than once: the demo fleet's first worktree
     /// may have no terminal at all, in which case the sequence spills into the
-    /// next workspace, which is the behaviour rather than a failure.
+    /// next worktree, which is the behaviour rather than a failure.
     private func openATerminalInTheShell(_ app: XCUIApplication) throws -> XCUIElement {
         let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
         // 180 seconds, not 60, and the number is measured rather than chosen.
@@ -1152,12 +1152,12 @@ final class TerminalScrollTests: XCTestCase {
                 //
                 // `visibleSurface` falls back to the frame when no surface
                 // publishes `visible=`, and the frame is ambiguous the moment a
-                // second workspace is mounted — which is the whole defect this
+                // second worktree is mounted — which is the whole defect this
                 // field was added for. The fallback is there so the helper
                 // never returns nothing; it is NOT a state this suite may run
                 // in, because the app it reads is the app `xcodebuild test`
                 // just built from this checkout. Silence here would put the
-                // suite back to reading a pane in another workspace and
+                // suite back to reading a pane in another worktree and
                 // reporting green about it.
                 XCTAssertNotNil(
                     Self.field(surface.value as? String ?? "", "visible"),
@@ -1265,7 +1265,7 @@ final class TerminalScrollTests: XCTestCase {
     /// text element to type into, by construction.
     ///
     /// So `scripts/demo-host.sh` builds the pane instead: two terminals in the
-    /// demo workspace, the same 400 lines in both, one left at an ordinary
+    /// demo worktree, the same 400 lines in both, one left at an ordinary
     /// prompt and one whose shell has written `\e[?1000h`. The mode then
     /// travels the whole path a real program's would — tmux, the daemon, the
     /// wire, the phone's VT core — rather than being simulated at the near end,
@@ -1332,7 +1332,7 @@ final class TerminalScrollTests: XCTestCase {
 
     /// Walk the shell's tabs to the pane whose program has asked for the mouse.
     ///
-    /// `scripts/demo-host.sh` puts exactly one of those in the demo workspace,
+    /// `scripts/demo-host.sh` puts exactly one of those in the demo worktree,
     /// beside an otherwise identical pane that has not. Skipped, with the
     /// script named, when there is no such pane: an older demo host has one
     /// terminal and this test has nothing to say about it.
@@ -1458,15 +1458,15 @@ final class TerminalScrollTests: XCTestCase {
     /// The ids `launchTwoRunners` gave Runner A and Runner B on its last launch.
     private var runnerIDs = (a: "", b: "")
 
-    /// The workspace out of an accessibility label, whichever label it is.
+    /// The worktree out of an accessibility label, whichever label it is.
     ///
-    /// `ShellBar` says `Workspace <name>` and an elsewhere card says
+    /// `ShellBar` says `Worktree <name>` and an elsewhere card says
     /// `<name>, on <runner>`, and this test compares one against the other.
     /// Parsed rather than assumed: two labels written in two files by two
     /// rules is exactly the pair that drifts.
-    static func workspaceName(_ label: String) -> String {
+    static func worktreeName(_ label: String) -> String {
         var name = label
-        if name.hasPrefix("Workspace ") { name.removeFirst("Workspace ".count) }
+        if name.hasPrefix("Worktree ") { name.removeFirst("Worktree ".count) }
         if let comma = name.range(of: ", on ") { name = String(name[name.startIndex..<comma.lowerBound]) }
         return name.trimmingCharacters(in: .whitespaces)
     }
@@ -1519,26 +1519,26 @@ final class TerminalScrollTests: XCTestCase {
             withVelocity: .slow, thenHoldForDuration: 0.5)
     }
 
-    /// Wait out a change of runner by watching the workspace on the bar move.
+    /// Wait out a change of runner by watching the worktree on the bar move.
     ///
     /// The bar EXISTS throughout — the one being torn down and the one coming
     /// up are both `shell-bar` — so "the bar appeared" says nothing. What only
-    /// the new tree can do is name a different workspace, because a runner
+    /// the new tree can do is name a different worktree, because a runner
     /// that has just been selected opens on its own first worktree rather than
     /// on whatever the last one was showing.
     @discardableResult
-    private func waitForWorkspaceToChange(
+    private func waitForWorktreeToChange(
         _ app: XCUIApplication, bar: XCUIElement, from previous: String, what: String
     ) throws -> String {
         let moved = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in
-                bar.exists && !Self.workspaceName(bar.label).isEmpty
-                    && Self.workspaceName(bar.label) != previous
+                bar.exists && !Self.worktreeName(bar.label).isEmpty
+                    && Self.worktreeName(bar.label) != previous
             }, object: nil)
         XCTAssertEqual(
             XCTWaiter.wait(for: [moved], timeout: 120), .completed,
             "\(what) never came up: the bar still says \(previous)")
-        return Self.workspaceName(bar.label)
+        return Self.worktreeName(bar.label)
     }
 
     /// Switch to a runner from its heading in the overview, with the grid left
@@ -1576,7 +1576,7 @@ final class TerminalScrollTests: XCTestCase {
     //
     // It was also failing on `main` before any of this, for a fixture reason
     // its own skip message names: both demo runners point at one daemon with
-    // two workspaces, so the "workspace name changed" wait could not be
+    // two worktrees, so the "worktree name changed" wait could not be
     // satisfied.
 
 
@@ -1826,7 +1826,7 @@ final class TerminalScrollTests: XCTestCase {
         // serve one daemon, so B's worktree at this index has the same name
         // and the switch below leaves the bar naming it.
         XCTAssertTrue(bar.waitForExistence(timeout: 20), "the bar never appeared")
-        let here = Self.workspaceName(bar.label)
+        let here = Self.worktreeName(bar.label)
 
         // Onto B from its heading, and wait for B's fleet: A's cards are only
         // a memory once A has been retired and B has taken its place.
@@ -1857,14 +1857,14 @@ final class TerminalScrollTests: XCTestCase {
         XCTAssertEqual(
             XCTWaiter.wait(for: [appeared], timeout: 20), .completed,
             "Runner A left no cached cards behind after the switch")
-        let barNow = Self.workspaceName(bar.label)
+        let barNow = Self.worktreeName(bar.label)
         let all = cards.allElementsBoundByIndex
         let card = try XCTUnwrap(
             all.dropFirst().last {
-                ![here, barNow].contains(Self.workspaceName($0.label))
+                ![here, barNow].contains(Self.worktreeName($0.label))
             },
             "no cached card of A's names a worktree other than \(here), \(barNow) and A's first")
-        let wanted = Self.workspaceName(card.label)
+        let wanted = Self.worktreeName(card.label)
         let mountBefore = Self.field(probe.value as? String ?? "", "mount")
         try tapInGrid(app, card)
 
@@ -1873,11 +1873,11 @@ final class TerminalScrollTests: XCTestCase {
         let landed = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in
                 Self.field(probe.value as? String ?? "", "overview") == "0"
-                    && Self.workspaceName(bar.label) == wanted
+                    && Self.worktreeName(bar.label) == wanted
             }, object: nil)
         XCTAssertEqual(
             XCTWaiter.wait(for: [landed], timeout: 60), .completed,
-            "the tap on \(wanted) never landed: the bar says \(Self.workspaceName(bar.label)) "
+            "the tap on \(wanted) never landed: the bar says \(Self.worktreeName(bar.label)) "
                 + "and the probe reads \(probe.value ?? "nothing")")
         XCTAssertEqual(
             Self.field(probe.value as? String ?? "", "mount"), mountBefore,
@@ -1894,13 +1894,13 @@ final class TerminalScrollTests: XCTestCase {
         XCTAssertTrue(probe.waitForExistence(timeout: 180), "the shell never stood up again")
         let opened = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in
-                bar.exists && !Self.workspaceName(bar.label).isEmpty
+                bar.exists && !Self.worktreeName(bar.label).isEmpty
             }, object: nil)
         XCTAssertEqual(
             XCTWaiter.wait(for: [opened], timeout: 60), .completed,
             "the relaunched shell's bar names nothing")
         XCTAssertNotEqual(
-            Self.workspaceName(bar.label), wanted,
+            Self.worktreeName(bar.label), wanted,
             "the relaunch opened on \(wanted), the crossing that had already landed: its note "
                 + "was never spent, and it will steer every launch until something reads it")
     }
@@ -1953,7 +1953,7 @@ final class TerminalScrollTests: XCTestCase {
             XCTWaiter.wait(for: [appeared], timeout: 20), .completed,
             "Runner A left no cached cards behind after the switch")
         let card = try XCTUnwrap(cards.allElementsBoundByIndex.last)
-        let tapped = Self.workspaceName(card.label)
+        let tapped = Self.worktreeName(card.label)
         try tapInGrid(app, card)
         try switchToRunner(app, id: runnerIDs.b)
         XCTAssertEqual(
@@ -2018,7 +2018,7 @@ final class TerminalScrollTests: XCTestCase {
                 + "\(other.exists ? other.label : "nothing")")
 
         // B's first live card. Live cards are `shell-card-<runner>…`, the
-        // composite `ShellIdentity.workspace` makes.
+        // composite `ShellIdentity.worktree` makes.
         let card = app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "shell-card-\(runnerIDs.b)")
         ).firstMatch

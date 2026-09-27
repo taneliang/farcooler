@@ -9,7 +9,7 @@
 //! making the redaction a property of the conversion — rather than something
 //! each handler remembers — is what stops one forgotten call site leaking it.
 //!
-//! **Terminal and workspace `state` is derived, never read from storage.** The
+//! **Terminal and worktree `state` is derived, never read from storage.** The
 //! converters take a derived view rather than a stored row, so there is no way
 //! to write a handler that reports a stale `running` for a pane that died an
 //! hour ago.
@@ -20,7 +20,7 @@ use farcooler_store::models;
 use uuid::Uuid;
 
 use crate::agent_supervisor::AgentSupervisor;
-use crate::service::{TerminalView, WorkspaceView};
+use crate::service::{TerminalView, WorktreeView};
 
 pub fn id_bytes(id: Uuid) -> bytes::Bytes {
     bytes::Bytes::copy_from_slice(id.as_bytes())
@@ -155,13 +155,13 @@ pub fn repository(model: &models::Repository, scope: Scope) -> wire::Repository 
     }
 }
 
-/// A workspace with its DERIVED state.
+/// A worktree with its DERIVED state.
 ///
-/// Taking a view rather than a row is the point: `models::Workspace` has no
+/// Taking a view rather than a row is the point: `models::Worktree` has no
 /// state field to accidentally report.
-pub fn workspace(view: &WorkspaceView, scope: Scope) -> wire::Workspace {
-    let ws = &view.workspace;
-    wire::Workspace {
+pub fn worktree(view: &WorktreeView, scope: Scope) -> wire::Worktree {
+    let ws = &view.worktree;
+    wire::Worktree {
         id: id_bytes(ws.id),
         resource_version: ws.resource_version,
         repository_id: id_bytes(ws.repository_id),
@@ -176,7 +176,7 @@ pub fn workspace(view: &WorkspaceView, scope: Scope) -> wire::Workspace {
         state: view.state as i32,
         is_main_checkout: ws.is_main_checkout,
         // The list already comes back in this order. Sent anyway, because a
-        // client applying `workspace_changed` as a delta holds one workspace
+        // client applying `worktree_changed` as a delta holds one worktree
         // and no list to infer a position from.
         ordinal: ws.ordinal,
     }
@@ -194,7 +194,7 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         id: id_bytes(t.id),
         resource_version: t.resource_version,
         lease_generation: t.lease_generation,
-        workspace_id: id_bytes(t.workspace_id),
+        worktree_id: id_bytes(t.worktree_id),
         title: t.title.clone(),
         command_preset: t.command_preset.clone(),
         intent: t.intent as i32,
@@ -536,18 +536,18 @@ pub fn timestamp(unix_millis: i64) -> prost_types::Timestamp {
     }
 }
 
-/// A workspace's tiling, whole.
+/// A worktree's tiling, whole.
 ///
 /// Sent whole and never as a diff. Layout is edited by the app, by the CLI, by
 /// agents driving the CLI, and by anyone attached to the tmux session directly —
 /// so a client that missed one event converges on the next rather than applying a
 /// delta to a state it may not hold.
 pub fn pane_group_list(
-    workspace: Uuid,
+    worktree: Uuid,
     layouts: &[crate::layout::LayoutView],
 ) -> farcooler_protocol::v1::PaneGroupList {
     farcooler_protocol::v1::PaneGroupList {
-        workspace_id: id_bytes(workspace),
+        worktree_id: id_bytes(worktree),
         items: layouts.iter().map(pane_group).collect(),
     }
 }
@@ -556,7 +556,7 @@ pub fn pane_group(view: &crate::layout::LayoutView) -> farcooler_protocol::v1::P
     let (columns, rows) = view.size();
     farcooler_protocol::v1::PaneGroup {
         id: view.window.window_id.clone(),
-        workspace_id: id_bytes(view.window.workspace_id),
+        worktree_id: id_bytes(view.window.worktree_id),
         name: view.window.name.clone(),
         active: view.window.active,
         columns,
@@ -610,7 +610,7 @@ mod tests {
         crate::reconcile::repository(&svc, repo).await.unwrap();
         let ws = svc
             .store
-            .list_workspaces_for_repository(repo)
+            .list_worktrees_for_repository(repo)
             .unwrap()
             .into_iter()
             .next()
@@ -627,14 +627,14 @@ mod tests {
             )
             .unwrap();
 
-        let one = |svc: std::sync::Arc<crate::service::Service>, ws: models::Workspace| async move {
-            svc.workspace_view(&ws)
+        let one = |svc: std::sync::Arc<crate::service::Service>, ws: models::Worktree| async move {
+            svc.worktree_view(&ws)
                 .await
                 .unwrap()
                 .terminals
                 .into_iter()
                 .find(|v| v.terminal.id == term.id)
-                .expect("the terminal is in its workspace")
+                .expect("the terminal is in its worktree")
         };
 
         let before = one(svc.clone(), ws.clone()).await;

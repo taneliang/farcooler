@@ -24,7 +24,7 @@ import SwiftUI
 /// those into separate panels asks the user to classify their own intent before
 /// they have finished having it. Ranking, not routing.
 struct CommandPalette: View {
-    let workspaces: [Workspace]
+    let worktrees: [Worktree]
     /// What the window is looking at, used for two small things: which tile the
     /// highlight avoids starting on, and where a new terminal goes when the
     /// query matched no worktree.
@@ -72,9 +72,9 @@ struct CommandPalette: View {
 
     private var entries: [PaletteEntry] {
         isSwitcher
-            ? PaletteIndex.recent(in: workspaces)
+            ? PaletteIndex.recent(in: worktrees)
             : PaletteIndex.matching(
-                query, in: workspaces, current: currentWorkspace,
+                query, in: worktrees, current: currentWorktree,
                 currentTerminal: selectedTerminalRecord)
     }
 
@@ -82,13 +82,13 @@ struct CommandPalette: View {
     /// offer to toggle ITS mode rather than only knowing its id.
     private var selectedTerminalRecord: Terminal? {
         guard let currentTerminal else { return nil }
-        return workspaces.lazy.flatMap(\.terminals).first { $0.id == currentTerminal }
+        return worktrees.lazy.flatMap(\.terminals).first { $0.id == currentTerminal }
     }
 
-    private var currentWorkspace: String? {
+    private var currentWorktree: String? {
         switch current {
-        case .workspace(_, let id): return id
-        case .terminal(_, let workspace, _): return workspace
+        case .worktree(_, let id): return id
+        case .terminal(_, let worktree, _): return worktree
         case .board, nil: return nil
         }
     }
@@ -164,7 +164,7 @@ struct CommandPalette: View {
 
             PaletteField(
                 text: $query,
-                placeholder: "Go to a terminal, a workspace, or start something",
+                placeholder: "Go to a terminal, a worktree, or start something",
                 horizontalMoves: isSwitcher,
                 onMove: move,
                 onSubmit: submit,
@@ -248,7 +248,7 @@ struct CommandPalette: View {
     private var footer: some View {
         HStack(spacing: 8) {
             if isSwitcher {
-                let hidden = workspaces.reduce(0) { $0 + $1.terminals.count } - entries.count
+                let hidden = worktrees.reduce(0) { $0 + $1.terminals.count } - entries.count
                 // Said out loud, because a grid that silently stops at twelve
                 // looks like a fleet that stops at twelve.
                 Text(

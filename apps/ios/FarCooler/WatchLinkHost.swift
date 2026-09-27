@@ -133,7 +133,7 @@ final class WatchLinkHost: NSObject {
     /// and only the last of those is worth telling somebody about.
     private func connection(forTerminal id: String) -> Connection? {
         fleet?.entries.first { entry in
-            entry.workspace.terminals.contains { $0.id == id }
+            entry.worktree.terminals.contains { $0.id == id }
         }?.connection
     }
 

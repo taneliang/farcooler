@@ -29,8 +29,8 @@ import Foundation
 // for a bookmark, and a type nobody on this side would ever construct is not
 // shared code, it is the phone's code stored somewhere further away.
 //
-// `Workspace.reviewAgentTargets()` did not move either, and that one is not a
-// judgment call: `Workspace` and `Terminal` are declared separately per app and
+// `Worktree.reviewAgentTargets()` did not move either, and that one is not a
+// judgment call: `Worktree` and `Terminal` are declared separately per app and
 // the two declarations do not agree here. Still true now that the phone's pair
 // sits in this same package, in `CoreModel.swift` — they are `internal` there
 // precisely so that being package-mates cannot be mistaken for being one type.
@@ -275,7 +275,7 @@ public final class ReviewCommentQueue: ObservableObject {
     private static let sentKept = 5
 
     private let deliver: Deliver
-    private let workspace: String
+    private let worktree: String
     private let defaults: UserDefaults
     private var loading = true
 
@@ -283,12 +283,12 @@ public final class ReviewCommentQueue: ObservableObject {
     /// wrote into the real `UserDefaults` would leave a queue of notes behind
     /// in whichever app ran it.
     public init(
-        workspace: String, defaults: UserDefaults = .standard, deliver: @escaping Deliver
+        worktree: String, defaults: UserDefaults = .standard, deliver: @escaping Deliver
     ) {
-        self.workspace = workspace
+        self.worktree = worktree
         self.defaults = defaults
         self.deliver = deliver
-        if let data = defaults.data(forKey: Self.key(workspace)),
+        if let data = defaults.data(forKey: Self.key(worktree)),
             let stored = try? JSONDecoder().decode(Stored.self, from: data)
         {
             pending = stored.pending
@@ -404,8 +404,8 @@ public final class ReviewCommentQueue: ObservableObject {
         var sent: [SentReviewBatch]
     }
 
-    private static func key(_ workspace: String) -> String {
-        "changes.comments.\(workspace)"
+    private static func key(_ worktree: String) -> String {
+        "changes.comments.\(worktree)"
     }
 
     private func save() {
@@ -415,6 +415,6 @@ public final class ReviewCommentQueue: ObservableObject {
         guard !loading else { return }
         guard let data = try? JSONEncoder().encode(Stored(pending: pending, sent: sent))
         else { return }
-        defaults.set(data, forKey: Self.key(workspace))
+        defaults.set(data, forKey: Self.key(worktree))
     }
 }

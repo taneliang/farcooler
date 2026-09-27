@@ -254,7 +254,7 @@ struct ShellFlightTests {
 
     // MARK: - Nothing to fly to
 
-    /// A grid that has not laid out the current workspace's cell — a search
+    /// A grid that has not laid out the current worktree's cell — a search
     /// that filters it out, most obviously — leaves the page a page.
     ///
     /// Not a crash and not a zero: with no cell there is no destination, so the

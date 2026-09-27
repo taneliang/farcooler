@@ -77,14 +77,14 @@ class ChangesStoreTest {
         /** Held open so a test can land an answer after the reader has moved on. */
         var gate: CompletableDeferred<Unit>? = null
 
-        override suspend fun changeSet(workspace: String, fresh: Boolean): ChangeSet {
+        override suspend fun changeSet(worktree: String, fresh: Boolean): ChangeSet {
             changeSetCalls += fresh
             setFails?.let { throw it }
             return set
         }
 
         override suspend fun fileDiff(
-            workspace: String,
+            worktree: String,
             path: String,
             scope: String,
         ): FileDiffReply {
@@ -94,15 +94,15 @@ class ChangesStoreTest {
             return diffs[path] ?: FileDiffReply(path = path)
         }
 
-        override suspend fun commitFiles(workspace: String, sha: String): List<ChangedFile> {
+        override suspend fun commitFiles(worktree: String, sha: String): List<ChangedFile> {
             commitFilesCalls += sha
             commitFilesFail?.let { throw it }
             return commitFilesFor[sha] ?: emptyList()
         }
 
-        override suspend fun setBase(workspace: String, baseRef: String): ChangeSet = set
+        override suspend fun setBase(worktree: String, baseRef: String): ChangeSet = set
 
-        override suspend fun markRead(workspace: String) {
+        override suspend fun markRead(worktree: String) {
             markReadCalls += 1
         }
 
@@ -207,7 +207,7 @@ class ChangesStoreTest {
         val store = ChangesStore(ref, source, InMemoryReviewStorage(), storeScope())
         store.load()
         assertEquals(
-            "Couldn’t read this workspace. The request that reads it didn’t finish.",
+            "Couldn’t read this worktree. The request that reads it didn’t finish.",
             store.state.value.error?.sentence,
         )
         assertEquals("ssh: channel closed", store.state.value.error?.transcript)
@@ -800,7 +800,7 @@ class ChangesStoreTest {
     /**
      * The base picker's list comes through the store, so the sheet can be built
      * without a `Connection` — and the repository is the daemon's own scope for
-     * `branch.list`, not the workspace.
+     * `branch.list`, not the worktree.
      */
     @Test
     fun `the branch list is read for the repository it was asked about`() = runTest {
@@ -819,7 +819,7 @@ class ChangesStoreTest {
     }
 
     /**
-     * **A base that would not resolve is not a workspace that could not be
+     * **A base that would not resolve is not a worktree that could not be
      * read**, and until the picker existed to reach this line it said the wrong
      * one. `review_ops::set_base` validates with `rev-parse --verify` before
      * recording anything, so the ordinary failure is a ref deleted between the
@@ -832,7 +832,7 @@ class ChangesStoreTest {
         val fake = FakeSource()
         fake.set = before
         val source = object : ChangesSource by fake {
-            override suspend fun setBase(workspace: String, baseRef: String): ChangeSet =
+            override suspend fun setBase(worktree: String, baseRef: String): ChangeSet =
                 throw CoreException(
                     "the base this branch is compared against could not be resolved",
                     RunnerRefusal.BASE_UNRESOLVABLE.word,

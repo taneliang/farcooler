@@ -5,14 +5,14 @@ package com.farcooler.model
  *
  * The derivation behind the front door, kept out of the composable so it can be
  * tested without a device — the same split `ui/Navigation.kt` makes for the back
- * stack. Everything here is pure: a list of workspaces in, an ordered list of
+ * stack. Everything here is pure: a list of worktrees in, an ordered list of
  * sections out.
  *
- * ## The unit is a workspace, and everything in it is a target
+ * ## The unit is a worktree, and everything in it is a target
  *
- * One section per workspace: what the work is in the header, a row for each
+ * One section per worktree: what the work is in the header, a row for each
  * agent inside it that wants a person — blocked first, then finished — and a
- * row for its diff. A workspace that is blocked and finished and unread appears
+ * row for its diff. A worktree that is blocked and finished and unread appears
  * once, saying all three, and every part of what it says is something you can
  * tap. iOS arrived at this in `43a320f` after two row KINDS produced four rows
  * for one piece of work.
@@ -28,10 +28,10 @@ package com.farcooler.model
  * form: the most urgent thing in the fleet could sit halfway down the screen,
  * under a heading for a machine with nothing to say.
  *
- * The grouping is therefore by workspace and the ordering spans runners, with
+ * The grouping is therefore by worktree and the ordering spans runners, with
  * [NeedsYouSection.hostId] carried on every section so a tap acts on the right
- * daemon. Ids are minted per daemon, so [NeedsYouSection.key] is `host/workspace`
- * and never the workspace alone.
+ * daemon. Ids are minted per daemon, so [NeedsYouSection.key] is `host/worktree`
+ * and never the worktree alone.
  *
  * ## Ranks from two runners are comparable, and that is not obvious
  *
@@ -53,12 +53,12 @@ package com.farcooler.model
  * agent.
  */
 
-/** One workspace, its runner, and what that runner said about its diff. */
+/** One worktree, its runner, and what that runner said about its diff. */
 data class NeedsYouInput(
     val hostId: String,
     /** The runner's own name, shown on a section only when more than one is connected. */
     val hostLabel: String,
-    val workspace: Workspace,
+    val worktree: Worktree,
     /**
      * This worktree's `changes.inbox` row, or null.
      *
@@ -72,7 +72,7 @@ data class NeedsYouInput(
 )
 
 /**
- * One workspace and every reason it is on the front door.
+ * One worktree and every reason it is on the front door.
  *
  * A single type rather than the two cases iOS replaced, because two cases were
  * two rows for one piece of work. The tiers are an ordering over these, not a
@@ -81,7 +81,7 @@ data class NeedsYouInput(
 data class NeedsYouSection(
     val hostId: String,
     val hostLabel: String,
-    val workspace: Workspace,
+    val worktree: Worktree,
     /** Its blocked agents, most urgent first. Empty on a section here for something else. */
     val blocked: List<Terminal>,
     /**
@@ -95,15 +95,15 @@ data class NeedsYouSection(
      */
     val finished: List<Terminal>,
     val counts: InboxRow?,
-    /** [Workspace.ordinals], computed once per section rather than once per row. */
+    /** [Worktree.ordinals], computed once per section rather than once per row. */
     val ordinals: Map<String, Int>,
 ) {
     /**
-     * Identity, and the runner is half of it. Two runners can hold workspaces
+     * Identity, and the runner is half of it. Two runners can hold worktrees
      * with the same id — `BackstackTest` pins that they must not be conflated —
      * and this string is what a `LazyColumn` keys its items on.
      */
-    val key: String get() = "$hostId/${workspace.id}"
+    val key: String get() = "$hostId/${worktree.id}"
 
     /**
      * Whether this section draws a row for its diff.
@@ -123,7 +123,7 @@ data class NeedsYouSection(
 /**
  * How many agents of ONE KIND a section shows before it starts counting them.
  *
- * Three, because each one is a fleet row up to eight lines tall and a workspace
+ * Three, because each one is a fleet row up to eight lines tall and a worktree
  * with eight blocked agents would otherwise be the whole screen. What is lost
  * is small: the tab strip on the other side of the tap holds every one of them,
  * labelled.
@@ -133,15 +133,15 @@ data class NeedsYouSection(
  * in the same worktree — and an answer arriving is the thing this screen most
  * needs to say, not an edge case it tolerates.
  */
-const val AGENTS_PER_WORKSPACE = 3
+const val AGENTS_PER_WORKTREE = 3
 
 /**
- * Every workspace that wants a person, in the order it wants them.
+ * Every worktree that wants a person, in the order it wants them.
  *
  * Two tiers, and the first one holds two kinds.
  *
- * 1. **Workspaces with an agent wanting attention**, ranked by the LOWEST
- *    [Terminal.sortRank] among them. A workspace is as urgent as its most
+ * 1. **Worktrees with an agent wanting attention**, ranked by the LOWEST
+ *    [Terminal.sortRank] among them. A worktree is as urgent as its most
  *    urgent agent; an average or a count would let a worktree with six working
  *    agents outrank one with a single agent stuck for an hour.
  * 2. **Unread diffs** — `changedSinceReviewed && hasDiff` with no agent wanting
@@ -162,11 +162,11 @@ const val AGENTS_PER_WORKSPACE = 3
  * the durable one.
  *
  * The second tier has no rank of its own, deliberately. [InboxRow] is a
- * workspace's counts, not an agent's state, and inventing a rank from the
- * workspace's terminals would sort a diff by how blocked some agent in the same
+ * worktree's counts, not an agent's state, and inventing a rank from the
+ * worktree's terminals would sort a diff by how blocked some agent in the same
  * worktree happens to be, which is not a fact about the diff.
  *
- * **The tiebreak is the runner and then the workspace**, and it is load-bearing
+ * **The tiebreak is the runner and then the worktree**, and it is load-bearing
  * twice over. Ranks genuinely collide — two agents that entered the same tier
  * in the same second get the same number — and across runners they collide more
  * often, because two daemons that each have one agent blocked for four minutes
@@ -174,9 +174,9 @@ const val AGENTS_PER_WORKSPACE = 3
  * sections could swap places on any poll, and a row that moves under a finger
  * already travelling toward it is a tap that lands on something else.
  *
- * **Hidden workspaces are not here.** A hidden workspace is one the user asked
+ * **Hidden worktrees are not here.** A hidden worktree is one the user asked
  * not to see; a front door that shows what you hid is not honoring the hiding.
- * They are one tap away in the workspace list, behind the same disclosure they
+ * They are one tap away in the worktree list, behind the same disclosure they
  * have always been.
  */
 fun needsYou(inputs: List<NeedsYouInput>): List<NeedsYouSection> {
@@ -184,8 +184,8 @@ fun needsYou(inputs: List<NeedsYouInput>): List<NeedsYouSection> {
     val unread = mutableListOf<NeedsYouSection>()
 
     for (input in inputs) {
-        val workspace = input.workspace
-        if (workspace.isHidden) continue
+        val worktree = input.worktree
+        if (worktree.isHidden) continue
 
         // `wantsAttention` and not a list of cases, because that property IS
         // the product's single definition of what is worth interrupting
@@ -196,24 +196,24 @@ fun needsYou(inputs: List<NeedsYouInput>): List<NeedsYouSection> {
         // Sorted once and then split. The split does not reorder: rank puts
         // every blocked agent a whole tier below every finished one, so the two
         // slices come out already in the order they are drawn in.
-        val wanting = workspace.terminals
+        val wanting = worktree.terminals
             .filter { it.agent.wantsAttention }
             .sortedWith(compareBy({ it.sortRank }, { it.id }))
 
         val section = NeedsYouSection(
             hostId = input.hostId,
             hostLabel = input.hostLabel,
-            workspace = workspace,
+            worktree = worktree,
             blocked = wanting.filter { it.agent == AgentActivity.BLOCKED },
             finished = wanting.filter { it.agent == AgentActivity.DONE },
             counts = input.counts,
-            ordinals = workspace.ordinals(),
+            ordinals = worktree.ordinals(),
         )
 
         val first = wanting.firstOrNull()
         if (first != null) {
-            // A workspace whose only news is a finished agent ranks by that
-            // agent, which lands it below every blocked workspace and above
+            // A worktree whose only news is a finished agent ranks by that
+            // agent, which lands it below every blocked worktree and above
             // every unread diff without this line knowing which kind it holds.
             attention += first.sortRank to section
         } else if (input.counts?.changedSinceReviewed == true && input.counts.hasDiff) {
@@ -222,7 +222,7 @@ fun needsYou(inputs: List<NeedsYouInput>): List<NeedsYouSection> {
     }
 
     attention.sortWith(
-        compareBy({ it.first }, { it.second.hostId }, { it.second.workspace.id })
+        compareBy({ it.first }, { it.second.hostId }, { it.second.worktree.id })
     )
     return attention.map { it.second } + unread
 }

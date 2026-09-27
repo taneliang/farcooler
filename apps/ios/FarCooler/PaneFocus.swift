@@ -1,13 +1,13 @@
 import Foundation
 
-/// Which tab of a workspace somebody means.
+/// Which tab of a worktree somebody means.
 ///
 /// This was `Route.Focus`, a case inside the navigation enum `FleetView`
 /// rendered as a `NavigationStack` path. That enum is gone — the shell is the
 /// app's navigation now, and a shell position is a pair of indices into a
 /// fleet, not a list of pushes — but the VALUE outlived it, because it was
 /// never really about navigation. It is the one thing this app writes down
-/// about a workspace: which of its tabs a person chose.
+/// about a worktree: which of its tabs a person chose.
 ///
 /// A shell-neutral value type in a file of its own, so `Connection` can hold
 /// `lastFocus` without importing a vocabulary of screens. Nothing here knows
@@ -27,16 +27,16 @@ import Foundation
 /// a tab. So what is left is:
 ///
 /// 1. **The tab you were last on.** `Connection.lastFocus`, written only when a
-///    person moves between the tabs of one workspace — see
+///    person moves between the tabs of one worktree — see
 ///    `Connection.rememberFocus` and `ShellScreen.remember(_:leaving:)`.
 /// 2. **The rule**, `rule(for:inbox:)`: whatever needs you now.
 ///
 /// The difference between them is the difference between a place you chose and
-/// a place the app picked for you. A workspace you last read the diff of should
+/// a place the app picked for you. A worktree you last read the diff of should
 /// open on that diff when you come back to it, at the gym ninety seconds later
 /// or in the morning — `docs/jobs-to-be-done.md` F4 is the owner saying review
 /// has to be resumable, and landing somewhere other than where you were is
-/// exactly what it is not to be. A workspace you have never chosen a tab in has
+/// exactly what it is not to be. A worktree you have never chosen a tab in has
 /// nothing to be resumed to, and opens on whatever needs you at seven rather
 /// than on the agent that needed you at midnight.
 ///
@@ -53,7 +53,7 @@ enum PaneFocus: Hashable, Codable {
 }
 
 extension PaneFocus {
-    /// Which tab a workspace opens on when nobody ever chose one.
+    /// Which tab a worktree opens on when nobody ever chose one.
     ///
     /// The last of the two answers above, and the only one that reads the world
     /// as it is right now rather than as somebody left it.
@@ -61,26 +61,26 @@ extension PaneFocus {
     /// Blocked agent, then unread diff, then whatever the fleet would put at the
     /// top. In that order because it is the order of "what did you open this
     /// for": an agent that stopped to ask is waiting on you, a diff that moved
-    /// is waiting to be read, and a workspace where neither is true is one you
+    /// is waiting to be read, and a worktree where neither is true is one you
     /// went looking for rather than one that called.
     ///
     /// The blocked agent is chosen by `sortRank` — `farcooler_core::feed::rank`,
     /// computed on the runner — with the terminal id as a tiebreak, because
     /// ranks genuinely collide and `min(by:)` over a collision has to land on
-    /// the same agent every time or the workspace opens somewhere different on
+    /// the same agent every time or the worktree opens somewhere different on
     /// each poll.
     ///
     /// One caller reaches it now, and there used to be three. The inbox row and
-    /// the workspace list row were two of them, and both were doors that named a
+    /// the worktree list row were two of them, and both were doors that named a
     /// pane; neither screen exists. What is left is
-    /// `ShellFleetMap.resume(_:connection:tabs:)` — a workspace nobody has ever
+    /// `ShellFleetMap.resume(_:connection:tabs:)` — a worktree nobody has ever
     /// chosen a tab in, or one whose remembered tab names an agent that has
     /// since gone.
-    static func rule(for workspace: Workspace, inbox: InboxRow?) -> PaneFocus {
+    static func rule(for worktree: Worktree, inbox: InboxRow?) -> PaneFocus {
         // A `changes` pane the host happens to have open is not an agent and is
         // not a candidate: the diff it shows is the Changes tab, which is
         // already the second branch below.
-        let panes = workspace.terminals.filter { !$0.isChangesPane }
+        let panes = worktree.terminals.filter { !$0.isChangesPane }
 
         if let blocked = panes.filter({ $0.agent == .blocked })
             .min(by: { ($0.sortRank, $0.id) < ($1.sortRank, $1.id) })
@@ -97,7 +97,7 @@ extension PaneFocus {
         if let top = panes.min(by: { ($0.sortRank, $0.id) < ($1.sortRank, $1.id) }) {
             return .agent(top.id)
         }
-        // A workspace with no panes at all still has a diff to read, and that
+        // A worktree with no panes at all still has a diff to read, and that
         // is the whole reason Changes needs no pane to exist behind it.
         return .changes
     }

@@ -11,10 +11,10 @@ import Foundation
 struct Fleet: Decodable, Equatable {
     var runtimeHealthy: Bool
     var livePanes: Int
-    var workspaces: [Workspace]
+    var worktrees: [Worktree]
     /// What this runner says a derived branch name starts with.
     ///
-    /// Optional, by the rule stated on `Workspace` below: a client meeting an
+    /// Optional, by the rule stated on `Worktree` below: a client meeting an
     /// older daemon must not fail to decode the entire fleet over one absent
     /// key. `nil` and `""` are both "no prefix from this runner" here — the
     /// distinction between unset and deliberately empty is the daemon's to draw,
@@ -24,12 +24,12 @@ struct Fleet: Decodable, Equatable {
     enum CodingKeys: String, CodingKey {
         case runtimeHealthy = "runtime_healthy"
         case livePanes = "live_panes"
-        case workspaces
+        case worktrees
         case branchPrefix = "branch_prefix"
     }
 
     static let empty =
-        Fleet(runtimeHealthy: false, livePanes: 0, workspaces: [], branchPrefix: nil)
+        Fleet(runtimeHealthy: false, livePanes: 0, worktrees: [], branchPrefix: nil)
 }
 
 /// A worktree.
@@ -38,8 +38,8 @@ struct Fleet: Decodable, Equatable {
 /// synthesized `Decodable` ignores default values and throws on a missing key,
 /// so a client meeting an older daemon — or an app built before a CLI — would
 /// fail to decode the entire fleet over one absent field, and show "no
-/// workspaces" for a host full of them.
-struct Workspace: Decodable, Identifiable, Hashable {
+/// worktrees" for a host full of them.
+struct Worktree: Decodable, Identifiable, Hashable {
     var id: String
     var short: String
     var task: String
@@ -52,11 +52,11 @@ struct Workspace: Decodable, Identifiable, Hashable {
     /// `windowSubtitle` prints and `matches(_:)` searches.
     ///
     /// One key with two meanings, and this is the half the CLI gives. `farcooler
-    /// workspace list --json` resolves `repository_id` through the repository
+    /// worktree list --json` resolves `repository_id` through the repository
     /// list and sends `display_name` (`crates/cli/src/main.rs:1569`). The FFI
     /// the PHONE reads sends the repository UUID under this same key, because
     /// `stack.get` and `pr.refresh` take an id — see `repository` on the iOS
-    /// `Workspace` in `apps/shared/AgentKit/Sources/AgentKit/CoreModel.swift`.
+    /// `Worktree` in `apps/shared/AgentKit/Sources/AgentKit/CoreModel.swift`.
     /// Both clients are right about the producer they read. Copying a use of
     /// this field between them is not, and that is the mistake `07e75e8` cost a
     /// release: printing the phone's would show a UUID, and handing this one to
@@ -70,7 +70,9 @@ struct Workspace: Decodable, Identifiable, Hashable {
     /// something already in front of you. It surfaces only where it
     /// disambiguates.
     var host: String?
-    var worktree: String
+    /// The worktree's directory on its runner. The wire calls it `worktree`,
+    /// from before the row itself was called one.
+    var path: String
     /// Where this card sits on its runner, as the runner has it stored.
     ///
     /// Not read to sort with. The list already arrives in this order and the
@@ -83,7 +85,7 @@ struct Workspace: Decodable, Identifiable, Hashable {
     /// of the entire fleet against an older daemon.
     var ordinal: Int?
 
-    /// Whether this workspace IS the repository's own checkout.
+    /// Whether this worktree IS the repository's own checkout.
     ///
     /// From the daemon, which gets it from `git worktree list`. It used to be
     /// `task == "main"`, which a linked worktree in a directory called `main`
@@ -92,7 +94,7 @@ struct Workspace: Decodable, Identifiable, Hashable {
     ///
     /// Optional because every field added after the first release is: a client
     /// meeting an older daemon must not fail to decode the entire fleet over
-    /// one absent key and show "no workspaces" for a host full of them.
+    /// one absent key and show "no worktrees" for a host full of them.
     var isMainCheckout: Bool { is_main_checkout ?? false }
     // swiftlint:disable:next identifier_name
     var is_main_checkout: Bool?
@@ -104,6 +106,12 @@ struct Workspace: Decodable, Identifiable, Hashable {
     var worktreeMissing: Bool { state == "worktree_missing" }
     var state: String
     var terminals: [Terminal]
+
+    enum CodingKeys: String, CodingKey {
+        case id, short, task, branch, repository, host, ordinal, state, terminals
+        case is_main_checkout
+        case path = "worktree"
+    }
 
     /// Terminals wanting the user, across this worktree.
     var attention: [Terminal] { terminals.filter(\.status.wantsAttention) }
@@ -142,7 +150,7 @@ struct Workspace: Decodable, Identifiable, Hashable {
     /// `shell` would be numbered for no reason.
     ///
     /// One method rather than the three private copies this app used to carry
-    /// (the sidebar section, the workspace detail, and — nearly — the review
+    /// (the sidebar section, the worktree detail, and — nearly — the review
     /// note picker). They agreed, which is luck rather than design: the same
     /// pane numbered differently depending on which view is showing it is a
     /// disagreement about which terminal you are looking at. The phone ported

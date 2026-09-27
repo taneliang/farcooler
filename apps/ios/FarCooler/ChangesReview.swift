@@ -14,7 +14,7 @@ import SwiftUI
 // runners and the same place `ReviewCommentQueue` keeps unsent notes: none of
 // it is secret, none of it is large, and the one thing on this screen that IS
 // secret — the diff itself — is deliberately not written down anywhere. What is
-// stored is a path, a sha, and whatever the reader typed, per workspace.
+// stored is a path, a sha, and whatever the reader typed, per worktree.
 //
 // The queue itself is no longer declared here. It is in
 // `AgentKit/ReviewComments.swift` now, because the Mac's diff pane grew the
@@ -27,7 +27,7 @@ import SwiftUI
 // per-file checkmark, and that is a decision rather than an omission: an agent
 // is still editing these files, so a mark saying "I read this" on a file that
 // has changed twice since is a lie the app would be telling on the reader's
-// behalf. The workspace-level `changed_since_reviewed` watermark the daemon
+// behalf. The worktree-level `changed_since_reviewed` watermark the daemon
 // already keeps is the one piece of review state that survives an edit, because
 // it is invalidated BY the edit. This file remembers position only.
 
@@ -86,29 +86,29 @@ struct ReviewPosition: Codable, Equatable {
     }
 }
 
-/// The bookmarks, one per workspace, in `UserDefaults`.
+/// The bookmarks, one per worktree, in `UserDefaults`.
 ///
 /// A free function over a namespaced key rather than an object: nothing
 /// observes a bookmark. It is written when the position changes and read once,
 /// when a store is created, and an `ObservableObject` in between would only
 /// publish changes nobody is watching.
 enum ReviewBookmarks {
-    private static func key(_ workspace: String) -> String {
-        "changes.position.\(workspace)"
+    private static func key(_ worktree: String) -> String {
+        "changes.position.\(worktree)"
     }
 
-    static func read(_ workspace: String) -> ReviewPosition? {
-        guard let data = UserDefaults.standard.data(forKey: key(workspace)) else { return nil }
+    static func read(_ worktree: String) -> ReviewPosition? {
+        guard let data = UserDefaults.standard.data(forKey: key(worktree)) else { return nil }
         return try? JSONDecoder().decode(ReviewPosition.self, from: data)
     }
 
-    static func write(_ position: ReviewPosition, for workspace: String) {
+    static func write(_ position: ReviewPosition, for worktree: String) {
         guard let data = try? JSONEncoder().encode(position) else { return }
-        UserDefaults.standard.set(data, forKey: key(workspace))
+        UserDefaults.standard.set(data, forKey: key(worktree))
     }
 
-    static func forget(_ workspace: String) {
-        UserDefaults.standard.removeObject(forKey: key(workspace))
+    static func forget(_ worktree: String) {
+        UserDefaults.standard.removeObject(forKey: key(worktree))
     }
 }
 
@@ -131,7 +131,7 @@ enum ReviewBookmarks {
 
 // MARK: - Where a note can be sent
 
-extension Workspace {
+extension Worktree {
     /// The panes in this worktree a review note can be handed to.
     ///
     /// `isAgentPane` OR `canSwitchPaneMode`, because both are the daemon's word
@@ -147,7 +147,7 @@ extension Workspace {
     /// chances for the same worktree to offer different agents depending on
     /// which door you came through.
     ///
-    /// Not shared with the Mac, though `ReviewAgentTarget` is. `Workspace` and
+    /// Not shared with the Mac, though `ReviewAgentTarget` is. `Worktree` and
     /// `Terminal` are declared once per app and the two do not agree here: a
     /// Mac's `canSwitchPaneMode` excludes a pane showing a diff, because a Mac
     /// can put one there and the daemon refuses to switch it. One filter over
@@ -174,8 +174,8 @@ extension ReviewCommentQueue {
     /// The queue as this app builds it: the send is `terminal.agent_prompt`
     /// over the FFI, the same call `AgentStream.send` makes, so a comment batch
     /// arrives in the transcript exactly as a typed message does.
-    static func phone(core: ClientCore, workspace: String) -> ReviewCommentQueue {
-        ReviewCommentQueue(workspace: workspace) { target, text in
+    static func phone(core: ClientCore, worktree: String) -> ReviewCommentQueue {
+        ReviewCommentQueue(worktree: worktree) { target, text in
             do {
                 _ = try await core.call(
                     "terminal.agent_prompt", ["terminal": target.id, "text": text])

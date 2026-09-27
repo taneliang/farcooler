@@ -47,7 +47,7 @@ impl From<SessionError> for BackendError {
             // proceed. `Refused` carries no message here because neither
             // variant has one — the path refusal is ours, not the agent's.
             SessionError::Refused => {
-                BackendError::Refused("the path is outside the workspace worktree".into())
+                BackendError::Refused("the path is outside the worktree".into())
             }
             SessionError::Rejected => {
                 BackendError::Refused("the agent did not accept the session".into())

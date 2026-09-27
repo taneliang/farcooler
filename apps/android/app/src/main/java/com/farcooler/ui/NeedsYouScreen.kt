@@ -47,7 +47,7 @@ import com.farcooler.data.Runner
 import com.farcooler.model.RunnerCount
 import com.farcooler.model.RunnerLink
 import com.farcooler.model.reassurance
-import com.farcooler.model.AGENTS_PER_WORKSPACE
+import com.farcooler.model.AGENTS_PER_WORKTREE
 import com.farcooler.model.AgentActivity
 import com.farcooler.model.NeedsYouSection
 import com.farcooler.model.blockedOverflow
@@ -61,16 +61,16 @@ import kotlinx.coroutines.launch
  * What the phone opens onto: everything, on every runner, that wants a person.
  *
  * The app used to open into a terminal. `FleetRepository.landing()` picked one
- * on connect and the workspace list was the fallback for a fleet with nothing
+ * on connect and the worktree list was the fallback for a fleet with nothing
  * running — the right front door for exactly one of the four situations
  * `docs/jobs-to-be-done.md` names, on the couch about to drive an agent. In the
  * other three, the first question is *what needs me*, and a terminal is an
  * answer to a question nobody asked. iOS deleted the same shape in `1be6264`.
  *
- * ## One section per workspace, spanning every runner
+ * ## One section per worktree, spanning every runner
  *
  * The derivation and its ordering live in `model/NeedsYou.kt`, where they can
- * be tested without a device; the argument for grouping by workspace rather
+ * be tested without a device; the argument for grouping by worktree rather
  * than by RUNNER is written down there too, and it is the one decision on this
  * screen that is not a port. In short: grouping by runner is iOS's
  * `HostSwitcherBar` in list form, and it would let the most urgent thing in the
@@ -115,7 +115,7 @@ import kotlinx.coroutines.launch
  * throughout, settled in `cb13d31`.
  *
  * `ListItem` for the two rows that fit it — the diff and the way to the
- * workspace list. NOT for an agent: [TerminalRow] is four bands running one to
+ * worktree list. NOT for an agent: [TerminalRow] is four bands running one to
  * eight lines, and `ListItem` has three text slots and a specified minimum
  * height per variant. Drawing an agent a second way here would also be a second
  * chance for two screens to say different things about one pane.
@@ -125,8 +125,8 @@ import kotlinx.coroutines.launch
 fun NeedsYouScreen(
     model: AppModel,
     onSelect: (TerminalRef) -> Unit,
-    onReviewChanges: (hostId: String, workspaceId: String) -> Unit,
-    onOpenWorkspaces: () -> Unit,
+    onReviewChanges: (hostId: String, worktreeId: String) -> Unit,
+    onOpenWorktrees: () -> Unit,
     onOpenBoard: (com.farcooler.model.BoardRow) -> Unit,
     onOpenDrawer: () -> Unit,
 ) {
@@ -140,7 +140,7 @@ fun NeedsYouScreen(
     // Derived from the entries alone, which already carry the counts — see
     // `FleetEntry.counts`. Nothing here re-subscribes per runner.
     val sections = remember(entries) { needsYou(entries.map { it.needsYouInput() }) }
-    val visible = entries.filter { !it.workspace.isHidden }
+    val visible = entries.filter { !it.worktree.isHidden }
     val namesRunners = connections.size > 1
     // Derived from `entries`, which is what this composable is subscribed to.
     // Reading it off each connection's fleet would be a value nothing here
@@ -152,7 +152,7 @@ fun NeedsYouScreen(
     // on reporting its last working agents for the whole reconnect.
     val working = visible.groupBy { it.host.id }.mapValues { (_, entries) ->
         entries.sumOf { entry ->
-            entry.workspace.terminals.count { it.agent == AgentActivity.WORKING }
+            entry.worktree.terminals.count { it.agent == AgentActivity.WORKING }
         }
     }
 
@@ -224,14 +224,14 @@ fun NeedsYouScreen(
                     }
 
                     items(
-                        section.blocked.take(AGENTS_PER_WORKSPACE),
+                        section.blocked.take(AGENTS_PER_WORKTREE),
                         key = { "agent/${section.hostId}/${it.id}" },
                     ) { terminal ->
                         AgentRow(model, section, terminal, onSelect, Modifier.animateItem())
                     }
-                    if (section.blocked.size > AGENTS_PER_WORKSPACE) {
+                    if (section.blocked.size > AGENTS_PER_WORKTREE) {
                         item(key = "more-blocked/${section.key}") {
-                            Overflow(blockedOverflow(section.blocked.size - AGENTS_PER_WORKSPACE))
+                            Overflow(blockedOverflow(section.blocked.size - AGENTS_PER_WORKTREE))
                         }
                     }
 
@@ -245,15 +245,15 @@ fun NeedsYouScreen(
                     // `done` to `idle` on the next poll and the row goes. That
                     // is the intended shape of this row, not a wrinkle in it.
                     items(
-                        section.finished.take(AGENTS_PER_WORKSPACE),
+                        section.finished.take(AGENTS_PER_WORKTREE),
                         key = { "agent/${section.hostId}/${it.id}" },
                     ) { terminal ->
                         AgentRow(model, section, terminal, onSelect, Modifier.animateItem())
                     }
-                    if (section.finished.size > AGENTS_PER_WORKSPACE) {
+                    if (section.finished.size > AGENTS_PER_WORKTREE) {
                         item(key = "more-finished/${section.key}") {
                             Overflow(
-                                finishedOverflow(section.finished.drop(AGENTS_PER_WORKSPACE))
+                                finishedOverflow(section.finished.drop(AGENTS_PER_WORKTREE))
                             )
                         }
                     }
@@ -266,9 +266,9 @@ fun NeedsYouScreen(
                 }
 
                 // A Board row per repository whose board has something on it,
-                // directly above the door to the workspaces — where the Mac puts
-                // its Board row above a repository's workspaces. Here rather
-                // than in the workspace list: that list is flat across runners
+                // directly above the door to the worktrees — where the Mac puts
+                // its Board row above a repository's worktrees. Here rather
+                // than in the worktree list: that list is flat across runners
                 // with no repository level, and this screen is the one every
                 // session starts on. One item per runner, because each runner's
                 // boards are flows of their own; see [RunnerBoardRows].
@@ -278,8 +278,8 @@ fun NeedsYouScreen(
                     }
                 }
 
-                item(key = "workspaces") {
-                    WorkspacesRow(visible.size, entries.size, connections, onOpenWorkspaces)
+                item(key = "worktrees") {
+                    WorktreesRow(visible.size, entries.size, connections, onOpenWorktrees)
                 }
             }
         }
@@ -299,13 +299,13 @@ fun NeedsYouScreen(
  * One agent, wherever it came from.
  *
  * Shared by the blocked group and the finished one because the row is the same
- * row and the destination is the same destination: the workspace, opened on
+ * row and the destination is the same destination: the worktree, opened on
  * that pane, which is what somebody wants from both — the answer to the
  * question, or the answer to the question they asked.
  *
  * `point`, not `choose`. [AppModel.open] is the sent-here door and does not
  * write the remembered tab down: arriving from the front door is the app
- * routing you, not a preference about where this workspace opens tomorrow. The
+ * routing you, not a preference about where this worktree opens tomorrow. The
  * tab strip stays the one writer. See [Focus].
  */
 @Composable
@@ -331,7 +331,7 @@ private fun AgentRow(
             ordinal = section.ordinals[terminal.id],
             answering = answering,
             onClick = {
-                onSelect(TerminalRef(section.hostId, section.workspace.id, terminal.id))
+                onSelect(TerminalRef(section.hostId, section.worktree.id, terminal.id))
             },
             onAction = { action ->
                 connection?.let { scope.launch { it.act(action, terminal) } }
@@ -341,7 +341,7 @@ private fun AgentRow(
 }
 
 /**
- * The workspace's own line: what the work is, which branch it is on, and — once
+ * The worktree's own line: what the work is, which branch it is on, and — once
  * there is more than one — whose runner.
  *
  * A header, not a target, so nothing here competes with the rows below it and
@@ -366,7 +366,7 @@ private fun SectionHeader(section: NeedsYouSection, showRunner: Boolean) {
             .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 2.dp)
     ) {
         Text(
-            section.workspace.task.ifBlank { section.workspace.branch },
+            section.worktree.task.ifBlank { section.worktree.branch },
             style = MaterialTheme.typography.titleSmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -377,8 +377,8 @@ private fun SectionHeader(section: NeedsYouSection, showRunner: Boolean) {
                 // that it IS the repository is. `FleetScreen`'s header and
                 // iOS's both say it the same way.
                 append(
-                    if (section.workspace.isMainCheckout) "Primary checkout"
-                    else section.workspace.branch
+                    if (section.worktree.isMainCheckout) "Primary checkout"
+                    else section.worktree.branch
                 )
                 if (showRunner) append(" · ${section.hostLabel}")
             },
@@ -394,7 +394,7 @@ private fun SectionHeader(section: NeedsYouSection, showRunner: Boolean) {
 /**
  * The diff, as a row of its own — and it opens the diff.
  *
- * Why it gets a row at all: no road into a workspace had ever opened it on its
+ * Why it gets a row at all: no road into a worktree had ever opened it on its
  * diff, so from the front door the diff cost two taps while `+82 -13` sat on
  * the header looking like the control for it.
  * `docs/jobs-to-be-done.md` F4 has the phone's review experience load-bearing
@@ -403,7 +403,7 @@ private fun SectionHeader(section: NeedsYouSection, showRunner: Boolean) {
  *
  * **Both of the reasons this row used to point at the worktree instead are
  * spent, and the second one is worth keeping rather than deleting.** The first
- * was that the workspace screen drew a `changes` pane as raw VT bytes, so
+ * was that the worktree screen drew a `changes` pane as raw VT bytes, so
  * aiming here at one would be worse than aiming at the worktree; the Changes
  * tab and [Pane]'s fold closed that. The second was the one that actually
  * decided it: that tab could say how big the diff was and could not show it,
@@ -413,7 +413,7 @@ private fun SectionHeader(section: NeedsYouSection, showRunner: Boolean) {
  * to change is the tap.
  *
  * What it does NOT do is name a pane on the runner. The tab is asked for by
- * workspace id, so it answers during a handshake where a remembered terminal
+ * worktree id, so it answers during a handshake where a remembered terminal
  * cannot: tapping this row on a runner that is still connecting lands on the
  * diff and waits there, rather than on "Waiting for that runner." See
  * [AppModel.openChanges] for why the focus is written before the route moves.
@@ -428,7 +428,7 @@ private fun SectionHeader(section: NeedsYouSection, showRunner: Boolean) {
 @Composable
 private fun ChangesRow(
     section: NeedsYouSection,
-    onReview: (hostId: String, workspaceId: String) -> Unit,
+    onReview: (hostId: String, worktreeId: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val counts = section.counts
@@ -444,13 +444,13 @@ private fun ChangesRow(
         },
         trailingContent = {
             // The counts, drawn by the one composable that knows what those
-            // two colors mean — the workspace's Changes chip shows the same
+            // two colors mean — the worktree's Changes chip shows the same
             // pair for the same worktree, and they must not be able to come out
             // different. See [DiffCounts].
             if (counts != null && counts.hasDiff) DiffCounts(counts)
         },
         modifier = modifier
-            .clickable { onReview(section.hostId, section.workspace.id) }
+            .clickable { onReview(section.hostId, section.worktree.id) }
             // Spoken as one target, in the Changes chip's own words. `+82` and
             // `-13` read aloud as two orphaned numbers, and the clause about
             // uncommitted work exists nowhere else — so the row and the tab it
@@ -508,7 +508,7 @@ private fun Overflow(sentence: String) {
 private fun Reassurance(
     connections: List<Connection>,
     working: Map<String, Int>,
-    workspaces: Int,
+    worktrees: Int,
 ) {
     val phases = connections.map { connection ->
         key(connection.host.id) { connection.phase.collectAsStateWithLifecycle().value }
@@ -532,7 +532,7 @@ private fun Reassurance(
         )
         Text("Nothing needs you", style = MaterialTheme.typography.titleMedium)
         Text(
-            reassurance(runners, where, workspaces),
+            reassurance(runners, where, worktrees),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -554,7 +554,7 @@ private fun Reassurance(
 //
 // It counts `working` only, which is disjoint from the two states that put a
 // row on this screen, so it answers "is anything happening", asked only once
-// nothing needs you. Hidden workspaces are left out, to agree with the rest of
+// nothing needs you. Hidden worktrees are left out, to agree with the rest of
 // the screen. It names the runner only when there is exactly one: with one,
 // naming it tells you which machine the app is speaking for; with several the
 // scope is the whole fleet, and picking one name to put in the sentence would
@@ -568,17 +568,17 @@ private fun Reassurance(
  * read `Working 0` on the only way in — a label telling you not to open the one
  * door you needed.
  *
- * Hidden workspaces are left out of the number, so it is a number you can find
+ * Hidden worktrees are left out of the number, so it is a number you can find
  * by counting rows over there — and the supporting line says so when there are
  * any, because "12" over a list with fourteen rows in it is the same kind of
  * lie.
  *
- * A count of zero is still worth a tap: the quick task and the new-workspace
+ * A count of zero is still worth a tap: the quick task and the new-worktree
  * form live in that screen and nowhere else on the phone, so an empty fleet is
  * the state in which going there matters most.
  */
 @Composable
-private fun WorkspacesRow(
+private fun WorktreesRow(
     visible: Int,
     total: Int,
     connections: List<Connection>,
@@ -586,7 +586,7 @@ private fun WorkspacesRow(
 ) {
     val hidden = total - visible
     ListItem(
-        headlineContent = { Text("Workspaces") },
+        headlineContent = { Text("Worktrees") },
         leadingContent = {
             Icon(
                 Icons.Outlined.Folder,
@@ -600,7 +600,7 @@ private fun WorkspacesRow(
                 hidden == 1 -> "1 more is hidden."
                 hidden > 1 -> "$hidden more are hidden."
                 connections.isEmpty() -> "No runners yet. This is where you add one."
-                total == 0 -> "No workspaces yet. This is where you start one."
+                total == 0 -> "No worktrees yet. This is where you start one."
                 else -> null
             }
             if (sentence != null) Text(sentence)

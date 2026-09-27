@@ -1,7 +1,7 @@
 //! Stacks of branches, and what GitHub says about them.
 //!
 //! A stack is a chain from the repository's default branch up to a tip, one PR
-//! per link. It is derived per REPOSITORY, not per workspace, so two worktrees
+//! per link. It is derived per REPOSITORY, not per worktree, so two worktrees
 //! on two links of the same stack show the same chain from different positions —
 //! which is what happens when someone splits a branch and opens a second
 //! worktree to review one slice of it.

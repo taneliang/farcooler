@@ -82,7 +82,7 @@ pub enum DomainError {
     /// This runner's Far Cooler is older than what the client asked for.
     ///
     /// Distinct from `NotFound`, which it used to arrive as. "No such
-    /// workspace" and "this runner cannot do that yet" call for opposite
+    /// worktree" and "this runner cannot do that yet" call for opposite
     /// responses, and a newer app could not tell them apart — so it could
     /// neither dim the control nor say anything a person could act on.
     ///
@@ -111,8 +111,8 @@ pub enum DomainError {
     /// disk that Far Cooler would no longer be allowed to clean up. A client has
     /// to tell the user to remove those first, which it cannot do if this
     /// arrives as "managed processes are still running".
-    #[error("workspaces still exist under this resource")]
-    WorkspacesExist,
+    #[error("worktrees still exist under this resource")]
+    WorktreesExist,
 
     /// A prompt was sent to a pane no shim is holding the socket for.
     ///
@@ -152,7 +152,7 @@ impl DomainError {
             DomainError::PathNotAllowed => (ErrorCode::PathNotAllowed, false),
             DomainError::SensitiveRoot => (ErrorCode::SensitiveRoot, false),
             DomainError::ConfirmationRequired => (ErrorCode::ConfirmationRequired, false),
-            DomainError::WorkspacesExist => (ErrorCode::WorkspacesExist, false),
+            DomainError::WorktreesExist => (ErrorCode::WorktreesExist, false),
             // Retryable: a shim that has not finished dialing will be there.
             DomainError::AgentNotConnected => (ErrorCode::AgentNotConnected, true),
             DomainError::BaseUnresolvable => (ErrorCode::BaseUnresolvable, false),
@@ -210,7 +210,7 @@ impl DomainError {
             | DomainError::PathNotAllowed
             | DomainError::SensitiveRoot
             | DomainError::ConfirmationRequired
-            | DomainError::WorkspacesExist
+            | DomainError::WorktreesExist
             | DomainError::AgentNotConnected
             | DomainError::BaseUnresolvable
             | DomainError::DiffTooLarge
@@ -277,7 +277,8 @@ pub fn word(code: ErrorCode) -> &'static str {
         ErrorCode::TmuxUnavailable => "tmux-unavailable",
         ErrorCode::PathNotAllowed => "path-not-allowed",
         ErrorCode::ConfirmationRequired => "confirmation-required",
-        ErrorCode::WorkspacesExist => "workspaces-exist",
+        // The word keeps the old spelling: the apps match on it.
+        ErrorCode::WorktreesExist => "workspaces-exist",
         ErrorCode::SensitiveRoot => "sensitive-root",
         ErrorCode::BaseUnresolvable => "base-unresolvable",
         ErrorCode::DiffTooLarge => "diff-too-large",
@@ -339,7 +340,7 @@ mod tests {
             DomainError::PathNotAllowed,
             DomainError::SensitiveRoot,
             DomainError::ConfirmationRequired,
-            DomainError::WorkspacesExist,
+            DomainError::WorktreesExist,
             DomainError::BaseUnresolvable,
             DomainError::DiffTooLarge,
             DomainError::DiffUnsupported,

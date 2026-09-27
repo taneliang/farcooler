@@ -8,7 +8,7 @@ import kotlin.math.min
  * The navigation shell, as arithmetic.
  *
  * A port of `apps/shared/AgentKit/Sources/AgentKit/ShellNavigation.swift` — the
- * PURE half of the gesture shell iOS shipped: which workspace and tab a swipe
+ * PURE half of the gesture shell iOS shipped: which worktree and tab a swipe
  * lands on, where the axis locks, how far the column unfurls, what a release
  * means. There is deliberately not one Compose type in this file.
  *
@@ -172,17 +172,17 @@ data class ShellTab(
      * Carried rather than re-derived from [mark] because it is deliberately
      * BROADER than the amber ring: a finished turn wants you and draws the
      * middle-weight REVIEW ring, not the heavy amber one. See
-     * [ShellWorkspace.precedence], which is the only thing that reads it and the
+     * [ShellWorktree.precedence], which is the only thing that reads it and the
      * only place the distinction matters.
      */
     val wantsAttention: Boolean = false,
 )
 
 /**
- * Where a workspace sorts in the overview, and nowhere else.
+ * Where a worktree sorts in the overview, and nowhere else.
  *
  * §03's order, one rung per row: needs you, then an unread diff, then a
- * workspace we have heard nothing from, then one getting on with it.
+ * worktree we have heard nothing from, then one getting on with it.
  */
 enum class ShellPrecedence {
     NEEDS_YOU,
@@ -191,13 +191,13 @@ enum class ShellPrecedence {
     WORKING,
 }
 
-/** One workspace: its name, its tabs, and where to reopen it. */
-data class ShellWorkspace(
+/** One worktree: its name, its tabs, and where to reopen it. */
+data class ShellWorktree(
     val id: String,
     val name: String,
     val tabs: List<ShellTab>,
     /**
-     * Which runner this workspace is on.
+     * Which runner this worktree is on.
      *
      * **iOS has this field and holds it nil**, with a comment saying "The field
      * earns its keep the day a fleet spans runners" — because a `Connection` is
@@ -208,7 +208,7 @@ data class ShellWorkspace(
      * take you to another machine can say so before you commit.
      */
     val runnerId: String,
-    /** The last few things this workspace's most active agent said. */
+    /** The last few things this worktree's most active agent said. */
     val tail: List<String> = emptyList(),
     /** Which tab to reopen on, or null to fall back to the first. */
     val resume: Int? = null,
@@ -218,12 +218,12 @@ data class ShellWorkspace(
         get() = resume?.takeIf { it in tabs.indices } ?: 0
 
     /**
-     * This workspace's rung.
+     * This worktree's rung.
      *
      * **The top rung is `wantsAttention` and not the amber ring**, which is the
      * one place the shell's sort and the shell's DRAWING deliberately part
      * company. A finished turn draws the REVIEW ring rather than the amber one
-     * — `GlanceMark.of` maps it there — but it is still a workspace you should
+     * — `GlanceMark.of` maps it there — but it is still a worktree you should
      * be shown first, and `AgentActivity.wantsAttention` has been this app's
      * single answer to "should this interrupt someone" since before the glance
      * vocabulary existed. So a done tab sorts on the needs-you rung while
@@ -258,24 +258,24 @@ enum class ShellDirection {
 }
 
 /** A place in the fleet. */
-data class ShellPosition(val workspace: Int, val tab: Int)
+data class ShellPosition(val worktree: Int, val tab: Int)
 
 /**
  * A place to go, and what it costs to get there.
  *
- * [crossesWorkspace] and [crossesRunner] are what the incoming pane's title
+ * [crossesWorktree] and [crossesRunner] are what the incoming pane's title
  * shows before you commit — the crossing is made visible rather than discovered.
  */
 data class ShellStep(
     val position: ShellPosition,
-    val crossesWorkspace: Boolean,
+    val crossesWorktree: Boolean,
     val crossesRunner: Boolean,
 )
 
 /**
  * Which surface a swipe started on.
  *
- * The bar moves by WORKSPACE; the content moves by TAB along one flat sequence.
+ * The bar moves by WORKTREE; the content moves by TAB along one flat sequence.
  * Same thresholds, different destinations, which is why every function that
  * steps takes this.
  */
@@ -285,22 +285,22 @@ enum class ShellTrack {
 }
 
 /** The whole fleet, as the shell sees it. */
-data class ShellFleet(val workspaces: List<ShellWorkspace>) {
+data class ShellFleet(val worktrees: List<ShellWorktree>) {
 
-    val isEmpty: Boolean get() = workspaces.isEmpty()
+    val isEmpty: Boolean get() = worktrees.isEmpty()
 
-    fun tabCount(workspace: Int): Int =
-        workspaces.getOrNull(workspace)?.tabs?.size ?: 0
+    fun tabCount(worktree: Int): Int =
+        worktrees.getOrNull(worktree)?.tabs?.size ?: 0
 
     fun contains(position: ShellPosition): Boolean =
-        workspaces.getOrNull(position.workspace)?.tabs?.indices?.contains(position.tab) == true
+        worktrees.getOrNull(position.worktree)?.tabs?.indices?.contains(position.tab) == true
 
     fun tab(at: ShellPosition): ShellTab? =
-        if (contains(at)) workspaces[at.workspace].tabs[at.tab] else null
+        if (contains(at)) worktrees[at.worktree].tabs[at.tab] else null
 
     fun position(tabId: String): ShellPosition? {
-        workspaces.forEachIndexed { w, workspace ->
-            val t = workspace.tabs.indexOfFirst { it.id == tabId }
+        worktrees.forEachIndexed { w, worktree ->
+            val t = worktree.tabs.indexOfFirst { it.id == tabId }
             if (t >= 0) return ShellPosition(w, t)
         }
         return null
@@ -309,7 +309,7 @@ data class ShellFleet(val workspaces: List<ShellWorkspace>) {
     /** The first tab that exists anywhere, or null for a fleet with none. */
     val first: ShellPosition?
         get() {
-            workspaces.forEachIndexed { i, w -> if (w.tabs.isNotEmpty()) return ShellPosition(i, 0) }
+            worktrees.forEachIndexed { i, w -> if (w.tabs.isNotEmpty()) return ShellPosition(i, 0) }
             return null
         }
 
@@ -322,31 +322,31 @@ data class ShellFleet(val workspaces: List<ShellWorkspace>) {
         direction: ShellDirection,
         along: ShellTrack,
     ): ShellStep? {
-        if (from.workspace !in workspaces.indices) return null
+        if (from.worktree !in worktrees.indices) return null
         return when (along) {
-            ShellTrack.BAR -> barStep(from.workspace, direction)
+            ShellTrack.BAR -> barStep(from.worktree, direction)
             ShellTrack.CONTENT -> contentStep(from, direction)
         }
     }
 
-    /** The bar moves whole workspaces, landing on wherever that one was left. */
-    private fun barStep(workspace: Int, direction: ShellDirection): ShellStep? {
-        val next = if (direction == ShellDirection.NEXT) workspace + 1 else workspace - 1
-        if (next !in workspaces.indices) return null
+    /** The bar moves whole worktrees, landing on wherever that one was left. */
+    private fun barStep(worktree: Int, direction: ShellDirection): ShellStep? {
+        val next = if (direction == ShellDirection.NEXT) worktree + 1 else worktree - 1
+        if (next !in worktrees.indices) return null
         return ShellStep(
-            ShellPosition(next, workspaces[next].resumeTab),
-            crossesWorkspace = true,
-            crossesRunner = workspaces[next].runnerId != workspaces[workspace].runnerId,
+            ShellPosition(next, worktrees[next].resumeTab),
+            crossesWorktree = true,
+            crossesRunner = worktrees[next].runnerId != worktrees[worktree].runnerId,
         )
     }
 
     /**
      * The content walks ONE FLAT SEQUENCE across the whole fleet: the next tab
-     * if there is one, else the next workspace's first, else nothing.
+     * if there is one, else the next worktree's first, else nothing.
      *
      * **Flat across runners too, for now, and that is an open question rather
      * than a decision.** iOS is flat because a `Connection` is one runner and
-     * the sequence cannot leave it; here it can, and swiping from a workspace on
+     * the sequence cannot leave it; here it can, and swiping from a worktree on
      * a laptop into one on a build box is a bigger move than the gesture
      * suggests. The alternative — stop at a runner boundary and require the bar
      * or the overview to cross it — is a one-branch change confined to this
@@ -355,26 +355,26 @@ data class ShellFleet(val workspaces: List<ShellWorkspace>) {
      * than settled here.
      */
     private fun contentStep(from: ShellPosition, direction: ShellDirection): ShellStep? {
-        val here = workspaces[from.workspace]
+        val here = worktrees[from.worktree]
         fun crossing(to: ShellPosition) = ShellStep(
             to,
-            crossesWorkspace = true,
-            crossesRunner = workspaces[to.workspace].runnerId != here.runnerId,
+            crossesWorktree = true,
+            crossesRunner = worktrees[to.worktree].runnerId != here.runnerId,
         )
         return when (direction) {
             ShellDirection.NEXT -> {
                 if (from.tab + 1 in here.tabs.indices) {
                     return ShellStep(
-                        ShellPosition(from.workspace, from.tab + 1),
-                        crossesWorkspace = false,
+                        ShellPosition(from.worktree, from.tab + 1),
+                        crossesWorktree = false,
                         crossesRunner = false,
                     )
                 }
-                // Skips empty workspaces rather than landing on one: a workspace
+                // Skips empty worktrees rather than landing on one: a worktree
                 // with no tabs is not somewhere a page turn can put you.
-                var w = from.workspace + 1
-                while (w in workspaces.indices) {
-                    if (workspaces[w].tabs.isNotEmpty()) return crossing(ShellPosition(w, 0))
+                var w = from.worktree + 1
+                while (w in worktrees.indices) {
+                    if (worktrees[w].tabs.isNotEmpty()) return crossing(ShellPosition(w, 0))
                     w += 1
                 }
                 null
@@ -382,15 +382,15 @@ data class ShellFleet(val workspaces: List<ShellWorkspace>) {
             ShellDirection.PREVIOUS -> {
                 if (from.tab - 1 >= 0 && from.tab - 1 in here.tabs.indices) {
                     return ShellStep(
-                        ShellPosition(from.workspace, from.tab - 1),
-                        crossesWorkspace = false,
+                        ShellPosition(from.worktree, from.tab - 1),
+                        crossesWorktree = false,
                         crossesRunner = false,
                     )
                 }
-                var w = from.workspace - 1
+                var w = from.worktree - 1
                 while (w >= 0) {
-                    val count = workspaces[w].tabs.size
-                    // The previous workspace's LAST tab, so the flat sequence
+                    val count = worktrees[w].tabs.size
+                    // The previous worktree's LAST tab, so the flat sequence
                     // reverses exactly: stepping back and forward returns you.
                     if (count > 0) return crossing(ShellPosition(w, count - 1))
                     w -= 1
@@ -407,19 +407,19 @@ data class ShellFleet(val workspaces: List<ShellWorkspace>) {
     /**
      * The overview's order: by rung, then by the fleet's own order within a rung.
      *
-     * Stable on the index, so two workspaces at the same rung keep the order
+     * Stable on the index, so two worktrees at the same rung keep the order
      * they arrived in rather than swapping places on a poll.
      */
     fun overviewOrder(): List<Int> =
-        workspaces.indices.sortedWith(
-            compareBy({ workspaces[it].precedence.ordinal }, { it })
+        worktrees.indices.sortedWith(
+            compareBy({ worktrees[it].precedence.ordinal }, { it })
         )
 
     /** The same, filtered by name. A blank query filters nothing. */
     fun overviewOrder(query: String): List<Int> {
         val needle = query.trim()
         if (needle.isEmpty()) return overviewOrder()
-        return overviewOrder().filter { workspaces[it].name.contains(needle, ignoreCase = true) }
+        return overviewOrder().filter { worktrees[it].name.contains(needle, ignoreCase = true) }
     }
 }
 
@@ -449,7 +449,7 @@ object ShellGesture {
      * bug this returns null to prevent: vertical there belongs to whatever
      * vertical scroller is under the finger. On the BAR nothing else is
      * listening — down does nothing, up is the column, sideways is the
-     * workspace — so [lean] starts here and then keeps asking.
+     * worktree — so [lean] starts here and then keeps asking.
      *
      * The tie goes to VERTICAL, and that is the answer to what wins on the
      * diagonal for a gesture with no history. After the first six points there
@@ -587,7 +587,7 @@ object ShellGesture {
      * and never reaches a sideways test. Above it nothing arbitrates by
      * design, and an unconditional projection let a vertical fling's own
      * lateral shadow answer the sideways question: the owner's *"if my fling
-     * is angled too much it picks either the previous or next workspace to
+     * is angled too much it picks either the previous or next worktree to
      * land on."*
      *
      * A thumb pivoting about the palm deviates about 24 dp across the 132
@@ -724,7 +724,7 @@ object ShellGesture {
      * third bug iOS shipped. Scrolling back up through forty cards ends at the
      * top with a large downward translation — character for character the same
      * release a deliberate pull-down produces — so a check at release reopened
-     * the last workspace every time somebody scrolled the grid back to the top.
+     * the last worktree every time somebody scrolled the grid back to the top.
      *
      * @param begunAtTop captured on the FIRST change of the gesture and not
      *   re-read afterwards.
@@ -878,7 +878,7 @@ sealed interface ShellRelease {
     /** Nothing was chosen; slide back. */
     data object SpringBack : ShellRelease
 
-    /** Land on this tab of the current workspace. */
+    /** Land on this tab of the current worktree. */
     data class Land(val tab: Int) : ShellRelease
 
     /** The page has flown; show the grid. */
@@ -940,7 +940,7 @@ fun ShellFleet.barRelease(
             step?.let { ShellRelease.Commit(it) } ?: ShellRelease.SpringBack
         }
         ShellAxis.VERTICAL -> {
-            val tabs = tabCount(at.workspace)
+            val tabs = tabCount(at.worktree)
             // A sideways component only counts once the page has left the glass:
             // below that the gesture is unfurling the column and a little
             // horizontal drift is a thumb, not an instruction. `pageIsHeld`
@@ -984,7 +984,7 @@ fun ShellFleet.barRelease(
 /**
  * What releasing a drag that started on the CONTENT means.
  *
- * Same thresholds as the bar, one flat sequence instead of whole workspaces, and
+ * Same thresholds as the bar, one flat sequence instead of whole worktrees, and
  * no vertical behaviour at all: a vertical drag on a pane belongs to the pane,
  * which is scrolling.
  *

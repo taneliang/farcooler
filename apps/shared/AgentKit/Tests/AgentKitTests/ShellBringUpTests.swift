@@ -10,7 +10,7 @@ import Testing
 /// machine set up and not yet used answers with zero worktrees, which is a
 /// fleet, and the old branch waited for a pane that was never coming.
 struct ShellBringUpTests {
-    private let somewhere = ShellPosition(workspace: 1, tab: 2)
+    private let somewhere = ShellPosition(worktree: 1, tab: 2)
 
     /// **The defect.** One runner, connected, no worktrees. `hasFleet` is true
     /// — it is set by the first successful refresh regardless of what came back
@@ -19,18 +19,18 @@ struct ShellBringUpTests {
     /// host switcher under it.
     @Test func aConnectedRunnerWithNoWorktreesIsASentenceAndNotASpinner() {
         #expect(
-            ShellBringUp.opening(seated: nil, workspaces: 0, reports: [.answered])
-                == .noWorkspaces)
+            ShellBringUp.opening(seated: nil, worktrees: 0, reports: [.answered])
+                == .noWorktrees)
     }
 
     /// A runner still dialing may yet bring worktrees, so the wait is real and
     /// has an end.
     @Test func aRunnerStillOnItsWayHoldsTheSpinner() {
         #expect(
-            ShellBringUp.opening(seated: nil, workspaces: 0, reports: [.pending]) == .waiting)
+            ShellBringUp.opening(seated: nil, worktrees: 0, reports: [.pending]) == .waiting)
         #expect(
             ShellBringUp.opening(
-                seated: nil, workspaces: 0, reports: [.answered, .pending]) == .waiting)
+                seated: nil, worktrees: 0, reports: [.answered, .pending]) == .waiting)
     }
 
     /// A runner that FAILED does not hold it, and neither does one holding a
@@ -39,11 +39,11 @@ struct ShellBringUpTests {
     /// reach a row from behind a full-screen spinner.
     @Test func aStalledRunnerDoesNotHoldTheSpinner() {
         #expect(
-            ShellBringUp.opening(seated: nil, workspaces: 0, reports: [.stalled])
-                == .noWorkspaces)
+            ShellBringUp.opening(seated: nil, worktrees: 0, reports: [.stalled])
+                == .noWorktrees)
         #expect(
-            ShellBringUp.opening(seated: nil, workspaces: 0, reports: [.answered, .stalled])
-                == .noWorkspaces)
+            ShellBringUp.opening(seated: nil, worktrees: 0, reports: [.answered, .stalled])
+                == .noWorktrees)
     }
 
     /// The ordinary answer, and it is sticky: once the shell has been seeded
@@ -52,28 +52,28 @@ struct ShellBringUpTests {
     /// pane in it, which is what `ShellPaneTrack` exists to prevent.
     @Test func aSeededShellStaysSeededThroughAnEmptyFleet() {
         #expect(
-            ShellBringUp.opening(seated: somewhere, workspaces: 3, reports: [.answered])
+            ShellBringUp.opening(seated: somewhere, worktrees: 3, reports: [.answered])
                 == .pane(somewhere))
         #expect(
-            ShellBringUp.opening(seated: somewhere, workspaces: 0, reports: [.answered])
+            ShellBringUp.opening(seated: somewhere, worktrees: 0, reports: [.answered])
                 == .pane(somewhere))
         #expect(
-            ShellBringUp.opening(seated: somewhere, workspaces: 0, reports: [.stalled])
+            ShellBringUp.opening(seated: somewhere, worktrees: 0, reports: [.stalled])
                 == .pane(somewhere))
     }
 
     /// A fleet in hand with nothing seated yet is the one body pass between the
     /// worktrees arriving and the seeding that runs off them. A wait, and a
-    /// short one — never the sentence, which would flash "No Workspaces" over a
+    /// short one — never the sentence, which would flash "No Worktrees" over a
     /// fleet that is already here.
     @Test func aFleetArrivedButNotYetSeededIsStillAWait() {
         #expect(
-            ShellBringUp.opening(seated: nil, workspaces: 4, reports: [.answered]) == .waiting)
+            ShellBringUp.opening(seated: nil, worktrees: 4, reports: [.answered]) == .waiting)
     }
 
     /// No runners at all is not a wait either. Nobody is coming.
     @Test func noRunnersIsNotAWait() {
-        #expect(ShellBringUp.opening(seated: nil, workspaces: 0, reports: []) == .noWorkspaces)
+        #expect(ShellBringUp.opening(seated: nil, worktrees: 0, reports: []) == .noWorktrees)
     }
 
     // MARK: - The two sentences
@@ -82,10 +82,10 @@ struct ShellBringUpTests {
     /// quoted the search either way, so a runner with no worktrees was told
     /// that none of them matched the empty string.
     @Test func theEmptyGridSaysWhichKindOfEmptyItIs() {
-        #expect(ShellEmptyCopy.description(matching: "") == "This runner has no workspaces yet.")
+        #expect(ShellEmptyCopy.description(matching: "") == "This runner has no worktrees yet.")
         #expect(
             ShellEmptyCopy.description(matching: "api")
-                == "No workspace matches “api”.")
+                == "No worktree matches “api”.")
     }
 
     /// Typographic quotes, not the ASCII pair — this is prose on a screen, and

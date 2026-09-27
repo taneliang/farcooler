@@ -15,7 +15,7 @@ allocated across terminals, keeping a guaranteed per-terminal floor so a noisy n
 cannot evict everyone else's history.
 
 **Why:** The per-terminal cap multiplies by a concurrency the product is explicitly
-designed to increase. Five workspaces with four tabs each is twenty terminals and roughly
+designed to increase. Five worktrees with four tabs each is twenty terminals and roughly
 160 MiB of daemon memory held solely for reconnect, most of it belonging to terminals
 nobody is currently watching. That is the dominant term in the daemon's footprint, on a
 background service running on the user's own laptop next to the coding agents it launched.
@@ -24,7 +24,7 @@ background service running on the user's own laptop next to the coding agents it
 what other terminals are doing, and it needs no eviction or fairness policy that a noisy
 terminal could exploit. A shared budget is more machinery, and there is no measured need yet.
 
-**Trigger:** Observed daemon memory during the five-workspace acceptance run, or during
+**Trigger:** Observed daemon memory during the five-worktree acceptance run, or during
 design-partner use, indicating the footprint is a real problem. The daemon already reports
 total replay usage in host self-health, so the data arrives without extra instrumentation.
 

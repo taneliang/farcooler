@@ -100,15 +100,15 @@ pub fn split_args(side: SplitSide) -> (Axis, bool) {
 }
 
 impl Service {
-    /// Every layout in a workspace, in window order, with tmux's geometry.
-    pub async fn layout(&self, workspace: Uuid) -> Result<Vec<LayoutView>> {
+    /// Every layout in a worktree, in window order, with tmux's geometry.
+    pub async fn layout(&self, worktree: Uuid) -> Result<Vec<LayoutView>> {
         let panes = self.tmux.list_tagged_panes().await?;
         let mut windows: Vec<ManagedLayout> = self
             .tmux
             .list_layouts()
             .await?
             .into_iter()
-            .filter(|w| w.workspace_id == workspace)
+            .filter(|w| w.worktree_id == worktree)
             .collect();
         windows.sort_by_key(|w| w.index);
 
@@ -125,26 +125,26 @@ impl Service {
             .collect())
     }
 
-    /// The layout on screen for a workspace.
+    /// The layout on screen for a worktree.
     ///
     /// tmux marks one window active per SESSION, and the session spans every
-    /// workspace — so "active" is read within the workspace, and a workspace whose
+    /// worktree — so "active" is read within the worktree, and a worktree whose
     /// windows are all inactive still has to show something.
-    pub async fn active_layout(&self, workspace: Uuid) -> Result<Option<LayoutView>> {
-        let layouts = self.layout(workspace).await?;
+    pub async fn active_layout(&self, worktree: Uuid) -> Result<Option<LayoutView>> {
+        let layouts = self.layout(worktree).await?;
         Ok(layouts.iter().find(|l| l.window.active).or_else(|| layouts.first()).cloned())
     }
 
     /// The layout being acted on: the one named, or the active one.
-    async fn resolve(&self, workspace: Uuid, group: Option<&str>) -> Result<LayoutView> {
+    async fn resolve(&self, worktree: Uuid, group: Option<&str>) -> Result<LayoutView> {
         match group {
             Some(id) if !id.is_empty() => self
-                .layout(workspace)
+                .layout(worktree)
                 .await?
                 .into_iter()
                 .find(|l| l.window.window_id == id)
                 .ok_or(DomainError::NotFound),
-            _ => self.active_layout(workspace).await?.ok_or(DomainError::NotFound),
+            _ => self.active_layout(worktree).await?.ok_or(DomainError::NotFound),
         }
     }
 
@@ -165,13 +165,13 @@ impl Service {
     /// moves it there.
     pub async fn layout_move(
         &self,
-        workspace: Uuid,
+        worktree: Uuid,
         dragged: Uuid,
         target: Uuid,
         side: SplitSide,
     ) -> Result<Vec<LayoutView>> {
         if dragged == target {
-            return self.layout(workspace).await;
+            return self.layout(worktree).await;
         }
         let source = self.pane_of(dragged).await?;
         let destination = self.pane_of(target).await?;
@@ -179,30 +179,30 @@ impl Service {
 
         self.tmux.join_pane(&source.pane_id, &destination.pane_id, axis, before, dragged).await?;
         self.tmux.select_pane(&source.pane_id).await?;
-        self.layout(workspace).await
+        self.layout(worktree).await
     }
 
     /// Rearrange a layout into one of tmux's five.
     pub async fn layout_preset(
         &self,
-        workspace: Uuid,
+        worktree: Uuid,
         group: Option<&str>,
         preset: LayoutPreset,
     ) -> Result<Vec<LayoutView>> {
-        let view = self.resolve(workspace, group).await?;
+        let view = self.resolve(worktree, group).await?;
         self.tmux.select_preset(&view.window.window_id, tmux_preset(preset)).await?;
-        self.layout(workspace).await
+        self.layout(worktree).await
     }
 
     /// tmux's `prefix Space`.
     pub async fn layout_cycle(
         &self,
-        workspace: Uuid,
+        worktree: Uuid,
         group: Option<&str>,
     ) -> Result<Vec<LayoutView>> {
-        let view = self.resolve(workspace, group).await?;
+        let view = self.resolve(worktree, group).await?;
         self.tmux.next_preset(&view.window.window_id).await?;
-        self.layout(workspace).await
+        self.layout(worktree).await
     }
 
     /// Focus a pane, which is also what puts its layout on screen.
@@ -210,7 +210,7 @@ impl Service {
     /// One call, because a pane cannot hold the keyboard while a different
     /// arrangement is showing. Two calls could disagree about which pane you
     /// asked for, and did.
-    pub async fn layout_focus(&self, workspace: Uuid, terminal: Uuid) -> Result<Vec<LayoutView>> {
+    pub async fn layout_focus(&self, worktree: Uuid, terminal: Uuid) -> Result<Vec<LayoutView>> {
         let pane = self.pane_of(terminal).await?;
         // Was anything zoomed before we moved? tmux drops zoom when the active
         // pane changes, which is right for one pane at a time and wrong here.
@@ -233,52 +233,52 @@ impl Service {
             self.tmux.unzoom(&pane.window_id).await?;
             self.tmux.toggle_zoom(&pane.pane_id).await?;
         }
-        self.layout(workspace).await
+        self.layout(worktree).await
     }
 
     /// Move focus by position, wrapping. `+1` is `prefix o`.
     pub async fn layout_focus_step(
         &self,
-        workspace: Uuid,
+        worktree: Uuid,
         group: Option<&str>,
         delta: i64,
     ) -> Result<Vec<LayoutView>> {
-        let view = self.resolve(workspace, group).await?;
+        let view = self.resolve(worktree, group).await?;
         if view.panes.is_empty() {
-            return self.layout(workspace).await;
+            return self.layout(worktree).await;
         }
         let count = view.panes.len() as i64;
         let at = view.panes.iter().position(|p| p.pane_active).unwrap_or(0) as i64;
         let next = ((at + delta) % count + count) % count;
-        self.layout_focus(workspace, view.panes[next as usize].terminal_id).await
+        self.layout_focus(worktree, view.panes[next as usize].terminal_id).await
     }
 
     /// Focus the Nth pane, one-based.
     pub async fn layout_focus_index(
         &self,
-        workspace: Uuid,
+        worktree: Uuid,
         group: Option<&str>,
         index: usize,
     ) -> Result<Vec<LayoutView>> {
-        let view = self.resolve(workspace, group).await?;
+        let view = self.resolve(worktree, group).await?;
         let Some(pane) = index.checked_sub(1).and_then(|i| view.panes.get(i)) else {
             return Err(DomainError::InvalidArgument { what: "pane index" });
         };
-        self.layout_focus(workspace, pane.terminal_id).await
+        self.layout_focus(worktree, pane.terminal_id).await
     }
 
     /// Zoom a pane, or clear the zoom. `None` toggles the focused one.
     pub async fn layout_zoom(
         &self,
-        workspace: Uuid,
+        worktree: Uuid,
         group: Option<&str>,
         terminal: Option<Uuid>,
         off: bool,
     ) -> Result<Vec<LayoutView>> {
-        let view = self.resolve(workspace, group).await?;
+        let view = self.resolve(worktree, group).await?;
         if off {
             self.tmux.unzoom(&view.window.window_id).await?;
-            return self.layout(workspace).await;
+            return self.layout(worktree).await;
         }
         match terminal {
             Some(id) => {
@@ -296,21 +296,21 @@ impl Service {
                 self.tmux.toggle_zoom(&pane.pane_id).await?;
             }
         }
-        self.layout(workspace).await
+        self.layout(worktree).await
     }
 
     /// Exchange two panes' positions.
-    pub async fn layout_swap(&self, workspace: Uuid, a: Uuid, b: Uuid) -> Result<Vec<LayoutView>> {
+    pub async fn layout_swap(&self, worktree: Uuid, a: Uuid, b: Uuid) -> Result<Vec<LayoutView>> {
         let first = self.pane_of(a).await?;
         let second = self.pane_of(b).await?;
         self.tmux.swap_panes(&first.pane_id, &second.pane_id).await?;
-        self.layout(workspace).await
+        self.layout(worktree).await
     }
 
     /// Move a divider, in cells.
     pub async fn layout_resize(
         &self,
-        workspace: Uuid,
+        worktree: Uuid,
         terminal: Uuid,
         side: SplitSide,
         cells: i32,
@@ -318,19 +318,19 @@ impl Service {
         let pane = self.pane_of(terminal).await?;
         let (axis, _) = split_args(side);
         self.tmux.resize_pane(&pane.pane_id, axis, cells).await?;
-        self.layout(workspace).await
+        self.layout(worktree).await
     }
 
     /// Pull a pane out into a layout of its own.
-    pub async fn layout_break(&self, workspace: Uuid, terminal: Uuid) -> Result<Vec<LayoutView>> {
+    pub async fn layout_break(&self, worktree: Uuid, terminal: Uuid) -> Result<Vec<LayoutView>> {
         let pane = self.pane_of(terminal).await?;
-        self.tmux.break_pane(&pane.pane_id, workspace, terminal).await?;
-        self.layout(workspace).await
+        self.tmux.break_pane(&pane.pane_id, worktree, terminal).await?;
+        self.layout(worktree).await
     }
 
     /// Show the next or previous layout, wrapping.
-    pub async fn layout_group_step(&self, workspace: Uuid, delta: i64) -> Result<Vec<LayoutView>> {
-        let layouts = self.layout(workspace).await?;
+    pub async fn layout_group_step(&self, worktree: Uuid, delta: i64) -> Result<Vec<LayoutView>> {
+        let layouts = self.layout(worktree).await?;
         if layouts.len() < 2 {
             return Ok(layouts);
         }
@@ -338,18 +338,18 @@ impl Service {
         let at = layouts.iter().position(|l| l.window.active).unwrap_or(0) as i64;
         let next = ((at + delta) % count + count) % count;
         self.show(&layouts[next as usize]).await?;
-        self.layout(workspace).await
+        self.layout(worktree).await
     }
 
     /// Show a specific layout.
     pub async fn layout_group_select(
         &self,
-        workspace: Uuid,
+        worktree: Uuid,
         group: &str,
     ) -> Result<Vec<LayoutView>> {
-        let view = self.resolve(workspace, Some(group)).await?;
+        let view = self.resolve(worktree, Some(group)).await?;
         self.show(&view).await?;
-        self.layout(workspace).await
+        self.layout(worktree).await
     }
 
     /// Put a layout on screen, keyboard included.
@@ -368,16 +368,16 @@ impl Service {
     /// Name a layout, which is what a client shows in its tab.
     pub async fn layout_rename(
         &self,
-        workspace: Uuid,
+        worktree: Uuid,
         group: Option<&str>,
         name: &str,
     ) -> Result<Vec<LayoutView>> {
-        let view = self.resolve(workspace, group).await?;
+        let view = self.resolve(worktree, group).await?;
         let trimmed: String = name.trim().chars().take(48).collect();
         if !trimmed.is_empty() {
             self.tmux.rename_layout(&view.window.window_id, &trimmed).await?;
         }
-        self.layout(workspace).await
+        self.layout(worktree).await
     }
 
     /// Size a layout to the viewport actually showing it.
@@ -387,18 +387,18 @@ impl Service {
     /// arrangement computed for whatever size the window last had.
     pub async fn layout_resize_window(
         &self,
-        workspace: Uuid,
+        worktree: Uuid,
         group: Option<&str>,
         columns: u32,
         rows: u32,
     ) -> Result<Vec<LayoutView>> {
-        let view = self.resolve(workspace, group).await?;
+        let view = self.resolve(worktree, group).await?;
         // A window smaller than this cannot hold a usable pane, and tmux refuses
         // sizes it cannot satisfy anyway.
         if columns >= 20 && rows >= 5 {
             self.tmux.resize_window(&view.window.window_id, columns, rows).await?;
         }
-        self.layout(workspace).await
+        self.layout(worktree).await
     }
 }
 

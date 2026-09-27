@@ -70,8 +70,8 @@ fn main() {
     println!("connected over ssh");
 
     let fleet = call(handle, "fleet", serde_json::json!({}));
-    let count = fleet["workspaces"].as_array().map(|w| w.len()).unwrap_or(0);
-    println!("fleet: {count} workspaces");
+    let count = fleet["worktrees"].as_array().map(|w| w.len()).unwrap_or(0);
+    println!("fleet: {count} worktrees");
 
     let screen = call(handle, "terminal.screen", serde_json::json!({ "terminal": terminal }));
     let revision = screen["revision"].as_u64().unwrap_or(0);

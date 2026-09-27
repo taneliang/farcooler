@@ -186,7 +186,7 @@ private struct AgentRow: View {
     }
 }
 
-/// How many workspaces have moved since anybody looked at them.
+/// How many worktrees have moved since anybody looked at them.
 ///
 /// **Every word and the mark come off `FleetSnapshot.Glance.review`**, which is
 /// the table the complication draws from too. That is the point of the case

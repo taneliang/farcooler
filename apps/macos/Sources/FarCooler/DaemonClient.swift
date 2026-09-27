@@ -102,7 +102,7 @@ final class DaemonClient: ObservableObject {
     /// `scheduleRetry`'s `Task` calls `startEvents`, whose `onEnd` arms the
     /// next `scheduleRetry` — self → retryTask → self, with no owner left to
     /// break the cycle. It would keep spawning `farcooler … events` and
-    /// `workspace list` subprocesses against a runner this app no longer
+    /// `worktree list` subprocesses against a runner this app no longer
     /// shows anywhere, invisible except in `ps`.
     deinit {
         retryTask?.cancel()
@@ -140,7 +140,7 @@ final class DaemonClient: ObservableObject {
     /// Set when the read above ran and could not answer.
     ///
     /// Distinguished from `daemonBuild == nil`, which is only "nobody has
-    /// asked yet". A runner that answered `workspace list` and then failed to
+    /// asked yet". A runner that answered `worktree list` and then failed to
     /// answer `status` is a real case — `status` asks for host facts, and a
     /// daemon old enough to predate that method answers `NOT_FOUND` — and the
     /// two must not look the same, or the runner most likely to be stale
@@ -459,7 +459,7 @@ final class DaemonClient: ObservableObject {
             onLayout: { [weak self] event in
                 Task { @MainActor in
                     guard let self, self.streamGeneration == generation else { return }
-                    self.layouts[event.workspace] = event.groups
+                    self.layouts[event.worktree] = event.groups
                 }
             },
             onFleet: { [weak self] in
@@ -584,13 +584,13 @@ final class DaemonClient: ObservableObject {
     /// Applied in place rather than triggering a full re-read: a re-read per
     /// event would make a busy fleet slower than the polling this replaced.
     private func apply(_ event: TerminalEvent) {
-        for w in fleet.workspaces.indices {
+        for w in fleet.worktrees.indices {
             guard
-                let t = fleet.workspaces[w].terminals.firstIndex(where: { $0.id == event.id })
+                let t = fleet.worktrees[w].terminals.firstIndex(where: { $0.id == event.id })
             else { continue }
 
-            fleet.workspaces[w].terminals[t].state = event.state
-            fleet.workspaces[w].terminals[t].activity = event.activity
+            fleet.worktrees[w].terminals[t].state = event.state
+            fleet.worktrees[w].terminals[t].activity = event.activity
             // What is RUNNING, which is also what the terminal is CALLED.
             //
             // This was missed, and the omission was invisible until the name
@@ -599,7 +599,7 @@ final class DaemonClient: ObservableObject {
             // out of that event and dropped the command — so a shell you had just
             // run `node` in stayed labeled `shell` until something forced a full
             // re-read. The whole point of pushing events is not needing one.
-            fleet.workspaces[w].terminals[t].preset = event.preset
+            fleet.worktrees[w].terminals[t].preset = event.preset
             // What can be switched to a chat, which is also what `⌃B a`
             // checks before it will even try.
             //
@@ -611,25 +611,25 @@ final class DaemonClient: ObservableObject {
             // dropped this field — so `canSwitchPaneMode` stayed false
             // forever, since this app is push-only and never re-fetches a
             // terminal it already knows.
-            fleet.workspaces[w].terminals[t].chatCapable = event.chatCapable
+            fleet.worktrees[w].terminals[t].chatCapable = event.chatCapable
             // Same reason as `chatCapable` above, one field later: without
             // this, a terminal pushed into `exited` here reads as a clean
             // exit — `Status` sees a `nil` exit code, which is deliberately
             // never a failure — until some later full refresh happens to
             // backfill it. A failed build must not wait on that to be seen.
-            fleet.workspaces[w].terminals[t].exitCode = event.exitCode
-            fleet.workspaces[w].terminals[t].exitSignal = event.exitSignal
+            fleet.worktrees[w].terminals[t].exitCode = event.exitCode
+            fleet.worktrees[w].terminals[t].exitSignal = event.exitSignal
             // The daemon has always sent this; it was never applied here,
             // which is the same omission a third time — a live-pushed
             // Working or Blocked row kept showing whatever `statusDuration`
             // last got from a full refresh instead of what just changed.
-            fleet.workspaces[w].terminals[t].activitySince = event.activitySince
+            fleet.worktrees[w].terminals[t].activitySince = event.activitySince
             // Same reason as `exitCode` above, one tick later: the moment a
             // row goes Blocked over this event is exactly the moment it
             // needs the turn clock and the question to be current, not
             // whatever a later refresh happens to backfill.
-            fleet.workspaces[w].terminals[t].turnStartedAt = event.turnStartedAt
-            fleet.workspaces[w].terminals[t].blockedQuestion = event.blockedQuestion
+            fleet.worktrees[w].terminals[t].turnStartedAt = event.turnStartedAt
+            fleet.worktrees[w].terminals[t].blockedQuestion = event.blockedQuestion
             // The fields whose whole job is "what is it doing RIGHT NOW".
             // Applied from the push rather than waited on, because a row that
             // only arrived with a full refresh would always be describing the
@@ -637,24 +637,24 @@ final class DaemonClient: ObservableObject {
             // sending them. `line` is the one that moves most often of all: a
             // task completing takes `3/7` to `4/7` while nothing else about
             // the pane changes.
-            fleet.workspaces[w].terminals[t].feed = event.feed
-            fleet.workspaces[w].terminals[t].line = event.line
-            fleet.workspaces[w].terminals[t].subagents = event.subagents
+            fleet.worktrees[w].terminals[t].feed = event.feed
+            fleet.worktrees[w].terminals[t].line = event.line
+            fleet.worktrees[w].terminals[t].subagents = event.subagents
             // And the field with the most expensive omission: without this a
             // row whose agent just died kept a clean `Done` tick until
             // something else happened in that pane, which for a dead agent is
             // never.
-            fleet.workspaces[w].terminals[t].turnFailed = event.turnFailed
+            fleet.worktrees[w].terminals[t].turnFailed = event.turnFailed
 
-            let terminal = fleet.workspaces[w].terminals[t]
-            Notifier.shared.report(terminal: terminal, workspace: fleet.workspaces[w].task)
+            let terminal = fleet.worktrees[w].terminals[t]
+            Notifier.shared.report(terminal: terminal, worktree: fleet.worktrees[w].task)
             reapIfExited(terminal)
             return
         }
 
         // A terminal we have never seen: created elsewhere, or created here
         // before the first read finished. Only a full read can place it in a
-        // workspace, so ask for one.
+        // worktree, so ask for one.
         Task { await refresh() }
     }
 
@@ -709,9 +709,9 @@ final class DaemonClient: ObservableObject {
     /// Has a fleet ever been read successfully?
     ///
     /// Without this, "we could not read the fleet" and "there are no
-    /// workspaces" look identical to the UI, because a failed read leaves the
+    /// worktrees" look identical to the UI, because a failed read leaves the
     /// last value in place — and the first value is empty. A user who had just
-    /// created a workspace was shown the new-user empty state, which is the
+    /// created a worktree was shown the new-user empty state, which is the
     /// most misleading thing the app could have said.
     @Published private(set) var hasLoaded = false
 
@@ -721,7 +721,7 @@ final class DaemonClient: ObservableObject {
         // fact, where a concurrent command's own failure could have
         // overwritten it between that call resuming and this line running.
         let (maybeData, failureMessage) = await runRaw(
-            ["workspace", "list", "--json"], background: true)
+            ["worktree", "list", "--json"], background: true)
         guard let data = maybeData else {
             let reason = failureMessage ?? "Couldn’t reach this runner."
             lastError = reason
@@ -789,8 +789,8 @@ final class DaemonClient: ObservableObject {
             // while the app was closed produces no event to react to, so
             // without this the first thing you see on launch is exactly the
             // clutter auto-removal exists to prevent.
-            for workspace in fleet.workspaces {
-                for terminal in workspace.terminals {
+            for worktree in fleet.worktrees {
+                for terminal in worktree.terminals {
                     reapIfExited(terminal)
                     openAsChatIfPreferred(terminal)
                 }
@@ -869,7 +869,7 @@ final class DaemonClient: ObservableObject {
             // What that runner can do, which `status --json` has carried
             // since capabilities existed and this read never passed on — so
             // `can(_:)` saw an empty set and answered as for a daemon older
-            // than capabilities: workspaces and terminals, nothing else.
+            // than capabilities: worktrees and terminals, nothing else.
             // `reportWatching`'s gate was therefore closed on every Mac.
             capabilities: Set(body["capabilities"] as? [String] ?? []))
     }
@@ -1096,25 +1096,25 @@ final class DaemonClient: ObservableObject {
     /// sidebar uses. "Ready for input" is exactly what idle means, so the
     /// signal already existed.
     ///
-    /// Returns the new workspace, so the caller can select it immediately
+    /// Returns the new worktree, so the caller can select it immediately
     /// rather than after the agent has finished starting.
     // MARK: - Tiling
 
-    /// Each workspace's groups, keyed by workspace id.
+    /// Each worktree's groups, keyed by worktree id.
     ///
     /// Held here rather than in a view, because the daemon owns it and three
     /// things change it: this app, the CLI, and agents driving the CLI. A layout
     /// in view state would be a fourth opinion.
     @Published var layouts: [String: [PaneGroup]] = [:]
 
-    func activeGroup(_ workspace: String) -> PaneGroup? {
-        let groups = layouts[workspace] ?? []
+    func activeGroup(_ worktree: String) -> PaneGroup? {
+        let groups = layouts[worktree] ?? []
         return groups.first { $0.isActive } ?? groups.first
     }
 
     /// Which group holds a terminal, if any.
-    func group(holding terminal: String, in workspace: String) -> PaneGroup? {
-        (layouts[workspace] ?? []).first { $0.terminals.contains(terminal) }
+    func group(holding terminal: String, in worktree: String) -> PaneGroup? {
+        (layouts[worktree] ?? []).first { $0.terminals.contains(terminal) }
     }
 
     /// Mark a pane focused locally, before the daemon has been asked.
@@ -1134,8 +1134,8 @@ final class DaemonClient: ObservableObject {
     /// The pane's group comes forward with it, because `layout focus` brings a
     /// layout to the front on the daemon side too; assuming the focus without
     /// the group would show a ring on a pane in a layout that is not on screen.
-    func assumeFocus(_ terminal: String, in workspace: String) {
-        guard var groups = layouts[workspace],
+    func assumeFocus(_ terminal: String, in worktree: String) {
+        guard var groups = layouts[worktree],
             let index = groups.firstIndex(where: { $0.terminals.contains(terminal) })
         else { return }
 
@@ -1145,13 +1145,13 @@ final class DaemonClient: ObservableObject {
                 groups[g].panes[p].focused = g == index && groups[g].panes[p].id == terminal
             }
         }
-        layouts[workspace] = groups
+        layouts[worktree] = groups
     }
 
     // MARK: - Layout commands
     //
     // One method per CLI subcommand, and nothing more. Each is a single line over
-    // `layout(_:_:_:)`, which exists so the reply — always the workspace's whole
+    // `layout(_:_:_:)`, which exists so the reply — always the worktree's whole
     // layout — is applied in exactly one place. The value of naming them anyway is
     // that the argument order and the flag spellings live here rather than being
     // written out at each call site, which is where the last set of them drifted.
@@ -1167,12 +1167,12 @@ final class DaemonClient: ObservableObject {
     /// event stream is a round trip spent looking at an empty pane.
     @discardableResult
     func split(
-        _ workspace: Workspace, beside terminal: String?, side: TileDirection,
+        _ worktree: Worktree, beside terminal: String?, side: TileDirection,
         preset: String = "shell"
     ) async -> [PaneGroup] {
         var rest = terminal.map { [$0] } ?? []
         rest += ["--side", side.rawValue, "--preset", preset]
-        let groups = await layout(workspace, ["split"], rest)
+        let groups = await layout(worktree, ["split"], rest)
         await refresh()
         return groups
     }
@@ -1184,19 +1184,19 @@ final class DaemonClient: ObservableObject {
     /// within a layout and pulling a terminal in from another one.
     @discardableResult
     func movePane(
-        _ terminal: String, onto target: String, side: TileDirection, in workspace: Workspace
+        _ terminal: String, onto target: String, side: TileDirection, in worktree: Worktree
     ) async -> [PaneGroup] {
-        await layout(workspace, ["move"], [terminal, target, "--side", side.rawValue])
+        await layout(worktree, ["move"], [terminal, target, "--side", side.rawValue])
     }
 
     @discardableResult
-    func applyPreset(_ preset: TilePreset, in workspace: Workspace) async -> [PaneGroup] {
-        await layout(workspace, ["preset"], [preset.rawValue])
+    func applyPreset(_ preset: TilePreset, in worktree: Worktree) async -> [PaneGroup] {
+        await layout(worktree, ["preset"], [preset.rawValue])
     }
 
     @discardableResult
-    func cycleLayout(_ workspace: Workspace) async -> [PaneGroup] {
-        await layout(workspace, ["cycle"])
+    func cycleLayout(_ worktree: Worktree) async -> [PaneGroup] {
+        await layout(worktree, ["cycle"])
     }
 
     /// Focus a pane, which also brings its layout to the front.
@@ -1204,32 +1204,32 @@ final class DaemonClient: ObservableObject {
     /// Assumed locally first — see `assumeFocus` for why that is the whole fix
     /// for a focus ring that used to arrive a round trip late.
     @discardableResult
-    func focusPane(_ terminal: String, in workspace: Workspace) async -> [PaneGroup] {
-        assumeFocus(terminal, in: workspace.id)
-        return await confirmed(workspace, ["focus"], [terminal])
+    func focusPane(_ terminal: String, in worktree: Worktree) async -> [PaneGroup] {
+        assumeFocus(terminal, in: worktree.id)
+        return await confirmed(worktree, ["focus"], [terminal])
     }
 
     @discardableResult
-    func focusPane(step: String, in workspace: Workspace) async -> [PaneGroup] {
+    func focusPane(step: String, in worktree: Worktree) async -> [PaneGroup] {
         // `--next`/`--prev` step through a pane order the app already holds, so
         // the target is knowable here and the assumption is as safe as it is for
         // a pane named outright.
-        if let group = activeGroup(workspace.id), !group.panes.isEmpty,
+        if let group = activeGroup(worktree.id), !group.panes.isEmpty,
             let current = group.panes.firstIndex(where: \.focused)
         {
             let delta = step == "--prev" ? -1 : 1
             let next = (current + delta + group.panes.count) % group.panes.count
-            assumeFocus(group.panes[next].id, in: workspace.id)
+            assumeFocus(group.panes[next].id, in: worktree.id)
         }
-        return await confirmed(workspace, ["focus"], [step])
+        return await confirmed(worktree, ["focus"], [step])
     }
 
     @discardableResult
-    func focusPane(number: Int, in workspace: Workspace) async -> [PaneGroup] {
-        if let group = activeGroup(workspace.id), number >= 1, number <= group.panes.count {
-            assumeFocus(group.panes[number - 1].id, in: workspace.id)
+    func focusPane(number: Int, in worktree: Worktree) async -> [PaneGroup] {
+        if let group = activeGroup(worktree.id), number >= 1, number <= group.panes.count {
+            assumeFocus(group.panes[number - 1].id, in: worktree.id)
         }
-        return await confirmed(workspace, ["focus"], ["--pane", "\(number)"])
+        return await confirmed(worktree, ["focus"], ["--pane", "\(number)"])
     }
 
     /// Run a focus command and make sure the local copy ends up telling the
@@ -1245,44 +1245,44 @@ final class DaemonClient: ObservableObject {
     /// difference: `layout` answers a failure with the local copy, which is now
     /// the copy carrying the assumption.
     private func confirmed(
-        _ workspace: Workspace, _ path: [String], _ rest: [String]
+        _ worktree: Worktree, _ path: [String], _ rest: [String]
     ) async -> [PaneGroup] {
-        if let groups = await layoutOrNil(workspace, path, rest, background: true) {
+        if let groups = await layoutOrNil(worktree, path, rest, background: true) {
             return groups
         }
-        await refreshLayout(workspace)
-        return layouts[workspace.id] ?? []
+        await refreshLayout(worktree)
+        return layouts[worktree.id] ?? []
     }
 
     @discardableResult
-    func zoomPane(_ terminal: String?, in workspace: Workspace, off: Bool = false)
+    func zoomPane(_ terminal: String?, in worktree: Worktree, off: Bool = false)
         async -> [PaneGroup]
     {
-        await layout(workspace, ["zoom"], (terminal.map { [$0] } ?? []) + (off ? ["--off"] : []))
+        await layout(worktree, ["zoom"], (terminal.map { [$0] } ?? []) + (off ? ["--off"] : []))
     }
 
     @discardableResult
-    func swapPanes(_ a: String, _ b: String, in workspace: Workspace) async -> [PaneGroup] {
-        await layout(workspace, ["swap"], [a, b])
+    func swapPanes(_ a: String, _ b: String, in worktree: Worktree) async -> [PaneGroup] {
+        await layout(worktree, ["swap"], [a, b])
     }
 
     @discardableResult
     func resizePane(
-        _ terminal: String, side: TileDirection, cells: Int, in workspace: Workspace
+        _ terminal: String, side: TileDirection, cells: Int, in worktree: Worktree
     ) async -> [PaneGroup] {
         await layout(
-            workspace, ["resize"], [terminal, "--side", side.rawValue, "--cells", "\(cells)"])
+            worktree, ["resize"], [terminal, "--side", side.rawValue, "--cells", "\(cells)"])
     }
 
     /// Pull a pane into a layout of its own. tmux's `break-pane`.
     @discardableResult
-    func breakPane(_ terminal: String?, in workspace: Workspace) async -> [PaneGroup] {
-        await layout(workspace, ["break"], terminal.map { [$0] } ?? [])
+    func breakPane(_ terminal: String?, in worktree: Worktree) async -> [PaneGroup] {
+        await layout(worktree, ["break"], terminal.map { [$0] } ?? [])
     }
 
     @discardableResult
-    func renameLayout(_ name: String, in workspace: Workspace) async -> [PaneGroup] {
-        await layout(workspace, ["rename"], [name])
+    func renameLayout(_ name: String, in worktree: Worktree) async -> [PaneGroup] {
+        await layout(worktree, ["rename"], [name])
     }
 
     /// Tell tmux how big the view showing this layout is, in cells.
@@ -1291,42 +1291,42 @@ final class DaemonClient: ObservableObject {
     /// tmux cannot see: how much screen there is. Everything else flows back the
     /// other way — tmux lays out into this and reports where the panes landed.
     @discardableResult
-    func viewport(columns: Int, rows: Int, in workspace: Workspace) async -> [PaneGroup] {
-        await layout(workspace, ["viewport"], ["\(columns)", "\(rows)"])
+    func viewport(columns: Int, rows: Int, in worktree: Worktree) async -> [PaneGroup] {
+        await layout(worktree, ["viewport"], ["\(columns)", "\(rows)"])
     }
 
     /// Show a different layout: by tmux window id, by name, by number, or `--next`.
     @discardableResult
-    func selectLayout(_ group: String, in workspace: Workspace) async -> [PaneGroup] {
-        await layout(workspace, ["select"], [group])
+    func selectLayout(_ group: String, in worktree: Worktree) async -> [PaneGroup] {
+        await layout(worktree, ["select"], [group])
     }
 
-    func refreshLayout(_ workspace: Workspace) async {
-        guard let data = await run(["layout", "show", workspace.short, "--json"]) else { return }
+    func refreshLayout(_ worktree: Worktree) async {
+        guard let data = await run(["layout", "show", worktree.short, "--json"]) else { return }
         guard let list = try? JSONDecoder().decode(PaneGroupList.self, from: data) else { return }
-        layouts[workspace.id] = list.groups
+        layouts[worktree.id] = list.groups
     }
 
     /// Every layout the fleet has, read once.
     ///
-    /// One call per workspace rather than one for the fleet: `layout show` is
-    /// scoped to a workspace, and a fleet-wide read would be a method that exists
+    /// One call per worktree rather than one for the fleet: `layout show` is
+    /// scoped to a worktree, and a fleet-wide read would be a method that exists
     /// only for a first paint. Events carry every change after this.
     func refreshLayouts() async {
-        for workspace in fleet.workspaces {
-            await refreshLayout(workspace)
+        for worktree in fleet.worktrees {
+            await refreshLayout(worktree)
         }
     }
 
     /// Run a layout command and apply the groups it returns.
     ///
-    /// `path` is the subcommand, `rest` its arguments; the workspace goes between
+    /// `path` is the subcommand, `rest` its arguments; the worktree goes between
     /// them, which is where every one of these commands wants it. Spelled out
     /// rather than inserted at a fixed index — a previous version inserted it at
     /// position 2, which is right for a one-word subcommand and wrong for a
     /// two-word one, so half the commands silently acted on the wrong thing.
     ///
-    /// The reply is the workspace's whole layout, so the local copy is replaced
+    /// The reply is the worktree's whole layout, so the local copy is replaced
     /// rather than patched — and the event that follows says the same thing,
     /// which is what keeps a second client in step.
     ///
@@ -1337,11 +1337,11 @@ final class DaemonClient: ObservableObject {
     /// `busy` is how it says so.
     @discardableResult
     func layout(
-        _ workspace: Workspace, _ path: [String], _ rest: [String] = [],
+        _ worktree: Worktree, _ path: [String], _ rest: [String] = [],
         background: Bool = false
     ) async -> [PaneGroup] {
-        await layoutOrNil(workspace, path, rest, background: background)
-            ?? layouts[workspace.id] ?? []
+        await layoutOrNil(worktree, path, rest, background: background)
+            ?? layouts[worktree.id] ?? []
     }
 
     /// The same call, reporting failure instead of hiding it.
@@ -1356,20 +1356,20 @@ final class DaemonClient: ObservableObject {
     /// `nil` means the command did not produce a layout, whether it failed to
     /// run or answered with something undecodable.
     private func layoutOrNil(
-        _ workspace: Workspace, _ path: [String], _ rest: [String] = [],
+        _ worktree: Worktree, _ path: [String], _ rest: [String] = [],
         background: Bool = false
     ) async -> [PaneGroup]? {
-        let command = ["layout"] + path + [workspace.short] + rest
+        let command = ["layout"] + path + [worktree.short] + rest
         guard let data = await run(command + ["--json"], background: background),
             let list = try? JSONDecoder().decode(PaneGroupList.self, from: data)
         else { return nil }
-        layouts[workspace.id] = list.groups
+        layouts[worktree.id] = list.groups
         return list.groups
     }
 
     /// Branches in a project that work could be resumed on.
     func branches(project: String) async -> [BranchInfo] {
-        guard let data = await run(["workspace", "branches", project, "--json"]) else { return [] }
+        guard let data = await run(["worktree", "branches", project, "--json"]) else { return [] }
         return (try? JSONDecoder().decode(BranchList.self, from: data))?.branches ?? []
     }
 
@@ -1380,35 +1380,35 @@ final class DaemonClient: ObservableObject {
     /// person: pushing back has to go where it came from.
     @discardableResult
     func adoptBranch(project: String, branch: String, agent: String) async -> String? {
-        let before = Set(fleet.workspaces.map(\.id))
-        _ = await run(["workspace", "adopt", project, branch])
+        let before = Set(fleet.worktrees.map(\.id))
+        _ = await run(["worktree", "adopt", project, branch])
         await refresh()
 
-        guard let workspace = fleet.workspaces.first(where: { !before.contains($0.id) })
+        guard let worktree = fleet.worktrees.first(where: { !before.contains($0.id) })
         else { return nil }
         _ = await run([
-            "terminal", "create", workspace.short, "--preset", agent, "--title", "Agent",
+            "terminal", "create", worktree.short, "--preset", agent, "--title", "Agent",
         ])
         await refresh()
-        return workspace.id
+        return worktree.id
     }
 
     /// How starting a task ended.
     enum TaskStart: Equatable {
-        /// The workspace and its agent's terminal, by the ids the create calls
+        /// The worktree and its agent's terminal, by the ids the create calls
         /// returned — which is what the window selects, rather than whatever
         /// a later look at the fleet happens to hold.
         /// `name` is the one it was made under: the panel's, or it with the
         /// suffix `unique` added.
-        case started(workspace: String, terminal: String, name: String)
+        case started(worktree: String, terminal: String, name: String)
         /// A sentence for the panel, in this app's words. `made` is set when
         /// the worktree was made but its agent was not.
-        case failed(String, made: MadeWorkspace?)
+        case failed(String, made: MadeWorktree?)
     }
 
     /// A task's worktree that exists without its agent: what a start that got
     /// halfway leaves, and what starting it again goes on from.
-    struct MadeWorkspace: Equatable {
+    struct MadeWorktree: Equatable {
         var id: String
         /// The name it was made under, suffix included.
         var name: String
@@ -1468,11 +1468,11 @@ final class DaemonClient: ObservableObject {
             // or another window may have opened one since. And a worktree
             // removed since is found gone now, not by a create that fails.
             await refresh()
-            if let existing = fleet.workspaces.first(where: { $0.id == reusing }) {
+            if let existing = fleet.worktrees.first(where: { $0.id == reusing }) {
                 // Two agents in one tree write over each other. One already
                 // there is the task's: go to it, and start nothing.
                 if let running = existing.terminals.first(where: Self.isLiveAgent) {
-                    return .started(workspace: existing.id, terminal: running.id, name: name)
+                    return .started(worktree: existing.id, terminal: running.id, name: name)
                 }
                 return await startAgent(
                     in: Created(id: existing.id, short: existing.short), name: name,
@@ -1484,7 +1484,7 @@ final class DaemonClient: ObservableObject {
         // same value the composer previewed, so the branch that gets made is the
         // branch the user was shown.
         let prefix = fleet.branchPrefix ?? ""
-        let (listing, listFailure) = await runRaw(["workspace", "branches", project, "--json"])
+        let (listing, listFailure) = await runRaw(["worktree", "branches", project, "--json"])
         guard let listing,
             let branches = try? JSONDecoder().decode(BranchList.self, from: listing).branches
         else {
@@ -1496,7 +1496,7 @@ final class DaemonClient: ObservableObject {
         // minds, the cost is a `-2` nobody needed.
         let takenBranches = Set(branches.map { $0.name.lowercased() })
         let takenDirectories = Set(
-            fleet.workspaces.map { URL(fileURLWithPath: $0.worktree).lastPathComponent.lowercased() })
+            fleet.worktrees.map { URL(fileURLWithPath: $0.path).lastPathComponent.lowercased() })
         let refused = refusedTaskNames[project, default: []]
         let name = TaskName.unique(name) { candidate in
             takenDirectories.contains(candidate.lowercased())
@@ -1508,7 +1508,7 @@ final class DaemonClient: ObservableObject {
         // `--no-terminal`, because this creates its own agent terminal a few
         // lines below. Without it a task would come up with an unused shell
         // sitting beside the agent that is doing the work. `--json`, so what
-        // comes back names THIS workspace — two tasks started close together
+        // comes back names THIS worktree — two tasks started close together
         // would otherwise each guess the other's from a before-and-after diff.
         //
         // `--fork-only` where the runner has it: the branch list above is a
@@ -1522,11 +1522,11 @@ final class DaemonClient: ObservableObject {
         // `farcooler_protocol::capability::WORKSPACE_FORK_ONLY`.
         let forkOnly = daemonBuild?.can("workspace_fork_only") ?? false
         let (made, makeFailure) = await runRaw(
-            ["--json", "workspace", "create", project, name, "--branch", branch, "--no-terminal"]
+            ["--json", "worktree", "create", project, name, "--branch", branch, "--no-terminal"]
                 + (forkOnly ? ["--fork-only"] : []))
-        guard let workspace = made.flatMap(Created.decode) else {
+        guard let worktree = made.flatMap(Created.decode) else {
             // Taken, by something neither list shows: a directory left behind
-            // under `worktrees/` that no workspace owns, or a branch that came
+            // under `worktrees/` that no worktree owns, or a branch that came
             // in since the list was read. Remembered, so starting it again
             // gets the next name rather than the same refusal forever.
             if ["branch-exists", "worktree-exists"].contains(TaskFailure.code(in: makeFailure)) {
@@ -1535,7 +1535,7 @@ final class DaemonClient: ObservableObject {
             return .failed(TaskFailure.sentence(for: makeFailure), made: nil)
         }
         return await startAgent(
-            in: workspace, name: name, description: description, agent: agent,
+            in: worktree, name: name, description: description, agent: agent,
             undelivered: undelivered)
     }
 
@@ -1556,7 +1556,7 @@ final class DaemonClient: ObservableObject {
     /// that exists, with the description as its launch argument where the
     /// runner takes one and typed in once it is idle where it doesn't.
     private func startAgent(
-        in workspace: Created, name: String, description: String, agent: String,
+        in worktree: Created, name: String, description: String, agent: String,
         undelivered: (@MainActor (String) -> Void)?
     ) async -> TaskStart {
         // `"launch_prompt"` is `farcooler_protocol::capability::LAUNCH_PROMPT`.
@@ -1565,21 +1565,21 @@ final class DaemonClient: ObservableObject {
         let (terminalMade, terminalFailure) = await runRaw(
             ["--json"]
                 + Self.taskTerminalArguments(
-                    workspace: workspace.short, agent: agent,
+                    worktree: worktree.short, agent: agent,
                     prompt: asArgument ? description : nil))
         await refresh()
         guard let terminal = terminalMade.flatMap(Created.decode) else {
             return .failed(
                 TaskFailure.sentence(for: terminalFailure),
-                made: MadeWorkspace(id: workspace.id, name: name))
+                made: MadeWorktree(id: worktree.id, name: name))
         }
 
         if !asArgument {
             typeWhenIdle(
-                workspace: workspace.id, terminal: terminal.id, text: description, name: name,
+                worktree: worktree.id, terminal: terminal.id, text: description, name: name,
                 undelivered: undelivered)
         }
-        return .started(workspace: workspace.id, terminal: terminal.id, name: name)
+        return .started(worktree: worktree.id, terminal: terminal.id, name: name)
     }
 
     /// Task names a create on this runner refused as taken, by project,
@@ -1601,10 +1601,10 @@ final class DaemonClient: ObservableObject {
     /// `--prompt=` in one word rather than `--prompt` and a second word: a
     /// description can start with a dash, and the joined form can never be
     /// read as a flag of its own.
-    static func taskTerminalArguments(workspace: String, agent: String, prompt: String?)
+    static func taskTerminalArguments(worktree: String, agent: String, prompt: String?)
         -> [String]
     {
-        var args = ["terminal", "create", workspace, "--preset", agent, "--title", agent]
+        var args = ["terminal", "create", worktree, "--preset", agent, "--title", agent]
         if let prompt { args.append("--prompt=\(prompt)") }
         return args
     }
@@ -1632,7 +1632,7 @@ final class DaemonClient: ObservableObject {
     /// A client released while this waits says nothing: its runner was
     /// removed, and nothing shows it any more to say it over.
     private func typeWhenIdle(
-        workspace: String, terminal: String, text: String, name: String,
+        worktree: String, terminal: String, text: String, name: String,
         undelivered: (@MainActor (String) -> Void)?
     ) {
         let passes = typingPasses
@@ -1641,8 +1641,8 @@ final class DaemonClient: ObservableObject {
                 try? await Task.sleep(for: .milliseconds(500))
                 guard let self, !Task.isCancelled else { return }
                 await self.refresh()
-                let current = self.fleet.workspaces
-                    .first(where: { $0.id == workspace })?
+                let current = self.fleet.worktrees
+                    .first(where: { $0.id == worktree })?
                     .terminals.first(where: { $0.id == terminal })
                 guard let current else {
                     self.keepUndelivered(text, name: name, .gone, undelivered)
@@ -1708,29 +1708,29 @@ final class DaemonClient: ObservableObject {
     /// What creating a worktree came back with.
     ///
     /// Both halves, because the caller needs both: the daemon's own message so
-    /// `NewWorkspaceSheet` can stay open and show it rather than dismissing as
-    /// if nothing went wrong, and the workspace that appeared so the window can
+    /// `NewWorktreeSheet` can stay open and show it rather than dismissing as
+    /// if nothing went wrong, and the worktree that appeared so the window can
     /// go to it. Returning only the failure meant a worktree was created,
     /// the sheet closed, and nothing on screen changed — the new work was
     /// somewhere in the sidebar, collapsed, for you to go and find.
-    struct CreatedWorkspace {
+    struct CreatedWorktree {
         let failure: String?
         /// Nil on failure, and nil in the case where the refresh that followed
-        /// cannot say which workspace is the new one. Callers treat that as
+        /// cannot say which worktree is the new one. Callers treat that as
         /// "created, but do not move the selection" rather than guessing.
-        let workspace: String?
+        let worktree: String?
     }
 
-    func createWorkspace(repo: String, task: String, branch: String, base: String) async
-        -> CreatedWorkspace
+    func createWorktree(repo: String, task: String, branch: String, base: String) async
+        -> CreatedWorktree
     {
         // Sampled before the create, and diffed after the refresh — the same
-        // way `startTask` finds the workspace it just made. The daemon does not
+        // way `startTask` finds the worktree it just made. The daemon does not
         // report the id it minted, and matching on the name would find the
         // wrong one the second time a name is reused across projects.
-        let before = Set(fleet.workspaces.map(\.id))
+        let before = Set(fleet.worktrees.map(\.id))
         let failure = await runReportingError([
-            "workspace", "create", repo, task, "--branch", branch, "--base", base,
+            "worktree", "create", repo, task, "--branch", branch, "--base", base,
             // A worktree with nothing running in it is a directory. `shell`
             // rather than an agent, because this is the manual path — `startTask`
             // is the one that starts an agent — and it matches what
@@ -1738,19 +1738,19 @@ final class DaemonClient: ObservableObject {
             "--terminal", "shell",
         ])
         await refresh()
-        guard failure == nil else { return CreatedWorkspace(failure: failure, workspace: nil) }
-        return CreatedWorkspace(
+        guard failure == nil else { return CreatedWorktree(failure: failure, worktree: nil) }
+        return CreatedWorktree(
             failure: nil,
-            workspace: fleet.workspaces.first { !before.contains($0.id) }?.id)
+            worktree: fleet.worktrees.first { !before.contains($0.id) }?.id)
     }
 
-    func hideWorkspace(_ workspace: String) async {
-        _ = await run(["workspace", "hide", workspace])
+    func hideWorktree(_ worktree: String) async {
+        _ = await run(["worktree", "hide", worktree])
         await refresh()
     }
 
-    func unhideWorkspace(_ workspace: String) async {
-        _ = await run(["workspace", "unhide", workspace])
+    func unhideWorktree(_ worktree: String) async {
+        _ = await run(["worktree", "unhide", worktree])
         await refresh()
     }
 
@@ -1766,16 +1766,16 @@ final class DaemonClient: ObservableObject {
     /// never rearranged optimistically: the runner is the one that decides, and
     /// a card that moved on screen and not on disk is the failure this whole
     /// feature exists to remove.
-    func reorderWorkspaces(_ workspaces: [String]) async {
-        guard workspaces.count > 1 else { return }
-        _ = await run(["workspace", "reorder"] + workspaces)
+    func reorderWorktrees(_ worktrees: [String]) async {
+        guard worktrees.count > 1 else { return }
+        _ = await run(["worktree", "reorder"] + worktrees)
         await refresh()
     }
 
     /// What asking the daemon to remove a worktree came back with.
     enum RemoveWorktreeResult {
         case ok
-        /// The daemon needs the typed workspace name because the worktree is
+        /// The daemon needs the typed worktree name because the worktree is
         /// dirty (`DomainError::ConfirmationRequired`). Carries no message:
         /// the sheet has fixed wording for this one specific refusal.
         case confirmationRequired
@@ -1786,7 +1786,7 @@ final class DaemonClient: ObservableObject {
         case failed(String)
     }
 
-    /// Remove a worktree. `confirm` must be the workspace's exact task name,
+    /// Remove a worktree. `confirm` must be the worktree's exact task name,
     /// unless the worktree is clean (or its directory is already gone), in
     /// which case it may be empty and is omitted entirely — Task 8 made
     /// `--confirm` optional on the CLI side for exactly this.
@@ -1802,8 +1802,8 @@ final class DaemonClient: ObservableObject {
     /// — as "there is uncommitted work here" tells the user to type a name
     /// that will never make the real problem go away.
     @discardableResult
-    func removeWorktree(_ workspace: String, confirm: String) async -> RemoveWorktreeResult {
-        var args = ["workspace", "remove-worktree", workspace]
+    func removeWorktree(_ worktree: String, confirm: String) async -> RemoveWorktreeResult {
+        var args = ["worktree", "remove", worktree]
         if !confirm.isEmpty { args += ["--confirm", confirm] }
 
         let before = lastError
@@ -1848,18 +1848,18 @@ final class DaemonClient: ObservableObject {
     /// Files in a worktree matching a partial path, for the composer's `@`
     /// picker.
     ///
-    /// DEVIATION, recorded the same way `AgentStream` records its own:
-    /// `crates/cli` has no `workspace file-search` subcommand yet, so this is
-    /// written against the shape the feature needs — a query in, matching
-    /// paths out — and is inert until that subcommand lands. Empty on any
-    /// failure rather than surfacing `lastError`: a mention picker that
-    /// cannot search is a picker with nothing to show, not a reason to put a
-    /// banner over someone's half-typed message.
-    func searchFiles(in workspace: Workspace, query: String) async -> [String] {
+    /// `worktree file-search`. This once asked for `workspace file-search`, a
+    /// command the CLI never had, so every search exited 2 and came back
+    /// empty; `WorktreeCallsTests` now hands every line these calls send to
+    /// the CLI to parse. Empty on any failure rather than surfacing
+    /// `lastError`: a mention picker that cannot search is a picker with
+    /// nothing to show, not a reason to put a banner over someone's
+    /// half-typed message.
+    func searchFiles(in worktree: Worktree, query: String) async -> [String] {
         guard !query.isEmpty else { return [] }
         guard
             let data = await run([
-                "workspace", "file-search", workspace.short, query, "--json",
+                "worktree", "file-search", worktree.short, query, "--json",
             ])
         else { return [] }
         struct Result: Decodable { var paths: [String] }
@@ -1884,8 +1884,8 @@ final class DaemonClient: ObservableObject {
 
     /// Switch a pane between showing its terminal and showing its agent chat.
     ///
-    /// DEVIATION, same shape as `searchFiles` above: `crates/cli` has no
-    /// `terminal set-pane-mode` subcommand yet. This is written against the
+    /// DEVIATION, from when `crates/cli` had no `terminal set-pane-mode`
+    /// subcommand (it has one now). This was written against the
     /// daemon's own contract for it — a plain success, or a refusal naming
     /// what is in flight — so the confirmation flow above it (`ContentView`)
     /// can be built and reviewed now rather than after the CLI catches up.
@@ -1921,14 +1921,14 @@ final class DaemonClient: ObservableObject {
     /// two reads also looks new. Ids are stable, so the id set is the diff.
     @discardableResult
     func createTerminal(
-        in workspace: Workspace, preset: String, title: String
+        in worktree: Worktree, preset: String, title: String
     ) async -> Terminal? {
-        let before = Set(workspace.terminals.map(\.id))
-        await createTerminal(workspace: workspace.short, preset: preset, title: title)
+        let before = Set(worktree.terminals.map(\.id))
+        await createTerminal(worktree: worktree.short, preset: preset, title: title)
 
         // Creation is a tmux window opening, so the record can lag the call.
         for _ in 0..<20 {
-            if let found = fleet.workspaces.first(where: { $0.id == workspace.id })?
+            if let found = fleet.worktrees.first(where: { $0.id == worktree.id })?
                 .terminals.first(where: { !before.contains($0.id) })
             {
                 return found
@@ -1936,7 +1936,7 @@ final class DaemonClient: ObservableObject {
             try? await Task.sleep(for: .milliseconds(150))
             // Same reasoning as `startTask`'s own loop just above: `try?`
             // alone lets a cancelled caller keep polling — up to 20 more
-            // `workspace list` subprocesses against a runner that may have
+            // `worktree list` subprocesses against a runner that may have
             // just been removed — instead of stopping the moment it is told to.
             guard !Task.isCancelled else { return nil }
             await refresh()
@@ -1952,8 +1952,8 @@ final class DaemonClient: ObservableObject {
     /// every new terminal a split of whatever happened to be focused, which
     /// also hid the tab strip — with one layout there are no tabs to show —
     /// so the pane appeared to arrive nowhere at all.
-    func createTerminal(workspace: String, preset: String, title: String) async {
-        _ = await run(["terminal", "create", workspace, "--preset", preset, "--title", title])
+    func createTerminal(worktree: String, preset: String, title: String) async {
+        _ = await run(["terminal", "create", worktree, "--preset", preset, "--title", title])
         await refresh()
     }
 
@@ -2099,7 +2099,7 @@ final class DaemonClient: ObservableObject {
         let looking = !claim.isEmpty
         if looking && !wasLooking {
             let claimed = Set(claim)
-            markSeen(onScreen: fleet.workspaces.flatMap(\.terminals).filter { claimed.contains($0.id) })
+            markSeen(onScreen: fleet.worktrees.flatMap(\.terminals).filter { claimed.contains($0.id) })
         }
         wasLooking = looking
 
@@ -2244,12 +2244,13 @@ final class DaemonClient: ObservableObject {
         changesSupported = true
         changesError = nil
         guard let rows = InboxReply.rows(from: data) else { return }
-        var byWorkspace: [String: InboxRow] = [:]
+        var byWorktree: [String: InboxRow] = [:]
         // Keyed by the SHORT id, which is what `ChangesStore` and the sidebar
-        // look a workspace up by. A runner new enough to send `short` is taken
-        // at its word; an older one sent the short under `workspace_id` and had
-        // no `short` key at all, so the fallback is not a guess.
-        for r in rows { byWorkspace[r.short ?? r.workspaceId] = r }
+        // look a worktree up by. A runner new enough to send `short` is taken
+        // at its word; an older one sent the short under the id's own key
+        // (`workspace_id` then, `worktree_id` now) and had no `short` key at
+        // all, so the fallback is not a guess.
+        for r in rows { byWorktree[r.short ?? r.worktreeId] = r }
         // Assigned only when it actually differs.
         //
         // `@Published` fires on assignment regardless of the value, and this
@@ -2260,7 +2261,7 @@ final class DaemonClient: ObservableObject {
         // ran only on a full fleet read; now that a working agent asks for it
         // every few seconds, a fleet where nobody has committed anything would
         // otherwise repaint the app on a timer to show the same numbers.
-        if byWorkspace != changesInbox { changesInbox = byWorkspace }
+        if byWorktree != changesInbox { changesInbox = byWorktree }
     }
 
     /// When the inbox was last asked for, successfully or not.
@@ -2396,10 +2397,10 @@ final class DaemonClient: ObservableObject {
     /// remaining case, it is bounded by the runner's version, and it is what
     /// updating the runner fixes.
     func changesDiff(
-        workspace: String, path: String, scope: DiffScope, context: Int = 0,
+        worktree: String, path: String, scope: DiffScope, context: Int = 0,
         commit: String? = nil
     ) async -> FileDiff {
-        var args = ["changes", "diff", workspace, path]
+        var args = ["changes", "diff", worktree, path]
         // `--local`, not `--unstaged`: everything uncommitted. Asking for the
         // unstaged half alone meant a file went blank the moment it was staged,
         // which reads as the work having been undone.
@@ -2468,8 +2469,8 @@ final class DaemonClient: ObservableObject {
         return lines
     }
 
-    func changesMarkRead(workspace: String) async {
-        _ = await run(["changes", "read", workspace])
+    func changesMarkRead(worktree: String) async {
+        _ = await run(["changes", "read", worktree])
     }
 
     /// Hand a batch of review notes to an agent pane. Nil means it went.

@@ -20,7 +20,7 @@ struct StartTaskTests {
     final class Runner {
         var calls: [[String]] = []
         var capabilities: [String]
-        var workspaceMade = false
+        var worktreeMade = false
         var terminalMade = false
         var activity: String?
         /// What the made terminal's `preset` reads as: what it was launched
@@ -28,13 +28,13 @@ struct StartTaskTests {
         var terminalPreset = "claude"
         /// Worktree directories already on the runner, beside the main checkout.
         var existing: [String] = []
-        /// Branches git already has, as `workspace branches` lists them.
+        /// Branches git already has, as `worktree branches` lists them.
         var branches: [(name: String, remote: String?)] = []
         var branchPrefix = ""
-        /// A workspace somebody else's create made, listed FIRST — what a
+        /// A worktree somebody else's create made, listed FIRST — what a
         /// before-and-after diff of the fleet would wrongly take for ours.
-        var anotherNewWorkspace = false
-        var workspaceCreateFails: String?
+        var anotherNewWorktree = false
+        var worktreeCreateFails: String?
         var terminalCreateFails: String?
         var branchListFails = false
         /// The runner refuses `terminal send`.
@@ -47,15 +47,15 @@ struct StartTaskTests {
             calls.append(args)
             let words = args.filter { $0 != "--json" }
             switch Array(words.prefix(2)) {
-            case ["workspace", "create"]:
-                if let failure = workspaceCreateFails { return (nil, failure) }
-                workspaceMade = true
+            case ["worktree", "create"]:
+                if let failure = worktreeCreateFails { return (nil, failure) }
+                worktreeMade = true
                 return (json(["id": "w-new", "short": "wnew"]), nil)
             case ["terminal", "create"]:
                 if let failure = terminalCreateFails { return (nil, failure) }
                 terminalMade = true
                 return (json(["id": "t-new", "short": "tnew"]), nil)
-            case ["workspace", "branches"]:
+            case ["worktree", "branches"]:
                 if branchListFails { return (nil, "error: operation failed") }
                 let list = branches.map { branch -> [String: Any] in
                     var entry: [String: Any] = ["name": branch.name, "local": branch.remote == nil]
@@ -65,7 +65,7 @@ struct StartTaskTests {
                 return (json(["branches": list]), nil)
             case ["terminal", "send"]:
                 return sendFails ? (nil, "error: the pane is gone") : (Data(), nil)
-            case ["workspace", "list"]:
+            case ["worktree", "list"]:
                 if listFails { return (nil, "error: could not reach the daemon") }
                 return (fleet(), nil)
             case ["status"]:
@@ -93,7 +93,7 @@ struct StartTaskTests {
                 if let activity { terminal["activity"] = activity }
                 terminals.append(terminal)
             }
-            func workspace(_ id: String, _ directory: String, _ terminals: [[String: Any]] = [])
+            func worktree(_ id: String, _ directory: String, _ terminals: [[String: Any]] = [])
                 -> [String: Any]
             {
                 [
@@ -102,14 +102,14 @@ struct StartTaskTests {
                     "state": "active", "terminals": terminals,
                 ]
             }
-            var workspaces: [[String: Any]] = [workspace("w-main", "repo")]
-            if anotherNewWorkspace { workspaces.insert(workspace("w-other", "other"), at: 0) }
+            var worktrees: [[String: Any]] = [worktree("w-main", "repo")]
+            if anotherNewWorktree { worktrees.insert(worktree("w-other", "other"), at: 0) }
             for (index, directory) in existing.enumerated() {
-                workspaces.append(workspace("w-old\(index)", directory))
+                worktrees.append(worktree("w-old\(index)", directory))
             }
-            if workspaceMade { workspaces.append(workspace("w-new", "new", terminals)) }
+            if worktreeMade { worktrees.append(worktree("w-new", "new", terminals)) }
             return json([
-                "runtime_healthy": true, "live_panes": 0, "workspaces": workspaces,
+                "runtime_healthy": true, "live_panes": 0, "worktrees": worktrees,
                 "branch_prefix": branchPrefix,
             ]) ?? Data()
         }
@@ -157,7 +157,7 @@ struct StartTaskTests {
         let outcome = await start(client)
         let took = ContinuousClock.now - started
 
-        #expect(outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
+        #expect(outcome == .started(worktree: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
         #expect(took < .seconds(2), "returned once the terminal existed, not after a wait: \(took)")
         #expect(runner.made("terminal")?.contains("--prompt=\(Self.description)") == true)
         // Nothing is typed, then or later — the agent already has it. Idle
@@ -175,7 +175,7 @@ struct StartTaskTests {
         let outcome = await start(client)
         let took = ContinuousClock.now - started
 
-        #expect(outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
+        #expect(outcome == .started(worktree: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
         #expect(took < .seconds(2), "the typing no longer holds the window: \(took)")
         #expect(runner.made("terminal")?.contains { $0.hasPrefix("--prompt") } == false)
 
@@ -208,7 +208,7 @@ struct StartTaskTests {
         let outcome = await client.startTask(
             project: "repo", description: Self.description, name: "fix-flaky-reconnect",
             agent: "claude", undelivered: { said.append($0) })
-        #expect(outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
+        #expect(outcome == .started(worktree: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
         // Gone before the first look.
         if cause == "closed" { runner.terminalMade = false }
 
@@ -241,8 +241,8 @@ struct StartTaskTests {
     /// a "task".
     ///
     /// A task is a card on the board now, with a row of its own above every
-    /// repository's workspaces, and ⌘N puts nothing there: it makes a
-    /// workspace and starts an agent. What this walks is `TaskPrompt` and
+    /// repository's worktrees, and ⌘N puts nothing there: it makes a
+    /// worktree and starts an agent. What this walks is `TaskPrompt` and
     /// `TaskFailure` — the sentences composed off the view, which are the
     /// ones a test can call. The menu item, the palette entry, the ⌘/ row,
     /// the panel's hints and `startTask`'s two refusals are literals in
@@ -276,22 +276,22 @@ struct StartTaskTests {
         #expect(runner.made("terminal")?.contains { $0.hasPrefix("--prompt") } == false)
     }
 
-    @Test func theWorkspaceIsTheOneItsCreateReturnedNotANewcomerInTheList() async {
+    @Test func theWorktreeIsTheOneItsCreateReturnedNotANewcomerInTheList() async {
         let runner = Runner(capabilities: Self.prompting)
         // Absent while the client first reads the fleet, so a before-and-after
-        // guess would see TWO new workspaces during the start — and take the
+        // guess would see TWO new worktrees during the start — and take the
         // first, which is not ours.
         let client = await client(runner)
         let outcome = await startWithANewcomer(client, runner)
-        #expect(outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
+        #expect(outcome == .started(worktree: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
         #expect(runner.made("terminal")?.contains("wnew") == true)
     }
 
-    /// Another workspace appears in the list during this start.
+    /// Another worktree appears in the list during this start.
     private func startWithANewcomer(_ client: DaemonClient, _ runner: Runner) async
         -> DaemonClient.TaskStart
     {
-        runner.anotherNewWorkspace = true
+        runner.anotherNewWorktree = true
         return await start(client)
     }
 
@@ -300,8 +300,8 @@ struct StartTaskTests {
         let client = await client(runner)
         _ = await start(client)
         #expect(
-            runner.made("workspace")?.filter { $0 != "--json" } == [
-                "workspace", "create", "repo", "fix-flaky-reconnect", "--branch",
+            runner.made("worktree")?.filter { $0 != "--json" } == [
+                "worktree", "create", "repo", "fix-flaky-reconnect", "--branch",
                 "fix-flaky-reconnect", "--no-terminal",
             ])
     }
@@ -316,7 +316,7 @@ struct StartTaskTests {
             let runner = Runner(capabilities: capabilities)
             let client = await client(runner)
             _ = await start(client)
-            #expect(runner.made("workspace")?.contains("--fork-only") == forkOnly, "\(capabilities)")
+            #expect(runner.made("worktree")?.contains("--fork-only") == forkOnly, "\(capabilities)")
         }
     }
 
@@ -341,21 +341,21 @@ struct StartTaskTests {
             let client = await client(runner)
             let outcome = await start(client)
             #expect(
-                outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect-2"),
+                outcome == .started(worktree: "w-new", terminal: "t-new", name: "fix-flaky-reconnect-2"),
                 "the name it was made under comes back")
-            let args = runner.made("workspace")?.filter { $0 != "--json" }
+            let args = runner.made("worktree")?.filter { $0 != "--json" }
             #expect(args?[3] == "fix-flaky-reconnect-2", "\(args ?? [])")
             #expect(args?[5].hasSuffix("fix-flaky-reconnect-2") == true, "\(args ?? [])")
         }
     }
 
     /// Taken by something neither list shows — a directory left under
-    /// `worktrees/` that no workspace owns, a branch fetched since the list
+    /// `worktrees/` that no worktree owns, a branch fetched since the list
     /// was read. Starting it again gets the next name, not the same refusal.
     @Test(arguments: ["worktree-exists", "branch-exists"])
     func aNameTheRunnerRefusedAsTakenIsNotTriedAgain(_ code: String) async {
         let runner = Runner(capabilities: Self.prompting)
-        runner.workspaceCreateFails = "error: already exists\ncode: \(code)"
+        runner.worktreeCreateFails = "error: already exists\ncode: \(code)"
         let client = await client(runner)
         guard case .failed(let sentence, _) = await start(client) else {
             Issue.record("expected a refusal")
@@ -363,17 +363,17 @@ struct StartTaskTests {
         }
         #expect(sentence.contains("Start again"), "\(sentence)")
 
-        runner.workspaceCreateFails = nil
+        runner.worktreeCreateFails = nil
         let outcome = await start(client)
-        #expect(outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect-2"))
-        let creates = runner.calls.filter { $0.filter { $0 != "--json" }.starts(with: ["workspace", "create"]) }
+        #expect(outcome == .started(worktree: "w-new", terminal: "t-new", name: "fix-flaky-reconnect-2"))
+        let creates = runner.calls.filter { $0.filter { $0 != "--json" }.starts(with: ["worktree", "create"]) }
         #expect(creates.count == 2)
         #expect(creates.last?.contains("fix-flaky-reconnect-2") == true, "\(creates)")
     }
 
-    @Test func aWorkspaceThatCannotBeMadeSaysSoAndMakesNoAgent() async {
+    @Test func aWorktreeThatCannotBeMadeSaysSoAndMakesNoAgent() async {
         let runner = Runner(capabilities: Self.prompting)
-        runner.workspaceCreateFails = "error: branch already exists\ncode: branch-exists"
+        runner.worktreeCreateFails = "error: branch already exists\ncode: branch-exists"
         let client = await client(runner)
         let outcome = await start(client)
         guard case .failed(let sentence, let made) = outcome else {
@@ -385,7 +385,7 @@ struct StartTaskTests {
         #expect(runner.made("terminal") == nil)
     }
 
-    @Test func anAgentThatCannotBeStartedSaysSoAndNamesTheWorkspace() async {
+    @Test func anAgentThatCannotBeStartedSaysSoAndNamesTheWorktree() async {
         let runner = Runner(capabilities: Self.prompting)
         runner.terminalCreateFails = "error: tmux is unavailable\ncode: tmux-unavailable"
         let client = await client(runner)
@@ -414,8 +414,8 @@ struct StartTaskTests {
         let outcome = await client.startTask(
             project: "repo", description: Self.description, name: made.name, agent: "claude",
             reusing: made.id)
-        #expect(outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
-        let creates = runner.calls.filter { $0.filter { $0 != "--json" }.starts(with: ["workspace", "create"]) }
+        #expect(outcome == .started(worktree: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
+        let creates = runner.calls.filter { $0.filter { $0 != "--json" }.starts(with: ["worktree", "create"]) }
         #expect(creates.count == 1, "one worktree, made once: \(creates)")
         let terminals = runner.calls.filter { $0.filter { $0 != "--json" }.starts(with: ["terminal", "create"]) }
         #expect(terminals.count == 2 && terminals.last?.contains("wnew") == true, "\(terminals)")
@@ -428,14 +428,14 @@ struct StartTaskTests {
         let runner = Runner(capabilities: Self.prompting)
         let client = await client(runner)
         // Made behind the client's back: its fleet hasn't seen either yet.
-        runner.workspaceMade = true
+        runner.worktreeMade = true
         runner.terminalMade = true
         let outcome = await client.startTask(
             project: "repo", description: Self.description, name: "fix-flaky-reconnect",
             agent: "claude", reusing: "w-new")
-        #expect(outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
+        #expect(outcome == .started(worktree: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
         #expect(runner.made("terminal") == nil, "no second agent")
-        #expect(runner.made("workspace") == nil, "and no second worktree")
+        #expect(runner.made("worktree") == nil, "and no second worktree")
     }
 
     /// A shell opened in the leftover worktree to look around is not the
@@ -446,15 +446,15 @@ struct StartTaskTests {
     func aRetryWhereOnlyAShellRunsStartsTheAgent(_ shell: String) async {
         let runner = Runner(capabilities: Self.prompting)
         let client = await client(runner)
-        runner.workspaceMade = true
+        runner.worktreeMade = true
         runner.terminalMade = true
         runner.terminalPreset = shell
         let outcome = await client.startTask(
             project: "repo", description: Self.description, name: "fix-flaky-reconnect",
             agent: "claude", reusing: "w-new")
-        #expect(outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
+        #expect(outcome == .started(worktree: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
         #expect(runner.made("terminal")?.contains("--prompt=\(Self.description)") == true, "\(shell)")
-        #expect(runner.made("workspace") == nil, "in the worktree it made")
+        #expect(runner.made("worktree") == nil, "in the worktree it made")
     }
 
     /// Removed since: a start from scratch, not an agent sent nowhere.
@@ -464,8 +464,8 @@ struct StartTaskTests {
         let outcome = await client.startTask(
             project: "repo", description: Self.description, name: "fix-flaky-reconnect",
             agent: "claude", reusing: "w-removed")
-        #expect(outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
-        #expect(runner.made("workspace") != nil)
+        #expect(outcome == .started(worktree: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
+        #expect(runner.made("worktree") != nil)
     }
 
     @Test func aTaskTooLongForAnAgentIsRefusedBeforeAnythingIsMade() async {
@@ -478,7 +478,7 @@ struct StartTaskTests {
                 continue
             }
         }
-        #expect(runner.made("workspace") == nil)
+        #expect(runner.made("worktree") == nil)
     }
 
     @Test func branchesThatCannotBeReadStopTheStartRatherThanRiskAnExistingBranch() async {
@@ -489,16 +489,16 @@ struct StartTaskTests {
             Issue.record("expected a failure")
             return
         }
-        #expect(runner.made("workspace") == nil)
+        #expect(runner.made("worktree") == nil)
     }
 
     @Test func aPromptThatStartsWithADashIsStillOneArgument() {
         let args = DaemonClient.taskTerminalArguments(
-            workspace: "w", agent: "codex", prompt: "--help me")
+            worktree: "w", agent: "codex", prompt: "--help me")
         #expect(args == ["terminal", "create", "w", "--preset", "codex", "--title", "codex",
                          "--prompt=--help me"])
         #expect(
-            !DaemonClient.taskTerminalArguments(workspace: "w", agent: "codex", prompt: nil)
+            !DaemonClient.taskTerminalArguments(worktree: "w", agent: "codex", prompt: nil)
                 .contains { $0.hasPrefix("--prompt") })
     }
 
@@ -587,7 +587,7 @@ struct StartTaskTests {
     /// A runner whose one agent, `t-new`, has finished and not been seen.
     private func aFinishedAgent(watching: Bool = true) -> Runner {
         let runner = Runner(capabilities: ["workspaces", "terminals"] + (watching ? ["watching"] : []))
-        runner.workspaceMade = true
+        runner.worktreeMade = true
         runner.terminalMade = true
         runner.activity = "done"
         return runner
@@ -600,7 +600,7 @@ struct StartTaskTests {
         let runner = aFinishedAgent()
         let client = await client(runner)
         client.presence = present ? Self.present() : Self.present(unlocked: false)
-        let onScreen = client.fleet.workspaces.flatMap(\.terminals)
+        let onScreen = client.fleet.worktrees.flatMap(\.terminals)
         #expect(onScreen.map(\.agent) == [.done], "the stub's agent has finished")
 
         client.markSeen(onScreen: onScreen)
@@ -619,7 +619,7 @@ struct StartTaskTests {
         client.presence = Presence(
             appActive: { true }, screenAwake: { true }, sessionUnlocked: { true },
             secondsSinceInput: { idle })
-        client.markSeen(onScreen: client.fleet.workspaces.flatMap(\.terminals))
+        client.markSeen(onScreen: client.fleet.worktrees.flatMap(\.terminals))
         client.reportWatching(["t-new"])
         try? await Task.sleep(for: .milliseconds(100))
         #expect(runner.seenCalls.isEmpty, "nobody there yet")

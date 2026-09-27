@@ -5,9 +5,9 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
- * The arithmetic behind dragging a workspace card.
+ * The arithmetic behind dragging a worktree card.
  *
- * The same cases as `WorkspaceOrderTests.swift` in AgentKit, deliberately: the
+ * The same cases as `WorktreeOrderTests.swift` in AgentKit, deliberately: the
  * two apps drag the same cards into the same order on the same runner, and a
  * disagreement between them shows up as a card that lands in one place on a
  * phone and another on a Mac.
@@ -16,7 +16,7 @@ import org.junit.Test
  * of it — this app has no Compose test dependency, and a drop that lands one
  * card short looks exactly like a drop that lands right.
  */
-class WorkspaceOrderTest {
+class WorktreeOrderTest {
 
     private val list = listOf("a", "b", "c", "d")
 
@@ -24,7 +24,7 @@ class WorkspaceOrderTest {
     fun `dropping above a card puts the dragged one in front of it`() {
         assertEquals(
             listOf("a", "d", "b", "c"),
-            WorkspaceOrder.moved(list, "d", "b", WorkspaceOrder.Edge.ABOVE),
+            WorktreeOrder.moved(list, "d", "b", WorktreeOrder.Edge.ABOVE),
         )
     }
 
@@ -32,7 +32,7 @@ class WorkspaceOrderTest {
     fun `dropping below a card puts the dragged one after it`() {
         assertEquals(
             listOf("b", "c", "a", "d"),
-            WorkspaceOrder.moved(list, "a", "c", WorkspaceOrder.Edge.BELOW),
+            WorktreeOrder.moved(list, "a", "c", WorktreeOrder.Edge.BELOW),
         )
     }
 
@@ -46,15 +46,15 @@ class WorkspaceOrderTest {
     fun `dragging downwards lands where it was dropped and not one short`() {
         assertEquals(
             listOf("b", "c", "d", "a"),
-            WorkspaceOrder.moved(list, "a", "d", WorkspaceOrder.Edge.BELOW),
+            WorktreeOrder.moved(list, "a", "d", WorktreeOrder.Edge.BELOW),
         )
         assertEquals(
             listOf("b", "c", "a", "d"),
-            WorkspaceOrder.moved(list, "a", "d", WorkspaceOrder.Edge.ABOVE),
+            WorktreeOrder.moved(list, "a", "d", WorktreeOrder.Edge.ABOVE),
         )
         assertEquals(
             listOf("d", "a", "b", "c"),
-            WorkspaceOrder.moved(list, "d", "a", WorkspaceOrder.Edge.ABOVE),
+            WorktreeOrder.moved(list, "d", "a", WorktreeOrder.Edge.ABOVE),
         )
     }
 
@@ -65,10 +65,10 @@ class WorkspaceOrderTest {
      */
     @Test
     fun `a drop that would change nothing comes back unchanged`() {
-        assertEquals(list, WorkspaceOrder.moved(list, "b", "b", WorkspaceOrder.Edge.ABOVE))
-        assertEquals(list, WorkspaceOrder.moved(list, "b", "c", WorkspaceOrder.Edge.ABOVE))
-        assertEquals(list, WorkspaceOrder.moved(list, "b", "a", WorkspaceOrder.Edge.BELOW))
-        assertEquals(list, WorkspaceOrder.moved(list, "a", "b", WorkspaceOrder.Edge.ABOVE))
+        assertEquals(list, WorktreeOrder.moved(list, "b", "b", WorktreeOrder.Edge.ABOVE))
+        assertEquals(list, WorktreeOrder.moved(list, "b", "c", WorktreeOrder.Edge.ABOVE))
+        assertEquals(list, WorktreeOrder.moved(list, "b", "a", WorktreeOrder.Edge.BELOW))
+        assertEquals(list, WorktreeOrder.moved(list, "a", "b", WorktreeOrder.Edge.ABOVE))
     }
 
     /**
@@ -78,61 +78,61 @@ class WorkspaceOrderTest {
      */
     @Test
     fun `a stranger on either end leaves the list alone`() {
-        assertEquals(list, WorkspaceOrder.moved(list, "z", "b", WorkspaceOrder.Edge.ABOVE))
-        assertEquals(list, WorkspaceOrder.moved(list, "a", "z", WorkspaceOrder.Edge.BELOW))
+        assertEquals(list, WorktreeOrder.moved(list, "z", "b", WorktreeOrder.Edge.ABOVE))
+        assertEquals(list, WorktreeOrder.moved(list, "a", "z", WorktreeOrder.Edge.BELOW))
         assertEquals(
             emptyList<String>(),
-            WorkspaceOrder.moved(emptyList(), "a", "b", WorkspaceOrder.Edge.ABOVE),
+            WorktreeOrder.moved(emptyList(), "a", "b", WorktreeOrder.Edge.ABOVE),
         )
     }
 
     @Test
     fun `the edge is decided at the midpoint of the card`() {
-        assertEquals(WorkspaceOrder.Edge.ABOVE, WorkspaceOrder.edge(0f, 40f))
-        assertEquals(WorkspaceOrder.Edge.ABOVE, WorkspaceOrder.edge(19.9f, 40f))
-        assertEquals(WorkspaceOrder.Edge.BELOW, WorkspaceOrder.edge(20f, 40f))
-        assertEquals(WorkspaceOrder.Edge.BELOW, WorkspaceOrder.edge(40f, 40f))
+        assertEquals(WorktreeOrder.Edge.ABOVE, WorktreeOrder.edge(0f, 40f))
+        assertEquals(WorktreeOrder.Edge.ABOVE, WorktreeOrder.edge(19.9f, 40f))
+        assertEquals(WorktreeOrder.Edge.BELOW, WorktreeOrder.edge(20f, 40f))
+        assertEquals(WorktreeOrder.Edge.BELOW, WorktreeOrder.edge(40f, 40f))
         // A card that has not been measured yet must not fling anything to the end.
-        assertEquals(WorkspaceOrder.Edge.ABOVE, WorkspaceOrder.edge(12f, 0f))
+        assertEquals(WorktreeOrder.Edge.ABOVE, WorktreeOrder.edge(12f, 0f))
     }
 
     // ---- which card the finger is over ----
     //
-    // A workspace in this list is a header followed by however many terminal
+    // A worktree in this list is a header followed by however many terminal
     // rows, so a card's extent runs from its own header to the next one's. A
-    // finger halfway down a workspace's terminals is over THAT workspace, and
+    // finger halfway down a worktree's terminals is over THAT worktree, and
     // the guard below is the one that catches an implementation that measured
     // only the headers and left every gap between them dead.
 
     private val cards = listOf(
-        WorkspaceOrder.Card("a", top = 0, bottom = 200),
-        WorkspaceOrder.Card("b", top = 200, bottom = 260),
-        WorkspaceOrder.Card("c", top = 260, bottom = 500),
+        WorktreeOrder.Card("a", top = 0, bottom = 200),
+        WorktreeOrder.Card("b", top = 200, bottom = 260),
+        WorktreeOrder.Card("c", top = 260, bottom = 500),
     )
 
     @Test
-    fun `the finger is over the workspace whose block it is in, terminals included`() {
+    fun `the finger is over the worktree whose block it is in, terminals included`() {
         // Deep inside a's terminal rows, well past any header's height.
-        assertEquals(WorkspaceOrder.Landing("a", WorkspaceOrder.Edge.ABOVE), WorkspaceOrder.landing(cards, 40))
-        assertEquals(WorkspaceOrder.Landing("a", WorkspaceOrder.Edge.BELOW), WorkspaceOrder.landing(cards, 150))
+        assertEquals(WorktreeOrder.Landing("a", WorktreeOrder.Edge.ABOVE), WorktreeOrder.landing(cards, 40))
+        assertEquals(WorktreeOrder.Landing("a", WorktreeOrder.Edge.BELOW), WorktreeOrder.landing(cards, 150))
         // And the short card between them, which is a header with nothing under it.
-        assertEquals(WorkspaceOrder.Landing("b", WorkspaceOrder.Edge.ABOVE), WorkspaceOrder.landing(cards, 210))
-        assertEquals(WorkspaceOrder.Landing("b", WorkspaceOrder.Edge.BELOW), WorkspaceOrder.landing(cards, 250))
+        assertEquals(WorktreeOrder.Landing("b", WorktreeOrder.Edge.ABOVE), WorktreeOrder.landing(cards, 210))
+        assertEquals(WorktreeOrder.Landing("b", WorktreeOrder.Edge.BELOW), WorktreeOrder.landing(cards, 250))
     }
 
     // The lazy list's own measurements, which is where the extents above come
     // from in the app: `FleetScreen`'s `visibleItemsInfo` becomes [Laid], and
-    // [WorkspaceOrder.cards] turns that into the list [landing] reads. A
-    // workspace is a header plus its terminal rows, all siblings in one flat
+    // [WorktreeOrder.cards] turns that into the list [landing] reads. A
+    // worktree is a header plus its terminal rows, all siblings in one flat
     // `LazyColumn`, so the arithmetic that groups them is the part with a bug
     // available in it.
     private val laid = listOf(
-        WorkspaceOrder.Laid("a", offset = 0, size = 60),
-        WorkspaceOrder.Laid("a/1", offset = 60, size = 70),
-        WorkspaceOrder.Laid("a/2", offset = 130, size = 70),
-        WorkspaceOrder.Laid("b", offset = 200, size = 60),
-        WorkspaceOrder.Laid("c", offset = 260, size = 60),
-        WorkspaceOrder.Laid("c/1", offset = 320, size = 180),
+        WorktreeOrder.Laid("a", offset = 0, size = 60),
+        WorktreeOrder.Laid("a/1", offset = 60, size = 70),
+        WorktreeOrder.Laid("a/2", offset = 130, size = 70),
+        WorktreeOrder.Laid("b", offset = 200, size = 60),
+        WorktreeOrder.Laid("c", offset = 260, size = 60),
+        WorktreeOrder.Laid("c/1", offset = 320, size = 180),
     )
     private val headers = setOf("a", "b", "c")
 
@@ -148,35 +148,35 @@ class WorkspaceOrderTest {
      */
     @Test
     fun `a card runs from its own header to the next one, terminals included`() {
-        assertEquals(cards, WorkspaceOrder.cards(laid, headers))
+        assertEquals(cards, WorktreeOrder.cards(laid, headers))
     }
 
     /** And the two ends: a prefix before the first header, and the last row. */
     @Test
     fun `a header-less prefix is ignored and the last row ends the last card`() {
-        val banner = WorkspaceOrder.Laid("banner", offset = -40, size = 40)
-        assertEquals(cards, WorkspaceOrder.cards(listOf(banner) + laid, headers))
+        val banner = WorktreeOrder.Laid("banner", offset = -40, size = 40)
+        assertEquals(cards, WorktreeOrder.cards(listOf(banner) + laid, headers))
         // The final card ends at the bottom of the LAST item, not the bottom of
-        // its own header — the terminals under the last workspace are as much
+        // its own header — the terminals under the last worktree are as much
         // of it as the ones under the first.
-        assertEquals(500, WorkspaceOrder.cards(laid, headers).last().bottom)
-        assertEquals(emptyList<WorkspaceOrder.Card>(), WorkspaceOrder.cards(emptyList(), headers))
+        assertEquals(500, WorktreeOrder.cards(laid, headers).last().bottom)
+        assertEquals(emptyList<WorktreeOrder.Card>(), WorktreeOrder.cards(emptyList(), headers))
     }
 
     /** The same question as above, asked through what the screen measured. */
     @Test
-    fun `a finger in a workspace's terminal rows is over that workspace`() {
-        val measured = WorkspaceOrder.cards(laid, headers)
-        assertEquals(WorkspaceOrder.Landing("a", WorkspaceOrder.Edge.ABOVE), WorkspaceOrder.landing(measured, 40))
-        assertEquals(WorkspaceOrder.Landing("a", WorkspaceOrder.Edge.BELOW), WorkspaceOrder.landing(measured, 150))
-        assertEquals(WorkspaceOrder.Landing("c", WorkspaceOrder.Edge.ABOVE), WorkspaceOrder.landing(measured, 300))
-        assertEquals(WorkspaceOrder.Landing("c", WorkspaceOrder.Edge.BELOW), WorkspaceOrder.landing(measured, 450))
+    fun `a finger in a worktree's terminal rows is over that worktree`() {
+        val measured = WorktreeOrder.cards(laid, headers)
+        assertEquals(WorktreeOrder.Landing("a", WorktreeOrder.Edge.ABOVE), WorktreeOrder.landing(measured, 40))
+        assertEquals(WorktreeOrder.Landing("a", WorktreeOrder.Edge.BELOW), WorktreeOrder.landing(measured, 150))
+        assertEquals(WorktreeOrder.Landing("c", WorktreeOrder.Edge.ABOVE), WorktreeOrder.landing(measured, 300))
+        assertEquals(WorktreeOrder.Landing("c", WorktreeOrder.Edge.BELOW), WorktreeOrder.landing(measured, 450))
     }
 
     @Test
     fun `dragging past either end means the front or the back of the list`() {
-        assertEquals(WorkspaceOrder.Landing("a", WorkspaceOrder.Edge.ABOVE), WorkspaceOrder.landing(cards, -400))
-        assertEquals(WorkspaceOrder.Landing("c", WorkspaceOrder.Edge.BELOW), WorkspaceOrder.landing(cards, 9000))
-        assertNull(WorkspaceOrder.landing(emptyList(), 10))
+        assertEquals(WorktreeOrder.Landing("a", WorktreeOrder.Edge.ABOVE), WorktreeOrder.landing(cards, -400))
+        assertEquals(WorktreeOrder.Landing("c", WorktreeOrder.Edge.BELOW), WorktreeOrder.landing(cards, 9000))
+        assertNull(WorktreeOrder.landing(emptyList(), 10))
     }
 }

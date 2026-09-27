@@ -46,7 +46,7 @@ import kotlin.math.abs
  * shown.
  *
  * This never decides whether a terminal is "live" — the host does, the same way
- * [Connection] never computes a workspace's state. An unreadable screen is
+ * [Connection] never computes a worktree's state. An unreadable screen is
  * reported exactly as the host phrased it.
  *
  * ## Where the work happens
@@ -117,7 +117,7 @@ class TerminalSession(
      * The one pane this session is about, for as long as it exists.
      *
      * A `var` until this phase, with a `switchTo` that re-pointed it at a
-     * sibling — one session for a whole workspace, torn down and rebuilt around
+     * sibling — one session for a whole worktree, torn down and rebuilt around
      * a different terminal on every tab tap. That IS F-3 in the parity
      * inventory: the tap threw away the outgoing pane's emulator, its screen
      * and its stream, so the tab you came back to was one that had never been
@@ -389,7 +389,7 @@ class TerminalSession(
 
     /**
      * Release everything. Called when the pane is gone for good — unmounted by
-     * the workspace screen's limit, or pruned because the runner no longer has
+     * the worktree screen's limit, or pruned because the runner no longer has
      * it.
      *
      * [stop] first, and it is a no-op on a session that is already paused,

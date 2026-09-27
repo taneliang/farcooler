@@ -31,8 +31,8 @@ final class ShellGestureTests: XCTestCase {
     /// written into it with a comment explaining where the 102 came from.
     private let rowHeight = 44
 
-    /// The default fixture: ten workspaces, tab counts `[3, 2, 5, 1, 4]`
-    /// cycling. Workspace 0 therefore has three tabs, which is what every
+    /// The default fixture: ten worktrees, tab counts `[3, 2, 5, 1, 4]`
+    /// cycling. Worktree 0 therefore has three tabs, which is what every
     /// number below is counted against.
     private func launch(_ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
@@ -41,7 +41,7 @@ final class ShellGestureTests: XCTestCase {
         return app
     }
 
-    /// `ws`, `tab`, `workspaces`, `tabs`, `column`, `pinned`, `overview`.
+    /// `ws`, `tab`, `worktrees`, `tabs`, `column`, `pinned`, `overview`.
     private func state(_ app: XCUIApplication) throws -> [String: Int] {
         let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
         guard probe.waitForExistence(timeout: 30) else {
@@ -130,12 +130,12 @@ final class ShellGestureTests: XCTestCase {
         let start = try state(app)
         XCTAssertEqual(start["ws"], 0)
         XCTAssertEqual(start["tab"], 0)
-        XCTAssertEqual(start["workspaces"], 10)
-        XCTAssertEqual(start["tabs"], 3, "workspace 0 of the canned fleet has three tabs")
+        XCTAssertEqual(start["worktrees"], 10)
+        XCTAssertEqual(start["tabs"], 3, "worktree 0 of the canned fleet has three tabs")
 
         swipeContent(app, toward: -1)
         let forward = try state(app)
-        XCTAssertEqual(forward["ws"], 0, "a step within a workspace does not change workspace")
+        XCTAssertEqual(forward["ws"], 0, "a step within a worktree does not change worktree")
         XCTAssertEqual(forward["tab"], 1, "the swipe did not commit")
 
         swipeContent(app, toward: 1)
@@ -144,22 +144,22 @@ final class ShellGestureTests: XCTestCase {
         XCTAssertEqual(back["tab"], 0, "the return swipe did not land where it started")
     }
 
-    /// Walking forward off the last tab of a workspace lands on the NEXT
-    /// workspace's first tab — the flat sequence, on a real screen.
-    func testSwipingOffTheEndOfAWorkspaceCrossesIntoTheNext() throws {
+    /// Walking forward off the last tab of a worktree lands on the NEXT
+    /// worktree's first tab — the flat sequence, on a real screen.
+    func testSwipingOffTheEndOfAWorktreeCrossesIntoTheNext() throws {
         let app = launch()
         for _ in 0..<3 { swipeContent(app, toward: -1) }
         let crossed = try state(app)
-        XCTAssertEqual(crossed["ws"], 1, "three swipes off a three-tab workspace never crossed")
+        XCTAssertEqual(crossed["ws"], 1, "three swipes off a three-tab worktree never crossed")
         XCTAssertEqual(crossed["tab"], 0)
-        XCTAssertEqual(crossed["tabs"], 2, "workspace 1 of the canned fleet has two tabs")
+        XCTAssertEqual(crossed["tabs"], 2, "worktree 1 of the canned fleet has two tabs")
     }
 
-    /// The bar walks WORKSPACES, not tabs: one swipe on it from anywhere in a
-    /// workspace lands on the neighbour's first tab.
-    func testASwipeOnTheBarChangesWorkspace() throws {
+    /// The bar walks WORKTREES, not tabs: one swipe on it from anywhere in a
+    /// worktree lands on the neighbour's first tab.
+    func testASwipeOnTheBarChangesWorktree() throws {
         let app = launch()
-        // Somewhere in the middle of workspace 0, so "tab 0" afterwards is a
+        // Somewhere in the middle of worktree 0, so "tab 0" afterwards is a
         // fact about the bar's step rather than about where we started.
         swipeContent(app, toward: -1)
         XCTAssertEqual(try state(app)["tab"], 1)
@@ -172,8 +172,8 @@ final class ShellGestureTests: XCTestCase {
             forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.4)
 
         let after = try state(app)
-        XCTAssertEqual(after["ws"], 1, "the bar swipe did not change workspace")
-        XCTAssertEqual(after["tab"], 0, "the bar lands on the next workspace's first tab")
+        XCTAssertEqual(after["ws"], 1, "the bar swipe did not change worktree")
+        XCTAssertEqual(after["tab"], 0, "the bar lands on the next worktree's first tab")
     }
 
     /// A lift too small to open the column costs nothing.
@@ -198,7 +198,7 @@ final class ShellGestureTests: XCTestCase {
 
     /// Lifting past the last row and then some reaches the overview.
     ///
-    /// Workspace 0 has three tabs, so the column runs out at three rows and
+    /// Worktree 0 has three tabs, so the column runs out at three rows and
     /// the overview arrives 76 further up. 320 is well past both, and past is
     /// the only thing being asserted — the exact arrival point is
     /// `ShellNavigationTests.theOverviewBeginsWhereTheColumnRunsOut`.
@@ -219,7 +219,7 @@ final class ShellGestureTests: XCTestCase {
     }
 
     /// **A flick up from over a menu row reaches the overview, and a
-    /// deliberate lift from the same place stays in the workspace.** The
+    /// deliberate lift from the same place stays in the worktree.** The
     /// owner's complaint, and the whole of the momentum projection on one
     /// screen.
     ///
@@ -251,13 +251,13 @@ final class ShellGestureTests: XCTestCase {
     /// than a statement about the app.
     func testAFlickUpFromOverAMenuRowReachesTheOverview() throws {
         let app = launch()
-        XCTAssertEqual(try state(app)["tabs"], 3, "workspace 0 of the canned fleet has three tabs")
+        XCTAssertEqual(try state(app)["tabs"], 3, "worktree 0 of the canned fleet has three tabs")
         XCTAssertEqual(try state(app)["tab"], 0)
 
         // The row, off the finger's position rather than off its travel.
         liftBar(app, by: 60)
         let landed = try state(app)
-        XCTAssertEqual(landed["overview"], 0, "a deliberate 60-point lift left the workspace")
+        XCTAssertEqual(landed["overview"], 0, "a deliberate 60-point lift left the worktree")
         XCTAssertEqual(
             landed["tab"], 2,
             "the row under the finger is the one nearest the bar, which is the last tab")
@@ -272,7 +272,7 @@ final class ShellGestureTests: XCTestCase {
         flickBar(app, by: 140)
         XCTAssertEqual(
             try state(app)["overview"], 1,
-            "a flick from the same 140 points stayed in the workspace")
+            "a flick from the same 140 points stayed in the worktree")
     }
 
     /// A tap holds the column open, and a second tap closes it.
@@ -291,7 +291,7 @@ final class ShellGestureTests: XCTestCase {
         let opened = try state(app)
         XCTAssertEqual(opened["pinned"], 1, "a tap did not hold the column open")
         XCTAssertEqual(
-            opened["column"], 3 * rowHeight, "workspace 0's three rows were not showing")
+            opened["column"], 3 * rowHeight, "worktree 0's three rows were not showing")
 
         // The bar element has grown by the column's height, so its centre is
         // no longer over the bar. Aim at the bottom of it, which is.
@@ -336,9 +336,9 @@ final class ShellGestureTests: XCTestCase {
     /// **A fast, slightly angled fling up reaches the overview and does NOT
     /// carry.** The owner's report, on a finger.
     ///
-    /// *"when I fling the workspace up, quite often it animates the workspace
+    /// *"when I fling the worktree up, quite often it animates the worktree
     /// to the n-1th or n+1th grid square… if my fling is angled too much it
-    /// picks either the previous or next workspace to land on, seemingly
+    /// picks either the previous or next worktree to land on, seemingly
     /// assuming I already switched to it (clearly I didn't)."*
     ///
     /// Sixty points across 320 up is a ratio of 0.19 — a thumb's arc, and
@@ -377,7 +377,7 @@ final class ShellGestureTests: XCTestCase {
             flung["ws"], 0,
             "a fling angled 60 points across 320 landed in a neighbour's cell")
 
-        // Back to the workspace, then the control: genuinely sideways still
+        // Back to the worktree, then the control: genuinely sideways still
         // carries, at the same speed.
         app.buttons["shell-card-ws-0"].tap()
         XCTAssertEqual(try state(app)["overview"], 0, "the tap did not leave the overview")
@@ -388,19 +388,19 @@ final class ShellGestureTests: XCTestCase {
     }
 
     /// The same lift with no sideways travel still opens the overview on the
-    /// workspace you were in.
+    /// worktree you were in.
     ///
     /// The other side of the rule, and the one that would break first: a
     /// carry read out of the sideways wander every long drag has would move
-    /// the workspace under somebody who only ever swiped up. It is also the
+    /// the worktree under somebody who only ever swiped up. It is also the
     /// negative control for the redirection — a gesture with no sideways
     /// component has nothing to redirect INTO, so the lean must never fire.
-    func testAStraightLiftStaysOnTheWorkspaceItStartedOn() throws {
+    func testAStraightLiftStaysOnTheWorktreeItStartedOn() throws {
         let app = launch()
         liftBar(app, by: 320)
         let after = try state(app)
         XCTAssertEqual(after["overview"], 1)
-        XCTAssertEqual(after["ws"], 0, "a straight lift changed workspace")
+        XCTAssertEqual(after["ws"], 0, "a straight lift changed worktree")
     }
 
     /// **A diagonal drag on the bar resolves by which way it leans, and it
@@ -419,12 +419,12 @@ final class ShellGestureTests: XCTestCase {
     /// finger reaches it.
     ///
     /// **The same two numbers, swapped.** 80 across against 52 up is a
-    /// workspace crossing; 52 across against 80 up is a tab chosen off the
+    /// worktree crossing; 52 across against 80 up is a tab chosen off the
     /// column. Both are well inside the 19° band `redirect` would hold a
     /// gesture through if either of them ever got there — they are 33° and
     /// 57° — and both are unambiguous outcomes rather than two flavours of
-    /// nothing: the first changes workspace, the second changes tab while
-    /// leaving the workspace alone.
+    /// nothing: the first changes worktree, the second changes tab while
+    /// leaving the worktree alone.
     ///
     /// 52 across is also deliberately SHORT of the 70-point commit, so a
     /// gesture that leaned the wrong way would spring back and change no tab,
@@ -432,14 +432,14 @@ final class ShellGestureTests: XCTestCase {
     /// second row from the bar, which on a three-tab column is tab 1.
     func testADiagonalDragOnTheBarResolvesByWhichWayItLeans() throws {
         let app = launch()
-        XCTAssertEqual(try state(app)["tabs"], 3, "workspace 0 of the canned fleet has three tabs")
+        XCTAssertEqual(try state(app)["tabs"], 3, "worktree 0 of the canned fleet has three tabs")
         XCTAssertEqual(try state(app)["ws"], 0)
         XCTAssertEqual(try state(app)["tab"], 0)
 
         // Leaning vertical: 52 across, 80 up.
         dragBar(app, by: CGVector(dx: -52, dy: -80))
         let lifted = try state(app)
-        XCTAssertEqual(lifted["ws"], 0, "a drag that leans vertical changed workspace")
+        XCTAssertEqual(lifted["ws"], 0, "a drag that leans vertical changed worktree")
         XCTAssertEqual(
             lifted["tab"], 1,
             "the fingertip was over the second row from the bar, which is tab 1")
@@ -448,8 +448,8 @@ final class ShellGestureTests: XCTestCase {
         // Leaning horizontal: the same two numbers the other way round.
         dragBar(app, by: CGVector(dx: -80, dy: -52))
         let crossed = try state(app)
-        XCTAssertEqual(crossed["ws"], 1, "a drag that leans horizontal did not change workspace")
-        XCTAssertEqual(crossed["tab"], 0, "the bar lands on the next workspace's first tab")
+        XCTAssertEqual(crossed["ws"], 1, "a drag that leans horizontal did not change worktree")
+        XCTAssertEqual(crossed["tab"], 0, "the bar lands on the next worktree's first tab")
         XCTAssertEqual(crossed["overview"], 0)
     }
 
@@ -538,7 +538,7 @@ final class ShellGestureTests: XCTestCase {
         XCTAssertEqual(try state(app)["ws"], 1, "the carry did not cross")
         XCTAssertEqual(
             try pane(app, "ws-0-tab-0")["born"], leaving,
-            "the workspace the carry left was rebuilt mid-flight")
+            "the worktree the carry left was rebuilt mid-flight")
     }
 
     /// **Exactly one pane is `isVisible`, at rest and mid-gesture.**
@@ -665,7 +665,7 @@ final class ShellGestureTests: XCTestCase {
 
         let after = try state(app)
         XCTAssertEqual(after["tab"], 0, "a drag down the content turned the page")
-        XCTAssertEqual(after["ws"], 0, "a drag down the content changed workspace")
+        XCTAssertEqual(after["ws"], 0, "a drag down the content changed worktree")
     }
 
     /// The same drag UPWARD, which was never broken, so the fix cannot be "the
@@ -741,7 +741,7 @@ final class ShellGestureTests: XCTestCase {
         let app = launch(["-shell-scroll"])
         let start = try state(app)
         XCTAssertEqual(start["tab"], 0)
-        XCTAssertGreaterThan(start["tabs"] ?? 0, 1, "this workspace has nowhere to turn to")
+        XCTAssertGreaterThan(start["tabs"] ?? 0, 1, "this worktree has nowhere to turn to")
 
         // 240 across, 87 up: `tan 20°`.
         let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.80, dy: 0.60))
@@ -782,7 +782,7 @@ final class ShellGestureTests: XCTestCase {
     /// The pull-down that dismisses the overview read `atTop` at the moment
     /// the finger LEFT, so any scroll that finished at the top of the grid —
     /// which is every scroll back up through forty cards — was indistinguish-
-    /// able from a deliberate pull-down and threw you back onto the workspace
+    /// able from a deliberate pull-down and threw you back onto the worktree
     /// you came from.
     func testScrollingTheGridBackToItsTopDoesNotCloseIt() throws {
         let app = launch(["-shell-40"])
@@ -931,7 +931,7 @@ final class ShellGestureTests: XCTestCase {
     /// takes it to `#626771`, twenty-five levels up.
     ///
     /// **Pixels, and not the tap.** A test that only checked that tapping a
-    /// card opens its workspace would have passed on either treatment and on
+    /// card opens its worktree would have passed on either treatment and on
     /// none at all, which is why nobody noticed: the tap always worked. The
     /// only thing that can go red is a comparison of what is on screen.
     ///
@@ -1038,7 +1038,7 @@ final class ShellGestureTests: XCTestCase {
         bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertEqual(try state(app)["pinned"], 1, "a tap did not hold the column open")
 
-        // Workspace 0 has three tabs and the current one is 0, which is the
+        // Worktree 0 has three tabs and the current one is 0, which is the
         // row at the TOP of the column — so the row nearest the bar is tab 2,
         // is unlit at rest, and is the one this puts a thumb on. The row above
         // it is tab 1, which is lit in neither picture and is the reference.
@@ -1096,7 +1096,7 @@ final class ShellGestureTests: XCTestCase {
         throw XCTSkip("The card never stopped changing with nothing touching it.")
     }
 
-    /// The first workspace card in the grid, which is the one both assertions
+    /// The first worktree card in the grid, which is the one both assertions
     /// above are made about.
     private func firstCard(_ app: XCUIApplication) throws -> XCUIElement {
         let card = app.descendants(matching: .any).matching(identifier: "shell-card-ws-0")
@@ -1184,7 +1184,7 @@ final class ShellGestureTests: XCTestCase {
     /// which are memories.
     ///
     /// `-shell-4` so the whole grid fits on one screen: the cached sections
-    /// come after the live one, and a ten-workspace fixture puts them below
+    /// come after the live one, and a ten-worktree fixture puts them below
     /// the fold where `exists` is still true but nothing has been shown.
     func testTheGridGroupsEveryRunnersWorktreesUnderItsOwnHeading() throws {
         let app = launch(["-shell-servers", "-shell-overview", "-shell-4"])
@@ -1235,7 +1235,7 @@ final class ShellGestureTests: XCTestCase {
 
     /// **A hidden worktree is out of the grid until you ask for it.**
     ///
-    /// `Workspace.isHidden` has existed in the model the whole time and iOS
+    /// `Worktree.isHidden` has existed in the model the whole time and iOS
     /// had no consumer for it, so a worktree somebody put away on the Mac came
     /// back as an ordinary card on the phone. A filter alone would be the
     /// other bug — hiding is reversible and the way back must not be a
@@ -1244,7 +1244,7 @@ final class ShellGestureTests: XCTestCase {
         let app = launch(["-shell-hidden", "-shell-overview", "-shell-4"])
         XCTAssertEqual(try state(app)["overview"], 1)
 
-        // The fixture hides every fifth workspace from index 3, so `ws-3` is
+        // The fixture hides every fifth worktree from index 3, so `ws-3` is
         // the one out of four that goes.
         let hiddenCard = app.buttons["shell-card-ws-3"]
         let shownCard = app.buttons["shell-card-ws-0"]
@@ -1268,14 +1268,14 @@ final class ShellGestureTests: XCTestCase {
     // so there is no alert to assert and nothing for it to warn about. See
     // `FarCoolerApp.ConnectedRoot`.
 
-    /// Forty workspaces is the number the design was chosen for, so the
+    /// Forty worktrees is the number the design was chosen for, so the
     /// harness has to reach it and the overview has to hold it.
-    func testTheOverviewHoldsFortyWorkspaces() throws {
+    func testTheOverviewHoldsFortyWorktrees() throws {
         let app = launch(["-shell-40"])
-        XCTAssertEqual(try state(app)["workspaces"], 40)
+        XCTAssertEqual(try state(app)["worktrees"], 40)
         liftBar(app, by: 320)
         XCTAssertEqual(try state(app)["overview"], 1)
-        XCTAssertTrue(app.staticTexts["40 Workspaces"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["40 Worktrees"].waitForExistence(timeout: 5))
     }
 }
 

@@ -14,7 +14,7 @@ import UIKit
 @MainActor
 struct AgentView: View {
     let terminalID: String
-    let workspaceID: String?
+    let worktreeID: String?
     @ObservedObject var connection: Connection
     /// Whether this pane is the one on screen.
     ///
@@ -91,10 +91,10 @@ struct AgentView: View {
     private static let settleLadder = [80, 180, 300, 440]
 
     init(
-        terminalID: String, workspaceID: String?, connection: Connection, isVisible: Bool = true
+        terminalID: String, worktreeID: String?, connection: Connection, isVisible: Bool = true
     ) {
         self.terminalID = terminalID
-        self.workspaceID = workspaceID
+        self.worktreeID = worktreeID
         self.connection = connection
         self.isVisible = isVisible
         _stream = StateObject(wrappedValue: AgentStream(terminal: terminalID, core: connection.core))
@@ -150,8 +150,8 @@ struct AgentView: View {
     /// whether a turn is running, whether the runner gave up trying to start
     /// one — reads it from here.
     private var paneTerminal: Terminal? {
-        guard let workspaceID else { return nil }
-        return connection.terminal(terminalID, in: workspaceID)
+        guard let worktreeID else { return nil }
+        return connection.terminal(terminalID, in: worktreeID)
     }
 
     /// What to say about a pane that is a chat with no agent in it.
@@ -618,7 +618,7 @@ struct AgentView: View {
                     backend: stream.hasSession ? transcript.backend : nil,
                     hasAgent: hasAgent,
                     availableCommands: transcript.availableCommands,
-                    workspaceID: workspaceID,
+                    worktreeID: worktreeID,
                     paneID: terminalID,
                     core: connection.core,
                     onSend: { text, images in
@@ -644,7 +644,7 @@ struct AgentView: View {
             // keyboard DOWN they both want the same strip at the bottom of the
             // display. Measured on an iPhone 17: the composer's Send button
             // came out at y 776…820 and `shell-bar` at 784…828 — the "Message
-            // Claude" box drawn straight over the workspace slider, which is
+            // Claude" box drawn straight over the worktree slider, which is
             // the owner's report.
             //
             // The bar is the half that must not move. `ShellRootView` keeps the
@@ -2262,7 +2262,7 @@ private struct AgentComposer: View {
     /// off; this is the half that keeps the draft in the field.
     let hasAgent: Bool
     let availableCommands: [AgentChoice]
-    let workspaceID: String?
+    let worktreeID: String?
     /// Which pane this composer is for, so what is typed into it can be
     /// written down under that pane and read back by the same one.
     ///
@@ -2765,7 +2765,7 @@ private struct AgentComposer: View {
 
     private func scheduleMentionSearch() {
         mentionSearch?.cancel()
-        guard case let .mention(prefix, _) = token, let workspaceID else {
+        guard case let .mention(prefix, _) = token, let worktreeID else {
             mentionResults = []
             return
         }
@@ -2778,7 +2778,7 @@ private struct AgentComposer: View {
             guard
                 let data = try? await core.call(
                     "worktree.file_search",
-                    ["workspace": workspaceID, "query": prefix, "limit": 20]),
+                    ["worktree": worktreeID, "query": prefix, "limit": 20]),
                 let decoded = try? JSONDecoder().decode(FileSearchResult.self, from: data)
             else { return }
             guard !Task.isCancelled else { return }
@@ -3333,7 +3333,7 @@ private struct WorkingRow: View {
 /// The agent pane, with a canned conversation and no runner behind it.
 ///
 /// Exists because this screen could not be LOOKED at: reaching it needs an
-/// enrolled runner, a workspace, a chat-capable pane and a turn in flight, so
+/// enrolled runner, a worktree, a chat-capable pane and a turn in flight, so
 /// every judgement about its layout had been made by reading the code. Launch
 /// the app with `-agent-layout-harness` to get this instead of `RootView`.
 ///
@@ -3362,7 +3362,7 @@ private struct WorkingRow: View {
 ///
 /// ## What is not the app, and says so
 ///
-/// The words in the bar. It carries the workspace's name, so the fixture names
+/// The words in the bar. It carries the worktree's name, so the fixture names
 /// itself there — "Layout harness" — rather than borrowing a plausible worktree
 /// name and leaving somebody to find out later that no runner was involved. The
 /// glass around it is real; only the words are canned.
@@ -3448,7 +3448,7 @@ struct AgentLayoutHarness: View {
             PaneDraftStore.clear(pane: Self.agentPane.id)
         }
         connection.standIn(
-            on: Fleet(runtimeHealthy: true, livePanes: 2, workspaces: [Self.workspace]))
+            on: Fleet(runtimeHealthy: true, livePanes: 2, worktrees: [Self.worktree]))
         // The store publishes off `Connection.objectWillChange`, which
         // `standIn` fires — but on the turn AFTER this one, so the merged fleet
         // this shell reads is empty for one body pass. Republishing here closes
@@ -3460,9 +3460,9 @@ struct AgentLayoutHarness: View {
     /// The canned pane, and the fleet it lives in.
     ///
     /// A chat-capable agent pane and a shell beside it, because the ribbon and
-    /// the column are drawn from the workspace's terminals and the content
+    /// the column are drawn from the worktree's terminals and the content
     /// swipe walks between them — a one-terminal fixture would have made every
-    /// screenshot a workspace with two tabs where the app usually has three or
+    /// screenshot a worktree with two tabs where the app usually has three or
     /// four, and left the swipe with nowhere to go.
     ///
     /// The activity is the fleet's, not a flag on the pane: `AgentView.isWorking`
@@ -3481,8 +3481,8 @@ struct AgentLayoutHarness: View {
     /// The conversation whose session has gone out from under it.
     private static var isEnded: Bool { CommandLine.arguments.contains("-ended") }
 
-    private static var workspace: Workspace {
-        Workspace(
+    private static var worktree: Worktree {
+        Worktree(
             id: "harness-ws", short: "harness",
             // The two words that say what this is, in the two slots the app
             // puts a worktree's name and branch in.

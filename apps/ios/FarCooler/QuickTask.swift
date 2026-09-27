@@ -62,7 +62,7 @@ enum TaskSlug {
     /// what a letter is: Swift says yes to `é` and to 写, and the runner — which
     /// keeps ASCII and dashes everything else — says no to both. A description
     /// written in Chinese would otherwise slug to something this thinks is a
-    /// name and the daemon refuses outright, and `createWorkspace` swallows that
+    /// name and the daemon refuses outright, and `createWorktree` swallows that
     /// refusal, so Quick Task would close having created nothing and said
     /// nothing.
     static func name(from text: String) -> String {

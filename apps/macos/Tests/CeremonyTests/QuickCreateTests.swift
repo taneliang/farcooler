@@ -116,7 +116,7 @@ struct QuickCreateTests {
     @Test func aRetryAfterTheAgentFailedGoesOnInTheWorktreeItMade() async {
         let outcome = Outcome()
         outcome.failure = "The runner can’t reach tmux."
-        outcome.left = .init(host: "", project: "r1", workspace: "w-made", name: "fix-flaky-2")
+        outcome.left = .init(host: "", project: "r1", worktree: "w-made", name: "fix-flaky-2")
         let submission = TaskSubmission()
         await withDraft("Fix the flaky reconnect test") {
             let panel = panel(outcome, submission: submission)
@@ -125,8 +125,8 @@ struct QuickCreateTests {
             await panel.submit(keepOpen: false)
         }
         #expect(outcome.requests.count == 2)
-        #expect(outcome.requests.first?.workspace == nil, "the first start makes one")
-        #expect(outcome.requests.last?.workspace == "w-made")
+        #expect(outcome.requests.first?.worktree == nil, "the first start makes one")
+        #expect(outcome.requests.last?.worktree == "w-made")
         #expect(outcome.requests.last?.name == "fix-flaky-2", "under the name it was made with")
         #expect(submission.left == nil, "started, so nothing is left over")
     }
@@ -136,12 +136,12 @@ struct QuickCreateTests {
         let outcome = Outcome()
         let submission = TaskSubmission()
         _ = await submission.run {
-            .failed("No.", left: .init(host: "", project: "r2", workspace: "w-made", name: "x"))
+            .failed("No.", left: .init(host: "", project: "r2", worktree: "w-made", name: "x"))
         }
         await withDraft("Fix the flaky reconnect test") {
             await panel(outcome, submission: submission).submit(keepOpen: false)
         }
-        #expect(outcome.requests.first?.workspace == nil)
+        #expect(outcome.requests.first?.worktree == nil)
         #expect(outcome.requests.first?.name == "fix-flaky-reconnect-test")
     }
 

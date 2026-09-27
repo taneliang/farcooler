@@ -356,7 +356,7 @@ class GlanceTest {
      *
      * A later version made it an [AgentOutcome] — a filled disc, first green and
      * then in the review ink — because `GlanceMark.Attention.TO_REVIEW` refused
-     * an agent's state outright. That refusal was narrowed to the workspace
+     * an agent's state outright. That refusal was narrowed to the worktree
      * counts it was written about, so this now maps like `Status.glanceMark` on
      * the Mac and `GlanceMark(agent:)` on the phone: same tier, same weight,
      * same ink, three platforms.
@@ -559,7 +559,7 @@ class GlanceTest {
     @Test
     fun `only an unread diff earns the review tier`() {
         val row = { changed: Boolean, insertions: Int ->
-            InboxRow(workspaceId = "w", changedSinceReviewed = changed, insertions = insertions)
+            InboxRow(worktreeId = "w", changedSinceReviewed = changed, insertions = insertions)
         }
         assertEquals(
             GlanceMark.Attention.TO_REVIEW,
@@ -578,7 +578,7 @@ class GlanceTest {
      *
      * The prohibition was narrowed rather than lifted, so the guard is narrowed
      * with it rather than deleted. What it was written about still holds:
-     * `InboxRow` is a WORKSPACE's counts, not an agent's state, and inventing a
+     * `InboxRow` is a WORKTREE's counts, not an agent's state, and inventing a
      * per-agent version of it would sort a diff by how blocked some agent in the
      * same worktree happens to be. `done` was never that invented count — the
      * daemon sends it per terminal — which is why it is the one thing let in.

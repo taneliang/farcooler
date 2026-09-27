@@ -95,15 +95,15 @@ class AppModel(
     private val _focus = MutableStateFlow<Map<String, Focus>>(emptyMap())
 
     /**
-     * Which pane each workspace is showing, keyed `runner/workspace`.
+     * Which pane each worktree is showing, keyed `runner/worktree`.
      *
      * **Beside the stack, never inside it.** See [Route.Terminal] for why, and
      * [Focus] for why only half of what lands here is written down.
      *
-     * Keyed by runner AND workspace because this app is connected to every
-     * runner at once: workspace ids are minted per daemon, so a memory keyed by
-     * workspace alone would let one runner's worktree answer for another's.
-     * iOS can key by workspace alone only because its equivalent lives on a
+     * Keyed by runner AND worktree because this app is connected to every
+     * runner at once: worktree ids are minted per daemon, so a memory keyed by
+     * worktree alone would let one runner's worktree answer for another's.
+     * iOS can key by worktree alone only because its equivalent lives on a
      * `Connection` that dies with the runner.
      */
     val focus: StateFlow<Map<String, Focus>> = _focus.asStateFlow()
@@ -154,9 +154,9 @@ class AppModel(
         viewModelScope.launch { Identity.publicKey }
 
         fleet.onFleet = { host, snapshot ->
-            for (workspace in snapshot.workspaces) {
-                for (terminal in workspace.terminals) {
-                    notifier.report(terminal, workspace.task, host.displayLabel)
+            for (worktree in snapshot.worktrees) {
+                for (terminal in worktree.terminals) {
+                    notifier.report(terminal, worktree.task, host.displayLabel)
                 }
             }
         }
@@ -172,7 +172,7 @@ class AppModel(
      * door.
      *
      * This used to choose a TERMINAL. It merged every runner's panes, applied
-     * the landing rule to the union and opened the winner, with the workspace
+     * the landing rule to the union and opened the winner, with the worktree
      * list as the fallback for a fleet with nothing running — and it had to
      * wait for a runner to answer before it could, because a slow SSH handshake
      * would otherwise land on an empty list and stay there.
@@ -190,7 +190,7 @@ class AppModel(
      * which is when there are no runners.
      */
     fun landIfNeeded() {
-        // Before anything that reads the stack: a route naming a workspace that
+        // Before anything that reads the stack: a route naming a worktree that
         // is gone has to be off the stack before anything decides whether the
         // app has somewhere to be.
         settle()
@@ -217,45 +217,45 @@ class AppModel(
      */
     fun open(ref: TerminalRef) {
         point(ref)
-        goTo(Route.Terminal(ref.hostId, ref.workspaceId))
+        goTo(Route.Terminal(ref.hostId, ref.worktreeId))
     }
 
     /**
-     * Go to a workspace's DIFF — the front door's "Review changes" row.
+     * Go to a worktree's DIFF — the front door's "Review changes" row.
      *
-     * The first road in this app that opens a workspace on something other than
+     * The first road in this app that opens a worktree on something other than
      * an agent. What that row says has always been true — this worktree changed
      * and nobody has looked — but until there was a review surface behind the
      * Changes tab, tapping it could only offer the worktree and leave somebody
      * to find the chip and tap that too.
      *
-     * **This was `openWorkspace`, and its comment argued the opposite case
+     * **This was `openWorktree`, and its comment argued the opposite case
      * correctly for the app it was written in.** It said pointing at anything
      * was impossible because "`TerminalRef` would need a terminal id and there
      * is no honest one to give". That is true of a `TerminalRef` and was never
      * true of the worktree: the focus map holds a [Pane] rather than a terminal
      * id precisely so that "where I was in this worktree" can have an answer
      * that is not a pane on the runner. [Pane.Changes] is that answer, and it is
-     * an honest one — every `changes.*` RPC takes a workspace id and nothing
+     * an honest one — every `changes.*` RPC takes a worktree id and nothing
      * else, so the diff exists whether or not the runner has a pane for it.
      *
      * `record`, not [choose]. Somebody who tapped a row on the front door was
-     * ROUTED here; one morning's review must not decide where this workspace
+     * ROUTED here; one morning's review must not decide where this worktree
      * opens for the rest of the week. The tab strip stays the one writer, and
      * this lands in the focus map beside a fleet row and a tapped notification.
      * See [Focus].
      *
      * **Recorded before the route moves, and that order is the whole of the
-     * deep link.** `WorkspaceScreen` builds its [PaneDeck] from [paneOf] in a
+     * deep link.** `WorktreeScreen` builds its [PaneDeck] from [paneOf] in a
      * `remember` initializer, so a focus written first means the deck OPENS on
      * the diff. Written after, the screen would open on whatever the rule picked
      * and then switch — mounting an agent pane, with the terminal session and
      * the SSH stream under it, for a tab nobody asked to see. [open] has always
      * had this order, for exactly the same reason.
      */
-    fun openChanges(hostId: String, workspaceId: String) {
-        record(Backstack.key(hostId, workspaceId), Pane.Changes, chosen = false)
-        goTo(Route.Terminal(hostId, workspaceId))
+    fun openChanges(hostId: String, worktreeId: String) {
+        record(Backstack.key(hostId, worktreeId), Pane.Changes, chosen = false)
+        goTo(Route.Terminal(hostId, worktreeId))
     }
 
     /**
@@ -263,15 +263,15 @@ class AppModel(
      *
      * Called from the tab strip and nowhere else, and **the stack is never
      * touched**. That last clause used to be conditional: the strip spanned the
-     * whole fleet, so a chip could belong to another workspace on another
+     * whole fleet, so a chip could belong to another worktree on another
      * runner and tapping it was navigation. The strip is scoped to one
-     * workspace now, so every chip on it names the workspace already on screen
+     * worktree now, so every chip on it names the worktree already on screen
      * and [goTo] finds its own target at the top of the stack — which is the
      * property the whole shape exists for. Tapping a chip moves no navigation
      * state, so nothing keyed on the route has a reason to reset, and the panes
      * mounted under it are not disturbed. See [Route.Terminal].
      *
-     * Takes the runner and the workspace beside the tab rather than a
+     * Takes the runner and the worktree beside the tab rather than a
      * `TerminalRef`, because the Changes tab is a tab with no terminal in it and
      * a `TerminalRef` cannot say so. Everything that names something on a runner
      * still carries the runner.
@@ -279,34 +279,34 @@ class AppModel(
      * Choosing the chip you are already on still records. Confirming the rule's
      * guess is a choice, and the next visit should not have to guess again.
      */
-    fun choose(hostId: String, workspaceId: String, pane: Pane) {
-        record(Backstack.key(hostId, workspaceId), pane, chosen = true)
-        goTo(Route.Terminal(hostId, workspaceId))
+    fun choose(hostId: String, worktreeId: String, pane: Pane) {
+        record(Backstack.key(hostId, worktreeId), pane, chosen = true)
+        goTo(Route.Terminal(hostId, worktreeId))
     }
 
     /**
-     * Put a workspace on screen, over whatever sent you there.
+     * Put a worktree on screen, over whatever sent you there.
      *
-     * **A workspace PUSHES now, where it used to replace the whole stack.** The
+     * **A worktree PUSHES now, where it used to replace the whole stack.** The
      * old rule — and the comment that argued for it — was right about the app
      * it was written in: the terminal was the home screen, a home screen with a
-     * back button that goes somewhere is not one, and the workspace list was an
+     * back button that goes somewhere is not one, and the worktree list was an
      * edge swipe away in the drawer. Every clause of that is false now that
      * [Route.NeedsYou] is the root. A terminal opened from the front door has
      * somewhere to go back to and it is the screen that sent you, which is the
      * whole reason the front door is worth having.
      *
-     * **A terminal replaces a terminal.** Tapping another workspace in the
+     * **A terminal replaces a terminal.** Tapping another worktree in the
      * drawer while already in one must not stack them: the second Back would
-     * then land on a workspace nobody asked to see again. So the trailing run
+     * then land on a worktree nobody asked to see again. So the trailing run
      * of terminals is dropped and one is put back — which leaves the front door
-     * one Back away wherever you got here from, and leaves the workspace list
+     * one Back away wherever you got here from, and leaves the worktree list
      * in between when it was the thing that sent you. That is iOS's depth-2
      * shape, and the Back bug `43a320f` names is precisely the version of this
      * that replaced instead of appending.
      *
-     * Arriving at the workspace already underneath only closes what is over it,
-     * so a push for a pane in the workspace you are already in costs no
+     * Arriving at the worktree already underneath only closes what is over it,
+     * so a push for a pane in the worktree you are already in costs no
      * navigation at all — which is what keeps a tab tap free. See [choose].
      */
     private fun goTo(target: Route.Terminal) {
@@ -324,7 +324,7 @@ class AppModel(
      */
     fun openFromBoard(ref: TerminalRef) {
         point(ref)
-        install(Backstack.goToFromBoard(_stack.value, Route.Terminal(ref.hostId, ref.workspaceId)))
+        install(Backstack.goToFromBoard(_stack.value, Route.Terminal(ref.hostId, ref.worktreeId)))
     }
 
     /**
@@ -332,7 +332,7 @@ class AppModel(
      *
      * By id alone, because that is all a notification carries and all it can
      * carry: it may have been posted by the messaging service in a process that
-     * had no fleet at all. The runner and workspace are looked up from whatever
+     * had no fleet at all. The runner and worktree are looked up from whatever
      * has since connected, and a tap that arrives before the fleet does simply
      * lands on the list — which is the honest answer, not a guess.
      */
@@ -346,14 +346,14 @@ class AppModel(
     private fun resolvePendingTerminal() {
         val wanted = pendingTerminal ?: return
         val entry = fleet.entries.value.firstOrNull { entry ->
-            entry.workspace.terminals.any { it.id == wanted }
+            entry.worktree.terminals.any { it.id == wanted }
         } ?: return
         pendingTerminal = null
         _landed.value = true
         saved[LANDED] = true
         // `open`, not `choose`: a 3am ping is not a preference about where this
-        // workspace should open tomorrow.
-        open(TerminalRef(entry.host.id, entry.workspace.id, wanted))
+        // worktree should open tomorrow.
+        open(TerminalRef(entry.host.id, entry.worktree.id, wanted))
     }
 
     fun navigate(route: Route) {
@@ -371,7 +371,7 @@ class AppModel(
      * Back to the front door, whatever is stacked up.
      *
      * Was `showFleet`, and the rename is the whole of the change: [Backstack.ROOT]
-     * has always been what it installed, and ROOT is no longer the workspace
+     * has always been what it installed, and ROOT is no longer the worktree
      * list. A method named for its old destination is how the next reader ends
      * up somewhere else.
      */
@@ -401,7 +401,7 @@ class AppModel(
     }
 
     /**
-     * Which pane a workspace route is showing right now, or null while there is
+     * Which pane a worktree route is showing right now, or null while there is
      * nothing to show it with.
      *
      * Resolved fresh on every read rather than stored, for the reason
@@ -410,15 +410,15 @@ class AppModel(
      * route was installed cannot.
      */
     fun paneOf(route: Route.Terminal): Pane? {
-        val terminals = terminalsIn(route.hostId, route.workspaceId)
-        val key = Backstack.key(route.hostId, route.workspaceId)
+        val terminals = terminalsIn(route.hostId, route.worktreeId)
+        val key = Backstack.key(route.hostId, route.worktreeId)
         return Backstack.chooseFocus(terminals, _focus.value[key])
     }
 
     /** Where somebody was sent. Not written down — see [Focus]. */
     private fun point(ref: TerminalRef) =
         record(
-            Backstack.key(ref.hostId, ref.workspaceId),
+            Backstack.key(ref.hostId, ref.worktreeId),
             Pane.Terminal(ref.terminalId),
             chosen = false,
         )
@@ -431,7 +431,7 @@ class AppModel(
         // nothing here and cannot overwrite a real preference in the saved
         // copy. What that trades is narrow and deliberate: a pane you were sent
         // to and never confirmed does not come back after a process death — the
-        // one you last chose in that workspace does.
+        // one you last chose in that worktree does.
         if (chosen) saved[FOCUS] = Backstack.encodeFocus(_focus.value)
     }
 
@@ -440,8 +440,8 @@ class AppModel(
      * not.
      *
      * Run on every fleet change rather than once at launch, because the two
-     * cases are the same case: a workspace merged away while the app was dead
-     * and a workspace merged away while somebody is looking at it both leave a
+     * cases are the same case: a worktree merged away while the app was dead
+     * and a worktree merged away while somebody is looking at it both leave a
      * route naming nothing. See [Backstack.truncate] for why it truncates
      * rather than filters.
      */
@@ -451,11 +451,11 @@ class AppModel(
 
         val pruned = Backstack.prune(_focus.value) { key, terminalId ->
             val host = key.substringBefore('/')
-            val workspace = key.substringAfter('/')
+            val worktree = key.substringAfter('/')
             // A runner that has not answered yet keeps its memory, for the same
             // reason its routes survive below: "not connected" is not "gone".
             if (!answered(host)) return@prune true
-            terminalsIn(host, workspace).any { it.id == terminalId }
+            terminalsIn(host, worktree).any { it.id == terminalId }
         }
         if (pruned != _focus.value) {
             _focus.value = pruned
@@ -477,7 +477,7 @@ class AppModel(
         is Route.Terminal -> {
             val configured = hosts.hosts.value.any { it.id == route.hostId }
             configured && (!answered(route.hostId) ||
-                terminalsIn(route.hostId, route.workspaceId).isNotEmpty())
+                terminalsIn(route.hostId, route.worktreeId).isNotEmpty())
         }
 
         is Route.RunnerSettings -> hosts.hosts.value.any { it.id == route.hostId }
@@ -494,9 +494,9 @@ class AppModel(
     private fun answered(hostId: String) =
         fleet.connection(hostId)?.phase?.value is Connection.Phase.Connected
 
-    private fun terminalsIn(hostId: String, workspaceId: String): List<Terminal> =
-        fleet.connection(hostId)?.fleet?.value?.workspaces
-            ?.firstOrNull { it.id == workspaceId }?.terminals.orEmpty()
+    private fun terminalsIn(hostId: String, worktreeId: String): List<Terminal> =
+        fleet.connection(hostId)?.fleet?.value?.worktrees
+            ?.firstOrNull { it.id == worktreeId }?.terminals.orEmpty()
 
     private fun install(next: List<Route>, persist: Boolean = true) {
         // Never empty. There is no such thing as being nowhere, and an empty
@@ -515,7 +515,7 @@ class AppModel(
      *
      * Observable, which it did not have to be until panes started staying
      * mounted. [FleetRepository] and [Notifier] are TOLD this and act on it;
-     * the workspace screen has to be able to WATCH it, because every mounted
+     * the worktree screen has to be able to WATCH it, because every mounted
      * pane's stream and agent poll follow it. Without that, a phone with three
      * tabs open would hold three second SSH channels while it sat in a pocket —
      * where one re-pointed session held one, and the push path is what covers a

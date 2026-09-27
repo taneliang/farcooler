@@ -91,7 +91,7 @@ DERIVED="$DIR/DerivedData"
 # Honoured rather than assumed: someone building with a shared CARGO_TARGET_DIR
 # would otherwise be handed binaries from a directory cargo never wrote to.
 TARGET="${CARGO_TARGET_DIR:-$REPO/target}/release"
-PORT=2222
+PORT="${DEMO_PORT:-2222}"
 
 # Stop something this script started, and nothing else.
 #
@@ -437,10 +437,10 @@ fc() { env HOME="$SESSION_HOME" CODEX_HOME="$SESSION_HOME/.codex" FARCOOLER_HOME
 # Something to look at. A daemon with no repositories shows an empty fleet.
 # ---------------------------------------------------------------------------
 #
-# A scratch git repository, a workspace, and a few hundred lines of output in its
+# A scratch git repository, a worktree, and a few hundred lines of output in its
 # pane — because a pane holding twelve lines cannot demonstrate a scrolling fix
 # in either direction. All of it through the shipped CLI, so this is the same
-# path the Mac app takes rather than a second way to make a workspace.
+# path the Mac app takes rather than a second way to make a worktree.
 mkdir -p "$DIR/repos/scrollback"
 if [ ! -d "$DIR/repos/scrollback/.git" ]; then
     git init -q -b main "$DIR/repos/scrollback"
@@ -458,9 +458,9 @@ fi
 #
 # `repo register` in particular will happily register the same directory twice:
 # you get a second repository record, and — because the daemon enumerates a
-# repository's existing git worktrees when it registers one — a second workspace
+# repository's existing git worktrees when it registers one — a second worktree
 # for every worktree the first registration already made. Four runs of the
-# version that just called it produced four repositories and eight workspaces,
+# version that just called it produced four repositories and eight worktrees,
 # which is a fleet nobody can find the demo in.
 #
 # `first(…)` throughout, so that a home someone has already grown a second copy
@@ -485,42 +485,42 @@ REPO_ID=$(repo_id)
 # workaround was deleting `$FC_HOME` by hand.
 #
 # `dismiss-lost` refuses anything that is not lost, so this cannot take a live
-# pane with it. Every workspace that loses its panes here is given new ones
+# pane with it. Every worktree that loses its panes here is given new ones
 # below, by the same code that makes them on a first run.
-for lost in $(fc --json workspace list | jq -r '.workspaces[].terminals[] | select(.state=="LOST") | .id'); do
+for lost in $(fc --json worktree list | jq -r '.worktrees[].terminals[] | select(.state=="LOST") | .id'); do
     # A terminal that stopped being LOST between the list and this call is
     # refused, and that is no reason to stop the demo.
     fc terminal dismiss-lost "$lost" >/dev/null \
         || echo "could not dismiss lost terminal $lost; continuing"
 done
 
-if [ -z "$(fc --json workspace list | jq -r 'first(.workspaces[] | select(.task=="scrolling") | .id) // empty')" ]; then
-    fc workspace create "$REPO_ID" scrolling --branch demo/scrolling
+if [ -z "$(fc --json worktree list | jq -r 'first(.worktrees[] | select(.task=="scrolling") | .id) // empty')" ]; then
+    fc worktree create "$REPO_ID" scrolling --branch demo/scrolling
 fi
-# Polled: the workspace's first terminal is launched as the worktree finishes
+# Polled: the worktree's first terminal is launched as the worktree finishes
 # being made, so it is not always in the very next listing.
 for _ in $(seq 1 20); do
-    TERMINAL=$(fc --json workspace list \
-        | jq -r 'first(.workspaces[] | select(.task=="scrolling") | .terminals[0].id // empty) // empty')
+    TERMINAL=$(fc --json worktree list \
+        | jq -r 'first(.worktrees[] | select(.task=="scrolling") | .terminals[0].id // empty) // empty')
     [ -n "$TERMINAL" ] && break
     sleep 0.5
 done
 if [ -z "${TERMINAL:-}" ]; then
-    # A workspace outliving its pane is the ordinary case, not a fault: terminals
+    # A worktree outliving its pane is the ordinary case, not a fault: terminals
     # belong to tmux, so a Mac that has rebooted since the last demo has the
-    # workspace and none of its panes. One is made rather than reported.
-    WORKSPACE=$(fc --json workspace list \
-        | jq -r 'first(.workspaces[] | select(.task=="scrolling") | .id) // empty')
-    fc terminal create "$WORKSPACE" --preset shell >/dev/null
+    # worktree and none of its panes. One is made rather than reported.
+    WORKTREE=$(fc --json worktree list \
+        | jq -r 'first(.worktrees[] | select(.task=="scrolling") | .id) // empty')
+    fc terminal create "$WORKTREE" --preset shell >/dev/null
     for _ in $(seq 1 20); do
-        TERMINAL=$(fc --json workspace list \
-            | jq -r 'first(.workspaces[] | select(.task=="scrolling") | .terminals[0].id // empty) // empty')
+        TERMINAL=$(fc --json worktree list \
+            | jq -r 'first(.worktrees[] | select(.task=="scrolling") | .terminals[0].id // empty) // empty')
         [ -n "$TERMINAL" ] && break
         sleep 0.5
     done
 fi
 [ -n "${TERMINAL:-}" ] || {
-    echo "the demo workspace has no terminal; see $DIR/daemon.log"; exit 1
+    echo "the demo worktree has no terminal; see $DIR/daemon.log"; exit 1
 }
 
 # Sent as a file to run rather than as a one-liner, because the pane holds your
@@ -557,20 +557,20 @@ fc terminal send "$TERMINAL" "bash '$DIR/scrollback.sh'
 # the wire into the phone's VT core — or the pane the test finds would be in
 # mouse mode on this Mac and not on the device, which is a fixture that proves
 # the opposite of what it claims.
-MOUSY=$(fc --json workspace list \
-    | jq -r 'first(.workspaces[] | select(.task=="scrolling") | .terminals[1].id // empty) // empty')
+MOUSY=$(fc --json worktree list \
+    | jq -r 'first(.worktrees[] | select(.task=="scrolling") | .terminals[1].id // empty) // empty')
 if [ -z "$MOUSY" ]; then
-    WORKSPACE=$(fc --json workspace list \
-        | jq -r 'first(.workspaces[] | select(.task=="scrolling") | .id) // empty')
+    WORKTREE=$(fc --json worktree list \
+        | jq -r 'first(.worktrees[] | select(.task=="scrolling") | .id) // empty')
     # Not silenced. The first version sent this to /dev/null and polled for ten
     # seconds, and when the daemon had not listed the new pane by then the whole
     # fixture vanished with no message at all — leaving a test that skipped and
     # a script that said everything was fine. Whatever this prints is the reason
     # the fixture is missing.
-    fc terminal create "$WORKSPACE" --preset shell || true
+    fc terminal create "$WORKTREE" --preset shell || true
     for _ in $(seq 1 40); do
-        MOUSY=$(fc --json workspace list \
-            | jq -r 'first(.workspaces[] | select(.task=="scrolling") | .terminals[1].id // empty) // empty')
+        MOUSY=$(fc --json worktree list \
+            | jq -r 'first(.worktrees[] | select(.task=="scrolling") | .terminals[1].id // empty) // empty')
         [ -n "$MOUSY" ] && break
         sleep 0.5
     done
@@ -583,15 +583,15 @@ if [ -n "${MOUSY:-}" ]; then
     # to be the opposite of, and the test would skip rather than fail.
     fc terminal send "$MOUSY" "bash '$DIR/scrollback.sh'; printf '\\e[?1000h'
 " >/dev/null
-    echo "fleet:  repository 'scrollback', workspace 'scrolling', two panes of 400 lines"
+    echo "fleet:  repository 'scrollback', worktree 'scrolling', two panes of 400 lines"
     echo "        — one at an ordinary prompt, one that has asked for the mouse"
 else
-    echo "fleet:  repository 'scrollback', workspace 'scrolling', 400 lines in its pane"
+    echo "fleet:  repository 'scrollback', worktree 'scrolling', 400 lines in its pane"
     echo "        (no second pane: testAPaneThatAskedForTheMouseStillScrolls will skip)"
 fi
 
 # ---------------------------------------------------------------------------
-# A THIRD workspace, which exists for exactly one test.
+# A THIRD worktree, which exists for exactly one test.
 # ---------------------------------------------------------------------------
 #
 # `testAVisitedRunnersWorktreesAppearInTheGridAndCanBeCrossedTo` taps a card
@@ -601,9 +601,9 @@ fi
 # nothing carries it, nor the one already on screen behind the grid — a card
 # naming either of those is satisfied by a crossing that carried nothing at
 # all, which is the bug the test exists for. The test says so itself and then
-# skips: "Give the demo host a third workspace."
+# skips: "Give the demo host a third worktree."
 #
-# Two is what this fixture had. The repository's own checkout is one workspace
+# Two is what this fixture had. The repository's own checkout is one worktree
 # and `scrolling` is the other, both runners point at this one daemon, so the
 # two names the test must exclude were the only two names there were. The skip
 # was therefore permanent — the test could not run on any machine, and a test
@@ -611,29 +611,29 @@ fi
 #
 # `crossing` is that third name and it does nothing else. Nothing is sent into
 # the pane the daemon launches with the worktree, and nothing needs to be: the
-# assertion is read off the shell BAR, which names the workspace a crossing
-# landed on, and this workspace is a NAME the grid can offer rather than a
+# assertion is read off the shell BAR, which names the worktree a crossing
+# landed on, and this worktree is a NAME the grid can offer rather than a
 # place any test looks at. The 400 lines belong to `scrolling`, which is where
 # every scrollback assertion in the suite is made.
 CROSSING_EXISTED=1
-if [ -z "$(fc --json workspace list | jq -r 'first(.workspaces[] | select(.task=="crossing") | .id) // empty')" ]; then
-    fc workspace create "$REPO_ID" crossing --branch demo/crossing >/dev/null
+if [ -z "$(fc --json worktree list | jq -r 'first(.worktrees[] | select(.task=="crossing") | .id) // empty')" ]; then
+    fc worktree create "$REPO_ID" crossing --branch demo/crossing >/dev/null
     CROSSING_EXISTED=0
 fi
-CROSSING=$(fc --json workspace list \
-    | jq -r 'first(.workspaces[] | select(.task=="crossing") | .id) // empty')
+CROSSING=$(fc --json worktree list \
+    | jq -r 'first(.worktrees[] | select(.task=="crossing") | .id) // empty')
 # A pane, as a new worktree comes with one, when the sweep of lost terminals
-# above took the one it had. Only for a workspace that was already here: one
+# above took the one it had. Only for a worktree that was already here: one
 # made just now gets its pane from the daemon, and not always by the next
 # listing, so topping it up would sometimes give it two.
-if [ -n "$CROSSING" ] && [ "$CROSSING_EXISTED" = 1 ] && [ "$(fc --json workspace list \
-    | jq -r --arg id "$CROSSING" '[.workspaces[] | select(.id==$id) | .terminals[]] | length')" = 0 ]; then
+if [ -n "$CROSSING" ] && [ "$CROSSING_EXISTED" = 1 ] && [ "$(fc --json worktree list \
+    | jq -r --arg id "$CROSSING" '[.worktrees[] | select(.id==$id) | .terminals[]] | length')" = 0 ]; then
     fc terminal create "$CROSSING" --preset shell >/dev/null
 fi
 if [ -n "$CROSSING" ]; then
-    echo "        and a third workspace 'crossing', so the cross-runner grid test can run"
+    echo "        and a third worktree 'crossing', so the cross-runner grid test can run"
 else
-    echo "        (no 'crossing' workspace: the cross-runner grid test will skip)"
+    echo "        (no 'crossing' worktree: the cross-runner grid test will skip)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -649,7 +649,7 @@ fi
 # whatever `scripts/build-ios-frameworks.sh` last produced. Run that first if the
 # thing you changed is in `crates/`.
 # A board, and an agent on it: one task on the demo repository's board, and a
-# workspace `boarding` whose one pane was opened for that task — a `claude`
+# worktree `boarding` whose one pane was opened for that task — a `claude`
 # pane, which is what `task dispatch` opens, running the stand-in above. This
 # is what lets `ShellBoardTests.testTheRealBoardRowLandsOnTheDispatchedPane` go
 # overview → Board row → card → Agent → that pane through the app's own path.
@@ -675,20 +675,20 @@ if [ "$RESOLVED" = "$TRAP_DIR/claude" ] && [ -x "$STAND_IN" ]; then
             --intent "Something for the phone's board to show, with an agent on it." \
             --accept "The Board row shows" --accept "The card opens" | jq -r '.key // empty')
     fi
-    if [ -z "$(fc --json workspace list | jq -r 'first(.workspaces[] | select(.task=="boarding") | .id) // empty')" ]; then
-        fc workspace create "$REPO_ID" boarding --branch demo/boarding >/dev/null
+    if [ -z "$(fc --json worktree list | jq -r 'first(.worktrees[] | select(.task=="boarding") | .id) // empty')" ]; then
+        fc worktree create "$REPO_ID" boarding --branch demo/boarding >/dev/null
     fi
-    BOARDING=$(fc --json workspace list \
-        | jq -r 'first(.workspaces[] | select(.task=="boarding") | .id) // empty')
+    BOARDING=$(fc --json worktree list \
+        | jq -r 'first(.worktrees[] | select(.task=="boarding") | .id) // empty')
     # A pane from an earlier run whose stand-in has since exited is removed
     # rather than left beside the new one: the test lands on the live pane by
     # its tab, and a dead one ahead of it would move that tab.
-    for dead in $(fc --json workspace list \
-        | jq -r '.workspaces[] | select(.task=="boarding") | .terminals[] | select(.taskId != null and .state != "running") | .id'); do
+    for dead in $(fc --json worktree list \
+        | jq -r '.worktrees[] | select(.task=="boarding") | .terminals[] | select(.taskId != null and .state != "running") | .id'); do
         fc terminal remove "$dead" >/dev/null 2>&1 || true
     done
-    ON_TASK=$(fc --json workspace list \
-        | jq -r 'first(.workspaces[] | select(.task=="boarding") | .terminals[] | select(.taskId != null and .state == "running") | .id) // empty')
+    ON_TASK=$(fc --json worktree list \
+        | jq -r 'first(.worktrees[] | select(.task=="boarding") | .terminals[] | select(.taskId != null and .state == "running") | .id) // empty')
     DISPATCHED=0
     if [ -n "$BOARD_KEY" ] && [ -n "$BOARDING" ] && [ -z "$ON_TASK" ]; then
         fc terminal create "$BOARDING" --preset claude --task "$BOARD_KEY" >/dev/null \
@@ -706,8 +706,8 @@ if [ "$RESOLVED" = "$TRAP_DIR/claude" ] && [ -x "$STAND_IN" ]; then
     fi
     if [ -e "$TRAPPED" ]; then
         echo "STOPPING: a bare claude was resolved by searching ($TRAPPED)."
-        for pane in $(fc --json workspace list \
-            | jq -r '.workspaces[] | select(.task=="boarding") | .terminals[] | select(.taskId != null) | .id'); do
+        for pane in $(fc --json worktree list \
+            | jq -r '.worktrees[] | select(.task=="boarding") | .terminals[] | select(.taskId != null) | .id'); do
             fc terminal stop "$pane" >/dev/null 2>&1 || true
         done
         exit 1
@@ -720,12 +720,12 @@ if [ "$RESOLVED" = "$TRAP_DIR/claude" ] && [ -x "$STAND_IN" ]; then
         echo "        See $DIR/daemon.log for how the launch went."
         exit 1
     elif [ "$DISPATCHED" = 1 ]; then
-        echo "        and a board: task $BOARD_KEY with a stand-in agent in workspace 'boarding'"
+        echo "        and a board: task $BOARD_KEY with a stand-in agent in worktree 'boarding'"
         echo "        (the stand-in ran by absolute path; the trap for a searched claude did not)"
     elif [ -n "$ON_TASK" ]; then
         echo "        and a board: task $BOARD_KEY, its stand-in agent still running from an earlier run"
     else
-        echo "        (no board fixture: the task or its workspace could not be made; see $DIR/daemon.log)"
+        echo "        (no board fixture: the task or its worktree could not be made; see $DIR/daemon.log)"
     fi
 else
     echo "        (no board fixture: a bare claude resolves to '${RESOLVED:-nothing}', not the trap)"

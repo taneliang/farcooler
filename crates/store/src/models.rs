@@ -79,7 +79,7 @@ pub(crate) fn row_to_repository(row: &Row) -> rusqlite::Result<Repository> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Workspace {
+pub struct Worktree {
     pub id: Uuid,
     pub repository_id: Uuid,
     pub branch: String,
@@ -92,7 +92,7 @@ pub struct Workspace {
     /// git no longer lists this worktree, but the row carries terminals worth
     /// keeping. Set by the reconciler; cleared if the worktree comes back.
     pub worktree_missing: bool,
-    /// Where this workspace sits in the list, across the whole runner.
+    /// Where this worktree sits in the list, across the whole runner.
     ///
     /// The user's, and nothing else's. It is set once when the row is created —
     /// after every row that already exists — and after that only a reorder ever
@@ -103,8 +103,8 @@ pub struct Workspace {
     pub resource_version: u64,
 }
 
-impl Workspace {
-    /// What this workspace is called.
+impl Worktree {
+    /// What this worktree is called.
     ///
     /// Derived from the worktree path on every read rather than stored, for the
     /// same reason no terminal stores whether it is running: a second copy of a
@@ -115,8 +115,8 @@ impl Workspace {
     }
 }
 
-pub(crate) fn row_to_workspace(row: &Row) -> rusqlite::Result<Workspace> {
-    Ok(Workspace {
+pub(crate) fn row_to_worktree(row: &Row) -> rusqlite::Result<Worktree> {
+    Ok(Worktree {
         id: get_uuid(row, 0)?,
         repository_id: get_uuid(row, 1)?,
         branch: row.get(2)?,
@@ -173,7 +173,7 @@ impl PaneMode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Terminal {
     pub id: Uuid,
-    pub workspace_id: Uuid,
+    pub worktree_id: Uuid,
     pub title: String,
     pub command_preset: String,
     pub intent: TerminalIntent,
@@ -195,7 +195,7 @@ pub struct Terminal {
 pub(crate) fn row_to_terminal(row: &Row) -> rusqlite::Result<Terminal> {
     Ok(Terminal {
         id: get_uuid(row, 0)?,
-        workspace_id: get_uuid(row, 1)?,
+        worktree_id: get_uuid(row, 1)?,
         title: row.get(2)?,
         command_preset: row.get(3)?,
         intent: get_intent(row, 4)?,
@@ -214,7 +214,7 @@ pub(crate) fn row_to_terminal(row: &Row) -> rusqlite::Result<Terminal> {
 }
 
 /// Every field of `Terminal` a caller may legitimately change in place. `id`,
-/// `workspace_id`, and `resource_version` are excluded: identity never moves
+/// `worktree_id`, and `resource_version` are excluded: identity never moves
 /// and the version is the store's own bookkeeping, not an input.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalUpdate {
@@ -448,7 +448,7 @@ pub struct Task {
     pub constraints: Vec<String>,
     /// The lane this task is using, when it has one. A task exists in
     /// `backlog` long before any worktree does.
-    pub workspace_id: Option<Uuid>,
+    pub worktree_id: Option<Uuid>,
     pub labels: Vec<String>,
     pub resource_version: u64,
     /// Unix milliseconds, from when the task was filed.
@@ -476,7 +476,7 @@ pub struct TaskUpdate {
     pub acceptance: Vec<AcceptanceItem>,
     pub constraints: Vec<String>,
     pub labels: Vec<String>,
-    pub workspace_id: Option<Uuid>,
+    pub worktree_id: Option<Uuid>,
 }
 
 /// One entry in the record. Never edited, by this crate or by anything else:
@@ -617,7 +617,7 @@ pub(crate) fn row_to_task(row: &Row) -> rusqlite::Result<Task> {
         acceptance: get_acceptance(row, 7)?,
         constraints: get_strings(row, 8)?,
         labels: get_strings(row, 9)?,
-        workspace_id: get_optional_uuid(row, 10)?,
+        worktree_id: get_optional_uuid(row, 10)?,
         resource_version: row.get::<_, i64>(11)? as u64,
         created_at: row.get(12)?,
         updated_at: row.get(13)?,

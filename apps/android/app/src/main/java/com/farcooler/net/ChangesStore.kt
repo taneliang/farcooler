@@ -45,11 +45,11 @@ import kotlinx.coroutines.launch
  * far.
  */
 interface ChangesSource {
-    suspend fun changeSet(workspace: String, fresh: Boolean): ChangeSet
-    suspend fun fileDiff(workspace: String, path: String, scope: String): FileDiffReply
-    suspend fun commitFiles(workspace: String, sha: String): List<ChangedFile>
-    suspend fun setBase(workspace: String, baseRef: String): ChangeSet
-    suspend fun markRead(workspace: String)
+    suspend fun changeSet(worktree: String, fresh: Boolean): ChangeSet
+    suspend fun fileDiff(worktree: String, path: String, scope: String): FileDiffReply
+    suspend fun commitFiles(worktree: String, sha: String): List<ChangedFile>
+    suspend fun setBase(worktree: String, baseRef: String): ChangeSet
+    suspend fun markRead(worktree: String)
 
     /**
      * Re-read the fleet's `changes.inbox` counts.
@@ -185,7 +185,7 @@ class ChangesStore(
         _state.update { it.copy(loading = true) }
         try {
             try {
-                val answer = source.changeSet(ref.workspaceId, fresh)
+                val answer = source.changeSet(ref.worktreeId, fresh)
                 _state.update { it.copy(changeSet = answer, error = null) }
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
@@ -236,7 +236,7 @@ class ChangesStore(
         try {
             // The sha IS the scope for a commit — see `DiffScope.wire`, which is
             // the only place that rule is spelled out.
-            val diff = source.fileDiff(ref.workspaceId, path, before.scope.wire)
+            val diff = source.fileDiff(ref.worktreeId, path, before.scope.wire)
             // What was being compared changed while this was in flight, so these
             // lines answer a question nobody is asking any more. Stored anyway
             // they would file perfectly, under a heading that is now showing a
@@ -313,7 +313,7 @@ class ChangesStore(
     private suspend fun readCommitFiles(sha: String) {
         val asked = _state.value.generation
         try {
-            val files = source.commitFiles(ref.workspaceId, sha)
+            val files = source.commitFiles(ref.worktreeId, sha)
             if (_state.value.generation != asked) return
             _state.update { it.copy(commitFiles = files, commitUnreadable = false) }
         } catch (e: Exception) {
@@ -707,7 +707,7 @@ class ChangesStore(
      * that did not land except tap it again.
      */
     suspend fun markRead() {
-        attempt { source.markRead(ref.workspaceId) }
+        attempt { source.markRead(ref.worktreeId) }
         attempt { source.refreshCounts() }
     }
 
@@ -735,7 +735,7 @@ class ChangesStore(
     suspend fun setBase(baseRef: String) {
         _state.update { it.copy(loading = true) }
         try {
-            val answer = source.setBase(ref.workspaceId, baseRef)
+            val answer = source.setBase(ref.worktreeId, baseRef)
             _state.update {
                 it.copy(
                     changeSet = answer,
@@ -753,8 +753,8 @@ class ChangesStore(
         } catch (e: Exception) {
             e.rethrowIfCancellation()
             // NOT `loadTrouble`, which was this line until the picker existed to
-            // reach it. That sentence says the workspace could not be read, and
-            // nothing here failed to read a workspace: the diff on screen is
+            // reach it. That sentence says the worktree could not be read, and
+            // nothing here failed to read a worktree: the diff on screen is
             // exactly the diff that was on screen a moment ago. See [baseTrouble].
             _state.update { it.copy(error = baseTrouble(e, baseRef)) }
         } finally {
@@ -790,7 +790,7 @@ class ChangesStore(
             // was never a string the daemon sends — an unimplemented method
             // comes back as `CapabilityUnsupported`, whose message says nothing
             // of the kind — so that half matched nothing. And "not found"
-            // matched a workspace somebody else had removed, which this then
+            // matched a worktree somebody else had removed, which this then
             // reported as a runner too old to review changes: a definite answer
             // sending you to update software that was never the problem.
             //
@@ -804,7 +804,7 @@ class ChangesStore(
             return troubleFor(
                 e.refusalWord,
                 e.message,
-                "Couldn’t read this workspace. The request that reads it didn’t finish.",
+                "Couldn’t read this worktree. The request that reads it didn’t finish.",
             )
         }
 
@@ -881,21 +881,21 @@ class ChangesStore(
  * The Changes tab is one pane among several, and although `e23718c` keeps every
  * visited pane MOUNTED — so a store held in a `remember` would survive a tab
  * switch — it does not keep them mounted forever: three panes, least recently
- * shown evicted, and the whole workspace goes when the back stack does. A store
+ * shown evicted, and the whole worktree goes when the back stack does. A store
  * rebuilt from nothing means every fold reopened and every diff re-fetched over
  * somebody's cellular link, which is disruptive in exactly the case the tab
  * exists for.
  *
- * ## Keyed by workspace, and owned by the runner
+ * ## Keyed by worktree, and owned by the runner
  *
- * A map keyed by workspace id ALONE would be a collision, and not a theoretical
+ * A map keyed by worktree id ALONE would be a collision, and not a theoretical
  * one: ids are minted per daemon, this app connects to every runner at once, and
  * `df87410` had to answer exactly this for the front door. The answer here is
  * that the host half of the key is structural — one of these belongs to one
  * [Connection], so the only way to reach a store is through the runner that owns
  * it, and there is no call that could name the wrong one. Every store still
  * carries its [ReviewRef] so that what it writes to disk — a bookmark, an unsent
- * note — is keyed `host/workspace` the way [ReviewRef] argues it must be.
+ * note — is keyed `host/worktree` the way [ReviewRef] argues it must be.
  *
  * Held for the lifetime of the connection: a handful of change sets is small next
  * to re-reading one over a phone link, and a connection going away is the point
@@ -910,7 +910,7 @@ class ChangesStores(
     private val stores = mutableMapOf<String, ChangesStore>()
 
     @Synchronized
-    fun store(workspaceId: String): ChangesStore = stores.getOrPut(workspaceId) {
-        ChangesStore(ReviewRef(hostId, workspaceId), source, storage, scope)
+    fun store(worktreeId: String): ChangesStore = stores.getOrPut(worktreeId) {
+        ChangesStore(ReviewRef(hostId, worktreeId), source, storage, scope)
     }
 }

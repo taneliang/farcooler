@@ -270,7 +270,7 @@ fn whoami() -> String {
 
 // MARK: - a pane to watch
 
-/// One workspace, one terminal, through the daemon's own socket.
+/// One worktree, one terminal, through the daemon's own socket.
 ///
 /// Created locally rather than over ssh so that what is being measured is the
 /// stream and not the ceremony in front of it.
@@ -311,10 +311,10 @@ async fn a_pane(runner: &Runner) -> uuid::Uuid {
     let result = client.call(register).await.expect("repository.register");
     let Some(result::Value::Repository(repository)) = result.value else { panic!("wrong result") };
 
-    let mut create = rpc("workspace.create");
+    let mut create = rpc("worktree.create");
     create.target_resource_id = Some(repository.id.clone());
-    create.payload = Some(request::Payload::WorkspaceCreate(
-        farcooler_protocol::v1::WorkspaceCreate {
+    create.payload = Some(request::Payload::WorktreeCreate(
+        farcooler_protocol::v1::WorktreeCreate {
             task_name: "streaming".into(),
             branch: "feat/streaming".into(),
             base_revision: "HEAD".into(),
@@ -323,11 +323,11 @@ async fn a_pane(runner: &Runner) -> uuid::Uuid {
             fork_only: false,
         },
     ));
-    let result = client.call(create).await.expect("workspace.create");
-    let Some(result::Value::Workspace(workspace)) = result.value else { panic!("wrong result") };
+    let result = client.call(create).await.expect("worktree.create");
+    let Some(result::Value::Worktree(worktree)) = result.value else { panic!("wrong result") };
 
     let mut terminal = rpc("terminal.create");
-    terminal.target_resource_id = Some(workspace.id.clone());
+    terminal.target_resource_id = Some(worktree.id.clone());
     terminal.payload = Some(request::Payload::TerminalCreate(
         farcooler_protocol::v1::TerminalCreate {
             title: "watched".into(),

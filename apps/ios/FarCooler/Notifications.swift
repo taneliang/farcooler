@@ -58,7 +58,7 @@ final class Notifier {
     }
 
     /// Announce a change, if it is worth announcing.
-    func report(terminal: Terminal, workspace: String) {
+    func report(terminal: Terminal, worktree: String) {
         let activity = terminal.agent
         defer { announced[terminal.id] = activity }
 
@@ -76,7 +76,7 @@ final class Notifier {
             // writes this same sentence into the push it sends when this app is
             // closed. One person gets whichever of the two is delivered, about
             // one pane, and two casings of one sentence is two notifications.
-            content.body = "\(workspace) — Waiting for your answer"
+            content.body = "\(worktree) — Waiting for your answer"
             // The one state worth breaking through a Focus for: an agent that
             // is blocked has stopped, and will stay stopped until answered.
             content.interruptionLevel = .timeSensitive
@@ -87,12 +87,12 @@ final class Notifier {
             // is the lie the row's green checkmark used to tell.
             if terminal.turnDidFail {
                 content.title = "\(terminal.label) failed"
-                content.body = "\(workspace) — Its last turn didn’t finish"
+                content.body = "\(worktree) — Its last turn didn’t finish"
             } else {
                 content.title = "\(terminal.label) finished"
                 // What it finished, where there is an answer to that.
                 //
-                // The body was the workspace name alone, which the title's
+                // The body was the worktree name alone, which the title's
                 // label had very nearly already said — so the whole
                 // notification was "claude finished / add auth", a sentence
                 // about Far Cooler rather than about the work. The agent's own
@@ -101,9 +101,9 @@ final class Notifier {
                 // difference between knowing something ended and knowing
                 // whether to go and look.
                 //
-                // The workspace stays in front of it: several panes finish in a
+                // The worktree stays in front of it: several panes finish in a
                 // day and which worktree this was is what tells them apart.
-                // Falls back to the workspace alone when the turn was all tool
+                // Falls back to the worktree alone when the turn was all tool
                 // calls and no prose, which is a real case.
                 //
                 // `lastSaid`, not `recentSteps.last`, which is what this used
@@ -117,9 +117,9 @@ final class Notifier {
                 // message is on the wire now, cut from its start by the daemon
                 // — see `Terminal.lastSaid`.
                 if let said = terminal.lastSaid, !said.isEmpty {
-                    content.body = "\(workspace) — \(said)"
+                    content.body = "\(worktree) — \(said)"
                 } else {
-                    content.body = workspace
+                    content.body = worktree
                 }
             }
         default:

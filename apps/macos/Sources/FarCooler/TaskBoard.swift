@@ -226,27 +226,27 @@ extension TaskRow {
     }
 }
 
-/// One pane that is working a task, with the workspace it is in.
+/// One pane that is working a task, with the worktree it is in.
 ///
 /// Carried together because going to it needs both: `Selection.terminal`
-/// names the workspace and the host as well as the terminal, and a pane found
+/// names the worktree and the host as well as the terminal, and a pane found
 /// on its own would have to be looked up again to learn where it lives.
 struct BoardPane: Identifiable, Equatable {
     let terminal: Terminal
-    let workspace: Workspace
+    let worktree: Worktree
 
     var id: String { terminal.id }
 
     /// What a menu item offering this pane says: the pane, then where it is.
     /// "claude in fix-reconnect", because two agents on one task are usually
-    /// the same program, and the workspace is what tells them apart.
+    /// the same program, and the worktree is what tells them apart.
     ///
     /// Numbered the way the sidebar numbers it — "claude 2 in fix-reconnect"
-    /// — when the workspace holds two alike, because `dispatch --again` can
+    /// — when the worktree holds two alike, because `dispatch --again` can
     /// put the second agent in the same lane and two identical menu items
-    /// would be a coin toss. See `Workspace.ordinals()`.
+    /// would be a coin toss. See `Worktree.ordinals()`.
     var title: String {
-        "\(terminal.displayName(ordinal: workspace.ordinals()[terminal.id])) in \(workspace.task)"
+        "\(terminal.displayName(ordinal: worktree.ordinals()[terminal.id])) in \(worktree.task)"
     }
 
     /// Menu titles for several panes, told apart even where their names are
@@ -263,20 +263,20 @@ struct BoardPane: Identifiable, Equatable {
     /// is NOW rather than as it was when the card drew.
     ///
     /// A menu is open while the fleet moves under it, so the pane can have
-    /// exited and been reaped by the time it is chosen. Then: its workspace,
+    /// exited and been reaped by the time it is chosen. Then: its worktree,
     /// if that is still there, and nil — stay on the board and say so — if
     /// neither is.
-    static func landing(for pane: BoardPane, in fleet: [Workspace]) -> ContentView.Selection? {
-        let host = pane.workspace.host ?? ""
+    static func landing(for pane: BoardPane, in fleet: [Worktree]) -> ContentView.Selection? {
+        let host = pane.worktree.host ?? ""
         guard
-            let workspace = fleet.first(where: {
-                ($0.host ?? "") == host && $0.id == pane.workspace.id
+            let worktree = fleet.first(where: {
+                ($0.host ?? "") == host && $0.id == pane.worktree.id
             })
         else { return nil }
-        if workspace.terminals.contains(where: { $0.id == pane.terminal.id }) {
-            return .terminal(host: host, workspace: workspace.id, terminal: pane.terminal.id)
+        if worktree.terminals.contains(where: { $0.id == pane.terminal.id }) {
+            return .terminal(host: host, worktree: worktree.id, terminal: pane.terminal.id)
         }
-        return .workspace(host: host, id: workspace.id)
+        return .worktree(host: host, id: worktree.id)
     }
 }
 
@@ -285,16 +285,16 @@ struct BoardPane: Identifiable, Equatable {
 ///
 /// A value handed to the board by the window, which is what holds the fleet.
 /// The rule for which of these is working a card is AgentKit's
-/// (`TaskAgentLink.isWorking`); this only pairs each pane with its workspace
+/// (`TaskAgentLink.isWorking`); this only pairs each pane with its worktree
 /// so that the answer is somewhere you can go.
 struct BoardAgents {
-    /// The runner's workspaces, as the sidebar has them.
-    var workspaces: [Workspace]
+    /// The runner's worktrees, as the sidebar has them.
+    var worktrees: [Worktree]
     /// Whether the runner advertises `terminal_task`. Without it no pane
     /// carries a task, and the board makes no claim either way.
     var runnerRecordsTasks: Bool
 
-    static let none = BoardAgents(workspaces: [], runnerRecordsTasks: false)
+    static let none = BoardAgents(worktrees: [], runnerRecordsTasks: false)
 
     /// The panes a board may speak of on one runner — or none, which is
     /// "can't say": no pills, no "No Agent", and no count in the sidebar.
@@ -302,7 +302,7 @@ struct BoardAgents {
     /// Two gates. The runner has to record which pane works which task
     /// (`terminal_task`), and it has to be connected right now. Anything
     /// else — connecting, reconnecting, unreachable, not installed — means
-    /// the workspaces are the last ones read before the link went, kept so
+    /// the worktrees are the last ones read before the link went, kept so
     /// the sidebar stays put, and the agents in them may have exited since.
     ///
     /// `.connected` and not `state.refusal == nil`: a dead runner spends most
@@ -310,23 +310,23 @@ struct BoardAgents {
     /// frozen pills blink back on for every one of them. `FleetStore.reading`
     /// counts the status bar's live panes by the same rule.
     static func on(
-        _ workspaces: [Workspace], state: HostState, build: DaemonBuild?
+        _ worktrees: [Worktree], state: HostState, build: DaemonBuild?
     ) -> BoardAgents {
         // The rule is AgentKit's, so this board and the phone's cannot drift.
         guard TaskAgentLink.speaksOfAgents(connected: state == .connected, build: build)
         else { return .none }
-        return BoardAgents(workspaces: workspaces, runnerRecordsTasks: true)
+        return BoardAgents(worktrees: worktrees, runnerRecordsTasks: true)
     }
 
     private var panes: [BoardPane] {
-        workspaces.flatMap { ws in ws.terminals.map { BoardPane(terminal: $0, workspace: ws) } }
+        worktrees.flatMap { ws in ws.terminals.map { BoardPane(terminal: $0, worktree: ws) } }
     }
 
     /// The panes working `row`, in sidebar order. Empty on a runner that
     /// doesn't record tasks, whatever its panes say.
     func live(for row: TaskRow) -> [BoardPane] {
         guard runnerRecordsTasks else { return [] }
-        let working = Set(row.livePanes(in: workspaces.flatMap(\.terminals)).map(\.id))
+        let working = Set(row.livePanes(in: worktrees.flatMap(\.terminals)).map(\.id))
         return panes.filter { working.contains($0.id) }
     }
 
@@ -338,7 +338,7 @@ struct BoardAgents {
     /// quiet count.
     func tasksWithAgents(on board: TaskBoardModel) -> Int {
         guard runnerRecordsTasks else { return 0 }
-        return board.tasksWithLiveAgents(in: workspaces.flatMap(\.terminals))
+        return board.tasksWithLiveAgents(in: worktrees.flatMap(\.terminals))
     }
 }
 
@@ -346,7 +346,7 @@ struct BoardAgents {
 ///
 /// Not a sheet any more. A sheet sat over the agents it was orchestrating, so
 /// going to one closed the board and coming back meant opening it again; here
-/// it is a place in the sidebar like any workspace, and ⇧⌘B or a click on its
+/// it is a place in the sidebar like any worktree, and ⇧⌘B or a click on its
 /// row brings it back.
 struct TaskBoardView: View {
     @ObservedObject var store: TaskBoardStore

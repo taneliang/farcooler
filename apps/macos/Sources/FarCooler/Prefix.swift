@@ -74,7 +74,7 @@ final class PrefixMode: ObservableObject {
     /// you cannot see you have pressed is a prefix you press twice.
     @Published private(set) var armed = false
 
-    /// How many panes are on screen in the workspace being looked at.
+    /// How many panes are on screen in the worktree being looked at.
     ///
     /// Set by the view, and it is what makes the prefix-less `⌃hjkl` bindings
     /// affordable. `⌃H` is backspace, `⌃J` is newline, `⌃K` kills to end of line

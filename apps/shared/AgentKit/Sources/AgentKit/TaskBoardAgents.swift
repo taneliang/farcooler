@@ -183,7 +183,7 @@ extension TaskRow {
     /// `runnerRecordsTasks` is whether the runner advertises `terminal_task`.
     /// Without it no pane carries a task id, so "no agent" would be a claim
     /// this app cannot back: an older runner gets no link and no remark, never
-    /// a guess from the task's workspace.
+    /// a guess from the task's worktree.
     public func agentPresence(livePanes: Int, runnerRecordsTasks: Bool) -> TaskAgentPresence {
         guard runnerRecordsTasks else { return .unsaid }
         if livePanes > 0 { return .agents(livePanes) }

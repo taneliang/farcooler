@@ -1,7 +1,7 @@
 import Foundation
 
 // The phone's Board rows: one per repository that has a board, at the top of
-// its runner's section in the shell overview, above that runner's workspaces.
+// its runner's section in the shell overview, above that runner's worktrees.
 //
 // The Mac's sidebar has had this row since card -19 (`BoardRow` in
 // `apps/macos/Sources/FarCooler/SidebarViews.swift`), and it draws the same two
@@ -53,7 +53,7 @@ public enum RunnerBoards {
     /// - A repository gets a row only once its board has been read and has
     ///   something on it, unreadable rows included. An empty board is most
     ///   repositories on most runners, and a row for each would push the
-    ///   workspaces down for nothing to look at. This is where the phone
+    ///   worktrees down for nothing to look at. This is where the phone
     ///   differs from the Mac, whose sidebar row is also the board's only
     ///   way in and so is drawn for an empty one too.
     /// - `agents` is counted only where `TaskAgentLink.speaksOfAgents` says

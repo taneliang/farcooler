@@ -102,11 +102,11 @@ where
 #[tokio::test]
 async fn creates_a_tagged_window_and_proves_its_identity() {
     let srv = unique_server();
-    let workspace = Uuid::now_v7();
+    let worktree = Uuid::now_v7();
     let terminal = Uuid::now_v7();
 
     let win = srv
-        .create_terminal_window(workspace, terminal, "shell", "/tmp", "sleep 30")
+        .create_terminal_window(worktree, terminal, "shell", "/tmp", "sleep 30")
         .await
         .expect("create window");
 
@@ -118,7 +118,7 @@ async fn creates_a_tagged_window_and_proves_its_identity() {
 
     assert_eq!(mine.len(), 1, "exactly one pane proves this terminal");
     assert_eq!(mine[0].daemon_id, srv.daemon_id());
-    assert_eq!(mine[0].workspace_id, workspace);
+    assert_eq!(mine[0].worktree_id, worktree);
 
     srv.kill_server().await.unwrap();
 }
@@ -294,10 +294,10 @@ async fn respawning_a_pane_keeps_its_id_its_tag_and_its_place() {
     // rectangle changed, a four-tile layout would reflow every time someone
     // opened a chat.
     let Some(server) = live_server().await else { return };
-    let workspace = Uuid::now_v7();
+    let worktree = Uuid::now_v7();
     let terminal = Uuid::now_v7();
     let window = server
-        .create_terminal_window(workspace, terminal, "respawn", "/tmp", "/bin/sh -c 'sleep 300'")
+        .create_terminal_window(worktree, terminal, "respawn", "/tmp", "/bin/sh -c 'sleep 300'")
         .await
         .expect("window");
 

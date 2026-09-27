@@ -346,16 +346,16 @@ struct WorkingTreeFile: Decodable, Equatable {
 
 /// One worktree's line in the fleet's changed-since-you-looked list.
 struct InboxRow: Decodable, Equatable, Identifiable {
-    var workspaceId: String
+    var worktreeId: String
     var changedSinceReviewed: Bool
     var insertions: Int
     var deletions: Int
 
-    var id: String { workspaceId }
+    var id: String { worktreeId }
     var hasDiff: Bool { insertions > 0 || deletions > 0 }
 
     enum CodingKeys: String, CodingKey {
-        case workspaceId = "workspace_id"
+        case worktreeId = "worktree_id"
         case insertions, deletions
         case changedSinceReviewed = "changed_since_reviewed"
     }
@@ -668,16 +668,16 @@ final class ChangesStore: ObservableObject {
     @Published var resumeNote: String?
 
     private let core: ClientCore
-    private let workspace: String
+    private let worktree: String
     /// Whether this store has ever read the worktree.
     private var hasLoaded = false
     /// Whether the bookmark has already had its one chance to be offered.
     private var hasOfferedResume = false
 
-    init(core: ClientCore, workspace: String) {
+    init(core: ClientCore, worktree: String) {
         self.core = core
-        self.workspace = workspace
-        self.comments = ReviewCommentQueue.phone(core: core, workspace: workspace)
+        self.worktree = worktree
+        self.comments = ReviewCommentQueue.phone(core: core, worktree: worktree)
     }
 
     #if DEBUG
@@ -817,7 +817,7 @@ final class ChangesStore: ObservableObject {
 
         do {
             let data = try await core.call(
-                "changes.change_set", ["workspace": workspace, "fresh": fresh])
+                "changes.change_set", ["worktree": worktree, "fresh": fresh])
             changeSet = try JSONDecoder().decode(ChangeSet.self, from: data)
             error = nil
         } catch {
@@ -864,7 +864,7 @@ final class ChangesStore: ObservableObject {
         guard !hasOfferedResume else { return }
         hasOfferedResume = true
         guard error == nil else { return }
-        guard let saved = ReviewBookmarks.read(workspace), saved.isSomewhere else { return }
+        guard let saved = ReviewBookmarks.read(worktree), saved.isSomewhere else { return }
         // Already there. Two ways that happens and both must be caught, or the
         // card is an interruption that resolves to nothing:
         //
@@ -956,7 +956,7 @@ final class ChangesStore: ObservableObject {
             ReviewPosition(
                 scope: scope.wire, file: expandedFile, topFile: topFile,
                 savedAt: Date().timeIntervalSince1970),
-            for: workspace)
+            for: worktree)
     }
 
     /// A card said whether it is on screen. See `topFile`.
@@ -1334,7 +1334,7 @@ final class ChangesStore: ObservableObject {
         let asked = generation
         do {
             let data = try await core.call(
-                "changes.commit_files", ["workspace": workspace, "sha": sha])
+                "changes.commit_files", ["worktree": worktree, "sha": sha])
             let answer = try JSONDecoder().decode(CommitFiles.self, from: data)
             guard asked == generation else { return }
             commitFiles = answer.files
@@ -1379,7 +1379,7 @@ final class ChangesStore: ObservableObject {
                 "changes.file_diff",
                 // The sha IS the scope for a commit — see `DiffScope.wire`,
                 // which is the only place that rule is spelled out.
-                ["workspace": workspace, "path": path, "scope": scope.wire])
+                ["worktree": worktree, "path": path, "scope": scope.wire])
             let diff = try JSONDecoder().decode(FileDiff.self, from: data)
             // What was being compared changed while this was in flight, so
             // these lines answer a question nobody is asking any more. Stored
@@ -1428,7 +1428,7 @@ final class ChangesStore: ObservableObject {
 
     /// Mark this worktree as read, which is what clears its badge everywhere.
     func markRead() async {
-        _ = try? await core.call("changes.mark_read", ["workspace": workspace])
+        _ = try? await core.call("changes.mark_read", ["worktree": worktree])
         await load()
     }
 
@@ -1465,7 +1465,7 @@ final class ChangesStore: ObservableObject {
     /// The guess was wrong in both directions. "unknown method" was never a
     /// string the daemon sent — an unimplemented method comes back as
     /// `CapabilityUnsupported`, whose message says nothing of the kind — so
-    /// that half matched nothing. And "not found" matched a workspace somebody
+    /// that half matched nothing. And "not found" matched a worktree somebody
     /// else had removed, which this then reported as a runner too old to review
     /// changes: a definite answer that sends you to update software that was
     /// never the problem.
@@ -1479,7 +1479,7 @@ final class ChangesStore: ObservableObject {
         }
         return ClientCore.trouble(
             error,
-            otherwise: "Couldn’t read this workspace. The request that reads it didn’t finish.")
+            otherwise: "Couldn’t read this worktree. The request that reads it didn’t finish.")
     }
 }
 
@@ -1491,7 +1491,7 @@ final class ChangesStore: ObservableObject {
 /// re-fetched. That is disruptive in exactly the case the pane is for, which is
 /// reading a long diff in more than one sitting.
 ///
-/// Keyed by workspace, because what is being reviewed is the worktree. Held for
+/// Keyed by worktree, because what is being reviewed is the worktree. Held for
 /// the lifetime of the connection: a handful of change sets is small next to
 /// re-reading one over a phone link, and `Connection` going away is the point at
 /// which none of them mean anything anyway.
@@ -1504,10 +1504,10 @@ final class ChangesStores {
         self.core = core
     }
 
-    func store(for workspace: String) -> ChangesStore {
-        if let existing = stores[workspace] { return existing }
-        let made = ChangesStore(core: core, workspace: workspace)
-        stores[workspace] = made
+    func store(for worktree: String) -> ChangesStore {
+        if let existing = stores[worktree] { return existing }
+        let made = ChangesStore(core: core, worktree: worktree)
+        stores[worktree] = made
         return made
     }
 }

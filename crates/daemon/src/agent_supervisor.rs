@@ -1378,7 +1378,7 @@ mod tests {
         let root = store.create_repository_root(host, "/repos/one", 1_000).expect("root");
         let repo =
             store.create_repository(host, root.id, "name", "/gitdir", "origin").expect("repo");
-        let ws = store.create_workspace(repo.id, "feature/x", "/wt/one", false).expect("workspace");
+        let ws = store.create_worktree(repo.id, "feature/x", "/wt/one", false).expect("worktree");
         let term = store
             .create_terminal(ws.id, "t", preset, TerminalIntent::Running, 120, 40)
             .expect("terminal");
@@ -1546,7 +1546,7 @@ mod gap_tests {
     /// This exists for one line — `renumbered = entry[entry.len() -
     /// renumbered.len()..].to_vec()`, the last statement of the trim — and
     /// that line was previously deletable in silence across the whole
-    /// workspace. Every other sink in this file is `|_, _| {}`, and the one
+    /// worktree. Every other sink in this file is `|_, _| {}`, and the one
     /// that collects is handed two batches of one event that never come near
     /// `TRANSCRIPT_LIMIT`. Without it a subscriber is handed the numbers the
     /// batch had BEFORE the front was dropped — positions past the end of the

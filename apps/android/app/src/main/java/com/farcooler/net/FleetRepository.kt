@@ -6,7 +6,7 @@ import com.farcooler.data.Settings
 import com.farcooler.model.InboxRow
 import com.farcooler.model.NeedsYouInput
 import com.farcooler.model.Terminal
-import com.farcooler.model.Workspace
+import com.farcooler.model.Worktree
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,40 +20,40 @@ import kotlinx.coroutines.launch
  *
  * The host is carried rather than looked up. Short ids are the last eight hex
  * characters of a UUID minted per daemon; across three runners and a hundred
- * workspaces the birthday collision probability is around one in a hundred
+ * worktrees the birthday collision probability is around one in a hundred
  * thousand, and the cost of losing that coin flip is acting on the wrong
  * runner. Carrying the runner removes the class of bug rather than betting
  * against it — the same conclusion the Mac reached.
  */
-data class TerminalRef(val hostId: String, val workspaceId: String, val terminalId: String)
+data class TerminalRef(val hostId: String, val worktreeId: String, val terminalId: String)
 
-/** One workspace, the runner it is on, and what that runner said about its diff. */
+/** One worktree, the runner it is on, and what that runner said about its diff. */
 data class FleetEntry(
     val host: Runner,
     val connection: Connection,
-    val workspace: Workspace,
+    val worktree: Worktree,
     /**
      * This worktree's `changes.inbox` row, or null while its runner has not
      * answered.
      *
      * Carried on the entry rather than looked up by the screens that want it,
      * for the same reason the runner is: this is the app's one merged,
-     * already-observed list of workspaces across every runner, and a front door
+     * already-observed list of worktrees across every runner, and a front door
      * that reached back into a per-connection map would have to subscribe to N
      * more flows and re-key every one of them by host. See [Connection.inbox]
-     * for why that map is keyed by workspace alone.
+     * for why that map is keyed by worktree alone.
      */
     val counts: InboxRow? = null,
 ) {
     /** This entry as the front door's derivation wants it. See `model/NeedsYou.kt`. */
-    fun needsYouInput() = NeedsYouInput(host.id, host.displayLabel, workspace, counts)
+    fun needsYouInput() = NeedsYouInput(host.id, host.displayLabel, worktree, counts)
 }
 
 /**
  * Every configured runner, connected at once.
  *
  * The Mac's `FleetStore`, on a phone. It holds one [Connection] per runner,
- * merges their workspaces into one list, and answers "which connection owns
+ * merges their worktrees into one list, and answers "which connection owns
  * this row". Every mutation goes through the connection this names.
  *
  * The iOS app has a runner picker instead, which makes a remote agent
@@ -96,7 +96,7 @@ class FleetRepository(
 
     private val _entries = MutableStateFlow<List<FleetEntry>>(emptyList())
 
-    /** Every workspace on every connected runner, in runner order. */
+    /** Every worktree on every connected runner, in runner order. */
     val entries: StateFlow<List<FleetEntry>> = _entries.asStateFlow()
 
     private val _connections = MutableStateFlow<List<Connection>>(emptyList())
@@ -165,8 +165,8 @@ class FleetRepository(
         _connections.value = ordered
         _entries.value = ordered.flatMap { connection ->
             val counts = connection.inbox.value
-            connection.fleet.value.workspaces.map { workspace ->
-                FleetEntry(connection.host, connection, workspace, counts[workspace.id])
+            connection.fleet.value.worktrees.map { worktree ->
+                FleetEntry(connection.host, connection, worktree, counts[worktree.id])
             }
         }
     }
@@ -178,12 +178,12 @@ class FleetRepository(
     fun terminal(ref: TerminalRef): Terminal? =
         connections[ref.hostId]?.terminal(ref.terminalId)
 
-    fun workspace(ref: TerminalRef): Workspace? =
-        connections[ref.hostId]?.workspaceOf(ref.terminalId)
+    fun worktree(ref: TerminalRef): Worktree? =
+        connections[ref.hostId]?.worktreeOf(ref.terminalId)
 
     fun entry(ref: TerminalRef): FleetEntry? =
         _entries.value.firstOrNull {
-            it.host.id == ref.hostId && it.workspace.terminals.any { t -> t.id == ref.terminalId }
+            it.host.id == ref.hostId && it.worktree.terminals.any { t -> t.id == ref.terminalId }
         }
 
     /**
@@ -276,5 +276,5 @@ class FleetRepository(
     // by first-match.
     //
     // The narrower rule is untouched: `List<Terminal>.landingTerminal` still
-    // decides which PANE a workspace opens on, through `Backstack.rule`.
+    // decides which PANE a worktree opens on, through `Backstack.rule`.
 }

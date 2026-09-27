@@ -96,8 +96,8 @@ extension Array where Element == PaneGroup {
     /// somebody else's terminal for the length of that round trip: measured at
     /// 123ms and 269ms on a quiet local runner, and there is no ceiling on it.
     ///
-    /// Falls back to the active layout — which is right for a workspace with no
-    /// terminal selected — and then to the first, because a workspace with
+    /// Falls back to the active layout — which is right for a worktree with no
+    /// terminal selected — and then to the first, because a worktree with
     /// layouts always has one to show even if none of them claims to be active.
     func showing(_ id: String) -> PaneGroup? {
         first { $0.id == id } ?? first { $0.isActive } ?? first
@@ -105,7 +105,7 @@ extension Array where Element == PaneGroup {
 }
 
 struct PaneGroupList: Decodable, Sendable {
-    var workspace: String
+    var worktree: String
     var groups: [PaneGroup]
 
     var active: PaneGroup? { groups.first { $0.isActive } ?? groups.first }

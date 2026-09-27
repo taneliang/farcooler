@@ -83,6 +83,11 @@ fn main() -> Result<()> {
 
     let mut cfg = prost_build::Config::new();
     cfg.bytes(["."]);
+    // The compiled descriptor, kept so a test can read every message's field
+    // numbers by name. Renaming a message is free on the wire only while its
+    // numbers stay put, and that is checked against this, not by eye.
+    let out = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
+    cfg.file_descriptor_set_path(out.join("farcooler_descriptor.bin"));
     cfg.compile_protos(&["../../proto/farcooler.proto"], &["../../proto"])?;
     Ok(())
 }

@@ -98,13 +98,13 @@ fun liveSummary(runners: List<RunnerCount>): String {
  * What is happening, given that nothing needs you: the front door's line under
  * "Nothing needs you".
  *
- * [runners] carries each runner's count of WORKING agents in the workspaces the
+ * [runners] carries each runner's count of WORKING agents in the worktrees the
  * screen shows. [where] is " on <runner>" when there is exactly one runner, and
  * empty otherwise. A fleet with no runner answering says it can't say, rather
  * than "Nothing is running", which is the one sentence here that would be a
  * claim about a runner nobody has heard from.
  */
-fun reassurance(runners: List<RunnerCount>, where: String, workspaces: Int): String {
+fun reassurance(runners: List<RunnerCount>, where: String, worktrees: Int): String {
     // No runners is not "connecting": there is nothing to connect to.
     if (runners.isEmpty()) return "Nothing is running."
     return when (val reading = fleetReading(runners)) {
@@ -112,7 +112,7 @@ fun reassurance(runners: List<RunnerCount>, where: String, workspaces: Int): Str
         FleetReading.Unsaid -> "Can’t say what’s running until a runner answers."
         FleetReading.RuntimeDown, is FleetReading.Live -> {
             val working = (reading as? FleetReading.Live)?.count ?: 0
-            if (working == 0 && workspaces == 0) {
+            if (working == 0 && worktrees == 0) {
                 "Nothing is running$where yet."
             } else {
                 when (working) {

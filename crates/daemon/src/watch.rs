@@ -273,25 +273,25 @@ pub struct CardStats {
 /// the second line of a notification, which is which pane this is about
 /// followed by whatever that pane currently has to say for itself.
 ///
-/// `workspace` is the newest of the three and the one the product owner asked
+/// `worktree` is the newest of the three and the one the product owner asked
 /// for outright. Every push said `codex finished` and nothing more, and they
 /// run several codexes at once, so the notification identified nothing — the
 /// agent's name is what a pane has in COMMON with the others, not what tells
 /// it apart. Both local notifiers had already answered this the same way,
-/// with a body of `workspace — said`; see `Quoted::body`, which is that shape
+/// with a body of `worktree — said`; see `Quoted::body`, which is that shape
 /// written once so the phone's push and the Mac's banner about one pane say
 /// one thing.
 #[derive(Debug, Clone, Copy, Default)]
 struct Quoted<'a> {
     /// Which worktree this pane belongs to, by the name a client shows for it:
-    /// `ws.name()`, the same string `wire::workspace` sends as `task_name`.
+    /// `ws.name()`, the same string `wire::worktree` sends as `task_name`.
     ///
-    /// Not an `Option`, because every terminal belongs to a workspace and the
+    /// Not an `Option`, because every terminal belongs to a worktree and the
     /// sampling loop is already iterating them to reach this pane at all. It
     /// can still arrive EMPTY — `Quoted::default()`, and a name derived from a
     /// path that has none — and `body` treats that as "nothing to say about
     /// which pane" rather than drawing a leading dash.
-    workspace: &'a str,
+    worktree: &'a str,
     /// What the agent is asking, while it is asking it. Read off the screen.
     question: Option<&'a str>,
     /// The last thing the agent said, from its OPENING. Read out of its own
@@ -311,7 +311,7 @@ impl Quoted<'_> {
     /// One notification body: which pane this is about, then what there is to
     /// say about it.
     ///
-    /// `add-auth — Both tests pass.` The workspace goes IN FRONT rather than
+    /// `add-auth — Both tests pass.` The worktree goes IN FRONT rather than
     /// into the title, because the title is already `codex finished` and a
     /// title is what a notification is sorted and stacked by — and because
     /// this is the shape both local notifiers have written since they gained a
@@ -319,13 +319,13 @@ impl Quoted<'_> {
     /// the same pane.
     ///
     /// Either half can be missing and the result still reads as a sentence: a
-    /// turn can be all tool calls and say nothing, and a workspace name can be
+    /// turn can be all tool calls and say nothing, and a worktree name can be
     /// empty. Neither produces a stray dash — `— Both tests pass.` looks like
     /// a rendering bug, and a lock screen is not where to debug one.
     fn body(&self, text: Option<&str>) -> String {
-        match (Self::worth_saying(Some(self.workspace)), Self::worth_saying(text)) {
-            (Some(workspace), Some(text)) => format!("{workspace} — {text}"),
-            (Some(workspace), None) => workspace.to_string(),
+        match (Self::worth_saying(Some(self.worktree)), Self::worth_saying(text)) {
+            (Some(worktree), Some(text)) => format!("{worktree} — {text}"),
+            (Some(worktree), None) => worktree.to_string(),
             (None, Some(text)) => text.to_string(),
             (None, None) => String::new(),
         }
@@ -343,7 +343,7 @@ fn notification(
         AgentActivity::Blocked => Some(Notice {
             title: format!("{label} needs you"),
             // The question is what a person answers from the lock screen, and
-            // the workspace is what tells them which of three blocked codexes
+            // the worktree is what tells them which of three blocked codexes
             // is asking it. Both, in that order, for the same reason `Done`
             // carries both: `codex needs you / Do you want to create
             // haiku.txt?` is answerable and still not attributable.
@@ -378,7 +378,7 @@ fn notification(
         // shits." That is a fact about where the string was cut and not about
         // how the turn was parsed, so it is fixed where the cut is made.
         //
-        // The workspace alone when the agent said nothing this turn, which is
+        // The worktree alone when the agent said nothing this turn, which is
         // a real case — a turn can be all tool calls — and reads as a row that
         // has nothing to add rather than as a blank line pretending to be
         // content.
@@ -405,7 +405,7 @@ fn notification(
         // should say under the label", and for `Blocked` that happens to be
         // what the agent asked.
         //
-        // And the one tier with no workspace in front of it, which is the
+        // And the one tier with no worktree in front of it, which is the
         // difference between a card and a banner. A banner arrives once, into a
         // stack of other banners, and has to say which pane it is about or it
         // says nothing. A card is a rectangle the relay updates IN PLACE for
@@ -457,15 +457,15 @@ fn should_refresh_card(last_push_ms: Option<i64>, now_ms: i64) -> bool {
 /// tells a failure apart from a success; the status only tells the relay
 /// whether to keep a card on the lock screen.
 ///
-/// `workspace` for the same reason an agent's notice carries one, and it is
+/// `worktree` for the same reason an agent's notice carries one, and it is
 /// the same complaint one step over: `cargo build failed / Exit code 101` at
 /// three in the morning names neither the worktree it broke in nor anything
 /// else that would tell it from the other two builds running. The Mac's local
-/// `reportFailedExit` has written `workspace — exit code 101` all along, so
+/// `reportFailedExit` has written `worktree — exit code 101` all along, so
 /// this is also the push catching up with the banner beside it.
 fn exit_notice(
     label: &str,
-    workspace: &str,
+    worktree: &str,
     exit_code: Option<i32>,
     exit_signal: Option<i32>,
 ) -> Notice {
@@ -477,8 +477,8 @@ fn exit_notice(
         (None, None) => String::new(),
     };
     // Through the same join every other notice's body goes through, so an
-    // absent workspace cannot leave a leading dash here either.
-    let subtitle = Quoted { workspace, ..Quoted::default() }.body(Some(&outcome));
+    // absent worktree cannot leave a leading dash here either.
+    let subtitle = Quoted { worktree, ..Quoted::default() }.body(Some(&outcome));
     // No clock. This is a command that exited, not an agent turn — there is no
     // `turn_started_at` at this call site to be right about, and the relay ends
     // a card on `done` rather than starting one, so a timer would have nowhere
@@ -512,7 +512,7 @@ fn agent_observation(folded: AgentActivity) -> AgentActivity {
     activity::seen(folded)
 }
 
-/// A tagged pane with no durable terminal record is not a third workspace pane.
+/// A tagged pane with no durable terminal record is not a third worktree pane.
 /// It is residue from a close that removed the record before tmux collapsed the
 /// split. Leaving it in the layout gives clients a real rectangle with nothing
 /// they can render, which presents as a large blank column.
@@ -525,7 +525,7 @@ fn orphaned_pane(
 }
 
 /// The daemon's live view of what every agent is doing.
-/// What the last probe of one workspace left behind for the trace.
+/// What the last probe of one worktree left behind for the trace.
 ///
 /// Two running positions rather than two counts: the trace records CHANGE, and
 /// both sources here report a total. `lines` is `insertions + deletions` for
@@ -534,12 +534,12 @@ fn orphaned_pane(
 /// everything past it is HEAD moves nobody has counted yet.
 #[derive(Debug, Clone, Copy, Default)]
 struct TraceLevel {
-    /// `None` until this workspace has been probed once.
+    /// `None` until this worktree has been probed once.
     ///
     /// The distinction is the whole correctness of the upper half: a worktree
     /// already carrying a 4,000-line diff when the daemon starts has not just
     /// gained 4,000 lines, and recording the first reading as growth would draw
-    /// a bar on every workspace on the runner at every restart.
+    /// a bar on every worktree on the runner at every restart.
     lines: Option<u32>,
     /// How far into `<git dir>/logs/HEAD` the commit marks have been read.
     ///
@@ -553,7 +553,7 @@ struct TraceLevel {
 
 /// What each pane observed working gets out of a worktree's diff growing.
 ///
-/// Pulled out of `record_workspace_trace` so the arithmetic can be argued with
+/// Pulled out of `record_worktree_trace` so the arithmetic can be argued with
 /// directly, because every one of its four answers is a decision:
 ///
 /// - **No previous reading gives nothing.** A worktree already carrying a
@@ -603,13 +603,13 @@ pub struct Watcher {
     /// reconciled, which is what makes the first pass after a daemon start
     /// reach all of them — see `RECONCILE_BACKSTOP_MS`.
     worktree_reconciles: std::sync::Mutex<HashMap<Uuid, i64>>,
-    /// When each workspace's `+N -M` was last computed.
+    /// When each worktree's `+N -M` was last computed.
     ///
     /// A std mutex on the same terms as `worktree_marks`. Absent for a worktree
     /// nothing has probed, which is what makes the first pass after a daemon
     /// start reach all of them.
     change_set_probes: std::sync::Mutex<HashMap<Uuid, i64>>,
-    /// When an agent was last seen working in each workspace.
+    /// When an agent was last seen working in each worktree.
     ///
     /// The signal that makes live counts possible at all. An agent edits files
     /// with its own tools in its own pane — not through this daemon — so
@@ -622,13 +622,13 @@ pub struct Watcher {
     /// A std mutex, and written under the `state` lock without ever being held
     /// across an await — a map insert of two words.
     change_set_activity: std::sync::Mutex<HashMap<Uuid, i64>>,
-    /// Which terminals were seen working in each workspace since the last
+    /// Which terminals were seen working in each worktree since the last
     /// change-set probe.
     ///
     /// `change_set_activity` above answers "did anyone work here", which is all
     /// its gate needs. The activity trace needs "who", because the upper half
     /// of a row's trace is that row's code — and a worktree's diff growing is a
-    /// fact about the WORKSPACE. Several terminals routinely share one, and git
+    /// fact about the WORKTREE. Several terminals routinely share one, and git
     /// records no author per pane, so the growth is split evenly among the panes
     /// this loop actually observed working while it happened. See
     /// `probe_change_sets`, which is the only reader, and the note on
@@ -654,16 +654,16 @@ pub struct Watcher {
     /// worth of text held per terminal for a fleet of thirty is exactly the kind
     /// of quiet cost this loop is careful about.
     trace_shapes: std::sync::Mutex<HashMap<Uuid, farcooler_core::trace::ScreenShape>>,
-    /// The last `insertions + deletions` seen for each workspace, and how far
+    /// The last `insertions + deletions` seen for each worktree, and how far
     /// into its reflog the commit marks have been read.
     ///
     /// Levels, not events: `ReviewCache::counts` reports a worktree's whole
     /// diff against its base, so what the trace wants is its GROWTH between two
-    /// probes. Absent for a workspace nothing has probed, which is what stops
+    /// probes. Absent for a worktree nothing has probed, which is what stops
     /// the first sighting of an existing diff from being drawn as if the agent
     /// had written all of it in the last five minutes.
     trace_levels: std::sync::Mutex<HashMap<Uuid, TraceLevel>>,
-    /// Commit marks, per WORKSPACE rather than per terminal.
+    /// Commit marks, per WORKTREE rather than per terminal.
     ///
     /// Kept apart from `traces` because a commit is not a pane's. Several
     /// terminals share a worktree and git records nothing about which one a
@@ -675,13 +675,13 @@ pub struct Watcher {
     /// fleet, so a commit copied onto three panes would be three marks; held
     /// here it is added exactly once.
     commit_traces: std::sync::Mutex<HashMap<Uuid, farcooler_core::trace::Trace>>,
-    /// Which workspace each terminal's trace should take its commit marks from.
+    /// Which worktree each terminal's trace should take its commit marks from.
     ///
     /// The poll and push finishers are handed a terminal id and nothing else,
     /// and both have to reach the same ring. Maintained by `tick_traces` off
     /// the same sample that maintains the rings themselves, so it cannot name a
-    /// workspace the fleet no longer has.
-    trace_workspaces: std::sync::Mutex<HashMap<Uuid, Uuid>>,
+    /// worktree the fleet no longer has.
+    trace_worktrees: std::sync::Mutex<HashMap<Uuid, Uuid>>,
     /// Whether a change-set pass is still running.
     ///
     /// See `spawn_change_set_probe`, which is the only thing that reads or
@@ -797,7 +797,7 @@ struct Sampled {
     /// Where the pane's work lives, which is what claude's and cursor's project
     /// directories are named after.
     ///
-    /// The workspace's worktree path, not a live reading of the process's own
+    /// The worktree's path, not a live reading of the process's own
     /// cwd. A pane that has been `cd`-ed somewhere else fails the join and falls
     /// back to the title and the screen, which is the right failure: attaching a
     /// pane to the wrong conversation is worse than attaching it to none.
@@ -806,20 +806,20 @@ struct Sampled {
     ///
     /// Carried on the sample rather than looked up at the push site, exactly
     /// as `exit_code` above is and for the same reason: the outer loop is
-    /// already iterating workspaces to reach this terminal, so the name is in
+    /// already iterating worktrees to reach this terminal, so the name is in
     /// hand here, and a second read taken later in the tick could name a
-    /// workspace this pass is not otherwise describing.
+    /// worktree this pass is not otherwise describing.
     ///
     /// The name and not the path. A notification is read on a lock screen and
     /// a path is `host_admin` only — see this module's rule about which fields
     /// carry one — and `add-auth` is the string a person recognizes anyway.
-    workspace: String,
+    worktree: String,
     /// The same worktree, by id, for the things that key off one rather than
     /// name one. Carried here for the same reason the name above is: the outer
-    /// loop is already holding the workspace row this terminal was reached
+    /// loop is already holding the worktree row this terminal was reached
     /// through, and a lookup taken later in the tick could answer about a
     /// different fleet than the one this pass is describing.
-    workspace_id: Uuid,
+    worktree_id: Uuid,
     state: TerminalState,
     pane_mode: farcooler_store::models::PaneMode,
     preset: String,
@@ -2545,7 +2545,7 @@ impl Watcher {
             trace_shapes: std::sync::Mutex::new(HashMap::new()),
             trace_levels: std::sync::Mutex::new(HashMap::new()),
             commit_traces: std::sync::Mutex::new(HashMap::new()),
-            trace_workspaces: std::sync::Mutex::new(HashMap::new()),
+            trace_worktrees: std::sync::Mutex::new(HashMap::new()),
             change_set_probing: std::sync::atomic::AtomicBool::new(false),
             logs: std::sync::Mutex::new(HashMap::new()),
             log_watcher: crate::log_watch::LogWatcher::start(crate::log_watch::roots()),
@@ -2627,11 +2627,11 @@ impl Watcher {
             terminal,
             AgentActivity::Working,
             label,
-            // No workspace and nothing said. A working notice is a card the
+            // No worktree and nothing said. A working notice is a card the
             // relay moves in place, whose one line is the composed signal rung
             // — see the `Working` arm of `notification` for why neither of the
             // other two belongs on it.
-            Quoted { workspace: "", question: Some(line), said: None },
+            Quoted { worktree: "", question: Some(line), said: None },
             false,
             started_at,
         );
@@ -2649,11 +2649,11 @@ impl Watcher {
         &self,
         terminal: Uuid,
         label: &str,
-        workspace: &str,
+        worktree: &str,
         exit_code: Option<i32>,
         exit_signal: Option<i32>,
     ) {
-        self.push_notice(terminal, label, exit_notice(label, workspace, exit_code, exit_signal));
+        self.push_notice(terminal, label, exit_notice(label, worktree, exit_code, exit_signal));
     }
 
     /// Send one notice to the relay, detached from the sampling loop.
@@ -2816,10 +2816,10 @@ impl Watcher {
         }
         drop(traces);
 
-        let workspaces: HashSet<Uuid> = live.values().copied().collect();
+        let worktrees: HashSet<Uuid> = live.values().copied().collect();
         let mut commits = self.commit_traces.lock().unwrap_or_else(|e| e.into_inner());
-        commits.retain(|id, _| workspaces.contains(id));
-        for id in &workspaces {
+        commits.retain(|id, _| worktrees.contains(id));
+        for id in &worktrees {
             commits.entry(*id).or_default().tick(now_secs);
         }
         drop(commits);
@@ -2828,7 +2828,7 @@ impl Watcher {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .retain(|id, _| live.contains_key(id));
-        *self.trace_workspaces.lock().unwrap_or_else(|e| e.into_inner()) = live.clone();
+        *self.trace_worktrees.lock().unwrap_or_else(|e| e.into_inner()) = live.clone();
     }
 
     /// One terminal's trace, encoded as the wire carries it.
@@ -2869,11 +2869,11 @@ impl Watcher {
     fn drawn_trace(&self, terminal: Uuid, now: i64) -> Option<farcooler_core::trace::Trace> {
         let mut trace =
             self.traces.lock().unwrap_or_else(|e| e.into_inner()).get(&terminal).cloned()?;
-        let workspace =
-            self.trace_workspaces.lock().unwrap_or_else(|e| e.into_inner()).get(&terminal).copied();
-        if let Some(workspace) = workspace {
+        let worktree =
+            self.trace_worktrees.lock().unwrap_or_else(|e| e.into_inner()).get(&terminal).copied();
+        if let Some(worktree) = worktree {
             if let Some(marks) =
-                self.commit_traces.lock().unwrap_or_else(|e| e.into_inner()).get(&workspace)
+                self.commit_traces.lock().unwrap_or_else(|e| e.into_inner()).get(&worktree)
             {
                 trace.absorb(marks, now);
             }
@@ -2889,7 +2889,7 @@ impl Watcher {
     /// nothing numeric — so a card that wants a row per agent has to be given
     /// the numbers a row is made of.
     ///
-    /// **Nothing here runs git**, which is the same rule `record_workspace_trace`
+    /// **Nothing here runs git**, which is the same rule `record_worktree_trace`
     /// keeps and for the same reason: this is on the sampling loop's push path,
     /// once per notice, for every agent on the runner. `ReviewCache::counts` is
     /// a map lookup by contract and the rings are already in memory.
@@ -2903,9 +2903,9 @@ impl Watcher {
     pub fn card_stats(&self, terminal: Uuid) -> CardStats {
         let now = now_millis() / 1000;
         let trace = self.drawn_trace(terminal, now);
-        let workspace =
-            self.trace_workspaces.lock().unwrap_or_else(|e| e.into_inner()).get(&terminal).copied();
-        let counts = workspace.map(|id| self.service.review_cache.counts(id));
+        let worktree =
+            self.trace_worktrees.lock().unwrap_or_else(|e| e.into_inner()).get(&terminal).copied();
+        let counts = worktree.map(|id| self.service.review_cache.counts(id));
         let (insertions, deletions) = match counts {
             Some(crate::review::Counts::Known(_, insertions, deletions)) => {
                 (Some(insertions), Some(deletions))
@@ -2933,7 +2933,7 @@ impl Watcher {
     /// pick one width across all of them; a client holding only the rendered
     /// rows cannot.
     ///
-    /// Commits come off the workspace rings and so are added once each, not
+    /// Commits come off the worktree rings and so are added once each, not
     /// once per pane sharing the worktree. See `commit_traces`.
     ///
     /// With its anchor, off the same `now`, for `stamp_trace`'s reason: a phone
@@ -2957,7 +2957,7 @@ impl Watcher {
         (fleet.encode(now), fleet.anchor(now))
     }
 
-    /// The upper half and the axis, for one workspace that was just probed.
+    /// The upper half and the axis, for one worktree that was just probed.
     ///
     /// Called from `probe_change_sets`, which is already behind the gate that
     /// decides a worktree is worth looking at, and which has just refreshed the
@@ -2985,20 +2985,20 @@ impl Watcher {
     ///   editing in their own editor moves the diff with no pane to put it on,
     ///   and it is dropped rather than shared out among whoever happens to be
     ///   in that worktree.
-    fn record_workspace_trace(&self, workspace: Uuid, worktree: &std::path::Path, now_secs: i64) {
+    fn record_worktree_trace(&self, worktree_id: Uuid, worktree: &std::path::Path, now_secs: i64) {
         let workers: Vec<Uuid> = self
             .trace_workers
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .remove(&workspace)
+            .remove(&worktree_id)
             .map(|set| set.into_iter().collect())
             .unwrap_or_default();
 
         let mut levels = self.trace_levels.lock().unwrap_or_else(|e| e.into_inner());
-        let level = levels.entry(workspace).or_default();
+        let level = levels.entry(worktree_id).or_default();
 
         if let crate::review::Counts::Known(_, insertions, deletions) =
-            self.service.review_cache.counts(workspace)
+            self.service.review_cache.counts(worktree_id)
         {
             let total = insertions.saturating_add(deletions);
             let each = code_share(level.lines, total, workers.len());
@@ -3060,7 +3060,7 @@ impl Watcher {
             return;
         }
         let mut traces = self.commit_traces.lock().unwrap_or_else(|e| e.into_inner());
-        let ring = traces.entry(workspace).or_default();
+        let ring = traces.entry(worktree_id).or_default();
         for at in commits {
             // Recorded at the second the commit was authored, not at the second
             // this pass noticed it. That is what makes the backfill land in the
@@ -3183,33 +3183,33 @@ impl Watcher {
         self.announce(terminal, snapshot).await;
     }
 
-    /// Push a workspace's tiling to every connected client.
+    /// Push a worktree's tiling to every connected client.
     ///
     /// Layout is not sampled — nothing changes it but an explicit request — so
     /// unlike activity this is announced by whoever made the change rather than
     /// discovered by the loop. It still goes through the watcher because the
     /// broadcast channel is here, and one sender means one place where "only
     /// changes are sent" stays true.
-    pub fn publish_layout(&self, workspace: Uuid, groups: &[crate::layout::LayoutView]) {
+    pub fn publish_layout(&self, worktree: Uuid, groups: &[crate::layout::LayoutView]) {
         let _ = self.events.send(Event {
             event_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
             sequence: 0,
             payload: Some(farcooler_protocol::v1::event::Payload::LayoutChanged(
-                wire::pane_group_list(workspace, groups),
+                wire::pane_group_list(worktree, groups),
             )),
         });
     }
 
-    /// Tell every connected client that the set of workspaces changed.
+    /// Tell every connected client that the set of worktrees changed.
     ///
-    /// Carries nothing: reconciliation can both create and delete workspace
+    /// Carries nothing: reconciliation can both create and delete worktree
     /// rows in one pass, and a deletion has no resource left to describe.
     /// Sent once per reconcile pass that changed anything, not once per
-    /// workspace — a client re-reads the fleet rather than applying this as
+    /// worktree — a client re-reads the fleet rather than applying this as
     /// a delta.
     ///
     /// Also called directly by the RPC layer after `repository.register`,
-    /// `workspace.hide`, and `workspace.unhide` — mutations that change the
+    /// `worktree.hide`, and `worktree.unhide` — mutations that change the
     /// fleet without touching git at all, so neither the watch on
     /// `<common>/worktrees` nor the mtime gate behind it ever fires for them,
     /// and other connected clients would otherwise learn about them only at
@@ -3224,18 +3224,18 @@ impl Watcher {
         });
     }
 
-    /// A workspace's change set moved.
+    /// A worktree's change set moved.
     ///
-    /// Carries the workspace and a version, never the set: most clients are not
+    /// Carries the worktree and a version, never the set: most clients are not
     /// looking at a diff, and a lockfile regeneration would otherwise fan
     /// thousands of file records out to every connected device.
-    pub fn announce_change_set(&self, workspace_id: Uuid, version: u64) {
+    pub fn announce_change_set(&self, worktree_id: Uuid, version: u64) {
         let _ = self.events.send(Event {
             event_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
             sequence: 0,
             payload: Some(farcooler_protocol::v1::event::Payload::ChangeSetChanged(
                 farcooler_protocol::v1::ChangeSetChanged {
-                    workspace_id: bytes::Bytes::copy_from_slice(workspace_id.as_bytes()),
+                    worktree_id: bytes::Bytes::copy_from_slice(worktree_id.as_bytes()),
                     version,
                 },
             )),
@@ -3349,9 +3349,9 @@ impl Watcher {
     /// staleness — the watcher covers that — but about the watcher having
     /// stopped without saying so.
     async fn probe_change_sets(self: &Arc<Self>) {
-        let Ok(workspaces) = self.service.store.list_all_workspaces() else { return };
+        let Ok(worktrees) = self.service.store.list_all_worktrees() else { return };
 
-        let live: HashSet<Uuid> = workspaces.iter().map(|ws| ws.id).collect();
+        let live: HashSet<Uuid> = worktrees.iter().map(|ws| ws.id).collect();
         self.service.review_cache.retain_counts(&live);
         self.change_set_probes
             .lock()
@@ -3363,13 +3363,13 @@ impl Watcher {
             .retain(|id, _| live.contains(id));
 
         // Drained once for the whole pass, before anything is decided, for the
-        // reason `sample` drains the log watcher once a tick: every workspace
-        // consults the same answer, and draining per workspace would give the
+        // reason `sample` drains the log watcher once a tick: every worktree
+        // consults the same answer, and draining per worktree would give the
         // first one the news and the rest an empty set. Events that arrive
         // while this pass runs land in the next drain rather than being lost —
         // the set is what coalesces them, and it is never cleared by anything
         // but a drain.
-        let moved = self.fs_watcher.drain_workspaces();
+        let moved = self.fs_watcher.drain_worktrees();
 
         // A directory git cares about that did not exist when the registration
         // walk ran. Its creation surfaced, because its parent is watched;
@@ -3382,7 +3382,7 @@ impl Watcher {
             .filter(|(id, paths)| self.fs_watcher.needs_rewalk(**id, paths))
             .map(|(id, _)| *id)
             .collect();
-        let fleet: Vec<(Uuid, std::path::PathBuf)> = workspaces
+        let fleet: Vec<(Uuid, std::path::PathBuf)> = worktrees
             .iter()
             .map(|ws| (ws.id, std::path::PathBuf::from(&ws.worktree_path)))
             .collect();
@@ -3394,10 +3394,10 @@ impl Watcher {
         // exactly this class of reason — see `spawn_change_set_probe`. When it
         // does work it is a `git ls-files` and a run of `watch` calls, both of
         // which the tick loop would have to wait on if this ran there.
-        self.fs_watcher.sync_workspaces(&fleet, &rewalk).await;
+        self.fs_watcher.sync_worktrees(&fleet, &rewalk).await;
 
         let now = now_millis();
-        for ws in workspaces {
+        for ws in worktrees {
             let worktree = std::path::PathBuf::from(&ws.worktree_path);
             // A worktree whose directory is gone is not a worktree that changed
             // nothing; it is one git will refuse, loudly, ten seconds at a time.
@@ -3433,12 +3433,12 @@ impl Watcher {
                 probed_at.is_none_or(|probed| now.saturating_sub(probed) >= CHANGE_SET_BACKSTOP_MS);
             let unproven = self.service.review_cache.counts_unproven(ws.id);
 
-            let worth_probing = if self.fs_watcher.covers_workspace(ws.id) {
+            let worth_probing = if self.fs_watcher.covers_worktree(ws.id) {
                 moved.contains_key(&ws.id) || worked_since || unproven || backstop_due
             } else {
                 // The fallback, and the reason `cheap_gate` is still here. A
                 // registration that failed — no backend, the inotify ceiling, a
-                // worktree too large to watch — leaves this workspace exactly
+                // worktree too large to watch — leaves this worktree exactly
                 // where it was before any of this: two `stat`s and the activity
                 // gate, which is a known and bounded gap rather than a daemon
                 // that quietly stopped noticing edits. `fs_watch` says so out
@@ -3485,9 +3485,9 @@ impl Watcher {
             // The activity trace's upper half and its commit marks, off the
             // counts this pass just refreshed. Free by construction: a map
             // lookup for the diff, one `stat` for the reflog. See
-            // `record_workspace_trace`, which states exactly what the upper
+            // `record_worktree_trace`, which states exactly what the upper
             // half is and what it cannot say.
-            self.record_workspace_trace(ws.id, &worktree, now_millis() / 1000);
+            self.record_worktree_trace(ws.id, &worktree, now_millis() / 1000);
 
             if let Some(version) = version {
                 self.announce_change_set(ws.id, version);
@@ -3719,21 +3719,21 @@ impl Watcher {
         if panes.inventory_healthy {
             let terminals: HashSet<Uuid> = fleet
                 .iter()
-                .flat_map(|workspace| workspace.terminals.iter().map(|terminal| terminal.terminal.id))
+                .flat_map(|worktree| worktree.terminals.iter().map(|terminal| terminal.terminal.id))
                 .collect();
             let daemon = self.service.tmux.daemon_id();
             let orphaned: Vec<_> = panes
                 .panes
                 .iter()
                 .filter(|pane| orphaned_pane(pane, daemon, &terminals))
-                .map(|pane| (pane.pane_id.clone(), pane.workspace_id, pane.terminal_id))
+                .map(|pane| (pane.pane_id.clone(), pane.worktree_id, pane.terminal_id))
                 .collect();
 
             let mut repaired = HashSet::new();
-            for (pane, workspace, terminal) in orphaned {
+            for (pane, worktree, terminal) in orphaned {
                 match self.service.tmux.kill_pane(&pane).await {
                     Ok(true) => {
-                        repaired.insert(workspace);
+                        repaired.insert(worktree);
                         tracing::warn!(%pane, %terminal, "reaped orphaned managed pane");
                     }
                     Ok(false) => {}
@@ -3745,9 +3745,9 @@ impl Watcher {
 
             if !repaired.is_empty() {
                 panes = self.service.inventory.refresh().await;
-                for workspace in repaired {
-                    if let Ok(groups) = self.service.layout(workspace).await {
-                        self.publish_layout(workspace, &groups);
+                for worktree in repaired {
+                    if let Ok(groups) = self.service.layout(worktree).await {
+                        self.publish_layout(worktree, &groups);
                     }
                 }
             }
@@ -3790,8 +3790,8 @@ impl Watcher {
         let mut live = Vec::new();
         // Changes panes whose pane has gone. See the reap below the loop.
         let mut spent = Vec::new();
-        for workspace in &fleet {
-            for terminal in &workspace.terminals {
+        for view in &fleet {
+            for terminal in &view.terminals {
                 let id = terminal.terminal.id;
                 // A diff that has been closed leaves nothing behind.
                 //
@@ -3847,12 +3847,12 @@ impl Watcher {
                     title,
                     purpose,
                     pid: running.map(|r| r.pid),
-                    cwd: workspace.workspace.worktree_path.clone(),
-                    // The same string `wire::workspace` puts on the wire as
+                    cwd: view.worktree.worktree_path.clone(),
+                    // The same string `wire::worktree` puts on the wire as
                     // `task_name`, off the same row, so a notification and the
                     // sidebar row it is about name the worktree identically.
-                    workspace: workspace.workspace.name(),
-                    workspace_id: workspace.workspace.id,
+                    worktree: view.worktree.name(),
+                    worktree_id: view.worktree.id,
                     state: terminal.state(),
                     pane_mode: terminal.terminal.pane_mode,
                     preset: terminal.terminal.command_preset.clone(),
@@ -3865,7 +3865,7 @@ impl Watcher {
         // Announced once for however many were reaped, because a client re-reads
         // the fleet rather than applying this as a delta — the same contract
         // `fleet_changed` already has for a reconcile pass that deleted a
-        // workspace.
+        // worktree.
         if !spent.is_empty() {
             for id in spent {
                 if let Err(e) = self.service.remove_terminal(id).await {
@@ -3920,7 +3920,7 @@ impl Watcher {
         // and the next read would draw yesterday afternoon as this one. See
         // `Trace::advance_to`.
         self.tick_traces(
-            &live.iter().map(|s| (s.id, s.workspace_id)).collect(),
+            &live.iter().map(|s| (s.id, s.worktree_id)).collect(),
             now_millis() / 1000,
         );
 
@@ -3931,8 +3931,8 @@ impl Watcher {
             purpose,
             pid,
             cwd,
-            workspace,
-            workspace_id,
+            worktree,
+            worktree_id,
             state: terminal_state,
             pane_mode,
             preset,
@@ -4207,16 +4207,16 @@ impl Watcher {
                 self.change_set_activity
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
-                    .insert(workspace_id, now);
+                    .insert(worktree_id, now);
                 // WHICH pane, as well as whether any. The gate above only has
                 // to know that this worktree is worth a `git diff`; the trace's
-                // upper half has to put the result on a row, and a workspace's
+                // upper half has to put the result on a row, and a worktree's
                 // diff belongs to whichever of its panes was working while it
                 // grew. Cleared by `probe_change_sets` when it spends them.
                 self.trace_workers
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
-                    .entry(workspace_id)
+                    .entry(worktree_id)
                     .or_default()
                     .insert(id);
             }
@@ -4334,10 +4334,10 @@ impl Watcher {
                         Quoted {
                             // The one fact here that is NOT off the record, because
                             // it is not a fact about the pane's state at all: a
-                            // workspace's name does not change while a turn ends,
+                            // worktree's name does not change while a turn ends,
                             // and this is the sample's own copy of the row the
                             // outer loop walked to reach this terminal.
-                            workspace: &workspace,
+                            worktree: &worktree,
                             question: record.blocked_question.as_deref(),
                             // Off the same record as everything else here, for the
                             // reason the comment above gives: the card, the row and
@@ -4360,7 +4360,7 @@ impl Watcher {
             // the phone. See `exited_into_failure` for the exact rule.
             if exited_into_failure(just_appeared, previous_state, terminal_state, exit_code, exit_signal)
             {
-                self.push_failed_exit(id, &command, &workspace, exit_code, exit_signal);
+                self.push_failed_exit(id, &command, &worktree, exit_code, exit_signal);
             }
 
             tracing::info!(
@@ -4387,8 +4387,8 @@ impl Watcher {
     /// may not have.
     async fn announce(&self, terminal: Uuid, observed: Observed) {
         let Ok(fleet) = self.service.fleet().await else { return };
-        for workspace in &fleet {
-            let Some(view) = workspace.terminals.iter().find(|t| t.terminal.id == terminal) else {
+        for worktree in &fleet {
+            let Some(view) = worktree.terminals.iter().find(|t| t.terminal.id == terminal) else {
                 continue;
             };
             // `terminal_with_agent_state`, not `terminal`.
@@ -4690,7 +4690,7 @@ mod tests {
     #[test]
     fn a_finished_agent_says_what_it_did() {
         let quoted = Quoted {
-            workspace: "add-auth",
+            worktree: "add-auth",
             question: None,
             said: Some("I've added the tail window and fixed the stale action"),
         };
@@ -4710,18 +4710,18 @@ mod tests {
     /// harness, which is exactly what every pane in the fleet has in common.
     /// The worktree is what tells them apart, and it goes in the BODY because
     /// the title is already a sentence and because both local notifiers have
-    /// written `workspace — said` since they gained a body: the owner reads a
+    /// written `worktree — said` since they gained a body: the owner reads a
     /// Mac banner and a phone push about the same pane, and they must not be
     /// two different notifications.
     #[test]
-    fn a_finished_agent_says_which_workspace_it_finished_in() {
+    fn a_finished_agent_says_which_worktree_it_finished_in() {
         let quoted =
-            Quoted { workspace: "add-auth", question: None, said: Some("Both tests pass.") };
+            Quoted { worktree: "add-auth", question: None, said: Some("Both tests pass.") };
         let one = notification(AgentActivity::Done, "codex", quoted, false, None).expect("done");
         let other = notification(
             AgentActivity::Done,
             "codex",
-            Quoted { workspace: "fix-flaky-ci", ..quoted },
+            Quoted { worktree: "fix-flaky-ci", ..quoted },
             false,
             None,
         )
@@ -4733,12 +4733,12 @@ mod tests {
 
     /// A turn can be all tool calls and no prose. That reads as the row it
     /// belongs to rather than as a blank line pretending to be content — and
-    /// the workspace on its own is still an answer to "which one finished",
+    /// the worktree on its own is still an answer to "which one finished",
     /// which is the more useful half.
     #[test]
     fn a_finished_agent_that_said_nothing_still_says_where() {
         for quiet in [None, Some(""), Some("   ")] {
-            let quoted = Quoted { workspace: "add-auth", question: None, said: quiet };
+            let quoted = Quoted { worktree: "add-auth", question: None, said: quiet };
             let notice =
                 notification(AgentActivity::Done, "claude", quoted, false, None).expect("done");
             assert_eq!(notice.subtitle, "add-auth", "{quiet:?}");
@@ -4756,16 +4756,16 @@ mod tests {
         let notice =
             notification(AgentActivity::Done, "claude", Quoted::default(), false, None).expect("done");
         assert_eq!(notice.subtitle, "");
-        let unnamed = Quoted { workspace: "  ", question: None, said: Some("Both tests pass.") };
+        let unnamed = Quoted { worktree: "  ", question: None, said: Some("Both tests pass.") };
         let notice = notification(AgentActivity::Done, "claude", unnamed, false, None).expect("done");
         assert_eq!(notice.subtitle, "Both tests pass.");
     }
 
-    /// A failed turn names its workspace too. Being told an agent died is
+    /// A failed turn names its worktree too. Being told an agent died is
     /// worth very little if it does not say which one.
     #[test]
-    fn a_failed_turn_says_which_workspace_died() {
-        let quoted = Quoted { workspace: "add-auth", ..Quoted::default() };
+    fn a_failed_turn_says_which_worktree_died() {
+        let quoted = Quoted { worktree: "add-auth", ..Quoted::default() };
         let notice = notification(AgentActivity::Done, "codex", quoted, true, None).expect("done");
         assert_eq!(notice.title, "codex failed");
         assert_eq!(notice.subtitle, "add-auth — Its last turn didn’t finish");
@@ -4775,14 +4775,14 @@ mod tests {
     /// front of it: a blocked agent is asking, and what it said before asking
     /// is not the answer to "what does it need".
     ///
-    /// The workspace rides in front of the question for the same reason it
+    /// The worktree rides in front of the question for the same reason it
     /// rides in front of an answer: `codex needs you / Do you want to create
     /// haiku.txt?` is answerable from a lock screen and still does not say
     /// which of three codexes is asking it.
     #[test]
     fn a_blocked_agent_still_quotes_its_question() {
         let quoted = Quoted {
-            workspace: "add-auth",
+            worktree: "add-auth",
             question: Some("Overwrite fruit.txt?"),
             said: Some("Almost there"),
         };
@@ -4793,10 +4793,10 @@ mod tests {
 
     /// A `Quoted` carrying only a question, which is what these tests are about.
     /// The said half arrives from the agent's log and has its own tests, and
-    /// the workspace half is asserted where it is the point rather than
+    /// the worktree half is asserted where it is the point rather than
     /// repeated at every call site that is about something else.
     fn just_asking(question: &str) -> Quoted<'_> {
-        Quoted { workspace: "", question: Some(question), said: None }
+        Quoted { worktree: "", question: Some(question), said: None }
     }
 
     /// `resolved_activity` for the tests that predate questions, which is most
@@ -5034,7 +5034,7 @@ mod tests {
         let notice = notification(
             AgentActivity::Done,
             "codex",
-            Quoted { workspace: "add-auth", question: None, said: entry.feed.said() },
+            Quoted { worktree: "add-auth", question: None, said: entry.feed.said() },
             false,
             None,
         )
@@ -6786,7 +6786,7 @@ mod tests {
     fn tagged_pane(daemon: Uuid, terminal: Uuid) -> farcooler_core::inventory::TaggedPane {
         farcooler_core::inventory::TaggedPane {
             daemon_id: daemon,
-            workspace_id: Uuid::from_u128(2),
+            worktree_id: Uuid::from_u128(2),
             terminal_id: terminal,
             schema_version: 1,
             pane_id: "%1".into(),
@@ -6974,7 +6974,7 @@ mod tests {
         // blank second line — see `registry.blocked_question`, which returns
         // None for a trust gate whose '?' is mid-line.
         for absent in [None, Some(""), Some("   ")] {
-            let quoted = Quoted { workspace: "add-auth", question: absent, said: None };
+            let quoted = Quoted { worktree: "add-auth", question: absent, said: None };
             let notice = notification(AgentActivity::Blocked, "claude", quoted, false, None)
                 .expect("blocked");
             assert_eq!(notice.subtitle, "add-auth — Waiting for your answer", "{absent:?}");
@@ -7053,7 +7053,7 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_exit_names_the_code_and_the_workspace() {
+    fn a_failed_exit_names_the_code_and_the_worktree() {
         let notice = exit_notice("cargo build", "add-auth", Some(101), None);
         assert_eq!(notice.title, "cargo build failed");
         // Which build broke, as well as how. `cargo build failed / Exit code

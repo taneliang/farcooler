@@ -124,7 +124,7 @@ enum DaemonSkew: Equatable {
 /// place that builds these.
 struct DaemonUpdateTarget: Identifiable {
     /// The ssh target. Empty is this Mac — a real value here, not "nothing",
-    /// the same convention `workspace.host` and `FleetStore` use.
+    /// the same convention `worktree.host` and `FleetStore` use.
     let host: String
     let skew: DaemonSkew
     let update: () async -> DaemonUpdateOutcome

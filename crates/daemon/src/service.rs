@@ -1,6 +1,6 @@
 //! Domain services: the operations a client can invoke.
 //!
-//! Every read that reports terminal or workspace state DERIVES it from durable
+//! Every read that reports terminal or worktree state DERIVES it from durable
 //! intent joined against the live tmux inventory. Nothing here ever reads a
 //! stored runtime state, because none exists.
 
@@ -13,7 +13,7 @@ use farcooler_core::{
     inventory::RuntimeInventory,
     names, validate,
 };
-use farcooler_protocol::v1::{TerminalIntent, TerminalState, WorkspaceState};
+use farcooler_protocol::v1::{TerminalIntent, TerminalState, WorktreeState};
 use farcooler_store::{Store, models};
 use farcooler_tmux::{LiveInventory, TmuxServer};
 use uuid::Uuid;
@@ -42,7 +42,7 @@ use crate::{agent_supervisor, foreground, git, hook_ingress, paths, session_disc
 /// The binary that hosts `agent-host`, next to the daemon that is asking.
 ///
 /// NOT `current_exe()`. The daemon is `farcoolerd` and `agent-host` is a
-/// subcommand of the `farcooler` CLI — two binaries from one workspace. Using
+/// subcommand of the `farcooler` CLI — two binaries from one worktree. Using
 /// the daemon's own path put `farcoolerd agent-host …` into the pane, where
 /// `farcoolerd` ignored the arguments, saw a daemon already listening, and
 /// exited 0. The pane then died instantly and the terminal derived as an exit
@@ -794,7 +794,7 @@ type MergeHooks = fn(&str, &Path) -> String;
 /// behavior.
 ///
 /// Never fails. Writing into a worktree is a side effect on somebody's files
-/// and it is not worth a workspace for: a read-only mount, a `.cursor` that is
+/// and it is not worth a worktree for: a read-only mount, a `.cursor` that is
 /// a file rather than a directory, a hooks file we cannot parse — each of
 /// those loses the live view for that agent in that worktree and nothing else.
 async fn install_project_hooks(worktree: &Path, socket: &Path) {
@@ -1771,8 +1771,8 @@ pub struct Service {
     repo_urls: std::sync::Mutex<std::collections::HashMap<Uuid, Option<String>>>,
     /// One mutex per repository, created on first use and never removed.
     ///
-    /// Held across any sequence that mutates git and then writes a workspace
-    /// row. `create_workspace` runs `git worktree add` and then inserts; the
+    /// Held across any sequence that mutates git and then writes a worktree
+    /// row. `create_worktree` runs `git worktree add` and then inserts; the
     /// reconciler lists worktrees and then adopts what has no row. Without
     /// this, a reconcile landing between those two halves sees a worktree with
     /// no row, adopts it under the directory name, and the original call then
@@ -1788,11 +1788,11 @@ pub struct Service {
     repo_locks: std::sync::Mutex<std::collections::HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>>,
 }
 
-/// A workspace plus its derived state and terminals.
+/// A worktree plus its derived state and terminals.
 #[derive(Debug)]
-pub struct WorkspaceView {
-    pub workspace: models::Workspace,
-    pub state: WorkspaceState,
+pub struct WorktreeView {
+    pub worktree: models::Worktree,
+    pub state: WorktreeState,
     pub terminals: Vec<TerminalView>,
 }
 
@@ -2117,7 +2117,7 @@ impl Service {
     }
 
 
-    /// Where managed worktrees are created, one directory per workspace.
+    /// Where managed worktrees are created, one directory per worktree.
     fn worktrees_dir(&self) -> Result<PathBuf> {
         let dir = self.root.join("worktrees");
         std::fs::create_dir_all(&dir).map_err(|_| DomainError::OperationFailed)?;
@@ -2257,35 +2257,35 @@ impl Service {
         git_dir.parent().map(|p| p.to_path_buf()).unwrap_or(git_dir)
     }
 
-    // ---- workspaces ----
+    // ---- worktrees ----
 
-    /// Create a workspace: one worktree plus branch for one task.
+    /// Create a worktree: one directory plus branch for one task.
     ///
     /// Git succeeds before any metadata is written. If metadata then fails, the
     /// newly created clean worktree and unpushed branch are rolled back, and a
     /// dirty one is preserved instead.
-    pub async fn create_workspace(
+    pub async fn create_worktree(
         &self,
         repository_id: Uuid,
         name: &str,
         branch: &str,
         base_revision: &str,
-    ) -> Result<models::Workspace> {
-        self.create_workspace_with(repository_id, name, branch, base_revision, false).await
+    ) -> Result<models::Worktree> {
+        self.create_worktree_with(repository_id, name, branch, base_revision, false).await
     }
 
-    /// `create_workspace`, and with `fork_only` never on a branch that already
+    /// `create_worktree`, and with `fork_only` never on a branch that already
     /// exists anywhere: a name a remote carries is refused as `BranchExists`
     /// instead of checked out (`git::create_worktree_with`). What
-    /// `WorkspaceCreate.fork_only` asks for.
-    pub async fn create_workspace_with(
+    /// `WorktreeCreate.fork_only` asks for.
+    pub async fn create_worktree_with(
         &self,
         repository_id: Uuid,
         name: &str,
         branch: &str,
         base_revision: &str,
         fork_only: bool,
-    ) -> Result<models::Workspace> {
+    ) -> Result<models::Worktree> {
         validate::worktree_name(name)?;
         validate::branch_name(branch)?;
 
@@ -2318,7 +2318,7 @@ impl Service {
             git::mark_forked(&dest, &self.install_id).await;
         }
 
-        match self.store.create_workspace(repository_id, branch, &dest.to_string_lossy(), false) {
+        match self.store.create_worktree(repository_id, branch, &dest.to_string_lossy(), false) {
             Ok(ws) => {
                 // After the row, not before it: the failure arm below removes
                 // the worktree again, and there is no reason to have written
@@ -2332,7 +2332,7 @@ impl Service {
                 let removed = git::rollback_worktree(&repo_path, branch, &dest, &base_commit)
                     .await
                     .unwrap_or(false);
-                tracing::warn!(rolled_back = removed, "workspace metadata failed after git");
+                tracing::warn!(rolled_back = removed, "worktree metadata failed after git");
                 Err(e)
             }
         }
@@ -2346,20 +2346,20 @@ impl Service {
 
     /// Every worktree git reports for a repository.
     ///
-    /// A diagnostic view for `worktree.list`, a host-admin surface — not a
+    /// A diagnostic view for `worktree.discover`, a host-admin surface — not a
     /// list of candidates for a client to act on. Task 4's reconciler adopts
     /// every worktree it sees automatically, main checkout included, so
     /// "not yet registered" stopped being a meaningful filter: everything git
-    /// reports either already has a workspace row or will on the next tick.
+    /// reports either already has a worktree row or will on the next tick.
     pub async fn discover_worktrees(&self, repository_id: Uuid) -> Result<Vec<git::WorktreeInfo>> {
         let repo = self.store.get_repository(repository_id)?;
         let repo_path = self.repository_worktree(&repo);
         git::list_worktrees(&repo_path).await
     }
 
-    /// Create a workspace on a branch that already exists.
+    /// Create a worktree on a branch that already exists.
     ///
-    /// The other half of `create_workspace`. Work arrives on a branch as often
+    /// The other half of `create_worktree`. Work arrives on a branch as often
     /// as it starts on one: pushed from another machine, handed over by someone
     /// else, or produced by an agent running somewhere else entirely. Without
     /// this, picking that work up meant doing it by hand outside Far Cooler and
@@ -2373,7 +2373,7 @@ impl Service {
         &self,
         repository_id: Uuid,
         branch: &str,
-    ) -> Result<models::Workspace> {
+    ) -> Result<models::Worktree> {
         validate::branch_name(branch)?;
 
         // A branch is `feat/rate-limiting`; the worktree is `rate-limiting`. The
@@ -2394,14 +2394,14 @@ impl Service {
         git::create_worktree_from_branch(&repo_path, branch, &dest).await?;
         git::mark_owner(&dest, &self.install_id).await;
 
-        match self.store.create_workspace(repository_id, branch, &dest.to_string_lossy(), false) {
-            Ok(workspace) => {
+        match self.store.create_worktree(repository_id, branch, &dest.to_string_lossy(), false) {
+            Ok(worktree) => {
                 // The other door into "a worktree Far Cooler just made". A
                 // branch picked up from somewhere else runs the same agents in
                 // the same panes, and a pane that reports nothing is exactly
-                // as broken here as it is in `create_workspace`.
+                // as broken here as it is in `create_worktree`.
                 install_project_hooks(&dest, &hook_ingress::HookIngress::socket_path(&self.root)).await;
-                Ok(workspace)
+                Ok(worktree)
             }
             Err(e) => {
                 // The worktree exists but nothing records it. Remove it —
@@ -2416,7 +2416,7 @@ impl Service {
         }
     }
 
-    /// Every workspace on this runner, in the order the user put them in.
+    /// Every worktree on this runner, in the order the user put them in.
     ///
     /// One query rather than a loop over repositories. The loop was not an
     /// order: `list_repositories` has no `ORDER BY` either, so the fleet came
@@ -2425,13 +2425,13 @@ impl Service {
     /// yielded — which shifts as rows are updated. That is the "basically
     /// random" the sidebar showed.
     ///
-    /// It still lists only workspaces whose repository is registered, which is
+    /// It still lists only worktrees whose repository is registered, which is
     /// what the loop was really enforcing.
-    pub fn list_workspaces(&self) -> Result<Vec<models::Workspace>> {
-        self.store.list_workspaces_in_order()
+    pub fn list_worktrees(&self) -> Result<Vec<models::Worktree>> {
+        self.store.list_worktrees_in_order()
     }
 
-    /// Put these workspaces in this order, and keep it.
+    /// Put these worktrees in this order, and keep it.
     ///
     /// The client sends the list it is drawing, first on screen first, and the
     /// store permutes those cards among the ranks they already hold. Nothing
@@ -2442,11 +2442,11 @@ impl Service {
     /// Not serialized per repository the way creation is. A reorder writes only
     /// this table, in one transaction, and it never runs git — so there is no
     /// worktree operation for it to race.
-    pub async fn reorder_workspaces(&self, ordered: &[Uuid]) -> Result<()> {
-        self.store.reorder_workspaces(ordered)
+    pub async fn reorder_worktrees(&self, ordered: &[Uuid]) -> Result<()> {
+        self.store.reorder_worktrees(ordered)
     }
 
-    /// Take a workspace out of the main list. Never changes git data.
+    /// Take a worktree out of the main list. Never changes git data.
     ///
     /// Deliberately unconditional. Its predecessor refused while a managed
     /// terminal was running, which fit "archive" — a lifecycle step meaning
@@ -2457,12 +2457,12 @@ impl Service {
     /// agent stops being visible. It is handled where it belongs, in the
     /// sidebar, whose `Hidden (n)` header carries an attention dot when
     /// anything inside it wants the user.
-    pub async fn hide_workspace(&self, id: Uuid) -> Result<models::Workspace> {
-        let ws = self.store.get_workspace(id)?;
+    pub async fn hide_worktree(&self, id: Uuid) -> Result<models::Worktree> {
+        let ws = self.store.get_worktree(id)?;
         if ws.hidden {
             return Ok(ws);
         }
-        self.store.set_workspace_flags(id, ws.resource_version, true, ws.worktree_missing)
+        self.store.set_worktree_flags(id, ws.resource_version, true, ws.worktree_missing)
     }
 
     /// Delete a terminal's record.
@@ -2518,38 +2518,38 @@ impl Service {
         Ok(())
     }
 
-    /// Bring a hidden workspace back into the main list.
+    /// Bring a hidden worktree back into the main list.
     ///
     /// Hiding never touched git, so this never has to reconstruct anything. If
     /// the worktree went away while it was hidden the reconciler has already
     /// said so, and the row comes back carrying that fact rather than pretending
     /// otherwise.
-    pub async fn unhide_workspace(&self, id: Uuid) -> Result<models::Workspace> {
-        let ws = self.store.get_workspace(id)?;
+    pub async fn unhide_worktree(&self, id: Uuid) -> Result<models::Worktree> {
+        let ws = self.store.get_worktree(id)?;
         if !ws.hidden {
             return Ok(ws);
         }
-        self.store.set_workspace_flags(id, ws.resource_version, false, ws.worktree_missing)
+        self.store.set_worktree_flags(id, ws.resource_version, false, ws.worktree_missing)
     }
 
     /// Stop allowing Far Cooler to operate under a directory.
     ///
-    /// Refused while any task workspace under this root is still live, because
-    /// a root is the thing that makes those workspaces legal: removing it while
+    /// Refused while any task worktree under this root is still live, because
+    /// a root is the thing that makes those worktrees legal: removing it while
     /// they exist would leave records Far Cooler can no longer act on. Hidden
-    /// workspaces do not block it — they are already out of the way — and
+    /// worktrees do not block it — they are already out of the way — and
     /// nothing on disk is touched either way.
     ///
     /// Every refusal is checked before anything is deleted, and every
     /// repository's `repo_lock` is held for the whole function, acquired
     /// before the first check. `reconcile::repository` takes the identical
     /// lock and Task 5 runs it on a ticker; without holding it here, a
-    /// reconcile could insert a workspace row between the checks below and the
+    /// reconcile could insert a worktree row between the checks below and the
     /// deletes, reproducing the FK violation this function exists to avoid.
     /// That lock is what closes THAT race, specifically — it says nothing
     /// about `terminal.create` or a pane going live through tmux directly,
     /// neither of which takes `repo_lock`. So the delete loop below is safe
-    /// against a repository gaining a workspace out from under it, but not
+    /// against a repository gaining a worktree out from under it, but not
     /// airtight against a terminal's state changing in the vanishingly narrow
     /// window between the running check and its own delete; `remove_terminal`
     /// would refuse that one on the spot rather than silently drop it, and the
@@ -2568,15 +2568,15 @@ impl Service {
             _guards.push(lock.lock().await);
         }
 
-        let mut all_workspaces: Vec<models::Workspace> = Vec::new();
+        let mut all_worktrees: Vec<models::Worktree> = Vec::new();
         for repository in &repositories {
-            all_workspaces.extend(self.store.list_workspaces_for_repository(repository.id)?);
+            all_worktrees.extend(self.store.list_worktrees_for_repository(repository.id)?);
         }
 
-        // Refused while ANY task workspace remains, hidden or not.
+        // Refused while ANY task worktree remains, hidden or not.
         //
-        // The design's rule was "refused while non-hidden workspaces exist",
-        // which is the right instinct but leaves a gap: a hidden workspace
+        // The design's rule was "refused while non-hidden worktrees exist",
+        // which is the right instinct but leaves a gap: a hidden worktree
         // still has a worktree directory on disk. Deleting its record with the
         // root would strand that directory somewhere Far Cooler is no longer
         // allowed to touch, so it could never be cleaned up. Removing the
@@ -2591,9 +2591,9 @@ impl Service {
         // is the directory the user already owns and manages themselves;
         // de-registering the root touches no disk either way, main checkout
         // included, so there is nothing here for it to strand.
-        let remaining = all_workspaces.iter().filter(|w| !w.is_main_checkout).count();
+        let remaining = all_worktrees.iter().filter(|w| !w.is_main_checkout).count();
         if remaining > 0 {
-            return Err(DomainError::WorkspacesExist);
+            return Err(DomainError::WorktreesExist);
         }
 
         // Refused outright if the tmux inventory cannot be trusted at all.
@@ -2614,8 +2614,8 @@ impl Service {
         // `RunningProcesses` is the same vocabulary `remove_terminal` and
         // `remove_worktree` already use for "something is alive under here",
         // and a stopped-but-recorded terminal does not qualify.
-        for ws in &all_workspaces {
-            let view = self.workspace_view(ws).await?;
+        for ws in &all_worktrees {
+            let view = self.worktree_view(ws).await?;
             if view
                 .terminals
                 .iter()
@@ -2625,19 +2625,19 @@ impl Service {
             }
         }
 
-        // Deleted in foreign-key order: terminals, then workspaces, then
+        // Deleted in foreign-key order: terminals, then worktrees, then
         // repositories, then the root. Terminals go through `remove_terminal`
         // rather than a second hand-rolled deletion path beside it, so the
         // pane `remain-on-exit` retains for an already-exited terminal is
         // killed along with the record — left to a bare `delete_terminal` it
         // would be orphaned in tmux with nothing left that knows about it.
-        for ws in &all_workspaces {
-            for term in self.store.list_terminals_for_workspace(ws.id)? {
+        for ws in &all_worktrees {
+            for term in self.store.list_terminals_for_worktree(ws.id)? {
                 self.remove_terminal(term.id).await?;
             }
         }
-        for ws in &all_workspaces {
-            self.store.delete_workspace(ws.id, ws.resource_version)?;
+        for ws in &all_worktrees {
+            self.store.delete_worktree(ws.id, ws.resource_version)?;
         }
         // The repositories go with it. They exist only as members of a root,
         // and leaving them behind would strand rows pointing at nothing.
@@ -2664,7 +2664,7 @@ impl Service {
     /// inspected, so it needs no confirmation either — there is nothing left
     /// to lose.
     pub async fn removal_needs_confirmation(&self, id: Uuid) -> Result<bool> {
-        let ws = self.store.get_workspace(id)?;
+        let ws = self.store.get_worktree(id)?;
         if !std::path::Path::new(&ws.worktree_path).is_dir() {
             return Ok(false);
         }
@@ -2692,10 +2692,10 @@ impl Service {
         Ok(holds_an_unseen_skill_file(worktree).await)
     }
 
-    /// Remove a workspace's worktree.
+    /// Remove a worktree's directory.
     ///
     /// The most destructive action in the product. It CLOSES every terminal in
-    /// the workspace rather than refusing while one is running: the user asked
+    /// the worktree rather than refusing while one is running: the user asked
     /// for the worktree gone, and telling them to go and stop four terminals
     /// first is telling them to do the thing they just asked for. What the old
     /// refusal protected — a directory deleted out from under a live process —
@@ -2712,7 +2712,7 @@ impl Service {
     /// untouched. A dirty worktree still requires the caller to have
     /// confirmed, decided by `removal_needs_confirmation`.
     pub async fn remove_worktree(&self, id: Uuid) -> Result<()> {
-        let ws = self.store.get_workspace(id)?;
+        let ws = self.store.get_worktree(id)?;
         let repo = self.store.get_repository(ws.repository_id)?;
         let repo_path = self.repository_worktree(&repo);
 
@@ -2761,16 +2761,16 @@ impl Service {
         // Two steps per terminal rather than one, because that is the sequence
         // that already works: `stop_terminal` kills the pane and sets intent
         // Stopped, which is what makes the `remove_terminal` that follows pass
-        // its own running check. `remove_root` deletes its workspaces' terminals
+        // its own running check. `remove_root` deletes its worktrees' terminals
         // through the same pair, for the stated reason that a hand-rolled
         // deletion beside it would orphan the pane `remain-on-exit` retains.
         //
         // `stop_terminal`'s result is discarded and `remove_terminal`'s is not,
         // and the asymmetry is deliberate. A terminal whose pane is already gone
         // has nothing to stop, and that is no reason to keep the worktree; a
-        // record that will not delete is, because `terminals.workspace_id` is a
-        // foreign key with no cascade and the workspace row is about to go.
-        for term in self.store.list_terminals_for_workspace(ws.id)? {
+        // record that will not delete is, because `terminals.worktree_id` is a
+        // foreign key with no cascade and the worktree row is about to go.
+        for term in self.store.list_terminals_for_worktree(ws.id)? {
             let _ = self.stop_terminal(term.id).await;
             self.remove_terminal(term.id).await?;
         }
@@ -2791,8 +2791,8 @@ impl Service {
             return Err(DomainError::OperationFailed);
         }
 
-        // The workspace record goes with the worktree; the BRANCH stays.
-        self.store.delete_workspace(id, ws.resource_version)
+        // The worktree row goes with the directory; the BRANCH stays.
+        self.store.delete_worktree(id, ws.resource_version)
     }
 
     // ---- terminals ----
@@ -2815,7 +2815,7 @@ impl Service {
     /// The two halves are one function because they are one question — "make
     /// this agent able to report itself, here" — and splitting them is exactly
     /// how the bug this fixes happened. claude's `--settings` hung off the
-    /// launch; codex's and cursor's project files hung off `create_workspace`
+    /// launch; codex's and cursor's project files hung off `create_worktree`
     /// and `adopt_branch`. So a worktree Far Cooler made had all three, and the
     /// checkout a person actually works in — adopted by the reconciler, never
     /// created by us — had only claude. The one repository that mattered most
@@ -2952,11 +2952,11 @@ impl Service {
     /// Create a terminal: a tagged tmux window running the preset.
     pub async fn create_terminal(
         &self,
-        workspace_id: Uuid,
+        worktree_id: Uuid,
         title: &str,
         command_preset: &str,
     ) -> Result<models::Terminal> {
-        self.create_terminal_with_prompt(workspace_id, title, command_preset, None, None).await
+        self.create_terminal_with_prompt(worktree_id, title, command_preset, None, None).await
     }
 
     /// Create a terminal whose agent starts on `prompt`: claude, codex and
@@ -2979,7 +2979,7 @@ impl Service {
     /// `opening_prompt`, with any `prompt` given after it. See `opening_for`.
     pub async fn create_terminal_with_prompt(
         &self,
-        workspace_id: Uuid,
+        worktree_id: Uuid,
         title: &str,
         command_preset: &str,
         prompt: Option<&str>,
@@ -2992,12 +2992,12 @@ impl Service {
             validate_launch_prompt(p)?;
         }
 
-        let ws = self.store.get_workspace(workspace_id)?;
+        let ws = self.store.get_worktree(worktree_id)?;
         let (task_key, prompt) = self.opening_for(&ws, command_preset, task, prompt)?;
 
         // 1. Commit the durable record with intent RUNNING, unconfirmed.
         let term = self.store.create_terminal_for_task(
-            workspace_id,
+            worktree_id,
             title,
             command_preset,
             TerminalIntent::Running,
@@ -3055,7 +3055,7 @@ impl Service {
         test_agent::refuse_a_real_agent(&command);
         let created = self
             .tmux
-            .create_terminal_window(workspace_id, term.id, title, &ws.worktree_path, &command)
+            .create_terminal_window(worktree_id, term.id, title, &ws.worktree_path, &command)
             .await;
 
         if let Err(e) = created {
@@ -3101,7 +3101,7 @@ impl Service {
     /// untouched, to be ignored as it always was.
     fn opening_for(
         &self,
-        ws: &models::Workspace,
+        ws: &models::Worktree,
         preset: &str,
         task: Option<Uuid>,
         prompt: Option<&str>,
@@ -3115,7 +3115,7 @@ impl Service {
             return Err(DomainError::InvalidArgument { what: "command_preset" });
         }
         // Deleted since the caller resolved it: the key is what was wrong,
-        // not the workspace a bare `NotFound` would read as.
+        // not the worktree a bare `NotFound` would read as.
         let task = self.store.get_task(task).map_err(|e| match e {
             DomainError::NotFound => DomainError::InvalidArgument { what: "task_key" },
             other => other,
@@ -3136,15 +3136,15 @@ impl Service {
         Ok((key, Some(first)))
     }
 
-    /// The task `key` names on `workspace`'s own board, for `terminal.create`.
+    /// The task `key` names on `worktree`'s own board, for `terminal.create`.
     ///
     /// On that board only. Resolved across every board, a key that happens to
     /// exist elsewhere would open a pane in this repository working another
     /// one's ticket. Exactly one match, or a refusal naming `task_key`: no
     /// match is a typo or another board, and two is the prefixless-key case
     /// `tasks_with_key` returns a list for, which is refused, never picked.
-    pub fn task_on_workspace_board(&self, workspace: Uuid, key: &str) -> Result<Uuid> {
-        let ws = self.store.get_workspace(workspace)?;
+    pub fn task_on_worktree_board(&self, worktree: Uuid, key: &str) -> Result<Uuid> {
+        let ws = self.store.get_worktree(worktree)?;
         match self.store.tasks_with_key(Some(ws.repository_id), key.trim())?.as_slice() {
             [task] => Ok(task.id),
             _ => Err(DomainError::InvalidArgument { what: "task_key" }),
@@ -3244,9 +3244,9 @@ impl Service {
                 .await;
         });
 
-        let Ok(workspaces) = self.list_workspaces() else { return };
-        for ws in workspaces {
-            let Ok(terminals) = self.store.list_terminals_for_workspace(ws.id) else { continue };
+        let Ok(worktrees) = self.list_worktrees() else { return };
+        for ws in worktrees {
+            let Ok(terminals) = self.store.list_terminals_for_worktree(ws.id) else { continue };
             for t in terminals.iter().filter(|t| t.pane_mode == models::PaneMode::Agent) {
                 self.agents.ensure_listening(&self.root, t.id);
             }
@@ -3306,13 +3306,13 @@ impl Service {
     /// honestly rather than one that claims to be running.
     pub async fn split_terminal(
         &self,
-        workspace_id: Uuid,
+        worktree_id: Uuid,
         target: Uuid,
         side: farcooler_protocol::v1::SplitSide,
         title: &str,
         command_preset: &str,
     ) -> Result<models::Terminal> {
-        self.split_terminal_with_prompt(workspace_id, target, side, title, command_preset, None, None)
+        self.split_terminal_with_prompt(worktree_id, target, side, title, command_preset, None, None)
             .await
     }
 
@@ -3322,7 +3322,7 @@ impl Service {
     #[allow(clippy::too_many_arguments)]
     pub async fn split_terminal_with_prompt(
         &self,
-        workspace_id: Uuid,
+        worktree_id: Uuid,
         target: Uuid,
         side: farcooler_protocol::v1::SplitSide,
         title: &str,
@@ -3337,13 +3337,13 @@ impl Service {
             validate_launch_prompt(p)?;
         }
 
-        let ws = self.store.get_workspace(workspace_id)?;
+        let ws = self.store.get_worktree(worktree_id)?;
         let (task_key, prompt) = self.opening_for(&ws, command_preset, task, prompt)?;
         let pane = self.pane_of(target).await?;
         let (axis, before) = crate::layout::split_args(side);
 
         let term = self.store.create_terminal_for_task(
-            workspace_id,
+            worktree_id,
             title,
             command_preset,
             TerminalIntent::Running,
@@ -3452,7 +3452,7 @@ impl Service {
 
     /// Forget a lost terminal, without ever claiming it exited.
     ///
-    /// It used to only set a flag, which cleared the workspace error and left
+    /// It used to only set a flag, which cleared the worktree error and left
     /// the terminal listed as lost with a Dismiss button that could not change
     /// anything a second time. A lost terminal has no pane, no output and no
     /// exit code: once the user has acknowledged it there is nothing left for
@@ -3483,7 +3483,7 @@ impl Service {
     /// Restart a lost or exited terminal as a NEW epoch from the same preset.
     pub async fn restart_terminal(&self, id: Uuid) -> Result<models::Terminal> {
         let term = self.store.get_terminal(id)?;
-        let ws = self.store.get_workspace(term.workspace_id)?;
+        let ws = self.store.get_worktree(term.worktree_id)?;
 
         // A restarted claude or codex reattaches to the conversation it
         // already had rather than starting a new one the record does not know
@@ -3547,7 +3547,7 @@ impl Service {
             None => {
                 self.tmux
                     .create_terminal_window(
-                        term.workspace_id,
+                        term.worktree_id,
                         id,
                         &term.title,
                         &ws.worktree_path,
@@ -3673,7 +3673,7 @@ impl Service {
         force: bool,
     ) -> Result<models::Terminal> {
         let term = self.store.get_terminal(id)?;
-        let ws = self.store.get_workspace(term.workspace_id)?;
+        let ws = self.store.get_worktree(term.worktree_id)?;
 
         // A changes pane is not a posture a pane is in, so it is not one this
         // can move to or from.
@@ -3743,7 +3743,7 @@ impl Service {
                 // pane starting a fresh one.
                 let claimed: Vec<String> = self
                     .store
-                    .list_terminals_for_workspace(term.workspace_id)
+                    .list_terminals_for_worktree(term.worktree_id)
                     .unwrap_or_default()
                     .into_iter()
                     .filter(|t| t.id != id)
@@ -3978,18 +3978,18 @@ impl Service {
         )
     }
 
-    /// Files in a workspace's worktree, for the `@`-mention picker.
+    /// Files in a worktree's directory, for the `@`-mention picker.
     ///
     /// Substring match on the worktree-relative path, capped. Deliberately not
     /// a git call: an untracked file the agent just created is exactly the one
     /// a user wants to mention next.
     pub async fn search_worktree_files(
         &self,
-        workspace_id: Uuid,
+        worktree_id: Uuid,
         query: &str,
         limit: u32,
     ) -> Result<Vec<String>> {
-        let ws = self.store.get_workspace(workspace_id)?;
+        let ws = self.store.get_worktree(worktree_id)?;
         let root = PathBuf::from(&ws.worktree_path);
         let needle = query.to_lowercase();
         let cap = if limit == 0 { 50 } else { limit.min(500) } as usize;
@@ -4144,10 +4144,10 @@ impl Service {
         derive::derive_terminal(&to_record(term), &snapshot)
     }
 
-    /// One workspace with every state derived fresh.
-    pub async fn workspace_view(&self, ws: &models::Workspace) -> Result<WorkspaceView> {
+    /// One worktree with every state derived fresh.
+    pub async fn worktree_view(&self, ws: &models::Worktree) -> Result<WorktreeView> {
         let snapshot = self.inventory.snapshot();
-        let terminals = self.store.list_terminals_for_workspace(ws.id)?;
+        let terminals = self.store.list_terminals_for_worktree(ws.id)?;
 
         let views: Vec<TerminalView> = terminals
             .into_iter()
@@ -4162,22 +4162,22 @@ impl Service {
             .map(|v| (to_record(&v.terminal), v.derived.clone()))
             .collect();
 
-        let state = derive::derive_workspace(
+        let state = derive::derive_worktree(
             ws.hidden,
             ws.worktree_missing,
             ws.creation_failed,
             &pairs,
         );
 
-        Ok(WorkspaceView { workspace: ws.clone(), state, terminals: views })
+        Ok(WorktreeView { worktree: ws.clone(), state, terminals: views })
     }
 
     /// The whole fleet, refreshed once. One inventory query, not one per terminal.
-    pub async fn fleet(&self) -> Result<Vec<WorkspaceView>> {
+    pub async fn fleet(&self) -> Result<Vec<WorktreeView>> {
         self.inventory.refresh().await;
         let mut out = Vec::new();
-        for ws in self.list_workspaces()? {
-            out.push(self.workspace_view(&ws).await?);
+        for ws in self.list_worktrees()? {
+            out.push(self.worktree_view(&ws).await?);
         }
         Ok(out)
     }
@@ -4186,7 +4186,7 @@ impl Service {
 pub(crate) fn to_record(t: &models::Terminal) -> derive::TerminalRecord {
     derive::TerminalRecord {
         id: t.id,
-        workspace_id: t.workspace_id,
+        worktree_id: t.worktree_id,
         intent: t.intent,
         runtime_confirmed: t.runtime_confirmed,
         exit_code: t.exit_code,
@@ -4565,10 +4565,10 @@ mod tests {
         Service::open_in(dir).await.unwrap()
     }
 
-    /// A workspace whose worktree is a real, empty directory a test can write
+    /// A worktree whose directory is a real, empty directory a test can write
     /// into — everything `search_worktree_files` needs and nothing tmux or git
     /// would add, since this is a store-level fixture rather than a live one.
-    async fn seed_workspace(service: &Service) -> models::Workspace {
+    async fn seed_worktree(service: &Service) -> models::Worktree {
         let worktree = tempfile::tempdir().unwrap().keep();
         let root = service
             .store
@@ -4580,7 +4580,7 @@ mod tests {
             .unwrap();
         service
             .store
-            .create_workspace(repo.id, "branch", &worktree.display().to_string(), false)
+            .create_worktree(repo.id, "branch", &worktree.display().to_string(), false)
             .unwrap()
     }
 
@@ -4588,7 +4588,7 @@ mod tests {
     async fn worktree_search_finds_a_file_that_git_has_never_seen() {
         // The @-mention case that matters: the file the agent just created.
         let service = temp_service().await;
-        let ws = seed_workspace(&service).await;
+        let ws = seed_worktree(&service).await;
         std::fs::write(
             std::path::Path::new(&ws.worktree_path).join("brand_new.rs"),
             "fn main() {}",
@@ -4601,7 +4601,7 @@ mod tests {
     #[tokio::test]
     async fn worktree_search_never_offers_the_git_directory() {
         let service = temp_service().await;
-        let ws = seed_workspace(&service).await;
+        let ws = seed_worktree(&service).await;
         let git_dir = std::path::Path::new(&ws.worktree_path).join(".git");
         std::fs::create_dir_all(&git_dir).unwrap();
         std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/main").unwrap();
@@ -4657,9 +4657,9 @@ mod tests {
     /// below, which asserts exactly that for the identical call — the old
     /// `archive_workspace` guard checked `== TerminalState::Running` only,
     /// so this scenario would not have been refused under the old code
-    /// either). What this test can honestly prove instead: the workspace is
-    /// demonstrably not idle — `workspace_view` reports it `Active`, the
-    /// same state a truly running terminal would produce — and `hide_workspace`
+    /// either). What this test can honestly prove instead: the worktree is
+    /// demonstrably not idle — `worktree_view` reports it `Active`, the
+    /// same state a truly running terminal would produce — and `hide_worktree`
     /// still succeeds unconditionally, because it never reads terminal state
     /// in the first place. The case of a truly `Running` terminal needs a
     /// live pane and belongs in an integration test with real tmux instead.
@@ -4668,7 +4668,7 @@ mod tests {
         let (_dir, svc, repo) = crate::test_support::fixture().await;
         let ws = svc
             .store
-            .list_workspaces_for_repository(repo)
+            .list_worktrees_for_repository(repo)
             .unwrap()
             .into_iter()
             .next()
@@ -4677,17 +4677,17 @@ mod tests {
             .create_terminal(ws.id, "agent", "claude", TerminalIntent::Running, 80, 24)
             .unwrap();
 
-        let view = svc.workspace_view(&ws).await.unwrap();
+        let view = svc.worktree_view(&ws).await.unwrap();
         assert_eq!(
             view.state,
-            WorkspaceState::Active,
-            "the workspace must actually carry something alive for this test to mean anything: {view:?}"
+            WorktreeState::Active,
+            "the worktree must actually carry something alive for this test to mean anything: {view:?}"
         );
 
-        let hidden = svc.hide_workspace(ws.id).await.unwrap();
+        let hidden = svc.hide_worktree(ws.id).await.unwrap();
         assert!(hidden.hidden);
 
-        let back = svc.unhide_workspace(hidden.id).await.unwrap();
+        let back = svc.unhide_worktree(hidden.id).await.unwrap();
         assert!(!back.hidden);
     }
 
@@ -5297,14 +5297,14 @@ mod restart_wiring_tests {
         out.stdout.trim().to_string()
     }
 
-    /// A workspace on a real directory, on the fixture's private tmux server.
-    pub(super) async fn a_workspace()
-    -> (crate::test_support::ScratchDir, Arc<Service>, models::Workspace) {
+    /// A worktree on a real directory, on the fixture's private tmux server.
+    pub(super) async fn a_worktree()
+    -> (crate::test_support::ScratchDir, Arc<Service>, models::Worktree) {
         let (dir, svc, repo) = crate::test_support::fixture().await;
         crate::reconcile::repository(&svc, repo).await.unwrap();
         let ws = svc
             .store
-            .list_workspaces_for_repository(repo)
+            .list_worktrees_for_repository(repo)
             .unwrap()
             .into_iter()
             .next()
@@ -5333,7 +5333,7 @@ mod restart_wiring_tests {
         // writing into the developer's REAL `~/.claude/projects` — the check
         // reads the actual home directory — and a test that has to move
         // somebody's home directory to mean anything is a test nobody runs.
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let sid = Uuid::now_v7().to_string();
         let term = svc
             .store
@@ -5369,7 +5369,7 @@ mod restart_wiring_tests {
         // always `None`. So the id was never written, and every claude pane
         // made this way had nothing for a restart to reopen and nothing for a
         // chat to load, no matter how correct the respawn builder is.
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let target = svc.create_terminal(ws.id, "one", "shell").await.expect("a pane to split");
 
         let split = svc
@@ -5405,7 +5405,7 @@ mod restart_wiring_tests {
         // The other half of "keep the stored mode and the actual pane in
         // agreement": routing restart through the respawn builder must not
         // change what a plain terminal comes back as.
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = svc
             .store
             .create_terminal(ws.id, "shell", "shell", TerminalIntent::Running, 80, 24)
@@ -5424,7 +5424,7 @@ mod restart_wiring_tests {
         // the rectangle, so a row left saying `Agent` would have SQLite
         // claiming a chat while the pane held a terminal — no shim dials the
         // socket and the pane's activity freezes at whatever it last reported.
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let sid = Uuid::now_v7().to_string();
         let term = svc
             .store
@@ -5469,7 +5469,7 @@ mod restart_wiring_tests {
     /// the switch back into a chat on exactly that word.
     #[tokio::test]
     async fn restarting_an_agent_pane_stops_it_answering_for_the_shim_that_died() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = svc
             .store
             .create_terminal(ws.id, "agent", "claude", TerminalIntent::Running, 80, 24)
@@ -5531,7 +5531,7 @@ mod restart_wiring_tests {
         //
         // Two panes is enough to prove it. With the old wiring the sibling has
         // no pane at all after the restart, because its window is gone.
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let first = svc.create_terminal(ws.id, "one", "shell").await.expect("a pane");
         let second = svc
             .split_terminal(
@@ -5577,7 +5577,7 @@ mod agent_mode_wiring_tests {
     //! fixtures: a real tmux server, and `#{pane_start_command}` read back off
     //! the pane.
 
-    use super::restart_wiring_tests::{a_workspace, pane_start_command};
+    use super::restart_wiring_tests::{a_worktree, pane_start_command};
     use super::*;
 
     /// A pane that `Registry::identify` accepts as Claude Code.
@@ -5592,7 +5592,7 @@ mod agent_mode_wiring_tests {
     /// agent on it is a test CI never runs.
     pub(super) async fn a_pane_that_looks_like_claude(
         svc: &Service,
-        ws: &models::Workspace,
+        ws: &models::Worktree,
         title: &str,
     ) -> models::Terminal {
         let term = svc.create_terminal(ws.id, title, "shell").await.expect("a pane");
@@ -5623,7 +5623,7 @@ mod agent_mode_wiring_tests {
 
     #[tokio::test]
     async fn switching_a_claude_pane_into_agent_mode_runs_the_shim() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = a_pane_that_looks_like_claude(&svc, &ws, "agent").await;
         let before = svc.pane_of(term.id).await.expect("a pane").pane_id;
         let before_epoch = svc.store.get_terminal(term.id).unwrap().epoch;
@@ -5706,7 +5706,7 @@ mod agent_mode_wiring_tests {
         // usually one belonging to a different pane. The refusal is the fix,
         // and until now nothing exercised it through `Service::set_pane_mode`
         // at all.
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = svc.create_terminal(ws.id, "shell", "shell").await.expect("a pane");
 
         let refused = svc.set_pane_mode(term.id, models::PaneMode::Agent, false).await;
@@ -5745,7 +5745,7 @@ mod agent_mode_wiring_tests {
     /// about discarding a turn that was already gone.
     #[tokio::test]
     async fn a_pane_forced_out_of_a_chat_mid_turn_is_not_left_reporting_a_turn() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = a_pane_that_looks_like_claude(&svc, &ws, "agent").await;
         svc.set_pane_mode(term.id, models::PaneMode::Agent, false).await.expect("a chat");
 
@@ -5836,7 +5836,7 @@ mod agent_mode_wiring_tests {
     /// make the record disagree with that rather than prevent it.
     #[tokio::test]
     async fn two_toggles_at_once_both_record_themselves() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = svc.create_terminal(ws.id, "pane", "shell").await.expect("a pane");
 
         let (first, second) = tokio::join!(
@@ -5888,13 +5888,13 @@ mod agent_mode_wiring_tests {
             .store
             .create_repository(svc.host_id, root.id, "repo", "/tmp/pane-mode-race/.git", "")
             .unwrap();
-        let workspace = svc
+        let worktree = svc
             .store
-            .create_workspace(repository.id, "feature/x", "/tmp/pane-mode-race", false)
+            .create_worktree(repository.id, "feature/x", "/tmp/pane-mode-race", false)
             .unwrap();
         let term = svc
             .store
-            .create_terminal(workspace.id, "pane", "claude", TerminalIntent::Running, 80, 24)
+            .create_terminal(worktree.id, "pane", "claude", TerminalIntent::Running, 80, 24)
             .unwrap();
 
         // Somebody else writes the row between the read and the write. This is
@@ -5940,7 +5940,7 @@ mod pane_actor_tests {
     //! not a launch at all: switching one into a chat.
 
     use super::agent_mode_wiring_tests::a_pane_that_looks_like_claude;
-    use super::restart_wiring_tests::{a_workspace, pane_start_command};
+    use super::restart_wiring_tests::{a_worktree, pane_start_command};
     use super::*;
 
     /// What a pane launched for `terminal` must export.
@@ -5950,7 +5950,7 @@ mod pane_actor_tests {
 
     #[tokio::test]
     async fn a_created_agent_pane_carries_its_own_name() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
 
         let command = pane_start_command(&svc, term.id).await;
@@ -5962,7 +5962,7 @@ mod pane_actor_tests {
 
     #[tokio::test]
     async fn a_split_agent_pane_carries_its_own_name() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let target = svc.create_terminal(ws.id, "one", "shell").await.expect("a pane to split");
 
         let split = svc
@@ -5985,7 +5985,7 @@ mod pane_actor_tests {
 
     #[tokio::test]
     async fn a_restarted_agent_pane_carries_its_own_name() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
 
         svc.restart_terminal(term.id).await.expect("restart");
@@ -5999,7 +5999,7 @@ mod pane_actor_tests {
 
     #[tokio::test]
     async fn a_pane_switched_back_to_a_terminal_carries_its_own_name() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
 
         let back = svc
@@ -6026,7 +6026,7 @@ mod pane_actor_tests {
     /// agent is the one whose record is least likely to say so.
     #[tokio::test]
     async fn a_pane_opened_as_a_chat_carries_its_own_name() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = a_pane_that_looks_like_claude(&svc, &ws, "agent").await;
         assert_eq!(
             svc.store.get_terminal(term.id).unwrap().command_preset,
@@ -6107,7 +6107,7 @@ mod pane_actor_tests {
     /// and `farcooler pane-host` has no board writes to file.
     #[tokio::test]
     async fn a_changes_pane_names_no_agent() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = svc
             .create_terminal(ws.id, "diff", CHANGES_PRESET)
             .await
@@ -6129,7 +6129,7 @@ mod pane_actor_tests {
     /// equivalence test above carries both.
     #[tokio::test]
     async fn an_agent_pane_with_a_model_still_names_itself() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = svc
             .create_terminal(ws.id, "agent", "claude:opus")
             .await
@@ -6153,7 +6153,7 @@ mod pane_actor_tests {
     /// into it would have filed under `agent:<this pane>`.
     #[tokio::test]
     async fn a_preset_that_is_never_run_leaves_a_person_at_the_prompt() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = svc
             .create_terminal(ws.id, "odd", "claude opus")
             .await
@@ -6181,7 +6181,7 @@ mod pane_actor_tests {
     /// distinction.
     #[tokio::test]
     async fn a_shell_pane_is_left_as_a_person() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = svc.create_terminal(ws.id, "shell", "shell").await.expect("a shell pane");
 
         let command = pane_start_command(&svc, term.id).await;
@@ -6199,7 +6199,7 @@ mod pane_actor_tests {
     /// the work had been done.
     #[tokio::test]
     async fn a_pane_opened_for_no_task_claims_none() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
 
         let command = pane_start_command(&svc, term.id).await;
@@ -6210,8 +6210,8 @@ mod pane_actor_tests {
         );
     }
 
-    /// A task on this workspace's board, and its key.
-    fn a_task(svc: &Service, ws: &models::Workspace) -> (Uuid, String) {
+    /// A task on this worktree's board, and its key.
+    fn a_task(svc: &Service, ws: &models::Worktree) -> (Uuid, String) {
         let task = svc
             .store
             .create_task(ws.repository_id, "a task", farcooler_store::models::Actor::User)
@@ -6227,7 +6227,7 @@ mod pane_actor_tests {
     /// this is the relaunch's wiring, read off the pane tmux was handed.
     #[tokio::test]
     async fn a_pane_opened_for_a_task_names_it_across_a_restart() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let (task, key) = a_task(&svc, &ws);
         let term = svc
             .store
@@ -6256,7 +6256,7 @@ mod pane_actor_tests {
     /// The stub is checked in the pane itself, not assumed.
     #[tokio::test]
     async fn only_the_first_launch_is_told_what_to_do() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let (task, key) = a_task(&svc, &ws);
         let term = svc
             .create_terminal_with_prompt(ws.id, "w", "claude", None, Some(task))
@@ -6285,16 +6285,16 @@ mod pane_actor_tests {
     /// somebody is working the task. Refused before a record or a pane exists.
     #[tokio::test]
     async fn only_an_agent_that_is_told_the_task_can_be_opened_for_one() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let (task, _) = a_task(&svc, &ws);
         for preset in ["cluade", "gemini", "bash", "shell", "changes", "fcprobe", "claude opus"] {
-            let before = svc.store.list_terminals_for_workspace(ws.id).unwrap().len();
+            let before = svc.store.list_terminals_for_worktree(ws.id).unwrap().len();
             let refused = svc.create_terminal_with_prompt(ws.id, "w", preset, None, Some(task)).await;
             assert!(
                 matches!(refused, Err(DomainError::InvalidArgument { what: "command_preset" })),
                 "{preset}: {refused:?}"
             );
-            assert_eq!(svc.store.list_terminals_for_workspace(ws.id).unwrap().len(), before, "{preset}");
+            assert_eq!(svc.store.list_terminals_for_worktree(ws.id).unwrap().len(), before, "{preset}");
         }
         // With no task, any preset still opens as it always did.
         svc.create_terminal_with_prompt(ws.id, "s", "shell", None, None).await.expect("a shell");
@@ -6308,7 +6308,7 @@ mod pane_actor_tests {
     /// longer than any login shell here takes to start and fail.
     #[tokio::test]
     async fn a_stubbed_agents_pane_stays_alive() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
         assert!(pane_start_command(&svc, term.id).await.contains(super::test_agent::MARKER), "the stub");
 
@@ -6324,7 +6324,7 @@ mod pane_actor_tests {
     /// chat. It keeps the key, just as a restart does.
     #[tokio::test]
     async fn a_pane_opened_for_a_task_names_it_after_switching_modes() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let (task, key) = a_task(&svc, &ws);
         let term = svc
             .create_terminal_with_prompt(ws.id, "w", "claude", None, Some(task))
@@ -6345,7 +6345,7 @@ mod pane_actor_tests {
     /// record exists.
     #[tokio::test]
     async fn a_task_from_another_board_opens_nothing() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let host = Uuid::now_v7();
         let root = svc.store.create_repository_root(host, "/elsewhere", 0).unwrap();
         let other = svc.store.create_repository(host, root.id, "Elsewhere", "/elsewhere/.git", "").unwrap().id;
@@ -6354,7 +6354,7 @@ mod pane_actor_tests {
             .store
             .create_task(other, "not here", farcooler_store::models::Actor::User)
             .unwrap();
-        let before = svc.store.list_terminals_for_workspace(ws.id).unwrap().len();
+        let before = svc.store.list_terminals_for_worktree(ws.id).unwrap().len();
 
         // claude, so the board check is what refuses it; it refuses before
         // any pane exists, so no agent is started.
@@ -6363,7 +6363,7 @@ mod pane_actor_tests {
             matches!(refused, Err(DomainError::InvalidArgument { what: "task_key" })),
             "{refused:?}"
         );
-        assert_eq!(svc.store.list_terminals_for_workspace(ws.id).unwrap().len(), before);
+        assert_eq!(svc.store.list_terminals_for_worktree(ws.id).unwrap().len(), before);
     }
 }
 
@@ -6584,11 +6584,11 @@ mod lock_tests {
 mod remove_root_tests {
     use super::*;
 
-    /// A registered repository with one workspace already in it, all created
+    /// A registered repository with one worktree already in it, all created
     /// through the store directly. `remove_root` never touches git, so a
     /// store-level fixture is enough — the point of these tests is the
     /// refusal logic, not worktree mechanics.
-    async fn fixture_with_workspace() -> (Service, models::RepositoryRoot, models::Workspace) {
+    async fn fixture_with_worktree() -> (Service, models::RepositoryRoot, models::Worktree) {
         let dir = tempfile::tempdir().unwrap().keep();
         let service = Service::open_in(dir).await.unwrap();
         let root = service
@@ -6599,11 +6599,11 @@ mod remove_root_tests {
             .store
             .create_repository(service.host_id, root.id, "repo", "/tmp/remove-root-tests/.git", "")
             .unwrap();
-        let workspace = service
+        let worktree = service
             .store
-            .create_workspace(repository.id, "main", "/tmp/remove-root-tests", true)
+            .create_worktree(repository.id, "main", "/tmp/remove-root-tests", true)
             .unwrap();
-        (service, root, workspace)
+        (service, root, worktree)
     }
 
     /// A terminal that was just created and has never been confirmed alive
@@ -6628,7 +6628,7 @@ mod remove_root_tests {
     /// implied.
     #[tokio::test]
     async fn a_starting_terminal_blocks_removal_same_as_a_running_one() {
-        let (service, root, workspace) = fixture_with_workspace().await;
+        let (service, root, worktree) = fixture_with_worktree().await;
         assert!(
             service.inventory_snapshot().inventory_healthy,
             "this test needs a healthy inventory to mean anything"
@@ -6636,7 +6636,7 @@ mod remove_root_tests {
 
         let term = service
             .store
-            .create_terminal(workspace.id, "shell", "shell", TerminalIntent::Running, 80, 24)
+            .create_terminal(worktree.id, "shell", "shell", TerminalIntent::Running, 80, 24)
             .unwrap();
         let derived = service.derive_one(&term);
         assert_eq!(
@@ -6707,10 +6707,10 @@ mod remove_root_tests {
     /// hook path no shim ever establishes anything.
     #[tokio::test]
     async fn removing_a_terminal_drops_the_transcript_recorded_for_it() {
-        let (service, _root, workspace) = fixture_with_workspace().await;
+        let (service, _root, worktree) = fixture_with_worktree().await;
         let term = service
             .store
-            .create_terminal(workspace.id, "pane", "claude", TerminalIntent::Stopped, 80, 24)
+            .create_terminal(worktree.id, "pane", "claude", TerminalIntent::Stopped, 80, 24)
             .unwrap();
         assert_eq!(
             service.derive_one(&term).state,
@@ -6742,14 +6742,14 @@ mod remove_root_tests {
     /// an empty window while every client holds a cursor into the old one.
     #[tokio::test]
     async fn a_refused_removal_leaves_a_live_terminals_transcript_alone() {
-        let (service, _root, workspace) = fixture_with_workspace().await;
+        let (service, _root, worktree) = fixture_with_worktree().await;
         assert!(
             service.inventory_snapshot().inventory_healthy,
             "this test needs a healthy inventory to derive `starting` rather than `unknown`"
         );
         let term = service
             .store
-            .create_terminal(workspace.id, "pane", "claude", TerminalIntent::Running, 80, 24)
+            .create_terminal(worktree.id, "pane", "claude", TerminalIntent::Running, 80, 24)
             .unwrap();
         assert_eq!(
             service.derive_one(&term).state,
@@ -6781,10 +6781,10 @@ mod remove_root_tests {
     /// the record is still there afterwards, so its transcript has to be.
     #[tokio::test]
     async fn a_delete_that_fails_on_a_version_conflict_evicts_nothing() {
-        let (service, _root, workspace) = fixture_with_workspace().await;
+        let (service, _root, worktree) = fixture_with_worktree().await;
         let term = service
             .store
-            .create_terminal(workspace.id, "pane", "claude", TerminalIntent::Stopped, 80, 24)
+            .create_terminal(worktree.id, "pane", "claude", TerminalIntent::Stopped, 80, 24)
             .unwrap();
         record_something(&service, term.id);
         assemble_something(&service, term.id);
@@ -6819,10 +6819,10 @@ mod remove_root_tests {
     /// that ships.
     #[tokio::test]
     async fn removing_a_terminal_drops_the_hook_assembler_it_accumulated() {
-        let (service, _root, workspace) = fixture_with_workspace().await;
+        let (service, _root, worktree) = fixture_with_worktree().await;
         let term = service
             .store
-            .create_terminal(workspace.id, "pane", "claude", TerminalIntent::Stopped, 80, 24)
+            .create_terminal(worktree.id, "pane", "claude", TerminalIntent::Stopped, 80, 24)
             .unwrap();
         assert_eq!(
             service.derive_one(&term).state,
@@ -6843,14 +6843,14 @@ mod remove_root_tests {
     /// separate omission.
     #[tokio::test]
     async fn dismissing_a_lost_terminal_drops_its_hook_assembler_too() {
-        let (service, _root, workspace) = fixture_with_workspace().await;
+        let (service, _root, worktree) = fixture_with_worktree().await;
         assert!(
             service.inventory_snapshot().inventory_healthy,
             "this test needs a healthy inventory to derive `lost` rather than `unknown`"
         );
         let term = service
             .store
-            .create_terminal(workspace.id, "pane", "claude", TerminalIntent::Running, 80, 24)
+            .create_terminal(worktree.id, "pane", "claude", TerminalIntent::Running, 80, 24)
             .unwrap();
         // Confirmed alive once and now claimed by no pane, which is what
         // `lost` means and the only state `dismiss_lost` accepts.
@@ -6880,14 +6880,14 @@ mod remove_root_tests {
     /// then draws only its tail.
     #[tokio::test]
     async fn a_refused_removal_leaves_a_live_terminals_assembler_alone() {
-        let (service, _root, workspace) = fixture_with_workspace().await;
+        let (service, _root, worktree) = fixture_with_worktree().await;
         assert!(
             service.inventory_snapshot().inventory_healthy,
             "this test needs a healthy inventory to derive `starting` rather than `unknown`"
         );
         let term = service
             .store
-            .create_terminal(workspace.id, "pane", "claude", TerminalIntent::Running, 80, 24)
+            .create_terminal(worktree.id, "pane", "claude", TerminalIntent::Running, 80, 24)
             .unwrap();
         assert_eq!(
             service.derive_one(&term).state,
@@ -6920,7 +6920,7 @@ mod naming_tests {
     #[tokio::test]
     async fn a_new_worktree_lands_under_its_repository_and_is_named_by_its_leaf() {
         let (dir, svc, repo) = crate::test_support::fixture().await;
-        let ws = svc.create_workspace(repo, "rate limiting", "feat/rate-limiting", "HEAD").await.unwrap();
+        let ws = svc.create_worktree(repo, "rate limiting", "feat/rate-limiting", "HEAD").await.unwrap();
 
         assert_eq!(
             Path::new(&ws.worktree_path),
@@ -6939,11 +6939,11 @@ mod naming_tests {
     #[tokio::test]
     async fn a_second_worktree_of_the_same_name_is_refused_by_name() {
         let (_dir, svc, repo) = crate::test_support::fixture().await;
-        svc.create_workspace(repo, "rate limiting", "feat/rate-limiting", "HEAD").await.unwrap();
+        svc.create_worktree(repo, "rate limiting", "feat/rate-limiting", "HEAD").await.unwrap();
 
         // Slugged the same, typed differently: the collision is between
         // directories, not between the strings someone typed.
-        match svc.create_workspace(repo, "rate-limiting", "feat/rate-limiting-2", "HEAD").await {
+        match svc.create_worktree(repo, "rate-limiting", "feat/rate-limiting-2", "HEAD").await {
             Err(DomainError::WorktreeExists) => {}
             other => panic!("expected WorktreeExists, got {other:?}"),
         }
@@ -6986,7 +6986,7 @@ mod remove_worktree_tests {
 
         let ws = svc
             .store
-            .list_workspaces_for_repository(repo)
+            .list_worktrees_for_repository(repo)
             .unwrap()
             .into_iter()
             .find(|w| !w.is_main_checkout)
@@ -7011,7 +7011,7 @@ mod remove_worktree_tests {
 
         let ws = svc
             .store
-            .list_workspaces_for_repository(repo)
+            .list_worktrees_for_repository(repo)
             .unwrap()
             .into_iter()
             .find(|w| !w.is_main_checkout)
@@ -7038,7 +7038,7 @@ mod remove_worktree_tests {
 
         let ws = svc
             .store
-            .list_workspaces_for_repository(repo)
+            .list_worktrees_for_repository(repo)
             .unwrap()
             .into_iter()
             .find(|w| !w.is_main_checkout)
@@ -7086,7 +7086,7 @@ mod remove_worktree_tests {
 
         let ws = svc
             .store
-            .list_workspaces_for_repository(repo)
+            .list_worktrees_for_repository(repo)
             .unwrap()
             .into_iter()
             .find(|w| !w.is_main_checkout)
@@ -7107,15 +7107,15 @@ mod remove_worktree_tests {
         svc.remove_worktree(ws.id).await.expect("a live terminal is closed, not a refusal");
 
         // The terminal's record goes with it. Left behind it would point at a
-        // workspace row that no longer exists, and `terminals.workspace_id` has
+        // worktree row that no longer exists, and `terminals.worktree_id` has
         // no cascade to clean that up.
         assert!(
             svc.store.get_terminal(term.id).is_err(),
             "the terminal record must go with the worktree"
         );
         assert!(
-            svc.store.list_workspaces_for_repository(repo).unwrap().iter().all(|w| w.id != ws.id),
-            "the workspace row is gone"
+            svc.store.list_worktrees_for_repository(repo).unwrap().iter().all(|w| w.id != ws.id),
+            "the worktree row is gone"
         );
     }
 
@@ -7126,7 +7126,7 @@ mod remove_worktree_tests {
         let (_dir, svc, repo) = crate::test_support::fixture().await;
         let ws = svc
             .store
-            .list_workspaces_for_repository(repo)
+            .list_worktrees_for_repository(repo)
             .unwrap()
             .into_iter()
             .find(|w| w.is_main_checkout)
@@ -7141,7 +7141,7 @@ mod remove_worktree_tests {
     /// The upgraded-database case: migration 0006 added `is_main_checkout`
     /// with `DEFAULT 0`, so a database written before this feature existed
     /// has the main checkout's row saying "not main" — and
-    /// `set_workspace_identity` is used here to put a row into exactly that
+    /// `set_worktree_identity` is used here to put a row into exactly that
     /// state deliberately, standing in for that database, rather than relying
     /// on `ws.is_main_checkout` ever having been right.
     /// The path comparison in `remove_worktree` must refuse it anyway.
@@ -7154,7 +7154,7 @@ mod remove_worktree_tests {
         let (_dir, svc, repo) = crate::test_support::fixture().await;
         let ws = svc
             .store
-            .list_workspaces_for_repository(repo)
+            .list_worktrees_for_repository(repo)
             .unwrap()
             .into_iter()
             .find(|w| w.is_main_checkout)
@@ -7162,7 +7162,7 @@ mod remove_worktree_tests {
 
         let ws = svc
             .store
-            .set_workspace_identity(ws.id, ws.resource_version, &ws.branch, false)
+            .set_worktree_identity(ws.id, ws.resource_version, &ws.branch, false)
             .unwrap();
         assert!(!ws.is_main_checkout, "the test must start from the wrong flag to mean anything");
 
@@ -7265,13 +7265,13 @@ mod hook_wiring_tests {
             .store
             .create_repository(service.host_id, root.id, "repo", "/tmp/hook-wiring-tests/.git", "")
             .unwrap();
-        let workspace = service
+        let worktree = service
             .store
-            .create_workspace(repository.id, "main", "/tmp/hook-wiring-tests", true)
+            .create_worktree(repository.id, "main", "/tmp/hook-wiring-tests", true)
             .unwrap();
         let term = service
             .store
-            .create_terminal(workspace.id, "pane", "claude", TerminalIntent::Running, 80, 24)
+            .create_terminal(worktree.id, "pane", "claude", TerminalIntent::Running, 80, 24)
             .unwrap();
         // The pane stays in TERMINAL mode. A claude somebody is running for
         // themselves is the whole point of the hook path, and putting this one
@@ -7412,13 +7412,13 @@ mod hook_wiring_tests {
         {
             let worktree = dir.path().join(name);
             std::fs::create_dir_all(&worktree).unwrap();
-            let workspace = service
+            let row = service
                 .store
-                .create_workspace(repository.id, name, &worktree.to_string_lossy(), false)
+                .create_worktree(repository.id, name, &worktree.to_string_lossy(), false)
                 .unwrap();
             let term = service
                 .store
-                .create_terminal(workspace.id, name, "codex", TerminalIntent::Running, 80, 24)
+                .create_terminal(row.id, name, "codex", TerminalIntent::Running, 80, 24)
                 .unwrap();
             // No session id, which is what a codex pane always has: nothing
             // mints one at launch. That is exactly the shape
@@ -7535,13 +7535,13 @@ mod hook_wiring_tests {
                 "",
             )
             .unwrap();
-        let workspace = service
+        let worktree = service
             .store
-            .create_workspace(repository.id, "main", &dir.path().to_string_lossy(), true)
+            .create_worktree(repository.id, "main", &dir.path().to_string_lossy(), true)
             .unwrap();
         let term = service
             .store
-            .create_terminal(workspace.id, "pane", "claude", TerminalIntent::Running, 80, 24)
+            .create_terminal(worktree.id, "pane", "claude", TerminalIntent::Running, 80, 24)
             .unwrap();
 
         let facts = farcooler_agent_hooks::facts::Facts {
@@ -7599,13 +7599,13 @@ mod hook_wiring_tests {
             .store
             .create_repository(service.host_id, root.id, "repo", "/tmp/codex-transcript-tests/.git", "")
             .unwrap();
-        let workspace = service
+        let worktree = service
             .store
-            .create_workspace(repository.id, "main", "/tmp/codex-transcript-tests", true)
+            .create_worktree(repository.id, "main", "/tmp/codex-transcript-tests", true)
             .unwrap();
         let term = service
             .store
-            .create_terminal(workspace.id, "pane", "codex", TerminalIntent::Running, 80, 24)
+            .create_terminal(worktree.id, "pane", "codex", TerminalIntent::Running, 80, 24)
             .unwrap();
         // The session-id join alone, exactly like the claude test above --
         // codex's OWN binding path (`announced_terminal`) is a different
@@ -7767,13 +7767,13 @@ mod hook_wiring_tests {
             .store
             .create_repository(service.host_id, root.id, "repo", "/tmp/cursor-transcript-tests/.git", "")
             .unwrap();
-        let workspace = service
+        let worktree = service
             .store
-            .create_workspace(repository.id, "main", "/tmp/cursor-transcript-tests", true)
+            .create_worktree(repository.id, "main", "/tmp/cursor-transcript-tests", true)
             .unwrap();
         let term = service
             .store
-            .create_terminal(workspace.id, "pane", "cursor", TerminalIntent::Running, 80, 24)
+            .create_terminal(worktree.id, "pane", "cursor", TerminalIntent::Running, 80, 24)
             .unwrap();
         let term = service
             .store
@@ -7911,7 +7911,7 @@ mod hook_wiring_tests {
 /// Every case here is about a file somebody else may own. `hook_install`'s own
 /// tests prove the merge preserves what was already there; these prove the
 /// caller never hands the merge something it would be wrong to merge, and
-/// never takes a workspace down over a directory it could not write.
+/// never takes a worktree down over a directory it could not write.
 #[cfg(test)]
 mod hook_file_tests {
     use super::*;
@@ -8029,7 +8029,7 @@ mod hook_file_tests {
         let _ = std::fs::remove_dir_all(&worktree);
     }
 
-    /// A worktree we cannot write into is a logged line, never a workspace
+    /// A worktree we cannot write into is a logged line, never a worktree
     /// that fails to be created. `.cursor` as a FILE is the real shape of
     /// this: `create_dir_all` refuses, and the alternative — propagating
     /// that — would mean somebody's stray file stops them making a worktree.
@@ -8218,7 +8218,7 @@ mod hook_file_tests {
     /// `GIT_TIMEOUT`.
     #[tokio::test]
     async fn a_codex_launchs_gits_share_one_budget() {
-        let (_dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
+        let (_dir, svc, ws) = super::restart_wiring_tests::a_worktree().await;
         let worktree = Path::new(&ws.worktree_path);
         let hung = hung_git_in(worktree);
         let started = std::time::Instant::now();
@@ -8363,7 +8363,7 @@ mod hook_file_tests {
     /// no flag on it.
     #[tokio::test]
     async fn a_claude_pane_this_runner_launched_names_its_settings_file() {
-        let (_dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
+        let (_dir, svc, ws) = super::restart_wiring_tests::a_worktree().await;
 
         // A pane that is not claude first, in the same runtime directory: the
         // file is claude's alone, and writing it for every terminal would put
@@ -8392,7 +8392,7 @@ mod hook_file_tests {
     /// with `write_plugin` itself still present and working.
     #[tokio::test]
     async fn opening_a_claude_pane_puts_the_skill_where_the_flag_points() {
-        let (_dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
+        let (_dir, svc, ws) = super::restart_wiring_tests::a_worktree().await;
         let term = svc.create_terminal(ws.id, "manager", "claude").await.expect("a claude pane");
 
         let command = super::restart_wiring_tests::pane_start_command(&svc, term.id).await;
@@ -8432,35 +8432,35 @@ mod hook_file_tests {
     /// `adopt_branch` is the other door into "a worktree Far Cooler just
     /// made" — work picked up from a branch pushed somewhere else. It runs
     /// the same agents in the same panes, so a pane that reports nothing is
-    /// exactly as broken here as it is in `create_workspace`.
+    /// exactly as broken here as it is in `create_worktree`.
     #[tokio::test]
     async fn an_adopted_branch_gets_them_too() {
         let (dir, svc, repo) = crate::test_support::fixture().await;
         git::git(&dir.path().join("repo"), &["branch", "feat/rate-limiting"]).await.unwrap();
 
-        let ws = svc.adopt_branch(repo, "feat/rate-limiting").await.expect("a workspace");
+        let ws = svc.adopt_branch(repo, "feat/rate-limiting").await.expect("a worktree");
 
         let worktree = Path::new(&ws.worktree_path);
         assert!(worktree.join(".codex/hooks.json").exists(), "codex reports itself here too");
         assert!(worktree.join(".cursor/hooks.json").exists(), "and so does cursor");
     }
 
-    /// The regression the workspace suite caught, asked directly.
+    /// The regression the worktree suite caught, asked directly.
     ///
     /// `against_a_real_daemon` went red on `ConfirmationRequired` where it
     /// expected `Removed`: `install_project_hooks` writes two files into a
     /// fresh worktree, `git::is_dirty` counts untracked files, and
-    /// `removal_needs_confirmation` reads that — so a workspace created a
+    /// `removal_needs_confirmation` reads that — so a worktree created a
     /// second ago and touched by nobody demanded that the user type its name
     /// back to remove it, on the strength of two files they have never seen.
     /// Far Cooler must not report its own writes to the user as their work.
     #[tokio::test]
-    async fn a_workspace_nobody_has_touched_needs_no_confirmation_to_remove() {
+    async fn a_worktree_nobody_has_touched_needs_no_confirmation_to_remove() {
         let (_dir, svc, repo) = crate::test_support::fixture().await;
         let ws = svc
-            .create_workspace(repo, "rate limiting", "feat/rate-limiting", "HEAD")
+            .create_worktree(repo, "rate limiting", "feat/rate-limiting", "HEAD")
             .await
-            .expect("a workspace");
+            .expect("a worktree");
 
         // The files really are there -- this is a filter, not an absence.
         let worktree = Path::new(&ws.worktree_path);
@@ -8486,9 +8486,9 @@ mod hook_file_tests {
     async fn a_fresh_worktree_opens_with_an_empty_diff() {
         let (_dir, svc, repo) = crate::test_support::fixture().await;
         let ws = svc
-            .create_workspace(repo, "rate limiting", "feat/rate-limiting", "HEAD")
+            .create_worktree(repo, "rate limiting", "feat/rate-limiting", "HEAD")
             .await
-            .expect("a workspace");
+            .expect("a worktree");
         let worktree = Path::new(&ws.worktree_path);
 
         let wt = crate::change_set::working_tree(worktree).await.expect("status");
@@ -8516,9 +8516,9 @@ mod hook_file_tests {
     async fn a_users_own_file_beside_ours_is_still_their_work() {
         let (_dir, svc, repo) = crate::test_support::fixture().await;
         let ws = svc
-            .create_workspace(repo, "rate limiting", "feat/rate-limiting", "HEAD")
+            .create_worktree(repo, "rate limiting", "feat/rate-limiting", "HEAD")
             .await
-            .expect("a workspace");
+            .expect("a worktree");
         let worktree = Path::new(&ws.worktree_path);
 
         std::fs::write(worktree.join(".codex").join("config.toml"), "theirs").unwrap();
@@ -8628,7 +8628,7 @@ mod hook_file_tests {
     /// most claude panes reported nothing at all.
     #[tokio::test]
     async fn a_claude_pane_made_by_splitting_names_the_settings_file() {
-        let (_dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
+        let (_dir, svc, ws) = super::restart_wiring_tests::a_worktree().await;
         let target = svc.create_terminal(ws.id, "one", "shell").await.expect("a pane to split");
 
         let split = svc
@@ -8649,7 +8649,7 @@ mod hook_file_tests {
     /// quiet; this is the path a lost or killed agent comes back through.
     #[tokio::test]
     async fn a_restarted_claude_pane_names_the_settings_file() {
-        let (_dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
+        let (_dir, svc, ws) = super::restart_wiring_tests::a_worktree().await;
         let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
 
         svc.restart_terminal(term.id).await.expect("restart");
@@ -8667,7 +8667,7 @@ mod hook_file_tests {
     /// the door is what this pins.
     #[tokio::test]
     async fn a_pane_switched_back_to_a_terminal_names_the_settings_file() {
-        let (_dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
+        let (_dir, svc, ws) = super::restart_wiring_tests::a_worktree().await;
         let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
 
         let back = svc.set_pane_mode(term.id, models::PaneMode::Terminal, false).await.expect("terminal");
@@ -8686,12 +8686,12 @@ mod hook_file_tests {
     /// The other call site, and the one Task 9 described and never wired: a
     /// worktree Far Cooler makes gets the files codex and cursor read.
     #[tokio::test]
-    async fn a_new_workspace_gets_the_project_local_hook_files() {
+    async fn a_new_worktree_gets_the_project_local_hook_files() {
         let (_dir, svc, repo) = crate::test_support::fixture().await;
         let ws = svc
-            .create_workspace(repo, "rate limiting", "feat/rate-limiting", "HEAD")
+            .create_worktree(repo, "rate limiting", "feat/rate-limiting", "HEAD")
             .await
-            .expect("a workspace");
+            .expect("a worktree");
 
         let worktree = Path::new(&ws.worktree_path);
         for relative in [".codex/hooks.json", ".cursor/hooks.json"] {
@@ -8715,22 +8715,22 @@ mod hook_file_tests {
 /// worktree the pane opens in.
 ///
 /// The repository a person actually works in is adopted by the reconciler, not
-/// created by Far Cooler, so the two installers that hung off `create_workspace`
+/// created by Far Cooler, so the two installers that hung off `create_worktree`
 /// and `adopt_branch` never reached it: the checkout that mattered most was the
-/// one that stayed silent while throwaway worktrees worked. Every workspace here
-/// therefore comes from `a_workspace`, which is `reconcile::repository` adopting
+/// one that stayed silent while throwaway worktrees worked. Every worktree here
+/// therefore comes from `a_worktree`, which is `reconcile::repository` adopting
 /// a real main checkout — the exact shape of the case this fixes.
 #[cfg(test)]
 mod launch_hook_install_tests {
     use super::*;
 
-    use super::restart_wiring_tests::a_workspace;
+    use super::restart_wiring_tests::a_worktree;
 
-    fn codex_hooks(ws: &models::Workspace) -> PathBuf {
+    fn codex_hooks(ws: &models::Worktree) -> PathBuf {
         Path::new(&ws.worktree_path).join(crate::hook_install::CODEX_HOOKS)
     }
 
-    fn cursor_hooks(ws: &models::Workspace) -> PathBuf {
+    fn cursor_hooks(ws: &models::Worktree) -> PathBuf {
         Path::new(&ws.worktree_path).join(crate::hook_install::CURSOR_HOOKS)
     }
 
@@ -8758,7 +8758,7 @@ mod launch_hook_install_tests {
     /// reporting after it.
     #[tokio::test]
     async fn opening_a_codex_pane_installs_codexs_hooks_in_a_checkout_far_cooler_did_not_make() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         assert!(
             !codex_hooks(&ws).exists(),
             "the reconciler adopts without writing, which is the whole problem"
@@ -8781,7 +8781,7 @@ mod launch_hook_install_tests {
     /// nothing they did asked for.
     #[tokio::test]
     async fn opening_codex_does_not_also_write_cursors_file() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
 
         svc.create_terminal(ws.id, "agent", "codex:gpt-5.6-sol").await.expect("a codex pane");
 
@@ -8795,7 +8795,7 @@ mod launch_hook_install_tests {
 
     #[tokio::test]
     async fn opening_a_cursor_pane_installs_cursors_hooks_and_only_those() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
 
         svc.create_terminal(ws.id, "agent", "cursor").await.expect("a cursor pane");
 
@@ -8812,7 +8812,7 @@ mod launch_hook_install_tests {
     /// whole of claude's registration, and it touches nothing of the user's.
     #[tokio::test]
     async fn a_claude_or_shell_pane_writes_nothing_into_the_users_repository() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
 
         svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
         svc.create_terminal(ws.id, "plain", "shell").await.expect("a shell pane");
@@ -8825,7 +8825,7 @@ mod launch_hook_install_tests {
     /// Splitting is how most panes on a runner are made.
     #[tokio::test]
     async fn a_codex_pane_made_by_splitting_installs_them_too() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let target = svc.create_terminal(ws.id, "one", "shell").await.expect("a pane to split");
         assert!(!codex_hooks(&ws).exists(), "the shell wrote nothing");
 
@@ -8841,7 +8841,7 @@ mod launch_hook_install_tests {
     /// reporting rather than come back quiet.
     #[tokio::test]
     async fn a_restarted_codex_pane_installs_them_again() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
         std::fs::remove_file(codex_hooks(&ws)).expect("take the file away");
 
@@ -8854,7 +8854,7 @@ mod launch_hook_install_tests {
     /// launched, and it reads the file on startup like any other.
     #[tokio::test]
     async fn a_codex_pane_coming_back_to_a_terminal_installs_them_again() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
         std::fs::remove_file(codex_hooks(&ws)).expect("take the file away");
 
@@ -8875,7 +8875,7 @@ mod launch_hook_install_tests {
     /// repository nobody asked Far Cooler to write into.
     #[tokio::test]
     async fn a_hooks_file_the_user_already_had_keeps_everything_it_had() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let path = codex_hooks(&ws);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(
@@ -8895,7 +8895,7 @@ mod launch_hook_install_tests {
     /// pane must not be what replaces it.
     #[tokio::test]
     async fn a_hooks_file_we_cannot_parse_survives_a_launch_byte_for_byte() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let path = codex_hooks(&ws);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let theirs = "{ \"hooks\": { \"SessionStart\": [ oops this is not json";
@@ -8910,7 +8910,7 @@ mod launch_hook_install_tests {
     /// nothing else. The pane opens; it is quiet.
     #[tokio::test]
     async fn a_worktree_we_cannot_write_into_still_opens_the_pane() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         // `.codex` as a FILE is the real shape of this: `create_dir_all`
         // refuses, and the alternative -- propagating it -- would mean a stray
         // file of somebody's stops them opening a terminal.
@@ -8956,7 +8956,7 @@ mod launch_hook_install_tests {
     /// repository.
     #[tokio::test]
     async fn a_tracked_hooks_file_is_left_exactly_as_the_repository_has_it() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         commit_team_hooks(Path::new(&ws.worktree_path)).await;
 
         let codex = svc.create_terminal(ws.id, "one", "codex:gpt-5.6-sol").await.expect("a codex pane");
@@ -8976,14 +8976,14 @@ mod launch_hook_install_tests {
     /// The other installer: a worktree Far Cooler makes from a branch that
     /// commits both hooks files gets neither rewritten.
     #[tokio::test]
-    async fn a_new_workspace_on_a_branch_that_tracks_them_leaves_them_alone() {
+    async fn a_new_worktree_on_a_branch_that_tracks_them_leaves_them_alone() {
         let (dir, svc, repo) = crate::test_support::fixture().await;
         commit_team_hooks(&dir.path().join("repo")).await;
 
         let ws = svc
-            .create_workspace(repo, "rate limiting", "feat/rate-limiting", "HEAD")
+            .create_worktree(repo, "rate limiting", "feat/rate-limiting", "HEAD")
             .await
-            .expect("a workspace");
+            .expect("a worktree");
 
         assert_eq!(std::fs::read_to_string(codex_hooks(&ws)).unwrap(), TEAM_CODEX, "codex's tracked file");
         assert_eq!(std::fs::read_to_string(cursor_hooks(&ws)).unwrap(), TEAM_CURSOR, "cursor's tracked file");
@@ -8994,7 +8994,7 @@ mod launch_hook_install_tests {
     /// file makes removal ask before `git worktree remove --force`.
     #[tokio::test]
     async fn removal_asks_before_losing_an_edit_to_a_tracked_hooks_file() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         commit_team_hooks(Path::new(&ws.worktree_path)).await;
         assert!(!svc.removal_needs_confirmation(ws.id).await.expect("dirt check"), "committed and unchanged");
 
@@ -9008,7 +9008,7 @@ mod launch_hook_install_tests {
     /// inside it.
     #[tokio::test]
     async fn removal_asks_when_our_untracked_hooks_file_holds_an_entry_of_somebodys() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
         assert!(
             !svc.removal_needs_confirmation(ws.id).await.expect("dirt check"),
@@ -9028,7 +9028,7 @@ mod launch_hook_install_tests {
     /// touch the file. Removal asks, because the file is theirs now too.
     #[tokio::test]
     async fn a_command_the_owner_put_inside_our_entry_survives_the_next_launch() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
         let mut doc: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(codex_hooks(&ws)).unwrap()).unwrap();
@@ -9050,7 +9050,7 @@ mod launch_hook_install_tests {
     /// has to ask, because the first copy is the owner's.
     #[tokio::test]
     async fn removal_asks_about_a_hooks_file_that_names_a_key_twice() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
         let ours = std::fs::read_to_string(codex_hooks(&ws)).unwrap();
         let ours: serde_json::Value = serde_json::from_str(&ours).unwrap();
@@ -9068,7 +9068,7 @@ mod launch_hook_install_tests {
     /// the next launch replaces them with entries at the CLI's current path.
     #[tokio::test]
     async fn our_entries_from_a_cli_that_moved_are_still_ours() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
         let now = std::fs::read_to_string(codex_hooks(&ws)).unwrap();
         let current = shell_quote(&shim_binary(std::env::current_exe().ok().as_deref()));
@@ -9087,7 +9087,7 @@ mod launch_hook_install_tests {
     /// opened codex there. Removing the worktree would delete their file.
     #[tokio::test]
     async fn removal_asks_for_the_owners_own_untracked_hooks_file_after_ours_were_merged_in() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         std::fs::create_dir_all(codex_hooks(&ws).parent().unwrap()).unwrap();
         std::fs::write(codex_hooks(&ws), TEAM_CODEX).unwrap();
 
@@ -9107,7 +9107,7 @@ mod launch_hook_install_tests {
     /// is what makes the flag, the column and the migration unnecessary.
     #[tokio::test]
     async fn launching_again_in_a_worktree_that_already_has_them_writes_nothing() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         svc.create_terminal(ws.id, "one", "codex").await.expect("a codex pane");
         let path = codex_hooks(&ws);
 
@@ -9342,13 +9342,13 @@ mod project_skill_tests {
     use super::*;
     use crate::skill_install::{PROJECT_SKILL, PROJECT_SKILL_POLICY};
 
-    use super::restart_wiring_tests::a_workspace;
+    use super::restart_wiring_tests::a_worktree;
 
-    fn skill(ws: &models::Workspace) -> PathBuf {
+    fn skill(ws: &models::Worktree) -> PathBuf {
         Path::new(&ws.worktree_path).join(PROJECT_SKILL)
     }
 
-    fn policy(ws: &models::Workspace) -> PathBuf {
+    fn policy(ws: &models::Worktree) -> PathBuf {
         Path::new(&ws.worktree_path).join(PROJECT_SKILL_POLICY)
     }
 
@@ -9365,11 +9365,11 @@ mod project_skill_tests {
 
     /// A worktree Far Cooler made, with a codex pane opened in it: the only
     /// way the skill gets there.
-    async fn a_codex_worktree(svc: &Service, repo: Uuid, name: &str) -> models::Workspace {
+    async fn a_codex_worktree(svc: &Service, repo: Uuid, name: &str) -> models::Worktree {
         let ws = svc
-            .create_workspace(repo, name, &format!("feat/{name}"), "HEAD")
+            .create_worktree(repo, name, &format!("feat/{name}"), "HEAD")
             .await
-            .expect("a workspace");
+            .expect("a worktree");
         svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
         ws
     }
@@ -9392,9 +9392,9 @@ mod project_skill_tests {
     async fn a_new_worktree_holds_no_skill_until_codex_opens_there() {
         let (_dir, svc, repo) = crate::test_support::fixture().await;
         let ws = svc
-            .create_workspace(repo, "skill", "feat/skill", "HEAD")
+            .create_worktree(repo, "skill", "feat/skill", "HEAD")
             .await
-            .expect("a workspace");
+            .expect("a worktree");
         assert!(!Path::new(&ws.worktree_path).join(".agents").exists(), "creating it wrote the skill");
 
         svc.create_terminal(ws.id, "agent", "cursor").await.expect("a cursor pane");
@@ -9509,9 +9509,9 @@ mod project_skill_tests {
         let (_dir, svc, repo) = crate::test_support::fixture().await;
         let _codex = a_codex_worktree(&svc, repo, "skill").await;
         let other = svc
-            .create_workspace(repo, "other", "feat/other", "HEAD")
+            .create_worktree(repo, "other", "feat/other", "HEAD")
             .await
-            .expect("a workspace");
+            .expect("a worktree");
         std::fs::create_dir_all(skill(&other).parent().unwrap()).unwrap();
         std::fs::write(skill(&other), "---\nname: farcooler-manager\n---\ntheirs\n").unwrap();
 
@@ -9525,9 +9525,9 @@ mod project_skill_tests {
     async fn a_tracked_copy_the_owner_changed_is_dirty() {
         let (_dir, svc, repo) = crate::test_support::fixture().await;
         let ws = svc
-            .create_workspace(repo, "skill", "feat/skill", "HEAD")
+            .create_worktree(repo, "skill", "feat/skill", "HEAD")
             .await
-            .expect("a workspace");
+            .expect("a worktree");
         let worktree = Path::new(&ws.worktree_path);
         std::fs::create_dir_all(skill(&ws).parent().unwrap()).unwrap();
         std::fs::write(skill(&ws), crate::skill_install::sign_markdown("committed\n")).unwrap();
@@ -9549,9 +9549,9 @@ mod project_skill_tests {
     async fn a_committed_skill_nobody_changed_needs_no_confirmation() {
         let (_dir, svc, repo) = crate::test_support::fixture().await;
         let ws = svc
-            .create_workspace(repo, "skill", "feat/skill", "HEAD")
+            .create_worktree(repo, "skill", "feat/skill", "HEAD")
             .await
-            .expect("a workspace");
+            .expect("a worktree");
         let worktree = Path::new(&ws.worktree_path);
         std::fs::create_dir_all(skill(&ws).parent().unwrap()).unwrap();
         std::fs::write(skill(&ws), "theirs, committed\n").unwrap();
@@ -9565,7 +9565,7 @@ mod project_skill_tests {
     /// worktree, and nothing is written through it.
     #[tokio::test]
     async fn a_linked_agents_directory_is_not_written_through() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let shared = tempfile::tempdir().unwrap();
         std::os::unix::fs::symlink(shared.path(), Path::new(&ws.worktree_path).join(".agents")).unwrap();
 
@@ -9610,7 +9610,7 @@ mod project_skill_tests {
     /// there, the act the ruling allows. Read back from disk.
     #[tokio::test]
     async fn opening_codex_puts_the_skill_in_that_worktree() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         assert!(!skill(&ws).exists(), "the reconciler adopts without writing");
 
         svc.create_terminal(ws.id, "agent", "codex:gpt-5.6-sol").await.expect("a codex pane");
@@ -9650,7 +9650,7 @@ mod project_skill_tests {
     /// back from the filesystem, not from what any function returned.
     #[tokio::test]
     async fn opening_cursor_writes_nothing_into_the_worktree() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let status = || {
             let out = std::process::Command::new("git")
                 .arg("-C")
@@ -9678,7 +9678,7 @@ mod project_skill_tests {
     /// handed, and read back from where it points.
     #[tokio::test]
     async fn opening_a_cursor_pane_puts_the_skill_where_the_flag_points() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = svc.create_terminal(ws.id, "agent", "cursor:auto").await.expect("a cursor pane");
 
         let dir = plugin_dir_of(&svc, term.id, "cursor-agent").await;
@@ -9692,7 +9692,7 @@ mod project_skill_tests {
     /// A restarted cursor pane is launched again, and keeps the flag.
     #[tokio::test]
     async fn a_restarted_cursor_pane_keeps_the_plugin_dir() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = svc.create_terminal(ws.id, "agent", "cursor").await.expect("a cursor pane");
         std::fs::remove_dir_all(svc.root.join(crate::skill_install::PLUGIN_DIR)).expect("take it away");
 
@@ -9707,7 +9707,7 @@ mod project_skill_tests {
     /// out between the two gets the skill back.
     #[tokio::test]
     async fn a_restarted_codex_pane_puts_the_skill_back() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let term = svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
         std::fs::remove_file(skill(&ws)).expect("take the skill away");
 
@@ -9720,7 +9720,7 @@ mod project_skill_tests {
     /// repository: claude's copy lives in the runtime directory.
     #[tokio::test]
     async fn opening_claude_or_a_shell_writes_no_skill_into_the_repository() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
 
         svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
         svc.create_terminal(ws.id, "plain", "shell").await.expect("a shell pane");
@@ -9733,7 +9733,7 @@ mod project_skill_tests {
     /// ownership rule, reached through the real call site.
     #[tokio::test]
     async fn a_worktree_that_already_has_skills_keeps_them() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let theirs = Path::new(&ws.worktree_path).join(".agents/skills/other/SKILL.md");
         std::fs::create_dir_all(theirs.parent().unwrap()).unwrap();
         std::fs::write(&theirs, "theirs\n").unwrap();
@@ -9755,7 +9755,7 @@ mod project_skill_tests {
     /// ownership rule alone would replace it: only the tracked check stops it.
     #[tokio::test]
     async fn a_skill_file_git_tracks_is_never_written() {
-        let (_dir, svc, ws) = a_workspace().await;
+        let (_dir, svc, ws) = a_worktree().await;
         let worktree = Path::new(&ws.worktree_path);
         let committed = crate::skill_install::sign_markdown("an older copy, committed\n");
         std::fs::create_dir_all(skill(&ws).parent().unwrap()).unwrap();
@@ -10037,7 +10037,7 @@ mod launch_prompt_tests {
 
     #[tokio::test]
     async fn cursor_trust_is_only_for_a_worktree_this_install_forked_for_a_new_task() {
-        let (_dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
+        let (_dir, svc, ws) = super::restart_wiring_tests::a_worktree().await;
         let trusts = {
             let svc = svc.clone();
             move |path: String| {
@@ -10048,7 +10048,7 @@ mod launch_prompt_tests {
 
         // A new task's worktree: a new branch, cut here. Trusted — and only
         // for cursor.
-        let made = svc.create_workspace(ws.repository_id, "fix-it", "fix-it", "HEAD").await.unwrap();
+        let made = svc.create_worktree(ws.repository_id, "fix-it", "fix-it", "HEAD").await.unwrap();
         assert!(trusts(made.worktree_path.clone()).await);
         assert!(svc.prepare_launch_hooks("cursor:auto", &made.worktree_path).await.trust_workspace);
         assert!(!svc.prepare_launch_hooks("claude", &made.worktree_path).await.trust_workspace);
@@ -10056,7 +10056,7 @@ mod launch_prompt_tests {
         // Forked by ANOTHER install sharing this host is not ours to trust:
         // the mark has to name this one.
         let theirs =
-            svc.create_workspace(ws.repository_id, "not-ours", "not-ours", "HEAD").await.unwrap();
+            svc.create_worktree(ws.repository_id, "not-ours", "not-ours", "HEAD").await.unwrap();
         git::mark_forked(Path::new(&theirs.worktree_path), "another-install").await;
         assert_eq!(
             git::forked_by(Path::new(&theirs.worktree_path)).as_deref(),
@@ -10095,7 +10095,7 @@ mod launch_prompt_tests {
     /// here is a throwaway home (`codex_trust::test_home`), never the owner's.
     #[tokio::test]
     async fn codex_trust_is_only_for_a_worktree_this_install_forked_for_a_new_task() {
-        let (_dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
+        let (_dir, svc, ws) = super::restart_wiring_tests::a_worktree().await;
         let home = tempfile::tempdir().unwrap();
         let config = home.path().join("config.toml");
         let entries = || -> Vec<String> {
@@ -10106,7 +10106,7 @@ mod launch_prompt_tests {
                 .map(|p| p.iter().map(|(k, _)| k.to_string()).collect())
                 .unwrap_or_default()
         };
-        let made = svc.create_workspace(ws.repository_id, "fix-it", "fix-it", "HEAD").await.unwrap();
+        let made = svc.create_worktree(ws.repository_id, "fix-it", "fix-it", "HEAD").await.unwrap();
 
         // A daemon whose home isn't its channel's default (a scratch daemon,
         // a test) writes nothing, even for a forked worktree.
@@ -10191,7 +10191,7 @@ mod launch_prompt_tests {
     /// the whole prompt as one argument.
     #[tokio::test]
     async fn tmux_refuses_a_long_prompt_inline_and_takes_it_through_the_file() {
-        let (dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
+        let (dir, svc, ws) = super::restart_wiring_tests::a_worktree().await;
         let prompt = long_prompt();
         let out = dir.path().join("argv");
         // Unquoted inside the payload, so a path with nothing to quote.

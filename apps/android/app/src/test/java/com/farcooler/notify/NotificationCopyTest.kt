@@ -68,7 +68,7 @@ class NotificationCopyTest {
     fun `a turn that died never says finished`() {
         val dead = NotificationCopy.of(
             terminal(activity = "done", turnFailed = true, said = "I'll try that again."),
-            workspace = "add-auth",
+            worktree = "add-auth",
         )!!
         assertEquals("claude failed", dead.title)
         assertEquals("add-auth — ${NotificationCopy.DID_NOT_FINISH}", dead.body)
@@ -85,7 +85,7 @@ class NotificationCopyTest {
         assertNull(NotificationCopy.of(terminal(activity = "working", turnFailed = true), "w"))
         val blocked = NotificationCopy.of(
             terminal(activity = "blocked", turnFailed = true),
-            workspace = "add-auth",
+            worktree = "add-auth",
         )!!
         assertEquals("claude needs you", blocked.title)
     }
@@ -94,7 +94,7 @@ class NotificationCopyTest {
     fun `a finished agent says what it finished`() {
         val done = NotificationCopy.of(
             terminal(activity = "done", said = "Both tests pass."),
-            workspace = "add-auth",
+            worktree = "add-auth",
         )!!
         assertEquals("claude finished", done.title)
         assertEquals("add-auth — Both tests pass.", done.body)
@@ -114,7 +114,7 @@ class NotificationCopyTest {
                 said = "More shit, shipped in carefully authorized batches.",
                 feed = listOf("More shit, shipped in carefully", "authorized batches."),
             ),
-            workspace = "add-auth",
+            worktree = "add-auth",
         )!!
         assertEquals("add-auth — More shit, shipped in carefully authorized batches.", done.body)
     }
@@ -127,14 +127,14 @@ class NotificationCopyTest {
     fun `an older runner falls back to the feed`() {
         val done = NotificationCopy.of(
             terminal(activity = "done", feed = listOf("Reading watch.rs.", "Ran the suite.")),
-            workspace = "add-auth",
+            worktree = "add-auth",
         )!!
         assertEquals("add-auth — Ran the suite.", done.body)
     }
 
     /** A turn can be all tool calls and say nothing. That is a real case. */
     @Test
-    fun `a turn that said nothing is the workspace alone`() {
+    fun `a turn that said nothing is the worktree alone`() {
         assertEquals("add-auth", NotificationCopy.of(terminal(activity = "done"), "add-auth")!!.body)
         assertEquals(
             "add-auth",
@@ -146,7 +146,7 @@ class NotificationCopyTest {
     fun `a blocked agent asks its own question`() {
         val blocked = NotificationCopy.of(
             terminal(activity = "blocked", blockedQuestion = "Run `rm -rf build`?"),
-            workspace = "add-auth",
+            worktree = "add-auth",
         )!!
         assertEquals("claude needs you", blocked.title)
         assertEquals("add-auth — Run `rm -rf build`?", blocked.body)
@@ -296,7 +296,7 @@ class NotificationCopyTest {
             for (failed in listOf(false, true)) {
                 val title = NotificationCopy.of(
                     terminal(title = "{label}", activity = state, turnFailed = failed),
-                    workspace = "",
+                    worktree = "",
                 )!!.title
                 assertTrue(
                     "The daemon no longer writes the title \"$title\". One person reads either " +
@@ -317,17 +317,17 @@ class NotificationCopyTest {
     }
 
     /**
-     * The join, from the same source. `Quoted::body` is what puts the workspace
+     * The join, from the same source. `Quoted::body` is what puts the worktree
      * in front of whatever there is to say, and this file's `body` is a port of
      * it — including which separator, which is the visible half.
      */
     @Test
-    fun `the workspace is joined the same way on both sides`() {
+    fun `the worktree is joined the same way on both sides`() {
         val watch = repositoryFile("crates/daemon/src/watch.rs")
         assertTrue(
             "Quoted::body no longer joins with an em dash. NotificationCopy.body is a port of " +
                 "it and the two land on one lock screen.",
-            watch.contains("format!(\"{workspace} — {text}\")"),
+            watch.contains("format!(\"{worktree} — {text}\")"),
         )
     }
 

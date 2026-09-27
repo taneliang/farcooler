@@ -96,7 +96,7 @@ import com.farcooler.model.ReviewAnchor
 import com.farcooler.model.ReviewCommentQueue
 import com.farcooler.model.ReviewPosition
 import com.farcooler.model.ReviewScroll
-import com.farcooler.model.Workspace
+import com.farcooler.model.Worktree
 import com.farcooler.net.ChangesStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -207,7 +207,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun ChangesPane(
     store: ChangesStore,
-    workspace: Workspace?,
+    worktree: Worktree?,
     showRunner: Boolean,
     runnerLabel: String,
     /** The terminal's own face and size — see [DiffLine] for why a diff wears them. */
@@ -326,8 +326,8 @@ fun ChangesPane(
     val rows = state.rows
 
     Column(Modifier.fillMaxSize()) {
-        WorkspaceTopBar(
-            workspace = workspace,
+        WorktreeTopBar(
+            worktree = worktree,
             fallbackTitle = "Changes",
             showRunner = showRunner,
             runnerLabel = runnerLabel,
@@ -374,7 +374,7 @@ fun ChangesPane(
                             is ChangesRow.Summary -> SummaryBlock(
                                 state = state,
                                 store = store,
-                                workspace = workspace,
+                                worktree = worktree,
                                 onOpenSheet = { sheet = it },
                             )
                             is ChangesRow.GeneratedHeading -> GeneratedHeading(row)
@@ -455,7 +455,7 @@ fun ChangesPane(
 
         ReviewSheet.Base -> BaseBranchSheet(
             set = state.changeSet,
-            repositoryId = workspace?.repository,
+            repositoryId = worktree?.repository,
             loadBranches = { store.branches(it) },
             onChoose = { ref -> scope.launch { store.setBase(ref) } },
             onDismiss = { sheet = null },
@@ -598,7 +598,7 @@ private fun FileHeading(file: ChangedFile, expanded: Boolean, onClick: () -> Uni
             // Spoken as one phrase and WITHOUT the directory. Pinned, this is
             // read on the way into every file, and the path in it would be
             // `crates/daemon/src` spelled out once per file on a forty-file
-            // branch. `NeedsYouScreen`'s workspace header leaves the branch out
+            // branch. `NeedsYouScreen`'s worktree header leaves the branch out
             // of its label for the same reason. The directory stays on screen
             // for the eye.
             .semantics(mergeDescendants = true) {
@@ -619,7 +619,7 @@ private fun FileHeading(file: ChangedFile, expanded: Boolean, onClick: () -> Uni
         Column(Modifier.weight(1f)) {
             // Truncated in the MIDDLE, which matters more for the part that
             // stays on screen: a long leaf is `ChangesStore+Resume` or
-            // `WorkspaceDetailViewController`, and both ends of it say more than
+            // `WorktreeDetailViewController`, and both ends of it say more than
             // either end alone.
             Text(
                 file.name,
@@ -1065,7 +1065,7 @@ private fun DiffLine(line: DiffComputation.Line, fontFamily: FontFamily, fontSiz
 private fun SummaryBlock(
     state: ChangesState,
     store: ChangesStore,
-    workspace: Workspace?,
+    worktree: Worktree?,
     onOpenSheet: (ReviewSheet) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -1080,7 +1080,7 @@ private fun SummaryBlock(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    state.changeSet.branch.ifBlank { workspace?.branch.orEmpty() }
+                    state.changeSet.branch.ifBlank { worktree?.branch.orEmpty() }
                         .ifBlank { "This worktree" },
                     style = MaterialTheme.typography.titleSmall,
                     fontFamily = FontFamily.Monospace,
@@ -1984,7 +1984,7 @@ internal fun statusColor(status: ChangedFileStatus): Color = when (status) {
  */
 internal fun nothingHere(scope: DiffScope): String = when (scope) {
     is DiffScope.Branch -> "This branch hasn’t committed anything yet."
-    is DiffScope.Local -> "Nothing uncommitted. The workspace is clean."
+    is DiffScope.Local -> "Nothing uncommitted. The worktree is clean."
     is DiffScope.Commit ->
         "Nothing changed against this commit’s first parent, which is also what a " +
             "clean merge looks like."

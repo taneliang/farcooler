@@ -67,7 +67,7 @@ final class ShellBoardTests: XCTestCase {
         // is not an agent).
         XCTAssertEqual(row.value as? String, "1 task needs a decision, Agents are on 2 tasks")
         // Above the runner's first card, which is what "above its
-        // workspaces" means on screen.
+        // worktrees" means on screen.
         let firstCard = app.buttons["shell-card-ws-0"]
         XCTAssertTrue(firstCard.waitForExistence(timeout: 5))
         XCTAssertLessThan(row.frame.maxY, firstCard.frame.minY, "the Board row is not above the cards")
@@ -286,7 +286,7 @@ final class ShellBoardTests: XCTestCase {
     /// `ShellScreen.requestedTab` turning a terminal id into a tab.
     ///
     /// Needs `./scripts/demo-host.sh`, whose board fixture is one task and a
-    /// `boarding` workspace with one `claude` pane opened for it — a stand-in
+    /// `boarding` worktree with one `claude` pane opened for it — a stand-in
     /// that sleeps, never the real one. Skipped, naming why, when no runner
     /// answers, like every other demo-runner test; once one has, every step
     /// is an assertion, the Board row included.
@@ -360,10 +360,10 @@ final class ShellBoardTests: XCTestCase {
         XCTAssertTrue(agent.waitForExistence(timeout: 10), "the opened card has no Agent button")
         agent.tap()
 
-        // Landed: the overview is gone and the bar names the workspace the
+        // Landed: the overview is gone and the bar names the worktree the
         // dispatched pane is in, on that pane's tab. `boarding` holds the
         // Changes tab, the shell its creation opened, then the stand-in agent
-        // — so tab 2, and not the shell a plain "open the workspace" might
+        // — so tab 2, and not the shell a plain "open the worktree" might
         // have rested on.
         let deadline = Date().addingTimeInterval(15)
         while Date() < deadline, probe(app, "shell-state")["overview"] != "0" {

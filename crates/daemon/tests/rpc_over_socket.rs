@@ -190,9 +190,9 @@ async fn registered_repository(
     (dir, repository.id)
 }
 
-/// Every terminal the daemon knows about, whichever workspace it belongs to.
+/// Every terminal the daemon knows about, whichever worktree it belongs to.
 ///
-/// `Workspace` carries no terminals of its own — they are a separate list — so
+/// `Worktree` carries no terminals of its own — they are a separate list — so
 /// asserting that a worktree opened with one means asking for them.
 async fn terminals(
     client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
@@ -202,27 +202,27 @@ async fn terminals(
     list.items
 }
 
-/// Every workspace the daemon knows about, in the order it lists them.
-async fn workspaces(
+/// Every worktree the daemon knows about, in the order it lists them.
+async fn worktrees(
     client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
-) -> Vec<farcooler_protocol::v1::Workspace> {
-    let result = client.call(request("workspace.list")).await.expect("workspace.list");
-    let Some(result::Value::WorkspaceList(list)) = result.value else { panic!("wrong result") };
+) -> Vec<farcooler_protocol::v1::Worktree> {
+    let result = client.call(request("worktree.list")).await.expect("worktree.list");
+    let Some(result::Value::WorktreeList(list)) = result.value else { panic!("wrong result") };
     list.items
 }
 
-/// Create a workspace, asking for `preset` in its opening terminal.
-async fn create_workspace(
+/// Create a worktree, asking for `preset` in its opening terminal.
+async fn create_worktree(
     client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
     repository: bytes::Bytes,
     task: &str,
     branch: &str,
     preset: &str,
-) -> farcooler_protocol::v1::Workspace {
-    let mut create = request("workspace.create");
+) -> farcooler_protocol::v1::Worktree {
+    let mut create = request("worktree.create");
     create.target_resource_id = Some(repository);
-    create.payload = Some(request::Payload::WorkspaceCreate(
-        farcooler_protocol::v1::WorkspaceCreate {
+    create.payload = Some(request::Payload::WorktreeCreate(
+        farcooler_protocol::v1::WorktreeCreate {
             task_name: task.into(),
             branch: branch.into(),
             base_revision: "HEAD".into(),
@@ -231,12 +231,12 @@ async fn create_workspace(
             fork_only: false,
         },
     ));
-    let result = client.call(create).await.expect("workspace.create");
-    let Some(result::Value::Workspace(ws)) = result.value else { panic!("wrong result") };
+    let result = client.call(create).await.expect("worktree.create");
+    let Some(result::Value::Worktree(ws)) = result.value else { panic!("wrong result") };
     ws
 }
 
-/// The order the daemon lists workspaces in is the order the user put them in,
+/// The order the daemon lists worktrees in is the order the user put them in,
 /// it comes back over the wire, and it does not move on its own.
 ///
 /// Over the socket rather than against the store, because what is being
@@ -244,7 +244,7 @@ async fn create_workspace(
 /// dispatch arm, and the announce that tells everybody else. Any one of those
 /// missing leaves a drag that works until the next refresh.
 #[tokio::test]
-async fn workspaces_come_back_in_the_order_somebody_dragged_them_into() {
+async fn worktrees_come_back_in_the_order_somebody_dragged_them_into() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let (_dir, repository) = registered_repository(&mut client).await;
@@ -253,18 +253,18 @@ async fn workspaces_come_back_in_the_order_somebody_dragged_them_into() {
     // sorting by name — or to whatever the query plan yielded — would not
     // produce this sequence.
     let zebra =
-        create_workspace(&mut client, repository.clone(), "zebra", "feat/zebra", "").await;
+        create_worktree(&mut client, repository.clone(), "zebra", "feat/zebra", "").await;
     let apple =
-        create_workspace(&mut client, repository.clone(), "apple", "feat/apple", "").await;
-    let mango = create_workspace(&mut client, repository, "mango", "feat/mango", "").await;
+        create_worktree(&mut client, repository.clone(), "apple", "feat/apple", "").await;
+    let mango = create_worktree(&mut client, repository, "mango", "feat/mango", "").await;
 
-    let items = workspaces(&mut client).await;
+    let items = worktrees(&mut client).await;
     // The repository's own checkout is adopted by registration, so it is here
     // too; the three created after it follow in creation order.
     let names: Vec<_> = items.iter().map(|w| w.task_name.clone()).collect();
     let created: Vec<_> =
         names.iter().filter(|n| ["zebra", "apple", "mango"].contains(&n.as_str())).collect();
-    assert_eq!(created, ["zebra", "apple", "mango"], "a new workspace lands at the end");
+    assert_eq!(created, ["zebra", "apple", "mango"], "a new worktree lands at the end");
 
     // Ranks are on the wire, distinct, and ascending down the list.
     let ranks: Vec<u32> = items.iter().map(|w| w.ordinal).collect();
@@ -274,16 +274,16 @@ async fn workspaces_come_back_in_the_order_somebody_dragged_them_into() {
     );
 
     // Drag: mango to the front of the three, zebra to the back.
-    let mut reorder = request("workspace.reorder");
-    reorder.payload = Some(request::Payload::WorkspaceReorder(
-        farcooler_protocol::v1::WorkspaceReorder {
-            workspace_ids: vec![mango.id.clone(), apple.id.clone(), zebra.id.clone()],
+    let mut reorder = request("worktree.reorder");
+    reorder.payload = Some(request::Payload::WorktreeReorder(
+        farcooler_protocol::v1::WorktreeReorder {
+            worktree_ids: vec![mango.id.clone(), apple.id.clone(), zebra.id.clone()],
         },
     ));
     let mut events = h.watcher.subscribe();
-    client.call(reorder).await.expect("workspace.reorder");
+    client.call(reorder).await.expect("worktree.reorder");
 
-    let names: Vec<_> = workspaces(&mut client)
+    let names: Vec<_> = worktrees(&mut client)
         .await
         .into_iter()
         .map(|w| w.task_name)
@@ -311,18 +311,18 @@ async fn workspaces_come_back_in_the_order_somebody_dragged_them_into() {
 
 /// Nonsense is refused with a code a client can act on, and nothing moves.
 #[tokio::test]
-async fn a_reorder_naming_something_that_is_not_a_workspace_is_refused_whole() {
+async fn a_reorder_naming_something_that_is_not_a_worktree_is_refused_whole() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let (_dir, repository) = registered_repository(&mut client).await;
 
-    let one = create_workspace(&mut client, repository.clone(), "one", "feat/one", "").await;
-    let two = create_workspace(&mut client, repository, "two", "feat/two", "").await;
+    let one = create_worktree(&mut client, repository.clone(), "one", "feat/one", "").await;
+    let two = create_worktree(&mut client, repository, "two", "feat/two", "").await;
 
-    let mut reorder = request("workspace.reorder");
-    reorder.payload = Some(request::Payload::WorkspaceReorder(
-        farcooler_protocol::v1::WorkspaceReorder {
-            workspace_ids: vec![
+    let mut reorder = request("worktree.reorder");
+    reorder.payload = Some(request::Payload::WorktreeReorder(
+        farcooler_protocol::v1::WorktreeReorder {
+            worktree_ids: vec![
                 two.id.clone(),
                 one.id.clone(),
                 bytes::Bytes::copy_from_slice(uuid::Uuid::now_v7().as_bytes()),
@@ -334,7 +334,7 @@ async fn a_reorder_naming_something_that_is_not_a_workspace_is_refused_whole() {
         other => panic!("expected NOT_FOUND, got {other:?}"),
     }
 
-    let names: Vec<_> = workspaces(&mut client)
+    let names: Vec<_> = worktrees(&mut client)
         .await
         .into_iter()
         .map(|w| w.task_name)
@@ -344,7 +344,7 @@ async fn a_reorder_naming_something_that_is_not_a_workspace_is_refused_whole() {
 }
 
 #[tokio::test]
-async fn creating_a_workspace_with_a_preset_opens_a_terminal_in_it() {
+async fn creating_a_worktree_with_a_preset_opens_a_terminal_in_it() {
     // The review: "When a new worktree is created, it should just open a
     // terminal as well." Done here rather than in each client, because a
     // worktree with nothing running in it is a directory, and a rule
@@ -353,16 +353,16 @@ async fn creating_a_workspace_with_a_preset_opens_a_terminal_in_it() {
     let mut client = connect(&h).await;
     let (_dir, repository) = registered_repository(&mut client).await;
 
-    let ws = create_workspace(&mut client, repository, "add auth", "feat/add-auth", "shell").await;
+    let ws = create_worktree(&mut client, repository, "add auth", "feat/add-auth", "shell").await;
 
     let opened: Vec<_> =
-        terminals(&mut client).await.into_iter().filter(|t| t.workspace_id == ws.id).collect();
+        terminals(&mut client).await.into_iter().filter(|t| t.worktree_id == ws.id).collect();
     assert_eq!(opened.len(), 1, "the worktree came with a terminal");
     assert_eq!(opened[0].title, "shell", "titled after the preset, as the CLI does");
 }
 
 #[tokio::test]
-async fn creating_a_workspace_with_no_preset_opens_nothing() {
+async fn creating_a_worktree_with_no_preset_opens_nothing() {
     // Empty means none, which is what keeps every existing caller's behavior
     // unchanged and gives `--no-terminal` something to mean: the task flow
     // creates its own agent terminal a moment later and must not also get a
@@ -371,9 +371,9 @@ async fn creating_a_workspace_with_no_preset_opens_nothing() {
     let mut client = connect(&h).await;
     let (_dir, repository) = registered_repository(&mut client).await;
 
-    let ws = create_workspace(&mut client, repository, "add auth", "feat/add-auth", "").await;
+    let ws = create_worktree(&mut client, repository, "add auth", "feat/add-auth", "").await;
     assert!(
-        terminals(&mut client).await.iter().all(|t| t.workspace_id != ws.id),
+        terminals(&mut client).await.iter().all(|t| t.worktree_id != ws.id),
         "nothing was asked for, so nothing was opened"
     );
 }
@@ -392,19 +392,19 @@ async fn removing_a_worktree_closes_the_terminals_in_it() {
     let mut client = connect(&h).await;
     let (_dir, repository) = registered_repository(&mut client).await;
 
-    let ws = create_workspace(&mut client, repository, "doomed", "feat/doomed", "shell").await;
+    let ws = create_worktree(&mut client, repository, "doomed", "feat/doomed", "shell").await;
     assert_eq!(
-        terminals(&mut client).await.iter().filter(|t| t.workspace_id == ws.id).count(),
+        terminals(&mut client).await.iter().filter(|t| t.worktree_id == ws.id).count(),
         1,
         "there has to be something to close for this to prove anything"
     );
 
-    let mut remove = request("workspace.remove_worktree");
+    let mut remove = request("worktree.remove");
     remove.target_resource_id = Some(ws.id.clone());
     client.call(remove).await.expect("removal closes the terminals rather than refusing");
 
     assert!(
-        terminals(&mut client).await.iter().all(|t| t.workspace_id != ws.id),
+        terminals(&mut client).await.iter().all(|t| t.worktree_id != ws.id),
         "the terminal records went with the worktree"
     );
 }
@@ -450,12 +450,12 @@ async fn host_get_carries_this_machines_settings() {
 #[tokio::test]
 async fn listing_an_empty_host_returns_empty_lists_rather_than_an_error() {
     // A fresh install is not a failure, and a client that has to distinguish
-    // "no workspaces" from "the call broke" will get it wrong.
+    // "no worktrees" from "the call broke" will get it wrong.
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
 
-    let result = client.call(request("workspace.list")).await.expect("workspace.list");
-    let Some(result::Value::WorkspaceList(list)) = result.value else { panic!("wrong result") };
+    let result = client.call(request("worktree.list")).await.expect("worktree.list");
+    let Some(result::Value::WorktreeList(list)) = result.value else { panic!("wrong result") };
     assert!(list.items.is_empty());
 
     let result = client.call(request("terminal.list")).await.expect("terminal.list");
@@ -523,7 +523,7 @@ async fn a_mutation_without_its_target_is_refused() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
 
-    match client.call(request("workspace.hide")).await {
+    match client.call(request("worktree.hide")).await {
         Err(ClientError::Daemon { code, .. }) => assert_eq!(code, ErrorCode::NotFound as i32),
         other => panic!("expected NOT_FOUND, got {other:?}"),
     }
@@ -677,7 +677,7 @@ async fn removing_a_root_leaves_no_orphaned_repositories() {
 }
 
 #[tokio::test]
-async fn a_root_with_workspaces_under_it_is_refused_with_an_actionable_reason() {
+async fn a_root_with_worktrees_under_it_is_refused_with_an_actionable_reason() {
     // Not RUNNING_PROCESSES: nothing is running. The distinction matters
     // because the two have different remedies, and a client can only say
     // "remove the worktrees first" if it is told that is the problem.
@@ -721,10 +721,10 @@ async fn a_root_with_workspaces_under_it_is_refused_with_an_actionable_reason() 
     let result = client.call(register).await.expect("register");
     let Some(result::Value::Repository(repository)) = result.value else { panic!("wrong result") };
 
-    let mut create = request("workspace.create");
+    let mut create = request("worktree.create");
     create.target_resource_id = Some(repository.id.clone());
-    create.payload = Some(request::Payload::WorkspaceCreate(
-        farcooler_protocol::v1::WorkspaceCreate {
+    create.payload = Some(request::Payload::WorktreeCreate(
+        farcooler_protocol::v1::WorktreeCreate {
             task_name: "a task".into(),
             branch: "feat/x".into(),
             base_revision: "HEAD".into(),
@@ -733,7 +733,7 @@ async fn a_root_with_workspaces_under_it_is_refused_with_an_actionable_reason() 
             fork_only: false,
         },
     ));
-    client.call(create).await.expect("workspace.create");
+    client.call(create).await.expect("worktree.create");
 
     let mut remove = request("repository_root.remove");
     remove.target_resource_id = Some(root.id.clone());
@@ -742,19 +742,19 @@ async fn a_root_with_workspaces_under_it_is_refused_with_an_actionable_reason() 
     ));
     match client.call(remove).await {
         Err(ClientError::Daemon { code, retryable, .. }) => {
-            assert_eq!(code, ErrorCode::WorkspacesExist as i32);
+            assert_eq!(code, ErrorCode::WorktreesExist as i32);
             assert!(!retryable, "retrying cannot help; the user has to act");
         }
-        other => panic!("expected WORKSPACES_EXIST, got {other:?}"),
+        other => panic!("expected WORKTREES_EXIST, got {other:?}"),
     }
 }
 
 /// Regression for a bug the first cut of the reconciler introduced: since
-/// registering a repository now auto-adopts its main checkout as a workspace
+/// registering a repository now auto-adopts its main checkout as a worktree
 /// (see `crates/daemon/src/reconcile.rs`), that row's `is_main_checkout` flag
-/// exempts it from `WorkspacesExist` -- otherwise no root could ever be
-/// removed again, because `workspace.remove_worktree` refuses the main
-/// checkout on purpose. But the row still existed, and `terminals.workspace_id`
+/// exempts it from `WorktreesExist` -- otherwise no root could ever be
+/// removed again, because `worktree.remove_worktree` refuses the main
+/// checkout on purpose. But the row still existed, and `terminals.worktree_id`
 /// carries a foreign key with no `ON DELETE CASCADE`, so deleting the
 /// repository underneath a surviving terminal row failed with a `ResourceConflict`
 /// ("resource version is stale") -- a misleading error for what was actually a
@@ -799,14 +799,14 @@ async fn removing_a_root_survives_a_stopped_terminal_in_the_main_checkout() {
     let result = client.call(register).await.expect("register");
     let Some(result::Value::Repository(repository)) = result.value else { panic!("wrong result") };
 
-    // `workspace.main` is gone -- the reconciler adopted the main checkout
+    // `worktree.main` is gone -- the reconciler adopted the main checkout
     // the moment `repository.register` ran, synchronously. Find that row by
     // its worktree path rather than by a method that no longer exists; the
-    // wire `Workspace` carries no `is_main_checkout` flag, only the path.
-    let result = client.call(request("workspace.list")).await.expect("workspace.list");
-    let Some(result::Value::WorkspaceList(list)) = result.value else { panic!("wrong result") };
+    // wire `Worktree` carries no `is_main_checkout` flag, only the path.
+    let result = client.call(request("worktree.list")).await.expect("worktree.list");
+    let Some(result::Value::WorktreeList(list)) = result.value else { panic!("wrong result") };
     let canonical_repo_path = repo_path.canonicalize().unwrap().to_string_lossy().into_owned();
-    let workspace = list
+    let worktree = list
         .items
         .into_iter()
         .find(|w| {
@@ -815,7 +815,7 @@ async fn removing_a_root_survives_a_stopped_terminal_in_the_main_checkout() {
         })
         .expect("the reconciler must have adopted the main checkout");
 
-    let terminal = a_terminal(&mut client, &workspace.id, "shell").await;
+    let terminal = a_terminal(&mut client, &worktree.id, "shell").await;
     let mut stop = request("terminal.stop");
     stop.target_resource_id = Some(terminal.id.clone());
     client.call(stop).await.expect("terminal.stop");
@@ -878,14 +878,14 @@ async fn removing_a_root_is_refused_while_a_terminal_is_actually_running() {
     let result = client.call(register).await.expect("register");
     let Some(result::Value::Repository(repository)) = result.value else { panic!("wrong result") };
 
-    // `workspace.main` is gone -- the reconciler adopted the main checkout
+    // `worktree.main` is gone -- the reconciler adopted the main checkout
     // the moment `repository.register` ran, synchronously. Find that row by
     // its worktree path rather than by a method that no longer exists; the
-    // wire `Workspace` carries no `is_main_checkout` flag, only the path.
-    let result = client.call(request("workspace.list")).await.expect("workspace.list");
-    let Some(result::Value::WorkspaceList(list)) = result.value else { panic!("wrong result") };
+    // wire `Worktree` carries no `is_main_checkout` flag, only the path.
+    let result = client.call(request("worktree.list")).await.expect("worktree.list");
+    let Some(result::Value::WorktreeList(list)) = result.value else { panic!("wrong result") };
     let canonical_repo_path = repo_path.canonicalize().unwrap().to_string_lossy().into_owned();
-    let workspace = list
+    let worktree = list
         .items
         .into_iter()
         .find(|w| {
@@ -895,7 +895,7 @@ async fn removing_a_root_is_refused_while_a_terminal_is_actually_running() {
         .expect("the reconciler must have adopted the main checkout");
 
     // Left running -- never stopped.
-    let _terminal = a_terminal(&mut client, &workspace.id, "shell").await;
+    let _terminal = a_terminal(&mut client, &worktree.id, "shell").await;
 
     let mut remove = request("repository_root.remove");
     remove.target_resource_id = Some(root.id.clone());
@@ -916,22 +916,22 @@ async fn removing_a_root_is_refused_while_a_terminal_is_actually_running() {
     assert_eq!(list.items.len(), 1, "a refused removal changes nothing");
 }
 
-/// A workspace, over the wire, ready to have things tiled in it.
-async fn a_workspace(
+/// A worktree, over the wire, ready to have things tiled in it.
+async fn a_worktree(
     client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
     dir: &std::path::Path,
-) -> farcooler_protocol::v1::Workspace {
-    a_workspace_named(client, dir, "demo", "tiling").await
+) -> farcooler_protocol::v1::Worktree {
+    a_worktree_named(client, dir, "demo", "tiling").await
 }
 
-/// `a_workspace`, in a repository called `repository` on a branch named for
+/// `a_worktree`, in a repository called `repository` on a branch named for
 /// `task`: two of them on one daemon need two names.
-async fn a_workspace_named(
+async fn a_worktree_named(
     client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
     dir: &std::path::Path,
     repository: &str,
     task: &str,
-) -> farcooler_protocol::v1::Workspace {
+) -> farcooler_protocol::v1::Worktree {
     let repo_path = dir.join(repository);
     std::fs::create_dir(&repo_path).unwrap();
     for args in [
@@ -966,10 +966,10 @@ async fn a_workspace_named(
     let result = client.call(register).await.expect("register");
     let Some(result::Value::Repository(repository)) = result.value else { panic!("wrong result") };
 
-    let mut create = request("workspace.create");
+    let mut create = request("worktree.create");
     create.target_resource_id = Some(repository.id.clone());
-    create.payload = Some(request::Payload::WorkspaceCreate(
-        farcooler_protocol::v1::WorkspaceCreate {
+    create.payload = Some(request::Payload::WorktreeCreate(
+        farcooler_protocol::v1::WorktreeCreate {
             task_name: task.into(),
             branch: format!("feat/{task}"),
             base_revision: "HEAD".into(),
@@ -978,19 +978,19 @@ async fn a_workspace_named(
             fork_only: false,
         },
     ));
-    let result = client.call(create).await.expect("workspace.create");
-    let Some(result::Value::Workspace(workspace)) = result.value else { panic!("wrong result") };
-    workspace
+    let result = client.call(create).await.expect("worktree.create");
+    let Some(result::Value::Worktree(worktree)) = result.value else { panic!("wrong result") };
+    worktree
 }
 
 async fn layout_call(
     client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
     method: &str,
-    workspace: &bytes::Bytes,
+    worktree: &bytes::Bytes,
     update: farcooler_protocol::v1::LayoutUpdate,
 ) -> farcooler_protocol::v1::PaneGroupList {
     let mut req = request(method);
-    req.target_resource_id = Some(workspace.clone());
+    req.target_resource_id = Some(worktree.clone());
     req.payload = Some(request::Payload::LayoutUpdate(update));
     let result = client.call(req).await.unwrap_or_else(|e| panic!("{method}: {e:?}"));
     let Some(result::Value::PaneGroupList(list)) = result.value else {
@@ -1000,16 +1000,16 @@ async fn layout_call(
 }
 
 #[tokio::test]
-async fn a_workspace_starts_with_nothing_tiled() {
+async fn a_worktree_starts_with_nothing_tiled() {
     // The stated case is four agents with three on screen, and it only works if
     // membership is something you opt into rather than something that happens.
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, dir.path()).await;
+    let worktree = a_worktree(&mut client, dir.path()).await;
 
     let mut list = request("layout.list");
-    list.target_resource_id = Some(workspace.id.clone());
+    list.target_resource_id = Some(worktree.id.clone());
     let result = client.call(list).await.expect("layout.list");
     let Some(result::Value::PaneGroupList(groups)) = result.value else { panic!("wrong result") };
     assert!(groups.items.is_empty(), "nothing tiles until asked");
@@ -1023,13 +1023,13 @@ async fn zoom_follows_focus_so_four_agents_can_be_read_one_at_a_time() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, dir.path()).await;
+    let worktree = a_worktree(&mut client, dir.path()).await;
 
     // Two terminals in ONE layout means creating one and splitting it. Creating
     // twice would make two layouts, because a terminal is a pane and a fresh
     // terminal gets a window of its own.
     let mut create = request("terminal.create");
-    create.target_resource_id = Some(workspace.id.clone());
+    create.target_resource_id = Some(worktree.id.clone());
     create.payload = Some(request::Payload::TerminalCreate(
         farcooler_protocol::v1::TerminalCreate {
             title: "one".into(),
@@ -1045,7 +1045,7 @@ async fn zoom_follows_focus_so_four_agents_can_be_read_one_at_a_time() {
     let list = layout_call(
         &mut client,
         "layout.split",
-        &workspace.id,
+        &worktree.id,
         farcooler_protocol::v1::LayoutUpdate {
             target: Some(one.id.clone()),
             side: farcooler_protocol::v1::SplitSide::Right as i32,
@@ -1067,7 +1067,7 @@ async fn zoom_follows_focus_so_four_agents_can_be_read_one_at_a_time() {
     let zoomed = layout_call(
         &mut client,
         "layout.zoom",
-        &workspace.id,
+        &worktree.id,
         farcooler_protocol::v1::LayoutUpdate { zoom: Some(first.clone()), ..Default::default() },
     )
     .await;
@@ -1077,7 +1077,7 @@ async fn zoom_follows_focus_so_four_agents_can_be_read_one_at_a_time() {
     let moved = layout_call(
         &mut client,
         "layout.focus",
-        &workspace.id,
+        &worktree.id,
         farcooler_protocol::v1::LayoutUpdate { step: Some(1), ..Default::default() },
     )
     .await;
@@ -1085,7 +1085,7 @@ async fn zoom_follows_focus_so_four_agents_can_be_read_one_at_a_time() {
     assert!(now.focused, "focus moved");
     assert!(now.zoomed, "and the zoom came along, which tmux alone would not do");
 
-    let out = layout_call(&mut client, "layout.zoom", &workspace.id, Default::default()).await;
+    let out = layout_call(&mut client, "layout.zoom", &worktree.id, Default::default()).await;
     assert!(!out.items[0].panes.iter().any(|p| p.zoomed), "prefix z is still the way out");
 }
 
@@ -1099,7 +1099,7 @@ async fn tiling_needs_control_and_reading_a_layout_does_not() {
 
     let mut list = request("layout.list");
     list.target_resource_id = Some(bytes::Bytes::copy_from_slice(uuid::Uuid::now_v7().as_bytes()));
-    // Read scope reaches the method; the workspace simply does not exist.
+    // Read scope reaches the method; the worktree simply does not exist.
     match client.call(list).await {
         Err(ClientError::Daemon { code, .. }) => {
             assert_ne!(code, ErrorCode::ScopeDenied as i32, "read must be enough to look");
@@ -1123,11 +1123,11 @@ async fn tiling_needs_control_and_reading_a_layout_does_not() {
 /// One terminal, made the ordinary way, and where it ends up.
 async fn a_terminal(
     client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
-    workspace: &bytes::Bytes,
+    worktree: &bytes::Bytes,
     title: &str,
 ) -> farcooler_protocol::v1::Terminal {
     let mut create = request("terminal.create");
-    create.target_resource_id = Some(workspace.clone());
+    create.target_resource_id = Some(worktree.clone());
     create.payload = Some(request::Payload::TerminalCreate(
         farcooler_protocol::v1::TerminalCreate {
             title: title.into(),
@@ -1149,7 +1149,7 @@ async fn a_terminal(
     // size makes the arithmetic deterministic rather than dependent on when tmux
     // got round to it.
     let mut viewport = request("layout.viewport");
-    viewport.target_resource_id = Some(workspace.clone());
+    viewport.target_resource_id = Some(worktree.clone());
     viewport.payload = Some(request::Payload::LayoutUpdate(
         farcooler_protocol::v1::LayoutUpdate {
             columns: Some(120),
@@ -1178,10 +1178,10 @@ async fn a_terminal_is_a_pane_in_a_layout_from_the_moment_it_exists() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, dir.path()).await;
-    let terminal = a_terminal(&mut client, &workspace.id, "one").await;
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    let terminal = a_terminal(&mut client, &worktree.id, "one").await;
 
-    let list = layout_call(&mut client, "layout.list", &workspace.id, Default::default()).await;
+    let list = layout_call(&mut client, "layout.list", &worktree.id, Default::default()).await;
     assert_eq!(list.items.len(), 1, "one terminal, one layout");
     let group = &list.items[0];
     assert_eq!(group.panes.len(), 1);
@@ -1196,13 +1196,13 @@ async fn splitting_right_puts_the_new_pane_on_the_right() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, dir.path()).await;
-    let first = a_terminal(&mut client, &workspace.id, "one").await;
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    let first = a_terminal(&mut client, &worktree.id, "one").await;
 
     let after = layout_call(
         &mut client,
         "layout.split",
-        &workspace.id,
+        &worktree.id,
         split(&first.id, farcooler_protocol::v1::SplitSide::Right),
     )
     .await;
@@ -1224,13 +1224,13 @@ async fn splitting_left_puts_the_new_pane_on_the_left() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, dir.path()).await;
-    let first = a_terminal(&mut client, &workspace.id, "one").await;
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    let first = a_terminal(&mut client, &worktree.id, "one").await;
 
     let after = layout_call(
         &mut client,
         "layout.split",
-        &workspace.id,
+        &worktree.id,
         split(&first.id, farcooler_protocol::v1::SplitSide::Left),
     )
     .await;
@@ -1245,13 +1245,13 @@ async fn splitting_downwards_stacks_rather_than_sitting_beside() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, dir.path()).await;
-    let first = a_terminal(&mut client, &workspace.id, "one").await;
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    let first = a_terminal(&mut client, &worktree.id, "one").await;
 
     let after = layout_call(
         &mut client,
         "layout.split",
-        &workspace.id,
+        &worktree.id,
         split(&first.id, farcooler_protocol::v1::SplitSide::Bottom),
     )
     .await;
@@ -1270,13 +1270,13 @@ async fn a_pane_splits_at_any_depth() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, dir.path()).await;
-    let first = a_terminal(&mut client, &workspace.id, "one").await;
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    let first = a_terminal(&mut client, &worktree.id, "one").await;
 
     let after = layout_call(
         &mut client,
         "layout.split",
-        &workspace.id,
+        &worktree.id,
         split(&first.id, farcooler_protocol::v1::SplitSide::Right),
     )
     .await;
@@ -1293,7 +1293,7 @@ async fn a_pane_splits_at_any_depth() {
     let after = layout_call(
         &mut client,
         "layout.split",
-        &workspace.id,
+        &worktree.id,
         split(&second, farcooler_protocol::v1::SplitSide::Bottom),
     )
     .await;
@@ -1319,13 +1319,13 @@ async fn breaking_a_pane_out_makes_a_layout_and_dropping_it_back_puts_it_where_a
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, dir.path()).await;
-    let first = a_terminal(&mut client, &workspace.id, "one").await;
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    let first = a_terminal(&mut client, &worktree.id, "one").await;
 
     let after = layout_call(
         &mut client,
         "layout.split",
-        &workspace.id,
+        &worktree.id,
         split(&first.id, farcooler_protocol::v1::SplitSide::Right),
     )
     .await;
@@ -1340,7 +1340,7 @@ async fn breaking_a_pane_out_makes_a_layout_and_dropping_it_back_puts_it_where_a
     let broken = layout_call(
         &mut client,
         "layout.break",
-        &workspace.id,
+        &worktree.id,
         farcooler_protocol::v1::LayoutUpdate {
             target: Some(second.clone()),
             ..Default::default()
@@ -1354,7 +1354,7 @@ async fn breaking_a_pane_out_makes_a_layout_and_dropping_it_back_puts_it_where_a
     let rejoined = layout_call(
         &mut client,
         "layout.move",
-        &workspace.id,
+        &worktree.id,
         farcooler_protocol::v1::LayoutUpdate {
             terminals: vec![second.clone()],
             target: Some(first.id.clone()),
@@ -1377,7 +1377,7 @@ async fn moving_a_pane_that_is_alone_in_its_window_keeps_its_identity() {
     // to the pane looks like, and the only arrangement possible while a window
     // held exactly one pane. Joining that pane to another window makes it inherit
     // the destination's options instead, so the id vanishes, the record derives as
-    // `lost`, and its workspace as `error`.
+    // `lost`, and its worktree as `error`.
     //
     // Two terminals in separate layouts, then one dragged onto the other, is the
     // ordinary drag-and-drop path — so this was reachable by dragging almost any
@@ -1385,18 +1385,18 @@ async fn moving_a_pane_that_is_alone_in_its_window_keeps_its_identity() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, dir.path()).await;
+    let worktree = a_worktree(&mut client, dir.path()).await;
 
-    let first = a_terminal(&mut client, &workspace.id, "one").await;
-    let second = a_terminal(&mut client, &workspace.id, "two").await;
+    let first = a_terminal(&mut client, &worktree.id, "one").await;
+    let second = a_terminal(&mut client, &worktree.id, "two").await;
 
-    let before = layout_call(&mut client, "layout.list", &workspace.id, Default::default()).await;
+    let before = layout_call(&mut client, "layout.list", &worktree.id, Default::default()).await;
     assert_eq!(before.items.len(), 2, "two terminals, two layouts");
 
     let after = layout_call(
         &mut client,
         "layout.move",
-        &workspace.id,
+        &worktree.id,
         farcooler_protocol::v1::LayoutUpdate {
             terminals: vec![second.id.clone()],
             target: Some(first.id.clone()),
@@ -1416,7 +1416,7 @@ async fn moving_a_pane_that_is_alone_in_its_window_keeps_its_identity() {
 
     // And the record agrees: still running, not lost.
     let mut list = request("terminal.list");
-    list.target_resource_id = Some(workspace.id.clone());
+    list.target_resource_id = Some(worktree.id.clone());
     let result = client.call(list).await.expect("terminal.list");
     let Some(result::Value::TerminalList(terminals)) = result.value else { panic!("wrong result") };
     let moved = terminals.items.iter().find(|t| t.id == second.id).expect("moved terminal");
@@ -1433,8 +1433,8 @@ async fn a_terminal_reports_its_pane_mode_to_a_client() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, dir.path()).await;
-    let terminal = a_terminal(&mut client, &workspace.id, "claude").await;
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    let terminal = a_terminal(&mut client, &worktree.id, "claude").await;
 
     assert_eq!(terminal.pane_mode, farcooler_protocol::v1::PaneMode::Terminal as i32);
 }
@@ -1448,13 +1448,13 @@ async fn a_pane_split_with_the_changes_preset_is_a_changes_pane() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, dir.path()).await;
-    let original = a_terminal(&mut client, &workspace.id, "one").await;
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    let original = a_terminal(&mut client, &worktree.id, "one").await;
 
     let list = layout_call(
         &mut client,
         "layout.split",
-        &workspace.id,
+        &worktree.id,
         farcooler_protocol::v1::LayoutUpdate {
             target: Some(original.id.clone()),
             side: farcooler_protocol::v1::SplitSide::Right as i32,
@@ -1467,7 +1467,7 @@ async fn a_pane_split_with_the_changes_preset_is_a_changes_pane() {
     assert_eq!(list.items[0].panes.len(), 2, "two panes: the terminal and the diff");
 
     let mut terminals = request("terminal.list");
-    terminals.target_resource_id = Some(workspace.id.clone());
+    terminals.target_resource_id = Some(worktree.id.clone());
     let result = client.call(terminals).await.expect("terminal.list");
     let Some(result::Value::TerminalList(terminals)) = result.value else { panic!("wrong result") };
     let changes = terminals
@@ -1527,11 +1527,11 @@ async fn hiding_succeeds_while_a_terminal_is_genuinely_running() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, dir.path()).await;
-    let terminal = a_terminal(&mut client, &workspace.id, "agent").await;
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    let terminal = a_terminal(&mut client, &worktree.id, "agent").await;
 
     let mut list = request("terminal.list");
-    list.target_resource_id = Some(workspace.id.clone());
+    list.target_resource_id = Some(worktree.id.clone());
     let result = client.call(list).await.expect("terminal.list");
     let Some(result::Value::TerminalList(terminals)) = result.value else { panic!("wrong result") };
     let live = terminals.items.iter().find(|t| t.id == terminal.id).expect("its own terminal");
@@ -1541,20 +1541,20 @@ async fn hiding_succeeds_while_a_terminal_is_genuinely_running() {
         "this test needs a genuinely running terminal to mean anything: {live:?}"
     );
 
-    let mut hide = request("workspace.hide");
-    hide.target_resource_id = Some(workspace.id.clone());
+    let mut hide = request("worktree.hide");
+    hide.target_resource_id = Some(worktree.id.clone());
     let result =
-        client.call(hide).await.expect("workspace.hide must not refuse a running terminal");
-    let Some(result::Value::Workspace(hidden)) = result.value else { panic!("wrong result") };
-    assert_eq!(hidden.state(), farcooler_protocol::v1::WorkspaceState::Hidden);
+        client.call(hide).await.expect("worktree.hide must not refuse a running terminal");
+    let Some(result::Value::Worktree(hidden)) = result.value else { panic!("wrong result") };
+    assert_eq!(hidden.state(), farcooler_protocol::v1::WorktreeState::Hidden);
 
-    let mut unhide = request("workspace.unhide");
-    unhide.target_resource_id = Some(workspace.id.clone());
-    let result = client.call(unhide).await.expect("workspace.unhide");
-    let Some(result::Value::Workspace(back)) = result.value else { panic!("wrong result") };
+    let mut unhide = request("worktree.unhide");
+    unhide.target_resource_id = Some(worktree.id.clone());
+    let result = client.call(unhide).await.expect("worktree.unhide");
+    let Some(result::Value::Worktree(back)) = result.value else { panic!("wrong result") };
     assert_eq!(
         back.state(),
-        farcooler_protocol::v1::WorkspaceState::Active,
+        farcooler_protocol::v1::WorktreeState::Active,
         "the terminal is still running, so unhiding must not hide that"
     );
 }
@@ -1567,8 +1567,8 @@ async fn an_agent_subscribe_from_a_cursor_is_accepted() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, dir.path()).await;
-    let terminal = a_terminal(&mut client, &workspace.id, "claude").await;
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    let terminal = a_terminal(&mut client, &worktree.id, "claude").await;
 
     let mut req = request("terminal.agent_subscribe");
     req.payload = Some(request::Payload::AgentSubscribe(farcooler_protocol::v1::AgentSubscribe {
@@ -1603,8 +1603,8 @@ async fn a_prompt_nothing_is_listening_for_is_refused_rather_than_dropped() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = h._dir.path().to_path_buf();
-    let workspace = a_workspace(&mut client, &dir).await;
-    let terminal = a_terminal(&mut client, &workspace.id, "pane").await;
+    let worktree = a_worktree(&mut client, &dir).await;
+    let terminal = a_terminal(&mut client, &worktree.id, "pane").await;
 
     let mut req = request("terminal.agent_prompt");
     req.payload = Some(request::Payload::AgentPrompt(farcooler_protocol::v1::AgentPrompt {
@@ -1643,11 +1643,11 @@ async fn switching_a_panes_mode_tells_every_client_and_not_just_the_caller() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = h._dir.path().to_path_buf();
-    let workspace = a_workspace(&mut client, &dir).await;
-    let terminal = a_terminal(&mut client, &workspace.id, "pane").await;
+    let worktree = a_worktree(&mut client, &dir).await;
+    let terminal = a_terminal(&mut client, &worktree.id, "pane").await;
 
     // Subscribed AFTER the setup above, so the fleet traffic that creating a
-    // workspace and a terminal legitimately produces cannot be mistaken for
+    // worktree and a terminal legitimately produces cannot be mistaken for
     // the announce this test is about.
     let mut events = h.watcher.subscribe();
 
@@ -1704,12 +1704,12 @@ async fn an_image_pasted_in_chunks_lands_as_one_file_and_is_typed_into_the_pane(
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let (_repo_dir, repository) = registered_repository(&mut client).await;
-    let ws = create_workspace(&mut client, repository, "look at this", "feat/look", "shell").await;
+    let ws = create_worktree(&mut client, repository, "look at this", "feat/look", "shell").await;
     let terminal = terminals(&mut client)
         .await
         .into_iter()
-        .find(|t| t.workspace_id == ws.id)
-        .expect("the workspace opened a terminal");
+        .find(|t| t.worktree_id == ws.id)
+        .expect("the worktree opened a terminal");
 
     // Three chunks, so the offset bookkeeping is exercised rather than assumed.
     let image = png(300);
@@ -1782,11 +1782,11 @@ async fn a_paste_whose_offset_does_not_match_is_refused_over_the_wire() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let (_repo_dir, repository) = registered_repository(&mut client).await;
-    let ws = create_workspace(&mut client, repository, "look", "feat/look2", "shell").await;
+    let ws = create_worktree(&mut client, repository, "look", "feat/look2", "shell").await;
     let terminal = terminals(&mut client)
         .await
         .into_iter()
-        .find(|t| t.workspace_id == ws.id)
+        .find(|t| t.worktree_id == ws.id)
         .expect("terminal");
 
     let image = png(300);
@@ -1840,7 +1840,7 @@ async fn the_handshake_says_what_this_machine_can_do() {
     let advertised = &client.server_hello().capabilities;
     assert!(!advertised.is_empty(), "a daemon that advertises nothing can be asked for nothing");
     for floor in
-        [farcooler_protocol::capability::WORKSPACES, farcooler_protocol::capability::TERMINALS]
+        [farcooler_protocol::capability::WORKTREES, farcooler_protocol::capability::TERMINALS]
     {
         assert!(advertised.iter().any(|c| c == floor), "{floor} is the floor; every daemon has it");
     }
@@ -1871,7 +1871,7 @@ async fn a_capability_this_machine_lacks_is_refused_before_anything_runs() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
 
-    let mut req = request("workspace.list");
+    let mut req = request("worktree.list");
     req.required_capabilities = vec!["time-travel".into()];
 
     match client.call(req).await {
@@ -1895,8 +1895,8 @@ async fn a_capability_this_machine_has_is_not_refused() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
 
-    let mut req = request("workspace.list");
-    req.required_capabilities = vec![farcooler_protocol::capability::WORKSPACES.into()];
+    let mut req = request("worktree.list");
+    req.required_capabilities = vec![farcooler_protocol::capability::WORKTREES.into()];
     assert!(client.call(req).await.is_ok());
 }
 
@@ -1909,10 +1909,10 @@ async fn a_terminal_that_starts_on_a_prompt_names_its_capability_and_is_served()
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, dir.path()).await;
+    let worktree = a_worktree(&mut client, dir.path()).await;
 
     let mut create = request("terminal.create");
-    create.target_resource_id = Some(workspace.id.clone());
+    create.target_resource_id = Some(worktree.id.clone());
     create.required_capabilities = vec![farcooler_protocol::capability::LAUNCH_PROMPT.into()];
     create.payload = Some(request::Payload::TerminalCreate(
         farcooler_protocol::v1::TerminalCreate {
@@ -1927,7 +1927,7 @@ async fn a_terminal_that_starts_on_a_prompt_names_its_capability_and_is_served()
     assert!(matches!(result.value, Some(result::Value::Terminal(_))));
 }
 
-/// `WorkspaceCreate.fork_only` reaches the daemon and holds: a name only a
+/// `WorktreeCreate.fork_only` reaches the daemon and holds: a name only a
 /// remote carries, which a plain create at `HEAD` checks out, is refused with
 /// `BRANCH_EXISTS` and nothing is made. With the capability it needs named,
 /// which this daemon serves rather than refuses.
@@ -1956,13 +1956,13 @@ async fn a_fork_only_create_refuses_a_branch_a_remote_already_has() {
     git(&repo, &["remote", "add", "origin", upstream.path().to_str().unwrap()]);
     git(&repo, &["fetch", "-q", "origin"]);
 
-    let before = workspaces(&mut client).await.len();
-    let mut create = request("workspace.create");
+    let before = worktrees(&mut client).await.len();
+    let mut create = request("worktree.create");
     create.target_resource_id = Some(repository);
     create.required_capabilities =
-        vec![farcooler_protocol::capability::WORKSPACE_FORK_ONLY.into()];
-    create.payload = Some(request::Payload::WorkspaceCreate(
-        farcooler_protocol::v1::WorkspaceCreate {
+        vec![farcooler_protocol::capability::WORKTREE_FORK_ONLY.into()];
+    create.payload = Some(request::Payload::WorktreeCreate(
+        farcooler_protocol::v1::WorktreeCreate {
             task_name: "theirs".into(),
             branch: "theirs".into(),
             base_revision: "HEAD".into(),
@@ -1975,16 +1975,16 @@ async fn a_fork_only_create_refuses_a_branch_a_remote_already_has() {
         Err(ClientError::Daemon { code, .. }) => assert_eq!(code, ErrorCode::BranchExists as i32),
         other => panic!("expected BRANCH_EXISTS, got {other:?}"),
     }
-    assert_eq!(workspaces(&mut client).await.len(), before, "nothing was made");
+    assert_eq!(worktrees(&mut client).await.len(), before, "nothing was made");
 }
 
 /// `terminal.create` for a task, named by key, with the capability that
 /// field needs. `fcprobe` is an agent preset by name (a plain identifier that
 /// isn't `shell` or `changes`) whose program this runner doesn't have, so the
 /// pane exports the key and nothing real is started.
-fn a_terminal_for(workspace: &bytes::Bytes, key: &str) -> farcooler_protocol::v1::Request {
+fn a_terminal_for(worktree: &bytes::Bytes, key: &str) -> farcooler_protocol::v1::Request {
     let mut create = request("terminal.create");
-    create.target_resource_id = Some(workspace.clone());
+    create.target_resource_id = Some(worktree.clone());
     create.required_capabilities = vec![farcooler_protocol::capability::TERMINAL_TASK.into()];
     create.payload = Some(request::Payload::TerminalCreate(
         farcooler_protocol::v1::TerminalCreate {
@@ -2019,12 +2019,12 @@ async fn a_task_is_only_opened_with_an_agent_that_is_told_it() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, dir.path()).await;
-    let task = create_task(&mut client, workspace.repository_id.clone(), "the work").await;
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    let task = create_task(&mut client, worktree.repository_id.clone(), "the work").await;
     let before = terminals(&mut client).await.len();
 
     for preset in ["cluade", "gemini", "bash", "fcprobe", "shell"] {
-        let mut create = a_terminal_for(&workspace.id, &task.key);
+        let mut create = a_terminal_for(&worktree.id, &task.key);
         let Some(request::Payload::TerminalCreate(ref mut p)) = create.payload else { panic!("payload") };
         p.command_preset = preset.into();
         match client.call(create).await {
@@ -2048,8 +2048,8 @@ async fn a_terminal_for_a_task_on_another_board_is_refused() {
     let mut client = connect(&h).await;
     let here_dir = tempfile::tempdir().unwrap();
     let there_dir = tempfile::tempdir().unwrap();
-    let here = a_workspace(&mut client, here_dir.path()).await;
-    let there = a_workspace_named(&mut client, there_dir.path(), "yonder", "elsewhere").await;
+    let here = a_worktree(&mut client, here_dir.path()).await;
+    let there = a_worktree_named(&mut client, there_dir.path(), "yonder", "elsewhere").await;
     let elsewhere = create_task(&mut client, there.repository_id.clone(), "not here").await;
     let before = terminals(&mut client).await.len();
 
@@ -2068,10 +2068,10 @@ async fn an_unknown_key_is_refused_and_no_pane_is_opened() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, dir.path()).await;
+    let worktree = a_worktree(&mut client, dir.path()).await;
     let before = terminals(&mut client).await.len();
 
-    match client.call(a_terminal_for(&workspace.id, "de-404")).await {
+    match client.call(a_terminal_for(&worktree.id, "de-404")).await {
         Err(ClientError::Daemon { code, what, .. }) => {
             assert_eq!(code, ErrorCode::InvalidArgument as i32);
             assert_eq!(what, "task_key");
@@ -2088,9 +2088,9 @@ async fn an_empty_task_key_is_an_ordinary_terminal() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, dir.path()).await;
+    let worktree = a_worktree(&mut client, dir.path()).await;
 
-    client.call(a_terminal_for(&workspace.id, "")).await.expect("an ordinary terminal");
+    client.call(a_terminal_for(&worktree.id, "")).await.expect("an ordinary terminal");
     let commands = start_commands(&h);
     assert!(commands.iter().any(|c| c.contains("fcprobe")), "{commands:?}");
     assert!(commands.iter().all(|c| !c.contains("FARCOOLER_TASK")), "{commands:?}");
@@ -2099,7 +2099,7 @@ async fn an_empty_task_key_is_an_ordinary_terminal() {
 #[tokio::test]
 async fn a_method_this_daemon_never_heard_of_says_so_precisely() {
     // Not NOT_FOUND, which this used to be. To a newer app asking for a feature
-    // this build predates, "no such method" and "no such workspace" were the
+    // this build predates, "no such method" and "no such worktree" were the
     // same code — so it could neither dim the control nor say anything a person
     // could act on.
     let h = start(Scope::HostAdmin).await;
@@ -2114,6 +2114,34 @@ async fn a_method_this_daemon_never_heard_of_says_so_precisely() {
             );
         }
         other => panic!("expected a capability refusal, got {other:?}"),
+    }
+}
+
+/// The names an app built before the worktree rename still sends.
+///
+/// The rename moved these on purpose and kept no aliases: every app and the
+/// runner update together. What an older app meets is the refusal above, not
+/// an empty success that would read as a runner with no worktrees on it.
+#[tokio::test]
+async fn a_method_retired_by_the_worktree_rename_is_refused_not_answered() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+
+    for method in [
+        "workspace.list",
+        "workspace.create",
+        "workspace.hide",
+        "workspace.unhide",
+        "workspace.reorder",
+        "workspace.remove_worktree",
+    ] {
+        match client.call(request(method)).await {
+            Err(ClientError::Daemon { code, retryable, .. }) => {
+                assert_eq!(code, ErrorCode::CapabilityUnsupported as i32, "{method}");
+                assert!(!retryable, "{method}: no retry brings the old name back");
+            }
+            other => panic!("{method} must be refused, got {other:?}"),
+        }
     }
 }
 
@@ -2698,11 +2726,11 @@ async fn pane_with_scrollback(
     client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
 ) -> (tempfile::TempDir, bytes::Bytes) {
     let (repo_dir, repository) = registered_repository(client).await;
-    let ws = create_workspace(client, repository, "scroll", "feat/scroll", "shell").await;
+    let ws = create_worktree(client, repository, "scroll", "feat/scroll", "shell").await;
     let terminal = terminals(client)
         .await
         .into_iter()
-        .find(|t| t.workspace_id == ws.id)
+        .find(|t| t.worktree_id == ws.id)
         .expect("terminal");
 
     let mut write = request("terminal.write");
@@ -2854,7 +2882,7 @@ async fn a_terminal_list_carries_the_activity_trace_and_the_fleet_sum() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let (_dir, repository) = registered_repository(&mut client).await;
-    create_workspace(&mut client, repository, "add auth", "feat/add-auth", "shell").await;
+    create_worktree(&mut client, repository, "add auth", "feat/add-auth", "shell").await;
 
     // The terminal the daemon actually opened, by the id the daemon gave it.
     let opened = terminals(&mut client).await;
@@ -2873,8 +2901,8 @@ async fn a_terminal_list_carries_the_activity_trace_and_the_fleet_sum() {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock")
         .as_secs() as i64;
-    let workspace = uuid::Uuid::from_slice(&opened[0].workspace_id).expect("a workspace id");
-    h.watcher.tick_traces(&std::collections::HashMap::from([(id, workspace)]), now);
+    let worktree = uuid::Uuid::from_slice(&opened[0].worktree_id).expect("a worktree id");
+    h.watcher.tick_traces(&std::collections::HashMap::from([(id, worktree)]), now);
     h.watcher.record_trace(id, now, Sample { output: 9, code: 4, commits: 0 });
 
     let listed = terminals(&mut client).await;
@@ -3675,7 +3703,7 @@ async fn blocking_a_task_on_one_that_does_not_exist_is_refused_followably() {
 ///
 /// The failure this pins is deterministic, not a rare interleaving: a client
 /// sends an acceptance item whose id is not sixteen bytes of uuid, or a
-/// malformed `workspace_id`, and if either is validated after `create_task` has
+/// malformed `worktree_id`, and if either is validated after `create_task` has
 /// committed then a titled task with a `Created` note and no intent is sitting
 /// on the board — with NO announce, so nothing tells any client it appeared.
 /// The caller reads `InvalidArgument`, fixes its request, retries, and now
@@ -3739,14 +3767,14 @@ async fn a_create_that_is_refused_leaves_no_task_behind_and_burns_no_key() {
     bad_lane.payload = Some(request::Payload::TaskCreate(farcooler_protocol::v1::TaskCreate {
         repository_id: repository.clone(),
         title: "fix the thing".into(),
-        workspace_id: Some(bytes::Bytes::from_static(b"not a workspace")),
+        worktree_id: Some(bytes::Bytes::from_static(b"not a worktree")),
         ..Default::default()
     }));
     match client.call(bad_lane).await {
         Err(ClientError::Daemon { code, .. }) => {
             assert_eq!(code, ErrorCode::InvalidArgument as i32)
         }
-        other => panic!("expected a malformed workspace_id to be refused, got {other:?}"),
+        other => panic!("expected a malformed worktree_id to be refused, got {other:?}"),
     }
     assert!(
         board(&mut client, repository.clone()).await.is_empty(),

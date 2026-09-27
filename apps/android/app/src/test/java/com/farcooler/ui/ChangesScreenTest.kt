@@ -57,7 +57,7 @@ class ChangesScreenTest {
             nothingHere(DiffScope.Branch),
         )
         assertEquals(
-            "Nothing uncommitted. The workspace is clean.",
+            "Nothing uncommitted. The worktree is clean.",
             nothingHere(DiffScope.Local),
         )
         val commit = nothingHere(DiffScope.Commit("a".repeat(40)))
@@ -146,7 +146,7 @@ class ChangesScreenTest {
     /**
      * A file heading is read on the way into every file, so the directory is
      * left out of it: `crates/daemon/src` spelled letter by letter once per file
-     * on a forty-file branch is what `NeedsYou`'s workspace header already
+     * on a forty-file branch is what `NeedsYou`'s worktree header already
      * refuses. The directory stays on screen for the eye, and the index sheet —
      * where a screen-reader user CHOOSES a file rather than passes one — says the
      * directory too. 5c built it: see `spokenIndexRow`, and the test for it in

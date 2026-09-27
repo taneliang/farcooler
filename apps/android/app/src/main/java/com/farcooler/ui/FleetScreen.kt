@@ -68,10 +68,10 @@ import com.farcooler.model.GlanceMarkSize
 import com.farcooler.model.RunnerLink
 import com.farcooler.model.fleetReading
 import com.farcooler.model.liveSummary
-import com.farcooler.model.WorkspaceOrder
+import com.farcooler.model.WorktreeOrder
 import com.farcooler.model.StateKind
 import com.farcooler.model.Terminal
-import com.farcooler.model.Workspace
+import com.farcooler.model.Worktree
 import com.farcooler.net.Connection
 import com.farcooler.net.FleetEntry
 import com.farcooler.net.HostKeyQuestion
@@ -82,9 +82,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * Every workspace on every runner, in one scroll area.
+ * Every worktree on every runner, in one scroll area.
  *
- * Shown two places — as a whole screen pushed from the front door's Workspaces
+ * Shown two places — as a whole screen pushed from the front door's Worktrees
  * row, and inside the drawer over anything — so a task started from either one
  * works the same way and neither loses a capability the other has.
  *
@@ -135,7 +135,7 @@ fun FleetDrawer(
  *
  * No longer where the app lands when nothing is running — the front door is,
  * always — so this is now a destination somebody chose: pushed from the front
- * door's Workspaces row, which is also the only place in the app that says how
+ * door's Worktrees row, which is also the only place in the app that says how
  * many there are.
  *
  * [onBack] is what says so. It carries the back arrow, and the hamburger is
@@ -156,7 +156,7 @@ fun FleetScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Workspaces") },
+                title = { Text("Worktrees") },
                 navigationIcon = {
                     if (onBack != null) {
                         IconButton(onClick = onBack) {
@@ -203,17 +203,17 @@ private fun FleetBody(
     val scope = rememberCoroutineScope()
 
     var showQuickTask by remember { mutableStateOf(false) }
-    var showNewWorkspace by remember { mutableStateOf(false) }
+    var showNewWorktree by remember { mutableStateOf(false) }
     // Saveable: the only state on this screen that is a decision rather than a
     // transient. The sheets below deliberately are not — a process death is not
-    // a reason to reopen a half-filled "new workspace" form on somebody's
+    // a reason to reopen a half-filled "new worktree" form on somebody's
     // behalf. `rememberLazyListState` already saves the scroll position itself.
     var showHidden by rememberSaveable { mutableStateOf(false) }
     var editingRunner by remember { mutableStateOf<com.farcooler.data.Runner?>(null) }
     var addingRunner by remember { mutableStateOf(false) }
-    var newTerminalIn by remember { mutableStateOf<Pair<Connection, Workspace>?>(null) }
-    // The two phase-8 doors off a workspace row. Both hold a `Connection` as
-    // well as the workspace, because a workspace id means nothing without the
+    var newTerminalIn by remember { mutableStateOf<Pair<Connection, Worktree>?>(null) }
+    // The two phase-8 doors off a worktree row. Both hold a `Connection` as
+    // well as the worktree, because a worktree id means nothing without the
     // runner that minted it — the same rule `ChangesStores` is keyed by.
     var stackFor by remember { mutableStateOf<FleetEntry?>(null) }
     var removing by remember { mutableStateOf<FleetEntry?>(null) }
@@ -223,8 +223,8 @@ private fun FleetBody(
     // nothing about which row is which.
     val namesRunners = connections.size > 1
 
-    val visible = entries.filter { showHidden || !it.workspace.isHidden }
-    val hiddenCount = entries.count { it.workspace.isHidden }
+    val visible = entries.filter { showHidden || !it.worktree.isHidden }
+    val hiddenCount = entries.count { it.worktree.isHidden }
 
     // The list's own state, because a drag has to ask where things ARE. Nothing
     // else on this screen needed it — `rememberLazyListState` saves the scroll
@@ -234,9 +234,9 @@ private fun FleetBody(
     // Deliberately not `rememberSaveable`: a drag interrupted by a process death
     // is a drag that did not happen.
     var lifted by remember { mutableStateOf<String?>(null) }
-    var landing by remember { mutableStateOf<WorkspaceOrder.Landing?>(null) }
+    var landing by remember { mutableStateOf<WorktreeOrder.Landing?>(null) }
 
-    fun keyOf(entry: FleetEntry) = "${entry.host.id}/${entry.workspace.id}"
+    fun keyOf(entry: FleetEntry) = "${entry.host.id}/${entry.worktree.id}"
 
     // Only cards on the SAME runner take part in a drag. Each runner keeps its
     // own order in its own database, so a card cannot move into another
@@ -244,12 +244,12 @@ private fun FleetBody(
     // not be read as asking for that. Clamping to this runner's own cards is
     // what turns such a wander into "the end of my own stretch", which is
     // almost always what was meant.
-    fun spans(hostId: String): List<WorkspaceOrder.Card> {
+    fun spans(hostId: String): List<WorktreeOrder.Card> {
         val mine = visible.filter { it.host.id == hostId }.map(::keyOf).toSet()
         val laid = listState.layoutInfo.visibleItemsInfo.map {
-            WorkspaceOrder.Laid(it.key.toString(), it.offset, it.size)
+            WorktreeOrder.Laid(it.key.toString(), it.offset, it.size)
         }
-        return WorkspaceOrder.cards(laid, mine)
+        return WorktreeOrder.cards(laid, mine)
     }
 
     // Let go: work out the runner's new order and send it, or send nothing.
@@ -262,12 +262,12 @@ private fun FleetBody(
         val entry = visible.firstOrNull { keyOf(it) == dragged } ?: return
         val group = visible.filter { it.host.id == entry.host.id }
         val order = group.map(::keyOf)
-        val next = WorkspaceOrder.moved(order, dragged, landed.target, landed.edge)
+        val next = WorktreeOrder.moved(order, dragged, landed.target, landed.edge)
         // A drop that changes nothing costs no round trip. It is not free: a
         // reorder makes every other client of that runner re-read the fleet.
         if (next == order) return
-        val ids = next.mapNotNull { key -> group.firstOrNull { keyOf(it) == key }?.workspace?.id }
-        scope.launch { entry.connection.reorderWorkspaces(ids) }
+        val ids = next.mapNotNull { key -> group.firstOrNull { keyOf(it) == key }?.worktree?.id }
+        scope.launch { entry.connection.reorderWorktrees(ids) }
     }
 
     LazyColumn(state = listState, modifier = modifier, contentPadding = contentPadding) {
@@ -285,8 +285,8 @@ private fun FleetBody(
                     Text("Quick task")
                 }
                 Spacer(Modifier.weight(1f))
-                IconButton(onClick = { showNewWorkspace = true }) {
-                    Icon(Icons.Filled.Add, contentDescription = "New workspace")
+                IconButton(onClick = { showNewWorktree = true }) {
+                    Icon(Icons.Filled.Add, contentDescription = "New worktree")
                 }
             }
         }
@@ -327,8 +327,8 @@ private fun FleetBody(
         if (visible.isEmpty()) {
             item {
                 Text(
-                    if (entries.isEmpty()) "No workspaces on any connected runner."
-                    else "Every workspace is hidden.",
+                    if (entries.isEmpty()) "No worktrees on any connected runner."
+                    else "Every worktree is hidden.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -337,18 +337,18 @@ private fun FleetBody(
         }
 
         for (entry in visible) {
-            item(key = "${entry.host.id}/${entry.workspace.id}") {
-                WorkspaceHeader(
+            item(key = "${entry.host.id}/${entry.worktree.id}") {
+                WorktreeHeader(
                     entry = entry,
                     showRunner = namesRunners,
                     drag = HeaderDrag(
                         key = keyOf(entry),
                         // Offered only where the runner keeps an order. A daemon
-                        // that predates `workspace.reorder` sends no `ordinal`,
+                        // that predates `worktree.reorder` sends no `ordinal`,
                         // and a drag against one would rearrange the screen and
                         // put it all back on the next refresh with nothing
                         // failing anywhere.
-                        enabled = entry.workspace.ordinal != null,
+                        enabled = entry.worktree.ordinal != null,
                         lifted = lifted == keyOf(entry),
                         edge = landing?.takeIf { it.target == keyOf(entry) }?.edge,
                         onStart = {
@@ -362,7 +362,7 @@ private fun FleetBody(
                             val me = listState.layoutInfo.visibleItemsInfo
                                 .firstOrNull { it.key == keyOf(entry) }
                             if (me != null) {
-                                landing = WorkspaceOrder.landing(
+                                landing = WorktreeOrder.landing(
                                     spans(entry.host.id), me.offset + y.toInt())
                             }
                         },
@@ -373,9 +373,9 @@ private fun FleetBody(
                         },
                     ),
                     onHide = { hidden ->
-                        scope.launch { entry.connection.setHidden(entry.workspace, hidden) }
+                        scope.launch { entry.connection.setHidden(entry.worktree, hidden) }
                     },
-                    onNewTerminal = { newTerminalIn = entry.connection to entry.workspace },
+                    onNewTerminal = { newTerminalIn = entry.connection to entry.worktree },
                     onStack = { stackFor = entry },
                     onRemove = { removing = entry },
                 )
@@ -386,23 +386,23 @@ private fun FleetBody(
             // committed to lands on something else. Attention is a mark on a
             // row, and a mark you can find in a list that holds still beats one
             // that comes to you by moving the list.
-            val numbering = entry.workspace.ordinals()
-            items(entry.workspace.terminals, key = { "${entry.host.id}/${it.id}" }) { terminal ->
+            val numbering = entry.worktree.ordinals()
+            items(entry.worktree.terminals, key = { "${entry.host.id}/${it.id}" }) { terminal ->
                 val phase by entry.connection.phase.collectAsStateWithLifecycle()
                 TerminalRow(
                     terminal = terminal,
                     ordinal = numbering[terminal.id],
                     answering = phase.link == RunnerLink.ANSWERING,
                     onClick = {
-                        onSelect(TerminalRef(entry.host.id, entry.workspace.id, terminal.id))
+                        onSelect(TerminalRef(entry.host.id, entry.worktree.id, terminal.id))
                     },
                     onAction = { action ->
                         scope.launch { entry.connection.act(action, terminal) }
                     },
                 )
             }
-            if (entry.workspace.terminals.isEmpty()) {
-                item(key = "${entry.host.id}/${entry.workspace.id}/empty") {
+            if (entry.worktree.terminals.isEmpty()) {
+                item(key = "${entry.host.id}/${entry.worktree.id}/empty") {
                     Text(
                         "No terminals",
                         style = MaterialTheme.typography.bodySmall,
@@ -421,7 +421,7 @@ private fun FleetBody(
                 ) {
                     Icon(Icons.Outlined.VisibilityOff, null, Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text(if (showHidden) "Hide hidden workspaces" else "$hiddenCount hidden")
+                    Text(if (showHidden) "Hide hidden worktrees" else "$hiddenCount hidden")
                 }
             }
         }
@@ -479,13 +479,13 @@ private fun FleetBody(
     if (showQuickTask) {
         QuickTaskSheet(model = model, onDismiss = { showQuickTask = false })
     }
-    if (showNewWorkspace) {
-        NewWorkspaceSheet(model = model, onDismiss = { showNewWorkspace = false })
+    if (showNewWorktree) {
+        NewWorktreeSheet(model = model, onDismiss = { showNewWorktree = false })
     }
-    newTerminalIn?.let { (connection, workspace) ->
+    newTerminalIn?.let { (connection, worktree) ->
         NewTerminalSheet(
             connection = connection,
-            workspace = workspace,
+            worktree = worktree,
             onDismiss = { newTerminalIn = null },
         )
     }
@@ -495,11 +495,11 @@ private fun FleetBody(
     // clearing `stackFor` here instead: writing state during composition is how
     // a screen recomposes itself in a loop, and Cancel already clears it.
     stackFor?.let { entry ->
-        entry.workspace.repository?.let { repository ->
+        entry.worktree.repository?.let { repository ->
             StackSheet(
                 connection = entry.connection,
                 repository = repository,
-                branch = entry.workspace.branch,
+                branch = entry.worktree.branch,
                 onDismiss = { stackFor = null },
             )
         }
@@ -507,7 +507,7 @@ private fun FleetBody(
     removing?.let { entry ->
         RemoveWorktreeCeremony(
             connection = entry.connection,
-            workspace = entry.workspace,
+            worktree = entry.worktree,
             onFinished = { removing = null },
         )
     }
@@ -845,7 +845,7 @@ internal fun failureDetail(
 }
 
 /**
- * Everything a workspace header needs to be draggable, in one argument.
+ * Everything a worktree header needs to be draggable, in one argument.
  *
  * One parameter rather than seven, because this header already carries five and
  * a call site with a dozen positional lambdas is where the wrong one gets passed
@@ -856,7 +856,7 @@ private class HeaderDrag(
     val enabled: Boolean,
     val lifted: Boolean,
     /** The edge to draw an insertion line on, or null if this is not the target. */
-    val edge: WorkspaceOrder.Edge?,
+    val edge: WorktreeOrder.Edge?,
     val onStart: () -> Unit,
     /** The finger, in this card's own coordinates. */
     val onMove: (Float) -> Unit,
@@ -865,7 +865,7 @@ private class HeaderDrag(
 )
 
 @Composable
-private fun WorkspaceHeader(
+private fun WorktreeHeader(
     entry: FleetEntry,
     showRunner: Boolean,
     drag: HeaderDrag,
@@ -910,14 +910,14 @@ private fun WorkspaceHeader(
     ) {
         Column(Modifier.weight(1f)) {
             Text(
-                entry.workspace.task.ifBlank { entry.workspace.branch },
+                entry.worktree.task.ifBlank { entry.worktree.branch },
                 style = MaterialTheme.typography.titleSmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 buildString {
-                    append(entry.workspace.branch)
+                    append(entry.worktree.branch)
                     if (showRunner) append(" · ${entry.host.displayLabel}")
                 },
                 style = MaterialTheme.typography.labelSmall,
@@ -929,7 +929,7 @@ private fun WorkspaceHeader(
         }
         Box {
             IconButton(onClick = { menu = true }) {
-                Icon(Icons.Filled.MoreVert, contentDescription = "Workspace actions")
+                Icon(Icons.Filled.MoreVert, contentDescription = "Worktree actions")
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(
@@ -943,7 +943,7 @@ private fun WorkspaceHeader(
                 // worktree belongs to and which branch it is on. An older
                 // daemon's fleet carried neither, and a menu item that cannot
                 // work is worse than one that is not there.
-                if (entry.workspace.repository != null && entry.workspace.branch.isNotBlank()) {
+                if (entry.worktree.repository != null && entry.worktree.branch.isNotBlank()) {
                     DropdownMenuItem(
                         text = { Text("Stack & pull request") },
                         onClick = {
@@ -953,10 +953,10 @@ private fun WorkspaceHeader(
                     )
                 }
                 DropdownMenuItem(
-                    text = { Text(if (entry.workspace.isHidden) "Unhide" else "Hide") },
+                    text = { Text(if (entry.worktree.isHidden) "Unhide" else "Hide") },
                     onClick = {
                         menu = false
-                        onHide(!entry.workspace.isHidden)
+                        onHide(!entry.worktree.isHidden)
                     },
                 )
                 // **Never for the repository's own checkout.** Removing it would
@@ -967,7 +967,7 @@ private fun WorkspaceHeader(
                 // keeps nobody walking through a destructive ceremony that could
                 // never have succeeded. See `07e75e8`, which is that story on
                 // iOS, and `RemoveWorktreeCeremony`.
-                if (!entry.workspace.isMainCheckout) {
+                if (!entry.worktree.isMainCheckout) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     DropdownMenuItem(
                         text = {
@@ -1000,7 +1000,7 @@ private fun WorkspaceHeader(
                     .fillMaxWidth()
                     .height(2.dp)
                     .align(
-                        if (drag.edge == WorkspaceOrder.Edge.ABOVE) Alignment.TopCenter
+                        if (drag.edge == WorktreeOrder.Edge.ABOVE) Alignment.TopCenter
                         else Alignment.BottomCenter
                     )
                     .background(MaterialTheme.colorScheme.primary)

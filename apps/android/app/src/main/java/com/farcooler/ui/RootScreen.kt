@@ -41,7 +41,7 @@ import kotlinx.coroutines.launch
  *
  * ## Two layers, not one screen at a time
  *
- * The workspace — or the fleet list, or onboarding — is always composed, and
+ * The worktree — or the fleet list, or onboarding — is always composed, and
  * every pushed screen is drawn OVER it. That used to be a `when` with a
  * `return` per route, which meant opening settings took `TerminalScreen` out of
  * the composition entirely: the `DisposableEffect` disposed the session, the
@@ -53,7 +53,7 @@ import kotlinx.coroutines.launch
  *
  * The fleet lives in a navigation drawer rather than behind a button, which is
  * where the Mac's sidebar and the phone's "switch terminal" sheet both end up
- * on this platform. It is the one place workspaces, runners, settings and
+ * on this platform. It is the one place worktrees, runners, settings and
  * "start something new" all belong together, and an edge swipe reaches it
  * without a target to hit — which matters at 3am, one-handed, checking whether
  * the other agent is still blocked.
@@ -104,7 +104,7 @@ fun RootScreen(model: AppModel) {
                 scope.launch { drawer.close() }
             }
 
-            // Back out of a pushed GROUND screen — a workspace, or the fleet
+            // Back out of a pushed GROUND screen — a worktree, or the fleet
             // list — to whatever is under it, which is now always something,
             // because the front door is the root and a terminal is pushed onto
             // it rather than replacing it.
@@ -174,7 +174,7 @@ fun RootScreen(model: AppModel) {
 }
 
 /**
- * Whatever is underneath everything: the front door, a workspace, the workspace
+ * Whatever is underneath everything: the front door, a worktree, the worktree
  * list, or nothing yet.
  *
  * Exactly one of them is composed at a time, which is what separates a ground
@@ -182,7 +182,7 @@ fun RootScreen(model: AppModel) {
  * see [Route.isOverlay] for why the terminal did not become an overlay when it
  * started being pushed rather than replacing.
  *
- * Keyed on the runner AND the workspace, and on nothing that can change when a
+ * Keyed on the runner AND the worktree, and on nothing that can change when a
  * chip is tapped. That is the Compose form of the rule iOS wrote down in
  * `09b1e1f`: which pane is focused must not be able to restructure this
  * subtree, because restructuring it discards every mounted pane — its terminal
@@ -190,30 +190,30 @@ fun RootScreen(model: AppModel) {
  * beside the stack in `AppModel.focus`, and [Route.Terminal] deliberately has
  * no room for it.
  *
- * **The workspace is in the key now, and this doc has claimed it was since it
- * was written.** It said "the runner and not the workspace", and argued for it
+ * **The worktree is in the key now, and this doc has claimed it was since it
+ * was written.** It said "the runner and not the worktree", and argued for it
  * from the `remember(ref.hostId)` that the old single screen built its one
- * session with: moving between workspaces on one runner re-pointed that session
+ * session with: moving between worktrees on one runner re-pointed that session
  * rather than closing an SSH channel and opening another. That session is gone
  * — a pane owns its own now, and there is nothing left to re-point — so the
  * key can finally be what this screen actually is, which is one worktree.
- * Leaving the workspace out would mean opening a second worktree reused the
- * first one's deck, and every pane in it would be mounted for a workspace it
+ * Leaving the worktree out would mean opening a second worktree reused the
+ * first one's deck, and every pane in it would be mounted for a worktree it
  * does not belong to.
  */
 @Composable
 private fun Ground(model: AppModel, route: Route, visible: Boolean, onOpenDrawer: () -> Unit) {
     // Two subscriptions used to sit here — the focus map and the fleet — held
     // only so that this composable ran again when either moved, because it
-    // resolved the workspace's pane itself and then handed a `TerminalRef` down.
-    // It does not resolve anything any more: [WorkspaceScreen] collects both for
+    // resolved the worktree's pane itself and then handed a `TerminalRef` down.
+    // It does not resolve anything any more: [WorktreeScreen] collects both for
     // itself, and the fleet list and the front door always did. So they are
     // gone rather than left as an inert pair of calls that reads like a
     // dependency.
     Box(Modifier.fillMaxSize()) {
         when (route) {
-            is Route.Terminal -> key(route.hostId, route.workspaceId) {
-                WorkspaceScreen(
+            is Route.Terminal -> key(route.hostId, route.worktreeId) {
+                WorktreeScreen(
                     model = model,
                     route = route,
                     onScreen = visible,
@@ -236,8 +236,8 @@ private fun Ground(model: AppModel, route: Route, visible: Boolean, onOpenDrawer
             else -> NeedsYouScreen(
                 model = model,
                 onSelect = { model.open(it) },
-                onReviewChanges = { host, workspace -> model.openChanges(host, workspace) },
-                onOpenWorkspaces = { model.navigate(Route.Fleet) },
+                onReviewChanges = { host, worktree -> model.openChanges(host, worktree) },
+                onOpenWorktrees = { model.navigate(Route.Fleet) },
                 onOpenBoard = { model.navigate(Route.Board(it.hostId, it.repository)) },
                 onOpenDrawer = onOpenDrawer,
             )

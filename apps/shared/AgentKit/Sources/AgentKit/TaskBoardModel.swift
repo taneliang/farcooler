@@ -150,7 +150,7 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
     public var constraints: [String]
     /// The lane this task is using, when it has one. A task exists in the
     /// backlog long before any worktree does.
-    public var workspaceID: String?
+    public var worktreeID: String?
     /// What this task is waiting on.
     ///
     /// Empty on a row that came from `task list`, which does not carry blocks
@@ -176,7 +176,7 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
         labels: [String] = [],
         acceptance: [TaskAcceptanceLine] = [],
         constraints: [String] = [],
-        workspaceID: String? = nil,
+        worktreeID: String? = nil,
         blockedBy: [TaskBlockRef] = [],
         createdAt: Date? = nil,
         updatedAt: Date? = nil
@@ -190,7 +190,7 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
         self.labels = labels
         self.acceptance = acceptance
         self.constraints = constraints
-        self.workspaceID = workspaceID
+        self.worktreeID = worktreeID
         self.blockedBy = blockedBy
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -564,7 +564,7 @@ public struct WireTask: Decodable, Sendable {
     public var labels: [String]
     public var constraints: [String]
     public var acceptance: [WireAcceptance]
-    public var workspaceID: String?
+    public var worktreeID: String?
     /// Unix milliseconds, or nil from a runner that did not say. Both absent
     /// and `null` (what `tasks_json` sends for an older runner's zero) land
     /// here as nil; so does a zero, for a producer that passed one through.
@@ -574,7 +574,7 @@ public struct WireTask: Decodable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id, key, title, status, intent, labels, constraints, acceptance
         case statusSince = "status_since"
-        case workspaceID = "workspace_id"
+        case worktreeID = "worktree_id"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -596,7 +596,7 @@ public struct WireTask: Decodable, Sendable {
         labels = try c.decodeIfPresent([String].self, forKey: .labels) ?? []
         constraints = try c.decodeIfPresent([String].self, forKey: .constraints) ?? []
         acceptance = try c.decodeIfPresent([WireAcceptance].self, forKey: .acceptance) ?? []
-        workspaceID = try c.decodeIfPresent(String.self, forKey: .workspaceID)
+        worktreeID = try c.decodeIfPresent(String.self, forKey: .worktreeID)
         // Unlike `status_since`, a missing clock here is quiet rather than
         // loud: the worst a card without it does is carry no time line, and
         // 1970 would be "Added 56y ago" on every card of an older runner.
@@ -625,7 +625,7 @@ public struct WireTask: Decodable, Sendable {
                 TaskAcceptanceLine(id: $0.id, text: $0.text, met: $0.met)
             },
             constraints: constraints,
-            workspaceID: workspaceID,
+            worktreeID: worktreeID,
             createdAt: createdAt.map { Date(timeIntervalSince1970: Double($0) / 1000) },
             updatedAt: updatedAt.map { Date(timeIntervalSince1970: Double($0) / 1000) })
     }

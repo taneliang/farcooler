@@ -13,8 +13,8 @@
 //! CLI, with the model types it already has.
 
 use farcooler_protocol::v1::{
-    AgentEventBatch, PaneMode, Repository, RepositoryRoot, Terminal, TerminalState, Workspace,
-    WorkspaceState, request, result,
+    AgentEventBatch, PaneMode, Repository, RepositoryRoot, Terminal, TerminalState, Worktree,
+    WorktreeState, request, result,
 };
 use farcooler_transport::{Client, ClientError, CodecError};
 use serde_json::json;
@@ -187,8 +187,8 @@ pub struct Session {
 /// `EventQueue` in `ffi.rs`, which is where that policy is written down.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FleetEvent {
-    /// Something in the fleet moved: a terminal's state, a workspace, a
-    /// layout, an operation, or the set of workspaces itself.
+    /// Something in the fleet moved: a terminal's state, a worktree, a
+    /// layout, an operation, or the set of worktrees itself.
     ///
     /// One variant for all five because they have one answer — re-read
     /// `fleet` — and a client that told them apart would make the same call
@@ -201,7 +201,7 @@ pub enum FleetEvent {
     /// One worktree's diff moved. The set itself is not carried — see
     /// `announce_change_set` in `crates/daemon/src/watch.rs:2511` for why the
     /// daemon does not fan thousands of file records out to every device.
-    ChangeSet { workspace: Uuid },
+    ChangeSet { worktree: Uuid },
     /// A repository's pull request state was re-read, because somebody's
     /// `stack.get` found a cache nobody had filled.
     ///
@@ -246,12 +246,12 @@ impl FleetEvent {
         use farcooler_protocol::v1::event::Payload;
         match payload {
             Payload::TerminalChanged(_)
-            | Payload::WorkspaceChanged(_)
+            | Payload::WorktreeChanged(_)
             | Payload::OperationChanged(_)
             | Payload::LayoutChanged(_)
             | Payload::FleetChanged(_) => Some(FleetEvent::Fleet),
             Payload::ChangeSetChanged(c) => {
-                Some(FleetEvent::ChangeSet { workspace: uuid_of(&c.workspace_id) })
+                Some(FleetEvent::ChangeSet { worktree: uuid_of(&c.worktree_id) })
             }
             Payload::StackChanged(s) => {
                 Some(FleetEvent::Stack { repository: uuid_of(&s.repository_id) })
@@ -702,10 +702,10 @@ impl Session {
 
     /// Everything a fleet view needs, in one round trip per resource.
     ///
-    /// Shaped identically to the CLI's `workspace list --json`, so a client
+    /// Shaped identically to the CLI's `worktree list --json`, so a client
     /// decodes one set of types no matter which one it is talking to.
     pub async fn fleet(&mut self) -> Result<serde_json::Value, SessionError> {
-        let workspaces = self.workspaces().await?;
+        let worktrees = self.worktrees().await?;
         // The whole list, not `self.terminals()`, because the FLEET's trace
         // hangs off the wrapper rather than off any one terminal — and
         // `terminals()` throws the wrapper away. The fleet's row is summed by
@@ -719,7 +719,7 @@ impl Session {
         let healthy =
             host.self_health != farcooler_protocol::v1::SelfHealth::Degraded as i32;
 
-        let items: Vec<_> = workspaces
+        let items: Vec<_> = worktrees
             .iter()
             .map(|w| {
                 json!({
@@ -729,34 +729,34 @@ impl Session {
                     //
                     // Carried on the wire message all along and dropped here,
                     // which is what made a phone unable to ask anything
-                    // repository-scoped about a workspace it was looking at —
+                    // repository-scoped about a worktree it was looking at —
                     // `stack.get` and `pr.refresh` both take a repository id,
                     // and the fleet was the only place a client learned about
-                    // workspaces at all.
+                    // worktrees at all.
                     "repository": uuid_of(&w.repository_id).to_string(),
                     "task": w.task_name,
                     "branch": w.branch,
                     "worktree": w.worktree_path,
-                    "state": workspace_label(w.state()),
+                    "state": worktree_label(w.state()),
                     // Offering to remove the repository's own checkout would
                     // offer to delete the directory the repository itself
                     // lives in — the client keeps the button off the menu
                     // entirely rather than relying only on the daemon's own
                     // refusal, same reasoning macOS's sidebar already uses.
                     "isMainCheckout": w.is_main_checkout,
-                    // Where this card sits, so a client can put a workspace it
+                    // Where this card sits, so a client can put a worktree it
                     // learned about from an event in the right place without
                     // re-reading the whole fleet, and can send the order back
                     // when somebody drags one.
                     //
                     // A runner too old to have a rank sends none, and prost
-                    // decodes that as 0 for every workspace — so a client must
+                    // decodes that as 0 for every worktree — so a client must
                     // tie-break on something of its own rather than trust this
                     // alone. `workspace_order` in `daemon.version` is how it
                     // tells the two apart.
                     "ordinal": w.ordinal,
                     "terminals": terminals.iter()
-                        .filter(|t| t.workspace_id == w.id)
+                        .filter(|t| t.worktree_id == w.id)
                         .map(|t| json!({
                             "id": uuid_of(&t.id).to_string(),
                             "short": short(&t.id),
@@ -877,10 +877,10 @@ impl Session {
         }
     }
 
-    pub async fn workspaces(&mut self) -> Result<Vec<Workspace>, SessionError> {
-        match self.value("workspace.list", None, None).await? {
-            result::Value::WorkspaceList(l) => Ok(l.items),
-            other => Err(wrong("workspaces", &other)),
+    pub async fn worktrees(&mut self) -> Result<Vec<Worktree>, SessionError> {
+        match self.value("worktree.list", None, None).await? {
+            result::Value::WorktreeList(l) => Ok(l.items),
+            other => Err(wrong("worktrees", &other)),
         }
     }
 
@@ -940,7 +940,7 @@ impl Session {
     /// ARRIVED on a branch rather than starting on one: pushed from another
     /// machine, handed over, or produced by a cloud agent. Creating is still
     /// the default, because it is still the common case.
-    pub async fn create_workspace(
+    pub async fn create_worktree(
         &mut self,
         repository: Uuid,
         task: &str,
@@ -948,8 +948,8 @@ impl Session {
         base: &str,
         terminal_preset: &str,
         adopt: bool,
-    ) -> Result<Workspace, SessionError> {
-        let payload = request::Payload::WorkspaceCreate(farcooler_protocol::v1::WorkspaceCreate {
+    ) -> Result<Worktree, SessionError> {
+        let payload = request::Payload::WorktreeCreate(farcooler_protocol::v1::WorktreeCreate {
             task_name: task.into(),
             branch: branch.into(),
             base_revision: base.into(),
@@ -957,15 +957,15 @@ impl Session {
             adopt_existing: adopt,
             fork_only: false,
         });
-        match self.value("workspace.create", Some(repository), Some(payload)).await? {
-            result::Value::Workspace(w) => Ok(w),
-            other => Err(wrong("workspace", &other)),
+        match self.value("worktree.create", Some(repository), Some(payload)).await? {
+            result::Value::Worktree(w) => Ok(w),
+            other => Err(wrong("worktree", &other)),
         }
     }
 
     pub async fn create_terminal(
         &mut self,
-        workspace: Uuid,
+        worktree: Uuid,
         title: &str,
         preset: &str,
         join_active_group: bool,
@@ -977,33 +977,33 @@ impl Session {
             prompt: None,
             task_key: None,
         });
-        match self.value("terminal.create", Some(workspace), Some(payload)).await? {
+        match self.value("terminal.create", Some(worktree), Some(payload)).await? {
             result::Value::Terminal(t) => Ok(t),
             other => Err(wrong("terminal", &other)),
         }
     }
 
-    pub async fn hide_workspace(&mut self, workspace: Uuid) -> Result<(), SessionError> {
-        Ok(crate::actions::hide_workspace(&mut self.client, workspace).await?)
+    pub async fn hide_worktree(&mut self, worktree: Uuid) -> Result<(), SessionError> {
+        Ok(crate::actions::hide_worktree(&mut self.client, worktree).await?)
     }
 
-    pub async fn unhide_workspace(&mut self, workspace: Uuid) -> Result<(), SessionError> {
-        Ok(crate::actions::unhide_workspace(&mut self.client, workspace).await?)
+    pub async fn unhide_worktree(&mut self, worktree: Uuid) -> Result<(), SessionError> {
+        Ok(crate::actions::unhide_worktree(&mut self.client, worktree).await?)
     }
 
-    /// Put the workspaces in this order, first on screen first.
-    pub async fn reorder_workspaces(&mut self, ordered: &[Uuid]) -> Result<(), SessionError> {
-        Ok(crate::actions::reorder_workspaces(&mut self.client, ordered).await?)
+    /// Put the worktrees in this order, first on screen first.
+    pub async fn reorder_worktrees(&mut self, ordered: &[Uuid]) -> Result<(), SessionError> {
+        Ok(crate::actions::reorder_worktrees(&mut self.client, ordered).await?)
     }
 
     /// Remove a worktree, or find out it needs the task name typed first —
     /// see `actions::remove_worktree` for what `confirm` means.
     pub async fn remove_worktree(
         &mut self,
-        workspace: Uuid,
+        worktree: Uuid,
         confirm: &str,
     ) -> Result<crate::actions::RemoveWorktreeOutcome, SessionError> {
-        Ok(crate::actions::remove_worktree(&mut self.client, workspace, confirm).await?)
+        Ok(crate::actions::remove_worktree(&mut self.client, worktree, confirm).await?)
     }
 
     pub async fn add_repository_root(
@@ -1451,13 +1451,13 @@ impl Session {
     /// protocol applies to everything below `host_admin`.
     pub async fn search_worktree_files(
         &mut self,
-        workspace: Uuid,
+        worktree: Uuid,
         query: &str,
         limit: u32,
     ) -> Result<Vec<String>, SessionError> {
         let payload =
             request::Payload::WorktreeFileSearch(farcooler_protocol::v1::WorktreeFileSearch {
-                workspace_id: bytes::Bytes::copy_from_slice(workspace.as_bytes()),
+                worktree_id: bytes::Bytes::copy_from_slice(worktree.as_bytes()),
                 query: query.to_string(),
                 limit,
             });
@@ -1479,12 +1479,12 @@ impl Session {
     /// What a worktree changed, against its base.
     pub async fn change_set(
         &mut self,
-        workspace: Uuid,
+        worktree: Uuid,
         fresh: bool,
     ) -> Result<serde_json::Value, SessionError> {
         let payload =
             request::Payload::ChangeSetRequest(farcooler_protocol::v1::ChangeSetRequest {
-                workspace_id: bytes::Bytes::copy_from_slice(workspace.as_bytes()),
+                worktree_id: bytes::Bytes::copy_from_slice(worktree.as_bytes()),
                 selector: None,
                 fresh,
             });
@@ -1502,7 +1502,7 @@ impl Session {
     /// per-gap rather than per-file.
     pub async fn file_diff(
         &mut self,
-        workspace: Uuid,
+        worktree: Uuid,
         path: &str,
         scope: &str,
         context: u32,
@@ -1518,7 +1518,7 @@ impl Session {
             sha => Kind::Commit(sha.to_string()),
         };
         let payload = request::Payload::FileDiffRequest(farcooler_protocol::v1::FileDiffRequest {
-            workspace_id: bytes::Bytes::copy_from_slice(workspace.as_bytes()),
+            worktree_id: bytes::Bytes::copy_from_slice(worktree.as_bytes()),
             selector: Some(farcooler_protocol::v1::DiffSelector { kind: Some(kind) }),
             path: path.to_string(),
             from_hunk: 0,
@@ -1533,12 +1533,12 @@ impl Session {
     /// The files one commit touched.
     pub async fn commit_files(
         &mut self,
-        workspace: Uuid,
+        worktree: Uuid,
         sha: &str,
     ) -> Result<serde_json::Value, SessionError> {
         let payload =
             request::Payload::CommitFilesRequest(farcooler_protocol::v1::CommitFilesRequest {
-                workspace_id: bytes::Bytes::copy_from_slice(workspace.as_bytes()),
+                worktree_id: bytes::Bytes::copy_from_slice(worktree.as_bytes()),
                 sha: sha.to_string(),
             });
         match self.value("changes.commit_files", None, Some(payload)).await? {
@@ -1571,10 +1571,10 @@ impl Session {
     }
 
     /// Mark a worktree as read, which is what clears its inbox badge.
-    pub async fn changes_mark_read(&mut self, workspace: Uuid) -> Result<(), SessionError> {
+    pub async fn changes_mark_read(&mut self, worktree: Uuid) -> Result<(), SessionError> {
         let payload =
             request::Payload::ChangesMarkRead(farcooler_protocol::v1::ChangesMarkRead {
-                workspace_id: bytes::Bytes::copy_from_slice(workspace.as_bytes()),
+                worktree_id: bytes::Bytes::copy_from_slice(worktree.as_bytes()),
                 branch: String::new(),
             });
         self.value("changes.mark_read", None, Some(payload)).await?;
@@ -1587,11 +1587,11 @@ impl Session {
     /// that looks exactly like a right one — see `BaseSource` in the protocol.
     pub async fn changes_set_base(
         &mut self,
-        workspace: Uuid,
+        worktree: Uuid,
         base_ref: &str,
     ) -> Result<serde_json::Value, SessionError> {
         let payload = request::Payload::ChangesSetBase(farcooler_protocol::v1::ChangesSetBase {
-            workspace_id: bytes::Bytes::copy_from_slice(workspace.as_bytes()),
+            worktree_id: bytes::Bytes::copy_from_slice(worktree.as_bytes()),
             base_ref: base_ref.to_string(),
         });
         match self.value("changes.set_base", None, Some(payload)).await? {
@@ -1871,7 +1871,7 @@ impl Session {
 /// runner without a special case at every call site.
 fn advertises(advertised: &[String], capability: &str) -> bool {
     if advertised.is_empty() {
-        return capability == farcooler_protocol::capability::WORKSPACES
+        return capability == farcooler_protocol::capability::WORKTREES
             || capability == farcooler_protocol::capability::TERMINALS;
     }
     advertised.iter().any(|c| c == capability)
@@ -1920,8 +1920,8 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::RepositoryRootList(_) => "repository_root_list",
         result::Value::Repository(_) => "repository",
         result::Value::RepositoryList(_) => "repository_list",
-        result::Value::Workspace(_) => "workspace",
-        result::Value::WorkspaceList(_) => "workspace_list",
+        result::Value::Worktree(_) => "worktree",
+        result::Value::WorktreeList(_) => "worktree_list",
         result::Value::Terminal(_) => "terminal",
         result::Value::TerminalList(_) => "terminal_list",
         result::Value::Operation(_) => "operation",
@@ -1929,7 +1929,7 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::TerminalAttach(_) => "terminal_attach",
         result::Value::BranchList(_) => "branch_list",
         result::Value::PaneGroupList(_) => "pane_group_list",
-        result::Value::WorktreeList(_) => "worktree_list",
+        result::Value::DiscoveredWorktreeList(_) => "discovered_worktree_list",
         result::Value::TerminalScreen(_) => "terminal_screen",
         result::Value::AgentEventBatch(_) => "agent_event_batch",
         result::Value::WorktreeFileList(_) => "worktree_file_list",
@@ -2016,15 +2016,15 @@ fn pane_mode_label(mode: i32) -> &'static str {
     }
 }
 
-fn workspace_label(s: WorkspaceState) -> &'static str {
+fn worktree_label(s: WorktreeState) -> &'static str {
     match s {
-        WorkspaceState::Unspecified => "?",
-        WorkspaceState::Creating => "creating",
-        WorkspaceState::Ready => "ready",
-        WorkspaceState::Active => "active",
-        WorkspaceState::Error => "ERROR",
-        WorkspaceState::Hidden => "hidden",
-        WorkspaceState::WorktreeMissing => "worktree_missing",
+        WorktreeState::Unspecified => "?",
+        WorktreeState::Creating => "creating",
+        WorktreeState::Ready => "ready",
+        WorktreeState::Active => "active",
+        WorktreeState::Error => "ERROR",
+        WorktreeState::Hidden => "hidden",
+        WorktreeState::WorktreeMissing => "worktree_missing",
     }
 }
 
@@ -2132,7 +2132,7 @@ fn fleet_json(
     healthy: bool,
     live_panes: serde_json::Value,
     list: &farcooler_protocol::v1::TerminalList,
-    workspaces: Vec<serde_json::Value>,
+    worktrees: Vec<serde_json::Value>,
 ) -> serde_json::Value {
     json!({
         "runtime_healthy": healthy,
@@ -2146,7 +2146,7 @@ fn fleet_json(
         // polling several runners sum their fleet traces onto one axis
         // exactly. Null with no trace, and from an older daemon.
         "fleetTraceAnchor": fleet_trace_anchor(list),
-        "workspaces": workspaces,
+        "worktrees": worktrees,
     })
 }
 
@@ -2390,9 +2390,9 @@ mod tests {
 
     #[test]
     fn a_wrong_result_variant_names_both_sides() {
-        let error = wrong("terminal", &result::Value::Workspace(Workspace::default()));
+        let error = wrong("terminal", &result::Value::Worktree(Worktree::default()));
         let message = error.to_string();
-        assert!(message.contains("terminal") && message.contains("workspace"));
+        assert!(message.contains("terminal") && message.contains("worktree"));
     }
 
     /// A scope crosses as a word, and the two directions agree.
@@ -2523,7 +2523,7 @@ mod tests {
         // a session still worth talking on. Treating these as drops would
         // reconnect on every typo'd method a client ever sends.
         assert!(!SessionError::Protocol("nope".into()).is_disconnect());
-        assert!(!SessionError::WrongResult { expected: "host", got: "workspace" }.is_disconnect());
+        assert!(!SessionError::WrongResult { expected: "host", got: "worktree" }.is_disconnect());
         assert!(!SessionError::VersionMismatch { daemon: 2, client: 1 }.is_disconnect());
     }
 

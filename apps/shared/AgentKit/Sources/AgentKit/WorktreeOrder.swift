@@ -17,7 +17,7 @@ import Foundation
 /// It knows nothing about activity, attention or recency, and it must never
 /// learn: the whole point of storing an order is that a card stays where it was
 /// put. See `crates/store/src/migrate.rs`'s migration 0009 for the durable half.
-public enum WorkspaceOrder {
+public enum WorktreeOrder {
 
     /// Which side of the row under the pointer a drop would go.
     public enum Edge: Sendable, Equatable {

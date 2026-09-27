@@ -49,7 +49,7 @@ enum Shortcut {
         (
             "Terminals",
             [
-                Item(keys: "⌘T", action: "New terminal in this workspace"),
+                Item(keys: "⌘T", action: "New terminal in this worktree"),
                 Item(keys: "⌘W", action: "Close terminal"),
                 Item(keys: "⌘1 … ⌘9", action: "Jump to terminal"),
                 Item(keys: "⌘]", action: "Next terminal"),
@@ -99,7 +99,7 @@ enum Shortcut {
                 Item(keys: "%  /  \"", action: "Split right / down — a new pane here"),
                 Item(keys: "!", action: "Move the focused pane out of the layout"),
                 Item(keys: "x", action: "Close the focused pane’s terminal"),
-                Item(keys: "c", action: "New group — several layouts per workspace"),
+                Item(keys: "c", action: "New group — several layouts per worktree"),
                 Item(keys: "n  /  p", action: "Next / previous group"),
                 Item(keys: "&", action: "Close this group"),
                 Item(keys: "a", action: "Toggle the focused pane between terminal and chat"),
@@ -107,11 +107,11 @@ enum Shortcut {
             ]
         ),
         (
-            // "Projects" rather than "Tasks": ⌘N makes a workspace, and a task
+            // "Projects" rather than "Tasks": ⌘N makes a worktree, and a task
             // is a card on the board, which ⇧⌘B is the way to.
             "Projects",
             [
-                Item(keys: "⌘N", action: "New workspace — describe what you want done and go"),
+                Item(keys: "⌘N", action: "New worktree — describe what you want done and go"),
                 Item(keys: "⇧⌘B", action: "Show this project’s board"),
                 Item(keys: "⇧⌘R", action: "Add Repository"),
                 Item(keys: "⇧⌘E", action: "Open this worktree in your editor"),
@@ -120,9 +120,9 @@ enum Shortcut {
         (
             "App",
             [
-                Item(keys: "⌘P", action: "Go to a terminal or a workspace, or start a new one"),
+                Item(keys: "⌘P", action: "Go to a terminal or a worktree, or start a new one"),
                 Item(keys: "⌘B", action: "Show or hide the sidebar"),
-                Item(keys: "⌘F", action: "Find a workspace or agent"),
+                Item(keys: "⌘F", action: "Find a worktree or agent"),
                 Item(keys: "⌘,", action: "Settings"),
                 Item(keys: "⌘/", action: "Keyboard shortcuts"),
                 Item(keys: "⌘0", action: "Reload the fleet"),

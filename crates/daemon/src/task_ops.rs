@@ -121,7 +121,7 @@ fn required_id(bytes: &[u8]) -> Result<Uuid> {
 
 /// An optional uuid: absent stays absent, present must be readable.
 ///
-/// Not silently dropped when unreadable. `workspace_id` is the lane a task is
+/// Not silently dropped when unreadable. `worktree_id` is the lane a task is
 /// using, and quietly clearing it because sixteen bytes were malformed would
 /// unpick a link the caller believes it just made.
 fn optional_id(bytes: Option<&bytes::Bytes>, what: &'static str) -> Result<Option<Uuid>> {
@@ -196,7 +196,7 @@ fn pb_task(task: &Task) -> pb::Task {
         intent: task.intent.clone(),
         acceptance: task.acceptance.iter().map(pb_acceptance).collect(),
         constraints: task.constraints.clone(),
-        workspace_id: task.workspace_id.map(id_bytes),
+        worktree_id: task.worktree_id.map(id_bytes),
         labels: task.labels.clone(),
         created_at: task.created_at,
         updated_at: task.updated_at,
@@ -333,7 +333,7 @@ pub fn search(svc: &Service, req: &pb::TaskSearchRequest) -> Result<pb::TaskNote
 /// **Every conversion that can fail runs BEFORE the first write, and that
 /// ordering is the point.** Validating a field after `create_task` has
 /// committed is not a rare interleaving — a client reaches it deterministically
-/// by sending a malformed acceptance-item id or `workspace_id`, and what it
+/// by sending a malformed acceptance-item id or `worktree_id`, and what it
 /// leaves behind is worse than the error it gets back: a titled task with a
 /// `Created` note and no intent, sitting on the board, with NO announce, so
 /// nothing tells any client it appeared. The caller reads `InvalidArgument`,
@@ -358,7 +358,7 @@ pub fn create(svc: &Service, watcher: &Watcher, req: &pb::TaskCreate) -> Result<
             .collect::<Result<Vec<_>>>()?,
         constraints: req.constraints.clone(),
         labels: req.labels.clone(),
-        workspace_id: optional_id(req.workspace_id.as_ref(), "workspace_id")?,
+        worktree_id: optional_id(req.worktree_id.as_ref(), "worktree_id")?,
     };
 
     // Nothing above this line has written anything.
@@ -388,7 +388,7 @@ fn blank_update(title: &str) -> farcooler_store::models::TaskUpdate {
         acceptance: Vec::new(),
         constraints: Vec::new(),
         labels: Vec::new(),
-        workspace_id: None,
+        worktree_id: None,
     }
 }
 
@@ -415,7 +415,7 @@ pub fn update(svc: &Service, watcher: &Watcher, req: &pb::TaskUpdate) -> Result<
             .collect::<Result<Vec<_>>>()?,
         constraints: req.constraints.clone(),
         labels: req.labels.clone(),
-        workspace_id: optional_id(req.workspace_id.as_ref(), "workspace_id")?,
+        worktree_id: optional_id(req.worktree_id.as_ref(), "worktree_id")?,
     };
     let task = svc.store.update_task(id, req.expected_version, &update)?;
     announce(watcher, &task, actor);
@@ -746,14 +746,14 @@ mod tests {
 
     #[test]
     fn an_unreadable_optional_id_is_refused_rather_than_dropped() {
-        assert_eq!(optional_id(None, "workspace_id").unwrap(), None);
+        assert_eq!(optional_id(None, "worktree_id").unwrap(), None);
         let held = Uuid::now_v7();
-        assert_eq!(optional_id(Some(&id_bytes(held)), "workspace_id").unwrap(), Some(held));
+        assert_eq!(optional_id(Some(&id_bytes(held)), "worktree_id").unwrap(), Some(held));
         // Quietly clearing the lane because sixteen bytes were malformed would
         // unpick a link the caller believes it just made.
         assert!(matches!(
-            optional_id(Some(&bytes::Bytes::from_static(b"nope")), "workspace_id"),
-            Err(DomainError::InvalidArgument { what: "workspace_id" })
+            optional_id(Some(&bytes::Bytes::from_static(b"nope")), "worktree_id"),
+            Err(DomainError::InvalidArgument { what: "worktree_id" })
         ));
     }
 }

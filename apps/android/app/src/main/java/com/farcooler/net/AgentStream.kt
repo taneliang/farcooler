@@ -32,7 +32,7 @@ import kotlinx.serialization.json.buildJsonObject
  * Holds a [Transcript] and nothing else derived: the agent mode, the available
  * modes and the commands all arrive on the transcript itself, from the events
  * the daemon sent — never recomputed here, for the same reason [Connection]
- * never computes a workspace's state.
+ * never computes a worktree's state.
  */
 class AgentStream(
     private val terminal: String,

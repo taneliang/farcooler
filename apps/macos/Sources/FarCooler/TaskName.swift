@@ -76,7 +76,7 @@ enum TaskName {
     /// "Please fix the flaky reconnect test in the iOS app" is
     /// `fix-flaky-reconnect-test`. A description that is nothing but filler
     /// keeps its own first words rather than coming out empty, and one with no
-    /// word a directory can hold at all is `workspace` — not `task`, which is
+    /// word a directory can hold at all is `worktree` — not `task`, which is
     /// a card on the board.
     static func heuristic(_ description: String) -> String {
         let all = words(description)

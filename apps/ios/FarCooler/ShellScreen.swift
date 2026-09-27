@@ -5,7 +5,7 @@ import SwiftUI
 //
 // `ShellRootView` is generic over its pane and knows nothing about a runner —
 // that is the seam this file sits on. Everything that is a fact about THIS app
-// rather than about the gesture is here: which tabs a workspace has and in
+// rather than about the gesture is here: which tabs a worktree has and in
 // what order, what each mark means, which pane each tab draws, and the two
 // pieces of state a mounted pane cannot own for itself — `isVisible` and
 // `Notifier.shared.visibleTerminal`.
@@ -43,7 +43,7 @@ private let staleAfter: TimeInterval = 60 * 60
 /// A side table keyed by tab id rather than something encoded IN the id.
 /// `ShellTab` lives in AgentKit, which cannot see `Terminal` — see that file's
 /// header on why the shell's model is a shared package rather than shared code
-/// — so the alternative is packing a workspace id and a pane id into one
+/// — so the alternative is packing a worktree id and a pane id into one
 /// string and parsing it back out at every use, which is a decoder nobody
 /// wrote a test for standing between the fleet and the screen.
 struct ShellPaneRef: Hashable {
@@ -53,16 +53,16 @@ struct ShellPaneRef: Hashable {
     /// changes here. A `ShellFleetMap` used to be one runner's fleet by
     /// construction — `RootView` keyed the tree `.id(host)`, so the screen was
     /// destroyed and rebuilt on every change of runner — and every ref in it
-    /// named a workspace on the same machine, so the runner went without
+    /// named a worktree on the same machine, so the runner went without
     /// saying. The merged map holds several, and a ref that did not say which
     /// would send an RPC down whichever connection the screen happened to be
     /// holding. See `ShellIdentity`.
     var runner: UUID
-    /// The DAEMON's own workspace id — the full UUID it minted, which is what
-    /// goes on the wire in `changes.*` and `workspace.*` calls. Not the shell's
+    /// The DAEMON's own worktree id — the full UUID it minted, which is what
+    /// goes on the wire in `changes.*` and `worktree.*` calls. Not the shell's
     /// composite, and not the eight-character `short` field, which is a display
     /// form nothing here uses as an identity.
-    var workspace: String
+    var worktree: String
     var pane: Pane
 }
 
@@ -91,7 +91,7 @@ struct CloseTerminalRequest: Identifiable {
 /// for.
 ///
 /// **It is the whole fleet and not one runner's**, which is the port's central
-/// change. `of(_ store:)` walks `FleetStore.entries` — every workspace on every
+/// change. `of(_ store:)` walks `FleetStore.entries` — every worktree on every
 /// connected runner, in the order the runner list is in — and every id it mints
 /// carries the runner, so a tab resolves back to a connection rather than to a
 /// search. See `ShellIdentity`, which is where that composition, its test and
@@ -101,13 +101,13 @@ struct ShellFleetMap {
     var fleet: ShellFleet
     var refs: [String: ShellPaneRef]
 
-    /// Which runner each shell workspace is on, and what it said, keyed by the
-    /// composite id `ShellWorkspace.id` now carries.
+    /// Which runner each shell worktree is on, and what it said, keyed by the
+    /// composite id `ShellWorktree.id` now carries.
     ///
     /// The side table that makes a merged fleet act-on-able. A screen holding a
-    /// `ShellWorkspace` has a name and a ribbon and nothing to send an RPC
+    /// `ShellWorktree` has a name and a ribbon and nothing to send an RPC
     /// down; this is where it gets the connection, the runner and the daemon's
-    /// own workspace id back. Keyed rather than searched, because the overview
+    /// own worktree id back. Keyed rather than searched, because the overview
     /// asks per card and the shell asks per rest.
     var entries: [String: FleetEntry] = [:]
 
@@ -122,23 +122,23 @@ struct ShellFleetMap {
     var tabOfTerminal: [String: String] {
         var out: [String: String] = [:]
         for entry in entries.values {
-            for terminal in entry.workspace.terminals {
+            for terminal in entry.worktree.terminals {
                 out[terminal.id] = Self.tabID(
-                    runner: entry.host.id, workspace: entry.workspace.id, pane: Pane(terminal))
+                    runner: entry.host.id, worktree: entry.worktree.id, pane: Pane(terminal))
             }
         }
         return out
     }
 
-    /// A tab's id: the runner, the workspace it is in, then the pane it is.
+    /// A tab's id: the runner, the worktree it is in, then the pane it is.
     ///
     /// Composed by `ShellIdentity` rather than here, so the composition sits
     /// somewhere a test can read it back: that file is in AgentKit, which
     /// `swift test` runs, and this target's tests are compiled by CI and never
     /// executed.
-    static func tabID(runner: UUID, workspace: String, pane: Pane) -> String {
+    static func tabID(runner: UUID, worktree: String, pane: Pane) -> String {
         ShellIdentity.tab(
-            runner: runner.uuidString, workspace: workspace, pane: pane.id)
+            runner: runner.uuidString, worktree: worktree, pane: pane.id)
     }
 
     /// Read the whole fleet — every connected runner's — as the shell's.
@@ -158,18 +158,18 @@ struct ShellFleetMap {
     /// them, so the one caller that has a runner instead of a fleet can reach
     /// it too.
     static func of(_ entries: [FleetEntry], now: Date = Date()) -> ShellFleetMap {
-        var map = ShellFleetMap(fleet: ShellFleet(workspaces: []), refs: [:])
-        var workspaces: [ShellWorkspace] = []
+        var map = ShellFleetMap(fleet: ShellFleet(worktrees: []), refs: [:])
+        var worktrees: [ShellWorktree] = []
         // More than one runner in the merge is what makes a card name its
         // machine. See `server` below.
         let servers = Set(entries.map(\.host.id)).count
         for entry in entries {
             let built = one(entry, naming: servers > 1, now: now)
-            workspaces.append(built.workspace)
+            worktrees.append(built.worktree)
             for (id, ref) in built.refs { map.refs[id] = ref }
-            map.entries[built.workspace.id] = entry
+            map.entries[built.worktree.id] = entry
         }
-        map.fleet = ShellFleet(workspaces: workspaces)
+        map.fleet = ShellFleet(worktrees: worktrees)
         return map
     }
 
@@ -186,51 +186,51 @@ struct ShellFleetMap {
         _ connection: Connection, host: Runner, now: Date = Date()
     ) -> ShellFleetMap {
         of(
-            connection.fleet.workspaces.map {
+            connection.fleet.worktrees.map {
                 FleetEntry(
-                    host: host, connection: connection, workspace: $0,
+                    host: host, connection: connection, worktree: $0,
                     counts: connection.inbox[$0.id])
             },
             now: now)
     }
 
-    /// One entry, as a workspace and the refs of its tabs.
+    /// One entry, as a worktree and the refs of its tabs.
     private static func one(
         _ entry: FleetEntry, naming server: Bool, now: Date
-    ) -> (workspace: ShellWorkspace, refs: [String: ShellPaneRef]) {
+    ) -> (worktree: ShellWorktree, refs: [String: ShellPaneRef]) {
         var refs: [String: ShellPaneRef] = [:]
         let connection = entry.connection
         let runner = entry.host.id
-        let workspace = entry.workspace
+        let worktree = entry.worktree
         let inbox = entry.counts
         // A host-side `changes` pane is not a tab of its own: it IS the
         // Changes tab, and both resolve to the same `ChangesStore`. Two
         // chips for one diff is what `Pane.init(_:)` exists to prevent.
-        let terminals = workspace.terminals.filter { !$0.isChangesPane }
+        let terminals = worktree.terminals.filter { !$0.isChangesPane }
 
         // **Changes leads, then fleet order, and never `sortRank`.**
         //
         // The tab strip this replaced made the argument and it is worse
-        // here rather than better: a ribbon is a MAP of the workspace, and
+        // here rather than better: a ribbon is a MAP of the worktree, and
         // a map whose landmarks move when an agent goes from working to
         // blocked is not a map — you would have to read it every time
         // instead of remembering it. The diff leading means the one tab
         // that is always there is always at the same end.
         var tabs: [ShellTab] = [
             ShellTab(
-                id: tabID(runner: runner, workspace: workspace.id, pane: .changes),
+                id: tabID(runner: runner, worktree: worktree.id, pane: .changes),
                 title: "Diff",
                 mark: diffMark(inbox))
         ]
         var order: [ShellPaneRef] = [
-            ShellPaneRef(runner: runner, workspace: workspace.id, pane: .changes)
+            ShellPaneRef(runner: runner, worktree: worktree.id, pane: .changes)
         ]
 
         for terminal in terminals {
             let pane = Pane(terminal)
             tabs.append(
                 ShellTab(
-                    id: tabID(runner: runner, workspace: workspace.id, pane: pane),
+                    id: tabID(runner: runner, worktree: worktree.id, pane: pane),
                     title: terminal.label,
                     mark: mark(of: terminal, now: now),
                     // The rank's own question, kept separate from the
@@ -239,27 +239,27 @@ struct ShellFleetMap {
                     // Every terminal tab, and only a terminal tab. The Diff
                     // above defaults to false and must: it is synthesized here
                     // rather than being a pane, and it is what closing the last
-                    // terminal in a workspace lands on.
+                    // terminal in a worktree lands on.
                     closable: true))
-            order.append(ShellPaneRef(runner: runner, workspace: workspace.id, pane: pane))
+            order.append(ShellPaneRef(runner: runner, worktree: worktree.id, pane: pane))
         }
 
         for (tab, ref) in zip(tabs, order) { refs[tab.id] = ref }
 
         return (
-            ShellWorkspace(
+            ShellWorktree(
                 // The COMPOSITE, not the daemon's own id. This string is a
                 // SwiftUI identity — the overview's `ForEach`es identify each
                 // card by it, a drag names the cards it moved by it, the card's
                 // accessibility identifier is built off it, and
-                // `ShellPaneTrack` remembers which workspace a retained pane
+                // `ShellPaneTrack` remembers which worktree a retained pane
                 // belongs to by it — and it is what a screen resolves a
                 // runner from. The daemon's own id is on the `FleetEntry` in
                 // `entries`, which is where the wire gets it back. See
                 // `ShellIdentity`.
-                id: ShellIdentity.workspace(
-                    runner: runner.uuidString, workspace: workspace.id),
-                name: workspace.task,
+                id: ShellIdentity.worktree(
+                    runner: runner.uuidString, worktree: worktree.id),
+                name: worktree.task,
                 // The runner's name, but only where the fleet on screen has
                 // more than one runner in it.
                 //
@@ -274,18 +274,18 @@ struct ShellFleetMap {
                 // where its worktree is would leave the one question a
                 // merged grid raises unanswered.
                 server: server ? entry.host.label : nil,
-                tail: tail(of: workspace),
-                resume: resume(workspace, connection: connection, tabs: order),
+                tail: tail(of: worktree),
+                resume: resume(worktree, connection: connection, tabs: order),
                 // The daemon's own view preference, carried rather than
                 // re-derived. iOS had no consumer for it at all, so a
                 // worktree somebody put away on the Mac came back as an
                 // ordinary card on the phone. See `ShellFleet.hiddenOrder`.
-                isHidden: workspace.isHidden,
-                // The one workspace the overview card's menu must not
+                isHidden: worktree.isHidden,
+                // The one worktree the overview card's menu must not
                 // offer to remove. Carried rather than looked up again
                 // from the connection at menu-build time, so the card and
                 // the daemon are reading one fact.
-                isPrimaryCheckout: workspace.isPrimaryCheckout,
+                isPrimaryCheckout: worktree.isPrimaryCheckout,
                 // Which runner's section the card is drawn in, and which
                 // runner a drag in that section is sent to. The runner's ID,
                 // not `server`: that is a label, and nil on a one-runner grid.
@@ -304,9 +304,9 @@ struct ShellFleetMap {
     ///
     /// **Only the Diff tab can be cyan, and that is a model fact rather than a
     /// style choice.** Unread-diff comes from `Connection.inbox`, and an
-    /// `InboxRow` is a WORKSPACE's counts, not an agent's state.
+    /// `InboxRow` is a WORKTREE's counts, not an agent's state.
     /// `NeedsYou.swift:94-97` already refuses to invent a per-agent version of
-    /// it — *"inventing one from the workspace's terminals would sort a diff
+    /// it — *"inventing one from the worktree's terminals would sort a diff
     /// by how blocked some agent in the same worktree happens to be"* — and
     /// the same refusal is what stops an agent tab ever drawing a cyan ring.
     ///
@@ -330,7 +330,7 @@ struct ShellFleetMap {
     /// This matters twice over. It is what keeps a Diff tab from drawing the
     /// filled mark that now means "an agent is producing" — under the old
     /// `ShellMark` the quiet arm here was `.working`, the same case a running
-    /// agent used, so every workspace's Diff tab would have started drawing a
+    /// agent used, so every worktree's Diff tab would have started drawing a
     /// filled dot the moment fill began to mean something. And it is what lets
     /// `RunnerDirectory.word(for:)` tell an unread diff from a finished turn,
     /// since both are `.toReview` and only one of them is an agent.
@@ -390,24 +390,24 @@ struct ShellFleetMap {
             link: stale ? .broken : .live)
     }
 
-    /// What this workspace's card shows: the last few things its most recently
+    /// What this worktree's card shows: the last few things its most recently
     /// active agent said.
     ///
     /// Most recently active rather than first, because the card's whole job is
     /// "what happened here while I was away" and the first terminal in fleet
     /// order is an arbitrary answer to that. Falls back to the first pane that
-    /// has anything to say, and to nothing at all — a workspace whose agents
+    /// has anything to say, and to nothing at all — a worktree whose agents
     /// have said nothing has nothing to show, and a placeholder there would be
     /// forty lies.
-    private static func tail(of workspace: Workspace) -> [String] {
-        let speaking = workspace.terminals.filter { !$0.isChangesPane && !$0.recentSteps.isEmpty }
+    private static func tail(of worktree: Worktree) -> [String] {
+        let speaking = worktree.terminals.filter { !$0.isChangesPane && !$0.recentSteps.isEmpty }
         let latest = speaking.max { a, b in
             (a.activityChangedAt ?? .distantPast) < (b.activityChangedAt ?? .distantPast)
         }
         return (latest ?? speaking.first)?.recentSteps ?? []
     }
 
-    /// Which tab this workspace should be REOPENED on.
+    /// Which tab this worktree should be REOPENED on.
     ///
     /// The one memory the app already keeps — `Connection.lastFocus`, written
     /// only by a person choosing a tab — resolved against the tabs that exist
@@ -416,32 +416,32 @@ struct ShellFleetMap {
     ///
     /// Degrades rather than guessing. A remembered agent that has since exited
     /// falls through to `PaneFocus.rule(for:inbox:)`, which is this app's
-    /// existing answer to "which pane should this workspace open on" — blocked
+    /// existing answer to "which pane should this worktree open on" — blocked
     /// agent, then unread diff, then top-ranked pane, then Changes — and a
-    /// rule that answers with a pane this workspace does not have falls
+    /// rule that answers with a pane this worktree does not have falls
     /// through to the first tab, which is the diff and always exists.
     ///
     /// Read by the BAR swipe, the carried lift and an overview card, and
-    /// deliberately not by the content swipe. See `ShellWorkspace.resume`.
+    /// deliberately not by the content swipe. See `ShellWorktree.resume`.
     private static func resume(
-        _ workspace: Workspace, connection: Connection, tabs: [ShellPaneRef]
+        _ worktree: Worktree, connection: Connection, tabs: [ShellPaneRef]
     ) -> Int? {
-        var wanted: PaneFocus = connection.lastFocus[workspace.id] ?? .none
+        var wanted: PaneFocus = connection.lastFocus[worktree.id] ?? .none
         if case .agent(let id) = wanted,
-            !workspace.terminals.contains(where: { $0.id == id })
+            !worktree.terminals.contains(where: { $0.id == id })
         {
             wanted = .none
         }
         if case .none = wanted {
             wanted = PaneFocus.rule(
-                for: workspace, inbox: connection.inbox[workspace.id])
+                for: worktree, inbox: connection.inbox[worktree.id])
         }
         let pane: Pane
         switch wanted {
         case .changes, .none:
             pane = .changes
         case .agent(let id):
-            guard let terminal = workspace.terminals.first(where: { $0.id == id }) else {
+            guard let terminal = worktree.terminals.first(where: { $0.id == id }) else {
                 return nil
             }
             pane = Pane(terminal)
@@ -450,9 +450,9 @@ struct ShellFleetMap {
     }
 }
 
-/// One pane of a real workspace.
+/// One pane of a real worktree.
 ///
-/// The two branches are the two things a workspace is: a pane on the runner,
+/// The two branches are the two things a worktree is: a pane on the runner,
 /// and the worktree's own diff. The second needs nothing on the runner to
 /// exist — see `Pane`.
 ///
@@ -513,8 +513,8 @@ struct ShellPaneRealView: View {
         _terminal = State(initialValue: ref.pane.terminal)
     }
 
-    private var workspace: Workspace? {
-        connection.fleet.workspaces.first { $0.id == ref.workspace }
+    private var worktree: Worktree? {
+        connection.fleet.worktrees.first { $0.id == ref.worktree }
     }
 
     /// This pane's terminal as the daemon describes it RIGHT NOW, where the
@@ -529,7 +529,7 @@ struct ShellPaneRealView: View {
     /// same distinction, one layer down, for the same reason.
     private var live: Terminal? {
         guard let terminal else { return nil }
-        return connection.terminal(terminal.id, in: ref.workspace) ?? terminal
+        return connection.terminal(terminal.id, in: ref.worktree) ?? terminal
     }
 
     var body: some View {
@@ -651,10 +651,10 @@ struct ShellPaneRealView: View {
             title: slot.tab.title,
             connection: connection,
             pastes: pastes,
-            workspace: workspace,
+            worktree: worktree,
             live: live,
             changes: terminal == nil
-                ? connection.changesStores.store(for: ref.workspace) : nil,
+                ? connection.changesStores.store(for: ref.worktree) : nil,
             isVisible: slot.isVisible,
             onCreated: onCreated)
     }
@@ -672,7 +672,7 @@ struct ShellPaneRealView: View {
                     connection: connection,
                     pastes: pastes)
             } else {
-                // The store comes from `Connection`, keyed by workspace, so
+                // The store comes from `Connection`, keyed by worktree, so
                 // this is the SAME review a `changes` pane in this worktree
                 // would show and the same one the Mac is looking at.
                 //
@@ -688,9 +688,9 @@ struct ShellPaneRealView: View {
                 // assertion that must stop when the pane is merely hidden;
                 // `ChangesView` holds none of those.
                 ChangesView(
-                    store: connection.changesStores.store(for: ref.workspace),
-                    workspaceName: workspace?.task ?? "Workspace",
-                    agents: workspace?.reviewAgentTargets() ?? [],
+                    store: connection.changesStores.store(for: ref.worktree),
+                    worktreeName: worktree?.task ?? "Worktree",
+                    agents: worktree?.reviewAgentTargets() ?? [],
                     pullRequest: pullRequest)
             }
         }
@@ -698,10 +698,10 @@ struct ShellPaneRealView: View {
 }
 
 /// A tapped card on another runner: which runner, and the daemon's own id for
-/// the worktree. What `ShellScreen.crossingKey` spells as `runner/workspace`.
+/// the worktree. What `ShellScreen.crossingKey` spells as `runner/worktree`.
 private struct ShellCrossing: Equatable {
     let runner: String
-    let workspace: String
+    let worktree: String
 }
 
 /// The shell, standing on a runner.
@@ -713,7 +713,7 @@ private struct ShellCrossing: Equatable {
 ///   running — and keeps reporting — when you swipe away from the pane that
 ///   started it. The same argument the pane host made for owning it above
 ///   its panes.
-/// - The pull request on the Changes tab's header, read for the workspace at
+/// - The pull request on the Changes tab's header, read for the worktree at
 ///   rest and only while its diff is the pane on screen.
 /// - **The one writer of `Notifier.shared.visibleTerminal`.** Read by
 ///   `Notifications.swift:162` to suppress a banner about the pane you are
@@ -763,7 +763,7 @@ struct ShellScreen: View {
     /// different pane. `ShellPosition` is a pair of indices and is only
     /// meaningful against the fleet it was resolved with.
     @State private var restingRef: ShellPaneRef?
-    /// What GitHub says about the branch of the workspace at rest.
+    /// What GitHub says about the branch of the worktree at rest.
     @State private var pullRequest: BranchPullRequest?
     /// The other runners' worktrees. See `readElsewhere`.
     @State private var elsewhere: [ShellServerGroup] = []
@@ -797,7 +797,7 @@ struct ShellScreen: View {
     /// is the whole reason it exists: a deep link is not a choice and must not
     /// be written down as one (see `linkedTab`), while a terminal somebody just
     /// MADE is the plainest choice in the app. Sharing the binding would have
-    /// the workspace forget, on the next visit, the very tab it was just told
+    /// the worktree forget, on the next visit, the very tab it was just told
     /// to open.
     @State private var createdTerminal: String?
 
@@ -809,7 +809,7 @@ struct ShellScreen: View {
     /// The agent a board card asked for, until the board has gone.
     ///
     /// Held while the sheet closes and handed to `boardTerminal` by its
-    /// `onDismiss`, so the page grows out of the workspace's card in a grid you
+    /// `onDismiss`, so the page grows out of the worktree's card in a grid you
     /// can see rather than behind a sheet still on its way down — the Mac's
     /// "close the board, then select" in the phone's own motion.
     @State private var boardJump: String?
@@ -817,7 +817,7 @@ struct ShellScreen: View {
     ///
     /// The third asker `requestedTab` resolves, and treated like
     /// `createdTerminal` rather than like a deep link: tapping Agent on a card
-    /// is somebody choosing that tab, and the workspace should remember it.
+    /// is somebody choosing that tab, and the worktree should remember it.
     @State private var boardTerminal: String?
 
     /// A worktree on another runner whose card was tapped, until the shell
@@ -825,10 +825,10 @@ struct ShellScreen: View {
     /// `select(runner:landingOn:)`.
     @State private var crossing: ShellCrossing?
 
-    /// Describe it, or fill in the form. Both were `WorkspaceListView`'s
+    /// Describe it, or fill in the form. Both were `WorktreeListView`'s
     /// toolbar and are the overview's now — see `overviewActions`.
     @State private var showQuickTask = false
-    @State private var showNewWorkspace = false
+    @State private var showNewWorktree = false
 
     /// Where a removal started from an overview card's menu has got to.
     ///
@@ -842,7 +842,7 @@ struct ShellScreen: View {
     /// The terminal a swipe asked to close, waiting on an answer.
     ///
     /// Held here for `removing`'s reason and one of its own: the column that
-    /// raised it FURLS. Landing on a row, crossing a workspace and flying to
+    /// raised it FURLS. Landing on a row, crossing a worktree and flying to
     /// the overview all clear `columnPinned`, so a dialog presented from inside
     /// `ShellBar` would be a dialog whose presenter is a surface that has since
     /// closed. What is being confirmed is a runner and a terminal, and neither
@@ -858,9 +858,9 @@ struct ShellScreen: View {
 
     /// The runner a heading asked to start work on, for the two sheets above.
     ///
-    /// Set by a heading's New Workspace and Quick Task and cleared by the
+    /// Set by a heading's New Worktree and Quick Task and cleared by the
     /// toolbar's, which keep meaning what they always meant: the runner at
-    /// rest. Without it a heading's "New Workspace…" on `gpu-box-2` would open
+    /// rest. Without it a heading's "New Worktree…" on `gpu-box-2` would open
     /// a sheet for whichever runner happened to be on screen.
     @State private var startingOn: Connection?
     /// A runner's own settings, opened from its heading. It was reachable only
@@ -905,7 +905,7 @@ struct ShellScreen: View {
     /// actions over its own cards. Falling back to the selection and then to
     /// the first runner that answered, for the one screen where there is no
     /// pane to rest on: a runner with no worktrees has nothing to look at and
-    /// "New Workspace" is the only move on it. Without a fallback both sheets
+    /// "New Worktree" is the only move on it. Without a fallback both sheets
     /// presented an empty body there — a sheet you can open and cannot use.
     ///
     /// `RunnerStore.selected` before list order, because it is persisted for
@@ -928,7 +928,7 @@ struct ShellScreen: View {
                 shell(map, from: initial)
             case .waiting:
                 // Before the first fleet there is no position to open on, and
-                // an empty shell would be a bar naming a workspace that does
+                // an empty shell would be a bar naming a worktree that does
                 // not exist. The same gap `FleetView`'s connected branch
                 // covers with a spinner — and a spinner is honest here only
                 // because `opening` has already ruled out the case where
@@ -936,7 +936,7 @@ struct ShellScreen: View {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Themes.shared.current.backgroundColor.ignoresSafeArea())
-            case .noWorkspaces:
+            case .noWorktrees:
                 bringUp
             }
         }
@@ -976,7 +976,7 @@ struct ShellScreen: View {
             markVisible()
         }
         .onDisappear { Notifier.shared.visibleTerminal = nil }
-        // The two ways of starting work, moved here from the workspace list's
+        // The two ways of starting work, moved here from the worktree list's
         // toolbar with their flows untouched: both were sheets there and both
         // are sheets here.
         //
@@ -997,7 +997,7 @@ struct ShellScreen: View {
         //
         // `acting` and not `resting`, which used to be the same thing and no
         // longer is. There is one screen with no pane at rest — a runner that
-        // answered with no worktrees, where "New Workspace" is the only move
+        // answered with no worktrees, where "New Worktree" is the only move
         // there is — and `resting` is nil on it, so both of these presented an
         // empty body: a sheet you can open and cannot use. See `acting`, which
         // falls back through the same selection that decides where a launch
@@ -1005,14 +1005,14 @@ struct ShellScreen: View {
         // `startingOn` is spent when the sheet goes, however it goes. Left
         // standing after a heading's sheet was cancelled, the next sheet opened
         // from anywhere that does not set it — the zero-worktree screen's New
-        // Workspace — would open on THAT heading's runner, whose connection
+        // Worktree — would open on THAT heading's runner, whose connection
         // may since have been retired.
-        .sheet(isPresented: $showNewWorkspace, onDismiss: { startingOn = nil }) {
+        .sheet(isPresented: $showNewWorktree, onDismiss: { startingOn = nil }) {
             if let connection = startingOn ?? acting {
-                NewWorkspaceView(
+                NewWorktreeView(
                     repositories: connection.repositories, connection: connection
                 ) { repository, name, branch, adopt in
-                    await connection.createWorkspace(
+                    await connection.createWorktree(
                         repository: repository, name: name, branch: branch, adopt: adopt)
                 }
             }
@@ -1068,7 +1068,7 @@ struct ShellScreen: View {
                     sheet: sheet, connection: connection,
                     onJump: { agent in
                         // Resolved BEFORE the board closes: a pane that has
-                        // exited, or sits in a workspace the shell does not
+                        // exited, or sits in a worktree the shell does not
                         // draw, is said on the board rather than closed onto.
                         guard boardCanLand(on: agent.id) else {
                             return TaskAgentLink.paneHasClosed
@@ -1177,47 +1177,47 @@ struct ShellScreen: View {
     /// has already refused that row a Close button.
     private func live(_ ref: ShellPaneRef, on connection: Connection) -> Terminal? {
         guard let wanted = ref.pane.terminal else { return nil }
-        return connection.fleet.workspaces
-            .first { $0.id == ref.workspace }?
+        return connection.fleet.worktrees
+            .first { $0.id == ref.worktree }?
             .terminals.first { $0.id == wanted.id }
     }
 
-    /// The runner's workspace a card names, or nil when the fleet has moved on
+    /// The runner's worktree a card names, or nil when the fleet has moved on
     /// since the grid was built.
     ///
     /// Looked up by id rather than by index, and that is the whole reason the
-    /// menu's closures carry a `ShellWorkspace` instead of a position: a poll
+    /// menu's closures carry a `ShellWorktree` instead of a position: a poll
     /// between the long press and the tap can have taken a worktree away, and
     /// an index into a fleet that has changed length names a DIFFERENT
-    /// workspace rather than none. `FleetView`'s removed-workspace rule, kept.
-    private func workspace(_ shell: ShellWorkspace) -> (Workspace, Connection)? {
+    /// worktree rather than none. `FleetView`'s removed-worktree rule, kept.
+    private func worktree(_ shell: ShellWorktree) -> (Worktree, Connection)? {
         // Through the map's own entry, which carries the runner this card is
         // on. Looking the id up in "the" fleet is what a single-connection
-        // screen could do and a merged one cannot: `ShellWorkspace.id` is a
+        // screen could do and a merged one cannot: `ShellWorktree.id` is a
         // composite now, and searching every runner for the daemon's own id
         // would answer with the first match rather than with the right one.
         guard let entry = map.entries[shell.id],
             let connection = fleet.connection(for: entry.host.id),
-            let live = connection.fleet.workspaces.first(where: { $0.id == entry.workspace.id })
+            let live = connection.fleet.worktrees.first(where: { $0.id == entry.worktree.id })
         else { return nil }
         return (live, connection)
     }
 
     /// Put a worktree away, or take it back out.
     ///
-    /// Fire-and-refresh, which is what `Connection.hideWorkspace` is: hiding
+    /// Fire-and-refresh, which is what `Connection.hideWorktree` is: hiding
     /// is a view preference the runner stores, it cannot fail in a way this
     /// app could usefully say a sentence about, and the answer arrives as the
     /// card moving into — or out of — the grid's Hidden section. Nothing about
-    /// where you ARE changes, because `isHidden` changes where a workspace is
-    /// DRAWN and nothing else; see `ShellWorkspace.isHidden`.
-    private func toggleHidden(_ shell: ShellWorkspace) {
-        guard let (workspace, connection) = workspace(shell) else { return }
+    /// where you ARE changes, because `isHidden` changes where a worktree is
+    /// DRAWN and nothing else; see `ShellWorktree.isHidden`.
+    private func toggleHidden(_ shell: ShellWorktree) {
+        guard let (worktree, connection) = worktree(shell) else { return }
         Task {
-            if workspace.isHidden {
-                await connection.unhideWorkspace(workspace)
+            if worktree.isHidden {
+                await connection.unhideWorktree(worktree)
             } else {
-                await connection.hideWorkspace(workspace)
+                await connection.hideWorktree(worktree)
             }
         }
     }
@@ -1225,8 +1225,8 @@ struct ShellScreen: View {
     /// What this app puts in the overview's navigation bar, opposite `Done`.
     ///
     /// All of them were somewhere else, and all three had the same somewhere
-    /// else: the pushed workspace list. It was a searchable screen of every
-    /// workspace on the runner with a toolbar for starting work and the runner
+    /// else: the pushed worktree list. It was a searchable screen of every
+    /// worktree on the runner with a toolbar for starting work and the runner
     /// switcher along its bottom, and the overview is that screen — a section
     /// per runner in the order each runner keeps, with cards instead of rows.
     /// Two of them would be two answers to "what is on this runner".
@@ -1237,7 +1237,7 @@ struct ShellScreen: View {
     ///   `runnerActions` — and this is the part of that menu that is about no
     ///   runner at all.
     /// - A sparkle for "describe it" (`TaskComposerView`), a plain plus for
-    ///   "fill in the form" (`NewWorkspaceView`) — the same two flows the Mac
+    ///   "fill in the form" (`NewWorktreeView`) — the same two flows the Mac
     ///   keeps side by side, kept apart here by icon rather than by picking a
     ///   winner. `sparkle` and not `sparkles`, because the Mac's `QuickCreate`
     ///   marks this flow with the singular and one concept gets one glyph.
@@ -1273,11 +1273,11 @@ struct ShellScreen: View {
 
         Button {
             startingOn = nil
-            showNewWorkspace = true
+            showNewWorktree = true
         } label: {
             Image(systemName: "plus")
         }
-        .accessibilityLabel("New Workspace")
+        .accessibilityLabel("New Worktree")
     }
 
     /// The runners this app is CURRENTLY talking to.
@@ -1312,7 +1312,7 @@ struct ShellScreen: View {
         return RunnerDirectoryStore.read()
             // The live runner is excluded by ID, not by label: two entries can
             // name one box under different users, and a grid that showed the
-            // runner you are ON as a cached section would draw every workspace
+            // runner you are ON as a cached section would draw every worktree
             // twice — once live, and once as it was thirty seconds ago.
             //
             // A runner somebody has since removed is excluded too. A card for
@@ -1334,7 +1334,7 @@ struct ShellScreen: View {
             .filter {
                 !live.contains($0.id.uuidString) && !remembered.contains($0.id.uuidString)
             }
-            .map { ShellServerGroup(id: $0.id.uuidString, name: $0.label, workspaces: []) }
+            .map { ShellServerGroup(id: $0.id.uuidString, name: $0.label, worktrees: []) }
     }
 
     /// Each connected runner as the overview names it: its label, and one word
@@ -1381,9 +1381,9 @@ struct ShellScreen: View {
         else { return [] }
         let connection = runner.connection
         return [
-            ShellHeaderAction(title: "New Workspace…", systemImage: "plus") {
+            ShellHeaderAction(title: "New Worktree…", systemImage: "plus") {
                 startingOn = connection
-                showNewWorkspace = true
+                showNewWorktree = true
             },
             ShellHeaderAction(title: "Quick Task…", systemImage: "sparkle") {
                 startingOn = connection
@@ -1427,17 +1427,17 @@ struct ShellScreen: View {
     /// A drop in a runner's section, sent to that runner and nobody else.
     ///
     /// The ids are resolved back to the daemon's own through the map the grid
-    /// was built from, all or nothing — see `ShellReorderRequest.workspaceIDs`
+    /// was built from, all or nothing — see `ShellReorderRequest.worktreeIDs`
     /// — and the call goes down the connection the REQUEST names, never the
     /// one at rest.
     private func reorder(_ request: ShellReorderRequest, in map: ShellFleetMap) async {
         guard let runner = UUID(uuidString: request.runner),
             let connection = fleet.connection(for: runner),
-            let ids = request.workspaceIDs(resolving: { id in
-                map.entries[id].map { ($0.host.id.uuidString, $0.workspace.id) }
+            let ids = request.worktreeIDs(resolving: { id in
+                map.entries[id].map { ($0.host.id.uuidString, $0.worktree.id) }
             })
         else { return }
-        await connection.reorderWorkspaces(ids)
+        await connection.reorderWorktrees(ids)
     }
 
     /// What this screen is: a pane, a wait, or a runner with nothing on it.
@@ -1451,20 +1451,20 @@ struct ShellScreen: View {
     /// add a second runner, read this device's key, or make the first worktree.
     private var opening: ShellOpening {
         ShellBringUp.opening(
-            seated: initial, workspaces: openableCount,
+            seated: initial, worktrees: openableCount,
             reports: fleet.runners.map { report($0) })
     }
 
     /// How many worktrees the merge has to open on, counted without building
     /// the merge.
     ///
-    /// `ShellFleetMap.of` walks every terminal of every workspace of every
+    /// `ShellFleetMap.of` walks every terminal of every worktree of every
     /// runner and this is read on every body pass, so it asks the connections
-    /// directly. The two agree by construction: `of` appends one workspace per
-    /// entry and gives each of them a Diff tab, so a workspace in the fleet is
+    /// directly. The two agree by construction: `of` appends one worktree per
+    /// entry and gives each of them a Diff tab, so a worktree in the fleet is
     /// always a position in the shell.
     private var openableCount: Int {
-        fleet.runners.reduce(0) { $0 + $1.connection.fleet.workspaces.count }
+        fleet.runners.reduce(0) { $0 + $1.connection.fleet.worktrees.count }
     }
 
     /// The same question as a flag, for the one place that only needs the edge.
@@ -1523,10 +1523,10 @@ struct ShellScreen: View {
                     // the runner the two sheets already resolve to — see
                     // `acting`, which is what lets them work before the shell
                     // has come to rest on anything.
-                    Button("New Workspace") {
+                    Button("New Worktree…") {
                         // The runner `acting` resolves to, never a heading's.
                         startingOn = nil
-                        showNewWorkspace = true
+                        showNewWorktree = true
                     }
                         .disabled(acting == nil)
                 }
@@ -1569,7 +1569,7 @@ struct ShellScreen: View {
                     // Only the LINK arms `linkedTab`. Whatever rest a deep link
                     // produces is not a choice and must not be written down as
                     // one; a terminal this app was just asked to make is one,
-                    // and the workspace should remember it. See `linkedTab` and
+                    // and the worktree should remember it. See `linkedTab` and
                     // `createdTerminal`.
                     if pendingTerminal != nil {
                         linkedTab = requestedTab(in: map)
@@ -1645,18 +1645,18 @@ struct ShellScreen: View {
             // tree `.id(host)`: the tap destroyed the screen, the track and
             // every mounted pane. It does not any more, and an alert warning
             // about a teardown that no longer happens is worse than no alert.
-            onCross: { group, workspace in
-                select(runner: group.id, landingOn: workspace.id)
+            onCross: { group, worktree in
+                select(runner: group.id, landingOn: worktree.id)
             },
             onToggleHidden: toggleHidden,
             onRemoveWorktree: { shell in
-                guard let (workspace, connection) = workspace(shell) else { return }
-                removing = .confirming(workspace, on: connection)
+                guard let (worktree, connection) = worktree(shell) else { return }
+                removing = .confirming(worktree, on: connection)
             },
-            // The workspace is ignored: a tab id already names its runner and
+            // The worktree is ignored: a tab id already names its runner and
             // its worktree — that is what `ShellIdentity.tab` composes — and
             // `map.refs` is the lookup that gets both back. Taking the
-            // workspace instead would be a second route to the same runner
+            // worktree instead would be a second route to the same runner
             // that could disagree with the first.
             onCloseTab: { _, tab in close(tab: tab, in: map) },
             overviewActions: { overviewActions }
@@ -1669,14 +1669,14 @@ struct ShellScreen: View {
             if let ref = map.refs[slot.tab.id], let connection = connection(ref) {
                 ShellPaneRealView(
                     slot: slot, ref: ref, connection: connection, pastes: pastes,
-                    // Only the workspace at rest gets an answer. A neighbour's
+                    // Only the worktree at rest gets an answer. A neighbour's
                     // diff header can wait until you land on it; asking for
                     // three is three GitHub round trips per swipe.
                     // The WHOLE ref, runner included. What "the same worktree"
                     // means across a merged fleet is a runner and an id, and a
                     // comparison on the id alone would rest on cross-daemon
                     // uniqueness that nothing enforces.
-                    pullRequest: ref.workspace == restingRef?.workspace
+                    pullRequest: ref.worktree == restingRef?.worktree
                         && ref.runner == restingRef?.runner ? pullRequest : nil,
                     onCreated: { createdTerminal = $0 })
             }
@@ -1707,11 +1707,11 @@ struct ShellScreen: View {
     /// the tap and the answer comes back without this screen's state, and
     /// `seed` still reads the note back for that launch. Spent when the
     /// request is taken, so it cannot steer a later launch.
-    private func select(runner: String, landingOn workspace: String) {
+    private func select(runner: String, landingOn worktree: String) {
         guard let picked = hosts.hosts.first(where: { $0.id.uuidString == runner })
         else { return }
-        UserDefaults.standard.set("\(runner)/\(workspace)", forKey: Self.crossingKey)
-        crossing = ShellCrossing(runner: runner, workspace: workspace)
+        UserDefaults.standard.set("\(runner)/\(worktree)", forKey: Self.crossingKey)
+        crossing = ShellCrossing(runner: runner, worktree: worktree)
         hosts.selected = picked
     }
 
@@ -1723,15 +1723,15 @@ struct ShellScreen: View {
     /// runner's copy the merge put first.
     private func tab(forCrossing crossing: ShellCrossing, in map: ShellFleetMap) -> String? {
         guard
-            let index = map.fleet.workspaces.indices.first(where: {
-                let entry = map.entries[map.fleet.workspaces[$0].id]
-                return entry?.workspace.id == crossing.workspace
+            let index = map.fleet.worktrees.indices.first(where: {
+                let entry = map.entries[map.fleet.worktrees[$0].id]
+                return entry?.worktree.id == crossing.worktree
                     && entry?.host.id.uuidString == crossing.runner
             })
         else { return nil }
-        let workspace = map.fleet.workspaces[index]
-        guard workspace.tabs.indices.contains(workspace.resumeTab) else { return nil }
-        return workspace.tabs[workspace.resumeTab].id
+        let worktree = map.fleet.worktrees[index]
+        guard worktree.tabs.indices.contains(worktree.resumeTab) else { return nil }
+        return worktree.tabs[worktree.resumeTab].id
     }
 
     /// Give up on a crossing that can no longer land.
@@ -1771,8 +1771,8 @@ struct ShellScreen: View {
         let keeps = ShellCrossingRule.keeps(
             picked: hosts.selected?.id.uuidString == crossing.runner,
             report: runner.map { report($0) },
-            hasWorktree: runner?.connection.fleet.workspaces.contains {
-                $0.id == crossing.workspace
+            hasWorktree: runner?.connection.fleet.worktrees.contains {
+                $0.id == crossing.worktree
             } ?? false)
         if !keeps { spendCrossing() }
     }
@@ -1816,7 +1816,7 @@ struct ShellScreen: View {
         hosts.selected = host
     }
 
-    /// Which worktree a crossing was aimed at, spelled `runner/workspace`.
+    /// Which worktree a crossing was aimed at, spelled `runner/worktree`.
     static let crossingKey = "shell.crossingTo"
 
 
@@ -1830,8 +1830,8 @@ struct ShellScreen: View {
     /// somewhere they had already left.
     ///
     /// `ShellFleet.first` rather than a rule, because the rule already ran:
-    /// `ShellFleetMap.resume` resolved every workspace's remembered tab, and
-    /// the first workspace's is where a launch lands.
+    /// `ShellFleetMap.resume` resolved every worktree's remembered tab, and
+    /// the first worktree's is where a launch lands.
     private func seed() {
         guard initial == nil else { return }
         let map = self.map
@@ -1841,22 +1841,22 @@ struct ShellScreen: View {
         // next launch of a runner somebody reached the ordinary way, which is
         // the self-fulfilling memory `remember(_:leaving:tab:)` refuses for
         // the same reason one paragraph down.
-        let workspace = takeCrossing().flatMap { wanted in
+        let worktree = takeCrossing().flatMap { wanted in
             // Both halves. A crossing note names a runner AND a worktree —
             // that is what `crossingKey` writes — and honoring only the second
             // over a merged fleet would land on whichever runner's copy the
             // merge put first.
-            map.fleet.workspaces.indices.first {
-                let entry = map.entries[map.fleet.workspaces[$0].id]
-                return entry?.workspace.id == wanted.workspace
+            map.fleet.worktrees.indices.first {
+                let entry = map.entries[map.fleet.worktrees[$0].id]
+                return entry?.worktree.id == wanted.worktree
                     && entry?.host.id.uuidString == wanted.runner
             }
-        } ?? onSelectedRunner(in: map) ?? at.workspace
+        } ?? onSelectedRunner(in: map) ?? at.worktree
         initial = ShellPosition(
-            workspace: workspace, tab: map.fleet.workspaces[workspace].resumeTab)
+            worktree: worktree, tab: map.fleet.worktrees[worktree].resumeTab)
     }
 
-    /// The first workspace on the runner somebody last picked.
+    /// The first worktree on the runner somebody last picked.
     ///
     /// **The selection still decides where a launch LANDS, even though it no
     /// longer decides what is connected.** `RunnerStore.selected` is persisted
@@ -1872,8 +1872,8 @@ struct ShellScreen: View {
     /// alternative is a spinner over a fleet that is already in hand.
     private func onSelectedRunner(in map: ShellFleetMap) -> Int? {
         guard let selected = hosts.selected?.id else { return nil }
-        return map.fleet.workspaces.indices.first {
-            map.entries[map.fleet.workspaces[$0].id]?.host.id == selected
+        return map.fleet.worktrees.indices.first {
+            map.entries[map.fleet.worktrees[$0].id]?.host.id == selected
         }
     }
 
@@ -1882,7 +1882,7 @@ struct ShellScreen: View {
     /// Checked against the runner as well as read, because the note outlives
     /// the tap: an app killed between the alert and the connection would come
     /// back with a note about a runner somebody may no longer be on.
-    private func takeCrossing() -> (runner: String, workspace: String)? {
+    private func takeCrossing() -> (runner: String, worktree: String)? {
         guard let note = UserDefaults.standard.string(forKey: Self.crossingKey) else { return nil }
         UserDefaults.standard.removeObject(forKey: Self.crossingKey)
         let parts = note.split(separator: "/", maxSplits: 1)
@@ -1900,15 +1900,15 @@ struct ShellScreen: View {
 
     /// Write down the tab somebody chose, and only that.
     ///
-    /// **Only when the arrival did not change workspace**, which is exactly
+    /// **Only when the arrival did not change worktree**, which is exactly
     /// the pane host's `choose(_:)` rule arrived at from the shell's side. In
     /// that screen the one writer was a tap on a chip; here the equivalents
-    /// are a swipe along the content within a workspace and a tap on a menu
-    /// row, and both of them are moves BETWEEN this workspace's tabs.
+    /// are a swipe along the content within a worktree and a tap on a menu
+    /// row, and both of them are moves BETWEEN this worktree's tabs.
     ///
-    /// Arriving in a workspace records nothing, and that matters more here
+    /// Arriving in a worktree records nothing, and that matters more here
     /// than it did there. A bar swipe, a carried lift and a tapped card all
-    /// land on `ShellWorkspace.resumeTab`, which for a workspace nobody has
+    /// land on `ShellWorktree.resumeTab`, which for a worktree nobody has
     /// ever chosen a tab in is `PaneFocus.rule`'s answer — so recording an
     /// arrival would write the rule's own answer into the memory and the rule
     /// would never get to run again. That is the self-fulfilling memory the
@@ -1921,8 +1921,8 @@ struct ShellScreen: View {
         _ arrived: ShellPaneRef?, leaving previous: ShellPaneRef?, tab: String?
     ) {
         // A deep link is not a choice either, and it is the one arrival that
-        // can look exactly like one: a card naming a pane in the workspace
-        // already on screen lands on a different tab of the same workspace,
+        // can look exactly like one: a card naming a pane in the worktree
+        // already on screen lands on a different tab of the same worktree,
         // which is the shape this function is otherwise here to record. The
         // pane host never had to say so — a request went through `select` and a
         // chip through `choose`, and only the second wrote anything.
@@ -1933,13 +1933,13 @@ struct ShellScreen: View {
         let linked = linkedTab
         linkedTab = nil
         if let tab, tab == linked { return }
-        guard let arrived, arrived.workspace == previous?.workspace,
+        guard let arrived, arrived.worktree == previous?.worktree,
             arrived.runner == previous?.runner
         else { return }
         // On the runner the pane is on. The memory is `Connection.lastFocus`,
-        // which is per runner because a workspace id means nothing off the
+        // which is per runner because a worktree id means nothing off the
         // machine that minted it.
-        connection(arrived)?.rememberFocus(arrived.pane.focus, in: arrived.workspace)
+        connection(arrived)?.rememberFocus(arrived.pane.focus, in: arrived.worktree)
     }
 
     // MARK: - A card tapped from outside the app
@@ -2026,7 +2026,7 @@ struct ShellScreen: View {
     // MARK: - The Changes tab's header
 
     /// When to read the pull request again: on arriving at the Changes tab of
-    /// a workspace, and on every fleet poll while it is up.
+    /// a worktree, and on every fleet poll while it is up.
     ///
     /// Deliberately not a timer of this screen's own — see
     /// `WorkspaceView.pullRequestReadKey`, which this is carried across from,
@@ -2036,11 +2036,11 @@ struct ShellScreen: View {
         guard let ref = restingRef, case .changes = ref.pane,
             let connection = connection(ref)
         else { return "" }
-        let branch = connection.fleet.workspaces.first { $0.id == ref.workspace }?.branch ?? ""
+        let branch = connection.fleet.worktrees.first { $0.id == ref.worktree }?.branch ?? ""
         // The runner is in the key for the reason it is in every other id here:
         // what the key has to change on is "a different worktree", and across a
         // merged fleet a worktree is a runner and an id rather than an id.
-        return "\(ref.runner)|\(ref.workspace)|\(branch)|\(connection.pollGeneration)"
+        return "\(ref.runner)|\(ref.worktree)|\(branch)|\(connection.pollGeneration)"
     }
 
     /// Read `stack.get` for the resting worktree's branch.
@@ -2052,18 +2052,18 @@ struct ShellScreen: View {
     private func readPullRequest() async {
         guard let ref = restingRef, case .changes = ref.pane,
             let connection = connection(ref),
-            let workspace = connection.fleet.workspaces.first(where: { $0.id == ref.workspace })
+            let worktree = connection.fleet.worktrees.first(where: { $0.id == ref.worktree })
         else { return }
-        guard let repository = workspace.repository, !workspace.branch.isEmpty else {
+        guard let repository = worktree.repository, !worktree.branch.isEmpty else {
             pullRequest = nil
             return
         }
         // A failed read leaves the last answer on screen rather than blanking
         // the row. The link dropping is not news about this pull request.
         guard let reply = await connection.stack(
-            repository: repository, branch: workspace.branch)
+            repository: repository, branch: worktree.branch)
         else { return }
-        let mine = reply.links.first { $0.branch == workspace.branch }
+        let mine = reply.links.first { $0.branch == worktree.branch }
         pullRequest = BranchPullRequest(
             pr: mine?.pr, known: reply.prAnswered, repoURL: reply.repoUrl)
     }
@@ -2081,7 +2081,7 @@ extension ShellScreen {
         return RunnerBoards.rows(
             repositories: connection.repositories.map { (id: $0.id, name: $0.displayName) },
             boards: connection.boards,
-            panes: connection.fleet.workspaces.flatMap(\.terminals),
+            panes: connection.fleet.worktrees.flatMap(\.terminals),
             build: connection.daemon,
             lastKnownBuild: connection.lastDaemon,
             connected: connection.phase == .connected)
@@ -2090,8 +2090,8 @@ extension ShellScreen {
     /// Whether a board's Agent button has a pane to land on. See `onJump` on
     /// the sheet, and `ShellFleet.landing` for the decision.
     ///
-    /// No "hidden workspace" case: the shell draws hidden workspaces too (the
-    /// overview's Hidden section), so a hidden workspace's pane has a tab and
+    /// No "hidden worktree" case: the shell draws hidden worktrees too (the
+    /// overview's Hidden section), so a hidden worktree's pane has a tab and
     /// lands. The only pane with no tab is one that is gone.
     fileprivate func boardCanLand(on terminal: String) -> Bool {
         tab(forTerminal: terminal, in: map) != nil
@@ -2140,15 +2140,15 @@ private struct BoardSheetHost: View {
     }
 
     /// The panes working `row` on this runner, in fleet order, each named
-    /// the way a menu item needs: the pane, then the workspace it is in.
+    /// the way a menu item needs: the pane, then the worktree it is in.
     private func agents(for row: TaskRow) -> [BoardAgent] {
         let now = Date()
-        let found = connection.fleet.workspaces.flatMap { workspace in
-            let ordinals = workspace.ordinals()
-            return row.livePanes(in: workspace.terminals).map { terminal in
+        let found = connection.fleet.worktrees.flatMap { worktree in
+            let ordinals = worktree.ordinals()
+            return row.livePanes(in: worktree.terminals).map { terminal in
                 (
                     terminal: terminal,
-                    title: "\(terminal.displayName(ordinal: ordinals[terminal.id])) in \(workspace.task)"
+                    title: "\(terminal.displayName(ordinal: ordinals[terminal.id])) in \(worktree.task)"
                 )
             }
         }

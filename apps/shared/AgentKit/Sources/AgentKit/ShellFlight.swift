@@ -52,7 +52,7 @@ enum ShellMotion {
     ///
     /// One number for BOTH directions, and that is the point rather than
     /// thrift. The two gestures that take a page off the display — lifting it
-    /// past the last row, and crossing sideways to another workspace — are the
+    /// past the last row, and crossing sideways to another worktree — are the
     /// same object doing the same thing, so a page that rounded its corners
     /// over 24 points going up and over a page width going sideways would be
     /// two different objects that happen to share a screen.

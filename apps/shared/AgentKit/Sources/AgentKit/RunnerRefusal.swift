@@ -57,7 +57,7 @@ public enum RunnerRefusal: String, CaseIterable, Sendable {
     /// Panes are still alive under the thing being removed.
     case runningProcesses = "running-processes"
     /// Nothing is running, but records would be orphaned.
-    case workspacesExist = "workspaces-exist"
+    case worktreesExist = "workspaces-exist"
     /// Outside every allowlisted root, or overlapping one.
     case pathNotAllowed = "path-not-allowed"
     /// A whole home directory or a system path, which never becomes allowable.
@@ -100,8 +100,8 @@ public enum RunnerRefusal: String, CaseIterable, Sendable {
             "That branch already exists. Pick another name, or resume the branch you have."
         case .runningProcesses:
             "Something is still running there. Stop it first, then try this again."
-        case .workspacesExist:
-            "Its workspaces are still here. Remove those first, then remove the folder."
+        case .worktreesExist:
+            "Its worktrees are still here. Remove those first, then remove the folder."
         case .pathNotAllowed:
             "That folder isn’t inside one you’ve added, or it overlaps one you already have."
         case .sensitiveRoot:

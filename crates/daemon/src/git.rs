@@ -200,7 +200,7 @@ pub async fn resolve_revision(repo: &Path, revision: &str) -> Result<String> {
 /// A list rather than an `Option`, because the COUNT is the decision: git
 /// refuses to guess when two remotes both have the name, and so does the caller
 /// — anyone with a fork plus an upstream has two, and picking one for them is
-/// how a workspace quietly starts from the wrong person's work.
+/// how a worktree quietly starts from the wrong person's work.
 pub async fn remotes_with_branch(repo: &Path, branch: &str) -> Result<Vec<String>> {
     let out = git(repo, &["for-each-ref", "--format", "%(refname)", "refs/remotes"]).await?;
     if !out.ok {
@@ -516,7 +516,7 @@ pub async fn rollback_worktree(
 /// including the checkout the user works in every day, which Far Cooler did not
 /// make. `removal_needs_confirmation` derives this same answer from the one
 /// `git status` its hooks check also reads, so without the subtraction a
-/// workspace created a second ago and never touched by anyone would demand
+/// worktree created a second ago and never touched by anyone would demand
 /// the user type its name back to remove it, on the strength of files Far
 /// Cooler wrote and the user has never seen.
 ///
@@ -666,7 +666,7 @@ mod tests {
     /// Someone else pushed the branch; checking it out must get THEIR commits.
     ///
     /// The reported bug, exactly: a colleague creates `origin/feat-branch`, you
-    /// make a workspace for it, and you get an empty branch of the same name cut
+    /// make a worktree for it, and you get an empty branch of the same name cut
     /// from `main`. `branch_exists` reads only `refs/heads`, so nothing noticed.
     #[tokio::test]
     async fn a_branch_that_exists_on_a_remote_is_checked_out_rather_than_forked() {
@@ -958,7 +958,7 @@ pub struct WorktreeInfo {
     /// The repository's own working tree, as opposed to a linked worktree.
     ///
     /// Listed by git and deliberately excluded from what is offered: the main
-    /// checkout is where you work by hand, and turning it into a task workspace
+    /// checkout is where you work by hand, and turning it into a task worktree
     /// would put an agent in it.
     pub is_main: bool,
     /// git holds a lock, usually because the worktree lives on removable media.
@@ -1063,7 +1063,7 @@ async fn admin_dir(worktree: &Path) -> Result<PathBuf> {
 ///
 /// Best effort by design. A marker that could not be written leaves the
 /// worktree looking unowned, which is exactly the behaviour that existed before
-/// ownership did — whereas failing workspace creation over a note would be a
+/// ownership did — whereas failing worktree creation over a note would be a
 /// worse outcome than the hazard it guards.
 pub async fn mark_owner(worktree: &Path, install_id: &str) {
     match admin_dir(worktree).await {

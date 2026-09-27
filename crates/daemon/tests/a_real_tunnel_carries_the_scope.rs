@@ -122,7 +122,7 @@ async fn a_device_reaching_through_the_tunnel_gets_the_scope_in_the_file() {
     // refused a host path through the tunnel exactly as it is over a direct
     // connection — a transport that quietly widened what a session may do
     // would pass every assertion above.
-    match client.call(request("worktree.list")).await {
+    match client.call(request("worktree.discover")).await {
         Err(ClientError::Daemon { code, .. }) => {
             assert_eq!(
                 code,

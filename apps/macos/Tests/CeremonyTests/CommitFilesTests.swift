@@ -3,7 +3,7 @@ import Testing
 
 @testable import Far_Cooler
 
-/// Reading `farcooler changes files <workspace> <sha> --json` back into rows.
+/// Reading `farcooler changes files <worktree> <sha> --json` back into rows.
 ///
 /// The status letter on a commit's file rows is what these are really about.
 /// The daemon has known it since `changes.commit_files` gained its

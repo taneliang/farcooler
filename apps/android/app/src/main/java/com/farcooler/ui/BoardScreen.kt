@@ -69,8 +69,8 @@ import com.farcooler.model.TaskAgentPresence
 import com.farcooler.model.TaskBoard
 import com.farcooler.model.TaskRow
 import com.farcooler.model.Terminal
-import com.farcooler.model.Workspace
-import com.farcooler.model.landingWorkspace
+import com.farcooler.model.Worktree
+import com.farcooler.model.landingWorktree
 import com.farcooler.net.Connection
 import com.farcooler.net.TerminalRef
 import kotlinx.coroutines.launch
@@ -103,7 +103,7 @@ fun RunnerBoardRows(
         hostId = connection.host.id,
         repositories = repositories,
         boards = boards,
-        panes = fleet.workspaces.flatMap { it.terminals },
+        panes = fleet.worktrees.flatMap { it.terminals },
         build = daemon,
         connected = phase is Connection.Phase.Connected,
     )
@@ -165,12 +165,12 @@ private fun BoardRowItem(row: BoardRow, runner: String?, onOpen: (BoardRow) -> U
     )
 }
 
-/** The panes working [row] on one runner, named for a menu: the pane, then its workspace. */
-fun boardAgents(row: TaskRow, workspaces: List<Workspace>): List<Pair<Terminal, String>> {
-    val found = workspaces.flatMap { workspace ->
-        val ordinals = workspace.ordinals()
-        row.livePanes(workspace.terminals).map { terminal ->
-            terminal to "${terminal.displayName(ordinals[terminal.id])} in ${workspace.task}"
+/** The panes working [row] on one runner, named for a menu: the pane, then its worktree. */
+fun boardAgents(row: TaskRow, worktrees: List<Worktree>): List<Pair<Terminal, String>> {
+    val found = worktrees.flatMap { worktree ->
+        val ordinals = worktree.ordinals()
+        row.livePanes(worktree.terminals).map { terminal ->
+            terminal to "${terminal.displayName(ordinals[terminal.id])} in ${worktree.task}"
         }
     }
     val titles = TaskAgentLink.menuTitles(found.map { it.second }, found.map { it.first.short })
@@ -209,7 +209,7 @@ fun BoardScreen(
         ?.let { it.displayName.ifEmpty { it.short } } ?: "Board"
     val board = boards[repository]
     val speaks = TaskAgentLink.speaksOfAgents(phase is Connection.Phase.Connected, daemon)
-    val jump = boardJump(connection.host.id, fleet.workspaces, onJump) { why ->
+    val jump = boardJump(connection.host.id, fleet.worktrees, onJump) { why ->
         scope.launch { snackbar.showSnackbar(why) }
     }
 
@@ -281,7 +281,7 @@ fun BoardScreen(
                             )
                         }
                         items(column.rows, key = { "task/${it.id}" }) { row ->
-                            val agents = if (speaks) boardAgents(row, fleet.workspaces) else emptyList()
+                            val agents = if (speaks) boardAgents(row, fleet.worktrees) else emptyList()
                             TaskCardRow(
                                 row = row,
                                 agents = agents,
@@ -321,13 +321,13 @@ fun BoardScreen(
  */
 private fun boardJump(
     hostId: String,
-    workspaces: List<Workspace>,
+    worktrees: List<Worktree>,
     onJump: (TerminalRef) -> Unit,
     onRefused: (String) -> Unit,
 ): (Terminal) -> Unit = { terminal ->
-    val workspace = landingWorkspace(terminal.id, workspaces)
-    if (workspace == null) onRefused(TaskAgentLink.PANE_HAS_CLOSED)
-    else onJump(TerminalRef(hostId, workspace, terminal.id))
+    val worktree = landingWorktree(terminal.id, worktrees)
+    if (worktree == null) onRefused(TaskAgentLink.PANE_HAS_CLOSED)
+    else onJump(TerminalRef(hostId, worktree, terminal.id))
 }
 
 @Composable
@@ -508,7 +508,7 @@ fun TaskDetailScreen(
 
     val row = boards[repository]?.row(taskId)
     val speaks = TaskAgentLink.speaksOfAgents(phase is Connection.Phase.Connected, daemon)
-    val jump = boardJump(connection.host.id, fleet.workspaces, onJump) { why ->
+    val jump = boardJump(connection.host.id, fleet.worktrees, onJump) { why ->
         scope.launch { snackbar.showSnackbar(why) }
     }
 
@@ -531,7 +531,7 @@ fun TaskDetailScreen(
             }
             return@Scaffold
         }
-        val agents = if (speaks) boardAgents(row, fleet.workspaces) else emptyList()
+        val agents = if (speaks) boardAgents(row, fleet.worktrees) else emptyList()
         val presence = row.agentPresence(agents.size, speaks)
         LazyColumn(Modifier.fillMaxSize().padding(padding).testTag("board-detail")) {
             item(key = "heading") {

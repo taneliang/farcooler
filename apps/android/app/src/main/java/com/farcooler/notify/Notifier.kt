@@ -118,7 +118,7 @@ class Notifier(private val context: Context, private val settings: Settings) {
     }
 
     /** Announce a change, if it is worth announcing. */
-    fun report(terminal: Terminal, workspace: String, runner: String) {
+    fun report(terminal: Terminal, worktree: String, runner: String) {
         val activity = terminal.agent
         val news = Announced(activity, terminal.turnDidFail)
         val previous = announced.put(terminal.id, news)
@@ -138,7 +138,7 @@ class Notifier(private val context: Context, private val settings: Settings) {
 
         // Every sentence, in one place that needs no `Context` and is held to
         // the daemon's own wording by a test. See [NotificationCopy].
-        val (title, body, channel) = NotificationCopy.of(terminal, workspace, runner) ?: return
+        val (title, body, channel) = NotificationCopy.of(terminal, worktree, runner) ?: return
 
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP

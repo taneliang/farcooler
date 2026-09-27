@@ -18,7 +18,7 @@ import kotlinx.serialization.json.Json
  * happens to a route that no longer names anything.
  *
  * **Every route that names something on a runner carries the runner.** Ids are
- * minted per daemon, so a workspace id or a terminal id is meaningless without
+ * minted per daemon, so a worktree id or a terminal id is meaningless without
  * the host beside it; `net/FleetRepository.kt` makes the same argument about
  * [com.farcooler.net.TerminalRef] and it is the reason this app can be
  * connected to every runner at once while iOS makes you pick one.
@@ -40,7 +40,7 @@ sealed interface Route {
      *
      * The root, and the app's answer to three of the four situations
      * `docs/jobs-to-be-done.md` names. The app used to open into a TERMINAL —
-     * `FleetRepository.landing()` picked one on connect and the workspace list
+     * `FleetRepository.landing()` picked one on connect and the worktree list
      * was the fallback for a fleet with nothing running. That is the right
      * front door for exactly one of those situations, on the couch about to
      * drive an agent; in the other three — in transit, standing with the phone
@@ -48,7 +48,7 @@ sealed interface Route {
      * and a terminal is an answer to a question nobody asked. iOS deleted the
      * same shape in `1be6264`.
      *
-     * No host and no workspace on it, unlike every other route that names
+     * No host and no worktree on it, unlike every other route that names
      * something: this one names the whole fleet, which is the property the
      * screen exists for.
      */
@@ -57,10 +57,10 @@ sealed interface Route {
     data object NeedsYou : Route
 
     /**
-     * The workspace list — every worktree on every runner, hidden ones
+     * The worktree list — every worktree on every runner, hidden ones
      * included.
      *
-     * No longer the root. It is pushed from the front door's Workspaces row,
+     * No longer the root. It is pushed from the front door's Worktrees row,
      * and it is also what the navigation drawer holds, which is deliberate
      * duplication rather than an oversight: the drawer is reachable by an edge
      * swipe with no target to hit, and the row is reachable by reading. See
@@ -71,7 +71,7 @@ sealed interface Route {
     data object Fleet : Route
 
     /**
-     * One workspace, on one runner — and deliberately NOT which pane of it.
+     * One worktree, on one runner — and deliberately NOT which pane of it.
      *
      * The pane lives in [Focus], beside the stack, and that separation is the
      * whole point. iOS learned it in `09b1e1f`: writing the focused tab into a
@@ -83,11 +83,17 @@ sealed interface Route {
      * `rememberSaveable(...)`, a `SaveableStateHolder` — so a route that
      * changes value on every tab tap is a subtree that resets on every tab tap
      * the moment anyone writes one of those. `RootScreen` keys the pane on
-     * `hostId` and `workspaceId` for exactly that reason.
+     * `hostId` and `worktreeId` for exactly that reason.
      */
     @Serializable
     @SerialName("terminal")
-    data class Terminal(val hostId: String, val workspaceId: String) : Route
+    data class Terminal(
+        val hostId: String,
+        // Spelled `workspaceId` on disk: a saved stack is a format, and this
+        // field was named before the worktree rename. See
+        // `BackstackTest.theWireNamesAreTheOnesOnDisk`.
+        @SerialName("workspaceId") val worktreeId: String,
+    ) : Route
 
     @Serializable
     @SerialName("settings")
@@ -147,9 +153,9 @@ sealed interface Route {
     data class BoardTask(val hostId: String, val repositoryId: String, val taskId: String) : Route
 
     /**
-     * Whether this route is drawn OVER the workspace rather than instead of it.
+     * Whether this route is drawn OVER the worktree rather than instead of it.
      *
-     * Every pushed screen is. The workspace underneath stays composed, which is
+     * Every pushed screen is. The worktree underneath stays composed, which is
      * what lets a predictive back gesture preview something real, and — the
      * reason that matters more — what lets the terminal session, the transcript
      * scroll and the composer draft survive a trip into settings. Before this,
@@ -173,10 +179,10 @@ sealed interface Route {
 }
 
 /**
- * One tab of a workspace.
+ * One tab of a worktree.
  *
  * Two kinds, and the second one has nothing behind it on the runner. Every
- * `changes.*` RPC takes a workspace id and nothing else — `Session::change_set`
+ * `changes.*` RPC takes a worktree id and nothing else — `Session::change_set`
  * and `Session::file_diff` in `crates/client/src/session.rs` pass `None` where
  * a terminal-scoped call passes an id — so the diff is a fact about the
  * worktree that this app can ask for whether or not anybody ever opened a
@@ -239,15 +245,15 @@ sealed interface Pane {
 }
 
 /**
- * Which tab a workspace is showing, and whether a person chose it.
+ * Which tab a worktree is showing, and whether a person chose it.
  *
  * The second half is not bookkeeping. Only a chosen focus is written down —
  * see [Backstack.encodeFocus] — because a notification tap and a fleet-list row
  * are places somebody was SENT, and a 3am ping about an agent that got itself
- * blocked must not decide where the workspace opens tomorrow morning. iOS draws
+ * blocked must not decide where the worktree opens tomorrow morning. iOS draws
  * the same line in `09b1e1f`, one writer and three deliberate non-writers.
  *
- * A [Pane] rather than a terminal id since the workspace screen gained a
+ * A [Pane] rather than a terminal id since the worktree screen gained a
  * Changes tab: "where I was in this worktree" has an answer that is not a pane
  * on the runner, and a map that could only hold terminal ids could not say it.
  */
@@ -275,15 +281,15 @@ object Backstack {
      * The root every degraded stack falls back to.
      *
      * The front door, since phase 3. It was [Route.Fleet], which was correct
-     * while the app landed on a terminal and used the workspace list as its
+     * while the app landed on a terminal and used the worktree list as its
      * fallback; now the fallback and the front door are the same screen, and it
      * is the one screen in the app that needs nothing from any runner to be
      * worth showing.
      */
     val ROOT: Route = Route.NeedsYou
 
-    /** One runner's one workspace, which is the grain a focus is remembered at. */
-    fun key(hostId: String, workspaceId: String) = "$hostId/$workspaceId"
+    /** One runner's one worktree, which is the grain a focus is remembered at. */
+    fun key(hostId: String, worktreeId: String) = "$hostId/$worktreeId"
 
     fun encodeStack(stack: List<Route>): String =
         json.encodeToString(stackFormat, stack)
@@ -305,7 +311,7 @@ object Backstack {
     }
 
     /**
-     * The chosen tabs, as `runner/workspace` to terminal id.
+     * The chosen tabs, as `runner/worktree` to terminal id.
      *
      * Only the chosen ones. An entry nobody chose is where the app put someone,
      * and writing that down would make the memory a record of the app's own
@@ -327,8 +333,8 @@ object Backstack {
 
     /**
      * [AppModel.open]'s arithmetic: close what is over the ground, then put
-     * the workspace on it, a terminal replacing a trailing terminal. Arriving
-     * at the workspace already underneath only closes what is over it.
+     * the worktree on it, a terminal replacing a trailing terminal. Arriving
+     * at the worktree already underneath only closes what is over it.
      */
     fun goTo(stack: List<Route>, target: Route.Terminal): List<Route> {
         val base = stack.dropLastWhile { it.isOverlay }
@@ -355,7 +361,7 @@ object Backstack {
      *
      * The Compose answer to what iOS does with `path.removeSubrange(gone...)`.
      * Truncating rather than filtering, because a stack is a story: if the
-     * workspace you were reading was merged away, the settings screen you had
+     * worktree you were reading was merged away, the settings screen you had
      * pushed on top of it is not where you meant to end up either. Everything
      * from the first dead route onwards goes.
      *
@@ -365,7 +371,7 @@ object Backstack {
      * exists to avoid.
      *
      * Called on every fleet change, not only at launch, so it covers both the
-     * restored stack and the workspace that disappears under someone while they
+     * restored stack and the worktree that disappears under someone while they
      * are looking at it. One rule, two moments.
      */
     fun truncate(stack: List<Route>, resolves: (Route) -> Boolean): List<Route> {
@@ -399,7 +405,7 @@ object Backstack {
         }
 
     /**
-     * Which pane a workspace shows, in an order of authority.
+     * Which pane a worktree shows, in an order of authority.
      *
      * 1. **The focus**, if it still names a live pane. Somebody either chose it
      *    or was sent to it; either way it is the most recent thing anyone
@@ -415,9 +421,9 @@ object Backstack {
 
     /**
      * The tab a remembered or requested pane actually resolves to, or null when
-     * it names nothing this workspace has.
+     * it names nothing this worktree has.
      *
-     * Split out of [chooseFocus] because the workspace screen needs the first
+     * Split out of [chooseFocus] because the worktree screen needs the first
      * half WITHOUT the second. That screen watches the focus map so a
      * notification tap or a fleet row moves the tab you are looking at — but it
      * must not follow the RULE, which changes on every poll: an agent finishing
@@ -432,7 +438,7 @@ object Backstack {
     fun resolve(pane: Pane?, terminals: List<Terminal>): Pane? = when (pane) {
         null -> null
         // Answerable with no fleet at all, which is the property the tab has:
-        // the diff is asked for by workspace id. So a remembered Changes tab
+        // the diff is asked for by worktree id. So a remembered Changes tab
         // comes back during a handshake, where a remembered terminal cannot.
         is Pane.Changes -> Pane.Changes
         // Folded, not returned as itself: the pane named may have been switched
@@ -441,12 +447,12 @@ object Backstack {
     }
 
     /**
-     * Which pane a workspace opens on when nobody said and nobody ever chose.
+     * Which pane a worktree opens on when nobody said and nobody ever chose.
      *
      * Blocked agent, then whatever is running, then the first pane there is —
      * and the ordering is `model/Model.kt`'s, not a third copy of it. This is
      * the same question the fleet-wide landing rule asks, narrowed to one
-     * workspace, and the two must not be able to disagree about which pane
+     * worktree, and the two must not be able to disagree about which pane
      * matters.
      */
     fun rule(terminals: List<Terminal>): Pane? {

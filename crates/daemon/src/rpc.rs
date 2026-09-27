@@ -303,19 +303,19 @@ fn required_scope(method: &str) -> Option<Scope> {
         // at the highest scope. A local caller already holds it; a remote one
         // gets it only where ssh has proved who they are.
         "daemon.shutdown" => Scope::HostAdmin,
-        "repository.list" | "workspace.list" | "terminal.list" | "branch.list" => Scope::Read,
+        "repository.list" | "worktree.list" | "terminal.list" | "branch.list" => Scope::Read,
         "layout.list" => Scope::Read,
         // Discovery reveals paths, which live behind the same gate as every
         // other path in this protocol.
-        "worktree.list" => Scope::HostAdmin,
+        "worktree.discover" => Scope::HostAdmin,
         "repository.register"
-        | "workspace.create"
-        | "workspace.hide"
-        | "workspace.unhide"
+        | "worktree.create"
+        | "worktree.hide"
+        | "worktree.unhide"
         // Dragging a card is a preference about a list, the same weight as
         // hiding one. It writes no git data and reveals no path, so it sits
         // where hide and unhide sit rather than behind `host_admin`.
-        | "workspace.reorder"
+        | "worktree.reorder"
         | "terminal.create"
         | "terminal.resize"
         | "terminal.stop"
@@ -356,7 +356,7 @@ fn required_scope(method: &str) -> Option<Scope> {
         // the same conversation, just structured — so it sits at the same
         // scope rather than behind `host_admin`. Search returns
         // worktree-relative paths only, never a runner path, so it belongs here
-        // too rather than beside `worktree.list`.
+        // too rather than beside `worktree.discover`.
         "terminal.set_pane_mode"
         | "terminal.agent_subscribe"
         | "terminal.agent_prompt"
@@ -389,7 +389,7 @@ fn required_scope(method: &str) -> Option<Scope> {
         // ground `changes.inbox` stands on, and a read-scoped phone has to be
         // able to see what the fleet is doing to be worth carrying.
         "task.list" | "task.get" | "task.get_by_key" | "task.search" => Scope::Read,
-        // The board writes, at the scope `workspace.create` and
+        // The board writes, at the scope `worktree.create` and
         // `terminal.create` already sit at: a write that touches no git data
         // and reveals no path.
         //
@@ -423,7 +423,7 @@ fn required_scope(method: &str) -> Option<Scope> {
         "repository_root.list"
         | "repository_root.add"
         | "repository_root.remove"
-        | "workspace.remove_worktree" => Scope::HostAdmin,
+        | "worktree.remove" => Scope::HostAdmin,
         // Runner settings, reads included.
         //
         // These write a file in the user's home directory on a runner that may
@@ -531,7 +531,7 @@ impl Handler for Rpc {
             //
             // `CapabilityUnsupported`, not `NotFound`: to a newer client asking
             // for a feature this build predates, "no such method" and "no such
-            // workspace" were the same code, so it could neither dim the
+            // worktree" were the same code, so it could neither dim the
             // control nor say anything a person could act on.
             None => Err(DomainError::CapabilityUnsupported {
                 needed: farcooler_protocol::capability::for_method(&req.method).unwrap_or("a newer Far Cooler"),
@@ -1028,19 +1028,19 @@ impl Rpc {
                 Ok(result::Value::RepositoryList(farcooler_protocol::v1::RepositoryList { items }))
             }
 
-            "workspace.list" => {
+            "worktree.list" => {
                 let items =
-                    svc.fleet().await?.iter().map(|view| wire::workspace(view, scope)).collect();
-                Ok(result::Value::WorkspaceList(farcooler_protocol::v1::WorkspaceList { items }))
+                    svc.fleet().await?.iter().map(|view| wire::worktree(view, scope)).collect();
+                Ok(result::Value::WorktreeList(farcooler_protocol::v1::WorktreeList { items }))
             }
 
             "terminal.list" => {
                 // An absent target lists every terminal; a present one filters
-                // to that workspace.
+                // to that worktree.
                 let filter = req.target_resource_id.as_deref().and_then(wire::parse_id);
                 let mut items = Vec::new();
                 for view in svc.fleet().await? {
-                    if filter.is_some_and(|id| id != view.workspace.id) {
+                    if filter.is_some_and(|id| id != view.worktree.id) {
                         continue;
                     }
                     for terminal in &view.terminals {
@@ -1056,7 +1056,7 @@ impl Rpc {
                 // every ring.
                 //
                 // Sent on the whole-fleet listing only. A filtered list is one
-                // workspace, and a fleet figure beside it would be a number
+                // worktree, and a fleet figure beside it would be a number
                 // about terminals the reply does not contain.
                 let (fleet_trace, fleet_trace_anchor) =
                     if filter.is_none() { self.watcher.fleet_trace() } else { (Vec::new(), None) };
@@ -1085,7 +1085,7 @@ impl Rpc {
                 // has, which changes the fleet without touching git — so the
                 // reconciler's mtime gate never fires for this. Without an
                 // explicit announce, other connected clients would not learn
-                // about the new workspaces until this repository's next
+                // about the new worktrees until this repository's next
                 // RECONCILE_BACKSTOP_MS pass (5 min).
                 self.watcher.announce_fleet_changed();
                 Ok(result::Value::Repository(wire::repository(&repo, scope)))
@@ -1109,7 +1109,7 @@ impl Rpc {
                 Ok(result::Value::BranchList(farcooler_protocol::v1::BranchList { items }))
             }
 
-            "worktree.list" => {
+            "worktree.discover" => {
                 let repository = Self::target(&req)?;
                 let items = svc
                     .discover_worktrees(repository)
@@ -1120,7 +1120,7 @@ impl Rpc {
                             .file_name()
                             .map(|n| n.to_string_lossy().to_string())
                             .unwrap_or_else(|| w.head.clone());
-                        farcooler_protocol::v1::ExistingWorktree {
+                        farcooler_protocol::v1::DiscoveredWorktree {
                             path: w.path.clone(),
                             branch: w.branch,
                             head: w.head,
@@ -1129,18 +1129,20 @@ impl Rpc {
                         }
                     })
                     .collect();
-                Ok(result::Value::WorktreeList(farcooler_protocol::v1::WorktreeList { items }))
+                Ok(result::Value::DiscoveredWorktreeList(farcooler_protocol::v1::DiscoveredWorktreeList {
+                    items,
+                }))
             }
 
-            "workspace.create" => {
+            "worktree.create" => {
                 let repository = Self::target(&req)?;
-                let Some(request::Payload::WorkspaceCreate(p)) = req.payload else {
+                let Some(request::Payload::WorktreeCreate(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 // `task_name` keeps its name on the wire and changes meaning:
                 // it is the worktree's name now, not a description of the work.
                 // Renaming the field would have made every shipped client fail
-                // to create a workspace against a new daemon, to say the same
+                // to create a worktree against a new daemon, to say the same
                 // thing in different words.
                 //
                 // Adoption ignores it outright. A worktree taken over for a
@@ -1149,7 +1151,7 @@ impl Rpc {
                 let ws = if p.adopt_existing {
                     svc.adopt_branch(repository, &p.branch).await?
                 } else {
-                    svc.create_workspace_with(
+                    svc.create_worktree_with(
                         repository,
                         &p.task_name,
                         &p.branch,
@@ -1168,7 +1170,7 @@ impl Rpc {
                 //
                 // A terminal that fails to start is LOGGED, not fatal. The
                 // worktree exists and is useful, and failing the call would
-                // report an error for a workspace that was in fact created —
+                // report an error for a worktree that was in fact created —
                 // which sends someone looking for a worktree that is already
                 // there. The view returned below shows no terminals, so the
                 // failure is visible without being reported as the wrong one.
@@ -1180,54 +1182,54 @@ impl Rpc {
                 if !preset.is_empty() {
                     if let Err(e) = svc.create_terminal(ws.id, preset, preset).await {
                         tracing::warn!(
-                            workspace = %ws.id,
+                            worktree_id = %ws.id,
                             preset = %preset,
                             error = ?e,
                             "the worktree was created but its terminal was not"
                         );
                     }
                 }
-                // The mutation writes the workspace row itself, so the
+                // The mutation writes the worktree row itself, so the
                 // reconcile pass that follows finds nothing to adopt — the
                 // fleet already matches git by the time it runs, which makes
                 // `Outcome::is_quiet()` true and skips its own broadcast.
-                // Hoisted above `workspace_view` so a transient store error
+                // Hoisted above `worktree_view` so a transient store error
                 // there does not cost the announce too: nothing else would
                 // ever raise it.
                 self.watcher.announce_fleet_changed();
-                let view = svc.workspace_view(&ws).await?;
-                Ok(result::Value::Workspace(wire::workspace(&view, scope)))
+                let view = svc.worktree_view(&ws).await?;
+                Ok(result::Value::Worktree(wire::worktree(&view, scope)))
             }
 
-            "workspace.hide" => {
-                let ws = svc.hide_workspace(Self::target(&req)?).await?;
-                // Hoisted above `workspace_view`: hiding changes the fleet
+            "worktree.hide" => {
+                let ws = svc.hide_worktree(Self::target(&req)?).await?;
+                // Hoisted above `worktree_view`: hiding changes the fleet
                 // without touching git, so the reconciler's mtime gate never
-                // sees it, and a transient store error from `workspace_view`
+                // sees it, and a transient store error from `worktree_view`
                 // must not cost the announce too — nothing else will ever
                 // raise it.
                 self.watcher.announce_fleet_changed();
-                let view = svc.workspace_view(&ws).await?;
-                Ok(result::Value::Workspace(wire::workspace(&view, scope)))
+                let view = svc.worktree_view(&ws).await?;
+                Ok(result::Value::Worktree(wire::worktree(&view, scope)))
             }
 
-            "workspace.reorder" => {
-                let Some(request::Payload::WorkspaceReorder(p)) = req.payload else {
+            "worktree.reorder" => {
+                let Some(request::Payload::WorktreeReorder(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                let mut ids = Vec::with_capacity(p.workspace_ids.len());
-                for raw in &p.workspace_ids {
+                let mut ids = Vec::with_capacity(p.worktree_ids.len());
+                for raw in &p.worktree_ids {
                     // A client that sent something that is not a uuid is
                     // refused whole. Skipping the bad one would silently
                     // reorder around it and hand back a layout nobody asked
                     // for, which is worse than an error a client can retry.
                     ids.push(wire::parse_id(raw).ok_or(DomainError::InvalidArgument {
-                        what: "workspace_ids",
+                        what: "worktree_ids",
                     })?);
                 }
-                svc.reorder_workspaces(&ids).await?;
+                svc.reorder_worktrees(&ids).await?;
                 // Reordering never touches git, so the reconciler's mtime gate
-                // never sees it — the same reasoning `workspace.hide` gives.
+                // never sees it — the same reasoning `worktree.hide` gives.
                 // Without this announce, every OTHER connected client keeps
                 // drawing the old order until the next backstop pass, which is
                 // five minutes of a phone and a Mac disagreeing about where a
@@ -1236,15 +1238,15 @@ impl Rpc {
                 Ok(result::Value::Empty(farcooler_protocol::v1::Empty {}))
             }
 
-            "workspace.unhide" => {
-                let ws = svc.unhide_workspace(Self::target(&req)?).await?;
-                // Same reasoning as `workspace.hide`: unhiding never touches
+            "worktree.unhide" => {
+                let ws = svc.unhide_worktree(Self::target(&req)?).await?;
+                // Same reasoning as `worktree.hide`: unhiding never touches
                 // git either, so this is the only signal other clients get
                 // before the next backstop tick, and it must not depend on
-                // `workspace_view` succeeding.
+                // `worktree_view` succeeding.
                 self.watcher.announce_fleet_changed();
-                let view = svc.workspace_view(&ws).await?;
-                Ok(result::Value::Workspace(wire::workspace(&view, scope)))
+                let view = svc.worktree_view(&ws).await?;
+                Ok(result::Value::Worktree(wire::worktree(&view, scope)))
             }
 
             "repository_root.remove" => {
@@ -1271,10 +1273,10 @@ impl Rpc {
                 Ok(result::Value::RepositoryRoot(wire::repository_root(&removed, 0, scope)))
             }
 
-            "workspace.remove_worktree" => {
+            "worktree.remove" => {
                 let id = Self::target(&req)?;
                 let ws = svc
-                    .list_workspaces()?
+                    .list_worktrees()?
                     .into_iter()
                     .find(|w| w.id == id)
                     .ok_or(DomainError::NotFound)?;
@@ -1291,26 +1293,26 @@ impl Rpc {
                     }
                 }
                 svc.remove_worktree(id).await?;
-                // Same reasoning as `workspace.create`: this mutation writes
-                // the workspace row itself, so the reconcile pass that
+                // Same reasoning as `worktree.create`: this mutation writes
+                // the worktree row itself, so the reconcile pass that
                 // follows finds nothing gone and stays quiet. Without this,
                 // other connected clients would not learn the worktree is
                 // gone until this repository's next RECONCILE_BACKSTOP_MS
                 // pass (5 min), if ever.
                 self.watcher.announce_fleet_changed();
-                let view = svc.workspace_view(&ws).await?;
-                Ok(result::Value::Workspace(wire::workspace(&view, scope)))
+                let view = svc.worktree_view(&ws).await?;
+                Ok(result::Value::Worktree(wire::worktree(&view, scope)))
             }
 
             "terminal.create" => {
-                let workspace = Self::target(&req)?;
+                let worktree = Self::target(&req)?;
                 let Some(request::Payload::TerminalCreate(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 // Before anything is made, so a key that isn't on this
-                // workspace's board opens no pane and writes no record.
+                // worktree's board opens no pane and writes no record.
                 let task = match p.task_key.as_deref().map(str::trim).filter(|k| !k.is_empty()) {
-                    Some(key) => Some(svc.task_on_workspace_board(workspace, key)?),
+                    Some(key) => Some(svc.task_on_worktree_board(worktree, key)?),
                     None => None,
                 };
                 // Joining the active layout is a SPLIT of the focused pane,
@@ -1326,7 +1328,7 @@ impl Rpc {
                 // A no-op when there is no layout to join, which is what makes
                 // it safe to pass unconditionally from a `%` binding.
                 if p.join_active_group {
-                    let anchor = svc.layout(workspace).await.ok().and_then(|views| {
+                    let anchor = svc.layout(worktree).await.ok().and_then(|views| {
                         let view = views.iter().find(|v| v.window.active).or(views.first())?;
                         let pane =
                             view.panes.iter().find(|pane| pane.pane_active).or(view.panes.first())?;
@@ -1335,7 +1337,7 @@ impl Rpc {
                     if let Some(anchor) = anchor {
                         let term = svc
                             .split_terminal_with_prompt(
-                                workspace,
+                                worktree,
                                 anchor,
                                 farcooler_protocol::v1::SplitSide::Right,
                                 &p.title,
@@ -1349,7 +1351,7 @@ impl Rpc {
                 }
                 let term = svc
                     .create_terminal_with_prompt(
-                        workspace,
+                        worktree,
                         &p.title,
                         &p.command_preset,
                         p.prompt.as_deref(),
@@ -1357,7 +1359,7 @@ impl Rpc {
                     )
                     .await?;
                 // A new terminal is a new tmux window, which IS a new layout —
-                // so the workspace's set of layouts just changed and every
+                // so the worktree's set of layouts just changed and every
                 // watcher has to be told.
                 //
                 // Clients read layouts once at startup and rely on events for
@@ -1365,8 +1367,8 @@ impl Rpc {
                 // appear. It shows up minutes later when some unrelated action
                 // happens to refresh, which reads as the pane arriving nowhere
                 // and then teleporting into a tab.
-                if let Ok(groups) = svc.layout(workspace).await {
-                    self.watcher.publish_layout(workspace, &groups);
+                if let Ok(groups) = svc.layout(worktree).await {
+                    self.watcher.publish_layout(worktree, &groups);
                 }
                 self.terminal_result(term.id).await
             }
@@ -1640,7 +1642,7 @@ impl Rpc {
             "terminal.remove" => {
                 let id = Self::target(&req)?;
                 svc.remove_terminal(id).await?;
-                // No terminal to return: it is gone. An empty workspace list is
+                // No terminal to return: it is gone. An empty worktree list is
                 // the honest shape for "this succeeded and there is nothing to
                 // show", rather than echoing back a record that no longer
                 // exists.
@@ -1690,7 +1692,7 @@ impl Rpc {
                     _ => return Err(DomainError::InvalidArgument { what: "pane_mode" }),
                 };
                 svc.set_pane_mode(id, mode, p.force).await?;
-                // Same reasoning as `workspace.hide`: this changes a pane
+                // Same reasoning as `worktree.hide`: this changes a pane
                 // WITHOUT changing anything the watcher observes. Activity,
                 // current command, and liveness all stay exactly as they were,
                 // so the runtime poll has nothing to notice and never
@@ -2006,7 +2008,7 @@ impl Rpc {
                 let Some(request::Payload::WorktreeFileSearch(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                let id = wire::parse_id(&p.workspace_id).ok_or(DomainError::NotFound)?;
+                let id = wire::parse_id(&p.worktree_id).ok_or(DomainError::NotFound)?;
                 let paths = svc.search_worktree_files(id, &p.query, p.limit).await?;
                 Ok(result::Value::WorktreeFileList(farcooler_protocol::v1::WorktreeFileList {
                     paths,
@@ -2015,19 +2017,19 @@ impl Rpc {
 
             // ---- tiling ----
             //
-            // The workspace is always the envelope target and the group is
+            // The worktree is always the envelope target and the group is
             // always in the payload, so every one of these reads the same two
             // things and differs only in what it does with them.
             "layout.list" => {
-                let workspace = Self::target(&req)?;
+                let worktree = Self::target(&req)?;
                 Ok(result::Value::PaneGroupList(wire::pane_group_list(
-                    workspace,
-                    &svc.layout(workspace).await?,
+                    worktree,
+                    &svc.layout(worktree).await?,
                 )))
             }
 
             method if method.starts_with("layout.") => {
-                let workspace = Self::target(&req)?;
+                let worktree = Self::target(&req)?;
                 let p = match req.payload {
                     Some(request::Payload::LayoutUpdate(p)) => p,
                     // Legal for the verbs that need no arguments.
@@ -2053,13 +2055,13 @@ impl Rpc {
                         let anchor = match target {
                             Some(id) => id,
                             None => svc
-                                .active_layout(workspace)
+                                .active_layout(worktree)
                                 .await?
                                 .and_then(|l| l.focused().map(|f| f.terminal_id))
                                 .ok_or(DomainError::NotFound)?,
                         };
                         let title = if p.name.is_empty() { preset } else { p.name.as_str() };
-                        svc.split_terminal(workspace, anchor, side, title, preset).await?;
+                        svc.split_terminal(worktree, anchor, side, title, preset).await?;
                         // A split is the one layout verb that CREATES a
                         // terminal, so it is the one that changes the fleet.
                         //
@@ -2074,7 +2076,7 @@ impl Rpc {
                         // own arrival; this is the same announcement for the
                         // other way a terminal can be born.
                         self.watcher.announce_fleet_changed();
-                        svc.layout(workspace).await?
+                        svc.layout(worktree).await?
                     }
                     // An existing pane moved against another, on an edge. The
                     // drag half of drag and drop, and it works across layouts.
@@ -2083,61 +2085,61 @@ impl Rpc {
                             return Err(DomainError::InvalidArgument { what: "one terminal" });
                         };
                         let onto = target.ok_or(DomainError::InvalidArgument { what: "target" })?;
-                        svc.layout_move(workspace, *dragged, onto, side).await?
+                        svc.layout_move(worktree, *dragged, onto, side).await?
                     }
                     "layout.preset" => {
                         let preset = p
                             .preset
                             .and_then(|raw| farcooler_protocol::v1::LayoutPreset::try_from(raw).ok())
                             .unwrap_or(farcooler_protocol::v1::LayoutPreset::Tiled);
-                        svc.layout_preset(workspace, group, preset).await?
+                        svc.layout_preset(worktree, group, preset).await?
                     }
-                    "layout.cycle" => svc.layout_cycle(workspace, group).await?,
+                    "layout.cycle" => svc.layout_cycle(worktree, group).await?,
                     "layout.focus" => match (p.focus.as_deref().and_then(wire::parse_id), p.pane) {
-                        (Some(terminal), _) => svc.layout_focus(workspace, terminal).await?,
+                        (Some(terminal), _) => svc.layout_focus(worktree, terminal).await?,
                         (None, Some(index)) => {
-                            svc.layout_focus_index(workspace, group, index as usize).await?
+                            svc.layout_focus_index(worktree, group, index as usize).await?
                         }
-                        (None, None) => svc.layout_focus_step(workspace, group, step).await?,
+                        (None, None) => svc.layout_focus_step(worktree, group, step).await?,
                     },
                     "layout.zoom" => {
                         let terminal = p.zoom.as_deref().and_then(wire::parse_id);
-                        svc.layout_zoom(workspace, group, terminal, p.unzoom).await?
+                        svc.layout_zoom(worktree, group, terminal, p.unzoom).await?
                     }
                     "layout.swap" => {
                         let [a, b] = terminals.as_slice() else {
                             return Err(DomainError::InvalidArgument { what: "two terminals" });
                         };
-                        svc.layout_swap(workspace, *a, *b).await?
+                        svc.layout_swap(worktree, *a, *b).await?
                     }
                     "layout.resize" => {
                         let terminal = target.ok_or(DomainError::InvalidArgument {
                             what: "target",
                         })?;
-                        svc.layout_resize(workspace, terminal, side, p.resize.unwrap_or(2)).await?
+                        svc.layout_resize(worktree, terminal, side, p.resize.unwrap_or(2)).await?
                     }
                     // Out into a layout of its own, tmux's break-pane.
                     "layout.break" => {
                         let terminal = match target.or(terminals.first().copied()) {
                             Some(id) => id,
                             None => svc
-                                .active_layout(workspace)
+                                .active_layout(worktree)
                                 .await?
                                 .and_then(|l| l.focused().map(|f| f.terminal_id))
                                 .ok_or(DomainError::NotFound)?,
                         };
-                        svc.layout_break(workspace, terminal).await?
+                        svc.layout_break(worktree, terminal).await?
                     }
-                    "layout.rename" => svc.layout_rename(workspace, group, &p.name).await?,
+                    "layout.rename" => svc.layout_rename(worktree, group, &p.name).await?,
                     "layout.group.select" => match group {
-                        Some(id) => svc.layout_group_select(workspace, id).await?,
-                        None => svc.layout_group_step(workspace, step).await?,
+                        Some(id) => svc.layout_group_select(worktree, id).await?,
+                        None => svc.layout_group_step(worktree, step).await?,
                     },
                     // The viewport, so tmux lays out for the size actually on
                     // screen rather than for whatever the window last had.
                     "layout.viewport" => {
                         svc.layout_resize_window(
-                            workspace,
+                            worktree,
                             group,
                             p.columns.unwrap_or(0),
                             p.rows.unwrap_or(0),
@@ -2150,8 +2152,8 @@ impl Rpc {
                     }
                 };
 
-                self.watcher.publish_layout(workspace, &groups);
-                Ok(result::Value::PaneGroupList(wire::pane_group_list(workspace, &groups)))
+                self.watcher.publish_layout(worktree, &groups);
+                Ok(result::Value::PaneGroupList(wire::pane_group_list(worktree, &groups)))
             }
 
             // `required_scope` already rejected anything not listed there, so
@@ -2268,21 +2270,21 @@ mod tests {
             "daemon.version",
             "repository_root.list",
             "repository.list",
-            "workspace.list",
+            "worktree.list",
             "terminal.list",
             "branch.list",
-            "worktree.list",
+            "worktree.discover",
             "repository_root.add",
             "repository.register",
-            "workspace.create",
-            "workspace.hide",
-            "workspace.unhide",
-            "workspace.reorder",
+            "worktree.create",
+            "worktree.hide",
+            "worktree.unhide",
+            "worktree.reorder",
             "terminal.seen",
             "terminal.watching",
             "terminal.remove",
             "repository_root.remove",
-            "workspace.remove_worktree",
+            "worktree.remove",
             "terminal.create",
             "terminal.resize",
             "terminal.stop",
@@ -2336,7 +2338,7 @@ mod tests {
         // Adding a repository root grants access to a directory tree, and
         // removing a worktree deletes files. Neither is a `control` action.
         assert_eq!(required_scope("repository_root.add"), Some(Scope::HostAdmin));
-        assert_eq!(required_scope("workspace.remove_worktree"), Some(Scope::HostAdmin));
+        assert_eq!(required_scope("worktree.remove"), Some(Scope::HostAdmin));
         assert_eq!(required_scope("repository_root.remove"), Some(Scope::HostAdmin));
         // Paths live behind the same gate, so listing roots is admin too.
         assert_eq!(required_scope("repository_root.list"), Some(Scope::HostAdmin));
@@ -2486,7 +2488,7 @@ mod tests {
 
     #[test]
     fn reads_never_require_more_than_read() {
-        for method in ["host.get", "daemon.version", "workspace.list", "terminal.list"] {
+        for method in ["host.get", "daemon.version", "worktree.list", "terminal.list"] {
             assert_eq!(required_scope(method), Some(Scope::Read), "{method}");
         }
     }
@@ -2534,10 +2536,10 @@ mod terminal_task_tests {
     use super::*;
     use crate::service::test_agent;
 
-    async fn a_handler() -> (crate::test_support::ScratchDir, Arc<Service>, RpcFactory, models::Workspace) {
+    async fn a_handler() -> (crate::test_support::ScratchDir, Arc<Service>, RpcFactory, models::Worktree) {
         let (dir, svc, repo) = crate::test_support::fixture().await;
         crate::reconcile::repository(&svc, repo).await.unwrap();
-        let ws = svc.store.list_workspaces_for_repository(repo).unwrap().into_iter().next().expect("the main checkout");
+        let ws = svc.store.list_worktrees_for_repository(repo).unwrap().into_iter().next().expect("the main checkout");
         let factory = RpcFactory::new(
             svc.clone(),
             crate::watch::Watcher::new(svc.clone()),

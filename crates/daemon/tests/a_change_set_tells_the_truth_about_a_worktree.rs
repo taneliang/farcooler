@@ -580,7 +580,7 @@ async fn shortstat_does_not_count_the_lines_of_a_new_binary_file() {
 
 #[tokio::test]
 async fn shortstat_works_in_a_linked_worktree_which_is_the_only_kind_this_product_makes() {
-    // Every workspace is a `git worktree add`, never the main checkout, so the
+    // Every worktree is a `git worktree add`, never the main checkout, so the
     // main-worktree case above is the one that never happens in production.
     let dir = repo();
     let p = dir.path();

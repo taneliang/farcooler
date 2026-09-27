@@ -1,15 +1,15 @@
-//! What a workspace is called.
+//! What a worktree is called.
 //!
-//! A workspace has exactly one name and does not store it: the worktree's
+//! A worktree has exactly one name and does not store it: the worktree's
 //! directory is the name, and this module reads it back as prose. The directory
 //! is the only thing about a worktree stable enough to name it. A branch is
 //! not — one worktree hosts a stack of commits over its life, and the branch
 //! checked out inside it changes as that stack is built and rebased, so naming
-//! a workspace after its branch means renaming it every time the work moves
+//! a worktree after its branch means renaming it every time the work moves
 //! forward. Two main checkouts would both be called `main`, as well.
 //!
 //! `slug` and `display` are inverses, which is the property worth protecting:
-//! whatever a person types in the New workspace sheet has to survive the round
+//! whatever a person types in the New Worktree sheet has to survive the round
 //! trip through the filesystem and come back looking like what they typed.
 
 use std::path::Path;
@@ -38,12 +38,12 @@ pub fn slug(s: &str) -> String {
     out.trim_matches('-').to_string()
 }
 
-/// What to call the workspace living at this worktree path.
+/// What to call the worktree living at this path.
 ///
 /// The directory's own name, with the separators a filesystem forces on it read
 /// back as spaces. `…/worktrees/overnight/rate-limiting` is "rate limiting".
 ///
-/// One rule covers every workspace. A main checkout sits in the repository's own
+/// One rule covers every worktree. A main checkout sits in the repository's own
 /// directory, so `~/Dev/overnight` is "overnight" — which is what the reconciler
 /// already called it, but now without an `is_main_checkout` branch to pick that
 /// rule over another one. A detached worktree needs no case of its own either:
@@ -57,7 +57,7 @@ pub fn slug(s: &str) -> String {
 pub fn display(worktree_path: &str) -> String {
     // `file_name` is `None` only for a path with no final component, which no
     // worktree can have. A row showing its whole path is recoverable; a row
-    // showing an empty string is a workspace the user cannot name or find.
+    // showing an empty string is a worktree the user cannot name or find.
     Path::new(worktree_path)
         .file_name()
         .map(|n| n.to_string_lossy().replace(['-', '_'], " "))

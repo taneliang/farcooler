@@ -97,7 +97,7 @@ const CURSOR_EVENTS: &[(&str, bool)] = &[
 /// them, `git::is_dirty`, and `change_set::working_tree`. Far Cooler wrote
 /// these files, so Far Cooler must not then report them to the user as work —
 /// a fresh worktree that opens with two files in its diff view, and a
-/// just-created workspace that demands a typed confirmation to remove, are the
+/// just-created worktree that demands a typed confirmation to remove, are the
 /// same bug read through two different signals. A second hand-kept copy of
 /// these two strings is what would let the installer and the filters drift.
 pub const CODEX_HOOKS: &str = ".codex/hooks.json";

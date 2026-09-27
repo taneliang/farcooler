@@ -23,7 +23,7 @@ use farcooler_agent_core::fs_guard::confine;
 pub enum SessionError {
     #[error(transparent)]
     Acp(#[from] AcpError),
-    #[error("refused: the path is outside the workspace worktree")]
+    #[error("refused: the path is outside the worktree")]
     Refused,
     #[error("the agent did not accept the session")]
     Rejected,

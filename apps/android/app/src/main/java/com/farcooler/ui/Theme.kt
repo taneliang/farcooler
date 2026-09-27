@@ -232,7 +232,7 @@ fun ProcessDot(kind: StateKind, modifier: Modifier = Modifier) {
  * have everywhere in this app.
  *
  * One copy, not one per surface. The front door's review row wrote this out and
- * the workspace's Changes chip was about to write it out again, which is the
+ * the worktree's Changes chip was about to write it out again, which is the
  * shape `df87410` already had to pull the landing ordering back from: three
  * copies of one rule is three chances for a phone to disagree with itself.
  *

@@ -49,7 +49,7 @@ public struct GlanceType: Sendable, Equatable {
     /// 15 / 600, −0.014em. Card header, column row titles.
     public static let cardHeader = GlanceType(15, .semibold, em: -0.014)
 
-    /// 13 / 600, −0.010em. Workspace names in rows.
+    /// 13 / 600, −0.010em. Worktree names in rows.
     public static let rowName = GlanceType(13, .semibold, em: -0.010)
 
     /// 12.5 / 400, no tracking. Terminal output in the app. Mono, because it is

@@ -18,8 +18,8 @@ use uuid::Uuid;
 use crate::error::map_err;
 use crate::migrate;
 use crate::models::{
-    IdempotencyRecord, PaneMode, Repository, RepositoryRoot, Terminal, TerminalUpdate, Workspace,
-    get_uuid, row_to_repository, row_to_repository_root, row_to_terminal, row_to_workspace,
+    IdempotencyRecord, PaneMode, Repository, RepositoryRoot, Terminal, TerminalUpdate, Worktree,
+    get_uuid, row_to_repository, row_to_repository_root, row_to_terminal, row_to_worktree,
     uuid_blob,
 };
 
@@ -273,47 +273,47 @@ impl Store {
         )
     }
 
-    // ---- workspaces ----
+    // ---- worktrees ----
 
-    /// Every column of `workspaces`, in the order `row_to_workspace` reads them.
+    /// Every column of `worktrees`, in the order `row_to_worktree` reads them.
     /// Named once because three queries share it and a drifting column order is
     /// a silent field swap rather than a compile error.
-    const WORKSPACE_COLUMNS: &'static str = "id, repository_id, branch, \
+    const WORKTREE_COLUMNS: &'static str = "id, repository_id, branch, \
          worktree_path, hidden, creation_failed, resource_version, is_main_checkout, \
          worktree_missing, ordinal";
 
-    /// How every listing of workspaces is ordered, in one place.
+    /// How every listing of worktrees is ordered, in one place.
     ///
     /// `ordinal` is the user's rank and `worktree_path` is only a tie-break, so
     /// that even a database whose ordinals somehow collided still comes back in
     /// the same order twice running. Nothing here reads activity, attention or
     /// recency, and nothing here ever may: a card that moves on its own is a
     /// card you cannot reach for without looking.
-    const WORKSPACE_ORDER: &'static str = "ORDER BY ordinal, worktree_path";
+    const WORKTREE_ORDER: &'static str = "ORDER BY ordinal, worktree_path";
 
-    pub fn create_workspace(
+    pub fn create_worktree(
         &self,
         repository_id: Uuid,
         branch: &str,
         worktree_path: &str,
         is_main_checkout: bool,
-    ) -> Result<Workspace> {
+    ) -> Result<Worktree> {
         let id = Uuid::now_v7();
         self.conn()
             .execute(
-                // A new workspace goes at the END, which is one more than the
+                // A new worktree goes at the END, which is one more than the
                 // highest rank anything currently holds. `MAX` over an empty
                 // table is NULL, so the first row on a runner lands at 0.
                 //
                 // Computed in the INSERT rather than read first and written
                 // second: two creates racing through a read-then-write would
                 // both see the same maximum and land on the same rank.
-                "INSERT INTO workspaces
+                "INSERT INTO worktrees
                  (id, repository_id, branch, worktree_path, hidden,
                   creation_failed, resource_version, is_main_checkout, worktree_missing,
                   ordinal)
                  VALUES (?1, ?2, ?3, ?4, 0, 0, 1, ?5, 0,
-                         (SELECT COALESCE(MAX(ordinal), -1) + 1 FROM workspaces))",
+                         (SELECT COALESCE(MAX(ordinal), -1) + 1 FROM worktrees))",
                 params![
                     uuid_blob(id),
                     uuid_blob(repository_id),
@@ -327,25 +327,25 @@ impl Store {
         // INSERT's own subquery, so this is the only place that knows it, and
         // a caller handed a struct claiming ordinal 0 would draw the new card
         // at the top for as long as it held that copy.
-        self.get_workspace(id)
+        self.get_worktree(id)
     }
 
-    pub fn get_workspace(&self, id: Uuid) -> Result<Workspace> {
+    pub fn get_worktree(&self, id: Uuid) -> Result<Worktree> {
         self.conn()
             .query_row(
-                &format!("SELECT {} FROM workspaces WHERE id = ?1", Self::WORKSPACE_COLUMNS),
+                &format!("SELECT {} FROM worktrees WHERE id = ?1", Self::WORKTREE_COLUMNS),
                 params![uuid_blob(id)],
-                row_to_workspace,
+                row_to_worktree,
             )
             .map_err(map_err)
     }
 
-    /// Every visible workspace on this runner, across repositories.
+    /// Every visible worktree on this runner, across repositories.
     ///
     /// For the fleet's own questions, which are not scoped to a project the way
     /// the sidebar's are. Hidden worktrees are left out: the user said not to
     /// see them, and that applies to a summary as much as to a list.
-    pub fn list_all_workspaces(&self) -> Result<Vec<Workspace>> {
+    pub fn list_all_worktrees(&self) -> Result<Vec<Worktree>> {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(&format!(
@@ -353,30 +353,30 @@ impl Store {
                 // stable but was not anybody's decision; `ordinal` starts out
                 // as exactly that path order (see migration 0009) and then only
                 // ever moves because somebody dragged a card.
-                "SELECT {} FROM workspaces WHERE hidden = 0 {}",
-                Self::WORKSPACE_COLUMNS,
-                Self::WORKSPACE_ORDER
+                "SELECT {} FROM worktrees WHERE hidden = 0 {}",
+                Self::WORKTREE_COLUMNS,
+                Self::WORKTREE_ORDER
             ))
             .map_err(map_err)?;
-        let rows = stmt.query_map([], row_to_workspace).map_err(map_err)?;
+        let rows = stmt.query_map([], row_to_worktree).map_err(map_err)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
     }
 
-    pub fn list_workspaces_for_repository(&self, repository_id: Uuid) -> Result<Vec<Workspace>> {
+    pub fn list_worktrees_for_repository(&self, repository_id: Uuid) -> Result<Vec<Worktree>> {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(&format!(
-                "SELECT {} FROM workspaces WHERE repository_id = ?1 {}",
-                Self::WORKSPACE_COLUMNS,
-                Self::WORKSPACE_ORDER
+                "SELECT {} FROM worktrees WHERE repository_id = ?1 {}",
+                Self::WORKTREE_COLUMNS,
+                Self::WORKTREE_ORDER
             ))
             .map_err(map_err)?;
         let rows =
-            stmt.query_map(params![uuid_blob(repository_id)], row_to_workspace).map_err(map_err)?;
+            stmt.query_map(params![uuid_blob(repository_id)], row_to_worktree).map_err(map_err)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
     }
 
-    /// Every workspace whose repository is still registered, in fleet order.
+    /// Every worktree whose repository is still registered, in fleet order.
     ///
     /// One query rather than a loop over repositories, because a loop is not an
     /// order: `list_repositories` has no `ORDER BY` of its own, so concatenating
@@ -385,31 +385,31 @@ impl Store {
     /// across the whole runner precisely so that this can be one statement.
     ///
     /// `EXISTS` rather than a join so the column list stays unqualified —
-    /// `workspaces` and `repositories` share `id`, `host_id` and
-    /// `resource_version`, and a join would make `WORKSPACE_COLUMNS` ambiguous.
-    pub fn list_workspaces_in_order(&self) -> Result<Vec<Workspace>> {
+    /// `worktrees` and `repositories` share `id`, `host_id` and
+    /// `resource_version`, and a join would make `WORKTREE_COLUMNS` ambiguous.
+    pub fn list_worktrees_in_order(&self) -> Result<Vec<Worktree>> {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(&format!(
-                "SELECT {} FROM workspaces
+                "SELECT {} FROM worktrees
                  WHERE EXISTS (
-                     SELECT 1 FROM repositories WHERE repositories.id = workspaces.repository_id
+                     SELECT 1 FROM repositories WHERE repositories.id = worktrees.repository_id
                  ) {}",
-                Self::WORKSPACE_COLUMNS,
-                Self::WORKSPACE_ORDER
+                Self::WORKTREE_COLUMNS,
+                Self::WORKTREE_ORDER
             ))
             .map_err(map_err)?;
-        let rows = stmt.query_map([], row_to_workspace).map_err(map_err)?;
+        let rows = stmt.query_map([], row_to_worktree).map_err(map_err)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
     }
 
-    /// Put these workspaces in this order.
+    /// Put these worktrees in this order.
     ///
     /// A permutation of the positions the named rows ALREADY hold, not a
     /// renumbering of the list from zero. The caller is a client that dragged a
     /// card, and what it can see is rarely the whole table: hidden worktrees are
     /// filtered out of every sidebar, a grouped view sends one repository's
-    /// cards, and a workspace created a second ago is in neither. Renumbering
+    /// cards, and a worktree created a second ago is in neither. Renumbering
     /// from zero would move every row the client could not see — silently, and
     /// to the end.
     ///
@@ -421,13 +421,13 @@ impl Store {
     /// Every id must exist, and no id may appear twice — both are a client
     /// sending nonsense rather than a race, and answering them with a partial
     /// reorder would leave a layout nobody chose.
-    pub fn reorder_workspaces(&self, ordered: &[Uuid]) -> Result<()> {
+    pub fn reorder_worktrees(&self, ordered: &[Uuid]) -> Result<()> {
         if ordered.is_empty() {
             return Ok(());
         }
         let unique: std::collections::BTreeSet<_> = ordered.iter().collect();
         if unique.len() != ordered.len() {
-            return Err(DomainError::InvalidArgument { what: "workspace_ids" });
+            return Err(DomainError::InvalidArgument { what: "worktree_ids" });
         }
 
         let mut conn = self.conn();
@@ -438,7 +438,7 @@ impl Store {
         for id in ordered {
             let row: Option<(i64, String, i64)> = tx
                 .query_row(
-                    "SELECT ordinal, worktree_path, resource_version FROM workspaces WHERE id = ?1",
+                    "SELECT ordinal, worktree_path, resource_version FROM worktrees WHERE id = ?1",
                     params![uuid_blob(*id)],
                     |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                 )
@@ -448,7 +448,7 @@ impl Store {
         }
 
         // The slots, in the order a listing would draw them — by rank, then by
-        // path, which is `WORKSPACE_ORDER`. Sorting the ranks alone would be
+        // path, which is `WORKTREE_ORDER`. Sorting the ranks alone would be
         // enough while they are distinct; taking the tie-break from the same
         // place the query does is what keeps this true if they ever are not.
         let mut slots: Vec<(i64, &str)> =
@@ -465,7 +465,7 @@ impl Store {
             // mutation here bumps it — a client holding a stale copy of the row
             // is holding a stale POSITION, which is the whole point of the call.
             tx.execute(
-                "UPDATE workspaces SET ordinal = ?1, resource_version = ?2 WHERE id = ?3",
+                "UPDATE worktrees SET ordinal = ?1, resource_version = ?2 WHERE id = ?3",
                 params![now, version + 1, uuid_blob(*id)],
             )
             .map_err(map_err)?;
@@ -475,7 +475,7 @@ impl Store {
         Ok(())
     }
 
-    pub fn update_workspace(
+    pub fn update_worktree(
         &self,
         id: Uuid,
         expected_version: u64,
@@ -483,9 +483,9 @@ impl Store {
         worktree_path: &str,
         hidden: bool,
         creation_failed: bool,
-    ) -> Result<Workspace> {
+    ) -> Result<Worktree> {
         self.run_versioned(
-            "UPDATE workspaces
+            "UPDATE worktrees
              SET branch = ?1, worktree_path = ?2, hidden = ?3, creation_failed = ?4, resource_version = ?5
              WHERE id = ?6 AND resource_version = ?7",
             &[
@@ -497,27 +497,27 @@ impl Store {
                 &uuid_blob(id),
                 &(expected_version as i64),
             ],
-            "SELECT 1 FROM workspaces WHERE id = ?1",
+            "SELECT 1 FROM worktrees WHERE id = ?1",
             &[&uuid_blob(id)],
         )?;
-        self.get_workspace(id)
+        self.get_worktree(id)
     }
 
     /// The two flags that are opinions rather than facts about the work.
     ///
-    /// Separate from `update_workspace` because both callers — hide/unhide and
+    /// Separate from `update_worktree` because both callers — hide/unhide and
     /// the reconciler — want to change exactly one thing, and passing the other
     /// five fields back unchanged is how a rename gets silently reverted by a
     /// concurrent write.
-    pub fn set_workspace_flags(
+    pub fn set_worktree_flags(
         &self,
         id: Uuid,
         expected_version: u64,
         hidden: bool,
         worktree_missing: bool,
-    ) -> Result<Workspace> {
+    ) -> Result<Worktree> {
         self.run_versioned(
-            "UPDATE workspaces
+            "UPDATE worktrees
              SET hidden = ?1, worktree_missing = ?2, resource_version = ?3
              WHERE id = ?4 AND resource_version = ?5",
             &[
@@ -527,16 +527,16 @@ impl Store {
                 &uuid_blob(id),
                 &(expected_version as i64),
             ],
-            "SELECT 1 FROM workspaces WHERE id = ?1",
+            "SELECT 1 FROM worktrees WHERE id = ?1",
             &[&uuid_blob(id)],
         )?;
-        self.get_workspace(id)
+        self.get_worktree(id)
     }
 
     /// The columns git owns, rewritten when the reconciler finds the row
     /// disagrees with `git worktree list`.
     ///
-    /// A workspace row is a cache of a worktree, and these three are the part
+    /// A worktree row is a cache of what git knows, and these three are the part
     /// of it git decides: what the worktree is called, what branch is checked
     /// out there, and whether it is the repository's own checkout rather than
     /// a linked one. Nothing else revisits them once the row exists, so
@@ -549,21 +549,21 @@ impl Store {
     /// taken from a single `git worktree list` record: splitting them would mean
     /// two versioned updates, the second racing the version the first just
     /// bumped. `hidden` and `creation_failed` are deliberately absent for the
-    /// reason `set_workspace_flags` exists at all — those are the user's
+    /// reason `set_worktree_flags` exists at all — those are the user's
     /// opinions, not git's facts, and passing them back unchanged is how a
     /// concurrent hide gets silently reverted.
     ///
     /// The name used to be healed here too. It no longer exists to heal: a
-    /// workspace is named by its worktree directory, read fresh on every access.
-    pub fn set_workspace_identity(
+    /// worktree is named by its directory, read fresh on every access.
+    pub fn set_worktree_identity(
         &self,
         id: Uuid,
         expected_version: u64,
         branch: &str,
         is_main_checkout: bool,
-    ) -> Result<Workspace> {
+    ) -> Result<Worktree> {
         self.run_versioned(
-            "UPDATE workspaces
+            "UPDATE worktrees
              SET branch = ?1, is_main_checkout = ?2, resource_version = ?3
              WHERE id = ?4 AND resource_version = ?5",
             &[
@@ -573,17 +573,17 @@ impl Store {
                 &uuid_blob(id),
                 &(expected_version as i64),
             ],
-            "SELECT 1 FROM workspaces WHERE id = ?1",
+            "SELECT 1 FROM worktrees WHERE id = ?1",
             &[&uuid_blob(id)],
         )?;
-        self.get_workspace(id)
+        self.get_worktree(id)
     }
 
-    pub fn delete_workspace(&self, id: Uuid, expected_version: u64) -> Result<()> {
+    pub fn delete_worktree(&self, id: Uuid, expected_version: u64) -> Result<()> {
         self.run_versioned(
-            "DELETE FROM workspaces WHERE id = ?1 AND resource_version = ?2",
+            "DELETE FROM worktrees WHERE id = ?1 AND resource_version = ?2",
             &[&uuid_blob(id), &(expected_version as i64)],
-            "SELECT 1 FROM workspaces WHERE id = ?1",
+            "SELECT 1 FROM worktrees WHERE id = ?1",
             &[&uuid_blob(id)],
         )
     }
@@ -593,14 +593,14 @@ impl Store {
     #[allow(clippy::too_many_arguments)]
     pub fn create_terminal(
         &self,
-        workspace_id: Uuid,
+        worktree_id: Uuid,
         title: &str,
         command_preset: &str,
         intent: TerminalIntent,
         columns: u32,
         rows: u32,
     ) -> Result<Terminal> {
-        self.create_terminal_for_task(workspace_id, title, command_preset, intent, columns, rows, None)
+        self.create_terminal_for_task(worktree_id, title, command_preset, intent, columns, rows, None)
     }
 
     /// `create_terminal`, recording the task the terminal is opened for.
@@ -611,7 +611,7 @@ impl Store {
     #[allow(clippy::too_many_arguments)]
     pub fn create_terminal_for_task(
         &self,
-        workspace_id: Uuid,
+        worktree_id: Uuid,
         title: &str,
         command_preset: &str,
         intent: TerminalIntent,
@@ -623,13 +623,13 @@ impl Store {
         self.conn()
             .execute(
                 r#"INSERT INTO terminals
-                 (id, workspace_id, title, command_preset, intent, runtime_confirmed,
+                 (id, worktree_id, title, command_preset, intent, runtime_confirmed,
                   exit_code, exit_signal, lease_generation, epoch,
                   "columns", "rows", resource_version, task_id)
                  VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL, NULL, 0, 0, ?6, ?7, 1, ?8)"#,
                 params![
                     uuid_blob(id),
-                    uuid_blob(workspace_id),
+                    uuid_blob(worktree_id),
                     title,
                     command_preset,
                     intent as i32,
@@ -641,7 +641,7 @@ impl Store {
             .map_err(map_err)?;
         Ok(Terminal {
             id,
-            workspace_id,
+            worktree_id,
             title: title.to_string(),
             command_preset: command_preset.to_string(),
             intent,
@@ -662,7 +662,7 @@ impl Store {
     pub fn get_terminal(&self, id: Uuid) -> Result<Terminal> {
         self.conn()
             .query_row(
-                r#"SELECT id, workspace_id, title, command_preset, intent, runtime_confirmed,
+                r#"SELECT id, worktree_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, lease_generation, epoch,
                           "columns", "rows", resource_version, pane_mode, agent_session_id, task_id
                    FROM terminals WHERE id = ?1"#,
@@ -672,17 +672,17 @@ impl Store {
             .map_err(map_err)
     }
 
-    pub fn list_terminals_for_workspace(&self, workspace_id: Uuid) -> Result<Vec<Terminal>> {
+    pub fn list_terminals_for_worktree(&self, worktree_id: Uuid) -> Result<Vec<Terminal>> {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(
-                r#"SELECT id, workspace_id, title, command_preset, intent, runtime_confirmed,
+                r#"SELECT id, worktree_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, lease_generation, epoch,
                           "columns", "rows", resource_version, pane_mode, agent_session_id, task_id
-                   FROM terminals WHERE workspace_id = ?1"#,
+                   FROM terminals WHERE worktree_id = ?1"#,
             )
             .map_err(map_err)?;
-        let rows = stmt.query_map(params![uuid_blob(workspace_id)], row_to_terminal).map_err(map_err)?;
+        let rows = stmt.query_map(params![uuid_blob(worktree_id)], row_to_terminal).map_err(map_err)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
     }
 
@@ -712,7 +712,7 @@ impl Store {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(
-                r#"SELECT id, workspace_id, title, command_preset, intent, runtime_confirmed,
+                r#"SELECT id, worktree_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, lease_generation, epoch,
                           "columns", "rows", resource_version, pane_mode, agent_session_id, task_id
                    FROM terminals WHERE agent_session_id = ?1"#,
@@ -724,13 +724,13 @@ impl Store {
 
     /// Feeds the daemon's derivation rule directly: durable intent, nothing
     /// tmux would have to have told us first.
-    pub fn load_terminal_records(&self, workspace_id: Uuid) -> Result<Vec<TerminalRecord>> {
+    pub fn load_terminal_records(&self, worktree_id: Uuid) -> Result<Vec<TerminalRecord>> {
         Ok(self
-            .list_terminals_for_workspace(workspace_id)?
+            .list_terminals_for_worktree(worktree_id)?
             .into_iter()
             .map(|t| TerminalRecord {
                 id: t.id,
-                workspace_id: t.workspace_id,
+                worktree_id: t.worktree_id,
                 intent: t.intent,
                 runtime_confirmed: t.runtime_confirmed,
                 exit_code: t.exit_code,
@@ -944,7 +944,7 @@ mod tests {
         // And exactly the durable columns the design calls for, nothing more.
         let expected = [
             "id",
-            "workspace_id",
+            "worktree_id",
             "title",
             "command_preset",
             "intent",
@@ -975,10 +975,10 @@ mod tests {
 
     // ---- the task a terminal was opened for ----
 
-    /// A repository, a workspace in it, and a task on its board.
+    /// A repository, a worktree in it, and a task on its board.
     fn a_lane_with_a_task(s: &Store) -> (Uuid, Uuid) {
         let repo = s.register_repository_for_test("Far Cooler");
-        let ws = s.create_workspace(repo, "feat/x", "/wt/terminal-task", false).unwrap();
+        let ws = s.create_worktree(repo, "feat/x", "/wt/terminal-task", false).unwrap();
         let task = s.create_task_for_test(repo, "a task");
         (ws.id, task)
     }
@@ -993,7 +993,7 @@ mod tests {
         assert_eq!(made.task_id, Some(task));
         assert_eq!(s.get_terminal(made.id).unwrap().task_id, Some(task), "read back from disk");
         assert_eq!(
-            s.list_terminals_for_workspace(ws).unwrap()[0].task_id,
+            s.list_terminals_for_worktree(ws).unwrap()[0].task_id,
             Some(task),
             "and through the listing every launch path reads"
         );
@@ -1164,17 +1164,17 @@ mod tests {
     }
 
     #[test]
-    fn workspace_round_trip_and_update() {
+    fn worktree_round_trip_and_update() {
         let s = store();
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
         let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
-        let ws = s.create_workspace(repo.id, "feature/x", "/wt/workspace", false).unwrap();
+        let ws = s.create_worktree(repo.id, "feature/x", "/wt/worktree", false).unwrap();
         assert!(!ws.hidden);
-        assert_eq!(s.get_workspace(ws.id).unwrap(), ws);
+        assert_eq!(s.get_worktree(ws.id).unwrap(), ws);
 
         let updated =
-            s.update_workspace(ws.id, 1, "feature/x", "/wt/workspace", true, false).unwrap();
+            s.update_worktree(ws.id, 1, "feature/x", "/wt/worktree", true, false).unwrap();
         assert!(updated.hidden);
         assert_eq!(updated.resource_version, 2);
     }
@@ -1190,11 +1190,11 @@ mod tests {
     /// Three repositories, one runner, and everything the store hands back is
     /// in the order the rows were created.
     fn ordered_names(s: &Store, repo: Uuid) -> Vec<String> {
-        s.list_workspaces_for_repository(repo).unwrap().iter().map(|w| w.name()).collect()
+        s.list_worktrees_for_repository(repo).unwrap().iter().map(|w| w.name()).collect()
     }
 
     #[test]
-    fn a_new_workspace_lands_at_the_end() {
+    fn a_new_worktree_lands_at_the_end() {
         let s = store();
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
@@ -1202,9 +1202,9 @@ mod tests {
 
         // Created out of alphabetical order on purpose: if anything fell back
         // to sorting by name or path, this would come back sorted.
-        let zebra = s.create_workspace(repo.id, "feat/z", "/wt/zebra", false).unwrap();
-        let apple = s.create_workspace(repo.id, "feat/a", "/wt/apple", false).unwrap();
-        let mango = s.create_workspace(repo.id, "feat/m", "/wt/mango", false).unwrap();
+        let zebra = s.create_worktree(repo.id, "feat/z", "/wt/zebra", false).unwrap();
+        let apple = s.create_worktree(repo.id, "feat/a", "/wt/apple", false).unwrap();
+        let mango = s.create_worktree(repo.id, "feat/m", "/wt/mango", false).unwrap();
 
         assert_eq!((zebra.ordinal, apple.ordinal, mango.ordinal), (0, 1, 2));
         assert_eq!(ordered_names(&s, repo.id), vec!["zebra", "apple", "mango"]);
@@ -1220,13 +1220,13 @@ mod tests {
         let one = s.create_repository(host, root.id, "one", "/one/.git", "").unwrap();
         let two = s.create_repository(host, root.id, "two", "/two/.git", "").unwrap();
 
-        let a = s.create_workspace(one.id, "b", "/wt/a", false).unwrap();
-        let b = s.create_workspace(two.id, "b", "/wt/b", false).unwrap();
-        let c = s.create_workspace(one.id, "b", "/wt/c", false).unwrap();
+        let a = s.create_worktree(one.id, "b", "/wt/a", false).unwrap();
+        let b = s.create_worktree(two.id, "b", "/wt/b", false).unwrap();
+        let c = s.create_worktree(one.id, "b", "/wt/c", false).unwrap();
 
         assert_eq!((a.ordinal, b.ordinal, c.ordinal), (0, 1, 2));
         assert_eq!(
-            s.list_workspaces_in_order().unwrap().iter().map(|w| w.name()).collect::<Vec<_>>(),
+            s.list_worktrees_in_order().unwrap().iter().map(|w| w.name()).collect::<Vec<_>>(),
             vec!["a", "b", "c"],
             "one list across the runner, in one order"
         );
@@ -1244,12 +1244,12 @@ mod tests {
             let host = Uuid::now_v7();
             let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
             let repo = s.create_repository(host, root.id, "name", "/gitdir", "").unwrap();
-            let a = s.create_workspace(repo.id, "b", "/wt/a", false).unwrap();
-            let b = s.create_workspace(repo.id, "b", "/wt/b", false).unwrap();
-            let c = s.create_workspace(repo.id, "b", "/wt/c", false).unwrap();
+            let a = s.create_worktree(repo.id, "b", "/wt/a", false).unwrap();
+            let b = s.create_worktree(repo.id, "b", "/wt/b", false).unwrap();
+            let c = s.create_worktree(repo.id, "b", "/wt/c", false).unwrap();
             assert_eq!(ordered_names(&s, repo.id), vec!["a", "b", "c"]);
 
-            s.reorder_workspaces(&[c.id, a.id, b.id]).unwrap();
+            s.reorder_worktrees(&[c.id, a.id, b.id]).unwrap();
             assert_eq!(ordered_names(&s, repo.id), vec!["c", "a", "b"]);
             (repo.id, a.id, b.id, c.id)
         };
@@ -1262,10 +1262,10 @@ mod tests {
 
         // And the version moved, so a client holding the old row knows its copy
         // of the position is stale.
-        assert!(s.get_workspace(a).unwrap().resource_version > 1);
+        assert!(s.get_worktree(a).unwrap().resource_version > 1);
 
         // Asking for the order it is already in changes nothing.
-        s.reorder_workspaces(&[c, a, b]).unwrap();
+        s.reorder_worktrees(&[c, a, b]).unwrap();
         assert_eq!(ordered_names(&s, repo), vec!["c", "a", "b"]);
 
         std::fs::remove_dir_all(&dir).ok();
@@ -1286,28 +1286,28 @@ mod tests {
         // That is the whole point of the fixture: a reorder that renumbered the
         // cards it was handed from zero would land them on top of `x` and `y`
         // and pass every assertion about relative order inside one group.
-        let x = s.create_workspace(two.id, "b", "/wt/x", false).unwrap();
-        let y = s.create_workspace(two.id, "b", "/wt/y", false).unwrap();
-        let a = s.create_workspace(one.id, "b", "/wt/a", false).unwrap();
-        let c = s.create_workspace(one.id, "b", "/wt/c", false).unwrap();
+        let x = s.create_worktree(two.id, "b", "/wt/x", false).unwrap();
+        let y = s.create_worktree(two.id, "b", "/wt/y", false).unwrap();
+        let a = s.create_worktree(one.id, "b", "/wt/a", false).unwrap();
+        let c = s.create_worktree(one.id, "b", "/wt/c", false).unwrap();
         assert_eq!((x.ordinal, y.ordinal, a.ordinal, c.ordinal), (0, 1, 2, 3));
 
-        s.reorder_workspaces(&[c.id, a.id]).unwrap();
+        s.reorder_worktrees(&[c.id, a.id]).unwrap();
 
         assert_eq!(ordered_names(&s, one.id), vec!["c", "a"], "the group that moved");
         assert_eq!(ordered_names(&s, two.id), vec!["x", "y"], "the group that did not");
         assert_eq!(
-            (s.get_workspace(c.id).unwrap().ordinal, s.get_workspace(a.id).unwrap().ordinal),
+            (s.get_worktree(c.id).unwrap().ordinal, s.get_worktree(a.id).unwrap().ordinal),
             (2, 3),
             "the two cards swapped the slots they held; they did not move to the front"
         );
         assert_eq!(
-            (s.get_workspace(x.id).unwrap().ordinal, s.get_workspace(y.id).unwrap().ordinal),
+            (s.get_worktree(x.id).unwrap().ordinal, s.get_worktree(y.id).unwrap().ordinal),
             (0, 1),
             "an untouched card keeps its exact rank, not merely its relative one"
         );
         assert_eq!(
-            s.list_workspaces_in_order().unwrap().iter().map(|w| w.name()).collect::<Vec<_>>(),
+            s.list_worktrees_in_order().unwrap().iter().map(|w| w.name()).collect::<Vec<_>>(),
             vec!["x", "y", "c", "a"],
             "and the whole runner's list is what a client would draw"
         );
@@ -1321,34 +1321,34 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
         let repo = s.create_repository(host, root.id, "name", "/gitdir", "").unwrap();
-        let a = s.create_workspace(repo.id, "b", "/wt/a", false).unwrap();
-        let b = s.create_workspace(repo.id, "b", "/wt/b", false).unwrap();
+        let a = s.create_worktree(repo.id, "b", "/wt/a", false).unwrap();
+        let b = s.create_worktree(repo.id, "b", "/wt/b", false).unwrap();
 
         assert!(matches!(
-            s.reorder_workspaces(&[a.id, a.id]),
+            s.reorder_worktrees(&[a.id, a.id]),
             Err(DomainError::InvalidArgument { .. })
         ));
         assert!(matches!(
-            s.reorder_workspaces(&[b.id, a.id, Uuid::now_v7()]),
+            s.reorder_worktrees(&[b.id, a.id, Uuid::now_v7()]),
             Err(DomainError::NotFound)
         ));
         assert_eq!(ordered_names(&s, repo.id), vec!["a", "b"], "nothing moved");
     }
 
     #[test]
-    fn workspace_flags_round_trip() {
+    fn worktree_flags_round_trip() {
         let s = store();
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
         let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
-        let ws = s.create_workspace(repo.id, "feature/x", "/wt/flags", false).unwrap();
+        let ws = s.create_worktree(repo.id, "feature/x", "/wt/flags", false).unwrap();
         assert!(!ws.hidden && !ws.worktree_missing);
 
-        let hidden = s.set_workspace_flags(ws.id, ws.resource_version, true, false).unwrap();
+        let hidden = s.set_worktree_flags(ws.id, ws.resource_version, true, false).unwrap();
         assert!(hidden.hidden, "hidden is set");
         assert_eq!(hidden.name(), "flags", "the name is the worktree, and hiding moves nothing");
 
-        let missing = s.set_workspace_flags(hidden.id, hidden.resource_version, true, true).unwrap();
+        let missing = s.set_worktree_flags(hidden.id, hidden.resource_version, true, true).unwrap();
         assert!(missing.hidden && missing.worktree_missing);
     }
 
@@ -1358,7 +1358,7 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
         let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
-        let ws = s.create_workspace(repo.id, "feature/x", "/wt/terminal", false).unwrap();
+        let ws = s.create_worktree(repo.id, "feature/x", "/wt/terminal", false).unwrap();
         let term =
             s.create_terminal(ws.id, "shell", "claude", TerminalIntent::Running, 80, 24).unwrap();
         assert!(!term.runtime_confirmed);
@@ -1398,7 +1398,7 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
         let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
-        let ws = s.create_workspace(repo.id, "feature/x", "/wt/pane-mode", false).unwrap();
+        let ws = s.create_worktree(repo.id, "feature/x", "/wt/pane-mode", false).unwrap();
         let t = s.create_terminal(ws.id, "t", "claude", TerminalIntent::Running, 120, 40).unwrap();
         assert_eq!(t.pane_mode, PaneMode::Terminal);
         assert_eq!(t.agent_session_id, None);
@@ -1412,7 +1412,7 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
         let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
-        let ws = s.create_workspace(repo.id, "feature/x", "/wt/session-id", false).unwrap();
+        let ws = s.create_worktree(repo.id, "feature/x", "/wt/session-id", false).unwrap();
         let t = s.create_terminal(ws.id, "t", "claude", TerminalIntent::Running, 120, 40).unwrap();
         let updated =
             s.set_pane_mode(t.id, t.resource_version, PaneMode::Agent, Some("abc-123".into()), false)
@@ -1437,7 +1437,7 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
         let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
-        let ws = s.create_workspace(repo.id, "feature/x", "/wt/epochs", false).unwrap();
+        let ws = s.create_worktree(repo.id, "feature/x", "/wt/epochs", false).unwrap();
         let t = s.create_terminal(ws.id, "t", "claude", TerminalIntent::Running, 120, 40).unwrap();
         let started = s.get_terminal(t.id).unwrap().epoch;
 
@@ -1471,7 +1471,7 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
         let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
-        let ws = s.create_workspace(repo.id, "feature/x", "/wt/sessions", false).unwrap();
+        let ws = s.create_worktree(repo.id, "feature/x", "/wt/sessions", false).unwrap();
 
         let mine = s.create_terminal(ws.id, "a", "claude", TerminalIntent::Running, 80, 24).unwrap();
         let mine =
@@ -1503,7 +1503,7 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
         let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
-        let ws = s.create_workspace(repo.id, "feature/x", "/wt/ambiguous", false).unwrap();
+        let ws = s.create_worktree(repo.id, "feature/x", "/wt/ambiguous", false).unwrap();
 
         for title in ["a", "b"] {
             let t =

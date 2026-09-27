@@ -7,7 +7,7 @@ import SwiftUI
 /// cannot drift into offering different editors, or the same editor under
 /// different rules about which ones are greyed out.
 struct EditorMenuItems: View {
-    let workspace: Workspace
+    let worktree: Worktree
     let onError: (String) -> Void
     /// The title bar button opens the last-used editor on a click, so its menu
     /// does not repeat that as a heading. The sidebar has no primary action and
@@ -22,7 +22,7 @@ struct EditorMenuItems: View {
     /// The `host:` argument labels below keep their spelling: what they take is
     /// the value substituted into an editor's `{host}` template, which is a
     /// token people have already saved in custom editor arguments.
-    private var runner: String { workspace.host ?? "" }
+    private var runner: String { worktree.host ?? "" }
     private var usable: [Editor] { editors.available.filter { $0.unavailability(host: runner) == nil } }
 
     /// Kept in the menu rather than dropped from it. An editor you have
@@ -57,7 +57,7 @@ struct EditorMenuItems: View {
     private func open(_ editor: Editor) {
         editors.remember(editor)
         Task {
-            if let problem = await editors.open(workspace, with: editor) { onError(problem) }
+            if let problem = await editors.open(worktree, with: editor) { onError(problem) }
         }
     }
 }
@@ -92,7 +92,7 @@ enum EditorSettingsLink {
 /// bar control whose width changes when you switch from Zed to Android Studio
 /// moves everything beside it, and the name is in the menu anyway.
 struct OpenInEditorButton: View {
-    let workspace: Workspace
+    let worktree: Worktree
     /// Where a launch failure goes. `ContentView` puts it in the banner.
     let onError: (String) -> Void
 
@@ -100,11 +100,11 @@ struct OpenInEditorButton: View {
     @Environment(\.openSettings) private var openSettings
 
     /// The runner this worktree is on, as its ssh target. Empty means this Mac.
-    private var runner: String { workspace.host ?? "" }
+    private var runner: String { worktree.host ?? "" }
 
     var body: some View {
         Menu {
-            EditorMenuItems(workspace: workspace, onError: onError)
+            EditorMenuItems(worktree: worktree, onError: onError)
         } label: {
             Image(systemName: "chevron.left.forwardslash.chevron.right")
         } primaryAction: {
@@ -117,7 +117,7 @@ struct OpenInEditorButton: View {
             // it — see `Editors.preferred`. Only an explicit pick from the menu
             // changes the preference.
             Task {
-                if let problem = await editors.open(workspace, with: editor) {
+                if let problem = await editors.open(worktree, with: editor) {
                     onError(problem)
                 }
             }
@@ -203,12 +203,12 @@ extension View {
     /// The right side of the title bar is otherwise empty, and the title already
     /// names the worktree — so the action about that worktree belongs beside it.
     func openInEditorToolbar(
-        workspace: Workspace?, onError: @escaping (String) -> Void
+        worktree: Worktree?, onError: @escaping (String) -> Void
     ) -> some View {
         toolbar {
-            if let workspace {
+            if let worktree {
                 ToolbarItem(placement: .primaryAction) {
-                    OpenInEditorButton(workspace: workspace, onError: onError)
+                    OpenInEditorButton(worktree: worktree, onError: onError)
                 }
             }
         }

@@ -83,7 +83,7 @@ message Request {
     Empty empty = 20;
     RepositoryRootAdd repository_root_add = 21;
     RepositoryRegister repository_register = 22;
-    WorkspaceCreate workspace_create = 23;
+    WorktreeCreate worktree_create = 23;
     TerminalCreate terminal_create = 24;
     TerminalResize terminal_resize = 25;
     TerminalStop terminal_stop = 26;
@@ -162,7 +162,7 @@ message Request {
     ClientRevoke client_revoke = 67;
     TerminalsWatched terminals_watched = 68;
     ClientSetNodeKey client_set_node_key = 69;
-    WorkspaceReorder workspace_reorder = 70;
+    WorktreeReorder worktree_reorder = 70;
     // The board. Reads first, then the writes; see the section at the foot of
     // this file for why there is no payload here that edits a note.
     TaskListRequest task_list = 71;
@@ -216,8 +216,8 @@ message Result {
     RepositoryRootList repository_root_list = 3;
     Repository repository = 4;
     RepositoryList repository_list = 5;
-    Workspace workspace = 6;
-    WorkspaceList workspace_list = 7;
+    Worktree worktree = 6;
+    WorktreeList worktree_list = 7;
     Terminal terminal = 8;
     TerminalList terminal_list = 9;
     Operation operation = 10;
@@ -225,7 +225,7 @@ message Result {
     TerminalAttachResult terminal_attach = 12;
     BranchList branch_list = 13;
     PaneGroupList pane_group_list = 14;
-    WorktreeList worktree_list = 15;
+    DiscoveredWorktreeList discovered_worktree_list = 15;
     TerminalScreen terminal_screen = 16;
     AgentEventBatch agent_event_batch = 17;
     WorktreeFileList worktree_file_list = 18;
@@ -357,7 +357,7 @@ message AgentSteerQueued {
 message AgentCancel { bytes terminal_id = 1; }
 
 message WorktreeFileSearch {
-  bytes workspace_id = 1;
+  bytes worktree_id = 1;
   string query = 2;
   uint32 limit = 3;
 }
@@ -407,10 +407,10 @@ message Event {
     Host host_changed = 10;
     RepositoryRoot repository_root_changed = 11;
     Repository repository_changed = 12;
-    Workspace workspace_changed = 13;
+    Worktree worktree_changed = 13;
     Terminal terminal_changed = 14;
     Operation operation_changed = 15;
-    // A workspace's whole set of groups, not a diff.
+    // A worktree's whole set of groups, not a diff.
     //
     // Layout is edited from three places at once — the app, the CLI, and an
     // agent driving the CLI — so a client that missed an event has to converge
@@ -419,16 +419,16 @@ message Event {
     // New events for one terminal's agent session, in seq order. A client that
     // missed some asks for them by cursor rather than reconstructing.
     AgentEventBatch agent_events = 17;
-    // The set of workspaces changed — re-read.
+    // The set of worktrees changed — re-read.
     //
-    // Reconciliation can both create and delete workspace rows in the same
-    // pass, and a deletion has no resource to carry: there is no `Workspace`
+    // Reconciliation can both create and delete worktree rows in the same
+    // pass, and a deletion has no resource to carry: there is no `Worktree`
     // left to describe. This fires once per reconcile pass that changed
-    // anything, not once per workspace, so a client re-reads the fleet rather
+    // anything, not once per worktree, so a client re-reads the fleet rather
     // than trying to apply it as a delta.
     Empty fleet_changed = 18;
-    // A workspace's change set moved: a commit landed, an agent wrote a file,
-    // a branch was checked out. Carries the workspace so a client knows which
+    // A worktree's change set moved: a commit landed, an agent wrote a file,
+    // a branch was checked out. Carries the worktree so a client knows which
     // one to re-read; the set itself is fetched, because most clients are not
     // looking at it and a lockfile regeneration would otherwise fan out
     // thousands of file records to everyone.
@@ -465,7 +465,7 @@ message Event {
     TerminalFrame terminal_frame = 20;
     // A task's row changed: status, title, intent, acceptance, or the note
     // log behind it. Carries the id and its repository, like
-    // `change_set_changed` carries a workspace, so a client knows which board
+    // `change_set_changed` carries a worktree, so a client knows which board
     // to re-read; the task itself is fetched rather than attached, for the
     // same reason.
     //
@@ -603,7 +603,7 @@ message Host {
   uint32 live_terminal_count = 9;
   // Rides on this message rather than a call of its own, because every client
   // already makes this one and the prefix is needed on the path that creates a
-  // workspace — a second round trip there would be a round trip spent asking
+  // worktree — a second round trip there would be a round trip spent asking
   // for a string.
   HostSettings settings = 10;
   // This runner's stable identity, as text, for a device that has to record
@@ -738,7 +738,7 @@ message AdapterTestResult {
   string failure = 3;
 }
 
-message Workspace {
+message Worktree {
   bytes id = 1;
   uint64 resource_version = 2;
   bytes repository_id = 3;
@@ -746,46 +746,46 @@ message Workspace {
   string branch = 5;
   string worktree_path_token = 6;
   optional string worktree_path = 7; // host_admin only
-  WorkspaceState state = 8;
-  // Whether this workspace IS the repository's own checkout, from `git
+  WorktreeState state = 8;
+  // Whether this worktree IS the repository's own checkout, from `git
   // worktree list`. Recognized this way rather than by task name, which a
   // linked worktree in a directory called `main` would defeat — and what
   // it guards is whether a client offers to delete the directory you work in.
   bool is_main_checkout = 9;
-  // Where this workspace sits in the list, ranked across the whole runner.
+  // Where this worktree sits in the list, ranked across the whole runner.
   //
   // The list already arrives in this order, so a client that renders what it
   // is given needs nothing here. It is on the wire for the client that does
-  // not: `workspace_changed` carries one workspace, and applying that as a
+  // not: `worktree_changed` carries one worktree, and applying that as a
   // delta means knowing where the row goes without re-reading the fleet.
   //
-  // Decided at creation — a new workspace takes the end — and after that only
-  // by `workspace.reorder`. Never by activity, attention or recency: a card
+  // Decided at creation — a new worktree takes the end — and after that only
+  // by `worktree.reorder`. Never by activity, attention or recency: a card
   // that moves on its own is a card nobody can reach for without reading the
   // whole list again.
   //
   // A daemon that predates this sends nothing, which decodes as 0 for every
-  // workspace. That is why a client must tie-break rather than trust it alone,
+  // worktree. That is why a client must tie-break rather than trust it alone,
   // and why `workspace_order` is a capability it can ask about first.
   uint32 ordinal = 10;
 }
 
-message WorkspaceList { repeated Workspace items = 1; }
+message WorktreeList { repeated Worktree items = 1; }
 
-enum WorkspaceState {
-  WORKSPACE_STATE_UNSPECIFIED = 0;
-  WORKSPACE_STATE_CREATING = 1;
-  WORKSPACE_STATE_READY = 2;
-  WORKSPACE_STATE_ACTIVE = 3;
-  WORKSPACE_STATE_ERROR = 4;
+enum WorktreeState {
+  WORKTREE_STATE_UNSPECIFIED = 0;
+  WORKTREE_STATE_CREATING = 1;
+  WORKTREE_STATE_READY = 2;
+  WORKTREE_STATE_ACTIVE = 3;
+  WORKTREE_STATE_ERROR = 4;
   // Tag 5 was ARCHIVED. Same state, one word: archiving never touched git and
   // neither does hiding, so having both meant users guessing which one deleted
   // files. Reusing the tag is correct here and only here — it is a rename, not
   // a new meaning wearing an old number.
-  WORKSPACE_STATE_HIDDEN = 5;
+  WORKTREE_STATE_HIDDEN = 5;
   // git no longer lists this worktree, but the row carries terminals worth
   // keeping. A row with nothing in it is deleted instead, never shown.
-  WORKSPACE_STATE_WORKTREE_MISSING = 6;
+  WORKTREE_STATE_WORKTREE_MISSING = 6;
 }
 
 // `intent` is durable. `state` is DERIVED at read time and never stored.
@@ -794,7 +794,7 @@ message Terminal {
   bytes id = 1;
   uint64 resource_version = 2;
   uint64 lease_generation = 3;
-  bytes workspace_id = 4;
+  bytes worktree_id = 4;
   string title = 5;
   string command_preset = 6;
   TerminalIntent intent = 7;
@@ -969,7 +969,7 @@ message Terminal {
   //
   // The whole message, redacted on the host on exactly the terms `feed` is,
   // and cut from its start to about 120 characters — roughly the two lines an
-  // iOS banner shows, less the workspace name every notifier writes in front
+  // iOS banner shows, less the worktree name every notifier writes in front
   // of it. See `farcooler_core::feed::SAID_WIDTH`.
   //
   // Sent for narration too, not only for a turn's closing answer. A
@@ -1071,7 +1071,7 @@ message Terminal {
   //  a line written and then written back nets to nothing, so a busy agent
   //  rewriting its own work is under-reported, never over-reported.
   // - Axis, commits: HEAD moves that were commits, dated from the worktree's
-  //  reflog. Per WORKSPACE, so every row of one worktree shows the same marks
+  //  reflog. Per WORKTREE, so every row of one worktree shows the same marks
   //  — which is the true statement, since a commit belongs to the worktree and
   //  not to a pane. A repository with reflogs disabled shows none.
   bytes activity_trace = 35;
@@ -1253,7 +1253,7 @@ message PaneGroup {
   // The tmux window id, `@7`. Stable for the window's life, which is exactly as
   // long as the layout exists.
   string id = 1;
-  bytes workspace_id = 2;
+  bytes worktree_id = 2;
   string name = 3;
   bool active = 4;
   // The window's size in cells. A client scales these to pixels with its own
@@ -1285,7 +1285,7 @@ message PaneRect {
 
 // Ordered by window index, which is what `layout group select 2` counts.
 message PaneGroupList {
-  bytes workspace_id = 1;
+  bytes worktree_id = 1;
   repeated PaneGroup items = 2;
 }
 
@@ -1353,7 +1353,7 @@ message RepositoryRootAdd {
 
 message RepositoryRegister { string relative_path = 1; }
 
-// The order somebody dragged these workspaces into.
+// The order somebody dragged these worktrees into.
 //
 // The whole visible order, not a "move this one to index N". A client draws a
 // list it has already filtered — hidden worktrees are out, and a grouped
@@ -1364,18 +1364,18 @@ message RepositoryRegister { string relative_path = 1; }
 //
 // Idempotent: sending the order a runner is already in changes nothing, which
 // is what makes a retry after a dropped connection safe.
-message WorkspaceReorder {
-  // Every workspace in the list being reordered, first on screen first. Ids
+message WorktreeReorder {
+  // Every worktree in the list being reordered, first on screen first. Ids
   // rather than ordinals, because the client is naming cards it can see and
   // has no business inventing rank numbers.
-  repeated bytes workspace_ids = 1;
+  repeated bytes worktree_ids = 1;
 }
 
-message WorkspaceCreate {
+message WorktreeCreate {
   string task_name = 1;
   string branch = 2;
   string base_revision = 3;
-  // What to run in the terminal this workspace opens with, or empty for no
+  // What to run in the terminal this worktree opens with, or empty for no
   // terminal at all.
   //
   // A worktree with nothing running in it is a directory, so a client that just
@@ -1399,7 +1399,7 @@ message WorkspaceCreate {
   // when a local branch or any remote already carries the name.
   //
   // Without it, a name that exists only on one remote is checked out from
-  // there when the base is `HEAD` — right for `workspace create feat` typed
+  // there when the base is `HEAD` — right for `worktree create feat` typed
   // by someone who knows the branch, and wrong for a client that made the
   // name up for a new task: the task would start on somebody's commits
   // with no word said. A client can check the branch list first, but a
@@ -1428,13 +1428,13 @@ message Branch {
 
 message BranchList { repeated Branch items = 1; }
 
-// A worktree that exists on disk but is not yet a task workspace.
+// A worktree git has that Far Cooler has not adopted yet.
 //
 // People arrive with a repository they have used for months and several
 // worktrees already checked out. Until Far Cooler can see those it only knows
 // about work it started itself, which means re-creating by hand what you already
 // have — a bad first hour with a tool whose whole point is saving you time.
-message ExistingWorktree {
+message DiscoveredWorktree {
   // Present, not optional, and deliberately.
   //
   // Every other path in this protocol is redacted below host_admin and stood in
@@ -1448,19 +1448,19 @@ message ExistingWorktree {
   // Absent for a detached HEAD, rather than filled in with a guess.
   optional string branch = 3;
   string head = 4;
-  // Suggested workspace name: the directory's own, which is what whoever made
+  // Suggested worktree name: the directory's own, which is what whoever made
   // the worktree already chose to call this work.
   string suggested_name = 5;
   // git holds a lock on it. Importable, but worth saying.
   bool locked = 6;
 }
 
-message WorktreeList { repeated ExistingWorktree items = 1; }
+message DiscoveredWorktreeList { repeated DiscoveredWorktree items = 1; }
 
 message TerminalCreate {
   string title = 1;
   string command_preset = 2;
-  // Put the new terminal straight into the workspace's active group.
+  // Put the new terminal straight into the worktree's active group.
   //
   // What `prefix %` means: you are looking at a layout and you want another
   // pane in it. Nothing tiles by default, so this is the one path that adds to
@@ -1480,7 +1480,7 @@ message TerminalCreate {
   optional string prompt = 4;
   // The board task this terminal is opened to work, by its key (`fc-12`).
   //
-  // Resolved on the workspace's own repository's board, and refused as
+  // Resolved on the worktree's own repository's board, and refused as
   // `task_key` when it isn't there. The terminal records the task, an agent
   // pane exports it as FARCOOLER_TASK on this launch and every relaunch, and
   // its first message becomes a fixed opening prompt that points it at the
@@ -1706,7 +1706,7 @@ message TerminalAttach {
 
 // One payload for every layout mutation; the METHOD says which.
 message LayoutUpdate {
-  // The layout to act on, as a tmux window id. Empty means the workspace's
+  // The layout to act on, as a tmux window id. Empty means the worktree's
   // active one, which is what a person or an agent means by "here" almost every
   // time.
   string group_id = 1;
@@ -1784,9 +1784,9 @@ enum ErrorCode {
   ERROR_CODE_TMUX_UNAVAILABLE = 17;
   ERROR_CODE_PATH_NOT_ALLOWED = 18;
   ERROR_CODE_CONFIRMATION_REQUIRED = 19;
-  // Workspaces still exist under the resource being removed. Distinct from
+  // Worktrees still exist under the resource being removed. Distinct from
   // RUNNING_PROCESSES: nothing is running, but records would be orphaned.
-  ERROR_CODE_WORKSPACES_EXIST = 20;
+  ERROR_CODE_WORKTREES_EXIST = 20;
   // Distinct from PATH_NOT_ALLOWED: that one means "not covered by any
   // root you've allowlisted yet, allowlist it"; this one means "this exact
   // location — a whole home directory or a system path — will never be
@@ -1811,7 +1811,7 @@ enum ErrorCode {
   ERROR_CODE_DISPATCH_UNKNOWN = 27;
   // This machine's Far Cooler is too old for what was asked.
   //
-  // Distinct from NOT_FOUND, which it used to arrive as. "No such workspace"
+  // Distinct from NOT_FOUND, which it used to arrive as. "No such worktree"
   // and "this machine cannot do this yet" call for opposite responses from a
   // client, and a newer app could not tell them apart — so it could neither
   // degrade nor say anything useful.
@@ -1846,23 +1846,23 @@ enum ErrorCode {
 // Which comparison a client is asking about.
 message ChangeSetSelector {
   oneof kind {
-    // The workspace's own branch against its base.
-    Empty workspace = 1;
-    // Any branch, against the workspace base or against its stack parent.
+    // The worktree's own branch against its base.
+    Empty worktree = 1;
+    // Any branch, against the worktree base or against its stack parent.
     BranchAgainst branch = 2;
   }
 }
 
 message BranchAgainst {
   string branch = 1;
-  // True selects the branch's stack parent instead of the workspace base. One
+  // True selects the branch's stack parent instead of the worktree base. One
   // field rather than two selector types, because the only thing that differs
   // between them is which side of the comparison the base comes from.
   bool against_parent = 2;
 }
 
 message ChangeSetRequest {
-  bytes workspace_id = 1;
+  bytes worktree_id = 1;
   ChangeSetSelector selector = 2;
   // Bypass the cache. The Refresh affordance: no watcher is perfect and the
   // user must always have a way to be certain.
@@ -1870,7 +1870,7 @@ message ChangeSetRequest {
 }
 
 message ChangeSetChanged {
-  bytes workspace_id = 1;
+  bytes worktree_id = 1;
   uint64 version = 2;
 }
 
@@ -1961,7 +1961,7 @@ message WorkingTree {
 }
 
 message ChangeSet {
-  bytes workspace_id = 1;
+  bytes worktree_id = 1;
   // Advances on every recompute. Not a resource_version: nothing here is
   // stored, so there is no row to version — this is a cache generation.
   uint64 version = 2;
@@ -1984,7 +1984,7 @@ message ChangeSet {
 }
 
 message CommitFilesRequest {
-  bytes workspace_id = 1;
+  bytes worktree_id = 1;
   string sha = 2;
 }
 
@@ -2010,7 +2010,7 @@ message DiffSelector {
 }
 
 message FileDiffRequest {
-  bytes workspace_id = 1;
+  bytes worktree_id = 1;
   DiffSelector selector = 2;
   string path = 3;
   // Paging cursor, for a file whose diff exceeded a cap.
@@ -2098,12 +2098,12 @@ message FileDiff {
 // ---------------------------------------------------------------------------
 
 message ChangesSetBase {
-  bytes workspace_id = 1;
+  bytes worktree_id = 1;
   string base_ref = 2;
 }
 
 message ChangesMarkRead {
-  bytes workspace_id = 1;
+  bytes worktree_id = 1;
   string branch = 2;
 }
 
@@ -2230,11 +2230,11 @@ message PrRefresh { bytes repository_id = 1; }
 
 message ChangesInboxRequest {}
 
-message InboxWorkspace {
-  bytes workspace_id = 1;
+message InboxWorktree {
+  bytes worktree_id = 1;
   string task_name = 2;
   string branch = 3;
-  // The change set moved since this workspace was last marked reviewed. Derived
+  // The change set moved since this worktree was last marked reviewed. Derived
   // from the cheap two-syscall gate, never from a fleet-wide `git status`.
   bool changed_since_reviewed = 8;
   uint32 insertions = 9;
@@ -2242,7 +2242,7 @@ message InboxWorkspace {
 }
 
 message ChangesInbox {
-  repeated InboxWorkspace items = 1;
+  repeated InboxWorktree items = 1;
   // Entries in scopes this client cannot see, as an opaque count.
   //
   // Included rather than omitted: a triage surface that silently hides half the
@@ -2577,7 +2577,7 @@ message Task {
   repeated string constraints = 10;
   // The lane this task is using, when it has one. A task exists in the backlog
   // long before any worktree does.
-  optional bytes workspace_id = 11;
+  optional bytes worktree_id = 11;
   repeated string labels = 12;
   // Unix milliseconds, from when the task was filed. Zero from a runner older
   // than this field, which a client reads as "not said" rather than 1970.
@@ -2716,7 +2716,7 @@ message TaskCreate {
   repeated TaskAcceptanceItem acceptance = 4;
   repeated string constraints = 5;
   repeated string labels = 6;
-  optional bytes workspace_id = 7;
+  optional bytes worktree_id = 7;
   string actor = 8;
 }
 
@@ -2741,7 +2741,7 @@ message TaskUpdate {
   repeated TaskAcceptanceItem acceptance = 5;
   repeated string constraints = 6;
   repeated string labels = 7;
-  optional bytes workspace_id = 8;
+  optional bytes worktree_id = 8;
   string actor = 9;
 }
 

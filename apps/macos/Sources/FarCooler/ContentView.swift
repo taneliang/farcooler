@@ -29,7 +29,7 @@ struct ContentView: View {
     /// on, and clicking `+` on the second repository re-opened the first.
     /// `sheet(item:)` presents a new value as a new presentation, so each `+`
     /// gets a view that has never chosen anything.
-    private struct NewWorkspaceIntent: Identifiable {
+    private struct NewWorktreeIntent: Identifiable {
         /// The project whose header was clicked, by display name — which is
         /// what the sidebar groups by and what the sheet matches on. Empty
         /// when the control named no project at all.
@@ -44,7 +44,7 @@ struct ContentView: View {
         var id: String { "\(host)\u{1}\(project)" }
     }
 
-    @State private var newWorkspace: NewWorkspaceIntent?
+    @State private var newWorktreeIntent: NewWorktreeIntent?
     /// Each worktree's change state, kept across selection changes: a review is
     /// a session, not a mode. Coming back to a worktree should still be showing
     /// the file you were reading.
@@ -72,18 +72,18 @@ struct ContentView: View {
     @StateObject private var taskSubmission = TaskSubmission()
     @AppStorage("tasks.lastProject") private var lastProject = ""
     /// The terminal that was open when the app last closed, as
-    /// `host/workspace/terminal`.
+    /// `host/worktree/terminal`.
     ///
     /// Reopening somewhere else is a small thing that costs a real one: the
     /// pane you were reading is the reason you came back, and finding it again
     /// means walking a sidebar you had already navigated once. The host is part
-    /// of the key now, same as `Selection`: a workspace id alone does not say
+    /// of the key now, same as `Selection`: a worktree id alone does not say
     /// which runner to look for it on, and it does not need to — full ids are
     /// unique per runner already — but resolving it needs the client, and the
     /// client is looked up by host.
     @AppStorage("fleet.lastTerminal") private var lastTerminal = ""
     @FocusState private var searchFocused: Bool
-    @State private var removeWorkspace: Workspace?
+    @State private var removeWorktree: Worktree?
     @State private var removeRepository: RepositoryToRemove?
     @State private var showResumeBranch = false
     @State private var showPalette = false
@@ -94,7 +94,7 @@ struct ContentView: View {
     @State private var resizingDivider = false
     /// Set when `setPaneMode` comes back `confirmationRequired` — a turn is in
     /// flight and switching would cancel it. Drives a sheet the same way
-    /// `removeWorkspace` does, rather than a banner: this refusal has an
+    /// `removeWorktree` does, rather than a banner: this refusal has an
     /// answer ("cancel it anyway?") a banner cannot offer.
     @State private var pendingPaneModeSwitch: PaneModeConfirmation?
     /// What an editor said when it would not start.
@@ -118,29 +118,29 @@ struct ContentView: View {
 
     /// What the detail pane is showing.
     ///
-    /// Carries the host alongside the id. A workspace's own id is a full
+    /// Carries the host alongside the id. A worktree's own id is a full
     /// per-daemon UUID and is not expected to collide across runners, but
-    /// resolving a selection means finding both the workspace AND the client
+    /// resolving a selection means finding both the worktree AND the client
     /// that owns it, and `FleetStore.client(for:)` — deliberately, see its own
     /// doc comment — never routes by id alone. Matching on host as well here
     /// keeps that same rule rather than leaning on id uniqueness as the only
     /// thing standing between a click and the right runner.
     enum Selection: Hashable {
-        case workspace(host: String, id: String)
-        case terminal(host: String, workspace: String, terminal: String)
+        case worktree(host: String, id: String)
+        case terminal(host: String, worktree: String, terminal: String)
         /// A repository's board, by the repository's uuid. The row above its
-        /// workspaces in the sidebar, and where ⇧⌘B goes.
+        /// worktrees in the sidebar, and where ⇧⌘B goes.
         case board(host: String, repository: String)
     }
 
     /// What confirming a pane-mode switch would do, and to which pane.
     struct PaneModeConfirmation: Identifiable {
         let id = UUID()
-        /// Which runner `terminal` is on — routing is by workspace, not by
+        /// Which runner `terminal` is on — routing is by worktree, not by
         /// the client that was current when the confirmation was raised,
         /// because by the time someone answers the sheet that may no longer
         /// be the same runner.
-        let workspace: Workspace
+        let worktree: Worktree
         let terminal: String
         let mode: String
         let message: String
@@ -160,14 +160,14 @@ struct ContentView: View {
                 // that would each need the failure channel threaded down to
                 // them. This is the one place that decides which worktree the
                 // window is showing, which is exactly what the control acts on.
-                .openInEditorToolbar(workspace: detailWorkspace) { editorError = $0 }
+                .openInEditorToolbar(worktree: detailWorktree) { editorError = $0 }
                 .toolbar {
                     // Not offered on a runner that has already said it cannot
                     // read changes at all. Its daemon predates the whole
                     // feature, so the split would open a pane running a
                     // subcommand that runner has never heard of — a dead pane
                     // where a diff was asked for, with nothing saying why.
-                    if let ws = detailWorkspace,
+                    if let ws = detailWorktree,
                         store.client(for: ws)?.changesSupported != false
                     {
                         ToolbarItem(placement: .primaryAction) {
@@ -185,7 +185,7 @@ struct ContentView: View {
                             .symbolVariant(changesPane(in: ws) == nil ? .none : .fill)
                             .help(
                                 changesPane(in: ws) == nil
-                                    ? "Show what this workspace changed, in a pane"
+                                    ? "Show what this worktree changed, in a pane"
                                     : "Close the changes pane")
                         }
                     }
@@ -236,8 +236,8 @@ struct ContentView: View {
         // quit, crashes, or is killed by a rebuild never gets a last word, and
         // this is exactly the state worth surviving all three.
         .onChange(of: selection) { _, now in
-            if case let .terminal(host, workspace, terminal) = now {
-                lastTerminal = "\(host)/\(workspace)/\(terminal)"
+            if case let .terminal(host, worktree, terminal) = now {
+                lastTerminal = "\(host)/\(worktree)/\(terminal)"
             }
         }
         // Tells the menu bar the main window is key, and whether an overlay
@@ -255,11 +255,11 @@ struct ContentView: View {
         .onChange(of: store.fleet) { old, _ in
             // One rule for every way a terminal can disappear: exiting on its
             // own, being closed here, being closed from a phone, or its
-            // workspace being hidden or removed. Hooking each path separately
+            // worktree being hidden or removed. Hooking each path separately
             // meant the common one — you press Ctrl-D in the terminal you are
             // looking at — left the selection pointing at something that no
             // longer existed.
-            healSelection(previous: old.workspaces)
+            healSelection(previous: old.worktrees)
             // An agent finishing under your nose is a fleet change and nothing
             // else — no click, no selection change — so this is the only hook
             // that can catch the case where you were already watching it.
@@ -298,15 +298,15 @@ struct ContentView: View {
             // layout you had used last. `⌘P` had the same fault for the same
             // reason: both set a selection and let the layout overrule it.
             if case .terminal(let host, let wsID, let termID) = new,
-                let workspace = workspace(host: host, id: wsID),
-                let c = store.client(for: workspace),
+                let worktree = worktree(host: host, id: wsID),
+                let c = store.client(for: worktree),
                 let holder = c.group(holding: termID, in: wsID),
                 let pane = holder.pane(termID),
                 !holder.isActive || !pane.focused
             {
                 Task {
-                    await act(on: workspace) { client in
-                        await client.focusPane(pane.short, in: workspace)
+                    await act(on: worktree) { client in
+                        await client.focusPane(pane.short, in: worktree)
                     }
                 }
             }
@@ -394,7 +394,7 @@ struct ContentView: View {
                         .ignoresSafeArea()
                         .onTapGesture { showPalette = false }
                     CommandPalette(
-                        workspaces: store.fleet.workspaces,
+                        worktrees: store.fleet.worktrees,
                         current: selection,
                         screen: { short in await screen(forTerminalShort: short) },
                         onRun: { perform($0) },
@@ -449,8 +449,8 @@ struct ContentView: View {
                 }
             )
         }
-        .sheet(item: $newWorkspace) { intent in
-            NewWorkspaceSheet(
+        .sheet(item: $newWorktreeIntent) { intent in
+            NewWorktreeSheet(
                 repositories: store.repositories,
                 preselected: intent.project,
                 // Both halves off the one intent, so they cannot disagree
@@ -472,21 +472,21 @@ struct ContentView: View {
                 guard let client = store.clients[host] else {
                     return "that runner is not connected"
                 }
-                let created = await client.createWorkspace(
+                let created = await client.createWorktree(
                     repo: repo, task: task, branch: branch, base: base)
                 if let failure = created.failure { return failure }
                 // Land in the terminal it came up with, exactly as starting a
                 // task does. Creating a worktree is not a filing act — you make
                 // one because you are about to work in it — and `reveal` is the
                 // one place that says what "go to it" means: expand the
-                // workspace in the sidebar, then select its terminal.
-                reveal(created.workspace)
+                // worktree in the sidebar, then select its terminal.
+                reveal(created.worktree)
                 return nil
             }
         }
-        .sheet(item: $removeWorkspace) { ws in
-            RemoveWorkspaceSheet(
-                workspace: ws,
+        .sheet(item: $removeWorktree) { ws in
+            RemoveWorktreeSheet(
+                worktree: ws,
                 // `Running | Starting`, matching what the daemon actually
                 // closes: a terminal mid-launch is as alive as one already
                 // confirmed. A count now rather than a flag — removal closes
@@ -510,7 +510,7 @@ struct ContentView: View {
                 // selection was still one of `ws`'s terminals, so if the fleet
                 // arrived first you kept wherever that had put you.
                 if case .ok = result {
-                    let without = store.fleet.workspaces.filter {
+                    let without = store.fleet.worktrees.filter {
                         !(($0.host ?? "") == (ws.host ?? "") && $0.id == ws.id)
                     }
                     let next = Self.healed(selection, in: without, was: [ws])
@@ -547,7 +547,7 @@ struct ContentView: View {
         .sheet(item: $pendingPaneModeSwitch) { pending in
             PaneModeConfirmSheet(message: pending.message) {
                 await act(
-                    on: pending.workspace, default: .failed("This runner can’t be reached right now.")
+                    on: pending.worktree, default: .failed("This runner can’t be reached right now.")
                 ) { c in
                     await c.setPaneMode(pending.terminal, mode: pending.mode, force: true)
                 }
@@ -578,8 +578,8 @@ struct ContentView: View {
     private struct ProjectGroup: Identifiable {
         let host: String
         let project: String
-        let shown: [Workspace]
-        let hidden: [Workspace]
+        let shown: [Worktree]
+        let hidden: [Worktree]
         var id: String { "\(host)\u{1}\(project)" }
     }
 
@@ -592,17 +592,17 @@ struct ContentView: View {
     }
 
     private var groups: [ProjectGroup] {
-        let visible = store.fleet.workspaces.filter { $0.matches(query) }
+        let visible = store.fleet.worktrees.filter { $0.matches(query) }
         var order: [String] = []
-        var byKey: [String: [Workspace]] = [:]
+        var byKey: [String: [Worktree]] = [:]
 
-        for workspace in visible {
-            let host = workspace.host ?? ""
-            let project = (workspace.repository ?? "").isEmpty
-                ? "Ungrouped" : workspace.repository!
+        for worktree in visible {
+            let host = worktree.host ?? ""
+            let project = (worktree.repository ?? "").isEmpty
+                ? "Ungrouped" : worktree.repository!
             let key = "\(host)\u{1}\(project)"
             if byKey[key] == nil { order.append(key) }
-            byKey[key, default: []].append(workspace)
+            byKey[key, default: []].append(worktree)
         }
 
         var result: [ProjectGroup] = order.map { key in
@@ -651,7 +651,7 @@ struct ContentView: View {
     /// detail than a bare header could say. Only a REMOTE runner that has
     /// contributed nothing gets one of these instead.
     private var silentHosts: [String] {
-        let present = Set(store.fleet.workspaces.map { $0.host ?? "" })
+        let present = Set(store.fleet.worktrees.map { $0.host ?? "" })
         return store.hosts.filter { !present.contains($0) && !$0.isEmpty }
     }
 
@@ -687,7 +687,7 @@ struct ContentView: View {
     /// The repository a project header's name and host actually stand for.
     ///
     /// `ProjectGroup.project` is a display name, not an id — see
-    /// `groups`'s own use of `workspace.repository` — so removing it needs
+    /// `groups`'s own use of `worktree.repository` — so removing it needs
     /// this lookup rather than something already in hand.
     private func repository(host: String, project: String) -> Repository? {
         store.repositories.first { $0.host == host && $0.repository.displayName == project }?
@@ -700,7 +700,7 @@ struct ContentView: View {
     /// advance, because someone clicking `+` on a project header has already
     /// said which one.
     private func newWorktree(host: String, project: String) {
-        newWorkspace = NewWorkspaceIntent(project: project, host: host)
+        newWorktreeIntent = NewWorktreeIntent(project: project, host: host)
     }
 
     /// A terminal in the repository's own checkout.
@@ -710,12 +710,12 @@ struct ContentView: View {
     /// asking the CLI to produce or locate it.
     private func newMainTerminal(host: String, project: String) async {
         guard
-            let workspace = store.fleet.workspaces.first(where: {
+            let worktree = store.fleet.worktrees.first(where: {
                 $0.isMainCheckout && $0.repository == project && ($0.host ?? "") == host
             })
         else { return }
-        await act(on: workspace) { client in
-            await client.createTerminal(workspace: workspace.short, preset: "shell", title: "")
+        await act(on: worktree) { client in
+            await client.createTerminal(worktree: worktree.short, preset: "shell", title: "")
             await client.refresh()
         }
     }
@@ -740,21 +740,21 @@ struct ContentView: View {
     /// call to a single client the whole of it.
     ///
     /// The runner is sent the group's WHOLE order, not "move this one" — see
-    /// `WorkspaceReorder` in the proto for why an index alone would be
+    /// `WorktreeReorder` in the proto for why an index alone would be
     /// meaningless against a list this has already filtered.
-    private func reorder(_ done: WorkspaceDrag.Completion) {
+    private func reorder(_ done: WorktreeDrag.Completion) {
         guard let group = groups.first(where: { g in g.shown.contains { $0.id == done.dragged } })
         else { return }
         let ids = group.shown.map(\.id)
-        let next = WorkspaceOrder.moved(ids, dragging: done.dragged, to: done.target, done.edge)
+        let next = WorktreeOrder.moved(ids, dragging: done.dragged, to: done.target, done.edge)
         // A drop that changes nothing costs no round trip. It is not free: a
         // reorder makes every other connected client re-read the fleet.
         guard next != ids, let anchor = group.shown.first else { return }
         let order = next.compactMap { id in group.shown.first { $0.id == id }?.short }
-        Task { await act(on: anchor) { client in await client.reorderWorkspaces(order) } }
+        Task { await act(on: anchor) { client in await client.reorderWorktrees(order) } }
     }
 
-    /// A repository's board row, above its workspaces — or nothing, for a
+    /// A repository's board row, above its worktrees — or nothing, for a
     /// group that is not a repository or a runner that has no board.
     ///
     /// Gated on `tasks`, the capability a board needs: on an older runner the
@@ -781,7 +781,7 @@ struct ContentView: View {
     /// task — or none while that runner is refused. See `BoardAgents.on`.
     private func boardAgents(host: String, client: DaemonClient) -> BoardAgents {
         BoardAgents.on(
-            store.fleet.workspaces.filter { ($0.host ?? "") == host },
+            store.fleet.worktrees.filter { ($0.host ?? "") == host },
             state: client.state, build: client.daemonBuild)
     }
 
@@ -799,17 +799,17 @@ struct ContentView: View {
     }
 
     /// Go to a pane a card offered, as the fleet has it now. See
-    /// `BoardPane.landing`: its workspace when the pane has gone, and the
-    /// board with a sentence when the workspace has too.
+    /// `BoardPane.landing`: its worktree when the pane has gone, and the
+    /// board with a sentence when the worktree has too.
     private func go(to pane: BoardPane) {
-        switch BoardPane.landing(for: pane, in: store.fleet.workspaces) {
-        case .terminal(let host, let workspace, let terminal):
-            expanded.insert(workspace)
-            selection = .terminal(host: host, workspace: workspace, terminal: terminal)
+        switch BoardPane.landing(for: pane, in: store.fleet.worktrees) {
+        case .terminal(let host, let worktree, let terminal):
+            expanded.insert(worktree)
+            selection = .terminal(host: host, worktree: worktree, terminal: terminal)
         case let landed?:
             selection = landed
         case nil:
-            errorBanner = "That agent has closed, and its workspace is gone."
+            errorBanner = "That agent has closed, and its worktree is gone."
         }
     }
 
@@ -822,7 +822,7 @@ struct ContentView: View {
     @ViewBuilder
     private func projectRows(_ group: ProjectGroup, key: String, usable: Bool) -> some View {
         ForEach(group.shown) { ws in
-            workspaceRow(ws, usable: usable)
+            worktreeRow(ws, usable: usable)
         }
         if !group.hidden.isEmpty {
             HiddenWorktrees(
@@ -837,7 +837,7 @@ struct ContentView: View {
                     }
                 },
                 onUnhide: { ws in
-                    Task { await act(on: ws) { c in await c.unhideWorkspace(ws.short) } }
+                    Task { await act(on: ws) { c in await c.unhideWorktree(ws.short) } }
                 }
             )
         }
@@ -848,11 +848,11 @@ struct ContentView: View {
             sidebarHeader
             searchField
 
-            // Gated on `groups`, not the raw merged workspace count: a
-            // runner that has never connected contributes no workspaces but
+            // Gated on `groups`, not the raw merged worktree count: a
+            // runner that has never connected contributes no worktrees but
             // still gets a `silentHosts` header in `groups` (unless it's the
             // local runner, which has its own placeholder below). Gating on
-            // `workspaces.isEmpty` instead used to short-circuit straight to
+            // `worktrees.isEmpty` instead used to short-circuit straight to
             // the LOCAL runner's empty state whenever the merged fleet had
             // no rows — even with a remote runner configured and its header
             // sitting in `groups` right below — making that remote runner
@@ -930,7 +930,7 @@ struct ContentView: View {
         // A finished drag, published by the row that took the drop. The row
         // says only that a card landed on another card's top or bottom edge;
         // what that MEANS needs the whole project group, which is here.
-        .onReceive(WorkspaceDrag.shared.$completion.compactMap { $0 }) { reorder($0) }
+        .onReceive(WorktreeDrag.shared.$completion.compactMap { $0 }) { reorder($0) }
         // Declared in exactly one place. A second declaration on the
         // `NavigationSplitView`'s sidebar closure made which width the column
         // settled on nondeterministic, and the window drifted with it.
@@ -948,7 +948,7 @@ struct ContentView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
-            TextField("Search workspaces and agents", text: $query)
+            TextField("Search worktrees and agents", text: $query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12.5))
                 .focused($searchFocused)
@@ -987,14 +987,14 @@ struct ContentView: View {
     /// hosts: an agent blocked on a runner in another room is exactly as
     /// urgent as one on this desk.
     private var attentionWaiting: [Status] {
-        store.fleet.workspaces.flatMap(\.terminals).map(\.status).filter(\.wantsAttention)
+        store.fleet.worktrees.flatMap(\.terminals).map(\.status).filter(\.wantsAttention)
     }
 
     private var sidebarHeader: some View {
         SidebarRow {
             HStack(spacing: 8) {
             // Just the word, now. It used to be the one runner being driven,
-            // because the sidebar was that runner's workspaces and the pane
+            // because the sidebar was that runner's worktrees and the pane
             // could not otherwise say whose. Now it is every runner's at
             // once, and each row already names its own runner below, so a
             // header naming one would be naming the wrong thing, or picking
@@ -1022,14 +1022,14 @@ struct ContentView: View {
             }
             // A menu rather than a button, because "add a repository" has to be
             // reachable at all times. It used to live only in the empty state,
-            // so once you had one workspace there was no way to add a second
+            // so once you had one worktree there was no way to add a second
             // repository without dropping to the terminal.
             SidebarMenuButton(
                 systemImage: "plus",
-                help: "Add a workspace, a repository, or a runner",
+                help: "Add a worktree, a repository, or a runner",
                 items: [
-                    SidebarMenuItem(title: "New Workspace…") {
-                        newWorkspace = NewWorkspaceIntent()
+                    SidebarMenuItem(title: "New Worktree…") {
+                        newWorktreeIntent = NewWorktreeIntent()
                     },
                     SidebarMenuItem(title: "Add Repository…") { showAddRepository = true },
                     // Here as well as in the picker, because this is the menu
@@ -1052,7 +1052,7 @@ struct ContentView: View {
 
     /// Shown only once a fleet has actually been read.
     ///
-    /// Telling someone they have no workspaces when the truth is that we could
+    /// Telling someone they have no worktrees when the truth is that we could
     /// not read them is worse than saying nothing, because it sends them to
     /// create one they already have.
     ///
@@ -1112,8 +1112,8 @@ struct ContentView: View {
             Image(systemName: "rectangle.stack")
                 .font(.system(size: 26))
                 .foregroundStyle(.tertiary)
-            Text("No workspaces").font(.callout.weight(.medium))
-            Text("A workspace is a worktree and branch of its own.")
+            Text("No worktrees").font(.callout.weight(.medium))
+            Text("A worktree is a directory and branch of its own.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -1125,8 +1125,8 @@ struct ContentView: View {
                     .multilineTextAlignment(.center)
                 Button("Add Repository…") { showAddRepository = true }.padding(.top, 4)
             } else {
-                Button("New Workspace") {
-                    newWorkspace = NewWorkspaceIntent()
+                Button("New Worktree…") {
+                    newWorktreeIntent = NewWorktreeIntent()
                 }.padding(.top, 4)
             }
         }
@@ -1159,7 +1159,7 @@ struct ContentView: View {
                 // changing it inside an amber sweep. Three arguments, and they
                 // agree. Green in this palette is `Status.done` and nothing
                 // else: `StatusGlyph` says so outright, `150eb0f` took it back
-                // off `WorkspaceDot`, and a permanent green at the foot of the
+                // off `WorktreeDot`, and a permanent green at the foot of the
                 // window is the one place a person looks for finished agents.
                 // `HostDot` states the principle a few hundred lines away —
                 // "a dot that is always there is a dot nobody reads, and the
@@ -1321,22 +1321,22 @@ struct ContentView: View {
     /// type checker's budget — adding one more parameter to it pushed the whole
     /// enclosing expression past "unable to type-check in reasonable time",
     /// which is a compile error with no line number worth reading.
-    private func workspaceRow(_ ws: Workspace, usable: Bool) -> some View {
+    private func worktreeRow(_ ws: Worktree, usable: Bool) -> some View {
         let client = store.client(for: ws)
         let tiled = Set(client?.activeGroup(ws.id)?.terminals ?? [])
-        return WorkspaceSection(
-            workspace: ws,
+        return WorktreeSection(
+            worktree: ws,
             isExpanded: expanded.contains(ws.id),
             selection: $selection,
             onToggle: { toggle(ws.id) },
             onNewTerminal: { newTerminal(in: ws) },
             onHide: {
-                Task { await act(on: ws) { c in await c.hideWorkspace(ws.short) } }
+                Task { await act(on: ws) { c in await c.hideWorktree(ws.short) } }
             },
             onUnhide: {
-                Task { await act(on: ws) { c in await c.unhideWorkspace(ws.short) } }
+                Task { await act(on: ws) { c in await c.unhideWorktree(ws.short) } }
             },
-            onRemove: { removeWorkspace = ws },
+            onRemove: { removeWorktree = ws },
             onTerminalAction: { term, action in
                 Task { await run(action, on: term, in: ws) }
             },
@@ -1350,7 +1350,7 @@ struct ContentView: View {
             tiled: tiled,
             onEditorError: { editorError = $0 },
             usable: usable,
-            reorderable: WorkspaceDrag.offersDrag(usable: usable, runner: client?.daemonBuild),
+            reorderable: WorktreeDrag.offersDrag(usable: usable, runner: client?.daemonBuild),
             changes: changesStatus(ws),
             countsWidth: countsWidth
         )
@@ -1371,19 +1371,19 @@ struct ContentView: View {
     /// Diff status for one worktree, or nil when the fleet inbox has not been
     /// read yet. Hoisted out of the sidebar builder: inline, the chained
     /// optional subscript pushed that expression past the type checker's budget.
-    private func changesStatus(_ ws: Workspace) -> InboxRow? {
+    private func changesStatus(_ ws: Worktree) -> InboxRow? {
         guard let client = store.client(for: ws) else { return nil }
         return client.changesInbox[ws.short]
     }
 
     /// This worktree's changes pane, if it has one open.
     ///
-    /// Asked of the ACTIVE layout rather than of the workspace's terminals,
+    /// Asked of the ACTIVE layout rather than of the worktree's terminals,
     /// because that is the question the toolbar button is answering: whether
     /// the arrangement you are looking at is showing the diff. A changes pane
     /// in a layout two tabs over is not on screen, and offering to close it
     /// from here would close something the window is not showing.
-    private func changesPane(in ws: Workspace) -> Terminal? {
+    private func changesPane(in ws: Worktree) -> Terminal? {
         guard let group = store.client(for: ws)?.activeGroup(ws.id) else { return nil }
         let inGroup = Set(group.panes.map(\.id))
         return ws.terminals.first { inGroup.contains($0.id) && $0.isChangesPane }
@@ -1396,7 +1396,7 @@ struct ContentView: View {
     /// are: the daemon has one verb for "a new pane, here, running this", and a
     /// changes pane is that verb with a different preset. Nothing new had to be
     /// taught about layouts to put a diff into one.
-    private func toggleChangesPane(in ws: Workspace) {
+    private func toggleChangesPane(in ws: Worktree) {
         if let open = changesPane(in: ws) {
             // Killing the pane is the whole of it. The record goes with it, but
             // the daemon does that — closing a diff from tmux's own `⌃B x` has
@@ -1462,10 +1462,10 @@ struct ContentView: View {
     /// exactly like a repository with somebody else's work on it.
     ///
     /// Matched by display name, because that is what the CLI puts on a
-    /// workspace — see `Workspace.repository`, which carries the name here and
+    /// worktree — see `Worktree.repository`, which carries the name here and
     /// a uuid on the phone.
     private var boardTarget: (host: String, repository: Repository, client: DaemonClient)? {
-        if let ws = currentWorkspace, let client = store.client(for: ws),
+        if let ws = currentWorktree, let client = store.client(for: ws),
             let name = ws.repository,
             let match = client.repositories.first(where: { $0.displayName == name })
         {
@@ -1484,9 +1484,9 @@ struct ContentView: View {
     /// `DaemonClient` when its runner leaves and builds a fresh one when it
     /// comes back, and a store held over from the old one would go on talking to
     /// a connection nobody is answering.
-    private func changesStore(for ws: Workspace, client: DaemonClient) -> ChangesStore {
+    private func changesStore(for ws: Worktree, client: DaemonClient) -> ChangesStore {
         if let existing = changesStores[ws.id], existing.client === client { return existing }
-        let made = ChangesStore(client: client, workspace: ws)
+        let made = ChangesStore(client: client, worktree: ws)
         // Assigned outside the view update, because creating it IS a state
         // change and SwiftUI is reading that state right now. An earlier version
         // wrote it from a Task, which rebuilt the store on every render and threw
@@ -1520,17 +1520,17 @@ struct ContentView: View {
             // layout you left active, so the pane on screen was another
             // terminal's, drawn live and indistinguishable from the one asked
             // for. Measured at 123ms and 269ms of that on a quiet local runner.
-            if let ws = workspace(host: host, id: wsID),
+            if let ws = worktree(host: host, id: wsID),
                 let c = store.client(for: ws),
                 let group = c.group(holding: termID, in: wsID)
             {
                 tiled(ws, client: c, group: group)
-            } else if let ws = workspace(host: host, id: wsID),
+            } else if let ws = worktree(host: host, id: wsID),
                 let term = ws.terminals.first(where: { $0.id == termID })
             {
                 TerminalPane(
                     terminal: term,
-                    workspace: ws,
+                    worktree: ws,
                     binary: store.client(for: ws)?.cliPath,
                     environment: store.client(for: ws)?.cliEnvironment ?? [:],
                     hostArguments: store.client(for: ws)?.cliHostArguments ?? [],
@@ -1556,26 +1556,26 @@ struct ContentView: View {
                 placeholder
             }
 
-        case .workspace(let host, let wsID):
+        case .worktree(let host, let wsID):
             // A worktree with a layout shows the layout. The card list was the
-            // right answer when a workspace had no arrangement of its own; once
+            // right answer when a worktree had no arrangement of its own; once
             // it does, showing a summary of the panes instead of the panes is a
             // click in the way.
-            if let ws = workspace(host: host, id: wsID),
+            if let ws = worktree(host: host, id: wsID),
                 let c = store.client(for: ws),
                 let group = c.activeGroup(wsID),
                 !group.terminals.isEmpty
             {
                 tiled(ws, client: c, group: group)
-            } else if let ws = workspace(host: host, id: wsID) {
-                WorkspaceDetail(
-                    workspace: ws,
+            } else if let ws = worktree(host: host, id: wsID) {
+                WorktreeDetail(
+                    worktree: ws,
                     onNewTerminal: { newTerminal(in: ws) },
-                    onHide: { Task { await act(on: ws) { c in await c.hideWorkspace(ws.short) } } },
-                    onUnhide: { Task { await act(on: ws) { c in await c.unhideWorkspace(ws.short) } } },
-                    onRemove: { removeWorkspace = ws },
+                    onHide: { Task { await act(on: ws) { c in await c.hideWorktree(ws.short) } } },
+                    onUnhide: { Task { await act(on: ws) { c in await c.unhideWorktree(ws.short) } } },
+                    onRemove: { removeWorktree = ws },
                     onOpenTerminal: { t in
-                        selection = .terminal(host: host, workspace: ws.id, terminal: t.id)
+                        selection = .terminal(host: host, worktree: ws.id, terminal: t.id)
                     }
                 )
             } else {
@@ -1595,7 +1595,7 @@ struct ContentView: View {
                 .navigationTitle(repository.displayName)
                 .navigationSubtitle("Board")
             } else {
-                // Said, rather than the generic "Select a workspace": this
+                // Said, rather than the generic "Select a worktree": this
                 // was a board, and the reader should know where it went.
                 ContentUnavailableView {
                     Label("This board isn’t here", systemImage: "checklist")
@@ -1616,11 +1616,11 @@ struct ContentView: View {
     /// and while they were written out twice they drifted: the drag handler was
     /// fixed in one copy and not the other, so dropping a pane behaved differently
     /// depending on which sidebar row you had clicked last.
-    private func tiled(_ ws: Workspace, client: DaemonClient, group: PaneGroup) -> some View {
+    private func tiled(_ ws: Worktree, client: DaemonClient, group: PaneGroup) -> some View {
         TileView(
             groups: client.layouts[ws.id] ?? [group],
             showing: group.id,
-            workspace: ws,
+            worktree: ws,
             changes: changesStore(for: ws, client: client),
             binary: store.client(for: ws)?.cliPath,
             environment: store.client(for: ws)?.cliEnvironment ?? [:],
@@ -1628,7 +1628,7 @@ struct ContentView: View {
             linkGeneration: store.client(for: ws)?.linkGeneration ?? 0,
             refusal: { store.refusal(for: ws) },
             onFocus: { id in
-                selection = .terminal(host: ws.host ?? "", workspace: ws.id, terminal: id)
+                selection = .terminal(host: ws.host ?? "", worktree: ws.id, terminal: id)
                 guard let pane = store.client(for: ws)?.group(holding: id, in: ws.id)?.pane(id)
                 else { return }
                 Task { await act(on: ws) { c in await c.focusPane(pane.short, in: ws) } }
@@ -1661,13 +1661,13 @@ struct ContentView: View {
 
     private var placeholder: some View {
         ContentUnavailableView {
-            Label("Select a workspace", systemImage: "rectangle.split.3x1")
+            Label("Select a worktree", systemImage: "rectangle.split.3x1")
         } description: {
-            Text("Each workspace is a worktree and branch of its own.")
+            Text("Each worktree is a directory and branch of its own.")
         } actions: {
             if !store.repositories.isEmpty {
-                Button("New Workspace") {
-                    newWorkspace = NewWorkspaceIntent()
+                Button("New Worktree…") {
+                    newWorktreeIntent = NewWorktreeIntent()
                 }
             }
         }
@@ -1676,8 +1676,8 @@ struct ContentView: View {
     // MARK: - Routing
 
     /// A repository to default the project picker to, when nothing was
-    /// chosen yet — the empty state's "New Workspace" button, the sidebar's
-    /// own `+`, and the palette's "New Workspace" all reach this with no project
+    /// chosen yet — the empty state's "New Worktree…" button, the sidebar's
+    /// own `+`, and the palette's "New Worktree…" all reach this with no project
     /// and therefore no host in hand at all, which is the one case where a
     /// default runner is legitimate rather than the picker again in
     /// disguise. This Mac's own repositories come first: it is the runner
@@ -1689,7 +1689,7 @@ struct ContentView: View {
             ?? store.repositories.first?.repository.id
     }
 
-    /// Route a mutation to the runner a workspace is on, refusing it first.
+    /// Route a mutation to the runner a worktree is on, refusing it first.
     ///
     /// Checked here rather than at each call site — see `FleetStore.refusal(for:)`
     /// for why. On refusal, `fallback` is handed back and nothing is called; on
@@ -1698,7 +1698,7 @@ struct ContentView: View {
     /// reaches the banner.
     @discardableResult
     private func act<T>(
-        on ws: Workspace, default fallback: T, _ body: (DaemonClient) async -> T
+        on ws: Worktree, default fallback: T, _ body: (DaemonClient) async -> T
     ) async -> T {
         if let why = store.refusal(for: ws) {
             errorBanner = "Cannot do that: \(why)"
@@ -1710,7 +1710,7 @@ struct ContentView: View {
         return result
     }
 
-    private func act(on ws: Workspace, _ body: (DaemonClient) async -> Void) async {
+    private func act(on ws: Worktree, _ body: (DaemonClient) async -> Void) async {
         await act(on: ws, default: ()) { client in await body(client) }
     }
 
@@ -1728,7 +1728,7 @@ struct ContentView: View {
     private func screen(forTerminalShort short: String) async -> String {
         for host in store.hosts {
             guard let client = store.clients[host] else { continue }
-            if client.fleet.workspaces.contains(where: { $0.terminals.contains { $0.short == short } }) {
+            if client.fleet.worktrees.contains(where: { $0.terminals.contains { $0.short == short } }) {
                 return await client.screen(terminal: short)
             }
         }
@@ -1737,16 +1737,16 @@ struct ContentView: View {
 
     // MARK: - Behavior
 
-    private func run(_ action: TerminalAction, on term: Terminal, in workspace: Workspace) async {
+    private func run(_ action: TerminalAction, on term: Terminal, in worktree: Worktree) async {
         switch action {
-        case .restart: await act(on: workspace) { c in await c.restart(terminal: term.short) }
-        case .dismissLost: await act(on: workspace) { c in await c.dismissLost(term) }
-        case .stop: await act(on: workspace) { c in await c.stop(terminal: term.short) }
+        case .restart: await act(on: worktree) { c in await c.restart(terminal: term.short) }
+        case .dismissLost: await act(on: worktree) { c in await c.dismissLost(term) }
+        case .stop: await act(on: worktree) { c in await c.stop(terminal: term.short) }
         }
     }
 
-    private func workspace(host: String, id: String) -> Workspace? {
-        store.fleet.workspaces.first { ($0.host ?? "") == host && $0.id == id }
+    private func worktree(host: String, id: String) -> Worktree? {
+        store.fleet.worktrees.first { ($0.host ?? "") == host && $0.id == id }
     }
 
     private func toggle(_ id: String) {
@@ -1774,32 +1774,32 @@ struct ContentView: View {
             .split(separator: "/", maxSplits: 2, omittingEmptySubsequences: false)
             .map(String.init)
         if saved.count == 3,
-            let ws = store.fleet.workspaces.first(where: {
+            let ws = store.fleet.worktrees.first(where: {
                 ($0.host ?? "") == saved[0] && $0.id == saved[1]
             }),
             ws.terminals.contains(where: { $0.id == saved[2] })
         {
             expanded.insert(ws.id)
-            selection = .terminal(host: saved[0], workspace: ws.id, terminal: saved[2])
+            selection = .terminal(host: saved[0], worktree: ws.id, terminal: saved[2])
             return
         }
 
-        for ws in store.fleet.workspaces {
+        for ws in store.fleet.worktrees {
             if let t = ws.terminals.first(where: { $0.status.wantsAttention }) {
                 expanded.insert(ws.id)
-                selection = .terminal(host: ws.host ?? "", workspace: ws.id, terminal: t.id)
+                selection = .terminal(host: ws.host ?? "", worktree: ws.id, terminal: t.id)
                 return
             }
         }
-        for ws in store.fleet.workspaces {
+        for ws in store.fleet.worktrees {
             if let t = ws.terminals.first(where: { StateKind.parse($0.state) == .running }) {
                 expanded.insert(ws.id)
-                selection = .terminal(host: ws.host ?? "", workspace: ws.id, terminal: t.id)
+                selection = .terminal(host: ws.host ?? "", worktree: ws.id, terminal: t.id)
                 return
             }
         }
-        if let ws = store.fleet.workspaces.first {
-            selection = .workspace(host: ws.host ?? "", id: ws.id)
+        if let ws = store.fleet.worktrees.first {
+            selection = .worktree(host: ws.host ?? "", id: ws.id)
         }
     }
 
@@ -1810,17 +1810,17 @@ struct ContentView: View {
     /// One definition, so ⌘1 and a click select the same thing and ⌘] walks the
     /// list a user can actually see.
     private var allTerminals: [Terminal] {
-        store.fleet.workspaces.flatMap(\.terminals)
+        store.fleet.worktrees.flatMap(\.terminals)
     }
 
-    private var selectedTerminal: (workspace: Workspace, terminal: Terminal)? {
-        guard case .terminal(let host, let workspaceID, let terminalID) = selection,
-            let workspace = store.fleet.workspaces.first(where: {
-                ($0.host ?? "") == host && $0.id == workspaceID
+    private var selectedTerminal: (worktree: Worktree, terminal: Terminal)? {
+        guard case .terminal(let host, let worktreeID, let terminalID) = selection,
+            let worktree = store.fleet.worktrees.first(where: {
+                ($0.host ?? "") == host && $0.id == worktreeID
             }),
-            let terminal = workspace.terminals.first(where: { $0.id == terminalID })
+            let terminal = worktree.terminals.first(where: { $0.id == terminalID })
         else { return nil }
-        return (workspace, terminal)
+        return (worktree, terminal)
     }
 
     // MARK: - Attention
@@ -1838,18 +1838,18 @@ struct ContentView: View {
     /// mistake worse than the bug it fixes.
     private var visibleTerminals: [Terminal] {
         switch selection {
-        case .terminal(let host, let workspaceID, let terminalID):
-            guard let ws = workspace(host: host, id: workspaceID) else { return [] }
-            if let c = store.client(for: ws), c.group(holding: terminalID, in: workspaceID) != nil,
-                let group = c.activeGroup(workspaceID)
+        case .terminal(let host, let worktreeID, let terminalID):
+            guard let ws = worktree(host: host, id: worktreeID) else { return [] }
+            if let c = store.client(for: ws), c.group(holding: terminalID, in: worktreeID) != nil,
+                let group = c.activeGroup(worktreeID)
             {
                 return ws.terminals.filter { group.terminals.contains($0.id) }
             }
             return ws.terminals.filter { $0.id == terminalID }
 
-        case .workspace(let host, let workspaceID):
-            guard let ws = workspace(host: host, id: workspaceID),
-                let group = store.client(for: ws)?.activeGroup(workspaceID),
+        case .worktree(let host, let worktreeID):
+            guard let ws = worktree(host: host, id: worktreeID),
+                let group = store.client(for: ws)?.activeGroup(worktreeID),
                 !group.terminals.isEmpty
             else { return [] }
             return ws.terminals.filter { group.terminals.contains($0.id) }
@@ -1900,13 +1900,13 @@ struct ContentView: View {
     /// answer is the point.
     private func markVisibleSeen() {
         guard NSApp.isActive else { return }
-        let client = detailWorkspace.flatMap { store.client(for: $0) }
+        let client = detailWorktree.flatMap { store.client(for: $0) }
         // Full ids, not `short`: resolving an abbreviation costs the CLI a
         // fleet listing, and this runs on a clock. See the `Watching` command
         // in `crates/cli/src/main.rs`.
         client?.reportWatching(visibleTerminals.map(\.id))
         // And every OTHER runner is told it is showing nothing. A window puts
-        // exactly one runner's workspace in the detail pane, so switching from a
+        // exactly one runner's worktree in the detail pane, so switching from a
         // pane on one runner to a pane on another would otherwise leave the
         // first still believing its pane is being watched — silent for as long
         // as the claim takes to age out, on the runner you just walked away
@@ -1923,12 +1923,12 @@ struct ContentView: View {
 
     // MARK: - Tiling
 
-    /// The workspace a tiling keystroke acts on.
-    private var tileTarget: Workspace? { currentWorkspace }
+    /// The worktree a tiling keystroke acts on.
+    private var tileTarget: Worktree? { currentWorktree }
 
     /// Carry out a `⌃B`-prefixed command.
     ///
-    /// Every one of them is a single `layout` call whose reply is the workspace's
+    /// Every one of them is a single `layout` call whose reply is the worktree's
     /// whole layout, so there is nothing to reconcile here: tmux decides what a
     /// zoom or a split means, and it decides the same way for this app, for the
     /// CLI and for an agent driving the CLI.
@@ -1937,8 +1937,8 @@ struct ContentView: View {
     /// worked out here from a recomputed arrangement; it is now read off the
     /// rectangles tmux reported, which is the only copy.
     private func tile(_ command: TileCommand) async {
-        guard let workspace = tileTarget else { return }
-        let group = store.client(for: workspace)?.activeGroup(workspace.id)
+        guard let worktree = tileTarget else { return }
+        let group = store.client(for: worktree)?.activeGroup(worktree.id)
         /// The pane a keystroke acts on: the selected one, else whatever tmux says
         /// is focused.
         let here: PaneRect? = {
@@ -1948,27 +1948,27 @@ struct ContentView: View {
 
         switch command {
         case .zoom:
-            await act(on: workspace) { c in await c.zoomPane(nil, in: workspace) }
+            await act(on: worktree) { c in await c.zoomPane(nil, in: worktree) }
 
         case .focusNext:
-            await act(on: workspace) { c in await c.focusPane(step: "--next", in: workspace) }
+            await act(on: worktree) { c in await c.focusPane(step: "--next", in: worktree) }
         case .focusPrevious:
-            await act(on: workspace) { c in await c.focusPane(step: "--prev", in: workspace) }
+            await act(on: worktree) { c in await c.focusPane(step: "--prev", in: worktree) }
 
         case .focus(let direction):
             guard let group, let from = here,
                 let next = group.neighbour(of: from.id, direction)
             else { return }
-            await act(on: workspace) { c in await c.focusPane(next.short, in: workspace) }
+            await act(on: worktree) { c in await c.focusPane(next.short, in: worktree) }
 
         case .focusIndex(let n):
-            await act(on: workspace) { c in await c.focusPane(number: n, in: workspace) }
+            await act(on: worktree) { c in await c.focusPane(number: n, in: worktree) }
 
         case .cycle:
-            await act(on: workspace) { c in await c.cycleLayout(workspace) }
+            await act(on: worktree) { c in await c.cycleLayout(worktree) }
 
         case .preset(let preset):
-            await act(on: workspace) { c in await c.applyPreset(preset, in: workspace) }
+            await act(on: worktree) { c in await c.applyPreset(preset, in: worktree) }
 
         case .evenPanes:
             // Which even arrangement, read off the panes rather than asked for.
@@ -1978,11 +1978,11 @@ struct ContentView: View {
             // becomes a row of three. So this counts how the window is already
             // split, the same way `TileView.Viewport` does, and hands back the
             // even version of the shape that is on screen.
-            let group = store.client(for: workspace)?.activeGroup(workspace.id)
+            let group = store.client(for: worktree)?.activeGroup(worktree.id)
             let columns = Set(group?.panes.map(\.left) ?? []).count
             let rows = Set(group?.panes.map(\.top) ?? []).count
             let preset: TilePreset = columns >= rows ? .evenHorizontal : .evenVertical
-            await act(on: workspace) { c in await c.applyPreset(preset, in: workspace) }
+            await act(on: worktree) { c in await c.applyPreset(preset, in: worktree) }
 
         case .splitRight, .splitDown:
             // One call. It used to be create-then-join-then-apply-a-preset, three
@@ -1991,18 +1991,18 @@ struct ContentView: View {
             // four rebuilt the other three as well. `layout split` splits the pane
             // you name, on the side you name, and leaves the rest alone.
             let side: TileDirection = command == .splitRight ? .right : .bottom
-            let groups = await act(on: workspace, default: []) { c in
-                await c.split(workspace, beside: here?.short, side: side)
+            let groups = await act(on: worktree, default: []) { c in
+                await c.split(worktree, beside: here?.short, side: side)
             }
             // Land in the pane that was just made, which is the one tmux focuses.
-            reveal(groups, in: workspace)
+            reveal(groups, in: worktree)
 
         case .breakPane:
             guard let here else { return }
-            let groups = await act(on: workspace, default: []) { c in
-                await c.breakPane(here.short, in: workspace)
+            let groups = await act(on: worktree, default: []) { c in
+                await c.breakPane(here.short, in: worktree)
             }
-            reveal(groups, in: workspace, preferring: here.id)
+            reveal(groups, in: worktree, preferring: here.id)
 
         case .closePane:
             // tmux's `x`, and it means the same thing: the pane's process ends.
@@ -2011,22 +2011,22 @@ struct ContentView: View {
             run(.closeTerminal)
 
         case .newGroup:
-            await openTerminalInNewLayout(workspace)
+            await openTerminalInNewLayout(worktree)
 
         case .nextGroup:
             // Landing in the new layout is the point of switching to it. Without
             // this the selection stayed on a pane from the OLD layout, which the
             // detail view then showed on its own — so ⌃B n looked like it opened a
             // random terminal and came back.
-            let groups = await act(on: workspace, default: []) { c in
-                await c.selectLayout("--next", in: workspace)
+            let groups = await act(on: worktree, default: []) { c in
+                await c.selectLayout("--next", in: worktree)
             }
-            reveal(groups, in: workspace)
+            reveal(groups, in: worktree)
         case .previousGroup:
-            let groups = await act(on: workspace, default: []) { c in
-                await c.selectLayout("--prev", in: workspace)
+            let groups = await act(on: worktree, default: []) { c in
+                await c.selectLayout("--prev", in: worktree)
             }
-            reveal(groups, in: workspace)
+            reveal(groups, in: worktree)
 
         case .toggleAgentPane:
             // Falls back to the plain selection when there is no tmux group
@@ -2034,7 +2034,7 @@ struct ContentView: View {
             // the first `layout show` has come back, where `here` is nil but
             // a terminal is still very much selected.
             let target =
-                here.flatMap { rect in workspace.terminals.first { $0.id == rect.id } }
+                here.flatMap { rect in worktree.terminals.first { $0.id == rect.id } }
                 ?? selectedTerminal?.terminal
                 // Selecting a LAYOUT TAB is not selecting a terminal, and a
                 // cached layout does not always mark a pane focused — so both
@@ -2042,7 +2042,7 @@ struct ContentView: View {
                 // and the command silently did nothing at all. A layout with
                 // one pane has no ambiguity about which pane is meant.
                 ?? group?.panes.first.flatMap { pane in
-                    workspace.terminals.first { $0.id == pane.id }
+                    worktree.terminals.first { $0.id == pane.id }
                 }
             guard let target else {
                 // Never silent. A keystroke that does nothing and says nothing
@@ -2071,7 +2071,7 @@ struct ContentView: View {
                 }
                 return
             }
-            await togglePaneMode(target, in: workspace)
+            await togglePaneMode(target, in: worktree)
 
         case .help:
             showShortcuts = true
@@ -2083,9 +2083,9 @@ struct ContentView: View {
     /// One call, and the daemon is the one deciding whether that is even
     /// possible — a client guessing "this preset can't be an agent" would be
     /// exactly the kind of state the design says clients never derive.
-    private func togglePaneMode(_ terminal: Terminal, in workspace: Workspace) async {
+    private func togglePaneMode(_ terminal: Terminal, in worktree: Worktree) async {
         let target = terminal.isAgentPane ? "terminal" : "agent"
-        let result = await act(on: workspace, default: DaemonClient.PaneModeResult.ok) { c in
+        let result = await act(on: worktree, default: DaemonClient.PaneModeResult.ok) { c in
             await c.setPaneMode(terminal.short, mode: target)
         }
         switch result {
@@ -2095,7 +2095,7 @@ struct ContentView: View {
             break
         case let .confirmationRequired(message):
             pendingPaneModeSwitch = PaneModeConfirmation(
-                workspace: workspace, terminal: terminal.short, mode: target, message: message)
+                worktree: worktree, terminal: terminal.short, mode: target, message: message)
         }
     }
 
@@ -2106,19 +2106,19 @@ struct ContentView: View {
     /// half an instruction — tmux has to be told which pane and which edge, and the
     /// menu has no way to ask. Dragging is how you say the other half, and the drop
     /// indicator is why that is easier than answering a dialog about it.
-    private func moveToLayout(_ terminal: Terminal, in workspace: Workspace, group: PaneGroup?) {
+    private func moveToLayout(_ terminal: Terminal, in worktree: Worktree, group: PaneGroup?) {
         Task {
             let groups: [PaneGroup]
             if let group, let onto = group.panes.first(where: \.focused) ?? group.panes.first {
-                groups = await act(on: workspace, default: []) { c in
-                    await c.movePane(terminal.short, onto: onto.short, side: .right, in: workspace)
+                groups = await act(on: worktree, default: []) { c in
+                    await c.movePane(terminal.short, onto: onto.short, side: .right, in: worktree)
                 }
             } else {
-                groups = await act(on: workspace, default: []) { c in
-                    await c.breakPane(terminal.short, in: workspace)
+                groups = await act(on: worktree, default: []) { c in
+                    await c.breakPane(terminal.short, in: worktree)
                 }
             }
-            reveal(groups, in: workspace, preferring: terminal.id)
+            reveal(groups, in: worktree, preferring: terminal.id)
         }
     }
 
@@ -2146,18 +2146,18 @@ struct ContentView: View {
     /// at a fraction of its speed.
     @discardableResult
     private func resizeDivider(
-        _ terminal: String, side: TileDirection, cells: Int, in workspace: Workspace
+        _ terminal: String, side: TileDirection, cells: Int, in worktree: Worktree
     ) -> Bool {
         guard cells != 0, !resizingDivider else { return false }
-        guard let pane = store.client(for: workspace)?.group(holding: terminal, in: workspace.id)?
+        guard let pane = store.client(for: worktree)?.group(holding: terminal, in: worktree.id)?
             .pane(terminal)
         else {
             return false
         }
         resizingDivider = true
         Task {
-            await act(on: workspace) { c in
-                await c.resizePane(pane.short, side: side, cells: cells, in: workspace)
+            await act(on: worktree) { c in
+                await c.resizePane(pane.short, side: side, cells: cells, in: worktree)
             }
             resizingDivider = false
         }
@@ -2166,17 +2166,17 @@ struct ContentView: View {
 
     /// Works across layouts too: the pane leaves whichever one it was in.
     private func placePane(
-        _ dragged: String, onto target: String, side: TileDirection, in workspace: Workspace
+        _ dragged: String, onto target: String, side: TileDirection, in worktree: Worktree
     ) {
         let shorts = [dragged, target].compactMap { id in
-            workspace.terminals.first { $0.id == id }?.short
+            worktree.terminals.first { $0.id == id }?.short
         }
         guard shorts.count == 2 else { return }
         Task {
-            let groups = await act(on: workspace, default: []) { c in
-                await c.movePane(shorts[0], onto: shorts[1], side: side, in: workspace)
+            let groups = await act(on: worktree, default: []) { c in
+                await c.movePane(shorts[0], onto: shorts[1], side: side, in: worktree)
             }
-            reveal(groups, in: workspace, preferring: dragged)
+            reveal(groups, in: worktree, preferring: dragged)
         }
     }
 
@@ -2187,23 +2187,23 @@ struct ContentView: View {
     /// disagree. `preferring` is for the cases where the command was about a
     /// specific terminal and that terminal should win.
     private func reveal(
-        _ groups: [PaneGroup], in workspace: Workspace, preferring: String? = nil
+        _ groups: [PaneGroup], in worktree: Worktree, preferring: String? = nil
     ) {
-        let host = workspace.host ?? ""
+        let host = worktree.host ?? ""
         guard let active = groups.first(where: { $0.isActive }) ?? groups.first else {
             // No layouts left, which now means no terminals left. Fall back to
             // the worktree rather than to a pane that no longer exists.
-            selection = .workspace(host: host, id: workspace.id)
+            selection = .worktree(host: host, id: worktree.id)
             return
         }
         let target = preferring.flatMap { active.terminals.contains($0) ? $0 : nil }
             ?? active.focused
             ?? active.terminals.first
         guard let target else {
-            selection = .workspace(host: host, id: workspace.id)
+            selection = .worktree(host: host, id: worktree.id)
             return
         }
-        selection = .terminal(host: host, workspace: workspace.id, terminal: target)
+        selection = .terminal(host: host, worktree: worktree.id, terminal: target)
     }
 
     /// Follow the layout's focus when something else moved it.
@@ -2225,13 +2225,13 @@ struct ContentView: View {
     /// nothing on screen claims either way.
     private func followLayoutFocus() {
         guard case .terminal(let host, let wsID, let termID) = selection,
-            let workspace = workspace(host: host, id: wsID),
-            let group = store.client(for: workspace)?.activeGroup(wsID),
+            let worktree = worktree(host: host, id: wsID),
+            let group = store.client(for: worktree)?.activeGroup(wsID),
             let focused = group.focused,
             focused != termID,
             group.terminals.contains(termID)
         else { return }
-        selection = .terminal(host: host, workspace: wsID, terminal: focused)
+        selection = .terminal(host: host, worktree: wsID, terminal: focused)
     }
 
     private func run(_ command: AppCommand) {
@@ -2241,15 +2241,15 @@ struct ContentView: View {
             // shell, and whatever you run in it — `claude`, `codex`, a build —
             // is detected from the process, not declared in advance. Asking
             // first was a dialog whose answer was already knowable.
-            if let workspace = currentWorkspace { newTerminal(in: workspace) }
+            if let worktree = currentWorktree { newTerminal(in: worktree) }
 
         case .closeTerminal:
-            guard let (workspace, terminal) = selectedTerminal else { return }
+            guard let (worktree, terminal) = selectedTerminal else { return }
             Task {
                 // Stop, then remove the record. Closing a terminal should leave
                 // nothing behind — that is what closing means everywhere else.
-                await act(on: workspace) { c in await c.stop(terminal: terminal.short) }
-                await act(on: workspace) { c in await c.removeTerminal(terminal.short) }
+                await act(on: worktree) { c in await c.stop(terminal: terminal.short) }
+                await act(on: worktree) { c in await c.removeTerminal(terminal.short) }
                 // Nothing to select here. Where the selection goes when a
                 // terminal disappears is `healSelection`'s one rule, run from
                 // `.onChange(of: store.fleet)` once the removal reaches the
@@ -2278,7 +2278,7 @@ struct ContentView: View {
                 select(next)
             }
 
-        case .newWorkspace:
+        case .newWorktree:
             // Only reachable with a project registered; the panel has nothing
             // to create into otherwise.
             if store.repositories.isEmpty {
@@ -2290,7 +2290,7 @@ struct ContentView: View {
         case .addRepository: showAddRepository = true
         case .showBoard:
             // Only reachable with a project registered; a board needs a
-            // repository to be scoped to, the same way New Workspace needs one
+            // repository to be scoped to, the same way New Worktree needs one
             // to create into.
             if store.repositories.isEmpty {
                 showAddRepository = true
@@ -2305,7 +2305,7 @@ struct ContentView: View {
             } else {
                 // Never a guess between several. The rows are in the sidebar
                 // for exactly this case.
-                errorBanner = "Select a workspace first, or choose a project’s Board in the sidebar."
+                errorBanner = "Select a worktree first, or choose a project’s Board in the sidebar."
             }
         case .openInEditor: openInPreferredEditor()
         case .reload: Task { for client in store.clients.values { await client.refresh() } }
@@ -2348,21 +2348,21 @@ struct ContentView: View {
     private func perform(_ action: PaletteAction) {
         showPalette = false
         switch action {
-        case .openTerminal(let workspace, let terminal):
-            expanded.insert(workspace)
-            let host = store.fleet.workspaces.first { $0.id == workspace }?.host ?? ""
-            selection = .terminal(host: host, workspace: workspace, terminal: terminal)
+        case .openTerminal(let worktree, let terminal):
+            expanded.insert(worktree)
+            let host = store.fleet.worktrees.first { $0.id == worktree }?.host ?? ""
+            selection = .terminal(host: host, worktree: worktree, terminal: terminal)
 
-        case .openWorkspace(let workspace):
-            expanded.insert(workspace)
-            let host = store.fleet.workspaces.first { $0.id == workspace }?.host ?? ""
-            selection = .workspace(host: host, id: workspace)
+        case .openWorktree(let worktree):
+            expanded.insert(worktree)
+            let host = store.fleet.worktrees.first { $0.id == worktree }?.host ?? ""
+            selection = .worktree(host: host, id: worktree)
 
         case .newTerminal(let id):
-            guard let workspace = store.fleet.workspaces.first(where: { $0.id == id }) else {
+            guard let worktree = store.fleet.worktrees.first(where: { $0.id == id }) else {
                 return
             }
-            newTerminal(in: workspace)
+            newTerminal(in: worktree)
 
         case .newTask(let described):
             if store.repositories.isEmpty {
@@ -2377,9 +2377,9 @@ struct ContentView: View {
             if !described.isEmpty, taskDraft.isEmpty { taskDraft = described }
             showQuickCreate = true
 
-        case .togglePaneMode(let workspace, let terminal):
+        case .togglePaneMode(let worktree, let terminal):
             guard
-                let ws = store.fleet.workspaces.first(where: { $0.id == workspace }),
+                let ws = store.fleet.worktrees.first(where: { $0.id == worktree }),
                 let target = ws.terminals.first(where: { $0.id == terminal })
             else { return }
             Task { await togglePaneMode(target, in: ws) }
@@ -2400,13 +2400,13 @@ struct ContentView: View {
     /// thing pressed after launch, and without this it would report "no editors
     /// found" on a Mac with four of them installed.
     private func openInPreferredEditor() {
-        guard let workspace = detailWorkspace else {
-            errorBanner = "Open a workspace first — there is nothing to hand to an editor."
+        guard let worktree = detailWorktree else {
+            errorBanner = "Open a worktree first — there is nothing to hand to an editor."
             return
         }
         let editors = Editors.shared
         editors.refresh()
-        let runner = workspace.host ?? ""
+        let runner = worktree.host ?? ""
         guard let editor = editors.preferred(host: runner) else {
             // Not an error. Nothing is wrong with an app that has never been
             // told which editor you use — so this opens the place you say so,
@@ -2415,13 +2415,13 @@ struct ContentView: View {
             return
         }
         Task {
-            if let problem = await editors.open(workspace, with: editor) { editorError = problem }
+            if let problem = await editors.open(worktree, with: editor) { editorError = problem }
         }
     }
 
     /// Start a task and go to it as soon as it exists.
     ///
-    /// Selects the workspace and its agent's terminal the moment
+    /// Selects the worktree and its agent's terminal the moment
     /// `DaemonClient.startTask` has made them, which is before the agent has
     /// booted: the description travels as the agent's launch argument, so
     /// nothing is left to wait for. The point is to be looking at the thing
@@ -2451,16 +2451,16 @@ struct ContentView: View {
             description: request.description,
             name: request.name,
             agent: request.preset.isEmpty ? Preferences.shared.defaultAgent : request.preset,
-            reusing: request.workspace,
+            reusing: request.worktree,
             // After the start has returned and the panel has let go of the
             // draft, so it's said over the pane instead.
             undelivered: { sentence in errorBanner = sentence })
         switch outcome {
-        case .started(let workspace, let terminal, let name):
+        case .started(let worktree, let terminal, let name):
             // By the ids the create calls returned, not by a later look at
             // the fleet — which, this soon, may not have the terminal yet.
-            expanded.insert(workspace)
-            selection = .terminal(host: host, workspace: workspace, terminal: terminal)
+            expanded.insert(worktree)
+            selection = .terminal(host: host, worktree: worktree, terminal: terminal)
             return .started(name: name)
         case .failed(let sentence, let made):
             if let made { reveal(made.id) }
@@ -2472,7 +2472,7 @@ struct ContentView: View {
                 sentence,
                 left: made.map {
                     TaskSubmission.Left(
-                        host: host, project: request.project, workspace: $0.id, name: $0.name)
+                        host: host, project: request.project, worktree: $0.id, name: $0.name)
                 })
         }
     }
@@ -2500,16 +2500,16 @@ struct ContentView: View {
         }
     }
 
-    /// Select a freshly created workspace, preferring its terminal.
-    private func reveal(_ workspace: String?) {
-        guard let workspace else { return }
-        expanded.insert(workspace)
-        let found = store.fleet.workspaces.first { $0.id == workspace }
+    /// Select a freshly created worktree, preferring its terminal.
+    private func reveal(_ worktree: String?) {
+        guard let worktree else { return }
+        expanded.insert(worktree)
+        let found = store.fleet.worktrees.first { $0.id == worktree }
         let host = found?.host ?? ""
         if let terminal = found?.terminals.first {
-            selection = .terminal(host: host, workspace: workspace, terminal: terminal.id)
+            selection = .terminal(host: host, worktree: worktree, terminal: terminal.id)
         } else {
-            selection = .workspace(host: host, id: workspace)
+            selection = .worktree(host: host, id: worktree)
         }
     }
 
@@ -2518,8 +2518,8 @@ struct ContentView: View {
     /// Selecting it afterwards matters: you made a terminal because you want to
     /// type in it, and leaving the selection where it was means a second click
     /// to get to the thing you just asked for.
-    private func newTerminal(in workspace: Workspace) {
-        Task { await openTerminalInNewLayout(workspace) }
+    private func newTerminal(in worktree: Worktree) {
+        Task { await openTerminalInNewLayout(worktree) }
     }
 
     /// A new terminal, in a layout of its own.
@@ -2534,44 +2534,44 @@ struct ContentView: View {
     ///
     /// tmux's `c` opens a window with a shell in it. So does this.
     @discardableResult
-    private func openTerminalInNewLayout(_ workspace: Workspace) async -> Terminal? {
-        expanded.insert(workspace.id)
+    private func openTerminalInNewLayout(_ worktree: Worktree) async -> Terminal? {
+        expanded.insert(worktree.id)
         guard
             let created = await act(
-                on: workspace, default: nil as Terminal?,
+                on: worktree, default: nil as Terminal?,
                 { c in
                     await c.createTerminal(
-                        in: workspace,
+                        in: worktree,
                         preset: "shell",
-                        title: "Terminal \(workspace.terminals.count + 1)")
+                        title: "Terminal \(worktree.terminals.count + 1)")
                 })
         else { return nil }
-        selection = .terminal(host: workspace.host ?? "", workspace: workspace.id, terminal: created.id)
+        selection = .terminal(host: worktree.host ?? "", worktree: worktree.id, terminal: created.id)
         return created
     }
 
-    /// The workspace the detail pane is actually showing.
+    /// The worktree the detail pane is actually showing.
     ///
-    /// Not `currentWorkspace` by name, though the two now compute the same
-    /// value: `currentWorkspace`'s own fallback to the first workspace in the
+    /// Not `currentWorktree` by name, though the two now compute the same
+    /// value: `currentWorktree`'s own fallback to the first worktree in the
     /// fleet is gone, removed for the same reason this property never had
     /// one — with nothing selected, the placeholder is on screen, and
     /// offering to open a worktree the window is not showing would be the
     /// control lying about what it points at. Kept as a separate property so
     /// each name still reads as what it answers: this one, what the detail
-    /// pane draws; `currentWorkspace`, what a keystroke acts on.
-    private var detailWorkspace: Workspace? {
+    /// pane draws; `currentWorktree`, what a keystroke acts on.
+    private var detailWorktree: Worktree? {
         switch selection {
-        case .workspace(let host, let id): return workspace(host: host, id: id)
-        case .terminal(let host, let id, _): return workspace(host: host, id: id)
+        case .worktree(let host, let id): return worktree(host: host, id: id)
+        case .terminal(let host, let id, _): return worktree(host: host, id: id)
         case .board, nil: return nil
         }
     }
 
-    /// The workspace the selection is in — nil when nothing is selected.
+    /// The worktree the selection is in — nil when nothing is selected.
     ///
     /// Used to be "or the first one": with nothing selected, that first
-    /// workspace could belong to ANY runner in the fleet, chosen by nothing
+    /// worktree could belong to ANY runner in the fleet, chosen by nothing
     /// more meaningful than merge order. `tileTarget` and ⌘T both read this
     /// to decide what a keystroke acts on, and a fallback here meant a ⌃B
     /// command issued while the detail pane was blank still landed — split,
@@ -2580,12 +2580,12 @@ struct ContentView: View {
     /// one failure this feature must never produce, so with no selection
     /// there is now no target, and `tileTarget`'s and `.newTerminal`'s own
     /// `guard`/`if let` already do nothing rather than guess.
-    private var currentWorkspace: Workspace? {
+    private var currentWorktree: Worktree? {
         switch selection {
-        case .workspace(let host, let id): return workspace(host: host, id: id)
-        case .terminal(let host, let id, _): return workspace(host: host, id: id)
-        // A board is a repository's, not a workspace's: a keystroke that acts
-        // on "the current workspace" has nothing to act on here.
+        case .worktree(let host, let id): return worktree(host: host, id: id)
+        case .terminal(let host, let id, _): return worktree(host: host, id: id)
+        // A board is a repository's, not a worktree's: a keystroke that acts
+        // on "the current worktree" has nothing to act on here.
         case .board, nil: return nil
         }
     }
@@ -2602,16 +2602,16 @@ struct ContentView: View {
     /// Move the selection off a terminal, or a worktree, that has gone.
     ///
     /// Prefers to stay where the user was looking: another terminal in the same
-    /// workspace, whatever wants attention first, then anything running. Only
-    /// falls back to the workspace itself when the workspace is empty, and to a
-    /// sibling worktree on the same runner when the workspace itself is gone.
+    /// worktree, whatever wants attention first, then anything running. Only
+    /// falls back to the worktree itself when the worktree is empty, and to a
+    /// sibling worktree on the same runner when the worktree itself is gone.
     ///
     /// The one rule for every way a terminal or a worktree can disappear,
     /// closing one here with ⌘W included. See `healed(_:in:was:)`, which is the
     /// rule itself. `previous` is the fleet before the change, which is the only
     /// place a removed worktree's repository can still be read.
-    private func healSelection(previous: [Workspace] = []) {
-        let next = Self.healed(selection, in: store.fleet.workspaces, was: previous)
+    private func healSelection(previous: [Worktree] = []) {
+        let next = Self.healed(selection, in: store.fleet.worktrees, was: previous)
         if next != selection { selection = next }
     }
 
@@ -2621,7 +2621,7 @@ struct ContentView: View {
     /// Static and free of the view so it can be tested; `healSelection` holds
     /// only the assignment.
     ///
-    /// - **Never leaves the workspace while the workspace is there.** A closed
+    /// - **Never leaves the worktree while the worktree is there.** A closed
     ///   terminal's neighbor is in the worktree you were working in, not
     ///   wherever the fleet happens to list a running terminal first. The
     ///   phones keep the same promise their own way, clamping to the
@@ -2633,58 +2633,58 @@ struct ContentView: View {
     ///   which is often another runner's, and it left a selected worktree's
     ///   id in place after the worktree was gone.
     nonisolated static func healed(
-        _ selection: Selection?, in workspaces: [Workspace], was previous: [Workspace] = []
+        _ selection: Selection?, in worktrees: [Worktree], was previous: [Worktree] = []
     ) -> Selection? {
         let host: String
-        let workspaceID: String
+        let worktreeID: String
         let terminalID: String?
         switch selection {
         case nil: return nil
         // A board has nothing to heal: it is a repository's, and a runner
         // that loses the repository draws the placeholder until you choose.
         case .board: return selection
-        case .workspace(let h, let w): (host, workspaceID, terminalID) = (h, w, nil)
-        case .terminal(let h, let w, let t): (host, workspaceID, terminalID) = (h, w, t)
+        case .worktree(let h, let w): (host, worktreeID, terminalID) = (h, w, nil)
+        case .terminal(let h, let w, let t): (host, worktreeID, terminalID) = (h, w, t)
         }
         guard
-            let workspace = workspaces.first(where: {
-                ($0.host ?? "") == host && $0.id == workspaceID
+            let worktree = worktrees.first(where: {
+                ($0.host ?? "") == host && $0.id == worktreeID
             })
         else {
-            return sibling(of: workspaceID, host: host, in: workspaces, was: previous)
+            return sibling(of: worktreeID, host: host, in: worktrees, was: previous)
         }
-        guard let terminalID, !workspace.terminals.contains(where: { $0.id == terminalID })
+        guard let terminalID, !worktree.terminals.contains(where: { $0.id == terminalID })
         else {
             return selection
         }
 
-        let candidates = workspace.terminals
+        let candidates = worktree.terminals
         let next = candidates.first(where: { $0.status.wantsAttention })
             ?? candidates.first(where: { StateKind.parse($0.state) == .running })
             ?? candidates.first
-        return next.map { .terminal(host: host, workspace: workspaceID, terminal: $0.id) }
-            ?? .workspace(host: host, id: workspaceID)
+        return next.map { .terminal(host: host, worktree: worktreeID, terminal: $0.id) }
+            ?? .worktree(host: host, id: worktreeID)
     }
 
-    /// The worktree to land on when `workspaceID` is gone: one on the same
+    /// The worktree to land on when `worktreeID` is gone: one on the same
     /// runner, in the same repository if `previous` still says which that was,
     /// and one the sidebar actually draws before a hidden one. Nil when the
     /// runner has none left, because landing on another runner is the app
     /// moving you somewhere you never asked to go.
     nonisolated static func sibling(
-        of workspaceID: String, host: String, in workspaces: [Workspace],
-        was previous: [Workspace]
+        of worktreeID: String, host: String, in worktrees: [Worktree],
+        was previous: [Worktree]
     ) -> Selection? {
         let repository = previous.first {
-            ($0.host ?? "") == host && $0.id == workspaceID
+            ($0.host ?? "") == host && $0.id == worktreeID
         }?.repository
-        let sameRunner = workspaces.filter { ($0.host ?? "") == host && $0.id != workspaceID }
+        let sameRunner = worktrees.filter { ($0.host ?? "") == host && $0.id != worktreeID }
         let shown = sameRunner.filter { !$0.isHidden }
         let next =
             shown.first(where: { repository != nil && $0.repository == repository })
             ?? shown.first
             ?? sameRunner.first
-        return next.map { .workspace(host: host, id: $0.id) }
+        return next.map { .worktree(host: host, id: $0.id) }
     }
 
     private func selectTerminal(at index: Int) {
@@ -2695,18 +2695,18 @@ struct ContentView: View {
 
     private func select(_ terminal: Terminal) {
         guard
-            let workspace = store.fleet.workspaces
+            let worktree = store.fleet.worktrees
                 .first(where: { $0.terminals.contains(where: { $0.id == terminal.id }) })
         else { return }
-        select(terminal, in: workspace)
+        select(terminal, in: worktree)
     }
 
-    /// The same, when the workspace is already known — a board's pill found
+    /// The same, when the worktree is already known — a board's pill found
     /// the pane on its own runner, and a second search of the whole fleet
     /// would be one that could land on another.
-    private func select(_ terminal: Terminal, in workspace: Workspace) {
-        expanded.insert(workspace.id)
-        selection = .terminal(host: workspace.host ?? "", workspace: workspace.id, terminal: terminal.id)
+    private func select(_ terminal: Terminal, in worktree: Worktree) {
+        expanded.insert(worktree.id)
+        selection = .terminal(host: worktree.host ?? "", worktree: worktree.id, terminal: terminal.id)
     }
 
 }

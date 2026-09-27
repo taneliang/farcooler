@@ -687,7 +687,7 @@ private struct RemoveRootConfirmSheet: View {
                                 failure = SheetFailure(
                                     sentence: "That name didn’t match — try again.")
                             // The two refusals this control actually produces
-                            // are "workspaces still exist under it" and
+                            // are "worktrees still exist under it" and
                             // "something is still running in one", and they need
                             // opposite things done about them. The sentence this
                             // replaces said neither: "That folder is still being

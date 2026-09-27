@@ -28,9 +28,9 @@ import com.farcooler.model.ShellStep
 import com.farcooler.model.ShellTab
 import com.farcooler.model.ShellTrack
 import com.farcooler.model.ShellTrackGeometry
-import com.farcooler.model.ShellWorkspace
+import com.farcooler.model.ShellWorktree
 import com.farcooler.model.contentRelease
-import com.farcooler.model.Workspace
+import com.farcooler.model.Worktree
 
 /**
  * The shell's content track: the pane you are on, with a real one either side.
@@ -49,7 +49,7 @@ import com.farcooler.model.Workspace
  * convenience API for exactly this interaction is the one thing that must not be
  * used for it. The same goes for `LazyRow`.
  *
- * So the panes stay where they already were: a plain `Box` in `WorkspaceScreen`,
+ * So the panes stay where they already were: a plain `Box` in `WorktreeScreen`,
  * one `key(pane.id)` per mounted pane, all of them composed all of the time.
  * This file adds two modifiers over that and destroys nothing. At a limit of
  * five the cost of getting it wrong went up, not down.
@@ -176,32 +176,32 @@ class PaneTrackState internal constructor() {
 }
 
 /**
- * The whole fleet as the content track walks it — which today is one workspace.
+ * The whole fleet as the content track walks it — which today is one worktree.
  *
  * **The tab ids ARE [Pane] ids**, which is the join that lets a `ShellFleet`
  * describe a deck without either type knowing about the other.
  *
- * **One workspace, and that is a limitation with a name.** `model/Shell.kt`'s
- * `contentStep` walks one flat sequence across every workspace, and the mount
- * limit was raised to five specifically so a neighbour in ANOTHER workspace
+ * **One worktree, and that is a limitation with a name.** `model/Shell.kt`'s
+ * `contentStep` walks one flat sequence across every worktree, and the mount
+ * limit was raised to five specifically so a neighbour in ANOTHER worktree
  * could be held. It cannot be yet: [Pane.Changes] is a `data object`, so every
- * workspace's diff shares one identity, and `Pane.id` is what `key()` and the
- * `SaveableStateHolder` bucket on — two workspaces in one deck would hand one
- * worktree's diff the other's saved state. Giving `Changes` a workspace also
+ * worktree's diff shares one identity, and `Pane.id` is what `key()` and the
+ * `SaveableStateHolder` bucket on — two worktrees in one deck would hand one
+ * worktree's diff the other's saved state. Giving `Changes` a worktree also
  * changes a string that is PERSISTED in the focus map, so it needs the same kind
  * of migration `Pane.parse`'s third arm already carries.
  *
  * That is a separate piece of work and it is deliberately not smuggled in here.
  * What matters is that nothing in the track knows: it asks a `ShellFleet` for
- * its neighbours, and the day the fleet handed to it spans workspaces, the
- * cross-workspace case starts working with no change to any of this.
+ * its neighbours, and the day the fleet handed to it spans worktrees, the
+ * cross-worktree case starts working with no change to any of this.
  *
  * Order matches `TerminalTabStrip`: the diff leads, then the panes in fleet
  * order. A track whose sequence disagreed with the strip's would be two
  * different answers to "what is next to this".
  */
-fun trackFleet(workspace: Workspace?, workspaceId: String, hostId: String): ShellFleet {
-    val terminals = workspace?.terminals.orEmpty().filterNot { it.isChangesPane }
+fun trackFleet(worktree: Worktree?, worktreeId: String, hostId: String): ShellFleet {
+    val terminals = worktree?.terminals.orEmpty().filterNot { it.isChangesPane }
     val tabs = buildList {
         add(ShellTab(id = Pane.CHANGES_ID, title = "Diff", mark = null))
         terminals.forEach {
@@ -210,9 +210,9 @@ fun trackFleet(workspace: Workspace?, workspaceId: String, hostId: String): Shel
     }
     return ShellFleet(
         listOf(
-            ShellWorkspace(
-                id = workspaceId,
-                name = workspace?.short.orEmpty(),
+            ShellWorktree(
+                id = worktreeId,
+                name = worktree?.short.orEmpty(),
                 tabs = tabs,
                 runnerId = hostId,
             )
@@ -257,7 +257,7 @@ fun Modifier.paneTrack(
 ): Modifier {
     // Read through holders so the scroll and fling objects — remembered once —
     // always see the frame they are running in. Capturing `fleet` would let a
-    // swipe resolve against the shape the workspace had when the screen opened,
+    // swipe resolve against the shape the worktree had when the screen opened,
     // which is a stale answer on any runner that is still starting panes.
     val fleetNow by rememberUpdatedState(fleet)
     val positionNow by rememberUpdatedState(position)

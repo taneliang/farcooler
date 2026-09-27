@@ -61,39 +61,39 @@ where
     Ok(client.call(request).await?.value)
 }
 
-pub async fn hide_workspace<R, W>(
+pub async fn hide_worktree<R, W>(
     client: &mut Client<R, W>,
-    workspace: Uuid,
+    worktree: Uuid,
 ) -> Result<(), ClientError>
 where
     R: AsyncRead + Unpin + Send,
     W: AsyncWrite + Unpin + Send,
 {
-    call(client, "workspace.hide", workspace, None).await.map(|_| ())
+    call(client, "worktree.hide", worktree, None).await.map(|_| ())
 }
 
-pub async fn unhide_workspace<R, W>(
+pub async fn unhide_worktree<R, W>(
     client: &mut Client<R, W>,
-    workspace: Uuid,
+    worktree: Uuid,
 ) -> Result<(), ClientError>
 where
     R: AsyncRead + Unpin + Send,
     W: AsyncWrite + Unpin + Send,
 {
-    call(client, "workspace.unhide", workspace, None).await.map(|_| ())
+    call(client, "worktree.unhide", worktree, None).await.map(|_| ())
 }
 
-/// Put the workspaces in this order, first on screen first.
+/// Put the worktrees in this order, first on screen first.
 ///
-/// No target resource id, unlike every other workspace action here: the subject
+/// No target resource id, unlike every other worktree action here: the subject
 /// is a LIST rather than one row, and naming one of them as the target would
 /// make the request look like it was about that card.
 ///
-/// Guarded by `capability::WORKSPACE_ORDER` at the call site rather than here.
+/// Guarded by `capability::WORKTREE_ORDER` at the call site rather than here.
 /// A runner too old to store a rank refuses this with
 /// `CAPABILITY_UNSUPPORTED`, which is a refusal a client can act on — but the
 /// client should not have offered the drag in the first place.
-pub async fn reorder_workspaces<R, W>(
+pub async fn reorder_worktrees<R, W>(
     client: &mut Client<R, W>,
     ordered: &[Uuid],
 ) -> Result<(), ClientError>
@@ -101,19 +101,19 @@ where
     R: AsyncRead + Unpin + Send,
     W: AsyncWrite + Unpin + Send,
 {
-    let payload = request::Payload::WorkspaceReorder(farcooler_protocol::v1::WorkspaceReorder {
-        workspace_ids: ordered
+    let payload = request::Payload::WorktreeReorder(farcooler_protocol::v1::WorktreeReorder {
+        worktree_ids: ordered
             .iter()
             .map(|id| bytes::Bytes::copy_from_slice(id.as_bytes()))
             .collect(),
     });
-    let mut request = farcooler_transport::request("workspace.reorder");
+    let mut request = farcooler_transport::request("worktree.reorder");
     request.payload = Some(payload);
     client.call(request).await?;
     Ok(())
 }
 
-/// Remove a worktree. `confirm` must be the workspace's exact task name,
+/// Remove a worktree. `confirm` must be the worktree's exact task name,
 /// unless the worktree is clean, in which case it may be empty.
 ///
 /// Forwarded rather than checked here: the daemon refuses a mismatch itself,
@@ -121,7 +121,7 @@ where
 /// protects the files.
 pub async fn remove_worktree<R, W>(
     client: &mut Client<R, W>,
-    workspace: Uuid,
+    worktree: Uuid,
     confirm: &str,
 ) -> Result<RemoveWorktreeOutcome, ClientError>
 where
@@ -131,7 +131,7 @@ where
     let payload = request::Payload::TypedConfirmation(farcooler_protocol::v1::TypedConfirmation {
         typed_confirmation: confirm.to_string(),
     });
-    match call(client, "workspace.remove_worktree", workspace, Some(payload)).await {
+    match call(client, "worktree.remove", worktree, Some(payload)).await {
         Ok(_) => Ok(RemoveWorktreeOutcome::Removed),
         Err(ClientError::Daemon { code, .. })
             if code == farcooler_protocol::v1::ErrorCode::ConfirmationRequired as i32 =>

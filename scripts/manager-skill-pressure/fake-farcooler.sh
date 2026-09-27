@@ -8,7 +8,7 @@
 #   task list ...           -> $FAKE_BOARD/list.txt
 #   task show <key> ...     -> $FAKE_BOARD/<key>.txt, else the task's row in
 #                              list.txt, else a task this world created
-#   workspace list ...      -> $FAKE_BOARD/workspaces.json
+#   worktree list ...       -> $FAKE_BOARD/worktrees.json
 #   task search ...         -> $FAKE_BOARD/search.txt
 #
 # Writes print one plausible line and exit 0. `task create` hands out a new key
@@ -27,12 +27,12 @@ for a in "$@"; do
     if [ -n "${REAL_FARCOOLER:-}" ] && [ -x "$REAL_FARCOOLER" ]; then
       exec "$REAL_FARCOOLER" "$@"
     fi
-    echo "farcooler task {list,show,create,set,note,ask,block,search,dispatch}; workspace {create,list}; see the skill"
+    echo "farcooler task {list,show,create,set,note,ask,block,search,dispatch}; worktree {create,list}; see the skill"
     exit 0
   fi
 done
 
-# Global flags may come before the subcommand (`--json workspace list`).
+# Global flags may come before the subcommand (`--json worktree list`).
 args=("$@")
 while [ ${#args[@]} -gt 0 ]; do
   case "${args[0]}" in
@@ -119,9 +119,9 @@ case "${1:-} ${2:-}" in
   "task block")     echo "${3:-fc-?}  blocked" ;;
   # What the real `task dispatch` prints, word for word but for the ids.
   "task dispatch")  echo "${3:-fc-?} is in progress in the new lane, terminal 0000abcd"
-                    echo "  it won't report back by itself: check the board or \`workspace list --json\`" ;;
-  "workspace list") show_file "$FAKE_BOARD/workspaces.json" '{"workspaces":[]}' ;;
-  "workspace create") echo "created workspace ${4:-}" ;;
+                    echo "  it won't report back by itself: check the board or \`worktree list --json\`" ;;
+  "worktree list") show_file "$FAKE_BOARD/worktrees.json" '{"worktrees":[]}' ;;
+  "worktree create") echo "created worktree ${4:-}" ;;
   *)                echo "ok" ;;
 esac
 exit 0

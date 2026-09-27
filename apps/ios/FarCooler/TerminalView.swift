@@ -778,7 +778,7 @@ struct TerminalView: View {
     /// The terminal this pane shows. Fixed for the pane's lifetime.
     ///
     /// This used to be `@State` that the tab strip reassigned, because one
-    /// `TerminalView` was reused for every pane in the workspace. It is a `let`
+    /// `TerminalView` was reused for every pane in the worktree. It is a `let`
     /// now: `ShellPaneTrack` keeps one of these per retained pane and shows the
     /// current one, so a pane never becomes a different pane.
     let terminal: Terminal
@@ -858,8 +858,8 @@ struct TerminalView: View {
             wrappedValue: TerminalSession(terminalID: terminal.id, core: connection.core))
     }
 
-    /// The workspace `current` actually lives in, looked up fresh each time
-    /// rather than carried in from wherever `current` was set — a workspace
+    /// The worktree `current` actually lives in, looked up fresh each time
+    /// rather than carried in from wherever `current` was set — a worktree
     /// the tab strip or the switcher sheet points at is only ever known to
     /// this screen by its terminal's id.
     /// The terminal as the daemon describes it RIGHT NOW.
@@ -871,19 +871,19 @@ struct TerminalView: View {
     /// every time, the screen kept drawing a VT grid, and the change only
     /// appeared after navigating away and back, which rebuilt the copy.
     private var live: Terminal {
-        guard let workspace = currentWorkspace?.id else { return terminal }
-        return connection.terminal(terminal.id, in: workspace) ?? terminal
+        guard let worktree = currentWorktree?.id else { return terminal }
+        return connection.terminal(terminal.id, in: worktree) ?? terminal
     }
 
-    private var currentWorkspace: Workspace? {
-        connection.fleet.workspaces.first { $0.terminals.contains { $0.id == terminal.id } }
+    private var currentWorktree: Worktree? {
+        connection.fleet.worktrees.first { $0.terminals.contains { $0.id == terminal.id } }
     }
 
     /// Which of several identically-labeled siblings `current` is — the
     /// same numbering the shell's ribbon and column use, so a terminal
     /// reads as "claude 2" everywhere or nowhere.
     private var currentOrdinal: Int? {
-        currentWorkspace?.ordinals()[terminal.id]
+        currentWorktree?.ordinals()[terminal.id]
     }
 
     private var currentName: String { terminal.displayName(ordinal: currentOrdinal) }
@@ -901,10 +901,10 @@ struct TerminalView: View {
             // subscribe from seq 0 costs one round trip, not a stream.
             if live.isAgentPane {
                 AgentView(
-                    terminalID: terminal.id, workspaceID: currentWorkspace?.id,
+                    terminalID: terminal.id, worktreeID: currentWorktree?.id,
                     connection: connection, isVisible: isVisible)
                     .id(terminal.id)
-            } else if live.isChangesPane, let workspace = currentWorkspace {
+            } else if live.isChangesPane, let worktree = currentWorktree {
                 // A review of the worktree, not a tty.
                 //
                 // This branch did not exist, so a `changes` pane fell through
@@ -913,16 +913,16 @@ struct TerminalView: View {
                 // along, with nothing on this platform able to show it.
                 //
                 // No longer the ordinary way a diff is reached: the shell
-                // gives every workspace a Changes tab that needs no pane behind
+                // gives every worktree a Changes tab that needs no pane behind
                 // it — see `ShellFleetMap.of` — and folds a host-side `changes`
                 // pane into that tab rather than mounting it here. What is left for this branch is a pane
                 // that BECOMES a `changes` pane while it is mounted — the Mac
                 // can do that to a worktree this phone is looking at — and the
                 // alternative for that case is the VT grid and the original bug.
                 //
-                // Keyed on the WORKSPACE rather than the terminal: what is
+                // Keyed on the WORKTREE rather than the terminal: what is
                 // being reviewed is the worktree, and two changes panes in one
-                // workspace are the same review.
+                // worktree are the same review.
                 // The store comes from `Connection`, so the scroll position,
                 // which files are folded, and the diffs already read all
                 // survive switching to another tab and back. Held in the view,
@@ -933,13 +933,13 @@ struct TerminalView: View {
                 // the `Connection` so that reviewing a diff does not
                 // re-evaluate a forty-card lazy stack on every three-second
                 // poll. See `ChangesView.agents`. The filter itself lives on
-                // `Workspace` because the inbox reaches the same review by a
-                // different door — see `Workspace.reviewAgentTargets()`.
+                // `Worktree` because the inbox reaches the same review by a
+                // different door — see `Worktree.reviewAgentTargets()`.
                 ChangesView(
-                    store: connection.changesStores.store(for: workspace.id),
-                    workspaceName: workspace.task,
-                    agents: workspace.reviewAgentTargets())
-                    .id(workspace.id)
+                    store: connection.changesStores.store(for: worktree.id),
+                    worktreeName: worktree.task,
+                    agents: worktree.reviewAgentTargets())
+                    .id(worktree.id)
             } else {
                 GeometryReader { geo in
                     phaseContent(size: geo.size)
@@ -1046,7 +1046,7 @@ struct TerminalView: View {
         // what it does about VISIBILITY is true of all three. What it did about
         // the SESSION was true of one, and it did it for all three anyway: an
         // agent pane opened a full terminal session, on a second ssh channel,
-        // and never drew a byte of it. Per agent pane, and a workspace can hold
+        // and never drew a byte of it. Per agent pane, and a worktree can hold
         // several: about 400 KB of scrollback, one of the ten concurrent
         // sessions a default `sshd` allows this phone across its whole fleet,
         // and a geometry poll every two seconds against a pane nobody is
@@ -1093,7 +1093,7 @@ struct TerminalView: View {
                 // `ShellPaneTrack` is for — and `KeystrokeSink` went on holding
                 // first responder after the pane left the screen. So the
                 // keyboard, and the key row docked in its window, stayed up
-                // over a workspace whose pane has no tty at all, covering the
+                // over a worktree whose pane has no tty at all, covering the
                 // bottom of the display and everything on it: measured, the
                 // shell's bar sat at y=784 under a keyboard whose top edge was
                 // at 514, and a swipe aimed at the bar went into the keyboard
@@ -1316,13 +1316,13 @@ struct TerminalView: View {
                     // at once and their values are all live. Picking the one a
                     // person is looking at used to be done by frame — "the
                     // surface under the middle of the screen" — and that is
-                    // ambiguous the moment a second WORKSPACE is mounted: its
+                    // ambiguous the moment a second WORKTREE is mounted: its
                     // panes are not offset sideways the way a neighboring TAB
                     // is, so two surfaces contain the middle and the query
                     // returns whichever the tree lists first. Measured on the
                     // demo fleet: the pane in front reported 1986 lines of
                     // scrollback while `TerminalScrollTests` read `history=2`
-                    // off a pane in a workspace nobody was looking at, and
+                    // off a pane in a worktree nobody was looking at, and
                     // three scroll tests skipped and one passed on the strength
                     // of it.
                     //

@@ -1,6 +1,6 @@
 import XCTest
 
-/// Closing a terminal from the workspace bar's column, with a real finger.
+/// Closing a terminal from the worktree bar's column, with a real finger.
 ///
 /// **Why a UI test and not arithmetic.** What `ShellCloseTests` can reach is
 /// the sentence a running pane is confirmed with; what it cannot reach is any
@@ -24,8 +24,8 @@ import XCTest
 /// `ShellCloseTests` holds the sentence; `Connection.close` is the pair of
 /// calls, in the order the daemon requires.
 final class ShellColumnCloseTests: XCTestCase {
-    /// The default fixture's first workspace has three tabs — `Diff`, then
-    /// `codex` and `shell`. Ten workspaces, tab counts `[3, 2, 5, 1, 4]`
+    /// The default fixture's first worktree has three tabs — `Diff`, then
+    /// `codex` and `shell`. Ten worktrees, tab counts `[3, 2, 5, 1, 4]`
     /// cycling, agent names cycling `[claude, codex, shell, aider]` from tab 0,
     /// whose title is overwritten with `Diff`.
     private func launch() -> XCUIApplication {
@@ -85,7 +85,7 @@ final class ShellColumnCloseTests: XCTestCase {
     /// surface inset from both edges of a bar that is itself inset, so a
     /// normalized swipe across the display starts outside it — and starting
     /// outside it is a swipe the bar's own horizontal gesture would answer by
-    /// changing workspace.
+    /// changing worktree.
     private func swipe(_ row: XCUIElement, by points: CGFloat = 60) {
         let from = row.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
         let to = from.withOffset(CGVector(dx: -points, dy: 0))
@@ -102,8 +102,8 @@ final class ShellColumnCloseTests: XCTestCase {
     /// thing the owner ruled out: *"we don't want the user to accidentally
     /// close terminals"*.
     ///
-    /// The workspace is asserted unchanged in the same breath. A horizontal
-    /// drag on this surface is also the gesture that changes workspace, and the
+    /// The worktree is asserted unchanged in the same breath. A horizontal
+    /// drag on this surface is also the gesture that changes worktree, and the
     /// interesting failure is not that the swipe does nothing — it is that the
     /// bar answers it instead, which looks like a working swipe on a screen
     /// that has quietly moved to a different worktree.
@@ -115,7 +115,7 @@ final class ShellColumnCloseTests: XCTestCase {
         XCTAssertTrue(
             row.waitForExistence(timeout: 10),
             "the column drew no terminal row: \(app.debugDescription)")
-        XCTAssertEqual(row.label, "codex", "row 1 of the fixture\u{2019}s first workspace is codex")
+        XCTAssertEqual(row.label, "codex", "row 1 of the fixture\u{2019}s first worktree is codex")
         swipe(row)
 
         XCTAssertTrue(
@@ -124,7 +124,7 @@ final class ShellColumnCloseTests: XCTestCase {
         XCTAssertTrue(row.exists, "the swipe closed the terminal on its own")
         XCTAssertEqual(
             try state(app)["ws"], 0,
-            "the swipe was answered by the bar and changed workspace")
+            "the swipe was answered by the bar and changed worktree")
     }
 
     /// **The Diff row has no Close, and it is absent rather than disabled.**
@@ -132,7 +132,7 @@ final class ShellColumnCloseTests: XCTestCase {
     /// The Mac's rule, kept: a daemon-side refusal is a safety net, and the
     /// button should not be there to press. A diff is synthesized by the shell,
     /// has no terminal behind it for `terminal.remove` to be called about, and
-    /// is what closing the last terminal in a workspace lands on.
+    /// is what closing the last terminal in a worktree lands on.
     ///
     /// A terminal row is swiped first, on a launch of its own, and that is the
     /// control: a column that built no swipe action at all — or one whose rows
@@ -160,7 +160,7 @@ final class ShellColumnCloseTests: XCTestCase {
         try pinColumn(app)
         let diff = app.buttons["shell-column-row-0"]
         XCTAssertTrue(diff.waitForExistence(timeout: 10), "the column drew no Diff row")
-        XCTAssertEqual(diff.label, "Diff", "row 0 of every workspace is the diff")
+        XCTAssertEqual(diff.label, "Diff", "row 0 of every worktree is the diff")
         swipe(diff)
         XCTAssertFalse(
             app.buttons["Close"].waitForExistence(timeout: 3),
@@ -170,7 +170,7 @@ final class ShellColumnCloseTests: XCTestCase {
         // This is the assertion that keeps the one above from passing for the
         // wrong reason. A row with no swipe action leaves the drag to the bar's
         // own horizontal gesture — which past `ShellGesture`'s commit threshold
-        // changes workspace and furls the column, and a furled column has no
+        // changes worktree and furls the column, and a furled column has no
         // Close on it whatever its diff row would have offered. Sixty points is
         // deliberately short of that threshold, and this says so rather than
         // assuming it.
@@ -183,7 +183,7 @@ final class ShellColumnCloseTests: XCTestCase {
         // swiped over the same sixty points on the same list, keeps its column
         // open and shows a Close — which is the difference this test is about.
         let after = try state(app)
-        XCTAssertEqual(after["ws"], 0, "the swipe on the Diff row changed workspace")
+        XCTAssertEqual(after["ws"], 0, "the swipe on the Diff row changed worktree")
         XCTAssertEqual(after["tab"], 0, "the swipe on the Diff row landed on some other tab")
     }
 
@@ -192,7 +192,7 @@ final class ShellColumnCloseTests: XCTestCase {
     /// Two phases, and they are the two ways the column stops being a menu.
     ///
     /// The first is the owner's third constraint: *"if the user swipes up from
-    /// the workspace bar, they should not be able to delete terminals that
+    /// the worktree bar, they should not be able to delete terminals that
     /// way"*. A column opened by a drag is never LEFT open — every release
     /// either lands on a row or furls it, so the finger that opened it is also
     /// the finger that spends it, and there is no state a single finger can

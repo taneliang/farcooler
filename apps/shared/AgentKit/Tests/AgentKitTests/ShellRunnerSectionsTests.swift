@@ -17,8 +17,8 @@ struct ShellRunnerSectionsTests {
     private static func card(
         _ id: String, on runner: String?, hidden: Bool = false,
         loud: Bool = false
-    ) -> ShellWorkspace {
-        ShellWorkspace(
+    ) -> ShellWorktree {
+        ShellWorktree(
             id: id, name: id, isHidden: hidden, runner: runner,
             tabs: [
                 ShellTab(
@@ -40,7 +40,7 @@ struct ShellRunnerSectionsTests {
     /// only worked because the runners arrived in blocks would pass on the real
     /// merge and fail the first time anything reordered it.
     private static func fleet() -> ShellFleet {
-        ShellFleet(workspaces: [
+        ShellFleet(worktrees: [
             card("l1", on: "L"),
             card("g1", on: "G"),
             card("l2", on: "L", loud: true),
@@ -79,7 +79,7 @@ struct ShellRunnerSectionsTests {
     /// Hidden worktrees are the Hidden section's, not their runner's.
     @Test func aHiddenWorktreeIsNotInItsRunnersSection() {
         var fleet = Self.fleet()
-        fleet.workspaces[2].isHidden = true
+        fleet.worktrees[2].isHidden = true
         let laptop = fleet.runnerSections([Self.laptop])[0]
         #expect(Self.ids(laptop) == ["l1", "l3"])
         #expect(fleet.hiddenOrder() == [2])
@@ -125,7 +125,7 @@ struct ShellRunnerSectionsTests {
         #expect(!Self.fleet().runnerSections([asleep])[0].canReorder)
     }
 
-    /// A runner that does not keep an order — no `workspace_order` in its
+    /// A runner that does not keep an order — no `worktree_order` in its
     /// capabilities — draws a section with no drag in it. Which runners those
     /// are is `ShellRunnerLabel.keepsOrder(daemon:)`, tested below.
     @Test func aRunnerThatStoresNoOrderCannotBeReordered() {
@@ -134,14 +134,14 @@ struct ShellRunnerSectionsTests {
     }
 
     /// Two worktrees as `Session::fleet` puts them on the wire for a runner
-    /// that predates `workspace_order`.
+    /// that predates `worktree_order`.
     ///
     /// **`ordinal` is PRESENT, and 0.** It is a proto3 scalar with no
     /// presence, prost decodes an old daemon's silence as 0, and
     /// `crates/client/src/session.rs` emits `"ordinal": w.ordinal`
     /// unconditionally — so "no ordinal" is not a thing the phone ever sees,
     /// and a rule that waited for one would offer every old runner a drag.
-    private static func wire(ordinals: [Int]) throws -> [Workspace] {
+    private static func wire(ordinals: [Int]) throws -> [Worktree] {
         let rows = ordinals.enumerated().map { index, ordinal in
             """
             {"id": "w\(index)", "short": "w\(index)", "task": "t\(index)", "branch": "b\(index)",
@@ -149,19 +149,19 @@ struct ShellRunnerSectionsTests {
             """
         }
         return try JSONDecoder().decode(
-            [Workspace].self, from: Data("[\(rows.joined(separator: ","))]".utf8))
+            [Worktree].self, from: Data("[\(rows.joined(separator: ","))]".utf8))
     }
 
-    /// **An old runner, all zeros and no `workspace_order`, is not offered a
-    /// drag.** It would accept nothing — `workspace.reorder` is unknown to it —
+    /// **An old runner, all zeros and no `worktree_order`, is not offered a
+    /// drag.** It would accept nothing — `worktree.reorder` is unknown to it —
     /// and the card would spring back with no error anywhere.
-    @Test func aRunnerWithoutTheWorkspaceOrderCapabilityKeepsNoOrder() throws {
+    @Test func aRunnerWithoutTheWorktreeOrderCapabilityKeepsNoOrder() throws {
         let old = DaemonBuild(
             version: "0.1.0+old", matches: true, platform: "macos",
             capabilities: ["workspaces", "terminals", "watching"])
-        let workspaces = try Self.wire(ordinals: [0, 0])
+        let worktrees = try Self.wire(ordinals: [0, 0])
         #expect(
-            workspaces.allSatisfy { $0.ordinal == 0 },
+            worktrees.allSatisfy { $0.ordinal == 0 },
             "an old runner's ordinals arrive, as 0 — there is no absence to read")
         #expect(!ShellRunnerLabel.keepsOrder(daemon: old))
     }
@@ -169,7 +169,7 @@ struct ShellRunnerSectionsTests {
     /// The capability is the whole answer, and a runner nobody has asked yet
     /// is refused until it has been asked rather than offered a drag on a
     /// guess.
-    @Test func theWorkspaceOrderCapabilityIsWhatDecides() {
+    @Test func theWorktreeOrderCapabilityIsWhatDecides() {
         let new = DaemonBuild(
             version: "0.1.0+new", matches: true, platform: "macos",
             capabilities: ["workspaces", "terminals", "workspace_order"])
@@ -182,7 +182,7 @@ struct ShellRunnerSectionsTests {
     }
 
     @Test func aSectionOfOneHasNothingToReorder() {
-        let fleet = ShellFleet(workspaces: [Self.card("a", on: "L")])
+        let fleet = ShellFleet(worktrees: [Self.card("a", on: "L")])
         #expect(!fleet.runnerSections([Self.laptop])[0].canReorder)
     }
 
@@ -241,16 +241,16 @@ struct ShellRunnerSectionsTests {
     /// moved. Nor may one resolve to a different runner.
     @Test func theRequestResolvesToThatRunnersOwnIdsOrToNothing() {
         let request = ShellReorderRequest(runner: "L", order: ["L/b", "L/a"])
-        let table: [String: (runner: String, workspace: String)] = [
+        let table: [String: (runner: String, worktree: String)] = [
             "L/a": ("L", "uuid-a"), "L/b": ("L", "uuid-b"), "G/c": ("G", "uuid-c"),
         ]
-        #expect(request.workspaceIDs { table[$0] } == ["uuid-b", "uuid-a"])
+        #expect(request.worktreeIDs { table[$0] } == ["uuid-b", "uuid-a"])
 
         let gone = ShellReorderRequest(runner: "L", order: ["L/b", "L/x", "L/a"])
-        #expect(gone.workspaceIDs { table[$0] } == nil)
+        #expect(gone.worktreeIDs { table[$0] } == nil)
 
         let stray = ShellReorderRequest(runner: "L", order: ["L/b", "G/c"])
-        #expect(stray.workspaceIDs { table[$0] } == nil)
+        #expect(stray.worktreeIDs { table[$0] } == nil)
     }
 
     // MARK: - Between the drop and the runner's answer
@@ -301,24 +301,24 @@ struct ShellRunnerSectionsTests {
         pending.begin(ShellReorderRequest(runner: "L", order: ["l3", "l1", "l2"]))
 
         var grown = Self.fleet()
-        grown.workspaces.insert(Self.card("new", on: "L"), at: 1)
+        grown.worktrees.insert(Self.card("new", on: "L"), at: 1)
         #expect(
             Self.ids(grown.runnerSections([Self.laptop], pending: pending)[0])
                 == ["l3", "new", "l1", "l2"])
 
         var shrunk = Self.fleet()
-        shrunk.workspaces.remove(at: 2)
+        shrunk.worktrees.remove(at: 2)
         #expect(Self.ids(shrunk.runnerSections([Self.laptop], pending: pending)[0]) == ["l3", "l1"])
     }
 
     /// The same rule, applied to a whole fleet: the runner's order changes and
     /// every other runner's worktree keeps the exact slot it had. What the
     /// harness does in place of a runner, and what the daemon does in
-    /// `Store::reorder_workspaces`.
+    /// `Store::reorder_worktrees`.
     @Test func applyingARequestPermutesOnlyThatRunnersSlots() {
         let applied = Self.fleet().reordered(
             ShellReorderRequest(runner: "L", order: ["l3", "l1", "l2"]))
-        #expect(applied.workspaces.map(\.id) == ["l3", "g1", "l1", "g2", "l2"])
+        #expect(applied.worktrees.map(\.id) == ["l3", "g1", "l1", "g2", "l2"])
     }
 }
 

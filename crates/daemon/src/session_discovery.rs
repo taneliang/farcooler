@@ -3,7 +3,7 @@
 //! Only for `claude` typed into a shell by hand. Anything Far Cooler launched
 //! carries a declared session id in SQLite and never reaches here.
 //!
-//! A workspace is one worktree, so the project directory almost always holds a
+//! A worktree is one directory, so the project directory almost always holds a
 //! single session and this is unambiguous. When it is not, this refuses and
 //! names what it found. Guessing would attach a chat view to a conversation
 //! other than the one in the pane — silently, and with no way for the user to

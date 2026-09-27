@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The workspace's layouts, when it has more than one.
+/// The worktree's layouts, when it has more than one.
 ///
 /// The feature existed before this did, and that was the problem. Several sets of
 /// tiles per worktree is exactly what people want — three agents arranged and a
