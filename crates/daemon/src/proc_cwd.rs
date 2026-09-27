@@ -38,7 +38,23 @@ pub fn cwd_of(pid: i32) -> Option<PathBuf> {
 /// read.
 #[cfg(target_os = "linux")]
 pub fn cwd_of(pid: i32) -> Option<PathBuf> {
-    std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
+    std::fs::read_link(format!("/proc/{pid}/cwd")).ok().and_then(linux_cwd)
+}
+
+/// What `/proc/<pid>/cwd` links to, as a working directory.
+///
+/// A directory removed while the process stood in it reads as its old path
+/// with ` (deleted)` on the end. That's evidence of nothing: matched as a
+/// path, `/r/.worktrees/x (deleted)` isn't inside `x` but is inside `/r`, so
+/// a process left in a removed worktree would read as working in the main
+/// checkout. So it's no working directory at all, and neither is a real
+/// directory someone named that, which the link can't tell apart. A pure
+/// function, so a test on any system can reach it.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn linux_cwd(link: PathBuf) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+
+    (!link.as_os_str().as_bytes().ends_with(b" (deleted)")).then_some(link)
 }
 
 /// Nothing to ask on this system, so nothing is ever seen.
@@ -72,6 +88,16 @@ mod tests {
         let _ = child.kill();
         let _ = child.wait();
         assert_eq!(seen, Some(std::fs::canonicalize(dir.path()).unwrap()));
+    }
+
+    /// Linux's link for a directory that was removed is no directory; any
+    /// other link is the directory, a name with `deleted` in it included.
+    #[test]
+    fn a_removed_directory_is_no_working_directory() {
+        assert_eq!(linux_cwd(PathBuf::from("/r/.worktrees/x (deleted)")), None);
+        assert_eq!(linux_cwd(PathBuf::from("/r/.worktrees/x")), Some(PathBuf::from("/r/.worktrees/x")));
+        assert_eq!(linux_cwd(PathBuf::from("/r/deleted")), Some(PathBuf::from("/r/deleted")));
+        assert_eq!(linux_cwd(PathBuf::from("/r/(deleted)")), Some(PathBuf::from("/r/(deleted)")));
     }
 
     #[test]
