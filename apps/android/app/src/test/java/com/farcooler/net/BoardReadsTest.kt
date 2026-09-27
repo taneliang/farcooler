@@ -237,8 +237,15 @@ class BoardReadsTest {
         boards.ledger.linkCameUp()
         reads.answer()
         runCurrent()
+        // Asserted before anything waits on the sweep: a sweep that read on
+        // would sit on b's unanswered read, and a join here would hang the
+        // test into runTest's timeout instead of failing on the reason.
+        assertEquals("b was read after its link went", listOf("a"), reads.order)
+        while (reads.gates.isNotEmpty()) {
+            reads.answer()
+            runCurrent()
+        }
         sweep.join()
-        assertEquals(listOf("a"), reads.order)
     }
 
     // ---- boards by workspace ----
