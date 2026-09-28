@@ -78,6 +78,9 @@ struct Held {
     since: Instant,
     seen_dialog: bool,
     absent_samples: u8,
+    /// Whether its `Permission` was recorded. Only an offered ask is owed a
+    /// `Resolved`.
+    offered: bool,
     reply: oneshot::Sender<Settled>,
 }
 
@@ -100,12 +103,36 @@ impl HookAsks {
     pub fn hold(&self, terminal: Uuid) -> (String, oneshot::Receiver<Settled>) {
         let id = format!("{HOOK_ASK_PREFIX}{}", Uuid::now_v7());
         let (reply, rx) = oneshot::channel();
-        let held = Held { id: id.clone(), since: Instant::now(), seen_dialog: false, absent_samples: 0, reply };
+        let held = Held { id: id.clone(), since: Instant::now(), seen_dialog: false, absent_samples: 0, offered: false, reply };
         let older = self.lock().insert(terminal, held);
         if let Some(older) = older {
             self.end(terminal, older, Settled { decision: None, ack: None }, "", true, "superseded");
         }
         (id, rx)
+    }
+
+    /// Offer the ask held under `id` on `terminal` to every surface, by
+    /// recording `permission`. Returns whether it was still held to offer.
+    ///
+    /// Recorded under the ledger's lock, so no ending can come between the
+    /// check and the record: every ending removes the entry under that same
+    /// lock, and records its `Resolved` after. So a `Permission` always
+    /// precedes its `Resolved`, and an ask that ended before it was offered
+    /// is never offered at all, which is also what keeps an offer after
+    /// `forget` from recreating the terminal's ring. The sink takes
+    /// `AgentSupervisor`'s locks, never this one, so holding this across it
+    /// cannot deadlock.
+    pub fn offer(&self, terminal: Uuid, id: &str, permission: AgentEvent) -> bool {
+        let sink = self.sink.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let mut held = self.lock();
+        let Some(ask) = held.get_mut(&terminal).filter(|ask| ask.id == id) else {
+            return false;
+        };
+        ask.offered = true;
+        if let Some(sink) = sink {
+            sink(terminal, vec![permission]);
+        }
+        true
     }
 
     /// A device's answer to the ask held under `id` on `terminal`.
@@ -175,13 +202,6 @@ impl HookAsks {
         self.settle(terminal, Some(id), Settled { decision: None, ack: None }, "", true, "withdrawn");
     }
 
-    /// `serve` giving up on an ask nobody was ever offered: the hold frame
-    /// could not be written, so no `Permission` was recorded and no
-    /// `Resolved` is owed.
-    pub fn abandon(&self, terminal: Uuid, id: &str) {
-        self.settle(terminal, Some(id), Settled { decision: None, ack: None }, "", false, "abandoned");
-    }
-
     /// `terminal`'s row is gone. Its ask ends with no decision and no
     /// `Resolved`: the ring goes with the row, and recording into it would
     /// bring an entry back for a terminal nothing can reach.
@@ -234,7 +254,7 @@ impl HookAsks {
         // `serve` may be gone already (its hook hung up); the ending is still
         // an ending, and the surfaces still need to hear it.
         let _ = held.reply.send(settled);
-        if !record {
+        if !record || !held.offered {
             return;
         }
         let sink = self.sink.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -289,11 +309,78 @@ mod tests {
         })
     }
 
+    fn a_permission(id: &str) -> AgentEvent {
+        AgentEvent::Permission { id: id.to_string(), tool_call: String::new(), options: vec![] }
+    }
+
+    /// Everything recorded for `pane`, as (kind, id), in order.
+    fn story(recorded: &Recorded, pane: Uuid) -> Vec<(&'static str, String)> {
+        recorded
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(t, _)| *t == pane)
+            .filter_map(|(_, e)| match e {
+                AgentEvent::Permission { id, .. } => Some(("Permission", id.clone())),
+                AgentEvent::Resolved { id, .. } => Some(("Resolved", id.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// An ask, held and offered, as `serve` leaves one.
+    fn offered(asks: &HookAsks, pane: Uuid) -> (String, oneshot::Receiver<Settled>) {
+        let (id, rx) = asks.hold(pane);
+        assert!(asks.offer(pane, &id, a_permission(&id)), "a fresh ask is still held");
+        (id, rx)
+    }
+
+    /// The surfaces read a `Permission` as pending until a `Resolved` for it
+    /// follows, so a `Resolved` that lands first leaves a button nothing ever
+    /// clears.
+    #[tokio::test]
+    async fn a_permission_is_offered_before_it_is_resolved() {
+        let (asks, recorded) = ledger();
+        let pane = Uuid::now_v7();
+        let (older, _rx) = offered(&asks, pane);
+        let (newer, _newer_rx) = asks.hold(pane);
+        assert_eq!(story(&recorded, pane), [("Permission", older.clone()), ("Resolved", older)]);
+        assert!(!asks.offer(pane, "hook-ask-nobody", a_permission("hook-ask-nobody")));
+        let _ = newer;
+    }
+
+    /// An ask ended between its hold and its offer (a newer ask, a turn
+    /// boundary) is never offered, and so is owed no `Resolved`.
+    #[tokio::test]
+    async fn an_ask_ended_before_it_was_offered_is_never_offered() {
+        let (asks, recorded) = ledger();
+        let pane = Uuid::now_v7();
+        let (older, older_rx) = asks.hold(pane);
+        let (newer, _newer_rx) = asks.hold(pane);
+        assert!(!asks.offer(pane, &older, a_permission(&older)), "the older ask was superseded");
+        assert_eq!(older_rx.await.expect("it still hears its ending").decision, None);
+        asks.turn_boundary(pane);
+        assert!(!asks.offer(pane, &newer, a_permission(&newer)), "the newer one ended at the turn");
+        assert_eq!(story(&recorded, pane), [], "nothing offered, nothing taken back");
+    }
+
+    /// `forget` goes with the terminal's ring. An offer after it must not
+    /// bring that ring back.
+    #[tokio::test]
+    async fn an_offer_after_forget_records_nothing() {
+        let (asks, recorded) = ledger();
+        let pane = Uuid::now_v7();
+        let (id, _rx) = asks.hold(pane);
+        asks.forget(pane);
+        assert!(!asks.offer(pane, &id, a_permission(&id)));
+        assert_eq!(story(&recorded, pane), []);
+    }
+
     #[tokio::test]
     async fn an_allow_from_a_device_decides_the_held_ask() {
         let (asks, recorded) = ledger();
         let pane = Uuid::now_v7();
-        let (id, rx) = asks.hold(pane);
+        let (id, rx) = offered(&asks, pane);
         assert!(id.starts_with(HOOK_ASK_PREFIX));
         let hook = a_hook_waiting_on(rx);
         assert_eq!(asks.answer(pane, &id, "allow", "iPhone").await, Ok(()));
@@ -306,7 +393,7 @@ mod tests {
     async fn a_deny_names_the_device_that_sent_it() {
         let (asks, recorded) = ledger();
         let pane = Uuid::now_v7();
-        let (id, rx) = asks.hold(pane);
+        let (id, rx) = offered(&asks, pane);
         let hook = a_hook_waiting_on(rx);
         assert_eq!(asks.answer(pane, &id, "deny", "iPhone").await, Ok(()));
         assert_eq!(
@@ -320,7 +407,7 @@ mod tests {
     async fn an_option_the_ask_never_offered_is_refused_and_the_ask_stays_held() {
         let (asks, recorded) = ledger();
         let pane = Uuid::now_v7();
-        let (id, _rx) = asks.hold(pane);
+        let (id, _rx) = offered(&asks, pane);
         assert_eq!(
             asks.answer(pane, &id, "allow_always", "iPhone").await,
             Err(AnswerRefused::UnknownOption)
@@ -333,7 +420,7 @@ mod tests {
     async fn a_second_answer_to_the_same_ask_is_refused() {
         let (asks, recorded) = ledger();
         let pane = Uuid::now_v7();
-        let (id, rx) = asks.hold(pane);
+        let (id, rx) = offered(&asks, pane);
         let hook = a_hook_waiting_on(rx);
         assert_eq!(asks.answer(pane, &id, "deny", "iPhone").await, Ok(()));
         hook.await.unwrap();
@@ -345,7 +432,7 @@ mod tests {
     async fn an_answer_naming_an_id_nobody_holds_is_refused() {
         let (asks, _) = ledger();
         let pane = Uuid::now_v7();
-        let (_id, _rx) = asks.hold(pane);
+        let (_id, _rx) = offered(&asks, pane);
         assert_eq!(
             asks.answer(pane, "hook-ask-nobody", "allow", "iPhone").await,
             Err(AnswerRefused::NotHeld)
@@ -363,8 +450,8 @@ mod tests {
     async fn a_newer_ask_on_the_same_pane_withdraws_the_older() {
         let (asks, recorded) = ledger();
         let pane = Uuid::now_v7();
-        let (older, older_rx) = asks.hold(pane);
-        let (newer, _newer_rx) = asks.hold(pane);
+        let (older, older_rx) = offered(&asks, pane);
+        let (newer, _newer_rx) = offered(&asks, pane);
         assert_ne!(older, newer);
         let settled = older_rx.await.expect("the older ask hears its ending");
         assert_eq!(settled.decision, None, "the older dialog is left to the keyboard");
@@ -385,7 +472,7 @@ mod tests {
         let mut ids = Vec::new();
 
         let pane = Uuid::now_v7();
-        let (id, rx) = asks.hold(pane);
+        let (id, rx) = offered(&asks, pane);
         let hook = a_hook_waiting_on(rx);
         asks.answer(pane, &id, "allow", "iPhone").await.unwrap();
         hook.await.unwrap();
@@ -394,15 +481,15 @@ mod tests {
         ids.push(("answer", id));
 
         let pane = Uuid::now_v7();
-        let (id, _rx) = asks.hold(pane);
+        let (id, _rx) = offered(&asks, pane);
         asks.withdraw(pane, &id);
         asks.withdraw(pane, &id);
         asks.turn_boundary(pane);
         ids.push(("withdraw", id));
 
         let pane = Uuid::now_v7();
-        let (id, _rx) = asks.hold(pane);
-        let (newer, _newer_rx) = asks.hold(pane);
+        let (id, _rx) = offered(&asks, pane);
+        let (newer, _newer_rx) = offered(&asks, pane);
         asks.withdraw(pane, &id);
         ids.push(("supersede", id));
 
@@ -411,7 +498,7 @@ mod tests {
         ids.push(("turn boundary", newer));
 
         let pane = Uuid::now_v7();
-        let (id, _rx) = asks.hold(pane);
+        let (id, _rx) = offered(&asks, pane);
         for up in [true, false, false, false, false] {
             asks.saw_screen(pane, up);
         }
@@ -423,7 +510,7 @@ mod tests {
         }
 
         let pane = Uuid::now_v7();
-        let (id, rx) = asks.hold(pane);
+        let (id, rx) = offered(&asks, pane);
         asks.forget(pane);
         asks.forget(pane);
         asks.withdraw(pane, &id);
@@ -435,7 +522,7 @@ mod tests {
     async fn the_dialog_leaving_withdraws_the_ask_only_after_it_was_seen() {
         let (asks, recorded) = ledger();
         let pane = Uuid::now_v7();
-        let (id, rx) = asks.hold(pane);
+        let (id, rx) = offered(&asks, pane);
         asks.saw_screen(pane, true);
         asks.saw_screen(pane, false);
         assert!(asks.is_holding(pane));
@@ -449,7 +536,7 @@ mod tests {
     async fn a_dialog_missing_for_one_sample_does_not_withdraw_the_ask() {
         let (asks, _) = ledger();
         let pane = Uuid::now_v7();
-        let (_id, _rx) = asks.hold(pane);
+        let (_id, _rx) = offered(&asks, pane);
         for up in [true, false, true, false, true] {
             asks.saw_screen(pane, up);
         }
@@ -460,7 +547,7 @@ mod tests {
     async fn a_dialog_not_yet_drawn_does_not_withdraw_the_ask() {
         let (asks, _) = ledger();
         let pane = Uuid::now_v7();
-        let (_id, _rx) = asks.hold(pane);
+        let (_id, _rx) = offered(&asks, pane);
         for _ in 0..10 {
             asks.saw_screen(pane, false);
         }
@@ -471,7 +558,7 @@ mod tests {
     async fn a_turn_boundary_withdraws_a_held_ask() {
         let (asks, recorded) = ledger();
         let pane = Uuid::now_v7();
-        let (id, rx) = asks.hold(pane);
+        let (id, rx) = offered(&asks, pane);
         asks.turn_boundary(Uuid::now_v7());
         assert!(asks.is_holding(pane), "another pane's turn is not this one's");
         asks.turn_boundary(pane);
@@ -481,11 +568,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_ask_nobody_was_offered_is_abandoned_without_a_resolved() {
+    async fn an_ask_nobody_was_offered_ends_without_a_resolved() {
         let (asks, recorded) = ledger();
         let pane = Uuid::now_v7();
         let (id, rx) = asks.hold(pane);
-        asks.abandon(pane, &id);
+        asks.withdraw(pane, &id);
         assert!(!asks.is_holding(pane));
         assert_eq!(rx.await.expect("an ending arrives").decision, None);
         assert!(resolved(&recorded, &id).is_empty(), "nothing was offered, so nothing is taken back");
@@ -495,7 +582,7 @@ mod tests {
     async fn forgetting_a_terminal_withdraws_its_ask() {
         let (asks, _) = ledger();
         let pane = Uuid::now_v7();
-        let (id, rx) = asks.hold(pane);
+        let (id, rx) = offered(&asks, pane);
         asks.forget(pane);
         assert!(!asks.is_holding(pane));
         assert_eq!(rx.await.expect("the hook is released").decision, None);

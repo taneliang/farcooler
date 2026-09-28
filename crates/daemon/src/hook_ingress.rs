@@ -832,7 +832,7 @@ impl HookIngress {
                     write_reply(&mut write, &Reply::verdict(None)).await?;
                     continue;
                 };
-                return self.hold_ask(terminal, hook, f, reader, write, on_events).await;
+                return self.hold_ask(terminal, hook, f, reader, write).await;
             }
             let Some(terminal) = terminal else {
                 tracing::debug!(session = ?f.session_id, "a hook from a session no terminal claims");
@@ -864,31 +864,31 @@ impl HookIngress {
     /// In this order, because the hook hears nothing after its 400 ms:
     /// hold the ask, reply with the hold, and only then offer it (a
     /// `Permission` for an ask whose hook had already gone would be a button
-    /// nothing answers) and check the claim. The claim check is a store read
+    /// nothing answers) and check the claim. The offer goes through the
+    /// ledger (`HookAsks::offer`), because anything can end the ask between
+    /// the hold and the offer, and only the ledger can say it didn't. The claim check is a store read
     /// and maybe a write, under the claims ledger's lock, and it runs off this
     /// task, so none of that can make the reply late.
     ///
     /// One ask per connection: the hook reads its verdict and hangs up.
-    async fn hold_ask<F>(
+    async fn hold_ask(
         &self,
         terminal: Uuid,
         hook: HookLine,
         f: Facts,
         mut reader: BufReader<OwnedReadHalf>,
         mut write: OwnedWriteHalf,
-        on_events: &F,
-    ) -> std::io::Result<()>
-    where
-        F: Fn(Uuid, Vec<AgentEvent>) + ?Sized,
-    {
+    ) -> std::io::Result<()> {
         let (id, mut settled) = self.asks.hold(terminal);
         if let Err(e) = write_reply(&mut write, &Reply::hold(self.hold)).await {
             // The hook missed its deadline and has gone. Nobody was offered
             // this ask, so it ends with nothing to take back.
-            self.asks.abandon(terminal, &id);
+            self.asks.withdraw(terminal, &id);
             return Err(e);
         }
-        on_events(terminal, vec![permission_ask(&id, &hook.payload)]);
+        // `false` when something ended it already; `settled` then has that
+        // ending, and the select below writes it at once.
+        self.asks.offer(terminal, &id, permission_ask(&id, &hook.payload));
         let this = self.clone();
         tokio::task::spawn_blocking(move || {
             this.start_transcript_tail(terminal, hook.agent, &f);
