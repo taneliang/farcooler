@@ -6,6 +6,7 @@ import com.farcooler.model.TaskRef
 import com.farcooler.model.TaskRow
 import com.farcooler.model.TaskStatus
 import com.farcooler.model.Terminal
+import com.farcooler.model.WorkspaceSummary
 import com.farcooler.model.Worktree
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -30,19 +31,29 @@ class WorktreeTopBarTest {
     }
 
     @Test
-    fun `the chip opens the board that holds the task`() {
-        val pane = Terminal(id = "p", workspace = "ws-pane")
-        val worktree = Worktree(id = "w", workspace = "ws-owner", repository = "repo")
+    fun `the chip's board is the one that holds the card, never a guess`() {
         val row = TaskRow("t-9", "bil-9", "Invoice PDF export", TaskStatus.IN_PROGRESS, 0L)
         val boards = mapOf(
             "ws-other" to TaskBoard(listOf(TaskBoardColumn(TaskStatus.IN_PROGRESS, emptyList()))),
             "ws-held" to TaskBoard(listOf(TaskBoardColumn(TaskStatus.IN_PROGRESS, listOf(row)))),
         )
-        assertEquals("ws-held", taskBoardOf("t-9", boards, pane, worktree))
-        // Unread boards: the pane's workspace, its worktree's, then the repository's implicit one.
-        assertEquals("ws-pane", taskBoardOf("t-9", emptyMap(), pane, worktree))
-        assertEquals("ws-owner", taskBoardOf("t-9", emptyMap(), pane.copy(workspace = null), worktree))
-        assertEquals("repo", taskBoardOf("t-9", emptyMap(), null, worktree.copy(workspace = null)))
-        assertNull(taskBoardOf("t-9", emptyMap(), null, null))
+        assertEquals("ws-held", taskBoardOf("t-9", boards))
+        // No board read so far holds it: nothing, rather than the pane's workspace.
+        assertNull(taskBoardOf("t-9", boards - "ws-held"))
+    }
+
+    @Test
+    fun `the boards read to find a card start with the pane's workspace`() {
+        fun ws(id: String, repository: String) = WorkspaceSummary(id = id, repository = repository)
+        val list = listOf(ws("ws-a", "repo"), ws("ws-owner", "repo"), ws("ws-other-repo", "elsewhere"), ws("ws-pane", "repo"))
+        val pane = Terminal(id = "p", workspace = "ws-pane")
+        val worktree = Worktree(id = "w", workspace = "ws-owner", repository = "repo")
+        assertEquals(
+            listOf("ws-pane", "ws-owner", "ws-a"),
+            boardsToRead(emptyMap(), list, pane, worktree).map { it.id },
+        )
+        // A board already read would have held it: not read again.
+        val read = mapOf("ws-owner" to TaskBoard(emptyList()))
+        assertEquals(listOf("ws-pane", "ws-a"), boardsToRead(read, list, pane, worktree).map { it.id })
     }
 }

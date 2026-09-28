@@ -2,6 +2,8 @@ package com.farcooler.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,6 +34,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.ripple
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -65,6 +69,7 @@ import com.farcooler.model.TaskBoard
 import com.farcooler.model.TaskLink
 import com.farcooler.model.TaskRef
 import com.farcooler.model.Terminal
+import com.farcooler.model.WorkspaceSummary
 import com.farcooler.model.Worktree
 import com.farcooler.net.Connection
 import com.farcooler.net.TerminalRef
@@ -146,9 +151,18 @@ fun TerminalPane(
     val ordinal = worktree?.ordinals()?.get(ref.terminalId)
     val name = terminal?.displayName(ordinal) ?: "Terminal"
 
-    // The task this pane is about, named in the top bar; see [topBarTask].
-    val task = topBarTask(terminal, worktree)
+    // The task this pane is about, named in the top bar once its board is
+    // known; see [rememberTaskChip].
     val boards by connection.boards.collectAsStateWithLifecycle()
+    val chip = rememberTaskChip(
+        hostId = ref.hostId,
+        terminal = terminal,
+        worktree = worktree,
+        boards = boards,
+        boardList = connection::boardList,
+        readBoard = connection::readBoard,
+        navigate = model::navigate,
+    )
 
     // Keyed to nothing that can change. A pane's id is fixed for the life of
     // this composable — [WorktreeScreen] gives each one its own `key` — so
@@ -248,12 +262,8 @@ fun TerminalPane(
             showRunner = showRunner,
             runnerLabel = connection.host.displayLabel,
             onOpenDrawer = onOpenDrawer,
-            task = task,
-            onOpenTask = task?.let { named ->
-                taskBoardOf(named.id, boards, terminal, worktree)?.let { board ->
-                    { model.navigate(Route.BoardTask(ref.hostId, board, named.id)) }
-                }
-            },
+            task = chip?.task,
+            onOpenTask = chip?.open,
         ) {
             // Terminal or chat, on the pane that can be either. Shown only
             // where it would work: `chatCapable` already reflects the daemon's
@@ -445,6 +455,9 @@ fun WorktreeTopBar(
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = Color(TerminalPalette.BACKGROUND),
         ),
+        // Taller while a task chip shows: the title's line and the chip's
+        // 48 dp touch target, stacked.
+        expandedHeight = if (task != null) 76.dp else TopAppBarDefaults.TopAppBarExpandedHeight,
         title = {
             Column {
                 Text(
@@ -502,55 +515,116 @@ fun topBarTask(terminal: Terminal?, worktree: Worktree?): TaskRef? {
 }
 
 /**
- * The board to open [taskId]'s card on: the one that holds it, as last read,
- * or failing that the workspace the pane works for, then its worktree's owner,
- * then — on a runner without workspaces — the repository's implicit one. Null
- * when there's nothing to go on, and the chip is then only a label.
+ * The board that holds [taskId]'s card, among the boards read so far, or
+ * null. Never a guess: a card opened on the wrong board reads "This task
+ * isn't on the board anymore", which isn't true.
  */
-fun taskBoardOf(
-    taskId: String,
+fun taskBoardOf(taskId: String, boards: Map<String, TaskBoard>): String? =
+    boards.entries.firstOrNull { it.value.row(taskId) != null }?.key
+
+/**
+ * The boards to read, in order, to find a task's card when no board read so
+ * far holds it. A task names no workspace (`TaskRef` is `{id, key, title,
+ * status}`), so these are where it most likely is: the workspace the pane
+ * works for, then the worktree's owner, then every other board of the
+ * worktree's repository. Boards already read are skipped: they'd have held it.
+ */
+fun boardsToRead(
     boards: Map<String, TaskBoard>,
+    list: List<WorkspaceSummary>,
     terminal: Terminal?,
     worktree: Worktree?,
-): String? =
-    boards.entries.firstOrNull { it.value.row(taskId) != null }?.key
-        ?: terminal?.workspace
-        ?: worktree?.workspace
-        ?: worktree?.repository
+): List<WorkspaceSummary> {
+    val repository = worktree?.repository
+    val first = listOfNotNull(terminal?.workspace, worktree?.workspace)
+    val mine = list.filter { repository == null || it.repository == repository || it.id == repository }
+    val ordered = first.mapNotNull { id -> list.firstOrNull { it.id == id } } +
+        mine.filter { it.id !in first }
+    return ordered.distinctBy { it.id }.filter { it.id !in boards }
+}
+
+/** A pane's task, and what tapping its chip does. */
+class TaskChip(val task: TaskRef, val open: () -> Unit)
+
+/**
+ * The task chip a pane's top bar draws, or null while there's none to draw.
+ *
+ * [topBarTask] names the task; the chip shows only once the board holding
+ * its card is known, so a tap always lands on the card. When no board read
+ * so far holds it, this reads [boardsToRead] one at a time until one does,
+ * and stops there: [boards] changing ends the search. A task no board holds
+ * gets no chip. Draws nothing itself, which is what lets a test compose it.
+ */
+@Composable
+fun rememberTaskChip(
+    hostId: String,
+    terminal: Terminal?,
+    worktree: Worktree?,
+    boards: Map<String, TaskBoard>,
+    boardList: () -> List<WorkspaceSummary>,
+    readBoard: suspend (WorkspaceSummary) -> Unit,
+    navigate: (Route) -> Unit,
+): TaskChip? {
+    val task = topBarTask(terminal, worktree)
+    val board = task?.let { taskBoardOf(it.id, boards) }
+    val searching = task != null && board == null
+    LaunchedEffect(task?.id, searching) {
+        if (!searching) return@LaunchedEffect
+        for (candidate in boardsToRead(boards, boardList(), terminal, worktree)) readBoard(candidate)
+    }
+    if (task == null || board == null) return null
+    return TaskChip(task) { navigate(Route.BoardTask(hostId, board, task.id)) }
+}
 
 /** The pane's task as a chip: its key in monospace, then its title. */
 @Composable
 private fun TaskChip(task: TaskRef, onOpen: (() -> Unit)?) {
-    Surface(
-        shape = RoundedCornerShape(50),
-        color = Color.White.copy(alpha = 0.12f),
-        contentColor = Color.White,
-        modifier = Modifier
-            .widthIn(max = 220.dp)
-            .clip(RoundedCornerShape(50))
+    // The pill is drawn small; the target around it is 48 dp, as Material
+    // asks of anything tappable. The ripple stays on the pill.
+    val presses = remember { MutableInteractionSource() }
+    Box(
+        Modifier
+            .minimumInteractiveComponentSize()
             .then(
                 if (onOpen == null) Modifier
-                else Modifier.clickable(onClickLabel = "Open Task", role = Role.Button, onClick = onOpen)
+                else Modifier.clickable(
+                    interactionSource = presses,
+                    indication = null,
+                    onClickLabel = "Open Task",
+                    role = Role.Button,
+                    onClick = onOpen,
+                )
             )
             .semantics { contentDescription = "Task ${task.label}" },
+        contentAlignment = Alignment.Center,
     ) {
-        Row(Modifier.padding(horizontal = 8.dp, vertical = 2.dp)) {
-            if (task.key.isNotBlank()) {
-                Text(
-                    task.key,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
-                    maxLines = 1,
-                )
-                if (task.title.isNotBlank()) Spacer(Modifier.size(4.dp))
-            }
-            if (task.title.isNotBlank()) {
-                Text(
-                    task.title,
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+        Surface(
+            shape = RoundedCornerShape(50),
+            color = Color.White.copy(alpha = 0.12f),
+            contentColor = Color.White,
+            modifier = Modifier
+                .widthIn(max = 220.dp)
+                .clip(RoundedCornerShape(50))
+                .indication(presses, ripple()),
+        ) {
+            Row(Modifier.padding(horizontal = 8.dp, vertical = 2.dp)) {
+                if (task.key.isNotBlank()) {
+                    Text(
+                        task.key,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                    )
+                    if (task.title.isNotBlank()) Spacer(Modifier.size(4.dp))
+                }
+                if (task.title.isNotBlank()) {
+                    Text(
+                        task.title,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }
