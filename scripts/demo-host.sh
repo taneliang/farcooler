@@ -356,13 +356,72 @@ done
 # argv and otherwise exactly as a real dispatched agent does — a plain exec in
 # the launch's own process group, with no job control of its own — so the demo
 # shows what a real dispatch shows, including how the runner names the pane.
+#
+# One exception, by worktree: in `asking` the stand-in asks for permission the
+# way claude 2.1.283 does, so the phone's Allow and Deny for a claude TUI pane
+# can be tested (`TerminalPermissionTests`). It is idle until a line is typed
+# into it, so nothing else in the demo sees a blocked agent.
+ASKING="$DIR/stand-in/asking.sh"
 cat > "$STAND_IN" <<STANDIN
 #!/bin/bash
 # The demo runner's claude: a stand-in, never the real one. See demo-host.sh.
 touch '$STAND_IN_RAN'
+case "\$PWD" in
+    */asking) exec /bin/bash '$ASKING' "\$@" ;;
+esac
 exec -a claude /bin/sleep 86400
 STANDIN
 chmod +x "$STAND_IN"
+# Launched as `<stand-in> claude --session-id S --settings F …`, in the
+# `asking` worktree. On each line typed into the pane it:
+#   - draws claude's permission dialog (the spike's capture, banner included,
+#     so the daemon reads the pane as a blocked claude);
+#   - runs the `PermissionRequest` hook Far Cooler wrote into F, with the
+#     payload claude sends, which the daemon holds while a phone may answer;
+#   - takes the dialog down when the hook exits (a phone answered, or the
+#     hold ran out) or when another line is typed (a keyboard answer).
+# The dialog stays up only while the hook is held, so a denial that never
+# reached the daemon keeps the pane blocked for the whole 60 s hold.
+cat > "$ASKING" <<ASKINGSH
+#!/bin/bash
+DIALOG='$REPO/crates/core/captures/claude-permission-hook-waiting.txt'
+ASKINGSH
+cat >> "$ASKING" <<'ASKINGSH'
+S=; F=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --session-id) S=$2; shift ;;
+        --settings) F=$2; shift ;;
+    esac
+    shift
+done
+cmd=$(grep -e '--event PermissionRequest' "$F" | sed -e 's/^ *"command": "//' -e 's/",*$//')
+idle() { clear; printf '%s\n\n❯ \n' "$1"; }
+idle "Type a line to ask for permission."
+while read -r _; do
+    clear
+    cat "$DIALOG"
+    out=$(mktemp)
+    printf '{"session_id":"%s","cwd":"%s","hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"touch x"}}' "$S" "$PWD" \
+        | sh -c "$cmd" > "$out" 2>/dev/null &
+    hook=$!
+    said=""
+    while kill -0 "$hook" 2>/dev/null; do
+        if read -r -t 1 _; then said=keyboard; break; fi
+    done
+    if [ "$said" = keyboard ]; then
+        idle "Answered at the keyboard. Type a line to ask again."
+    elif grep -q '"deny"' "$out"; then
+        idle "Denied by PermissionRequest hook. Type a line to ask again."
+    elif grep -q '"allow"' "$out"; then
+        idle "Allowed by PermissionRequest hook. Type a line to ask again."
+    else
+        idle "No answer from the hook. Type a line to ask again."
+    fi
+    rm -f "$out"
+done
+ASKINGSH
+chmod +x "$ASKING"
 # `env -u NAME` for each, built from what this shell actually exports.
 STRIP=()
 for name in $(env | cut -d= -f1 \
@@ -729,6 +788,37 @@ if [ "$RESOLVED" = "$TRAP_DIR/claude" ] && [ -x "$STAND_IN" ]; then
     fi
 else
     echo "        (no board fixture: a bare claude resolves to '${RESOLVED:-nothing}', not the trap)"
+fi
+
+# A claude that asks for permission, in a worktree of its own: `asking`, one
+# `claude` pane running the stand-in's asking script (see `$ASKING` above).
+# `TerminalPermissionTests` opens it, types a line, and answers from the phone.
+# The same guard as the board: only when a bare `claude` would hit the trap.
+if [ "$RESOLVED" = "$TRAP_DIR/claude" ] && [ -x "$STAND_IN" ]; then
+    asking_id() { fc --json worktree list | jq -r 'first(.worktrees[] | select(.task=="asking") | .id) // empty'; }
+    if [ -z "$(asking_id)" ]; then
+        fc worktree create "$REPO_ID" asking --branch demo/asking >/dev/null
+    fi
+    ASKING_WT=$(asking_id)
+    # A pane from an earlier run that has exited is removed, so the test's
+    # claude tab is the live one. Creating the worktree opened a shell as
+    # well, so the claude pane is found by the id written when it was made.
+    for dead in $(fc --json worktree list \
+        | jq -r '.worktrees[] | select(.task=="asking") | .terminals[] | select(.state != "running") | .id'); do
+        fc terminal remove "$dead" >/dev/null 2>&1 || true
+    done
+    ASKER=$(cat "$DIR/asking-terminal" 2>/dev/null || true)
+    LIVE=$(fc --json worktree list | jq -r --arg id "$ASKER" \
+        'first(.worktrees[] | select(.task=="asking") | .terminals[] | select(.id == $id and .state == "running") | .id) // empty')
+    if [ -n "$ASKING_WT" ] && [ -z "$LIVE" ]; then
+        fc --json terminal create "$ASKING_WT" --preset claude | jq -r '.id // empty' \
+            > "$DIR/asking-terminal" || true
+    fi
+    if [ -e "$TRAPPED" ]; then
+        echo "STOPPING: a bare claude was resolved by searching ($TRAPPED)."
+        exit 1
+    fi
+    echo "        and a claude that asks for permission, in worktree 'asking'"
 fi
 
 echo "building the iOS app…"

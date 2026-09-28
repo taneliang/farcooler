@@ -98,6 +98,10 @@ SOURCES = [
     "ImagePaste.swift",
     "AgentStream.swift",
     "AgentView.swift",
+    # A claude TUI pane's permission ask, with Allow and Deny, over its
+    # terminal. Reads the pane's ring through `AgentStream` and draws
+    # `AgentView`'s `ApprovalCard`.
+    "TerminalPermissionBar.swift",
     # The phone's half of the watch link. Not under `FarCoolerWatch/`: it runs
     # on the phone, holds the connection, and makes the core calls the watch
     # cannot.
@@ -596,6 +600,9 @@ UI_TEST_SOURCES = [
     # landing on the pane. Needs no runner: `-shell-board` puts a canned board
     # on the harness's runner, so this one cannot skip itself green either.
     "ShellBoardTests.swift",
+    # A claude TUI pane's permission ask, answered from the phone and at the
+    # keyboard, against the demo runner's asking stand-in.
+    "TerminalPermissionTests.swift",
     # Photographs the terminal renderer's own fixture and compares cells. Needs
     # no runner: the grid it draws is built in the app, so this one cannot skip
     # itself green when the demo daemon is down.

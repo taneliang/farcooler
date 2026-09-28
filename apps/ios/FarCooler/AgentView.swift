@@ -2047,7 +2047,11 @@ struct ApprovalControls: View {
     }
 }
 
-private struct ApprovalCard: View {
+/// "Needs your approval" and the agent's answers, as one card.
+///
+/// Not private: `TerminalPermissionBar` draws the same card over a claude TUI
+/// pane, so a question looks the same in a chat pane and over a terminal.
+struct ApprovalCard: View {
     let pending: PendingPermission
     let onChoose: (String) -> Void
 

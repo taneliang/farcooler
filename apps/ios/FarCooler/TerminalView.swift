@@ -962,6 +962,15 @@ struct TerminalView: View {
                                 columns: columns(for: geo.size), rows: rows(for: geo.size))
                         }
                 }
+                // A claude ask, answerable from here. Over the grid rather than
+                // beside it: taking rows from the grid would resize the pane in
+                // tmux and make claude redraw the very dialog being answered.
+                .overlay(alignment: .bottom) {
+                    TerminalPermissionBar(
+                        terminalID: terminal.id, core: connection.core,
+                        blocked: live.agent == .blocked, isVisible: isVisible)
+                        .id(terminal.id)
+                }
                 // NO KEYBOARD INSET OF THIS VIEW'S OWN, AND THAT IS A CHANGE.
                 //
                 // There used to be one here — `Color.clear.frame(height:
