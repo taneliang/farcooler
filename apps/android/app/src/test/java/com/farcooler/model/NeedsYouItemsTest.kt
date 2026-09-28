@@ -99,6 +99,9 @@ class NeedsYouItemsTest {
         assertEquals("in_review", review.task?.status)
         assertEquals(399_996_399L, review.rank)
 
+        // Every item a runner sent is its own, not one this phone made up.
+        assertEquals(false, runners.values.flatten().any { it.isDerived })
+
         val box = runners.getValue("build-box")
         assertEquals(listOf(NeedsYouKind.ASK, NeedsYouKind.REVIEW), box.map { it.kindValue })
         // Below Control scope: no buttons, no ask id, and a fixed sentence.
@@ -174,6 +177,7 @@ class NeedsYouItemsTest {
         assertEquals(199_996_399L, item.rank)
         assertEquals("codex needs you", item.question)
         assertEquals("ws", item.workspaceId)
+        assertEquals(true, item.isDerived)
 
         val merged = NeedsYouItems.merge(mapOf("old" to derived, "studio" to fixture().getValue("studio")))
         assertEquals(
@@ -185,9 +189,30 @@ class NeedsYouItemsTest {
 
     @Test
     fun `an older runner derives no decisions or reviews`() {
-        val working = Terminal(id = "t", preset = "claude", activity = "working", taskId = "task-1")
-        val wt = Worktree(id = "w", terminals = listOf(working), openTasks = listOf(TaskRef("task-1", "bil-1")))
+        // A task in Needs Decision and one In Review, each with a working
+        // agent: an older runner still says nothing about either.
+        val deciding = Terminal(id = "t1", preset = "claude", activity = "working", taskId = "task-1")
+        val reviewing = Terminal(id = "t2", preset = "claude", activity = "idle", taskId = "task-2")
+        val wt = Worktree(
+            id = "w",
+            terminals = listOf(deciding, reviewing),
+            openTasks = listOf(
+                TaskRef("task-1", "bil-1", "Pick a queue", "needs_decision"),
+                TaskRef("task-2", "bil-2", "Webhook signatures", "in_review"),
+            ),
+        )
         assertEquals(emptyList<NeedsYouItem>(), NeedsYouItems.derived(listOf(wt)))
+    }
+
+    @Test
+    fun `equal ranks hold still by runner, then by id`() {
+        val a1 = NeedsYouItem(id = "blocked:1", kind = "blocked", rank = 150_000_000)
+        val a2 = NeedsYouItem(id = "blocked:2", kind = "blocked", rank = 150_000_000)
+        val b1 = NeedsYouItem(id = "blocked:1", kind = "blocked", rank = 150_000_000)
+        val expected = listOf("alpha/blocked:1", "alpha/blocked:2", "beta/blocked:1")
+        // Whatever order the runners and their items arrive in.
+        assertEquals(expected, NeedsYouItems.merge(mapOf("beta" to listOf(b1), "alpha" to listOf(a2, a1))).map { it.key })
+        assertEquals(expected, NeedsYouItems.merge(mapOf("alpha" to listOf(a1, a2), "beta" to listOf(b1))).map { it.key })
     }
 
     /** A file in this checkout, found by walking up from wherever Gradle runs. */

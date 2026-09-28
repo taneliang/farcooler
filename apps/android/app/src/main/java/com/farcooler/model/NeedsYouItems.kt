@@ -2,6 +2,7 @@ package com.farcooler.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 /**
  * The needs-you rollup: what each runner says a person has to act on, and the
@@ -106,6 +107,13 @@ data class NeedsYouItem(
     @SerialName("ask_id") val askId: String? = null,
     /** Empty for a reader below Control scope, who gets no buttons. */
     val actions: List<NeedsYouAction> = emptyList(),
+    /**
+     * Made on this phone by [NeedsYouItems.derived] for a runner without
+     * `needs_you`, rather than sent by one. Never on the wire. What lets a
+     * row hedge ("Update Far Cooler on <runner> to see decisions and asks
+     * here.") without tracking which runner is which version.
+     */
+    @Transient val isDerived: Boolean = false,
 ) {
     val kindValue: NeedsYouKind get() = NeedsYouKind.parse(kind)
 
@@ -199,6 +207,7 @@ object NeedsYouItems {
             question = terminal.blockedQuestion?.ifBlank { null }
                 ?: "${Terminal.name(terminal.preset)} needs you",
             actions = listOf(NeedsYouAction(id = "open", title = "Open")),
+            isDerived = true,
         )
     }
 }
