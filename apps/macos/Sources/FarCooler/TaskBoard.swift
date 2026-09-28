@@ -452,9 +452,29 @@ struct BoardAgents {
 /// Anything but `read` offers them, `unspecified` included: that is what a
 /// runner newer than this build answers for a grant it has no word for, and
 /// what the Mac's own shell key reads as (`DaemonBuild.mayAdministerRunner`).
+///
+/// **This gate can't close on a Mac today.** The Mac reaches a runner over
+/// its own shell key, which the daemon reads as host_admin, and `status
+/// --json` carries no scope, so `grantedScope` is `unspecified` here and the
+/// writes are always offered. `NewTaskTests` pins the rule, not the view; it
+/// becomes reachable when the Mac learns its grant.
 enum TaskBoardWrites {
     static func offered(by build: DaemonBuild?) -> Bool {
         build?.grantedScope != "read"
+    }
+
+    /// The most a task's title may hold, in Unicode scalars: the daemon's
+    /// limit (`checked_title`, `crates/daemon/src/task_ops.rs:163`).
+    static let titleLimit = 200
+
+    /// Whether the daemon will take `title`, measured as it measures it:
+    /// trimmed, not empty, and at most `titleLimit` scalars. Scalars rather
+    /// than characters, because a flag or a family emoji is one character and
+    /// several scalars, and counting characters let through titles the runner
+    /// then refused.
+    static func titleFits(_ title: String) -> Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && trimmed.unicodeScalars.count <= titleLimit
     }
 }
 
@@ -673,10 +693,15 @@ struct TaskBoardView: View {
         .buttonStyle(.plain)
         .help(
             forced
-                ? "Always \(name). Click again to choose by width."
-                : "Show as \(name == "List" ? "a list" : "a kanban")")
+                ? "Always shown as \(article(form)). Click again to choose by width."
+                : "Always show this board as \(article(form)).")
         .accessibilityLabel(name)
         .accessibilityValue(forced ? "Chosen" : shown ? "Shown" : "")
+    }
+
+    /// "a list" or "a kanban", for the toggle's tooltips.
+    private func article(_ form: BoardForm) -> String {
+        form == .list ? "a list" : "a kanban"
     }
 
     /// The toggle's choice, kept on this device as it changes.
@@ -813,9 +838,6 @@ private struct NewTaskForm: View {
     @State private var sending = false
     @State private var failed = false
 
-    /// The CLI's limit on a title (`task create --title`).
-    private static let limit = 200
-
     private var trimmed: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
@@ -825,8 +847,8 @@ private struct NewTaskForm: View {
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 320)
                 .onSubmit(send)
-            if trimmed.count > Self.limit {
-                Text("A title can be at most \(Self.limit) characters.")
+            if !trimmed.isEmpty && !TaskBoardWrites.titleFits(trimmed) {
+                Text("That title is too long. Shorten it to add the task.")
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
                     .foregroundStyle(.secondary)
             } else if failed {
@@ -846,7 +868,7 @@ private struct NewTaskForm: View {
         .padding(14)
     }
 
-    private var canSend: Bool { !sending && !trimmed.isEmpty && trimmed.count <= Self.limit }
+    private var canSend: Bool { !sending && TaskBoardWrites.titleFits(trimmed) }
 
     private func send() {
         guard canSend else { return }

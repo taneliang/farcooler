@@ -29,3 +29,19 @@ struct NewTaskTests {
         #expect(TaskBoardWrites.offered(by: nil))
     }
 }
+
+/// New Task…'s title, held to the daemon's own rule (`checked_title`,
+/// `crates/daemon/src/task_ops.rs:163`): trimmed, not empty, and at most 200
+/// Unicode scalars. Scalars, not characters: a flag is one character and two
+/// scalars, so a title of flags the form counted as fitting came back from
+/// the runner as a refusal the form couldn't explain.
+@Test("A New Task title is measured as the daemon measures it")
+func aNewTaskTitleIsMeasuredAsTheDaemonMeasuresIt() {
+    #expect(TaskBoardWrites.titleFits(String(repeating: "a", count: 200)))
+    #expect(!TaskBoardWrites.titleFits(String(repeating: "a", count: 201)))
+    #expect(TaskBoardWrites.titleFits("  " + String(repeating: "a", count: 200) + "  "))
+    #expect(!TaskBoardWrites.titleFits("   "))
+    // 101 flags: 101 characters, 202 scalars.
+    #expect(!TaskBoardWrites.titleFits(String(repeating: "🇸🇬", count: 101)))
+    #expect(TaskBoardWrites.titleFits(String(repeating: "🇸🇬", count: 100)))
+}
