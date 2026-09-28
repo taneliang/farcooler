@@ -1513,6 +1513,30 @@ Do you want to allow this command?
         assert!(codex.blocked.iter().any(|s| s == "Press enter to continue"));
     }
 
+    /// The dialog claude 2.1.283 draws while its `PermissionRequest` hook is
+    /// held (ov-14). The watcher releases a phone's ask when this screen goes
+    /// from Blocked to not, so both halves of that edge are pinned here.
+    #[test]
+    fn claude_2_1_283s_permission_dialog_is_blocked() {
+        let r = Registry::built_in();
+        assert_eq!(
+            r.classify("claude", include_str!("../captures/claude-permission-hook-waiting.txt")),
+            AgentActivity::Blocked
+        );
+    }
+
+    /// The same pane about 0.1 s after a keyboard "Yes": the dialog is gone and
+    /// the working footer is back. Not Blocked, which is what tells the ledger
+    /// the keyboard answered.
+    #[test]
+    fn claude_2_1_283_after_a_keyboard_yes_is_not_blocked() {
+        let r = Registry::built_in();
+        assert_ne!(
+            r.classify("claude", include_str!("../captures/claude-after-a-keyboard-yes.txt")),
+            AgentActivity::Blocked
+        );
+    }
+
     #[test]
     fn claude_is_classified_from_its_real_screens() {
         let r = Registry::built_in();

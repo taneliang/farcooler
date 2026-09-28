@@ -4111,6 +4111,15 @@ impl Watcher {
                         // whose file has gone quiet anyway, is a pane attached
                         // to the wrong file — see `join_looks_dead`.
                         let screen_says = registry.classify(&command, &screen);
+                        // What the screen alone says, before any folding, is
+                        // what a held permission ask needs: claude's dialog
+                        // leaving the screen is the keyboard answering it,
+                        // and nothing else sees that (`hook_asks`). No new
+                        // capture; this one is already here.
+                        self.service
+                            .hooks()
+                            .asks()
+                            .saw_screen(id, screen_says == AgentActivity::Blocked);
                         let working = promoted_by_title(
                             screen_says,
                             &title,
@@ -4607,6 +4616,75 @@ mod tests {
         assert!(fleet_changed(&mut rx), "the claim is announced");
         watcher.sample().await;
         assert!(!fleet_changed(&mut rx), "once");
+    }
+
+    /// The keyboard answering claude's permission dialog is seen as the
+    /// dialog leaving the screen, and that releases the ask a phone was
+    /// offered (ov-14). A real pane, showing claude 2.1.283's dialog as the
+    /// spike captured it, then cleared.
+    #[tokio::test]
+    async fn a_dialog_that_leaves_the_screen_releases_the_held_ask() {
+        let (dir, svc, repo) = crate::test_support::fixture().await;
+        let rows = svc.store.list_worktrees_for_repository(repo).unwrap();
+        let main = rows.iter().find(|w| w.is_main_checkout).unwrap();
+        let term = svc.create_terminal(main.id, "shell", "shell").await.expect("a shell pane");
+        let capture = dir.path().join("dialog.txt");
+        std::fs::write(&capture, include_str!("../../core/captures/claude-permission-hook-waiting.txt")).unwrap();
+        let watcher = Watcher::new(svc.clone());
+        let asks = svc.hooks().asks().clone();
+
+        // Drawn and left there: `sleep` keeps the prompt from coming back
+        // under it, in whatever shell the pane runs, and Ctrl-C ends it.
+        let show = format!("clear; cat '{}'; sleep 600\n", capture.display());
+        // Typed once the shell has drawn something: keys sent before it is
+        // reading are lost.
+        for _ in 0..100 {
+            if svc.runtime().screen(term.id).await.is_ok_and(|(s, _, _)| !s.trim().is_empty()) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        let pane = svc
+            .tmux
+            .list_tagged_panes()
+            .await
+            .expect("tmux answered")
+            .into_iter()
+            .find(|p| p.terminal_id == term.id)
+            .expect("the pane is tagged")
+            .pane_id;
+        svc.tmux.send_keys(&pane, &show).await.expect("typed");
+        let (_id, mut settled) = asks.hold(term.id);
+
+        // Sampled until the dialog has been seen (once is enough, and a dialog
+        // never seen can't count as gone), then cleared and sampled twice.
+        let mut seen = false;
+        for _ in 0..50 {
+            watcher.sample().await;
+            if svc.runtime().screen(term.id).await.is_ok_and(|(s, _, _)| s.contains("Esc to cancel")) {
+                watcher.sample().await;
+                seen = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        let shown = svc.runtime().screen(term.id).await.map(|(s, _, _)| s);
+        assert!(seen, "the dialog never reached the pane: {shown:?}");
+        assert!(asks.is_holding(term.id), "the dialog is still up");
+
+        svc.tmux.send_keys(&pane, "\u{3}").await.expect("typed");
+        svc.tmux.send_keys(&pane, "clear\n").await.expect("typed");
+        for _ in 0..50 {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            if svc.runtime().screen(term.id).await.is_ok_and(|(s, _, _)| !s.contains("Esc to cancel")) {
+                break;
+            }
+        }
+        watcher.sample().await;
+        watcher.sample().await;
+        assert!(!asks.is_holding(term.id), "two samples without the dialog release the ask");
+        let ended = settled.try_recv().expect("the hook was told");
+        assert_eq!(ended.decision, None, "the keyboard decided, so the hook says nothing");
     }
 
     /// Every tick walks the panes' processes: a real shell in a real pane,

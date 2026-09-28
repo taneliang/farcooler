@@ -121,3 +121,22 @@ session log states the same fact as a number, on the record that ends the turn
 (`pendingBackgroundAgentCount`), and the daemon believes that over any footer —
 see `resolved_activity` in `crates/daemon/src/watch.rs`. These signatures are
 what stage 1 needs so that it stops contradicting it.
+
+## The permission dialog a phone can answer
+
+Captured 2026-09-28 against claude **2.1.283**, on a 140-column pane, by the
+ov-14 spike's sampler (`/tmp/fc-t/ov14-spike/cap.sh`). Unlike the files above,
+these are NOT raw `capture-pane` output. The sampler dropped blank lines, lines
+that were only `─`, and the pane's first three lines, and it rewrote spinner
+lines as `<spinner>`. Recapture raw before tightening any rule against them.
+
+- `claude-permission-hook-waiting.txt` is claude's dialog while its
+  `PermissionRequest` hook is held (frame r1, t=1790550898.785). Its footer,
+  `Esc to cancel · Tab to amend`, and `Do you want to` are what classify it
+  Blocked.
+- `claude-after-a-keyboard-yes.txt` is the same pane about 0.1 s after a
+  keyboard Yes (frame r2, t=1790550967.443), with the working footer back.
+
+The watcher releases a held phone ask on the edge between these two screens.
+The dialog must have been seen, and then be missing for two samples (see
+`crates/daemon/src/hook_asks.rs`).

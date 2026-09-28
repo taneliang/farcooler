@@ -41,9 +41,9 @@ use tokio::time::Instant;
 /// imperceptible to the person at the keyboard.
 ///
 /// It is the whole of the wait for every hook but one kind. A gating hook can
-/// wait longer, up to `LONGEST_HOLD` (plus `HOLD_GRACE`), and only on the daemon's word: a first
-/// line of `{"hold_ms":…}` says the ask is in front of a phone, and the hook
-/// then reads one more line for the verdict. That word has to arrive inside
+/// wait longer, up to `LONGEST_HOLD` (plus `HOLD_GRACE`), and only on the
+/// daemon's word: a first line of `{"hold_ms":…}` says the ask is in front of a
+/// phone, and the hook then reads one more line for the verdict. That word has to arrive inside
 /// this deadline, so the long wait is granted by a daemon that has just shown
 /// it is alive and answering, never assumed. A daemon that wedges before its
 /// first word costs the agent 400 ms, as it always did; one that wedges mid-hold
