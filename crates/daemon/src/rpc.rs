@@ -3002,7 +3002,8 @@ mod hook_answer_tests {
         let (id, hook) = held(&r);
         let mac = handler(&r.svc, None);
         assert_eq!(refusal(&mac, an_answer(r.terminal, &id, "deny")).await, None);
-        assert_eq!(hook.await.unwrap(), Some(Decision::Deny { message: "Denied from Mac".into() }));
+        let expected = format!("Denied from {}", local_name(cfg!(target_os = "macos")));
+        assert_eq!(hook.await.unwrap(), Some(Decision::Deny { message: expected }));
     }
 
     #[tokio::test]
