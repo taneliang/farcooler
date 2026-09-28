@@ -1814,7 +1814,8 @@ async fn a_permission_answered_from_a_phone_reaches_the_held_hook() {
     asking.never_trapped();
 }
 
-/// The local socket has no client id, so the device is the Mac.
+/// The local socket has no client id, so the device is the runner itself:
+/// "Mac" on macOS, "this computer" elsewhere.
 #[tokio::test]
 async fn a_permission_denied_from_the_mac_says_so_to_the_model() {
     let mut asking = a_claude_asking().await;
@@ -1825,7 +1826,8 @@ async fn a_permission_denied_from_the_mac_says_so_to_the_model() {
     let printed: serde_json::Value =
         serde_json::from_str(asking.hook_printed().trim()).expect("the hook printed json");
     assert_eq!(printed["hookSpecificOutput"]["decision"]["behavior"], "deny");
-    assert_eq!(printed["hookSpecificOutput"]["decision"]["message"], "Denied from Mac");
+    let local = if cfg!(target_os = "macos") { "Mac" } else { "this computer" };
+    assert_eq!(printed["hookSpecificOutput"]["decision"]["message"], format!("Denied from {local}"));
     assert_eq!(asking.resolved().await, "deny");
     asking.never_trapped();
 }
