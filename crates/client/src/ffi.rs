@@ -563,6 +563,14 @@ impl Lost {
             Lost::Already | Lost::Call(_) => None,
         }
     }
+
+    /// The runner's `Error.what` for this refusal, when it named one.
+    fn what(&self) -> Option<&str> {
+        match self {
+            Lost::Call(SessionError::Refused { what, .. }) if !what.is_empty() => Some(what),
+            Lost::Already | Lost::Call(_) => None,
+        }
+    }
 }
 
 /// Generate a new ed25519 key pair for this device.
@@ -2459,6 +2467,11 @@ fn push_call(
             if let Some(word) = reason.word() {
                 line["code"] = json!(word);
             }
+            // Which argument or which conflict, when the runner named one.
+            // Absent otherwise, on `code`'s terms.
+            if let Some(what) = reason.what() {
+                line["what"] = json!(what);
+            }
             line
         }
     };
@@ -2541,11 +2554,28 @@ mod tests {
                 code: farcooler_protocol::v1::ErrorCode::WorktreesExist as i32,
                 retryable: false,
                 message: "worktrees still exist under this resource".into(),
+                what: String::new(),
             })),
             false,
         );
         assert_eq!(refused["ok"], false);
         assert_eq!(refused["code"], "workspaces-exist");
+        assert!(refused.get("what").is_none(), "the runner named nothing, so there's no key");
+
+        // Two refusals with one code, told apart by `what`: the phone's Needs
+        // You says a different sentence for each.
+        for what in ["not_held", "not_delivered"] {
+            let conflict = line(
+                Err(Lost::Call(SessionError::Refused {
+                    code: farcooler_protocol::v1::ErrorCode::ResourceConflict as i32,
+                    retryable: false,
+                    message: "Someone already answered this.".into(),
+                    what: what.into(),
+                })),
+                false,
+            );
+            assert_eq!((&conflict["code"], &conflict["what"]), (&json!("resource-conflict"), &json!(what)));
+        }
         // The prose is still there. It is the app's fallback and its transcript,
         // and carrying the word must not have cost it.
         assert_eq!(refused["error"], "worktrees still exist under this resource");
@@ -2558,6 +2588,7 @@ mod tests {
                 code: 9_999,
                 retryable: false,
                 message: "something this build has never heard of".into(),
+                what: String::new(),
             })),
             false,
         );

@@ -51,8 +51,14 @@ pub enum SessionError {
     /// into a string here is what made every refusal on both phones the same
     /// generic apology. `Display` is still just the message, so nothing that
     /// only wants the prose has to change.
+    ///
+    /// `what` is the runner's `Error.what`, empty when it named nothing:
+    /// which argument it refused, or which conflict. `terminal.agent_answer`'s
+    /// `not_held` and `not_delivered` are one code, and a phone's Needs You
+    /// says "Someone already answered this." for one and "Try again." for the
+    /// other.
     #[error("{message}")]
-    Refused { code: i32, retryable: bool, message: String },
+    Refused { code: i32, retryable: bool, message: String, what: String },
     /// The link underneath this session is gone.
     ///
     /// Deliberately distinct from `Protocol`, which is the far side saying
@@ -110,15 +116,11 @@ impl From<ClientError> for SessionError {
             // throw the code away, and the code is the only thing an app can
             // write a useful sentence from.
             //
-            // `what` — which argument the runner refused — is deliberately not
-            // carried across yet. Nothing behind this boundary reads it: the
-            // phones see a refusal through `ffi::Lost::word`, which is the
-            // code and nothing else. Adding it here would mean a field on
-            // `Refused`, a second one on the FFI, and a word in Swift and in
-            // Kotlin, all with no reader. It belongs here the day a phone
-            // wants to say which field it got wrong.
-            ClientError::Daemon { code, retryable, message, .. } => {
-                SessionError::Refused { code, retryable, message }
+            // `what` crosses too, since Needs You: an answer refused as
+            // `not_held` and one refused as `not_delivered` are the same code,
+            // and a phone owes them different sentences (spec §2.5).
+            ClientError::Daemon { code, retryable, message, what } => {
+                SessionError::Refused { code, retryable, message, what }
             }
             other => SessionError::Protocol(other.to_string()),
         }
@@ -2141,6 +2143,7 @@ fn require(advertised: &[String], capability: &str, method: &str) -> Result<(), 
         code: farcooler_protocol::v1::ErrorCode::CapabilityUnsupported as i32,
         retryable: false,
         message: format!("this runner does not serve {method}"),
+        what: String::new(),
     })
 }
 

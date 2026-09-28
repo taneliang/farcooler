@@ -99,3 +99,41 @@ async fn task_list_and_task_get_are_refused_without_a_request() {
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     assert_eq!(requests.load(Ordering::SeqCst), 0, "a board read reached a runner without a board");
 }
+
+/// The same for Needs You and the phone's two new writes: a runner without
+/// `needs_you`, `tasks` or `workstreams` is refused here, so the app falls
+/// back (spec §2.6) rather than waiting on an answer that won't come.
+#[tokio::test]
+async fn needs_you_and_the_phones_writes_are_refused_without_a_request() {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("old.sock");
+    let requests = an_old_runner(&socket).await;
+
+    let mut session = Session::connect_local(&socket).await.expect("connect to the old runner");
+    assert!(!session.can(farcooler_protocol::capability::NEEDS_YOU));
+
+    let bound = std::time::Duration::from_secs(2);
+    let listed = tokio::time::timeout(bound, session.needs_you())
+        .await
+        .expect("needs_you.list went to the runner and waited for an answer");
+    refused_as_unsupported(listed, "needs_you.list");
+
+    let note = farcooler_client::session::task_note_append(
+        uuid::Uuid::now_v7(),
+        farcooler_protocol::v1::TaskNoteKind::Answer,
+        "Postgres",
+    );
+    let noted = tokio::time::timeout(bound, session.task_note(note))
+        .await
+        .expect("task.note went to the runner and waited for an answer");
+    refused_as_unsupported(noted, "task.note");
+
+    let start = farcooler_protocol::v1::WorkspaceStartOrchestrator { harness: "claude".into(), ..Default::default() };
+    let started = tokio::time::timeout(bound, session.start_orchestrator(uuid::Uuid::now_v7(), start))
+        .await
+        .expect("workspace.start_orchestrator went to the runner and waited for an answer");
+    refused_as_unsupported(started.map(|_| serde_json::Value::Null), "workspace.start_orchestrator");
+
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert_eq!(requests.load(Ordering::SeqCst), 0, "a request reached a runner that can't serve it");
+}

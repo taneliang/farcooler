@@ -30,6 +30,11 @@
  *     {"ticket": 3, "ok": true,  "result": { ... }}
  *     {"ticket": 4, "ok": false, "error": "a sentence for a human"}
  *
+ * A failure the runner refused also carries `code`, its stable word
+ * (`resource-conflict`), and `what` when it named which argument or which
+ * conflict (`not_held`, `not_delivered`). Both are absent, not empty, when
+ * no runner said them.
+ *
  * ## Lifetime and threading
  *
  * A handle is not thread-safe; confine it to one thread. The pointer returned

@@ -2001,8 +2001,10 @@ async fn a_permission_answered_at_the_keyboard_releases_the_held_hook_and_the_ph
 
     let id = asking.id.clone();
     match asking.session.agent_answer(terminal, &id, "allow").await {
-        Err(SessionError::Refused { code, .. }) => {
+        Err(SessionError::Refused { code, what, .. }) => {
             assert_eq!(farcooler_core::error::word_for(code), "resource-conflict");
+            // Named, so a phone can say "Someone already answered this."
+            assert_eq!(what, "not_held");
         }
         other => panic!("a late answer was not refused as a conflict: {other:?}"),
     }
