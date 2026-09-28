@@ -4133,7 +4133,6 @@ mod tests {
         };
         let mut link = answering(Ok(pb::Result {
             value: Some(pb::result::Value::NeedsYouList(list.clone())),
-            ..Default::default()
         }));
         let printed = needs_you_read(&mut link, true).await.expect("read");
         assert_eq!(link.sent[0].method, "needs_you.list");
