@@ -192,8 +192,8 @@ final class TaskBoardStore: ObservableObject {
         // Only the call that read refreshes an open card. The ones folded into
         // a read already running would each launch a `task show` of their own
         // for the same card.
-        guard await reload(), let opened else { return }
-        await open(opened)
+        guard await reload(), opened != nil else { return }
+        await refreshOpened()
     }
 
     /// Open one card: its record, and what it is waiting on.
@@ -201,18 +201,41 @@ final class TaskBoardStore: ObservableObject {
     /// A second call, because `task list` carries neither — one call for a
     /// whole board is what makes surveying it cheap, and the record is the
     /// expensive half.
+    ///
+    /// A different card starts empty. The card already open is read again in
+    /// place instead (`refreshOpened`): the board re-reads it on every task
+    /// write it hears of, most of them to other cards, and emptying it for
+    /// each one tore down the answer being typed into it.
     func open(_ row: TaskRow) async {
-        opened = row
-        detail = .empty
-        question = nil
+        if opened?.id != row.id {
+            opened = row
+            detail = .empty
+            question = nil
+        }
+        await read(row)
+    }
+
+    /// Read the open card again, keeping what it shows until the new read
+    /// lands.
+    func refreshOpened() async {
+        guard let opened else { return }
+        await read(opened)
+    }
+
+    private func read(_ row: TaskRow) async {
         let (data, _) = await client.taskDetail(key: row.key, repository: repositoryID)
+        // A card closed, or another opened, while this was in flight.
+        guard opened?.id == row.id else { return }
         guard let data, let read = try? TaskDetailModel.decode(data) else {
             trouble = "Far Cooler couldn’t read this task."
             return
         }
         trouble = nil
         detail = read
-        question = TaskQuestion.open(in: data)
+        let asked = TaskQuestion.open(in: data)
+        // Assigned only when it changed, so an unchanged question keeps its
+        // view, and the field in it.
+        if asked != question { question = asked }
         // The blocks arrive as ids; the board is what turns them into keys.
         opened = row.with(blocks: board.resolvingBlocks(read.blocks))
     }
@@ -241,6 +264,18 @@ final class TaskBoardStore: ObservableObject {
     /// what the card draws as Answer buttons. Read from the same `task show`
     /// as `detail`.
     @Published private(set) var question: TaskQuestion?
+
+    /// What has been typed into Answer… and not sent, by question. The
+    /// store's rather than the field's: the card is redrawn whenever its
+    /// record is read again, and a draft held by the view went with it.
+    /// Not published, so typing redraws the field and not the board.
+    private var drafts: [String: String] = [:]
+
+    func draft(for question: TaskQuestion) -> String { drafts[question.id] ?? "" }
+
+    func setDraft(_ text: String, for question: TaskQuestion) {
+        drafts[question.id] = text.isEmpty ? nil : text
+    }
 
     /// This runner, as the board's per-device choices are keyed: its target,
     /// or `local` for this Mac.
@@ -277,7 +312,8 @@ final class TaskBoardStore: ObservableObject {
             _ = refused
             return false
         }
-        if opened?.id == row.id { await open(row) }
+        if let question, opened?.id == row.id { setDraft("", for: question) }
+        if opened?.id == row.id { await refreshOpened() }
         await reload()
         return true
     }
@@ -504,6 +540,8 @@ struct TaskBoardView: View {
                 row: row, detail: store.detail, question: store.question,
                 agents: agents.live(for: row), canAnswer: store.offersWrites,
                 onAnswer: { body in await store.answer(row, with: body) },
+                draft: TaskCard.Draft(
+                    read: { store.draft(for: $0) }, write: { store.setDraft($1, for: $0) }),
                 onGoTo: { pane in
                     store.opened = nil
                     onGoTo(pane)
@@ -1280,6 +1318,7 @@ private struct TaskCardSheet: View {
     let agents: [BoardPane]
     let canAnswer: Bool
     let onAnswer: (String) async -> Bool
+    let draft: TaskCard.Draft
     let onGoTo: (BoardPane) -> Void
     let onClose: () -> Void
 
@@ -1310,7 +1349,7 @@ private struct TaskCardSheet: View {
             ScrollView {
                 TaskCard(
                     row: row, detail: detail, question: question, canAnswer: canAnswer,
-                    onAnswer: onAnswer
+                    onAnswer: onAnswer, draft: draft
                 )
                 .padding(14)
             }
@@ -1341,12 +1380,24 @@ struct TaskCard: View {
     let canAnswer: Bool
     /// Send an answer; true when it was written.
     let onAnswer: (String) async -> Bool
+    /// Where Answer…'s unsent text is kept: the store, so it outlives this
+    /// view, which is redrawn whenever the card's record is read again.
+    var draft: Draft = .none
+
+    /// Reads and writes an unsent answer, by question.
+    struct Draft {
+        var read: (TaskQuestion) -> String
+        var write: (TaskQuestion, String) -> Void
+
+        /// Nowhere: a card nobody can type into, or a test's.
+        static var none: Draft { Draft(read: { _ in "" }, write: { _, _ in }) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             understanding
             if let offer = Self.offer(row: row, question: question, canAnswer: canAnswer) {
-                QuestionAnswers(offer: offer, onAnswer: onAnswer)
+                QuestionAnswers(offer: offer, onAnswer: onAnswer, draft: draft)
                     .id(offer.question.id)
             }
             Divider()
@@ -1501,6 +1552,7 @@ struct TaskCard: View {
 private struct QuestionAnswers: View {
     let offer: TaskCard.Offer
     let onAnswer: (String) async -> Bool
+    let draft: TaskCard.Draft
 
     /// The answer on its way, which shows a spinner in place of the buttons.
     @State private var sending: String?
@@ -1551,6 +1603,13 @@ private struct QuestionAnswers: View {
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.07)))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("task-card-question")
+        // The field comes back open, with what was in it, whenever this view
+        // is made again: the draft is the store's.
+        .onAppear {
+            typed = draft.read(offer.question)
+            if !typed.isEmpty { writing = true }
+        }
+        .onChange(of: typed) { _, text in draft.write(offer.question, text) }
     }
 
     @ViewBuilder private var freeAnswer: some View {

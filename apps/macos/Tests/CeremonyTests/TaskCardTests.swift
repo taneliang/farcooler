@@ -1,5 +1,6 @@
 import AgentKit
 import AppKit
+import Combine
 import Foundation
 import SwiftUI
 import Testing
@@ -57,5 +58,52 @@ struct TaskCardTests {
             TaskCard.offer(
                 row: Self.row(.needsDecision), question: Self.question(["SQLite"]), canAnswer: false))
         #expect(read.buttons.isEmpty && read.more.isEmpty && !read.typed)
+    }
+
+    /// **A half-typed answer survives another task's write.** The daemon
+    /// announces every task write, a progress note on another card included,
+    /// and the board re-reads the open card for each. That re-read used to
+    /// open the card afresh: its question went nil for the round trip, which
+    /// tore down the answer field and the text in it. Now the card is read
+    /// again in place, its question stays on screen throughout, and the
+    /// draft is the store's, kept by question.
+    @Test("A draft survives an unrelated task's write")
+    func aDraftSurvivesAnUnrelatedTasksWrite() async throws {
+        let client = DaemonClient(target: "", notifications: NotificationCenter())
+        client.commandRunnerForTesting = { args in
+            if args.starts(with: ["task", "list"]) {
+                return (
+                    Data(
+                        #"{"tasks":[{"id":"t9","key":"-9","title":"Pick","status":"needs_decision"},{"id":"t1","key":"-1","title":"Other","status":"in_progress"}]}"#
+                            .utf8), nil
+                )
+            }
+            if args.starts(with: ["task", "show"]) {
+                return (
+                    Data(
+                        #"{"task":{},"notes":[{"id":"q1","kind":"question","actor":"manager","at":1,"body":"Which store?","extra":{}}],"blocks":[]}"#
+                            .utf8), nil
+                )
+            }
+            return (Data(), nil)
+        }
+        let store = TaskBoardStore(client: client, workspace: .implicit(repository: "r"))
+        await store.readIfNeverRead()
+        let row = try #require(store.board.rows.first { $0.id == "t9" })
+        await store.open(row)
+        let question = try #require(store.question)
+        store.setDraft("Postgres, because", for: question)
+
+        var seen: [TaskQuestion?] = []
+        let watching = store.$question.dropFirst().sink { seen.append($0) }
+        defer { watching.cancel() }
+        // A write to the other task, announced for this board.
+        client.boardMoved(TaskEvent(repository: "r", actor: "manager"))
+        await store.reloadIfMoved()
+
+        #expect(!seen.contains { $0 == nil }, "the question left the card mid-read: \(seen)")
+        #expect(store.question == question)
+        #expect(store.draft(for: question) == "Postgres, because")
+        #expect(store.opened?.id == "t9")
     }
 }
