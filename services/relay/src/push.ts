@@ -50,6 +50,15 @@ export interface Payload {
   /// Optional forever, like the two above: a daemon built before it sends
   /// nothing and gets exactly the behavior it always got.
   failed?: boolean
+  /// What the notice is, when it is not about an agent, and the task it names.
+  ///
+  /// `kind: "decision"` and `task: "bil-7"` for a task waiting on a decision,
+  /// which has no terminal to open — so these are what a tap on it opens
+  /// instead. Forwarded, never acted on here beyond `androidChannel`, and
+  /// absent from an agent's notice exactly as they always were. Neither is
+  /// content: a fixed word, and a key the runner minted.
+  kind?: string
+  task?: string
 }
 
 /// Which of Apple's two push services issued a device's token.
@@ -187,6 +196,8 @@ async function sendApns(
       status: payload.status,
       label: payload.label,
       failed: payload.failed,
+      ...(payload.kind ? { kind: payload.kind } : {}),
+      ...(payload.task ? { task: payload.task } : {}),
     }),
   })
   return response.ok
@@ -283,6 +294,17 @@ export interface ActivityState {
   blocked?: number
   review?: number
   working?: number
+  /// How many things need a person across the account: the sum of each
+  /// machine's own count of its asks, blocked agents, decisions and reviews.
+  ///
+  /// **The header's number when present**, and `blocked` when not. It is not
+  /// derived from `rows` like the three above, because it counts items and a
+  /// decision is an item with no agent. Each runner computes its own; the relay
+  /// keeps the latest per machine and sums them — see migration 0010.
+  ///
+  /// Absent, never 0, when no machine has sent a count in the last day, which
+  /// is every runner older than the rollup. The app falls back to `blocked`.
+  needsYou?: number
   /// Agents the card has no line for: `rows.length` subtracted from the fleet.
   /// Drawn as `+6 more`, beside the totals below.
   more?: number
@@ -613,8 +635,13 @@ const CHANNEL_DONE = 'agents.done'
 /// foreground path from the same word. Two copies because two processes decide
 /// it — this one for the notification Firebase draws, that one for the banner
 /// the app draws — and they must not disagree about a phone's one lock screen.
-export function androidChannel(status: string | undefined): string {
-  return status === 'blocked' ? CHANNEL_BLOCKED : CHANNEL_DONE
+///
+/// A decision goes on the blocked channel too. It has no status — it is a task,
+/// not an agent — but it is the same kind of news: somebody's work has stopped
+/// until a person answers it, and it stays stopped (ruling 3 of the workspace
+/// UI spec).
+export function androidChannel(status: string | undefined, kind?: string): string {
+  return status === 'blocked' || kind === 'decision' ? CHANNEL_BLOCKED : CHANNEL_DONE
 }
 
 async function sendFcm(env: any, token: string, payload: Payload): Promise<boolean> {
@@ -641,7 +668,7 @@ async function sendFcm(env: any, token: string, payload: Payload): Promise<boole
             // right, and it overrides the manifest default the SDK falls back to
             // when a message names no channel. Without it every push landed on
             // whichever channel that manifest names, whatever it was about.
-            notification: { channel_id: androidChannel(payload.status) },
+            notification: { channel_id: androidChannel(payload.status, payload.kind) },
           },
           // And the half that reaches a phone somebody is holding.
           //
@@ -668,6 +695,8 @@ async function sendFcm(env: any, token: string, payload: Payload): Promise<boole
           data: {
             terminal: payload.terminal,
             ...(payload.status ? { status: payload.status } : {}),
+            ...(payload.kind ? { kind: payload.kind } : {}),
+            ...(payload.task ? { task: payload.task } : {}),
           },
         },
       }),

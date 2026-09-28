@@ -905,6 +905,35 @@ interface Notification {
   /// Meaningless without the trace it came with, since the index is in units of
   /// that trace's width. The two are stored and carried forward together.
   traceAnchor?: number
+  /// What this notice is. Absent on an agent notice, which is every notice a
+  /// runner sent before the needs-you rollup and still the common one.
+  ///
+  ///   - `"decision"`: a task entered Needs Decision. It alerts, carries the
+  ///     task's key in `task`, and has NO `terminal` — so it writes no roster
+  ///     row, since rows are one per `(account, terminal)`.
+  ///   - `"count"`: `needsYou` and nothing else, sent when the runner's count
+  ///     moved and no other notice carried it. It alerts nothing and moves the
+  ///     card in place.
+  ///
+  /// A kind this relay does not know is kept for its count and otherwise
+  /// ignored, for the reason an unknown `status` is: the daemon ships
+  /// separately, and a 400 for a word invented later would cost more than it
+  /// protects.
+  kind?: string
+  /// This runner's needs-you count at the moment of sending: asks, blocked
+  /// agents, decisions and reviews, computed by the daemon from the same list
+  /// its RPC returns. Overwrites this machine's last count and never adds to
+  /// it; see migration 0010 and `readFleet`.
+  ///
+  /// Absent is not zero here either. A runner too old to send it leaves the
+  /// machine's last count, or none, where it was — see `numeric`.
+  needsYou?: number
+  /// The task a decision notice is about, by its key (`bil-7`). Forwarded to
+  /// the phone so a tap can open the task; never stored.
+  task?: string
+  /// The workspace the notice's agent or task belongs to, by name, or absent.
+  /// The alert's title already leads with it; this is for the card's rows.
+  workspace?: string
 }
 
 interface Device {
@@ -956,7 +985,12 @@ async function notify(request: Request, env: Env): Promise<Response> {
   if (daemon instanceof Response) return daemon
 
   const body = await request.json<Notification>()
-  if (!body.title) return json({ error: 'title' }, 400)
+  // An agent notice or a decision is an alert, and an alert with no title is a
+  // banner iOS may draw blank. A count has nothing to say to a person, and a
+  // kind this relay has never heard of is not going to be shown to one.
+  const kind = typeof body.kind === 'string' ? body.kind : undefined
+  const alerts = kind === undefined || kind === 'decision'
+  if (alerts && !body.title) return json({ error: 'title' }, 400)
 
   // A misconfigured deployment, said out loud rather than delivered as silence.
   //
@@ -974,6 +1008,21 @@ async function notify(request: Request, env: Env): Promise<Response> {
   if (misconfigured) {
     console.error(`relay misconfigured: ${misconfigured}`)
     return json({ error: 'relay misconfigured', detail: misconfigured }, 500)
+  }
+
+  // This machine's count, before anything reads the sum: the card this notice
+  // moves has to carry the count this notice brought.
+  //
+  // Overwritten, never added to. The count is a reading of what is waiting on
+  // this runner now, so the newest one is the whole truth about this machine
+  // and the one before it is simply out of date. A notice that carries no
+  // count — a runner older than the rollup, or a value that is not a count —
+  // leaves the last one where it was.
+  const needsYou = numeric(body.needsYou)
+  if (needsYou !== null) {
+    await env.DB.prepare(`UPDATE daemons SET needs_you = ?, needs_you_at = ? WHERE id = ?`)
+      .bind(needsYou, Date.now(), daemon.id)
+      .run()
   }
 
   const devices = await env.DB.prepare(
@@ -994,7 +1043,7 @@ async function notify(request: Request, env: Env): Promise<Response> {
   // of a `done` notify where every device has opted out, and for the same
   // reason — nothing is wrong, nobody wanted to hear it.
   let delivered = 0
-  if (body.status !== 'working') {
+  if (alerts && body.status !== 'working') {
     for (const device of devices.results ?? []) {
       // "When an agent finishes or fails", off. Per device inside the loop and
       // not per request outside it, because one account can hold devices that
@@ -1016,6 +1065,8 @@ async function notify(request: Request, env: Env): Promise<Response> {
           status: body.status,
           label: body.label,
           failed: body.failed,
+          kind,
+          task: typeof body.task === 'string' ? body.task.slice(0, 64) : undefined,
         },
         device.environment,
       )
@@ -1042,8 +1093,17 @@ async function notify(request: Request, env: Env): Promise<Response> {
   // device that silenced the banner and kept the card would be left with a lock
   // screen reading "Working" over an agent that stopped ten minutes ago. Skip
   // the alert, never the card.
+  //
+  // Only an agent notice is ABOUT an agent, so only one can write a row or
+  // start a card. Every other kind changes the count and nothing else, and the
+  // card, if one is up, is moved in place to say so — silently, because a
+  // decision's interruption is the alert above and a count has none.
   try {
-    await pushActivity(env, daemon, body, devices.results ?? [])
+    if (kind === undefined) {
+      await pushActivity(env, daemon, body, devices.results ?? [])
+    } else {
+      await refreshCard(env, daemon.account_id)
+    }
   } catch (error) {
     console.error('live activity push failed', error)
   }
@@ -1208,7 +1268,7 @@ async function retireActivities(request: Request, env: Env): Promise<Response> {
   // re-pushing here would mean this route composing a card state, which is the
   // one thing it has never done: it says what is no longer happening, and
   // `/v1/notify` says what is.
-  const left = await readFleet(env, daemon.account_id, Date.now())
+  const { rows: left } = await readFleet(env, daemon.account_id, Date.now())
   if (left.some(row => row.status === 'blocked' || row.status === 'working')) {
     return json({ retired: 0 })
   }
@@ -1488,6 +1548,10 @@ interface Fleet {
   blocked: number
   review: number
   working: number
+  /// The sum of the account's machines' needs-you counts, or NULL when none has
+  /// a fresh one. Not derived from the rows, unlike the three above: it counts
+  /// items, and a decision is an item with no row. See `readFleet`.
+  needsYou: number | null
   insertions: number | null
   deletions: number | null
   commits: number | null
@@ -1500,8 +1564,22 @@ interface Fleet {
 /// that is for the only reader to have deleted it first. Per ACCOUNT, on that
 /// account's own notice, which is what makes a lazy purge proportional — a
 /// person with no runners running costs nothing to keep.
-async function readFleet(env: Env, account: string, now: number): Promise<AgentRow[]> {
+///
+/// **The machines' counts are purged and read here too**, for the same reason
+/// and on the same clock. A runner that went down never sends a last "0", so its
+/// count is a claim nobody has vouched for since; after `ROW_RETENTION_MS` it is
+/// nulled rather than merely skipped, and the sum below is over what is left.
+/// The sum is read in this function and nowhere else, so it cannot be read
+/// without the purge having run first. A revoked machine's row is deleted by
+/// `revokeOwned`, count and all, so it is never here to be summed.
+async function readFleet(env: Env, account: string, now: number): Promise<Roster> {
   await env.DB.prepare(`DELETE FROM live_activities WHERE account_id = ? AND updated_at < ?`)
+    .bind(account, now - ROW_RETENTION_MS)
+    .run()
+  await env.DB.prepare(
+    `UPDATE daemons SET needs_you = NULL, needs_you_at = NULL
+     WHERE account_id = ? AND needs_you_at < ?`,
+  )
     .bind(account, now - ROW_RETENTION_MS)
     .run()
 
@@ -1512,7 +1590,26 @@ async function readFleet(env: Env, account: string, now: number): Promise<AgentR
   )
     .bind(account)
     .all<AgentRow>()
-  return rows.results ?? []
+  // `COUNT(needs_you)` counts the machines that have a count, which is what
+  // tells "nobody said" from "everybody said 0". The first is NULL and the card
+  // falls back to its blocked rows; the second is a real 0.
+  const sum = await env.DB.prepare(
+    `SELECT COUNT(needs_you) AS machines, COALESCE(SUM(needs_you), 0) AS total
+     FROM daemons WHERE account_id = ?`,
+  )
+    .bind(account)
+    .first<{ machines: number; total: number }>()
+  return {
+    rows: rows.results ?? [],
+    needsYou: sum && sum.machines > 0 ? sum.total : null,
+  }
+}
+
+/// What `readFleet` answers: the account's rows, and the sum of its machines'
+/// needs-you counts, or NULL when no machine has a fresh one.
+interface Roster {
+  rows: AgentRow[]
+  needsYou: number | null
 }
 
 /// Write down what one notice said about one agent.
@@ -1729,7 +1826,7 @@ function numeric(value: unknown): number | null {
 /// below) and the lines are over the first few, which is
 /// the whole point of `+N more`: a header that counted only what fits would say
 /// "2 need you" while three agents were waiting.
-function composeFleet(rows: AgentRow[], now: number): Fleet {
+function composeFleet(rows: AgentRow[], needsYou: number | null, now: number): Fleet {
   const all = [...rows].sort((a, b) => {
     const byTier = tier(a.status) - tier(b.status)
     if (byTier !== 0) return byTier
@@ -1764,6 +1861,7 @@ function composeFleet(rows: AgentRow[], now: number): Fleet {
     // leaves the lines and the count together. Blocked and done are latched
     // and are counted at any age; `more` still owns up to the quiet row.
     working: all.filter(row => row.status === 'working' && speaks(row, now)).length,
+    needsYou,
     insertions,
     deletions,
     commits,
@@ -1784,7 +1882,10 @@ function composeFleet(rows: AgentRow[], now: number): Fleet {
 /// alert iOS may draw as a blank banner.
 function fleetHeader(fleet: Fleet): string {
   const parts: string[] = []
-  if (fleet.blocked > 0) parts.push(`${fleet.blocked} need${fleet.blocked === 1 ? 's' : ''} you`)
+  // The machines' count when any machine sent one, and the blocked rows when
+  // none did — the same fallback the card makes. See `ActivityState.needsYou`.
+  const waiting = fleet.needsYou ?? fleet.blocked
+  if (waiting > 0) parts.push(`${waiting} need${waiting === 1 ? 's' : ''} you`)
   if (fleet.review > 0) parts.push(`${fleet.review} to review`)
   if (fleet.working > 0) parts.push(`${fleet.working} in flight`)
   return parts.length > 0 ? parts.join(' · ') : 'Your agents'
@@ -1805,6 +1906,9 @@ function withFleet(state: ActivityState, fleet: Fleet): ActivityState {
   state.blocked = fleet.blocked
   state.review = fleet.review
   state.working = fleet.working
+  // Absent, never 0, when no machine has a fresh count: the app then reads
+  // `blocked` as it always did, and a 0 here would say nothing needs anyone.
+  if (fleet.needsYou !== null) state.needsYou = fleet.needsYou
   if (fleet.insertions !== null) state.insertions = fleet.insertions
   if (fleet.deletions !== null) state.deletions = fleet.deletions
   if (fleet.commits !== null) state.commits = fleet.commits
@@ -1900,7 +2004,7 @@ async function pushActivity(
   // read either way — the card needs every row to compose a header, and the row
   // this notice is about is one of them.
   const now = Date.now()
-  const before = await readFleet(env, daemon.account_id, now)
+  const { rows: before, needsYou } = await readFleet(env, daemon.account_id, now)
   const prior = before.find(row => row.terminal === terminal)
   // The row the write just produced, handed back rather than read again: it is
   // the same object the statement was bound from, so the card cannot disagree
@@ -1908,7 +2012,11 @@ async function pushActivity(
   const mine = await rememberAgent(
     env, daemon.account_id, daemon.label, terminal, status, state, body, prior, now,
   )
-  const fleet = composeFleet([...before.filter(row => row.terminal !== terminal), mine], now)
+  const fleet = composeFleet(
+    [...before.filter(row => row.terminal !== terminal), mine],
+    needsYou,
+    now,
+  )
 
   // The headline, which is what `leads` used to decide and no longer does.
   //
@@ -2155,6 +2263,57 @@ async function pushActivity(
 /// the banner this alert would have been if the card still started on `working`.
 function startAlert(fleet: Fleet, body: Notification): { title: string; body: string } {
   return { title: fleetHeader(fleet), body: cut(body.subtitle ?? '', ALERT_BODY_BUDGET) }
+}
+
+/// Move the card to say what the fleet says now, without an alert and without a
+/// notice about any one agent.
+///
+/// For the notices that change the count and nothing else: a decision, whose
+/// interruption is its own alert push, and a count, which interrupts nobody.
+/// Answering a decision or a chat ask changes no terminal, so without this the
+/// lock screen would go on counting a question somebody had already answered
+/// until an unrelated agent happened to speak.
+///
+/// Deliberately narrower than `pushActivity`. It never starts a card — a card
+/// starts on a blocked agent, with the alert iOS requires — and never ends one,
+/// since only an agent's own notice can change whether anything is still
+/// running. It moves a card the relay can address, and otherwise does nothing.
+/// It is not held by `COALESCE_MS` either: the count is the card's headline
+/// number, and the runner already debounces the notices that carry it.
+async function refreshCard(env: Env, account: string): Promise<void> {
+  const running = await env.DB.prepare(
+    `SELECT update_token, environment FROM install_cards WHERE account_id = ?`,
+  )
+    .bind(account)
+    .first<{ update_token: string; environment: string | null }>()
+  if (!running || running.update_token === TOKEN_UNKNOWN) return
+
+  const now = Date.now()
+  const { rows, needsYou } = await readFleet(env, account, now)
+  const fleet = composeFleet(rows, needsYou, now)
+  // The same headline `pushActivity` would draw: the first row that speaks. A
+  // card with none has nothing to headline, and the next agent notice will
+  // either give it one or take it down.
+  const headline = fleet.shown[0]
+  if (!headline) return
+
+  const state: ActivityState = {
+    terminal: headline.terminal,
+    label: headline.label ?? '',
+    machine: headline.machine ?? '',
+    status: headline.status as ActivityState['status'],
+    detail: headline.detail ?? '',
+    startedAt: headline.started_at ?? undefined,
+  }
+  withFleet(state, fleet)
+
+  await deliverActivity(env, account, running.update_token, running.environment, {
+    event: 'update',
+    state,
+  })
+  await env.DB.prepare(`UPDATE install_cards SET pushed_at = ? WHERE account_id = ?`)
+    .bind(now, account)
+    .run()
 }
 
 /// Raise a card from the outside, and remember that it is up.

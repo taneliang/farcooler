@@ -1,0 +1,23 @@
+-- How many things on each machine need a person, as that machine last said.
+--
+-- Additive only, same as 0002 through 0009 and for the same reason: the previous
+-- worker is still serving requests while a deploy rolls out, and a runner older
+-- than these columns never sends `needsYou`. NULL is what such a machine has,
+-- and a card with no machine that has spoken falls back to counting its blocked
+-- rows, exactly as every card did before this migration.
+--
+-- **On `daemons`, not on the roster.** The count is the runner's own rollup of
+-- its items (asks, blocked agents, decisions and reviews), and a decision has no
+-- terminal, so it can never be a `live_activities` row: rows are one per
+-- `(account, terminal)`. One count per machine is the unit the daemon computes,
+-- and the card's header is the sum over an account's machines.
+--
+-- Overwritten, never added to. Every notice that carries `needsYou` replaces
+-- both columns, so a count clears the moment its machine says a new one. A
+-- machine silent for `ROW_RETENTION_MS` drops out of the sum: `readFleet`'s lazy
+-- purge nulls both columns. A revoked machine's row is deleted, count and all.
+--
+-- `needs_you_at` is the relay's clock at the notice, in Unix milliseconds. It is
+-- what the purge reads and nothing else.
+ALTER TABLE daemons ADD COLUMN needs_you INTEGER;
+ALTER TABLE daemons ADD COLUMN needs_you_at INTEGER;

@@ -1293,6 +1293,26 @@ describe('the Android push body', () => {
     expect(message.android.priority).toBe('HIGH')
   })
 
+  it('puts a decision on the channel that may break a Focus, and names its task', async () => {
+    // A task waiting on a decision has no status and no terminal, and falling
+    // through to the quiet channel would put the one push ruling 3 added —
+    // "decisions send a push" — where a Focus hides it. It is the same news as
+    // a blocked agent: work has stopped until a person answers. And a tap has
+    // no pane to open, so `data` names the task instead.
+    const calls = watchFetch()
+    await register('user_1', android)
+    await pair('user_1', 'mine')
+    await post(
+      '/v1/notify',
+      { kind: 'decision', task: 'bil-7', title: 'Billing · bil-7 needs a decision', needsYou: 1 },
+      'mine',
+    )
+
+    const message = fcm(calls)
+    expect(message.android.notification.channel_id).toBe('agents.blocked')
+    expect(message.data).toEqual({ terminal: '', kind: 'decision', task: 'bil-7' })
+  })
+
   it('leaves a finished agent on the quiet channel', async () => {
     // The half that must NOT change. Over-alerting every finished agent breaks
     // a Focus for the normal case, and that is the failure people answer by
@@ -3680,6 +3700,303 @@ describe('/v1/notify and Live Activities', () => {
       // budget has to survive, and both bodies are cut to `ALERT_BODY_BUDGET`.
       const worstAlert = ALERT_TITLE_BUDGET + ALERT_BODY_BUDGET + bytes({ title: '', body: '' })
       expect(STATE_BUDGET + worstAlert + envelope).toBeLessThanOrEqual(4096)
+    })
+  })
+
+  // MARK: The needs-you count
+
+  /// The header's count, which comes from the runners and not from the rows.
+  ///
+  /// The rows are agents and the count is ITEMS: an ask, a blocked agent, a
+  /// task waiting on a decision, a task in review. A decision has no terminal
+  /// and so can never be a row, which is why the header counted only blocked
+  /// rows and why a lock screen that did so disagreed with the app. Each runner
+  /// computes its own count and sends it on every notice as `needsYou`; the
+  /// relay keeps the latest per machine and sums them. See migration 0010.
+  describe('the needs-you count', () => {
+    /// A second machine on the same account, which is the only way two counts
+    /// can meet: one runner sends one count.
+    async function second(token = 'other') {
+      await pair('user_1', token)
+    }
+
+    /// The card state of the last activity push this test saw.
+    function lastCard(calls: Call[]) {
+      const activities = pushes(calls).filter(call => call.body.aps?.event)
+      return activities[activities.length - 1]
+    }
+
+    it('sums the latest needs-you count per daemon', async () => {
+      const calls = watchFetch()
+      await ready()
+      await second()
+      // Somebody else's machine, with a count of its own. It must not reach
+      // this account's header, and against one account a query that lost its
+      // account clause would sum exactly the same rows.
+      await pair('user_2', 'theirs')
+      await post('/v1/notify', { kind: 'count', needsYou: 7 }, 'theirs')
+      await running('term-1')
+
+      await post('/v1/notify', { kind: 'count', needsYou: 3 }, 'other')
+      await post(
+        '/v1/notify',
+        { title: 'claude needs you', terminal: 'term-1', status: 'blocked', needsYou: 2 },
+        'mine',
+      )
+
+      const card = lastCard(calls).body.aps['content-state']
+      expect(card.needsYou).toBe(5)
+      // The agent tiers are still counted over the rows, beside it. An app too
+      // old to read `needsYou` draws exactly what it drew before.
+      expect(card.blocked).toBe(1)
+    })
+
+    it("replaces a daemon's count rather than adding to it", async () => {
+      // The count is a reading, not an event. A machine that had two things
+      // waiting and now has one says 1, and a relay that added would say 3
+      // until the day ran out.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post(
+        '/v1/notify',
+        { title: 'claude needs you', terminal: 'term-1', status: 'blocked', needsYou: 2 },
+        'mine',
+      )
+      await post('/v1/notify', { kind: 'count', needsYou: 1 }, 'mine')
+
+      expect(lastCard(calls).body.aps['content-state'].needsYou).toBe(1)
+      const row = await env.DB.prepare(`SELECT needs_you FROM daemons`).first<any>()
+      expect(row?.needs_you).toBe(1)
+    })
+
+    it('drops a count older than a day from the sum', async () => {
+      // A runner that went down never says "0". Its last count is a claim
+      // nobody has vouched for since, and after `ROW_RETENTION_MS` it is
+      // forgotten the way a silent row is — nulled, not merely skipped, so the
+      // relay stops holding a number it no longer believes.
+      const calls = watchFetch()
+      await ready()
+      await second()
+      await running('term-1')
+      await post('/v1/notify', { kind: 'count', needsYou: 3 }, 'other')
+      await env.DB.prepare(`UPDATE daemons SET needs_you_at = ? WHERE token_hash = ?`)
+        .bind(Date.now() - 25 * 60 * 60 * 1000, await sha256('other'))
+        .run()
+
+      await post(
+        '/v1/notify',
+        { title: 'claude needs you', terminal: 'term-1', status: 'blocked', needsYou: 2 },
+        'mine',
+      )
+
+      expect(lastCard(calls).body.aps['content-state'].needsYou).toBe(2)
+      const stale = await env.DB.prepare(
+        `SELECT needs_you, needs_you_at FROM daemons WHERE token_hash = ?`,
+      )
+        .bind(await sha256('other'))
+        .first<any>()
+      expect(stale).toEqual({ needs_you: null, needs_you_at: null })
+    })
+
+    it("never sums a revoked daemon's count", async () => {
+      // Revoking a machine is saying it is not mine any more. Its last count is
+      // that machine's business and not this lock screen's, from the moment
+      // the route answers — not a day later when the count would have aged out.
+      const calls = watchFetch()
+      await ready()
+      await second()
+      await running('term-1')
+      await post('/v1/notify', { kind: 'count', needsYou: 3 }, 'other')
+      const other = await env.DB.prepare(`SELECT id FROM daemons WHERE token_hash = ?`)
+        .bind(await sha256('other'))
+        .first<{ id: string }>()
+      const revoked = await post(
+        '/v1/daemons/revoke',
+        { id: other!.id },
+        await sessionFor('user_1'),
+      )
+      expect(await revoked.json()).toEqual({ ok: true })
+
+      await post(
+        '/v1/notify',
+        { title: 'claude needs you', terminal: 'term-1', status: 'blocked', needsYou: 2 },
+        'mine',
+      )
+
+      expect(lastCard(calls).body.aps['content-state'].needsYou).toBe(2)
+    })
+
+    it('falls back to the blocked count when no daemon sent one', async () => {
+      // Every runner older than this change. The card carries no `needsYou` at
+      // all — never a confident 0 — and the app's header reads `blocked`, as
+      // it always did. The start alert, which the relay words itself, says the
+      // same thing.
+      const calls = watchFetch()
+      await ready()
+      await post('/v1/notify', { title: 'claude needs you', terminal: 'term-1', status: 'blocked' }, 'mine')
+
+      const start = pushes(calls).find(call => call.body.aps?.event === 'start')!
+      expect('needsYou' in start.body.aps['content-state']).toBe(false)
+      expect(start.body.aps['content-state'].blocked).toBe(1)
+      expect(start.body.aps.alert.title).toBe('1 needs you')
+    })
+
+    it('heads the start alert with the needs-you count when a daemon sent one', async () => {
+      // The other half of the fallback: the alert that raises a card counts
+      // items, like the card it raises, and not blocked agents.
+      const calls = watchFetch()
+      await ready()
+      await post(
+        '/v1/notify',
+        { title: 'claude needs you', terminal: 'term-1', status: 'blocked', needsYou: 3 },
+        'mine',
+      )
+
+      const start = pushes(calls).find(call => call.body.aps?.event === 'start')!
+      expect(start.body.aps['content-state'].needsYou).toBe(3)
+      expect(start.body.aps.alert.title).toBe('3 need you')
+    })
+
+    it('alerts on a decision notice and writes no roster row', async () => {
+      // A task waiting on a decision. It has no terminal, and rows are one per
+      // `(account, terminal)`, so a row written for it would be a row about the
+      // empty string — one the runner could never retire. It alerts, and it
+      // raises no card: a card is about agents, and starts on a blocked one.
+      const calls = watchFetch()
+      await ready()
+      const response = await post(
+        '/v1/notify',
+        {
+          kind: 'decision',
+          task: 'bil-7',
+          workspace: 'Billing',
+          title: 'Billing · bil-7 needs a decision',
+          subtitle: 'Ship the refund flow now?',
+          needsYou: 1,
+        },
+        'mine',
+      )
+
+      expect(await response.json()).toEqual({ delivered: 1 })
+      const sent = pushes(calls)
+      expect(sent.length).toBe(1)
+      expect(sent[0].headers['apns-push-type']).toBe('alert')
+      expect(sent[0].body.aps.alert).toEqual({
+        title: 'Billing · bil-7 needs a decision',
+        body: 'Ship the refund flow now?',
+      })
+      // What a tap needs to open the task rather than a pane.
+      expect(sent[0].body.kind).toBe('decision')
+      expect(sent[0].body.task).toBe('bil-7')
+      expect(await roster('user_1')).toEqual([])
+      expect(await cardOf('user_1')).toBeNull()
+      const row = await env.DB.prepare(`SELECT needs_you FROM daemons`).first<any>()
+      expect(row?.needs_you).toBe(1)
+    })
+
+    it("moves a card's count on a decision, with the one alert and no second", async () => {
+      // The count rose, so the card says so — silently, because the decision's
+      // own push is the interruption and a card that also alerted would buzz
+      // twice for one question.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post(
+        '/v1/notify',
+        { title: 'claude needs you', terminal: 'term-1', status: 'blocked', needsYou: 1 },
+        'mine',
+      )
+      const before = pushes(calls).length
+
+      await post(
+        '/v1/notify',
+        { kind: 'decision', task: 'bil-7', title: 'bil-7 needs a decision', needsYou: 2 },
+        'mine',
+      )
+
+      const after = pushes(calls).slice(before)
+      expect(after.filter(call => call.headers['apns-push-type'] === 'alert').length).toBe(1)
+      const updates = after.filter(call => call.body.aps?.event === 'update')
+      expect(updates.length).toBe(1)
+      expect(updates[0].body.aps.alert).toBeUndefined()
+      expect(updates[0].body.aps['content-state'].needsYou).toBe(2)
+      // Still headed by the agent. A decision is not a row.
+      expect(updates[0].body.aps['content-state'].terminal).toBe('term-1')
+      expect(await roster('user_1')).toEqual(['term-1'])
+    })
+
+    it('updates the card on a count notice without alerting', async () => {
+      // Answering a decision or a chat ask changes no terminal, so no agent
+      // notice follows it. The count notice is how the lock screen hears. It
+      // has no title, because it has nothing to say to a person.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post(
+        '/v1/notify',
+        { title: 'claude needs you', terminal: 'term-1', status: 'blocked', needsYou: 2 },
+        'mine',
+      )
+      const before = pushes(calls).length
+
+      const response = await post('/v1/notify', { kind: 'count', needsYou: 1 }, 'mine')
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ delivered: 0 })
+      const after = pushes(calls).slice(before)
+      expect(after.length).toBe(1)
+      expect(after[0].headers['apns-push-type']).toBe('liveactivity')
+      expect(after[0].body.aps.event).toBe('update')
+      expect(after[0].body.aps.alert).toBeUndefined()
+      expect(after[0].body.aps['content-state'].needsYou).toBe(1)
+      expect(await roster('user_1')).toEqual(['term-1'])
+    })
+
+    it('never starts a card on a count notice', async () => {
+      // A card starts on a blocked agent, with an alert, and on nothing else.
+      // A count has no agent to headline and no alert to carry.
+      const calls = watchFetch()
+      await ready()
+      await post('/v1/notify', { kind: 'count', needsYou: 4 }, 'mine')
+
+      expect(pushes(calls)).toEqual([])
+      expect(await cardOf('user_1')).toBeNull()
+    })
+
+    it('keeps the count of a notice whose kind it does not know, and says nothing', async () => {
+      // The daemon ships separately and will one day send a kind invented after
+      // this code. It is not an agent notice — it names no status to act on —
+      // so it alerts nothing; and its count is still this machine's count.
+      const calls = watchFetch()
+      await ready()
+      const response = await post('/v1/notify', { kind: 'pondering', needsYou: 4 }, 'mine')
+
+      expect(response.status).toBe(200)
+      expect(pushes(calls)).toEqual([])
+      const row = await env.DB.prepare(`SELECT needs_you FROM daemons`).first<any>()
+      expect(row?.needs_you).toBe(4)
+    })
+
+    it('still needs a title on a decision notice', async () => {
+      // A decision is an alert, and an alert with no title is a blank banner.
+      watchFetch()
+      await ready()
+      const response = await post('/v1/notify', { kind: 'decision', task: 'bil-7', needsYou: 1 }, 'mine')
+      expect(response.status).toBe(400)
+    })
+
+    it('never takes a count that is not a count', async () => {
+      // Absent is not zero, and neither is garbage: a string, a negative or a
+      // NaN leaves the last real count where it was rather than writing one.
+      watchFetch()
+      await ready()
+      await post('/v1/notify', { kind: 'count', needsYou: 2 }, 'mine')
+      for (const needsYou of ['3', -1, null, true, {}]) {
+        await post('/v1/notify', { kind: 'count', needsYou }, 'mine')
+      }
+      const row = await env.DB.prepare(`SELECT needs_you FROM daemons`).first<any>()
+      expect(row?.needs_you).toBe(2)
     })
   })
 })
