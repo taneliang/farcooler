@@ -126,9 +126,11 @@ what stage 1 needs so that it stops contradicting it.
 
 Captured 2026-09-28 against claude **2.1.283**, on a 140-column pane, by the
 ov-14 spike's sampler (`/tmp/fc-t/ov14-spike/cap.sh`). Unlike the files above,
-these are NOT raw `capture-pane` output. The sampler dropped blank lines, lines
-that were only `─`, and the pane's first three lines, and it rewrote spinner
-lines as `<spinner>`. Recapture raw before tightening any rule against them.
+these are NOT raw `capture-pane` output. The sampler dropped blank lines and
+lines that were only `─`, then dropped the first three lines of what was left
+(not of the pane), and it rewrote spinner lines as `<spinner>`. Its `─` filter
+missed one rule, the dialog's own (line 7 of the dialog file), which survived.
+Recapture raw before tightening any rule against them.
 
 - `claude-permission-hook-waiting.txt` is claude's dialog while its
   `PermissionRequest` hook is held (frame r1, t=1790550898.785). Its footer,

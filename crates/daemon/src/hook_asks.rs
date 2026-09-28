@@ -104,9 +104,11 @@ impl HookAsks {
         let id = format!("{HOOK_ASK_PREFIX}{}", Uuid::now_v7());
         let (reply, rx) = oneshot::channel();
         let held = Held { id: id.clone(), since: Instant::now(), seen_dialog: false, absent_samples: 0, offered: false, reply };
-        let older = self.lock().insert(terminal, held);
-        if let Some(older) = older {
-            self.end(terminal, older, Settled { decision: None, ack: None }, "", true, "superseded");
+        let sink = self.sink();
+        let mut asks = self.lock();
+        if let Some(older) = asks.insert(terminal, held) {
+            let settled = Settled { decision: None, ack: None };
+            end(terminal, older, settled, "", true, "superseded", sink.as_ref());
         }
         (id, rx)
     }
@@ -116,14 +118,14 @@ impl HookAsks {
     ///
     /// Recorded under the ledger's lock, so no ending can come between the
     /// check and the record: every ending removes the entry under that same
-    /// lock, and records its `Resolved` after. So a `Permission` always
+    /// lock, and records its `Resolved` before letting go of it. So a `Permission` always
     /// precedes its `Resolved`, and an ask that ended before it was offered
     /// is never offered at all, which is also what keeps an offer after
     /// `forget` from recreating the terminal's ring. The sink takes
     /// `AgentSupervisor`'s locks, never this one, so holding this across it
     /// cannot deadlock.
     pub fn offer(&self, terminal: Uuid, id: &str, permission: AgentEvent) -> bool {
-        let sink = self.sink.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let sink = self.sink();
         let mut held = self.lock();
         let Some(ask) = held.get_mut(&terminal).filter(|ask| ask.id == id) else {
             return false;
@@ -219,7 +221,9 @@ impl HookAsks {
     /// call was the one that ended it.
     ///
     /// The entry leaves the map under the lock, so of two endings racing for
-    /// one ask exactly one finds it.
+    /// one ask exactly one finds it. Its `Resolved` is recorded before the
+    /// lock is let go: `forget` takes this lock before the terminal's ring
+    /// is deleted, so no `Resolved` can land after and bring the ring back.
     fn settle(
         &self,
         terminal: Uuid,
@@ -229,42 +233,54 @@ impl HookAsks {
         record: bool,
         why: &str,
     ) -> bool {
-        let held = {
-            let mut held = self.lock();
-            if !held.get(&terminal).is_some_and(|ask| id.is_none_or(|id| ask.id == id)) {
-                return false;
-            }
-            held.remove(&terminal)
-        };
-        let Some(held) = held else { return false };
-        self.end(terminal, held, settled, chosen, record, why);
+        let sink = self.sink();
+        let mut asks = self.lock();
+        if !asks.get(&terminal).is_some_and(|ask| id.is_none_or(|id| ask.id == id)) {
+            return false;
+        }
+        let Some(held) = asks.remove(&terminal) else { return false };
+        end(terminal, held, settled, chosen, record, why, sink.as_ref());
         true
     }
 
-    /// Tell `serve` how an ask it holds ended and, when `record`, tell every
-    /// surface too, with a `Resolved` naming what was `chosen` ("" for no
-    /// decision).
-    ///
-    /// Only for an entry already out of the map, which is what makes the one
-    /// `Resolved` per ask a property rather than a hope. The sink is called
-    /// with no lock held: it reaches `AgentSupervisor::record`, which takes
-    /// locks of its own.
-    fn end(&self, terminal: Uuid, held: Held, settled: Settled, chosen: &str, record: bool, why: &str) {
-        tracing::debug!(%terminal, id = %held.id, held_for = ?held.since.elapsed(), why, "a held ask ended");
-        // `serve` may be gone already (its hook hung up); the ending is still
-        // an ending, and the surfaces still need to hear it.
-        let _ = held.reply.send(settled);
-        if !record || !held.offered {
-            return;
-        }
-        let sink = self.sink.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        if let Some(sink) = sink {
-            sink(terminal, vec![AgentEvent::Resolved { id: held.id, chosen: chosen.to_string() }]);
-        }
+    /// The sink, cloned out, so no call holds its lock and the ledger's at
+    /// once.
+    fn sink(&self) -> Option<EventSink> {
+        self.sink.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<Uuid, Held>> {
         self.held.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+/// Tell `serve` how an ask it held ended and, when `record`, tell every
+/// surface too, with a `Resolved` naming what was `chosen` ("" for no
+/// decision).
+///
+/// Only for an entry already out of the map, and only with the ledger's lock
+/// still held by the caller: that is what makes the one `Resolved` per ask a
+/// property rather than a hope, and what keeps it from landing after
+/// `forget`. The sink reaches `AgentSupervisor::record`, which takes its own
+/// locks and never this ledger's, so recording here cannot deadlock.
+fn end(
+    terminal: Uuid,
+    held: Held,
+    settled: Settled,
+    chosen: &str,
+    record: bool,
+    why: &str,
+    sink: Option<&EventSink>,
+) {
+    tracing::debug!(%terminal, id = %held.id, held_for = ?held.since.elapsed(), why, "a held ask ended");
+    // `serve` may be gone already (its hook hung up); the ending is still an
+    // ending, and the surfaces still need to hear it.
+    let _ = held.reply.send(settled);
+    if !record || !held.offered {
+        return;
+    }
+    if let Some(sink) = sink {
+        sink(terminal, vec![AgentEvent::Resolved { id: held.id, chosen: chosen.to_string() }]);
     }
 }
 
@@ -337,9 +353,11 @@ mod tests {
 
     /// The surfaces read a `Permission` as pending until a `Resolved` for it
     /// follows, so a `Resolved` that lands first leaves a button nothing ever
-    /// clears.
+    /// clears. In sequence only: the interleavings are
+    /// `an_ask_ended_before_it_was_offered_is_never_offered` and
+    /// `every_resolved_is_recorded_under_the_ledgers_lock`.
     #[tokio::test]
-    async fn a_permission_is_offered_before_it_is_resolved() {
+    async fn a_superseded_offer_is_resolved_after_its_permission() {
         let (asks, recorded) = ledger();
         let pane = Uuid::now_v7();
         let (older, _rx) = offered(&asks, pane);
@@ -347,6 +365,47 @@ mod tests {
         assert_eq!(story(&recorded, pane), [("Permission", older.clone()), ("Resolved", older)]);
         assert!(!asks.offer(pane, "hook-ask-nobody", a_permission("hook-ask-nobody")));
         let _ = newer;
+    }
+
+    /// Every `Resolved` is recorded with the ledger's lock still held.
+    ///
+    /// `forget` takes that lock before the terminal's ring is deleted, so a
+    /// `Resolved` recorded under it cannot land after the deletion and bring
+    /// the ring back. This sink checks the lock at the moment it is called,
+    /// for every ending that records one.
+    #[tokio::test]
+    async fn every_resolved_is_recorded_under_the_ledgers_lock() {
+        let asks_cell: Arc<std::sync::OnceLock<std::sync::Weak<HookAsks>>> = Arc::default();
+        let outside: Arc<Mutex<Vec<String>>> = Arc::default();
+        let (cell, out) = (asks_cell.clone(), outside.clone());
+        let sink: EventSink = Arc::new(move |_, events| {
+            let asks = cell.get().and_then(std::sync::Weak::upgrade).expect("the ledger");
+            for event in events {
+                if let AgentEvent::Resolved { id, .. } = event {
+                    if asks.held.try_lock().is_ok() {
+                        out.lock().unwrap().push(id);
+                    }
+                }
+            }
+        });
+        let asks = Arc::new(HookAsks::new(Arc::new(Mutex::new(Some(sink)))));
+        asks_cell.set(Arc::downgrade(&asks)).unwrap();
+
+        let pane = Uuid::now_v7();
+        let (id, rx) = offered(&asks, pane);
+        let hook = a_hook_waiting_on(rx);
+        asks.answer(pane, &id, "allow", "iPhone").await.unwrap();
+        hook.await.unwrap();
+        let (id, _rx) = offered(&asks, pane);
+        let (_newer, _newer_rx) = offered(&asks, pane);
+        asks.withdraw(pane, &id);
+        asks.turn_boundary(pane);
+        let (_id, _rx) = offered(&asks, pane);
+        for up in [true, false, false] {
+            asks.saw_screen(pane, up);
+        }
+        assert!(!asks.is_holding(pane));
+        assert_eq!(*outside.lock().unwrap(), Vec::<String>::new(), "recorded with the lock released");
     }
 
     /// An ask ended between its hold and its offer (a newer ask, a turn
