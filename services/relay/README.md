@@ -62,9 +62,11 @@ of them can be the leader, and only that one takes the card down.
 **The header counts what needs you, per machine.** Every notice may carry
 `needsYou`, that runner's count of its asks, blocked agents, decisions and
 reviews. The relay keeps the latest per machine on `daemons` (migration 0010),
-overwriting and never adding, and the card's `needsYou` is the sum over the
-account's machines. A machine silent for a day is purged from the sum, and a
-revoked one is gone with its row. With no machine reporting, the card has no
+overwriting and never adding. The card's `needsYou` is per runner: each
+machine's count where it sent one, plus the blocked rows of the machines that
+didn't (migration 0012 records whose row is whose). A machine silent for a day
+is purged from the sum, a revoked one is gone with its row, and re-pairing under
+the same label clears the old token's count. With no machine reporting, the card has no
 `needsYou` and the app counts `blocked` rows as before. Two notices carry no
 agent: `kind: "decision"` alerts and moves the card silently, and
 `kind: "count"` only moves the card. Neither writes a roster row or starts a

@@ -207,11 +207,12 @@ async function sendApns(
 
 /// Everything the lock-screen card can say.
 ///
-/// A fixed contract with the iOS app: these are the stored properties of its
-/// `ContentState`, by these names. An extra key, or a `status` outside this
-/// set, and the app cannot decode the push at all — the activity then freezes
-/// on whatever it last showed, which looks exactly like the relay never sent
-/// anything.
+/// A contract with the iOS app: these are the stored properties of its
+/// `ContentState`, by these names. The app decodes every field leniently and
+/// ignores a key it does not know — which is what lets this contract grow
+/// without coordinating with a build in the App Store — but a known field under
+/// a different name or type is simply lost, and a card missing its headline
+/// looks exactly like a relay that sent nothing.
 ///
 /// **The first six fields are the card's HEADLINE**, and they used to be the
 /// card's identity. There is one card per app install rather than one per
@@ -298,16 +299,17 @@ export interface ActivityState {
   blocked?: number
   review?: number
   working?: number
-  /// How many things need a person across the account: the sum of each
-  /// machine's own count of its asks, blocked agents, decisions and reviews.
+  /// How many things need a person across the account, per runner: each
+  /// runner's own count of its asks, blocked agents, decisions and reviews where
+  /// it sent one, and its blocked agents where it did not. See `composeFleet`
+  /// in `index.ts` and migrations 0010 and 0012.
   ///
-  /// **The header's number when present**, and `blocked` when not. It is not
-  /// derived from `rows` like the three above, because it counts items and a
-  /// decision is an item with no agent. Each runner computes its own; the relay
-  /// keeps the latest per machine and sums them — see migration 0010.
+  /// **The header's number when present**, and `blocked` when not. It counts
+  /// items, and a decision is an item with no agent.
   ///
   /// Absent, never 0, when no machine has sent a count in the last day, which
-  /// is every runner older than the rollup. The app falls back to `blocked`.
+  /// is every account whose runners all predate the rollup. The app falls back
+  /// to `blocked`.
   needsYou?: number
   /// Agents the card has no line for: `rows.length` subtracted from the fleet.
   /// Drawn as `+6 more`, beside the totals below.

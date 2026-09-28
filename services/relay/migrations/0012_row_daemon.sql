@@ -1,0 +1,15 @@
+-- Which machine wrote each roster row, by its `daemons.id`.
+--
+-- Additive only, same as 0002 through 0011: the previous worker is still
+-- serving requests while a deploy rolls out, and it never writes this column.
+--
+-- **Why the header needs it.** The needs-you count (0010) is per runner, and
+-- runners upgrade one at a time. A runner that sends a count has counted its
+-- own blocked agents in it; one too old to send a count has not, and its
+-- blocked rows are the only word on what it has waiting. So the header is each
+-- runner's count where it sent one, plus the blocked rows of the runners that
+-- did not — and telling those rows apart needs the row to say whose it is.
+--
+-- A row written before this column exists has NULL here, and is attributed by
+-- `machine`, the runner label it has always carried. See `composeFleet`.
+ALTER TABLE live_activities ADD COLUMN daemon_id TEXT;

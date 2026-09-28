@@ -770,12 +770,16 @@ Each of these reads the same items.
   - **Storage:** migration `0010_needs_you.sql` adds nullable `needs_you INTEGER` and `needs_you_at INTEGER` to
     `daemons`, the row for each daemon token. Additive and nullable, as 0002 through 0009 are.
   - **Update:** every notice that carries `needsYou` overwrites that daemon's two columns. It never adds.
-  - **Sum:** the header's `needsYou` is the sum over the account's unrevoked daemons whose `needs_you_at` is newer
-    than `ROW_RETENTION_MS` (24 hours, `index.ts`). With no such daemon, the header falls back to today's
-    `blocked` count.
-  - **Staleness:** a count clears in three ways. The next notice from that daemon overwrites it. A daemon silent
+  - **Sum, per runner:** each of the account's unrevoked daemons contributes its own `needsYou` when it has one
+    newer than `ROW_RETENTION_MS` (24 hours, `index.ts`), and its blocked rows when it doesn't. The header's
+    `needsYou` is the total. Runners upgrade one at a time, so one runner's count must never stand in for
+    another's blocked agents. To tell whose a row is, migration `0012_row_daemon.sql` adds `daemon_id` to
+    `live_activities`; a row from before it is matched by its runner label. With no daemon counting at all,
+    `needsYou` is absent and the header falls back to today's `blocked` count, unchanged.
+  - **Staleness:** a count clears in four ways. The next notice from that daemon overwrites it. A daemon silent
     for 24 hours drops out of the sum, and `readFleet`'s lazy purge nulls its columns. A revoked daemon is never
-    summed.
+    summed. Pairing a new token under a label the account already has clears that label's older counts, so a
+    re-paired runner isn't counted twice.
 - **Live Activity.**
   - The header count is the rollup's count.
   - The rows stay the relay's agent rows, which are per terminal, not items. They're relabeled "Billing · claude"

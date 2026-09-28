@@ -3973,7 +3973,7 @@ describe('/v1/notify and Live Activities', () => {
       expect(await cardOf('user_1')).toBeNull()
     })
 
-    it('keeps the count of a notice whose kind it does not know, and says nothing', async () => {
+    it('keeps the count of a notice whose kind it does not know, and alerts nothing', async () => {
       // The daemon ships separately and will one day send a kind invented after
       // this code. It is not an agent notice — it names no status to act on —
       // so it alerts nothing; and its count is still this machine's count.
@@ -3993,6 +3993,131 @@ describe('/v1/notify and Live Activities', () => {
       await ready()
       const response = await post('/v1/notify', { kind: 'decision', task: 'bil-7', needsYou: 1 }, 'mine')
       expect(response.status).toBe(400)
+    })
+
+    it("counts an old runner's blocked agents beside a new runner's count", async () => {
+      // Runners upgrade one at a time, so a fleet with one of each is the
+      // normal state for as long as a rollout lasts. The new runner's count
+      // covers its own items and nothing else; the old one's blocked agents
+      // are still waiting, and a header that let the new runner's 0 stand for
+      // the whole account would tell the person nothing needs them.
+      const calls = watchFetch()
+      await ready()
+      await second()
+      await running('term-2')
+      await post('/v1/notify', { title: 'claude needs you', terminal: 'term-2', status: 'blocked' }, 'other')
+
+      await post('/v1/notify', { kind: 'count', needsYou: 0 }, 'mine')
+      expect(lastCard(calls).body.aps['content-state'].needsYou).toBe(1)
+
+      // And each runner's own number, added: this one's 2 and the old one's
+      // blocked agent.
+      await post(
+        '/v1/notify',
+        { title: 'claude needs you', terminal: 'term-1', status: 'blocked', needsYou: 2 },
+        'mine',
+      )
+      const card = lastCard(calls).body.aps['content-state']
+      expect(card.needsYou).toBe(3)
+      // `blocked` still counts agents, for an app that reads nothing else.
+      expect(card.blocked).toBe(2)
+    })
+
+    it("heads the start alert with a mixed fleet's per-runner total", async () => {
+      // The same rule on the one sentence the relay writes itself.
+      const calls = watchFetch()
+      await ready()
+      await second()
+      await post('/v1/notify', { kind: 'count', needsYou: 0 }, 'mine')
+      await post('/v1/notify', { title: 'claude needs you', terminal: 'term-2', status: 'blocked' }, 'other')
+
+      const start = pushes(calls).find(call => call.body.aps?.event === 'start')!
+      expect(start.body.aps['content-state'].needsYou).toBe(1)
+      expect(start.body.aps.alert.title).toBe('1 needs you')
+    })
+
+    it('counts a row written before rows named their runner by its runner label', async () => {
+      // A row from before migration 0012 has no daemon id. It is attributed by
+      // the runner's label, which is what it does carry, so a blocked agent on
+      // a runner that now sends a count is not counted twice — once in that
+      // count and once more as a row.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await env.DB.prepare(
+        `INSERT INTO live_activities
+           (id, account_id, terminal, update_token, environment, updated_at,
+            label, machine, status, detail, status_since)
+         VALUES (?, 'user_1', 'term-old', '', NULL, ?, 'claude', 'Studio', 'blocked', '', ?)`,
+      )
+        .bind(crypto.randomUUID(), Date.now(), Date.now())
+        .run()
+
+      await post('/v1/notify', { title: 'codex', terminal: 'term-1', status: 'working', needsYou: 1 }, 'mine')
+
+      expect(lastCard(calls).body.aps['content-state'].needsYou).toBe(1)
+    })
+
+    it('counts a runner once after it is paired again', async () => {
+      // Re-pairing issues a new token and leaves the old row behind, and the
+      // old row's count would be summed beside the new one's for a day. A new
+      // pairing under the same label supersedes the count of the old one.
+      const calls = watchFetch()
+      await register('user_1', { liveActivityStartToken: 'start-token' })
+      const session = await sessionFor('user_1')
+      const issue = async (label: string) =>
+        (await (await post('/v1/daemons', { label }, session)).json<{ token: string }>()).token
+      const first = await issue('studio.local')
+      const elsewhere = await issue('build-box')
+      await post('/v1/notify', { kind: 'count', needsYou: 3 }, first)
+      await post('/v1/notify', { kind: 'count', needsYou: 4 }, elsewhere)
+
+      const again = await issue('studio.local')
+      await post('/v1/notify', { title: 'claude needs you', terminal: 'term-1', status: 'blocked', needsYou: 2 }, again)
+
+      const start = pushes(calls).find(call => call.body.aps?.event === 'start')!
+      // 2 from the new pairing and 4 from the other runner; never the old 3.
+      expect(start.body.aps['content-state'].needsYou).toBe(6)
+    })
+
+    it('moves the card to a new headline, and remembers it, when rows have gone quiet', async () => {
+      // A refresh draws the same headline an agent notice would, so the
+      // card's remembered leader has to follow it: the dismissal rule reads
+      // `leader_status` to know what the card is showing.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post('/v1/notify', { title: 'claude needs you', terminal: 'term-1', status: 'blocked', needsYou: 1 }, 'mine')
+      await post('/v1/notify', { title: 'codex', terminal: 'term-2', status: 'working', label: 'codex' }, 'mine')
+      await env.DB.prepare(`UPDATE live_activities SET updated_at = ? WHERE terminal = 'term-1'`)
+        .bind(Date.now() - 2 * 60 * 60 * 1000)
+        .run()
+
+      await post('/v1/notify', { kind: 'count', needsYou: 2 }, 'mine')
+
+      expect(lastCard(calls).body.aps['content-state'].terminal).toBe('term-2')
+      const card = await cardOf('user_1')
+      expect(card?.leader_terminal).toBe('term-2')
+      expect(card?.leader_status).toBe('working')
+    })
+
+    it("moves a card's count when every row has gone quiet", async () => {
+      // Quiet rows still hold the card up, and the count on it is the one
+      // number that must not freeze.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post('/v1/notify', { title: 'claude needs you', terminal: 'term-1', status: 'blocked', needsYou: 1 }, 'mine')
+      await env.DB.prepare(`UPDATE live_activities SET updated_at = ?`)
+        .bind(Date.now() - 2 * 60 * 60 * 1000)
+        .run()
+      const before = pushes(calls).length
+
+      await post('/v1/notify', { kind: 'count', needsYou: 0 }, 'mine')
+
+      const after = pushes(calls).slice(before)
+      expect(after.length).toBe(1)
+      expect(after[0].body.aps['content-state'].needsYou).toBe(0)
     })
 
     it('names the workspace on each row and on the headline', async () => {
@@ -4062,8 +4187,10 @@ describe('/v1/notify and Live Activities', () => {
     })
 
     it('never takes a count that is not a count', async () => {
-      // Absent is not zero, and neither is garbage: a string, a negative or a
-      // NaN leaves the last real count where it was rather than writing one.
+      // Absent is not zero, and neither is garbage: a string, a negative, a
+      // null or a boolean leaves the last real count where it was rather than
+      // writing one. (JSON cannot carry a NaN or an infinity, so no runner can
+      // send one.)
       watchFetch()
       await ready()
       await post('/v1/notify', { kind: 'count', needsYou: 2 }, 'mine')

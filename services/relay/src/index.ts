@@ -787,6 +787,19 @@ async function pairDaemon(request: Request, env: Env): Promise<Response> {
   const token = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '')
 
   const now = Date.now()
+  const label = body.label ?? 'Machine'
+  // A new pairing under a label this account already has is that runner being
+  // paired again, and the runner keeps one token — so the old row's count is
+  // superseded rather than summed beside the new one's for a day. Only the
+  // count: the old row itself is the person's to revoke, and it still lists.
+  // Two runners that genuinely share a label lose nothing lasting either, since
+  // the other one's next notice writes its count straight back.
+  await env.DB.prepare(
+    `UPDATE daemons SET needs_you = NULL, needs_you_at = NULL
+     WHERE account_id = ? AND label = ?`,
+  )
+    .bind(account, label)
+    .run()
   await env.DB.prepare(
     `INSERT INTO daemons (id, account_id, token_hash, label, created_at, expires_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
@@ -795,7 +808,7 @@ async function pairDaemon(request: Request, env: Env): Promise<Response> {
       crypto.randomUUID(),
       account,
       await sha256(token),
-      body.label ?? 'Machine',
+      label,
       now,
       now + TOKEN_LIFETIME_MS,
     )
@@ -1506,6 +1519,9 @@ interface AgentRow {
   terminal: string
   label: string | null
   machine: string | null
+  /// The `daemons.id` that last wrote this row, or NULL for a row written
+  /// before migration 0012. See `composeFleet`.
+  daemon_id: string | null
   workspace: string | null
   status: string | null
   detail: string | null
@@ -1560,9 +1576,9 @@ interface Fleet {
   blocked: number
   review: number
   working: number
-  /// The sum of the account's machines' needs-you counts, or NULL when none has
-  /// a fresh one. Not derived from the rows, unlike the three above: it counts
-  /// items, and a decision is an item with no row. See `readFleet`.
+  /// Each machine's needs-you count where it sent a fresh one, plus the blocked
+  /// rows of the machines that did not; NULL when none did. It counts items,
+  /// and a decision is an item with no row. See `composeFleet`.
   needsYou: number | null
   insertions: number | null
   deletions: number | null
@@ -1596,32 +1612,51 @@ async function readFleet(env: Env, account: string, now: number): Promise<Roster
     .run()
 
   const rows = await env.DB.prepare(
-    `SELECT terminal, label, machine, workspace, status, detail, insertions, deletions,
+    `SELECT terminal, label, machine, daemon_id, workspace, status, detail, insertions, deletions,
             commits, trace, trace_anchor, started_at, status_since, updated_at
      FROM live_activities WHERE account_id = ?`,
   )
     .bind(account)
     .all<AgentRow>()
-  // `COUNT(needs_you)` counts the machines that have a count, which is what
-  // tells "nobody said" from "everybody said 0". The first is NULL and the card
-  // falls back to its blocked rows; the second is a real 0.
-  const sum = await env.DB.prepare(
-    `SELECT COUNT(needs_you) AS machines, COALESCE(SUM(needs_you), 0) AS total
-     FROM daemons WHERE account_id = ?`,
+  // The machines that have a count. None at all is what tells "nobody said"
+  // from "everybody said 0": the first is NULL and the card is exactly the card
+  // it was before counts existed; the second is a real 0.
+  const counted = await env.DB.prepare(
+    `SELECT id, label, needs_you FROM daemons
+     WHERE account_id = ? AND needs_you IS NOT NULL`,
   )
     .bind(account)
-    .first<{ machines: number; total: number }>()
+    .all<{ id: string; label: string; needs_you: number }>()
+  const machines = counted.results ?? []
   return {
     rows: rows.results ?? [],
-    needsYou: sum && sum.machines > 0 ? sum.total : null,
+    counts: machines.length === 0
+      ? null
+      : {
+          total: machines.reduce((sum, machine) => sum + machine.needs_you, 0),
+          daemons: new Set(machines.map(machine => machine.id)),
+          labels: new Set(machines.map(machine => machine.label)),
+        },
   }
 }
 
-/// What `readFleet` answers: the account's rows, and the sum of its machines'
-/// needs-you counts, or NULL when no machine has a fresh one.
+/// What `readFleet` answers: the account's rows, and its machines' fresh
+/// needs-you counts, or NULL when no machine has one.
 interface Roster {
   rows: AgentRow[]
-  needsYou: number | null
+  counts: Counts | null
+}
+
+/// The machines on an account that sent a fresh count, and their sum.
+///
+/// `daemons` and `labels` say which rows those counts already cover: a
+/// counting runner has counted its own blocked agents, so its rows must not
+/// be counted again. `labels` is for a row from before migration 0012, which
+/// names its runner only by label.
+interface Counts {
+  total: number
+  daemons: Set<string>
+  labels: Set<string>
 }
 
 /// Write down what one notice said about one agent.
@@ -1654,6 +1689,7 @@ interface Roster {
 async function rememberAgent(
   env: Env,
   account: string,
+  daemonId: string,
   machine: string,
   terminal: string,
   status: string,
@@ -1675,6 +1711,8 @@ async function rememberAgent(
     terminal,
     label: state.label,
     machine,
+    // Whose row this is, for the per-runner count. See migration 0012.
+    daemon_id: daemonId,
     // Overwritten, never carried forward: absent is a runner saying this agent
     // is in no workspace. See migration 0011.
     workspace: state.workspace ?? null,
@@ -1696,13 +1734,14 @@ async function rememberAgent(
   await env.DB.prepare(
     `INSERT INTO live_activities
        (id, account_id, terminal, update_token, environment, updated_at,
-        label, machine, workspace, status, detail, insertions, deletions, commits, trace,
-        trace_anchor, started_at, status_since)
-     VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        label, machine, daemon_id, workspace, status, detail, insertions, deletions,
+        commits, trace, trace_anchor, started_at, status_since)
+     VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (account_id, terminal)
      DO UPDATE SET updated_at = excluded.updated_at,
                    label = excluded.label,
                    machine = excluded.machine,
+                   daemon_id = excluded.daemon_id,
                    workspace = excluded.workspace,
                    status = excluded.status,
                    detail = excluded.detail,
@@ -1729,6 +1768,7 @@ async function rememberAgent(
       mine.updated_at,
       mine.label,
       mine.machine,
+      mine.daemon_id,
       mine.workspace,
       mine.status,
       mine.detail,
@@ -1853,7 +1893,15 @@ function numeric(value: unknown): number | null {
 /// below) and the lines are over the first few, which is
 /// the whole point of `+N more`: a header that counted only what fits would say
 /// "2 need you" while three agents were waiting.
-function composeFleet(rows: AgentRow[], needsYou: number | null, now: number): Fleet {
+///
+/// **`needsYou` is per runner.** Each runner that sent a count contributes that
+/// count; each that did not — a runner older than the rollup — contributes its
+/// blocked rows, which are the only word on what it has waiting. Runners
+/// upgrade one at a time, so a fleet with one of each is the normal state
+/// during a rollout, and letting one runner's count stand for the account would
+/// hide every other runner's blocked agents. With no count at all it is NULL,
+/// and the card falls back to `blocked` exactly as before.
+function composeFleet(rows: AgentRow[], counts: Counts | null, now: number): Fleet {
   const all = [...rows].sort((a, b) => {
     const byTier = tier(a.status) - tier(b.status)
     if (byTier !== 0) return byTier
@@ -1888,11 +1936,23 @@ function composeFleet(rows: AgentRow[], needsYou: number | null, now: number): F
     // leaves the lines and the count together. Blocked and done are latched
     // and are counted at any age; `more` still owns up to the quiet row.
     working: all.filter(row => row.status === 'working' && speaks(row, now)).length,
-    needsYou,
+    needsYou: counts === null
+      ? null
+      : counts.total + all.filter(row => row.status === 'blocked' && !covered(row, counts)).length,
     insertions,
     deletions,
     commits,
   }
+}
+
+/// Whether a row's runner has already counted it, in its own `needsYou`.
+///
+/// By the row's daemon when the row names one, and by its runner label when it
+/// predates migration 0012 and does not.
+function covered(row: AgentRow, counts: Counts): boolean {
+  return row.daemon_id !== null
+    ? counts.daemons.has(row.daemon_id)
+    : counts.labels.has(row.machine ?? '')
 }
 
 /// The header, in the words the lock screen shows: `2 need you · 3 in flight`.
@@ -1909,8 +1969,8 @@ function composeFleet(rows: AgentRow[], needsYou: number | null, now: number): F
 /// alert iOS may draw as a blank banner.
 function fleetHeader(fleet: Fleet): string {
   const parts: string[] = []
-  // The machines' count when any machine sent one, and the blocked rows when
-  // none did — the same fallback the card makes. See `ActivityState.needsYou`.
+  // The per-runner count when any machine sent one, and the blocked rows when
+  // none did — the same fallback the card makes. See `composeFleet`.
   const waiting = fleet.needsYou ?? fleet.blocked
   if (waiting > 0) parts.push(`${waiting} need${waiting === 1 ? 's' : ''} you`)
   if (fleet.review > 0) parts.push(`${fleet.review} to review`)
@@ -1981,7 +2041,7 @@ function withFleet(state: ActivityState, fleet: Fleet): ActivityState {
 /// the one part of this route that is actually promised.
 async function pushActivity(
   env: Env,
-  daemon: { account_id: string; label: string },
+  daemon: { id: string; account_id: string; label: string },
   body: Notification,
   devices: Device[],
 ): Promise<void> {
@@ -2033,17 +2093,17 @@ async function pushActivity(
   // read either way — the card needs every row to compose a header, and the row
   // this notice is about is one of them.
   const now = Date.now()
-  const { rows: before, needsYou } = await readFleet(env, daemon.account_id, now)
+  const { rows: before, counts } = await readFleet(env, daemon.account_id, now)
   const prior = before.find(row => row.terminal === terminal)
   // The row the write just produced, handed back rather than read again: it is
   // the same object the statement was bound from, so the card cannot disagree
   // with the column underneath it.
   const mine = await rememberAgent(
-    env, daemon.account_id, daemon.label, terminal, status, state, body, prior, now,
+    env, daemon.account_id, daemon.id, daemon.label, terminal, status, state, body, prior, now,
   )
   const fleet = composeFleet(
     [...before.filter(row => row.terminal !== terminal), mine],
-    needsYou,
+    counts,
     now,
   )
 
@@ -2313,19 +2373,28 @@ function startAlert(fleet: Fleet, body: Notification): { title: string; body: st
 /// number, and the runner already debounces the notices that carry it.
 async function refreshCard(env: Env, account: string): Promise<void> {
   const running = await env.DB.prepare(
-    `SELECT update_token, environment FROM install_cards WHERE account_id = ?`,
+    `SELECT update_token, environment, leader_terminal, leader_status, updated_at
+     FROM install_cards WHERE account_id = ?`,
   )
     .bind(account)
-    .first<{ update_token: string; environment: string | null }>()
+    .first<{
+      update_token: string
+      environment: string | null
+      leader_terminal: string | null
+      leader_status: string | null
+      updated_at: number
+    }>()
   if (!running || running.update_token === TOKEN_UNKNOWN) return
 
   const now = Date.now()
-  const { rows, needsYou } = await readFleet(env, account, now)
-  const fleet = composeFleet(rows, needsYou, now)
-  // The same headline `pushActivity` would draw: the first row that speaks. A
-  // card with none has nothing to headline, and the next agent notice will
-  // either give it one or take it down.
-  const headline = fleet.shown[0]
+  const { rows, counts } = await readFleet(env, account, now)
+  const fleet = composeFleet(rows, counts, now)
+  // The same headline `pushActivity` would draw: the first row that speaks,
+  // and failing that the first row at all — quiet rows still hold a card up,
+  // and its count is the one number that must not freeze. A card with no rows
+  // has nothing to headline, and the next agent notice will either give it one
+  // or take it down.
+  const headline = fleet.shown[0] ?? fleet.all[0]
   if (!headline) return
 
   const state: ActivityState = {
@@ -2343,8 +2412,17 @@ async function refreshCard(env: Env, account: string): Promise<void> {
     event: 'update',
     state,
   })
-  await env.DB.prepare(`UPDATE install_cards SET pushed_at = ? WHERE account_id = ?`)
-    .bind(now, account)
+  // The headline it now shows, remembered the way `pushActivity` remembers
+  // it: the dismissal rule reads `leader_status` to know what the card says,
+  // and `updated_at` moves only when the headline does.
+  const moved =
+    running.leader_terminal !== headline.terminal || running.leader_status !== state.status
+  await env.DB.prepare(
+    `UPDATE install_cards
+     SET leader_terminal = ?, leader_status = ?, pushed_at = ?, updated_at = ?
+     WHERE account_id = ?`,
+  )
+    .bind(headline.terminal, state.status, now, moved ? now : running.updated_at, account)
     .run()
 }
 
