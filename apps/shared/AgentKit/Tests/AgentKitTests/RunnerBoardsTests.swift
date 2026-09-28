@@ -49,15 +49,6 @@ private let panes = [
     Pane(boardTaskID: "5", boardState: "exited"),
 ]
 
-/// A row for a repository whose board has something on it, and for no other:
-/// not an empty board, and not one nobody has read yet. A board holding only
-/// rows this build cannot place still has something on it.
-@Test func onlyARepositoryWithSomethingOnItsBoardGetsARow() {
-    let rows = RunnerBoards.rows(
-        repositories: repositories, boards: boards, panes: panes, build: both, connected: true)
-    #expect(rows.map(\.repository) == ["r-busy", "r-new"])
-    #expect(rows.first?.name == "overnight")
-}
 
 /// The two numbers: tasks in Needs Decision, and tasks (not panes) an agent is
 /// on.
@@ -116,7 +107,9 @@ private let panes = [
 }
 
 /// The phone lists the statuses with tasks in them, Needs Decision first and
-/// the rest in the order work moves.
+/// the rest in the order work moves. `listed` is deprecated for `sections`
+/// (ov-55) and kept until both phones move off it; this pins it until then.
+@available(*, deprecated)
 @Test func thePhoneListsOnlyTheStatusesWithTasksNeedsDecisionFirst() throws {
     let listed = try #require(boards["r-busy"]).listed
     #expect(listed.map(\.status) == [.needsDecision, .inProgress, .done])
@@ -130,7 +123,7 @@ private let panes = [
     let gap = RunnerBoards.rows(
         repositories: repositories, boards: boards, panes: panes,
         build: nil, lastKnownBuild: both, connected: true)
-    #expect(gap.map(\.repository) == ["r-busy", "r-new"])
+    #expect(gap.map(\.repository) == ["r-busy", "r-empty", "r-unread", "r-new"])
     #expect(try #require(gap.first).decisions == 2)
     #expect(try #require(gap.first).agents == 0)
 
@@ -287,4 +280,42 @@ private func workspace(
     let read = RunnerBoards.touched(by: named, among: implicit)
     #expect(read.map(\.id) == ["r1", "w-main"])
     #expect(read.first?.boardWorkspace == nil, "the implicit board is read whole")
+}
+
+// MARK: - Sections and the implicit board's row (ov-55, spec §5)
+
+/// **Every status is a section, the empty ones included** (owner decision 3).
+/// The list form draws an empty status as a collapsed header reading
+/// "Backlog 0"; a list that dropped it would say nothing about what isn't
+/// there. Every status in `order`, Needs Decision first, each with its
+/// count, whether the board was built with all seven columns, some, or none.
+@Test("Every status is a section, empty ones included")
+func everyStatusIsASectionEmptyOnesIncluded() throws {
+    let busy = try #require(boards["r-busy"])
+    #expect(busy.sections.map(\.status) == TaskBoardModel.order)
+    #expect(busy.sections.map(\.count) == [2, 0, 0, 2, 0, 1, 0])
+    #expect(busy.sections.map(\.title).first == "Needs Decision")
+    // A board with no columns at all, which is what `.empty` is.
+    #expect(TaskBoardModel.empty.sections.map(\.status) == TaskBoardModel.order)
+    #expect(TaskBoardModel.empty.sections.allSatisfy { $0.count == 0 })
+    // A board built with only some of its columns keeps their rows.
+    let partial = TaskBoardModel(columns: [
+        TaskBoardColumn(status: .done, rows: [row("5", .done)])
+    ])
+    #expect(partial.sections.map(\.count) == [0, 0, 0, 0, 0, 1, 0])
+    #expect(partial.sections.first { $0.status == .done }?.rows.map(\.id) == ["5"])
+}
+
+/// **An empty implicit board still has a row** (spec §5, §8). An implicit
+/// board is a repository's on a runner without `workstreams`, and the
+/// workspace view treats it as a workspace, so an empty one has to be
+/// reachable: the row is the way onto the board, and New Task… is on the
+/// board. Read or not, like a workspace's (ov-56).
+@Test("An empty implicit board still has a row")
+func anEmptyImplicitBoardStillHasARow() {
+    let rows = RunnerBoards.rows(
+        repositories: repositories, boards: boards, panes: panes, build: both, connected: true)
+    #expect(rows.map(\.repository) == ["r-busy", "r-empty", "r-unread", "r-new"])
+    #expect(rows.map(\.name) == ["overnight", "scratch", "never-read", "newer"])
+    #expect(rows.map(\.decisions) == [2, 0, 0, 0])
 }

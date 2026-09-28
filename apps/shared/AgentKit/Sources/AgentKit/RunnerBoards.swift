@@ -133,9 +133,10 @@ public enum RunnerBoards {
     ///   workspace made a moment ago has nothing on it yet. The board draws
     ///   the empty and unread states. Android does the same (8819fc06).
     /// - An implicit board, a repository's on a runner without workspaces,
-    ///   gets a row only once it has been read and has something on it,
-    ///   unreadable rows included. Nobody made a workspace there, and an
-    ///   empty board is most repositories.
+    ///   gets a row the same way, empty or unread (ov-55, spec §5 and §8).
+    ///   It used to need something on it, since nobody made a workspace
+    ///   there; but the workspace view treats it as a workspace, and an
+    ///   empty board with no row was a board New Task… could never reach.
     /// - `agents` is counted only where `TaskAgentLink.speaksOfAgents` says
     ///   the runner can be believed about its panes. Anywhere else it is 0,
     ///   which draws nothing: "can't say", not "none".
@@ -165,10 +166,8 @@ public enum RunnerBoards {
     ) -> [RunnerBoardRow] {
         guard (build ?? lastKnownBuild)?.can("tasks") == true else { return [] }
         let speaks = TaskAgentLink.speaksOfAgents(connected: connected, build: build)
-        return boards.compactMap { workspace in
+        return boards.map { workspace in
             let board = models[workspace.id]
-            let hasSomething = board.map { !$0.rows.isEmpty || !$0.unreadable.isEmpty } ?? false
-            if workspace.isImplicit && !hasSomething { return nil }
             let repository = workspace.repository ?? workspace.id
             return RunnerBoardRow(
                 workspace: workspace,
@@ -254,7 +253,32 @@ extension TaskBoardModel {
     /// their places as cards move, and an empty one says "nothing is in
     /// review" at a glance; seven headings down a phone, five of them over
     /// nothing, would put the one card you came for below the fold.
+    @available(*, deprecated, message: "Use `sections`, which keeps the empty statuses (ov-55). Deleted in 4D.")
     public var listed: [TaskBoardColumn] {
         columns.filter { !$0.rows.isEmpty }
     }
+}
+
+extension TaskBoardModel {
+    /// The board's sections: every status in `order`, Needs Decision first,
+    /// each with its rows and count, the empty ones included (owner decision
+    /// 3, spec §5).
+    ///
+    /// What the list form draws. An empty status is a collapsed header
+    /// reading "Backlog 0", not a gap: a list that dropped it said nothing
+    /// about what isn't there, and moved every heading under it when a task
+    /// was filed. Built over `order` rather than `columns`, so a board read
+    /// with some columns or none (`.empty`) still has all seven.
+    public var sections: [TaskBoardColumn] {
+        TaskBoardModel.order.map { status in
+            TaskBoardColumn(
+                status: status, rows: columns.first { $0.status == status }?.rows ?? [])
+        }
+    }
+}
+
+extension TaskBoardColumn {
+    /// How many tasks are in this status: what a section's header shows,
+    /// 0 included.
+    public var count: Int { rows.count }
 }
