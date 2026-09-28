@@ -327,13 +327,13 @@ Tests:
   - `@Test("An empty implicit board still has a row")`: red today
 
 **3A.2 The form rule.** New `AK/BoardForm.swift`:
-- `resolve(width:previous:forced:)`: a list below 800, a kanban at 824 and up, and between the two, the form it
+- `resolve(width:previous:forced:)`: a list below 868, a kanban at 892 and up (824 before the 2A measurement), and between the two, the form it
   already has;
 - `Choice` (`auto | list | kanban`), stored per device under `board.form.<host>.<workspace>`.
 
 Tests (`AKT/BoardFormTests.swift`):
-- `@Test("Below 800 it's a list, at 824 and up a kanban")`
-- `@Test("Between 800 and 824 it keeps the form it had")`
+- `@Test("Below 868 it's a list, at 892 and up a kanban")`
+- `@Test("Between 868 and 892 it keeps the form it had")`
 - `@Test("A forced form ignores width")`
 - `@Test("Choosing the forced form again returns to Automatic")`
 

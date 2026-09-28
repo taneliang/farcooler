@@ -626,12 +626,15 @@ One `TaskBoardView` with two forms. The form is chosen by the board pane's **own
 
 | Board width | Form |
 |---|---|
-| < 824 pt | **List**: status sections, Needs Decision first |
-| ≥ 824 pt | **Kanban**: seven 260 pt columns (`TaskBoard.swift:470, 517`), scrolling sideways past three |
+| < 892 pt | **List**: status sections, Needs Decision first |
+| ≥ 892 pt | **Kanban**: seven 260 pt columns (`TaskBoard.swift:470, 517`), scrolling sideways past three |
 
-- **Where 824 pt comes from:** the width at which three kanban columns fit (3×260 + 2×12 spacing + 2×10 padding).
-  Below it, a kanban shows fewer than three statuses, which the list does better.
-- **Hysteresis:** the form switches at 824 pt going up and 800 pt going down, so a divider drag across the line
+- **Where 892 pt comes from:** the width at which three whole kanban columns fit: 3×(260 + 2×10 column padding) +
+  2×12 spacing + 2×14 board padding. This was 824 pt, which left out each column's own padding and took the board's
+  as 10; the 2A measurement found the real metrics need 892 (`.claude/agent/reports/ui/2a-report.md`). The numbers
+  are `BoardForm`'s constants (`AK/BoardForm.swift`), which the Mac's kanban draws with, so the threshold can't
+  drift from the columns. Below it, a kanban shows fewer than three statuses, which the list does better.
+- **Hysteresis:** the form switches at 892 pt going up and 868 pt going down, so a divider drag across the line
   doesn't flicker.
 
 **The toggle** is a segmented control in the board header: `≡` List, `▦` Kanban. Choosing one forces that form;
