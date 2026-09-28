@@ -1,8 +1,10 @@
 package com.farcooler.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.ContentPaste
@@ -28,6 +31,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -43,6 +47,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalUriHandler
@@ -53,6 +61,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.core.TerminalPalette
 import com.farcooler.core.Vt
+import com.farcooler.model.TaskBoard
+import com.farcooler.model.TaskLink
+import com.farcooler.model.TaskRef
+import com.farcooler.model.Terminal
 import com.farcooler.model.Worktree
 import com.farcooler.net.Connection
 import com.farcooler.net.TerminalRef
@@ -133,6 +145,10 @@ fun TerminalPane(
     val terminal = model.fleet.terminal(ref)
     val ordinal = worktree?.ordinals()?.get(ref.terminalId)
     val name = terminal?.displayName(ordinal) ?: "Terminal"
+
+    // The task this pane is about, named in the top bar; see [topBarTask].
+    val task = topBarTask(terminal, worktree)
+    val boards by connection.boards.collectAsStateWithLifecycle()
 
     // Keyed to nothing that can change. A pane's id is fixed for the life of
     // this composable — [WorktreeScreen] gives each one its own `key` — so
@@ -232,6 +248,12 @@ fun TerminalPane(
             showRunner = showRunner,
             runnerLabel = connection.host.displayLabel,
             onOpenDrawer = onOpenDrawer,
+            task = task,
+            onOpenTask = task?.let { named ->
+                taskBoardOf(named.id, boards, terminal, worktree)?.let { board ->
+                    { model.navigate(Route.BoardTask(ref.hostId, board, named.id)) }
+                }
+            },
         ) {
             // Terminal or chat, on the pane that can be either. Shown only
             // where it would work: `chatCapable` already reflects the daemon's
@@ -402,6 +424,10 @@ fun TerminalPane(
  * itself in its chip, and repeating it here would spend the one line of title
  * bar a phone has on something already on screen. The runner appears only when
  * more than one is connected.
+ *
+ * Under the title, [task] as a chip — "bil-9 Invoice PDF export" — when the
+ * pane has one (spec §3.2). It opens the task's card through [onOpenTask], and
+ * is only a label while nothing can open it.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -411,6 +437,8 @@ fun WorktreeTopBar(
     showRunner: Boolean,
     runnerLabel: String,
     onOpenDrawer: () -> Unit,
+    task: TaskRef? = null,
+    onOpenTask: (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     TopAppBar(
@@ -432,15 +460,23 @@ fun WorktreeTopBar(
                         append(runnerLabel)
                     }
                 }
-                if (subtitle.isNotEmpty()) {
-                    Text(
-                        subtitle,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                if (task != null || subtitle.isNotEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (task != null) {
+                            TaskChip(task, onOpenTask)
+                            if (subtitle.isNotEmpty()) Spacer(Modifier.size(6.dp))
+                        }
+                        if (subtitle.isNotEmpty()) {
+                            Text(
+                                subtitle,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
             }
         },
@@ -451,6 +487,73 @@ fun WorktreeTopBar(
         },
         actions = actions,
     )
+}
+
+/**
+ * The task a pane's top bar names, or null.
+ *
+ * [TaskLink]'s rule, and then only a task it can name: a dispatched pane whose
+ * card isn't open in this worktree comes back from [TaskLink.task] with an id
+ * and no key or title, and a chip reading nothing is worse than no chip.
+ */
+fun topBarTask(terminal: Terminal?, worktree: Worktree?): TaskRef? {
+    if (terminal == null) return null
+    return TaskLink.task(terminal, worktree)?.takeIf { it.label.isNotEmpty() }
+}
+
+/**
+ * The board to open [taskId]'s card on: the one that holds it, as last read,
+ * or failing that the workspace the pane works for, then its worktree's owner,
+ * then — on a runner without workspaces — the repository's implicit one. Null
+ * when there's nothing to go on, and the chip is then only a label.
+ */
+fun taskBoardOf(
+    taskId: String,
+    boards: Map<String, TaskBoard>,
+    terminal: Terminal?,
+    worktree: Worktree?,
+): String? =
+    boards.entries.firstOrNull { it.value.row(taskId) != null }?.key
+        ?: terminal?.workspace
+        ?: worktree?.workspace
+        ?: worktree?.repository
+
+/** The pane's task as a chip: its key in monospace, then its title. */
+@Composable
+private fun TaskChip(task: TaskRef, onOpen: (() -> Unit)?) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = Color.White.copy(alpha = 0.12f),
+        contentColor = Color.White,
+        modifier = Modifier
+            .widthIn(max = 220.dp)
+            .clip(RoundedCornerShape(50))
+            .then(
+                if (onOpen == null) Modifier
+                else Modifier.clickable(onClickLabel = "Open Task", role = Role.Button, onClick = onOpen)
+            )
+            .semantics { contentDescription = "Task ${task.label}" },
+    ) {
+        Row(Modifier.padding(horizontal = 8.dp, vertical = 2.dp)) {
+            if (task.key.isNotBlank()) {
+                Text(
+                    task.key,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                )
+                if (task.title.isNotBlank()) Spacer(Modifier.size(4.dp))
+            }
+            if (task.title.isNotBlank()) {
+                Text(
+                    task.title,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
 }
 
 @Composable
