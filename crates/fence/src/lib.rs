@@ -731,6 +731,25 @@ fn readable(label: &str, fingerprint: &str) -> String {
     format!("{safe}-{short}")
 }
 
+/// The device name a comment of ours was built from, as `readable` left it.
+///
+/// `farcooler-iPhone-t7xq9vd8` is `iPhone`, and a plain line's
+/// `farcooler-shell-iPhone-t7xq9vd8.<client id>` is too. The name is the
+/// filtered one: `readable` turned every character but an ASCII letter, digit
+/// or `_` into `-`, and nothing can turn it back. `None` for a comment we did
+/// not write.
+pub fn device_name(comment: &str) -> Option<&str> {
+    let readable = match comment.strip_prefix(SHELL_COMMENT) {
+        // `shell_comment`'s delimiter: the readable half has no dot.
+        Some(rest) => rest.split_once('.').map_or(rest, |(readable, _)| readable),
+        None => comment.strip_prefix("farcooler-")?,
+    };
+    // The fingerprint's eight characters are base64, which has no `-`, so the
+    // last dash is the one `readable` put there.
+    let (name, _fingerprint) = readable.rsplit_once('-')?;
+    (!name.is_empty()).then_some(name)
+}
+
 /// The entries in a file's fence, read the same way a write reads it.
 ///
 /// Here rather than a `read_to_string` at the call site, because this module's
@@ -1230,6 +1249,18 @@ fn refused(why: String) -> FenceError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The name a deny reads "Denied from" with, taken back out of the
+    /// comment `render` wrote.
+    #[test]
+    fn a_comment_of_ours_gives_back_the_device_name_it_was_built_from() {
+        assert_eq!(device_name("farcooler-iPhone-t7xq9vd8"), Some("iPhone"));
+        assert_eq!(device_name("farcooler-iPhone-SQfC+vTb"), Some("iPhone"), "base64 has no dash");
+        assert_eq!(device_name(&comment_for("E-Liang's iPad", "SHA256:ab/cdefgh")), Some("E-Liang-s-iPad"));
+        assert_eq!(device_name("farcooler-shell-MacBook-t7xq9vd8.client-1.2"), Some("MacBook"));
+        assert_eq!(device_name("somebody@laptop"), None, "not a line we wrote");
+        assert_eq!(device_name("farcooler-"), None);
+    }
 
     /// A valid ed25519 public key, chosen for being obviously synthetic.
     ///

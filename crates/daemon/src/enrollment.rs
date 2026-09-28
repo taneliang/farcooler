@@ -36,6 +36,30 @@ pub async fn list(svc: &Service) -> Result<ClientList> {
     blocking(move || Ok(listing(&read(&path)?))).await
 }
 
+/// The name `client_id` was enrolled under, from its line's comment.
+///
+/// Not the label the device sent: `fence::render` filters it to ASCII letters,
+/// digits and `_` (the rest become `-`) and wraps it in `farcooler-…-<short
+/// fingerprint>`, and `fence::device_name` unwraps that. So "E-Liang's iPad"
+/// comes back "E-Liang-s-iPad".
+///
+/// `None` for a device with no line, a line with no comment, or a fence that
+/// could not be read: the caller has a word for an unnamed device, and a
+/// reason to say nothing about why. On the blocking pool, as every read here.
+pub async fn label_for(svc: &Service, client_id: &str) -> Option<String> {
+    let path = svc.authorized_keys().to_path_buf();
+    let client_id = client_id.to_string();
+    blocking(move || {
+        Ok(read(&path)?
+            .into_iter()
+            .filter(|e| e.client_id == client_id)
+            .find_map(|e| fence::device_name(&e.label).map(str::to_string)))
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 /// Add a device's key, or report the grant it already has.
 ///
 /// One call writes ONE line. A Mac calls twice — once for Key A, the restricted

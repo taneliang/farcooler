@@ -2544,6 +2544,12 @@ impl Service {
         &self.agents
     }
 
+    /// Where live agent sessions report, and where a claude TUI's held
+    /// permission asks wait for a device's answer.
+    pub fn hooks(&self) -> &hook_ingress::HookIngress {
+        &self.hooks
+    }
+
     /// Where this service's runtime data lives. Attachment blobs sit under it,
     /// beside the database rather than inside it, and pasted files land there too.
     pub fn root_dir(&self) -> &std::path::Path {
