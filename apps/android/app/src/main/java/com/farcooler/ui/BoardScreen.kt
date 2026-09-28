@@ -112,8 +112,8 @@ fun rememberBoardRows(connection: Connection): List<BoardRow> {
     val daemon by connection.daemon.collectAsStateWithLifecycle()
     val link by connection.link.collectAsStateWithLifecycle()
 
-    // A row per workspace with something on its board, or per repository on
-    // a runner without workspaces. The list is the fleet's and the
+    // A row per workspace, empty or not, or per repository with something
+    // on its board on a runner without workspaces. The list is the fleet's and the
     // repositories', which is why both are read above.
     return RunnerBoards.rows(
         hostId = connection.host.id,

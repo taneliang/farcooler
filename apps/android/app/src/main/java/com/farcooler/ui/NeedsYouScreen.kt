@@ -265,7 +265,7 @@ fun NeedsYouScreen(
                     }
                 }
 
-                // A Board row per workspace whose board has something on it,
+                // A Board row per workspace, empty or not (see [RunnerBoards.rows]),
                 // directly above the door to the worktrees — where the Mac puts
                 // its Board row above a workspace's worktrees. Here rather
                 // than in the worktree list, because this screen is the one

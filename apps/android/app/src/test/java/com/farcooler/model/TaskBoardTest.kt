@@ -469,6 +469,33 @@ class TaskBoardTest {
         assertEquals("r1", new.repository)
     }
 
+    /**
+     * **A workspace's board has a row as soon as the workspace exists**
+     * (ov-56). A workspace made a moment ago has an empty board, or one not
+     * read yet, and a row only for a board with something on it left the new
+     * workspace an inert heading: its board could not be opened to watch the
+     * first tasks arrive. The board screen draws the empty and unread states.
+     *
+     * Mutation: dropping an empty or unread board's row. Red.
+     */
+    @Test
+    fun aWorkspacesBoardHasARowWhileEmptyOrUnread() {
+        val main = WorkspaceSummary(id = "w-main", name = "Main", isMain = true, repository = "r-busy")
+        val billing = WorkspaceSummary(id = "w-billing", name = "Billing", ordinal = 1, repository = "r-busy")
+        val rows = RunnerBoards.rows(
+            hostId = "h",
+            boards = listOf(main, billing),
+            repositories = repositories,
+            models = mapOf("w-main" to TaskBoard.EMPTY),
+            panes = panes,
+            build = both,
+            link = RunnerLink.ANSWERING,
+        )
+        assertEquals(listOf("w-main", "w-billing"), rows.map { it.key })
+        assertEquals(listOf(0, 0), rows.map { it.decisions })
+        assertEquals(listOf(0, 0), rows.map { it.agents })
+    }
+
     @Test
     fun onlyARepositoryWithSomethingOnItsBoardGetsARow() {
         val rows = RunnerBoards.rows("h", repositories, boards, panes, both, link = RunnerLink.ANSWERING)

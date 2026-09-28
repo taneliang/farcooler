@@ -477,8 +477,14 @@ object RunnerBoards {
      *
      * - A runner that does not advertise `tasks` has no board, and gets no rows;
      *   nor does one no link has asked yet ([build] null).
-     * - A workspace gets a row only once its board has been read and has
-     *   something on it. An empty board is most workspaces on most runners.
+     * - A workspace gets a row whenever it exists, its board read or not and
+     *   empty or not (ov-56): the row is the way onto the board, and a
+     *   workspace made a moment ago has nothing on it yet. The board screen
+     *   draws the empty and unread states. Here the phone parts from the
+     *   iPhone, whose `RunnerBoards.rows` still drops an empty board.
+     * - An implicit board — a repository's, on a runner without workspaces —
+     *   gets a row only once it has been read and has something on it. No
+     *   workspace was made there, and an empty board is most repositories.
      * - [BoardRow.agents] is counted only where [TaskAgentLink.speaksOfAgents]
      *   holds; anywhere else it is 0, which draws nothing — "can't say".
      * - A workspace's row is called by its name; an implicit one's by its
@@ -499,16 +505,16 @@ object RunnerBoards {
         val speaks = TaskAgentLink.speaksOfAgents(link, build)
         val names = repositories.associate { it.id to it.displayName.ifEmpty { it.short } }
         return boards.mapNotNull { workspace ->
-            val board = models[workspace.id] ?: return@mapNotNull null
-            if (board.isEmpty) return@mapNotNull null
+            val board = models[workspace.id]
+            if (workspace.isImplicit && (board == null || board.isEmpty)) return@mapNotNull null
             val repository = workspace.repository ?: workspace.id
             val repositoryName = names[repository]
             BoardRow(
                 hostId = hostId,
                 repository = repository,
                 name = if (workspace.isImplicit) repositoryName ?: workspace.name else workspace.name,
-                decisions = board.waitingOnYou,
-                agents = if (speaks) board.tasksWithLiveAgents(panes) else 0,
+                decisions = board?.waitingOnYou ?: 0,
+                agents = if (speaks && board != null) board.tasksWithLiveAgents(panes) else 0,
                 workspace = workspace,
                 repositoryName = if (workspace.isImplicit) null else repositoryName,
             )

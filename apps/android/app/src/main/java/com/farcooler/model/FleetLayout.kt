@@ -86,8 +86,8 @@ object FleetLayout {
 
     /**
      * The Board row under each workspace's heading, by heading id, as the
-     * iPhone and the Mac draw one: a workspace's own row, where its board has
-     * one ([RunnerBoards.rows] leaves out a board not read yet or empty).
+     * iPhone and the Mac draw one: a workspace's own row, which
+     * [RunnerBoards.rows] gives every workspace, its board empty or not.
      * Unclaimed is no workspace and keeps no board, so it never has one.
      */
     fun boardRows(headings: List<FleetHeading>?, rows: List<BoardRow>): Map<String, BoardRow> {
