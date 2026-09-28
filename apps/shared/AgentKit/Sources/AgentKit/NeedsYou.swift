@@ -309,14 +309,24 @@ extension NeedsYou {
         public var rank: UInt32?
         /// When `activity` began, or nil when the runner didn't say.
         public var activitySince: Date?
-        /// Already redacted on the runner.
+        /// Already redacted on the runner. Empty reads as none.
         public var blockedQuestion: String?
+        /// The terminal's workspace, else its worktree's owner: the daemon's
+        /// order after the task's, which an older runner can't supply.
         public var workspaceID: String?
         public var repositoryID: String?
+        /// The task the pane was dispatched for (its `taskId`), named from
+        /// its worktree's open tasks, or nil. Never the worktree's one open
+        /// task for a pane with no `taskId`: that's the daemon's subject rule,
+        /// and `TaskLink`'s fallback is for display only.
+        public var task: NeedsYouTask?
+        /// The worktree it runs in.
+        public var worktree: NeedsYouWorktree?
 
         public init(
             terminal: NeedsYouTerminal, activity: String?, rank: UInt32?, activitySince: Date?,
-            blockedQuestion: String?, workspaceID: String?, repositoryID: String?
+            blockedQuestion: String?, workspaceID: String?, repositoryID: String?,
+            task: NeedsYouTask? = nil, worktree: NeedsYouWorktree? = nil
         ) {
             self.terminal = terminal
             self.activity = activity
@@ -325,6 +335,8 @@ extension NeedsYou {
             self.blockedQuestion = blockedQuestion
             self.workspaceID = workspaceID
             self.repositoryID = repositoryID
+            self.task = task
+            self.worktree = worktree
         }
     }
 
@@ -342,7 +354,11 @@ extension NeedsYou {
     /// that tier: a runner that can't say how long it's waited isn't claimed
     /// to have waited longest.
     ///
+    /// Hidden worktrees' panes belong in `panes` too: their items still
+    /// count (spec §2.2).
+    ///
     /// `now` stands in for `since` when the runner didn't send one.
+    /// Android's `NeedsYouItems.derived` is the same rule.
     public static func derived(fromTerminals panes: [OlderPane], now: Date = Date()) -> [NeedsYouItem] {
         panes
             .filter { $0.activity == "blocked" }
@@ -355,8 +371,11 @@ extension NeedsYou {
                     since: pane.activitySince ?? now,
                     workspaceID: pane.workspaceID,
                     repositoryID: pane.repositoryID,
+                    task: pane.task,
                     terminal: pane.terminal,
-                    question: pane.blockedQuestion ?? "\(pane.terminal.label) needs you",
+                    worktree: pane.worktree,
+                    question: pane.blockedQuestion.flatMap { $0.isEmpty ? nil : $0 }
+                        ?? "\(pane.terminal.label) needs you",
                     actions: [NeedsYouAction(id: "open", title: "Open", destructive: false, primary: false)])
             }
             .sorted { $0.rank < $1.rank }

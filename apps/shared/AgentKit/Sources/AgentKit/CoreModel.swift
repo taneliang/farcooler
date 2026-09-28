@@ -1161,6 +1161,44 @@ extension Terminal: TaskBoardPane {
     var runsAgent: Bool { TaskAgentLink.runsAgent(preset: preset, isChangesPane: isChangesPane) }
 }
 
+extension Fleet {
+    /// Every pane in this fleet as `NeedsYou.derived(fromTerminals:)` reads
+    /// it, for a runner without `needs_you` (spec §2.6). Hidden worktrees
+    /// included: their items still count.
+    ///
+    /// Filled the way the daemon fills an item: the label is what's running
+    /// (`claude`), the workspace is the terminal's and then its worktree's
+    /// owner, and the task is only the one the pane was dispatched for, named
+    /// from its worktree's `open_tasks`. Android's `NeedsYouItems.derived`
+    /// reads its fleet the same way.
+    func olderPanes() -> [NeedsYou.OlderPane] {
+        worktrees.flatMap { worktree in
+            worktree.terminals.map { terminal in
+                NeedsYou.OlderPane(
+                    terminal: NeedsYouTerminal(
+                        id: terminal.id, worktreeID: worktree.id,
+                        label: Terminal.name(of: terminal.preset), role: terminal.role ?? "",
+                        paneMode: terminal.paneMode ?? "terminal",
+                        chatCapable: terminal.chatCapable == true),
+                    activity: terminal.activity,
+                    rank: terminal.rank,
+                    activitySince: terminal.activitySince.map {
+                        Date(timeIntervalSince1970: $0 / 1000)
+                    },
+                    blockedQuestion: terminal.blockedQuestion,
+                    workspaceID: terminal.workspace ?? worktree.workspace,
+                    repositoryID: worktree.repository,
+                    task: terminal.taskId.flatMap { id in
+                        worktree.openTasks?.first { $0.id == id }
+                    },
+                    worktree: NeedsYouWorktree(
+                        id: worktree.id, name: worktree.task, branch: worktree.branch,
+                        insertions: 0, deletions: 0))
+            }
+        }
+    }
+}
+
 /// The phone's terminal and worktree, as `TaskLink` asks about them. The
 /// pane's `boardTaskID` is `TaskBoardPane`'s, above.
 extension Terminal: TaskLinkPane {}

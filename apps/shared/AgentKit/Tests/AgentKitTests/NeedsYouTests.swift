@@ -189,14 +189,16 @@ func aWorkspacesCountIsItsItemsNotItsSignals() throws {
 
 private func pane(
     _ id: String, activity: String?, rank: UInt32?, question: String? = nil,
-    workspace: String? = "w1"
+    workspace: String? = "w1", task: NeedsYouTask? = nil
 ) -> NeedsYou.OlderPane {
     NeedsYou.OlderPane(
         terminal: NeedsYouTerminal(
             id: id, worktreeID: "wt", label: "codex", role: "agent", paneMode: "terminal",
             chatCapable: false),
         activity: activity, rank: rank, activitySince: millis(1_789_999_000_000),
-        blockedQuestion: question, workspaceID: workspace, repositoryID: "r1")
+        blockedQuestion: question, workspaceID: workspace, repositoryID: "r1", task: task,
+        worktree: NeedsYouWorktree(
+            id: "wt", name: "fc-3-webhooks", branch: "bil/webhooks", insertions: 0, deletions: 0))
 }
 
 @Test("An older runner's blocked agent is a blocked item, never above a real ask")
@@ -204,7 +206,9 @@ func anOlderRunnersBlockedAgentIsABlockedItemNeverAboveARealAsk() throws {
     // `Terminal.rank`'s tier 0 is Blocked: this agent has waited an hour.
     let old = NeedsYou.derived(fromTerminals: [
         pane("t1", activity: "blocked", rank: 99_996_399, question: "Trust this folder?"),
-        pane("t2", activity: "blocked", rank: nil),
+        pane(
+            "t2", activity: "blocked", rank: nil, question: "",
+            task: NeedsYouTask(id: "k", key: "bil-9", title: "Retry", status: "in_progress")),
     ])
     #expect(old.map(\.kind) == [.blocked, .blocked])
     #expect(old[0].itemID == "blocked:t1")
@@ -215,7 +219,10 @@ func anOlderRunnersBlockedAgentIsABlockedItemNeverAboveARealAsk() throws {
     #expect(old[0].since == millis(1_789_999_000_000))
     #expect(old[0].actions.map(\.id) == ["open"])
     #expect(old[1].rank == 199_999_999, "no rank is the youngest in the tier")
-    #expect(old[1].question == "codex needs you")
+    #expect(old[1].question == "codex needs you", "an empty question is none")
+    #expect(old[1].task?.key == "bil-9", "the task it was dispatched for")
+    #expect(old[0].task == nil)
+    #expect(old[0].worktree?.name == "fc-3-webhooks")
 
     // A current runner's ask, one minute old, still comes first.
     let ask = try Fixture.load().items(of: "studio")[0]
@@ -238,4 +245,32 @@ func anOlderRunnerDerivesNoDecisionsOrReviews() {
     #expect(
         NeedsYou.olderRunnerNote(runner: "build-box")
             == "Update Far Cooler on build-box to see decisions and asks here.")
+}
+
+/// The phone's own fleet, read the way an older runner's items are derived:
+/// its blocked pane, with the label, workspace and task the daemon would give.
+@Test("The phone's fleet feeds the older-runner items")
+func thePhonesFleetFeedsTheOlderRunnerItems() throws {
+    let json = FleetDecodeTests.fleetJSON
+        .replacingOccurrences(of: #""activity": "done""#, with: #""activity": "blocked""#)
+        .replacingOccurrences(of: #""rank": 199999940"#, with: #""rank": 99999940"#)
+        .replacingOccurrences(
+            of: #""taskId": "0198f2c0-0000-7000-8000-00000000a001""#,
+            with: #""taskId": "0198f2c0-0000-7000-8000-00000000a002""#)
+    let fleet = try FleetDecodeTests.decodeFleet(json)
+    let items = NeedsYou.derived(fromTerminals: fleet.olderPanes())
+    let item = try #require(items.first)
+    #expect(items.count == 1)
+    #expect(item.itemID == "blocked:aab3238922bcc25a6f606eb525ffdc56")
+    #expect(item.rank == 199_999_940, "Terminal.rank's tier 0, moved to the blocked tier")
+    #expect(item.question == "Run `rm -rf build`?")
+    #expect(item.terminal?.label == "claude")
+    #expect(item.terminal?.worktreeID == "8f14e45f-ce5b-4a5e-9c2b-000000000001")
+    #expect(item.terminal?.isOrchestrator == true)
+    // The terminal's own workspace, over its worktree's owner.
+    #expect(item.workspaceID == "0198f2c0-0000-7000-8000-0000000000cc")
+    #expect(item.repositoryID == "1c383cd3-0b0f-4a63-b8a1-000000000002")
+    #expect(item.task?.key == "bil-9")
+    #expect(item.worktree?.name == "Widen the model")
+    #expect(item.since == Date(timeIntervalSince1970: 1_755_900_000))
 }

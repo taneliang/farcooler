@@ -11,6 +11,7 @@ private struct Pane: TaskLinkPane, TaskBoardPane {
     var boardTaskID: String?
     var boardState: String = "running"
     var runsAgent: Bool = true
+    var isOrchestrator: Bool = false
 }
 
 private struct Lane: TaskLinkWorktree {
@@ -41,6 +42,16 @@ func aPaneInAWorktreeWithOneOpenTaskShowsThatTask() {
 @Test("A pane in a worktree with two open tasks shows none")
 func aPaneInAWorktreeWithTwoOpenTasksShowsNone() {
     #expect(TaskLink.task(of: Pane(boardTaskID: nil), in: Lane(openTaskIDs: [bil9, bil7])) == nil)
+}
+
+@Test("An orchestrator's pane names no task")
+func anOrchestratorsPaneNamesNoTask() {
+    // It leads the workspace, even from a worktree with exactly one open task,
+    // and even with a task id of its own.
+    let lead = Pane(boardTaskID: nil, isOrchestrator: true)
+    #expect(TaskLink.task(of: lead, in: Lane(openTaskIDs: [bil9])) == nil)
+    let dispatched = Pane(boardTaskID: bil7, isOrchestrator: true)
+    #expect(TaskLink.task(of: dispatched, in: Lane(openTaskIDs: [bil9])) == nil)
 }
 
 @Test("A shell shown under a task is not counted as that task's agent")
@@ -81,7 +92,11 @@ func thePhonesFleetNamesAPanesTaskFromOpenTasks() throws {
                 title: "Invoice PDF export", status: "in_progress")
         ])
     #expect(worktree.openTaskIDs == ["0198f2c0-0000-7000-8000-00000000a002"])
-    var shell = try #require(worktree.terminals.first)
-    shell.taskId = nil
-    #expect(TaskLink.task(of: shell, in: worktree) == "0198f2c0-0000-7000-8000-00000000a002")
+    // The fixture's pane is its workspace's orchestrator, which names none.
+    var pane = try #require(worktree.terminals.first)
+    pane.taskId = nil
+    #expect(pane.isOrchestrator)
+    #expect(TaskLink.task(of: pane, in: worktree) == nil)
+    pane.role = "shell"
+    #expect(TaskLink.task(of: pane, in: worktree) == "0198f2c0-0000-7000-8000-00000000a002")
 }
