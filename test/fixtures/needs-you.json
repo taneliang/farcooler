@@ -1,0 +1,180 @@
+{
+  "runners": [
+    {
+      "needs_you": {
+        "items": [
+          {
+            "actions": [
+              {
+                "destructive": true,
+                "id": "reject",
+                "primary": false,
+                "title": "Deny"
+              },
+              {
+                "destructive": false,
+                "id": "allow",
+                "primary": true,
+                "title": "Allow"
+              }
+            ],
+            "also": [
+              "decision"
+            ],
+            "ask_id": "a-41",
+            "detail": "touch x",
+            "id": "ask:a-41",
+            "kind": "ask",
+            "question": "Allow touch x",
+            "rank": 12,
+            "repository_id": "01000000-0000-7000-8000-000000000002",
+            "since": 1790000000250,
+            "task": {
+              "id": "01000000-0000-7000-8000-000000000003",
+              "key": "bil-7",
+              "status": "needs_decision",
+              "title": "Invoice PDF export"
+            },
+            "terminal": {
+              "chat_capable": true,
+              "id": "01000000-0000-7000-8000-000000000004",
+              "label": "claude",
+              "pane_mode": "agent",
+              "role": "agent",
+              "worktree_id": "01000000-0000-7000-8000-000000000005"
+            },
+            "workspace_id": "01000000-0000-7000-8000-000000000001",
+            "workspace_name": "Billing",
+            "worktree": {
+              "branch": "bil/webhooks",
+              "deletions": 40,
+              "id": "01000000-0000-7000-8000-000000000005",
+              "insertions": 18,
+              "name": "fc-3-webhooks"
+            }
+          },
+          {
+            "actions": [
+              {
+                "destructive": false,
+                "id": "open",
+                "primary": true,
+                "title": "Open"
+              }
+            ],
+            "also": [],
+            "ask_id": null,
+            "detail": null,
+            "id": "blocked:01000000-0000-7000-8000-00000000000a",
+            "kind": "blocked",
+            "question": "Run the migration now?",
+            "rank": 3600020,
+            "repository_id": "01000000-0000-7000-8000-000000000002",
+            "since": 1790000100000,
+            "task": null,
+            "terminal": {
+              "chat_capable": false,
+              "id": "01000000-0000-7000-8000-00000000000a",
+              "label": "codex",
+              "pane_mode": "terminal",
+              "role": "orchestrator",
+              "worktree_id": "01000000-0000-7000-8000-00000000000b"
+            },
+            "workspace_id": "01000000-0000-7000-8000-000000000001",
+            "workspace_name": "Billing",
+            "worktree": null
+          },
+          {
+            "actions": [
+              {
+                "destructive": false,
+                "id": "Postgres",
+                "primary": false,
+                "title": "Postgres"
+              },
+              {
+                "destructive": false,
+                "id": "SQLite",
+                "primary": false,
+                "title": "SQLite"
+              }
+            ],
+            "also": [],
+            "ask_id": null,
+            "detail": null,
+            "id": "decision:01000000-0000-7000-8000-00000000000c",
+            "kind": "decision",
+            "question": "Postgres or SQLite for the queue?",
+            "rank": 7200300,
+            "repository_id": "01000000-0000-7000-8000-000000000002",
+            "since": 1789999000000,
+            "task": {
+              "id": "01000000-0000-7000-8000-00000000000c",
+              "key": "bil-9",
+              "status": "needs_decision",
+              "title": "Retry failed webhooks"
+            },
+            "terminal": null,
+            "workspace_id": "01000000-0000-7000-8000-000000000001",
+            "workspace_name": "Billing",
+            "worktree": null
+          }
+        ]
+      },
+      "runner": "studio"
+    },
+    {
+      "needs_you": {
+        "items": [
+          {
+            "actions": [],
+            "also": [],
+            "ask_id": null,
+            "detail": null,
+            "id": "ask:b-2",
+            "kind": "ask",
+            "question": "claude is asking to use a tool",
+            "rank": 40,
+            "repository_id": "01000000-0000-7000-8000-000000000015",
+            "since": 1790000200000,
+            "task": null,
+            "terminal": {
+              "chat_capable": true,
+              "id": "01000000-0000-7000-8000-000000000016",
+              "label": "claude",
+              "pane_mode": "terminal",
+              "role": "agent",
+              "worktree_id": "01000000-0000-7000-8000-000000000017"
+            },
+            "workspace_id": "01000000-0000-7000-8000-000000000014",
+            "workspace_name": "Main",
+            "worktree": null
+          },
+          {
+            "actions": [],
+            "also": [],
+            "ask_id": null,
+            "detail": null,
+            "id": "review:01000000-0000-7000-8000-00000000001e",
+            "kind": "review",
+            "question": "Ready for review",
+            "rank": 10800000,
+            "repository_id": "01000000-0000-7000-8000-000000000015",
+            "since": 1789990000000,
+            "task": {
+              "id": "01000000-0000-7000-8000-00000000001e",
+              "key": "ops-2",
+              "status": "in_review",
+              "title": "Rotate the relay keys"
+            },
+            "terminal": null,
+            "workspace_id": null,
+            "workspace_name": "",
+            "worktree": null
+          }
+        ]
+      },
+      "runner": "build-box"
+    }
+  ]
+}

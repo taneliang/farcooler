@@ -1870,6 +1870,13 @@ async fn dispatch(
 
         "changes.inbox" => Ok(session.changes_inbox().await?),
 
+        // What needs a person on this runner, in `farcooler needs-you
+        // --json`'s shape (`needs_you_json`). Refused with
+        // CAPABILITY_UNSUPPORTED, without a round trip, on a runner that
+        // doesn't advertise `needs_you`; the app derives that runner's blocked
+        // items from the fleet instead.
+        "needs_you" => session.needs_you().await,
+
         "changes.mark_read" => {
             session.changes_mark_read(id("worktree")?).await?;
             Ok(json!({}))

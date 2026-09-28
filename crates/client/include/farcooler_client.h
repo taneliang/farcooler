@@ -111,6 +111,14 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *   task.list              {repository}           -> {"tasks": [...]}, one
  *                                                    repository's board
  *   task.get               {task}                 -> {"task", "notes", "blocks"}
+ *   needs_you              {}                     -> {"items": [...]}, in rank
+ *                                                    order; see below
+ *
+ * `needs_you` answers in `farcooler needs-you --json`'s shape, which
+ * `test/fixtures/needs-you.json` pins for both phones' decoders. It fails with
+ * CAPABILITY_UNSUPPORTED, without a round trip, on a runner that does not
+ * advertise `needs_you`. A worktree in `fleet` carries `open_tasks`, its
+ * unfinished tasks as `{id, key, title, status}`, `[]` from an older runner.
  *
  * The two board reads answer in `farcooler task list --json` and `task show
  * --json`'s shapes, snake_case keys and all, because the Mac reads the same

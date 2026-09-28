@@ -38,6 +38,11 @@ const WORKTREES: [&str; 5] = [
 /// the daemon serving the method the whole time.
 const BOARD: [&str; 2] = ["task.list", "task.get"];
 
+/// The rollup a phone opens to. Unrouted, the app would fall back to deriving
+/// blocked items from the fleet on every runner, and no ask, decision or
+/// review would ever reach a phone.
+const NEEDS_YOU: [&str; 1] = ["needs_you"];
+
 /// Closing a pane: a stop, then a remove, from both phones (`Connection.close`
 /// on iOS and Android). `terminal.remove` had no arm, so every close stopped
 /// the pane and left it standing, dead, with the error swallowed.
@@ -56,6 +61,16 @@ fn every_terminal_method_a_close_makes_can_be_called() {
 #[test]
 fn every_board_read_the_phone_makes_can_be_called() {
     for method in BOARD {
+        assert!(
+            FFI.contains(&format!("\"{method}\" =>")),
+            "the daemon serves {method} and no app can reach it: `dispatch` has no arm for it"
+        );
+    }
+}
+
+#[test]
+fn the_needs_you_list_can_be_called() {
+    for method in NEEDS_YOU {
         assert!(
             FFI.contains(&format!("\"{method}\" =>")),
             "the daemon serves {method} and no app can reach it: `dispatch` has no arm for it"
@@ -94,6 +109,7 @@ fn the_header_tells_an_app_developer_these_exist() {
         .chain(WORKTREES.iter())
         .chain(BOARD.iter())
         .chain(TERMINALS.iter())
+        .chain(NEEDS_YOU.iter())
         .copied()
     {
         assert!(

@@ -941,6 +941,7 @@ dependencies = [
  "farcooler-protocol",
  "farcooler-tailcat",
  "farcooler-transport",
+ "prost-types",
  "rand",
  "russh",
  "serde",

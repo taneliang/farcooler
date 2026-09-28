@@ -12,6 +12,7 @@ pub mod actions;
 pub mod ceremony;
 pub mod changes_json;
 pub mod ffi;
+pub mod needs_you_json;
 pub mod session;
 pub mod ssh;
 pub mod tasks_json;

@@ -1653,6 +1653,20 @@ impl Session {
         }
     }
 
+    /// What needs a person on this runner, in rank order, in the shape
+    /// `farcooler needs-you --json` prints (`needs_you_json`).
+    ///
+    /// Refused here, without a round trip, on a runner that doesn't advertise
+    /// `needs_you`: the app derives that runner's blocked items from the fleet
+    /// instead, and the refusal's `capability-unsupported` is how it knows to.
+    pub async fn needs_you(&mut self) -> Result<serde_json::Value, SessionError> {
+        require(self.capabilities(), farcooler_protocol::capability::NEEDS_YOU, "needs_you.list")?;
+        match self.value("needs_you.list", None, None).await? {
+            result::Value::NeedsYouList(list) => Ok(crate::needs_you_json::needs_you_json(&list)),
+            other => Err(wrong("needs_you_list", &other)),
+        }
+    }
+
     /// Mark a worktree as read, which is what clears its inbox badge.
     pub async fn changes_mark_read(&mut self, worktree: Uuid) -> Result<(), SessionError> {
         let payload =
@@ -2173,7 +2187,7 @@ fn turn_started_at(t: &farcooler_protocol::v1::Terminal) -> Option<i64> {
 ///
 /// Same reason `activity_label` exists: a client that switched on an integer
 /// would hold a second copy of the enum and drift from it silently.
-fn pane_mode_label(mode: i32) -> &'static str {
+pub(crate) fn pane_mode_label(mode: i32) -> &'static str {
     match farcooler_protocol::v1::PaneMode::try_from(mode) {
         Ok(farcooler_protocol::v1::PaneMode::Agent) => "agent",
         Ok(farcooler_protocol::v1::PaneMode::Changes) => "changes",
@@ -2314,6 +2328,12 @@ fn with_workspaces(
     row["workspace"] = json!(workspace_of(w.workspace_id.as_deref()));
     row["claim_source"] = json!(w.claim_source);
     row["foreign_writers"] = json!(foreign_writers(w, known));
+    // The tasks working here that aren't finished, as `{id, key, title,
+    // status}`: what lets a worktree's row and a pane name their task without
+    // reading a board. `[]` from a runner too old to fill it. Here rather than
+    // in `fleet` so the test below can see it; `worktree list --json` carries
+    // the same key from the same function.
+    row["open_tasks"] = crate::needs_you_json::open_tasks_json(&w.open_tasks);
     let mine = terminals.iter().filter(|t| t.worktree_id == w.id);
     if let Some(rows) = row["terminals"].as_array_mut() {
         for (out, t) in rows.iter_mut().zip(mine) {
@@ -2425,8 +2445,8 @@ mod tests {
         assert!(super::require(&with, TASKS, "task.list").is_ok());
     }
 
-    /// A fleet row names its workspace, how it was claimed, and who else is
-    /// writing in it; each of its terminals names its own workspace and role.
+    /// A fleet row names its workspace, how it was claimed, who else is
+    /// writing in it, and the tasks working in it; each of its terminals names its own workspace and role.
     /// A pane in another worktree does not lend its fields to this one's.
     #[test]
     fn a_fleet_row_carries_its_workspace_and_its_panes_roles() {
@@ -2438,6 +2458,12 @@ mod tests {
             workspace_id: Some(b(main)),
             claim_source: Some("hook".into()),
             foreign_writer_workspace_ids: vec![b(billing)],
+            open_tasks: vec![farcooler_protocol::v1::TaskRef {
+                id: b(other),
+                key: "bil-9".into(),
+                title: "Invoice PDF export".into(),
+                status: farcooler_protocol::v1::TaskStatus::InReview as i32,
+            }],
             ..Default::default()
         };
         let pane = |worktree: Uuid, workspace: Uuid, role: farcooler_protocol::v1::TerminalRole| {
@@ -2464,6 +2490,16 @@ mod tests {
         assert_eq!(row["workspace"], main.to_string(), "{row}");
         assert_eq!(row["claim_source"], "hook");
         assert_eq!(row["foreign_writers"], serde_json::json!(["Billing"]));
+        assert_eq!(
+            row["open_tasks"],
+            serde_json::json!([{
+                "id": other.to_string(),
+                "key": "bil-9",
+                "title": "Invoice PDF export",
+                "status": "in_review",
+            }]),
+            "{row}"
+        );
         assert_eq!(row["terminals"][0]["workspace"], billing.to_string(), "{row}");
         assert_eq!(row["terminals"][0]["role"], "agent", "another worktree's pane lent its role");
         assert!(row["terminals"][1]["workspace"].is_null(), "{row}");
