@@ -105,8 +105,8 @@ An **item** is one thing a person has to act on. It is one of four kinds, listed
 | Kind | When | Its subject | Ends when |
 |---|---|---|---|
 | **ask** | An agent is waiting on a permission that has an id and options, so it can be answered away from its terminal. Two sources: a claude TUI's held `PermissionRequest` (ov-14; `crates/daemon/src/hook_asks.rs:1-22`, ids prefixed `hook-ask-`, `:37`), and an ACP chat pane's `AgentEvent::Permission` | The terminal, plus its task when the terminal has one | The ask settles (`hook_asks.rs` `settle`, or the chat's `Resolved`) |
-| **blocked** | An agent is Blocked and has no answerable ask: a codex or cursor TUI, a trust gate, or a question read off the screen. Also a terminal whose last turn failed (`Terminal.turn_failed`) or whose process exited badly (`exit_wants_attention`, `activity.rs:905`) | The terminal, plus its task | Its activity leaves Blocked, or the failure is seen (`terminal.seen`) |
-| **decision** | A task is in Needs Decision (`TASK_STATUS_NEEDS_DECISION`, `proto/farcooler.proto:2602`). Its question is the latest `QUESTION` note (`:2624`) | The task | An `ANSWER` note takes the task out of Needs Decision |
+| **blocked** | An agent is Blocked and has no answerable ask: a codex or cursor TUI, a trust gate, or a question read off the screen. Also an agent whose last turn failed (`Terminal.turn_failed` with activity Done). A process that exited badly (`exit_wants_attention`, `activity.rs:905`) is **not** an item: nothing marks an exit as seen (`activity::seen` changes only Done), so it would stay until the terminal is removed. It keeps its `✗` glyph | The terminal, plus its task | Its activity leaves Blocked, or the failed turn is seen (`terminal.seen` turns Done into Idle, `watch.rs:3172-3184`) |
+| **decision** | A task is in Needs Decision (`TASK_STATUS_NEEDS_DECISION`, `proto/farcooler.proto:2602`). Its question is the latest `QUESTION` note (`:2624`) | The task | An `ANSWER` note later than that question, **or** the task leaving Needs Decision. An answer only appends a note (`task_ops::note`, `crates/daemon/src/task_ops.rs:500-522`): nothing moves the status back, and the orchestrator stays in charge of the card (ruling 2's spirit). The task stays in Needs Decision on the board until it moves it |
 | **review** | A task is In Review (`TASK_STATUS_IN_REVIEW`, `proto/farcooler.proto:2604`). Nothing else: a Done agent and a worktree with unread changes are not items (ruling 1) | The task | The task leaves In Review |
 
 **Rules on top:**
@@ -182,18 +182,37 @@ Android. Both are pinned by one fixture file that both test suites read, as the 
 
 ### 2.4 Wire
 
-**New RPC `needs_you.list`,** Read scope.
-- Read, like `changes.inbox` (`crates/daemon/src/rpc.rs:414`): it is metadata about work.
-- Question text is already redacted on the host, as `blocked_question` is.
+**New RPC `needs_you.list`,** Read scope, with the content gated by scope in the converter, as `worktree_path` is.
+- Read, like `changes.inbox` (`crates/daemon/src/rpc.rs:414`): the shape of the work is metadata.
+- **Below Control scope** (ruled): an item carries its `id`, `kind`, `also`, `rank`, `since`, workspace, task and
+  terminal, and nothing else. `question` becomes a fixed sentence for the kind ("claude is asking to use a tool",
+  "claude needs you", "Needs a decision", "Ready for review"), and `detail`, `ask_id`, `actions` and the worktree's
+  path are left out. **Why:** an ask's option names carry the raw command or file path (`claude_tool_title`,
+  `crates/agent-core/src/permission.rs:26-31, 80-95`), and that text travels today only on the agent channel, which
+  is Control (`rpc.rs:388-394`). A decision's question is a board note, which Read may already see through
+  `task.get`; it's blanked anyway, so one rule covers every kind.
+- At Control, `question` is the ask's allow-option name ("Allow touch x"; there's no separate title), or
+  `blocked_question`, which is already redacted on the host, or the `QUESTION` note's body.
 
-**New event `needs_you_changed`** (Empty), sent once per change so clients re-read instead of polling. It fires on:
+**New event `needs_you_changed`** (Empty, `Event` tag 24), so clients re-read instead of polling. It fires on:
 - a terminal's activity change;
 - a held ask's `hold` or `settle`;
 - a chat's `Permission` or `Resolved`;
 - `task_changed` into or out of Needs Decision or In Review;
+- a `QUESTION` or `ANSWER` note on a task already in Needs Decision (the status doesn't move, but the item does);
 - `terminal.seen`.
 
-**New capability `needs_you`,** listed in `crates/protocol/src/lib.rs` beside `workstreams` (`:240`).
+`Watcher::announce_fleet_changed` (`watch.rs:3217`) sends one event per call and doesn't coalesce. This event is
+debounced in the watcher instead: at most one per 250 ms, trailing edge.
+
+**Fresh tags,** checked against `proto/farcooler.proto` at ddfb24d1:
+- `Event.needs_you_changed = 24` (the last is `events_missed = 23`, with no gaps);
+- `Result.needs_you_list = 45` (the last is 44; the unused 27-31 stay unused);
+- `Worktree.open_tasks = 14` (the last is `foreign_writer_workspace_ids = 13`).
+
+`needs_you.list` takes no payload, like `terminal.list`.
+
+**New capability `needs_you`,** a constant beside `workstreams` (`crates/protocol/src/lib.rs:240`) and an entry in `capability::ALL` (`:394-399`), without which the daemon doesn't advertise it.
 
 **The item** (proto sketch; tags are fresh):
 
@@ -201,11 +220,11 @@ Android. Both are pinned by one fixture file that both test suites read, as the 
 message NeedsYouItem {
   string id = 1;                       // stable across reads: "ask:<ask id>", "blocked:<terminal>",
                                        // "decision:<task>" or "review:<task>"
-  NeedsYouKind kind = 2;               // ASK, BLOCKED, DECISION, REVIEW
+  NeedsYouKind kind = 2;               // NEEDS_YOU_KIND_ASK, _BLOCKED, _DECISION, _REVIEW (UNSPECIFIED = 0)
   repeated NeedsYouKind also = 3;      // the subject's other, less urgent signals
   uint32 rank = 4;
   google.protobuf.Timestamp since = 5;
-  optional bytes workspace_id = 6;     // plus its name, so a glance can say "Billing" without a second read
+  bytes workspace_id = 6;              // empty for none, as Task.workspace_id is; plus its name, below
   string workspace_name = 7;
   bytes repository_id = 8;
   optional TaskRef task = 9;           // id, key, title, status
@@ -241,12 +260,17 @@ next `needs_you_changed`. When it's refused, the item stays, with one line:
 - "Someone already answered this." for `NotHeld`;
 - "Couldn't reach claude. Try again." for `NotDelivered`.
 
+Today both refusals are the same `ResourceConflict` with no `what` (`rpc.rs:2105-2110`), so no client can tell them
+apart. `terminal.agent_answer` sets `what` to `not_held` or `not_delivered`, and the CLI's error JSON carries it.
+
 This fixes the ov-54 review finding that a failed answer cleared the card silently.
 
 ### 2.6 Older runners
 
 A runner without `needs_you` still contributes items, derived in the app from what it already sends:
 - Blocked agents, from `Terminal.activity`, become **blocked** items. No asks, decisions or reviews are derived.
+- Their rank is re-tiered into the blocked tier. `Terminal.rank`'s tier 0 is Blocked, while the item scale's tier 0
+  is ask, so a derived item copied as is would outrank a real ask on another runner.
 - Its section in Needs You says: "Update Far Cooler on <runner> to see decisions and asks here."
 - Nothing is guessed.
 
@@ -268,8 +292,14 @@ A runner without `needs_you` still contributes items, derived in the app from wh
 ### 3.2 What's added
 
 1. **A worktree knows its tasks.**
-   - `Worktree` gains `repeated TaskRef tasks`: `{id, key, title, status}` for every task whose `worktree_id` is
-     this worktree and whose status is not Done or Cancelled.
+   - `Worktree` gains `repeated TaskRef open_tasks = 14`: `{id, key, title, status}` for every task whose
+     `worktree_id` is this worktree and whose status is not Done or Cancelled. Not `tasks`: the CLI's worktree JSON
+     already has `"task"`, the worktree's own name.
+   - It's filled where `WorktreeView` is built, since `wire::worktree` (`wire.rs:189`) has no store. It appears in
+     both projections (the CLI's `worktree list --json`, which the Mac reads, and `Session::fleet`, which the
+     phones read), and in all three decoders.
+   - `worktree_changed` fires for every change to it: `task.update` moving `worktree_id` (both lanes) or changing
+     the title; `task.create` naming a worktree; and `task.set_status` into or out of Done or Cancelled.
    - The daemon fills it in `worktree.list`, and `task_changed` triggers `worktree_changed` for the old and new
      lanes.
    - This is what lets a Worktrees row read "fc-3-webhooks · bil-9", and a pane's header name its task, without a
@@ -363,7 +393,7 @@ collapse thresholds below follow from whatever it measures. See R2.
 | Detail width | Shown |
 |---|---|
 | `W ≥ 400 + 280 + 500 = 1180` | All three |
-| `W < 1180`, task open | **The conversation collapses to a 36 pt rail** at the leading edge. The rail shows the orchestrator's status glyph and its needs-you dot. Clicking the rail, pressing Esc, or ⌘[ closes the task column, which brings the conversation back. The task column is navigation, not an arrangement to fit |
+| `W < 1180`, task open | **The conversation collapses to a 36 pt rail** at the leading edge. The rail shows the orchestrator's status glyph and its needs-you dot. Clicking the rail, Back (⌃⌘←), or Esc when no terminal has focus closes the task column, which brings the conversation back. The task column is navigation, not an arrangement to fit |
 | `W < 680`, no task | One column, with a segmented **Orchestrator \| Board** control in the header: the phone form |
 
 **At a 13-inch laptop's widths:**
@@ -426,8 +456,8 @@ workspaces, and a worktree row shows up only under Worktrees.
   - Otherwise: the agent does.
 
 **Open Worktree** replaces the column's contents with the worktree's own layouts: a `TileView` and `GroupBar`,
-the same view `.worktree` draws today. A breadcrumb reads "bil-9 › fc-3-webhooks", and Esc or ⌘[ goes back
-along it. **Focus** (⇧⌘↩) widens the task column over the conversation and board, for tmux work at full size;
+the same view `.worktree` draws today. A breadcrumb reads "bil-9 › fc-3-webhooks", and Back (⌃⌘←) goes back
+along it. **Focus Column** (⌃⌘↩) widens the task column over the conversation and board, for tmux work at full size;
 pressing it again restores them.
 
 ### 4.5 The sidebar
@@ -520,6 +550,10 @@ filters workspace rows and Worktrees.
   repository, it opens Main. The refusal copy "choose a project's Board" (`ContentView.swift:2693`) becomes
   "Select a workspace first."
 - **Focus shortcuts for the three columns:** ⌥⌘1, ⌥⌘2, ⌥⌘3. ⌘digits are taken by terminals.
+- **Back** is ⌃⌘← and **Focus Column** is ⌃⌘↩. The usual chords are taken: ⌘[ is Previous Terminal
+  (`Commands.swift:136-137`) and ⇧⌘↩ is Zoom Pane (`:170-171`). ⌃⌘←, ⌃⌘↩ and ⌥⌘1–3 are unused in `Commands.swift`
+  and aren't in `ShortcutSheetTests.systemChords`. Esc also goes back, but only when no terminal has focus, since a
+  terminal needs its Esc.
 - **Window title:** the workspace's name, with the subtitle "repository · runner". With a task focused, the title
   is "bil-9 Invoice PDF export" and the subtitle is "Billing · overnight". This replaces the worktree-derived
   title (`Model.swift:178-187`) everywhere except a loose worktree.
@@ -573,8 +607,14 @@ choosing the selected one again returns to Automatic, which is also in its menu.
 **The kanban form:** unchanged, except that opening a card opens the task column instead of a sheet.
 
 **Every form, on every platform:**
-- `TaskBoardModel.listed`, which drops empty statuses (`AK/RunnerBoards.swift:246-257`), is replaced by `sections`,
-  which keeps every status with its count. The phones take the same change: owner decision 3 applies there too.
+- `TaskBoardModel.sections` keeps every status with its count. It's added beside `listed`, which drops empty
+  statuses (`AK/RunnerBoards.swift:246-257`; Kotlin `android/model/TaskBoard.kt:229`). `listed` stays, deprecated,
+  until both phones have moved off it (`ios/TaskBoardView.swift:166`, `android/ui/BoardScreen.kt:283`), and is
+  deleted in the last phone task. The phones take `sections` too: owner decision 3 applies there as well.
+- **An implicit board always gets a row,** like a workspace's. An implicit board is a repository's board on a
+  runner without `workstreams`. Today it's hidden when empty (`AK/RunnerBoards.swift:170`, Kotlin `TaskBoard.kt:508`),
+  but §4.2 and §8 treat it as a workspace, so an empty one has to be reachable. A workspace's empty board already
+  gets a row (ov-56).
 - **New Task…** (`＋` in the header) files a task on this board with `task.create`, which is Control scope and
   already exists. The empty state "Put a task on it with farcooler task create." (`TaskBoard.swift:396-397`)
   becomes a button. In scope (ruling 5), as is Move to Workspace ▸ (§4.5).
@@ -665,20 +705,42 @@ Going from a task to its agent pushes, too. So the board is never covered or dis
 Each of these reads the same items.
 
 - **Push.**
-  - The daemon's push payload gains `workspace` (a name) and `needs_you` (this runner's item count).
+  - **The contract** (camelCase, as the body's other renamed fields are: `startedAt`, `traceAnchor`,
+    `crates/daemon/src/push.rs:212, 276`):
+    - every agent notice gains `workspace` (the name, or absent) and `needsYou` (this runner's item count at the
+      moment of sending);
+    - a **decision notice** has `kind: "decision"`, `task` (the key), `workspace`, `title`, `subtitle` and
+      `needsYou`, and **no `terminal`**. The relay alerts on it and writes no roster row, since rows are one per
+      `(account, terminal)` (`services/relay/migrations/0008_fleet_rows.sql`);
+    - a **count notice** has `kind: "count"` and `needsYou` only. The daemon sends one, debounced to 2 s, after any
+      `needs_you_changed` that no other notice carried. So answering a decision or a chat ask, which changes no
+      terminal, still updates the lock screen. It alerts nothing.
+    - A notice with no `kind` is an agent notice, as today.
   - The title leads with the workspace, as ov-60 did on the Mac: "Billing · claude needs you". For an
     orchestrator, it's "Billing Orchestrator needs you".
   - **A task entering Needs Decision sends a push** (ruling 3): "Billing · bil-7 needs a decision", with the
     question as the subtitle. Today nothing pushes a decision (workstreams spec, "Wake-ups and events").
-- **Relay.** It keeps the latest `needs_you` per machine and sums them for the Live Activity header. Today the
-  header counts blocked rows (`services/relay/src/push.ts:269-285`), which leaves out decisions.
+- **Relay.** Today the header counts blocked rows (`services/relay/src/push.ts:269-285`), which leaves out
+  decisions.
+  - **Storage:** migration `0010_needs_you.sql` adds nullable `needs_you INTEGER` and `needs_you_at INTEGER` to
+    `daemons`, the row for each daemon token. Additive and nullable, as 0002 through 0009 are.
+  - **Update:** every notice that carries `needsYou` overwrites that daemon's two columns. It never adds.
+  - **Sum:** the header's `needsYou` is the sum over the account's unrevoked daemons whose `needs_you_at` is newer
+    than `ROW_RETENTION_MS` (24 hours, `index.ts`). With no such daemon, the header falls back to today's
+    `blocked` count.
+  - **Staleness:** a count clears in three ways. The next notice from that daemon overwrites it. A daemon silent
+    for 24 hours drops out of the sum, and `readFleet`'s lazy purge nulls its columns. A revoked daemon is never
+    summed.
 - **Live Activity.**
   - The header count is the rollup's count.
-  - The two rows are the top two items, labeled "Billing · bil-9" instead of "claude · studio".
+  - The rows stay the relay's agent rows, which are per terminal, not items. They're relabeled "Billing · claude"
+    from the notice's `workspace`.
   - Asks get Allow and Deny buttons (ov-54).
 - **Widget.** `FleetSnapshot` (`AK/FleetSnapshot.swift:18-30`) gains optional `needsYou: [Item]`, written by the app.
   The widget's count and rows come from it. An older snapshot, without the field, decodes as today.
-- **Watch.**
+- **Watch.** The watch has no sockets. It gets items the way it gets agents today: the iPhone's
+  `WatchLinkHost.send(snapshot:)` (`ios/WatchLinkHost.swift:215-255`) puts `FleetSnapshot`, now with `needsYou`, in
+  the application context.
   - The list's first section is Needs You.
   - Asks answer in place, as today.
   - Decisions and reviews show the question and "Open on iPhone".
@@ -714,7 +776,6 @@ sessions, windows, worktree order and claims are untouched.
   collapse.
 - Expanded worktree rows were `@State` (`ContentView.swift:11`) and never persisted, so nothing is lost.
   - Worktrees disclosure state is new: `sidebar.openWorktrees`, empty by default.
-  - A workspace whose worktree was expanded at quit time opens with Worktrees disclosed, once.
 - New: `board.form.*` (§5), and the task column's divider.
 - **The first launch after the update** shows a one-time tip over the sidebar:
   - "Workspaces are now in the sidebar."
@@ -755,8 +816,9 @@ Each slice ships on its own and is usable without the next.
 
 **Usable alone:**
 - The CLI command, for a person or an orchestrator.
-- The Mac's ⌃⌘N and header badge switch to the rollup, so decisions join the cycle.
-- The pane header gains its task chip on all three apps.
+- The lock screen's count includes decisions, through the relay.
+- Android's panes name their task. The Mac and iOS consumers moved into slices 2 and 4, which own those apps'
+  files.
 
 **Tests:** see §11 R6 for the ones that must go red first.
 
@@ -797,20 +859,16 @@ otherwise as the kanban. That kanban is cramped in 340 pt but works, since it sc
 
 ### What can run in parallel
 
-```
-slice 1 (daemon, client core, CLI)  ──┬──► slice 2 (Mac view) ──────┐
-                                      ├──► 4a iOS ─┐                 ├──► done
-slice 3 (board: AgentKit, then Mac) ──┼──► 4b Android ─┤             │
-                                      └──► 4c glances ─┘─────────────┘
-```
+The plan (`docs/superpowers/plans/2026-09-28-workspace-ui.md`) assigns every shared file to one owning task and
+fixes the groups:
 
-- **Slice 1 and slice 3 run in parallel from day one.** They touch different code: the daemon and client core, and
-  board views.
-- **Slice 2's view structure can start alongside slice 1** against a stub item list. It merges after slice 1.
-- **4a, 4b and 4c run in parallel with each other and with slice 2,** once slice 1 has landed. 4a and 4b also need
-  slice 3's AgentKit and Kotlin `sections`, which is the first, small part of slice 3.
-- Every lane is its own worktree (one lane per worktree). Slices 2 and 3 both edit `TaskBoard.swift` and
-  `ContentView.swift`, so they land in sequence: slice 3's Mac part first, since it's smaller.
+1. **Day one:** the daemon (1A), the relay (1B), the shared board rules then the Mac board (3A → 3B), and the
+   column measurement (2A).
+2. **After 1A:** the client core and the CLI (1C).
+3. **After 1C:** AgentKit (1D) and Kotlin (1E).
+4. **After 1D, 1E, 3A, 3B and 2A:** the Mac (slice 2, one lane), iOS (4A), Android (4B), and the glances (4C, after
+   4A.1).
+5. **After 4A and 4B:** deleting `listed` (4D).
 
 ---
 
