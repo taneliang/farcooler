@@ -241,6 +241,12 @@ fn announce(watcher: &Watcher, task: &Task, actor: Actor) {
     watcher.announce_task_changed(task, None, actor);
 }
 
+/// Whether a task in this status is on the needs-you list: a decision or a
+/// review.
+fn is_an_item(status: TaskStatus) -> bool {
+    matches!(status, TaskStatus::NeedsDecision | TaskStatus::InReview)
+}
+
 /// The workspace a request names, which must be in `repository` when the
 /// request names one of those too.
 ///
@@ -482,8 +488,12 @@ pub fn set_status(svc: &Service, watcher: &Watcher, req: &pb::TaskSetStatus) -> 
     let actor = actor_from_wire(&req.actor)?;
     let status =
         status_from_wire(req.status).ok_or(DomainError::InvalidArgument { what: "status" })?;
+    let before = svc.store.get_task(id)?.status;
     let task = svc.store.set_task_status(id, status, actor)?;
     announce(watcher, &task, actor);
+    if before != task.status && (is_an_item(before) || is_an_item(task.status)) {
+        watcher.announce_needs_you();
+    }
     Ok(pb_task(&task))
 }
 
@@ -519,6 +529,11 @@ pub fn note(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend) -> Resul
     // that will be answered later look the same to a watcher.
     let task = svc.store.get_task(id)?;
     announce(watcher, &task, actor);
+    // A question or its answer on a task waiting on one moves the item
+    // though the status does not: an answer only appends a note.
+    if task.status == TaskStatus::NeedsDecision && matches!(kind, NoteKind::Question | NoteKind::Answer) {
+        watcher.announce_needs_you();
+    }
     Ok(pb_note(&written))
 }
 

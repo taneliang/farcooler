@@ -156,6 +156,9 @@ struct SessionState {
     epoch: u64,
 }
 
+/// What `AgentSupervisor::on_asks_moved` installs.
+type AsksMoved = Arc<dyn Fn() + Send + Sync>;
+
 #[derive(Clone, Default)]
 pub struct AgentSupervisor {
     sessions: Arc<Mutex<HashMap<Uuid, SessionState>>>,
@@ -168,6 +171,10 @@ pub struct AgentSupervisor {
     /// time. Pruned when the ask's `Resolved` arrives and when the terminal is
     /// forgotten.
     asked_at: Arc<Mutex<HashMap<Uuid, HashMap<String, std::time::SystemTime>>>>,
+    /// Told whenever a `Permission` or `Resolved` is recorded: the watcher's
+    /// `announce_needs_you`, since both move the needs-you list. `None` until
+    /// a watcher installs it.
+    asks_moved: Arc<Mutex<Option<AsksMoved>>>,
     /// Terminals whose socket is already bound.
     ///
     /// Without this, a second `set_pane_mode` would bind the same path again
@@ -319,6 +326,14 @@ impl AgentSupervisor {
             return (epoch, all);
         }
         (epoch, all.into_iter().filter(|e| e.seq >= from_seq).collect())
+    }
+
+    /// Call `f` whenever an ask appears or ends in any terminal's ring.
+    /// One listener; a second replaces the first.
+    pub fn on_asks_moved(&self, f: impl Fn() + Send + Sync + 'static) {
+        if let Ok(mut slot) = self.asks_moved.lock() {
+            *slot = Some(Arc::new(f));
+        }
     }
 
     /// The ask `terminal` is waiting on, if any: the last `Permission` in its
@@ -655,6 +670,12 @@ impl AgentSupervisor {
             }
         }
 
+        let moved = events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::Permission { .. } | AgentEvent::Resolved { .. }));
+        if moved && let Some(tell) = self.asks_moved.lock().ok().and_then(|slot| slot.clone()) {
+            tell();
+        }
         if let Ok(mut asked_at) = self.asked_at.lock() {
             for event in &events {
                 match event {

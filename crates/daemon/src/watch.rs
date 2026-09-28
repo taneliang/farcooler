@@ -435,6 +435,9 @@ fn notification(
 /// A starting number, not a measured one — see the design's risk 2.
 const CARD_REFRESH_MS: i64 = 10_000;
 
+/// How long `announce_needs_you` gathers changes before it says so once.
+const NEEDS_YOU_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(250);
+
 /// Whether a within-tier card refresh is due.
 ///
 /// Only ever asked about `working`. A tier change — working to blocked to done
@@ -687,6 +690,9 @@ pub struct Watcher {
     /// See `spawn_change_set_probe`, which is the only thing that reads or
     /// writes it.
     change_set_probing: std::sync::atomic::AtomicBool,
+    /// Whether a `needs_you_changed` is already scheduled. See
+    /// `announce_needs_you`, the only reader and writer.
+    needs_you_pending: Arc<std::sync::atomic::AtomicBool>,
     /// Each pane's attachment to its own session log.
     ///
     /// A std mutex for the same reason `worktree_marks` is one, and with the
@@ -2532,6 +2538,20 @@ fn attention(next: AgentActivity, watched: bool, unwritten: bool) -> Attention {
 impl Watcher {
     pub fn new(service: Arc<Service>) -> Arc<Self> {
         let (events, _) = broadcast::channel(EVENT_BACKLOG);
+        let watcher = Self::build(service, events);
+        // A chat's `Permission` or `Resolved`, and a held hook ask's offer or
+        // settling, all land in the supervisor's ring, and every one moves the
+        // needs-you list. Weak, since the service outlives no watcher it owns.
+        let weak = Arc::downgrade(&watcher);
+        watcher.service.agents().on_asks_moved(move || {
+            if let Some(watcher) = weak.upgrade() {
+                watcher.announce_needs_you();
+            }
+        });
+        watcher
+    }
+
+    fn build(service: Arc<Service>, events: broadcast::Sender<Event>) -> Arc<Self> {
         Arc::new(Self {
             service,
             events,
@@ -2547,6 +2567,7 @@ impl Watcher {
             commit_traces: std::sync::Mutex::new(HashMap::new()),
             trace_worktrees: std::sync::Mutex::new(HashMap::new()),
             change_set_probing: std::sync::atomic::AtomicBool::new(false),
+            needs_you_pending: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             logs: std::sync::Mutex::new(HashMap::new()),
             log_watcher: crate::log_watch::LogWatcher::start(crate::log_watch::roots()),
             // Registers nothing here on purpose: the fleet is not known yet,
@@ -3218,6 +3239,8 @@ impl Watcher {
         observed.state_since = now_millis();
         let snapshot = observed.clone();
         drop(state);
+        // A failed turn, seen, is no longer an item.
+        self.announce_needs_you();
         self.announce(terminal, snapshot).await;
     }
 
@@ -3260,6 +3283,50 @@ impl Watcher {
                 farcooler_protocol::v1::Empty {},
             )),
         });
+    }
+
+    /// Tell every connected client that the needs-you list moved: re-read it.
+    ///
+    /// Debounced, unlike `announce_fleet_changed`: at most one per
+    /// `NEEDS_YOU_DEBOUNCE`, on the trailing edge. The first call in a quiet
+    /// spell schedules the send; every call before it goes out is folded into
+    /// it; the flag is cleared before the send, so a change made while it is
+    /// going out schedules the next one rather than being lost. A burst (a
+    /// manager moving ten tasks, a fleet of agents blocking in one tick) is
+    /// one re-read per client.
+    ///
+    /// Called from every trigger in spec §2.4: an activity change, a held
+    /// ask's offer or settling and a chat's `Permission` or `Resolved` (both
+    /// through the supervisor's ring, see `new`), a task moving into or out
+    /// of Needs Decision or In Review, a QUESTION or ANSWER note on a task in
+    /// Needs Decision, and `terminal.seen`.
+    pub fn announce_needs_you(&self) {
+        use std::sync::atomic::Ordering;
+        if self.needs_you_pending.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let events = self.events.clone();
+        let pending = self.needs_you_pending.clone();
+        let send = move || {
+            pending.store(false, Ordering::SeqCst);
+            let _ = events.send(Event {
+                event_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
+                sequence: 0,
+                payload: Some(farcooler_protocol::v1::event::Payload::NeedsYouChanged(
+                    farcooler_protocol::v1::Empty {},
+                )),
+            });
+        };
+        match tokio::runtime::Handle::try_current() {
+            Ok(runtime) => {
+                runtime.spawn(async move {
+                    tokio::time::sleep(NEEDS_YOU_DEBOUNCE).await;
+                    send();
+                });
+            }
+            // No runtime to wait on: say it now rather than never.
+            Err(_) => send(),
+        }
     }
 
     /// A worktree's change set moved.
@@ -4355,6 +4422,10 @@ impl Watcher {
             }
             let record = entry.clone();
             drop(state);
+            // Blocked, or no longer, or a turn that just failed: the list moved.
+            if activity_moved.is_some() {
+                self.announce_needs_you();
+            }
 
             // Worth telling the owner about, and only on the transition.
             //
