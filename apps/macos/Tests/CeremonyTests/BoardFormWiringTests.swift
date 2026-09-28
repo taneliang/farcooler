@@ -37,46 +37,94 @@ struct BoardFormWiringTests {
         return TaskBoardStore(client: client, workspace: .implicit(repository: "r"))
     }
 
+    /// Every form the board published, in order, and the board's width,
+    /// which the test moves.
     @MainActor
-    final class Seen {
-        var form: BoardForm?
+    final class Seen: ObservableObject {
+        var forms: [BoardForm] = []
+        @Published var width: CGFloat
+        init(width: CGFloat) { self.width = width }
     }
 
-    /// The form a board `board` points wide draws, hosted `host` points wide.
-    private static func form(board: CGFloat, host width: CGFloat) async -> BoardForm? {
+    private struct Sized: View {
+        let store: TaskBoardStore
+        let defaults: UserDefaults
+        @ObservedObject var seen: Seen
+        let host: CGFloat
+
+        var body: some View {
+            TaskBoardView(
+                store: store, client: store.client, agents: .none, onGoTo: { _ in },
+                defaults: defaults
+            )
+            .frame(width: seen.width, height: 500)
+            .frame(width: host, height: 500, alignment: .leading)
+            .onPreferenceChange(BoardFormPreference.self) { form in
+                MainActor.assumeIsolated {
+                    if let form, form != seen.forms.last { seen.forms.append(form) }
+                }
+            }
+        }
+    }
+
+    /// A board hosted `host` points wide, drawn at each of `widths` in turn;
+    /// the forms it published, in order. `stored` is a choice this device
+    /// kept for the board before it was drawn, as after a relaunch.
+    private static func forms(
+        widths: [CGFloat], host width: CGFloat, stored: BoardForm.Choice = .auto
+    ) async -> [BoardForm] {
         let suite = "BoardFormWiringTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = store()
+        stored.write(host: store.hostKey, workspace: store.workspace.id, in: defaults)
         await store.readIfNeverRead()
-        let seen = Seen()
-        let view = TaskBoardView(
-            store: store, client: store.client, agents: .none, onGoTo: { _ in }, defaults: defaults
-        )
-        .frame(width: board, height: 500)
-        .frame(width: width, height: 500, alignment: .leading)
-        .onPreferenceChange(BoardFormPreference.self) { form in
-            MainActor.assumeIsolated { seen.form = form }
-        }
-        let host = NSHostingView(rootView: view)
+        let seen = Seen(width: widths[0])
+        let host = NSHostingView(
+            rootView: Sized(store: store, defaults: defaults, seen: seen, host: width))
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: width, height: 500),
             styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
         defer { window.close() }
-        for _ in 0..<50 where seen.form == nil {
-            host.layoutSubtreeIfNeeded()
-            try? await Task.sleep(for: .milliseconds(20))
+        for board in widths {
+            seen.width = board
+            for _ in 0..<5 {
+                host.layoutSubtreeIfNeeded()
+                try? await Task.sleep(for: .milliseconds(20))
+            }
         }
-        return seen.form
+        return seen.forms
     }
 
     @Test("A 600-pt board in a 1600-pt window draws the list")
     func aNarrowBoardInAWideWindowDrawsTheList() async {
-        #expect(await Self.form(board: 600, host: 1600) == .list)
+        #expect(await Self.forms(widths: [600], host: 1600) == [.list])
         // And a board as wide as its wide window is a kanban, so the line
         // above can't pass for a board that only ever draws a list.
-        #expect(await Self.form(board: 1600, host: 1600) == .kanban)
+        #expect(await Self.forms(widths: [1600], host: 1600) == [.kanban])
+    }
+
+    /// The hysteresis, drawn: a kanban narrowed to 880 stays a kanban, and
+    /// a list widened back to 880 stays a list, so a divider dragged back
+    /// and forth inside the band switches nothing. Only 860 does, once.
+    /// (A board without the band would draw a list at the first 880 and a
+    /// kanban again at 900: four switches.)
+    @Test("A board dragged across the line switches once each way")
+    func aBoardDraggedAcrossTheLineSwitchesOnceEachWay() async {
+        #expect(
+            await Self.forms(widths: [900, 880, 900, 860, 880, 860], host: 1600)
+                == [.kanban, .list])
+    }
+
+    /// **A stored choice is honored on relaunch, from the first frame.** A
+    /// board forced to a kanban and drawn 600 pt wide never publishes the
+    /// list it would be by width, not even for the frame before its choice
+    /// was read.
+    @Test("A stored choice is honored on relaunch, from the first frame")
+    func aStoredChoiceIsHonoredOnRelaunch() async {
+        #expect(await Self.forms(widths: [600], host: 1600, stored: .kanban) == [.kanban])
+        #expect(await Self.forms(widths: [1600], host: 1600, stored: .list) == [.list])
     }
 }

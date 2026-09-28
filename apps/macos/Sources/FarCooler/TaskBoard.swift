@@ -481,18 +481,35 @@ struct TaskBoardView: View {
     let onGoTo: (BoardPane) -> Void
     /// Where the form and the collapsed sections are kept. The app's own
     /// defaults, except in a test.
-    var defaults: UserDefaults = .standard
+    let defaults: UserDefaults
 
-    /// The toggle's choice for this board, read from `defaults` when the
-    /// board appears.
-    @State private var choice: BoardForm.Choice = .auto
+    /// The toggle's choice for this board: read from `defaults` in `init`,
+    /// so a board forced to one form never draws a frame in the other before
+    /// its choice is known, and again when the view is handed another board.
+    @State private var choice: BoardForm.Choice
     /// The form last drawn, which is what the hysteresis keeps between 868
     /// and 892 pt.
     @State private var drawn: BoardForm?
-    /// The list's collapsed sections, read from `defaults` when the board
-    /// appears.
-    @State private var collapsed: Set<TaskStatus> = BoardForm.collapsedByDefault
+    /// The list's collapsed sections, read the same way.
+    @State private var collapsed: Set<TaskStatus>
     @State private var newTaskOpen = false
+
+    init(
+        store: TaskBoardStore, client: DaemonClient, agents: BoardAgents,
+        onGoTo: @escaping (BoardPane) -> Void, defaults: UserDefaults = .standard
+    ) {
+        self.store = store
+        self.client = client
+        self.agents = agents
+        self.onGoTo = onGoTo
+        self.defaults = defaults
+        _choice = State(
+            initialValue: BoardForm.Choice.read(
+                host: store.hostKey, workspace: store.workspace.id, from: defaults))
+        _collapsed = State(
+            initialValue: BoardForm.collapsed(
+                host: store.hostKey, workspace: store.workspace.id, from: defaults))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -524,7 +541,7 @@ struct TaskBoardView: View {
         .task(id: ObjectIdentifier(store)) { await store.readIfNeverRead() }
         // This board's choices, read again whenever the view is handed
         // another board.
-        .onChange(of: remembered, initial: true) { _, key in
+        .onChange(of: remembered) { _, key in
             choice = BoardForm.Choice.read(host: key.host, workspace: key.workspace, from: defaults)
             collapsed = BoardForm.collapsed(host: key.host, workspace: key.workspace, from: defaults)
         }
@@ -687,7 +704,6 @@ struct TaskBoardView: View {
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
             .onChange(of: form, initial: true) { _, new in drawn = new }
-            .preference(key: BoardFormPreference.self, value: form)
         }
     }
 
@@ -731,6 +747,9 @@ struct TaskBoardView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("board-list")
+        // From the form itself, not from the value the switch reads, so what
+        // is published is what was drawn.
+        .preference(key: BoardFormPreference.self, value: .list)
     }
 
     /// Open or close one section, and keep it that way on this device.
@@ -766,12 +785,14 @@ struct TaskBoardView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("board-kanban")
+        .preference(key: BoardFormPreference.self, value: .kanban)
     }
 }
 
-/// The form a board is drawn in, published for whatever holds it: the
-/// window, which can say which form is on screen, and `BoardFormWiringTests`,
-/// which reads it from a board it can't see. Nil for a board not drawn yet.
+/// The form a board is drawn in, published by the form that was drawn, for
+/// whatever holds it: the window, which can say which form is on screen, and
+/// `BoardFormWiringTests`, which reads it from a board it can't see. Nil for a
+/// board not drawn yet.
 struct BoardFormPreference: PreferenceKey {
     static let defaultValue: BoardForm? = nil
     static func reduce(value: inout BoardForm?, nextValue: () -> BoardForm?) {
