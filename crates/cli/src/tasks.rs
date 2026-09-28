@@ -1755,7 +1755,11 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "task_prefix_taken" => "that prefix is already used by another workspace",
         "name" => "a workspace needs a name",
         "main_workspace" => "Main can't be deleted",
-        "workspace_not_empty" => "move this workspace's tasks, worktrees and terminals first",
+        "workspace_not_empty" => {
+            "move its tasks (`farcooler task move`) and worktrees (`farcooler worktree assign`) to another \
+             workspace, then stop and remove the terminals left in it (`farcooler terminal stop`, \
+             `farcooler terminal remove`)"
+        }
         "other_repository" => "that workspace is in a different repository",
         "main_checkout" => "the repository's main checkout always belongs to Main",
         "orchestrator_taken" => "this workspace already has an orchestrator running",

@@ -278,7 +278,10 @@ const SENTENCES: &[(&str, &str)] = &[
     ("task_prefix_taken", "That prefix is already used by another workspace."),
     ("name", "A workspace needs a name."),
     ("main_workspace", "Main can't be deleted."),
-    ("workspace_not_empty", "Move this workspace's tasks, worktrees and terminals first."),
+    (
+        "workspace_not_empty",
+        "Move this workspace's tasks and worktrees to another workspace, then close the terminals left in it.",
+    ),
     ("other_repository", "That workspace is in a different repository."),
     ("main_checkout", "The repository's main checkout always belongs to Main."),
     ("orchestrator_taken", "This workspace already has an orchestrator running."),

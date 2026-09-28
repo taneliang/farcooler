@@ -379,9 +379,11 @@ impl Store {
     /// Delete a workspace that holds nothing.
     ///
     /// Refused for Main (`main_workspace`), and while any task, worktree or
-    /// terminal still names it (`workspace_not_empty`): move them first. The
-    /// schema refuses the same delete on its own (see migration 0015); this
-    /// asks first so the refusal can say which it is.
+    /// terminal still names it (`workspace_not_empty`). Moving its worktrees
+    /// takes their agents along; a terminal still left, such as its
+    /// orchestrator or a shell, has to be removed. The schema refuses the
+    /// same delete on its own (see migration 0015); this asks first so the
+    /// refusal can say which it is.
     pub fn delete_workspace(&self, id: Uuid) -> Result<()> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
