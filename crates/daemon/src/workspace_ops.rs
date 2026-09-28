@@ -190,7 +190,8 @@ pub async fn start_orchestrator(
     workspace: Uuid,
     req: &pb::WorkspaceStartOrchestrator,
 ) -> Result<Uuid> {
-    let terminal = svc.start_orchestrator(workspace, &req.harness, req.replace).await?;
+    let handoff = Some(req.handoff_task.trim()).filter(|k| !k.is_empty());
+    let terminal = svc.start_orchestrator(workspace, &req.harness, req.replace, handoff).await?;
     if let Ok(groups) = svc.layout(terminal.worktree_id).await {
         watcher.publish_layout(terminal.worktree_id, &groups);
     }
@@ -235,7 +236,7 @@ mod tests {
         let settings = |ws: Uuid| svc.root_dir().join(format!("orchestrator-{ws}.json"));
 
         for ws in [billing, main] {
-            let term = svc.start_orchestrator(ws, "claude", false).await.expect("started");
+            let term = svc.start_orchestrator(ws, "claude", false, None).await.expect("started");
             assert!(settings(ws).is_file(), "the launch wrote {}", settings(ws).display());
             svc.stop_terminal(term.id).await.unwrap();
             svc.remove_terminal(term.id).await.unwrap();

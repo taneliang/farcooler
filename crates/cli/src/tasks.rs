@@ -1748,6 +1748,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "query" => "say what to search for",
         "key" => "name a task",
         "task_key" => "that task isn't on the board of the worktree it was sent to",
+        "handoff_task" => "that task isn't on this workspace's board",
         "cycle" => "those two tasks would end up waiting on each other",
         "blocked_by" => "the task it would wait on is not on this runner",
         // The workspace words, which the runner also has sentences for.

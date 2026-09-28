@@ -241,8 +241,15 @@ fn prompt_argument(prompt: Option<&LaunchPrompt>) -> String {
 /// not see it. Only a prompt that could collide is touched: one with no
 /// whitespace in it at all (a subcommand name has none), or one starting with
 /// a dash. "update the readme" is already not a subcommand's name.
+///
+/// One word that starts with `/` or `$` is left alone too. It's a command or
+/// a skill (`/farcooler:manager`, `$farcooler-manager`, an orchestrator's
+/// first message), which no subcommand's name or flag starts with, and a
+/// space in front would make it a message that mentions the command instead
+/// of one that runs it.
 fn guarded(text: &str) -> std::borrow::Cow<'_, str> {
-    let collides = text.starts_with('-') || !text.contains(char::is_whitespace);
+    let invokes = text.starts_with('/') || text.starts_with('$');
+    let collides = text.starts_with('-') || (!invokes && !text.contains(char::is_whitespace));
     if collides { format!(" {text}").into() } else { text.into() }
 }
 
@@ -3527,19 +3534,29 @@ impl Service {
     /// The manager skill comes the way it comes to any pane of that harness
     /// (`prepare_launch_hooks`): the plugin in the runtime directory for
     /// Claude Code and Cursor, a copy in the main checkout for Codex, which
-    /// runs there.
+    /// runs there. Its first message runs it (`orchestrator::first_prompt`),
+    /// on this launch only.
+    ///
+    /// `handoff` is the key of a task whose handoff note that first message
+    /// says to read first. It has to be on this workspace's own board: a
+    /// split moves the task holding its handoff there before it starts the
+    /// orchestrator. Anything else is refused (`handoff_task`) before the live
+    /// orchestrator is stopped.
     pub async fn start_orchestrator(
         &self,
         workspace: Uuid,
         harness: &str,
         replace: bool,
+        handoff: Option<&str>,
     ) -> Result<models::Terminal> {
         let harness = harness.trim();
         validate::command_preset(harness)?;
-        if crate::orchestrator::harness_of(harness).is_none() {
+        let Some(recipe) = crate::orchestrator::harness_of(harness) else {
             return Err(DomainError::InvalidArgument { what: "command_preset" });
-        }
+        };
         let row = self.store.get_workspace(workspace)?;
+        let handoff = handoff.map(|key| self.handoff_on_board(&row, key)).transpose()?;
+        let prompt = crate::orchestrator::first_prompt(recipe, handoff.as_deref());
         let live = self.orchestrator_seat(workspace).await?.0;
         if live.is_some() && !replace {
             return Err(DomainError::InvalidArgument { what: "orchestrator_taken" });
@@ -3559,7 +3576,20 @@ impl Service {
             self.stop_terminal(live.id).await?;
             self.remove_terminal(live.id).await?;
         }
-        self.open_terminal(main.id, "orchestrator", harness, None, None, Some(workspace)).await
+        self.open_terminal(main.id, "orchestrator", harness, Some(&prompt), None, Some(workspace)).await
+    }
+
+    /// The key of the task `key` names on `workspace`'s own board, as the
+    /// board spells it, for an orchestrator's first message. One match in the
+    /// repository, and in this workspace, or `handoff_task`: a task on another
+    /// workspace's board belongs to another orchestrator, and two matches is
+    /// the prefixless case `task_on_worktree_board` refuses too.
+    fn handoff_on_board(&self, workspace: &models::Workspace, key: &str) -> Result<String> {
+        let refused = DomainError::InvalidArgument { what: "handoff_task" };
+        match self.store.tasks_with_key(Some(workspace.repository_id), key.trim())?.as_slice() {
+            [task] if task.workspace_id == workspace.id && is_safe_model(&task.key) => Ok(task.key.clone()),
+            _ => Err(refused),
+        }
     }
 
     /// `create_terminal_with_prompt`, and for `orchestrating`, the start of
@@ -7237,7 +7267,7 @@ mod orchestrator_launch_tests {
     async fn a_started_claude_orchestrator_launches_from_its_home_seated() {
         let (_dir, svc, ws) = a_worktree().await;
         let main = main_of(&svc, &ws);
-        let term = svc.start_orchestrator(main.id, "claude", false).await.expect("started");
+        let term = svc.start_orchestrator(main.id, "claude", false, None).await.expect("started");
         assert_eq!(term.role, models::TerminalRole::Orchestrator);
         assert_eq!(term.workspace_id, Some(main.id));
         assert_eq!(term.worktree_id, ws.id, "in the main-checkout row");
@@ -7275,13 +7305,13 @@ mod orchestrator_launch_tests {
         let main = main_of(&svc, &ws);
         let repo = resolved(Path::new(&ws.worktree_path));
 
-        let codex = svc.start_orchestrator(main.id, "codex", false).await.expect("codex");
+        let codex = svc.start_orchestrator(main.id, "codex", false, None).await.expect("codex");
         let command = pane_start_command(&svc, codex.id).await;
         assert_eq!(arg_after(&command, "--cd"), repo.to_string_lossy());
         assert_eq!(pane_path(&svc, codex.id).await, repo);
         assert!(repo.join(crate::skill_install::PROJECT_SKILL).is_file(), "codex's copy of the skill");
 
-        let cursor = svc.start_orchestrator(main.id, "cursor", true).await.expect("cursor, replacing codex");
+        let cursor = svc.start_orchestrator(main.id, "cursor", true, None).await.expect("cursor, replacing codex");
         let command = pane_start_command(&svc, cursor.id).await;
         assert_eq!(arg_after(&command, "--workspace"), repo.to_string_lossy());
         let plugin = svc.root.join(crate::skill_install::PLUGIN_DIR);
@@ -7296,15 +7326,15 @@ mod orchestrator_launch_tests {
     async fn a_second_orchestrator_is_refused_unless_it_replaces_the_first() {
         let (_dir, svc, ws) = a_worktree().await;
         let main = main_of(&svc, &ws);
-        let first = svc.start_orchestrator(main.id, "claude", false).await.expect("first");
-        let refused = svc.start_orchestrator(main.id, "claude", false).await;
+        let first = svc.start_orchestrator(main.id, "claude", false, None).await.expect("first");
+        let refused = svc.start_orchestrator(main.id, "claude", false, None).await;
         assert!(
             matches!(refused, Err(DomainError::InvalidArgument { what: "orchestrator_taken" })),
             "{refused:?}"
         );
         assert_eq!(svc.store.list_terminals_for_worktree(ws.id).unwrap().len(), 1, "nothing was left behind");
 
-        let second = svc.start_orchestrator(main.id, "claude", true).await.expect("replaced");
+        let second = svc.start_orchestrator(main.id, "claude", true, None).await.expect("replaced");
         assert_ne!(first.id, second.id);
         // Removed, not only stopped: a kept record still says Orchestrator,
         // so it could be restarted beside `second`, and it would keep
@@ -7316,7 +7346,7 @@ mod orchestrator_launch_tests {
         assert_eq!(svc.live_orchestrator(main.id).unwrap().map(|t| t.id), Some(second.id));
         assert!(svc.inventory.refresh().await.claimants(first.id).is_empty(), "the old pane is closed");
 
-        let not_a_harness = svc.start_orchestrator(main.id, "shell", true).await;
+        let not_a_harness = svc.start_orchestrator(main.id, "shell", true, None).await;
         assert!(
             matches!(not_a_harness, Err(DomainError::InvalidArgument { what: "command_preset" })),
             "{not_a_harness:?}"
@@ -7340,7 +7370,7 @@ mod orchestrator_launch_tests {
         let (_dir, svc, ws) = a_worktree().await;
         let main = main_of(&svc, &ws);
         no_homes_can_be_made(&svc);
-        let refused = svc.start_orchestrator(main.id, "claude", false).await;
+        let refused = svc.start_orchestrator(main.id, "claude", false, None).await;
         assert!(
             matches!(refused, Err(DomainError::InvalidArgument { what: "orchestrator_home" })),
             "{refused:?}"
@@ -7363,7 +7393,7 @@ mod orchestrator_launch_tests {
     async fn a_restart_with_no_home_is_refused_and_gives_its_seat_back() {
         let (_dir, svc, ws) = a_worktree().await;
         let main = main_of(&svc, &ws);
-        let first = svc.start_orchestrator(main.id, "claude", false).await.expect("first");
+        let first = svc.start_orchestrator(main.id, "claude", false, None).await.expect("first");
         svc.stop_terminal(first.id).await.expect("stopped");
         no_homes_can_be_made(&svc);
         let again = svc.restart_terminal(first.id).await;
@@ -7379,11 +7409,11 @@ mod orchestrator_launch_tests {
     async fn a_replace_that_cannot_start_leaves_the_live_orchestrator_running() {
         let (_dir, svc, ws) = a_worktree().await;
         let main = main_of(&svc, &ws);
-        let first = svc.start_orchestrator(main.id, "claude", false).await.expect("first");
+        let first = svc.start_orchestrator(main.id, "claude", false, None).await.expect("first");
 
         let row = svc.store.get_worktree(ws.id).unwrap();
         svc.store.set_worktree_identity(ws.id, row.resource_version, &row.branch, false).unwrap();
-        let refused = svc.start_orchestrator(main.id, "claude", true).await;
+        let refused = svc.start_orchestrator(main.id, "claude", true, None).await;
         assert!(matches!(refused, Err(DomainError::NotFound)), "{refused:?}");
         assert_eq!(svc.live_orchestrator(main.id).unwrap().map(|t| t.id), Some(first.id), "no main checkout");
         assert!(!svc.inventory.refresh().await.claimants(first.id).is_empty(), "its pane was closed");
@@ -7391,7 +7421,7 @@ mod orchestrator_launch_tests {
         let row = svc.store.get_worktree(ws.id).unwrap();
         svc.store.set_worktree_identity(ws.id, row.resource_version, &row.branch, true).unwrap();
         no_homes_can_be_made(&svc);
-        let refused = svc.start_orchestrator(main.id, "claude", true).await;
+        let refused = svc.start_orchestrator(main.id, "claude", true, None).await;
         assert!(
             matches!(refused, Err(DomainError::InvalidArgument { what: "orchestrator_home" })),
             "{refused:?}"
@@ -7408,7 +7438,7 @@ mod orchestrator_launch_tests {
     async fn a_seat_taken_at_the_last_moment_leaves_nothing_behind() {
         let (_dir, svc, ws) = a_worktree().await;
         let main = main_of(&svc, &ws);
-        let first = svc.start_orchestrator(main.id, "claude", false).await.expect("first");
+        let first = svc.start_orchestrator(main.id, "claude", false, None).await.expect("first");
         let late = svc.open_terminal(ws.id, "orchestrator", "claude", None, None, Some(main.id)).await;
         assert!(matches!(late, Err(DomainError::InvalidArgument { what: "orchestrator_taken" })), "{late:?}");
         let left: Vec<Uuid> = svc.store.list_terminals_for_worktree(ws.id).unwrap().iter().map(|t| t.id).collect();
@@ -7423,9 +7453,9 @@ mod orchestrator_launch_tests {
     async fn a_succeeded_orchestrator_is_not_restarted_beside_its_successor() {
         let (_dir, svc, ws) = a_worktree().await;
         let main = main_of(&svc, &ws);
-        let first = svc.start_orchestrator(main.id, "claude", false).await.expect("first");
+        let first = svc.start_orchestrator(main.id, "claude", false, None).await.expect("first");
         svc.stop_terminal(first.id).await.expect("stopped");
-        let second = svc.start_orchestrator(main.id, "claude", false).await.expect("second");
+        let second = svc.start_orchestrator(main.id, "claude", false, None).await.expect("second");
 
         let again = svc.restart_terminal(first.id).await;
         assert!(matches!(again, Err(DomainError::InvalidArgument { what: "orchestrator_taken" })), "{again:?}");
@@ -7520,7 +7550,7 @@ mod orchestrator_launch_tests {
             .await
             .unwrap();
 
-        let started = svc.start_orchestrator(main.id, "claude", false).await.expect("a start without --replace");
+        let started = svc.start_orchestrator(main.id, "claude", false, None).await.expect("a start without --replace");
         assert_eq!(svc.live_orchestrator(main.id).unwrap().map(|t| t.id), Some(started.id));
         assert_eq!(svc.store.get_terminal(lost.id).unwrap().resource_version, lost.resource_version, "left alone");
 
@@ -7540,7 +7570,7 @@ mod orchestrator_launch_tests {
     async fn a_restart_underway_holds_the_seat_over_the_exit_it_replaces() {
         let (_dir, svc, ws) = a_worktree().await;
         let main = main_of(&svc, &ws);
-        let first = svc.start_orchestrator(main.id, "claude", false).await.expect("first");
+        let first = svc.start_orchestrator(main.id, "claude", false, None).await.expect("first");
         let pane = svc.inventory.refresh().await.claimants(first.id).into_iter().next().expect("a pane").clone();
         svc.tmux.run(&["respawn-pane", "-k", "-t", &pane.pane_id, "true"]).await.expect("its program exits");
         let mut exited = false;
@@ -7558,7 +7588,7 @@ mod orchestrator_launch_tests {
         let (_, vacated) = svc.orchestrator_seat(main.id).await.unwrap();
         svc.store.reseat_orchestrator(first.id, row.resource_version, &vacated).expect("its seat back");
         assert_eq!(svc.live_orchestrator(main.id).unwrap().map(|t| t.id), Some(first.id));
-        let refused = svc.start_orchestrator(main.id, "claude", false).await;
+        let refused = svc.start_orchestrator(main.id, "claude", false, None).await;
         assert!(matches!(refused, Err(DomainError::InvalidArgument { what: "orchestrator_taken" })), "{refused:?}");
         let _ = svc.tmux.run(&["kill-pane", "-t", &pane.pane_id]).await;
     }
@@ -7572,7 +7602,7 @@ mod orchestrator_launch_tests {
     async fn a_stale_view_does_not_seat_a_second_orchestrator() {
         let (_dir, svc, ws) = a_worktree().await;
         let main = main_of(&svc, &ws);
-        let first = svc.start_orchestrator(main.id, "claude", false).await.expect("first");
+        let first = svc.start_orchestrator(main.id, "claude", false, None).await.expect("first");
         let pane = svc.inventory.refresh().await.claimants(first.id).into_iter().next().expect("a pane").clone();
         let tag = farcooler_core::tags::TERMINAL_ID;
         svc.tmux.run(&["set-option", "-p", "-u", "-t", &pane.pane_id, tag]).await.expect("tag hidden");
@@ -7580,7 +7610,7 @@ mod orchestrator_launch_tests {
         svc.tmux.run(&["set-option", "-p", "-t", &pane.pane_id, tag, &first.id.to_string()]).await.expect("tag back");
         assert_eq!(svc.live_orchestrator(main.id).unwrap(), None, "the shared view is stale");
 
-        let second = svc.start_orchestrator(main.id, "claude", false).await;
+        let second = svc.start_orchestrator(main.id, "claude", false, None).await;
         assert!(matches!(second, Err(DomainError::InvalidArgument { what: "orchestrator_taken" })), "{second:?}");
         assert_eq!(svc.inventory.refresh().await.claimants(first.id).len(), 1, "the first is still running");
 
@@ -7644,7 +7674,7 @@ mod orchestrator_launch_tests {
             (lost.intent, lost.runtime_confirmed, lost.exit_code, lost.exit_signal),
             "written back as it was"
         );
-        let started = svc.start_orchestrator(main.id, "claude", false).await.expect("the seat is free again");
+        let started = svc.start_orchestrator(main.id, "claude", false, None).await.expect("the seat is free again");
         let _ = svc.stop_terminal(started.id).await;
     }
 
@@ -7658,7 +7688,7 @@ mod orchestrator_launch_tests {
         let back = svc.restart_terminal(lost.id).await.expect("restarted");
         assert_eq!(svc.live_orchestrator(main.id).unwrap().map(|t| t.id), Some(lost.id));
         assert!(back.runtime_confirmed);
-        let refused = svc.start_orchestrator(main.id, "claude", false).await;
+        let refused = svc.start_orchestrator(main.id, "claude", false, None).await;
         assert!(matches!(refused, Err(DomainError::InvalidArgument { what: "orchestrator_taken" })), "{refused:?}");
         let _ = svc.stop_terminal(lost.id).await;
     }
@@ -7668,7 +7698,7 @@ mod orchestrator_launch_tests {
     async fn a_restarted_orchestrator_comes_back_the_way_it_started() {
         let (_dir, svc, ws) = a_worktree().await;
         let main = main_of(&svc, &ws);
-        let term = svc.start_orchestrator(main.id, "claude", false).await.expect("started");
+        let term = svc.start_orchestrator(main.id, "claude", false, None).await.expect("started");
         svc.restart_terminal(term.id).await.expect("restart");
 
         let command = pane_start_command(&svc, term.id).await;
@@ -7684,7 +7714,7 @@ mod orchestrator_launch_tests {
     async fn an_orchestrator_switched_back_to_a_terminal_keeps_its_recipe() {
         let (_dir, svc, ws) = a_worktree().await;
         let main = main_of(&svc, &ws);
-        let term = svc.start_orchestrator(main.id, "claude", false).await.expect("started");
+        let term = svc.start_orchestrator(main.id, "claude", false, None).await.expect("started");
         svc.set_pane_mode(term.id, models::PaneMode::Terminal, false).await.expect("terminal");
 
         let command = pane_start_command(&svc, term.id).await;
@@ -7704,7 +7734,7 @@ mod orchestrator_launch_tests {
         preset: &str,
         marker: &str,
     ) -> models::Terminal {
-        let term = svc.start_orchestrator(main, preset, true).await.expect("started");
+        let term = svc.start_orchestrator(main, preset, true, None).await.expect("started");
         let pane = svc.pane_of(term.id).await.expect("a pane");
         svc.tmux
             .respawn_pane(&pane.pane_id, &ws.worktree_path, &format!("printf '{marker}\\n'; sleep 600"))
@@ -11959,6 +11989,30 @@ mod launch_prompt_tests {
                 argv_through(&command, program, "/bin/sh", "/bin/sh"),
                 format!("{flags},update the readme")
             );
+        }
+    }
+
+    /// A one-word prompt that invokes a command or a skill (`/farcooler:manager`,
+    /// `$farcooler-manager`, `/manager`) is neither a flag nor a subcommand's
+    /// name, so it reaches the agent exactly as written: a space in front would
+    /// be a message that merely mentions the command, to a harness that only
+    /// runs one at the start of a message.
+    #[test]
+    fn a_prompt_that_invokes_a_command_reaches_the_agent_as_written() {
+        let cases = [
+            ("claude", "claude", String::new()),
+            ("codex", "codex", ",-c,check_for_update_on_startup=false".to_string()),
+            ("cursor", "cursor-agent", String::new()),
+        ];
+        for (preset, program, flags) in &cases {
+            for word in ["/farcooler:manager", "$farcooler-manager", "/manager"] {
+                let command = preset_command_with_hooks(preset, None, &inline(word));
+                assert_eq!(
+                    argv_through(&command, program, "/bin/sh", "/bin/sh"),
+                    format!("{flags},{word}"),
+                    "{preset} {word}"
+                );
+            }
         }
     }
 

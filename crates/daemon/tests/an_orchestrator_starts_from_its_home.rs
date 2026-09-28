@@ -103,6 +103,9 @@ struct Harness {
     /// The main checkout, as registered.
     repo: PathBuf,
     repository: uuid::Uuid,
+    /// The daemon's service, for the board writes this client's scope
+    /// doesn't reach.
+    service: Arc<Service>,
 }
 
 impl Drop for Harness {
@@ -141,6 +144,7 @@ async fn start() -> Harness {
     let repository = service.register_repository(&repo).await.expect("registered").id;
 
     let tmux_socket = service.tmux.socket().to_string();
+    let held = service.clone();
     let server = UnixListenerServer::bind(&socket).expect("bind");
     let watcher = farcooler_daemon::watch::Watcher::new(service.clone());
     tokio::spawn(async move {
@@ -159,7 +163,7 @@ async fn start() -> Harness {
             .await;
     });
     tokio::task::yield_now().await;
-    Harness { dir, socket, tmux_socket, repo, repository }
+    Harness { dir, socket, tmux_socket, repo, repository, service: held }
 }
 
 /// The repository's Main workspace, as a client lists it.
@@ -178,10 +182,25 @@ async fn start_orchestrator(
     harness: &str,
     replace: bool,
 ) -> Result<farcooler_protocol::v1::Terminal, ClientError> {
+    start_orchestrator_reading(client, workspace, harness, replace, "").await
+}
+
+/// `start_orchestrator`, naming the task whose handoff it reads first.
+async fn start_orchestrator_reading(
+    client: &mut SocketClient,
+    workspace: bytes::Bytes,
+    harness: &str,
+    replace: bool,
+    handoff_task: &str,
+) -> Result<farcooler_protocol::v1::Terminal, ClientError> {
     let mut r = request("workspace.start_orchestrator");
     r.target_resource_id = Some(workspace);
     r.payload = Some(request::Payload::WorkspaceStartOrchestrator(
-        farcooler_protocol::v1::WorkspaceStartOrchestrator { harness: harness.into(), replace },
+        farcooler_protocol::v1::WorkspaceStartOrchestrator {
+            harness: harness.into(),
+            replace,
+            handoff_task: handoff_task.into(),
+        },
     ));
     match client.call(r).await?.value {
         Some(result::Value::Terminal(t)) => Ok(t),
@@ -293,6 +312,61 @@ async fn a_claude_orchestrator_is_started_from_its_home_with_the_recipe() {
     assert_eq!(value(&record, "charter"), [home.join("charter.md").to_str().unwrap()]);
     assert_eq!(value(&record, "actor"), ["manager"]);
     assert_eq!(value(&record, "claude_md"), ["1"]);
+    // Its first turn runs the manager skill: the prompt is the last argument.
+    assert_eq!(args.last(), Some(&"/farcooler:manager"), "{args:?}");
+}
+
+/// Every harness starts on its own spelling of the manager skill, as its
+/// last argument, and `handoff_task` names the task to read first.
+#[tokio::test]
+async fn each_orchestrator_starts_on_the_manager_skill() {
+    let h = start().await;
+    let mut client = Client::connect(&h.socket, "test-client", "0.0.0").await.expect("connect");
+    let main = main_workspace(&h, &mut client).await;
+    let workspace = uuid::Uuid::from_slice(&main.id).unwrap();
+    let task = h.service.store.create_task(workspace, "the handoff", farcooler_store::models::Actor::User).unwrap();
+    let id = workspace_id(&main);
+    let key = task.key.as_str();
+    let cases = [
+        ("claude", "", "claude", "/farcooler:manager".to_string()),
+        ("codex", "", "codex", "$farcooler-manager".to_string()),
+        ("cursor", "", "cursor-agent", "/manager".to_string()),
+        ("codex", key, "codex", format!("$farcooler-manager Read the handoff note on {key} first.")),
+    ];
+    for (n, (harness, read, program, prompt)) in cases.iter().enumerate() {
+        start_orchestrator_reading(&mut client, main.id.clone(), harness, n > 0, read).await.expect("started");
+        let record = records(&h, &id, n + 1).await.remove(n);
+        let args = value(&record, "arg");
+        assert_eq!(args.first(), Some(program), "{args:?}");
+        assert_eq!(args.last(), Some(&prompt.as_str()), "{harness} {read:?}: {args:?}");
+    }
+}
+
+/// A handoff task that isn't on the workspace's own board is refused in
+/// words, and the live orchestrator is left running.
+#[tokio::test]
+async fn a_handoff_task_off_the_workspaces_board_is_refused() {
+    let h = start().await;
+    let mut client = Client::connect(&h.socket, "test-client", "0.0.0").await.expect("connect");
+    let main = main_workspace(&h, &mut client).await;
+    let first = start_orchestrator(&mut client, main.id.clone(), "claude", false).await.expect("first");
+    records(&h, &workspace_id(&main), 1).await;
+    let other = h.service.store.create_workspace(h.repository, "Billing", "bil").unwrap();
+    let elsewhere = h.service.store.create_task(other.id, "not Main's", farcooler_store::models::Actor::User).unwrap();
+
+    for key in ["NOPE-9", elsewhere.key.as_str()] {
+        match start_orchestrator_reading(&mut client, main.id.clone(), "claude", true, key).await {
+            Err(ClientError::Daemon { code, what, message, .. }) => {
+                assert_eq!(code, ErrorCode::InvalidArgument as i32);
+                assert_eq!(what, "handoff_task", "{key}");
+                assert_eq!(message, "That task isn't on this workspace's board.");
+            }
+            other => panic!("{key} must be refused: {other:?}"),
+        }
+    }
+    let live = h.service.store.get_terminal(uuid::Uuid::from_slice(&first.id).unwrap()).expect("still there");
+    assert_eq!(live.role, farcooler_store::models::TerminalRole::Orchestrator);
+    assert_eq!(live.intent, farcooler_protocol::v1::TerminalIntent::Running);
 }
 
 /// The stand-in is one file at a fixed path, not one per run, and it's in
@@ -576,7 +650,7 @@ async fn a_restarted_daemon_still_finds_the_orchestrator() {
     assert!(layouts.iter().any(|l| l.panes.iter().any(|p| p.terminal_id == orchestrator)));
 
     let workspace = uuid::Uuid::from_slice(&s.workspace.id).unwrap();
-    match again.start_orchestrator(workspace, "claude", false).await {
+    match again.start_orchestrator(workspace, "claude", false, None).await {
         Err(farcooler_core::DomainError::InvalidArgument { what: "orchestrator_taken" }) => {}
         other => panic!("the live orchestrator's seat must still be taken: {other:?}"),
     }

@@ -289,6 +289,7 @@ const SENTENCES: &[(&str, &str)] = &[
     ("workspace", "This terminal doesn't belong to a workspace yet."),
     ("role", "Choose a role: shell, agent or orchestrator."),
     ("task_ids", "Name at least one task to move."),
+    ("handoff_task", "That task isn't on this workspace's board."),
 ];
 
 /// The word a client switches on, for a code that came off the wire.

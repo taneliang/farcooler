@@ -3026,4 +3026,9 @@ message WorkspaceStartOrchestrator {
   // A workspace with a live orchestrator refuses a second
   // (`orchestrator_taken`); with this set, the live one is stopped first.
   bool replace = 2;
+  // The key of a task on this workspace's board whose handoff note the new
+  // orchestrator reads first (`--read`), named in its first message. Empty
+  // for none. A key that isn't on this workspace's board is refused
+  // (`handoff_task`) before anything is stopped or started.
+  string handoff_task = 3;
 }

@@ -96,7 +96,8 @@ pub enum WorkspaceCmd {
     /// Claude Code and Cursor start in the workspace's home, beside its
     /// charter, pointed back at the repository; Codex starts in the
     /// repository. A workspace has at most one: a second is refused unless
-    /// `--replace`, which closes the one running first.
+    /// `--replace`, which closes the one running first. Its first message
+    /// runs the manager skill.
     StartOrchestrator {
         workspace: String,
         /// claude, codex or cursor, with an optional `:model`.
@@ -105,6 +106,10 @@ pub enum WorkspaceCmd {
         /// Close the orchestrator already running, and start this one.
         #[arg(long)]
         replace: bool,
+        /// A task on this workspace's board whose handoff note the new
+        /// orchestrator reads first, such as the one a split wrote.
+        #[arg(long, value_name = "TASK")]
+        read: Option<String>,
         #[arg(long)]
         repo: Option<String>,
     },
@@ -337,19 +342,19 @@ async fn workspace_via(
             }
         }
 
-        WorkspaceCmd::StartOrchestrator { workspace, harness, replace, repo } => {
+        WorkspaceCmd::StartOrchestrator { workspace, harness, replace, read, repo } => {
             if !farcooler_core::pane_env::takes_a_task(harness.trim()) {
                 return Err(format!("--harness {harness:?} can't orchestrate. use claude, codex or cursor").into());
             }
+            let read = read.as_deref().map(str::trim).filter(|k| !k.is_empty());
+            if read.is_some() && !link.daemon_capabilities().iter().any(|c| c == capability::ORCHESTRATOR_HANDOFF) {
+                return Err("this runner's Far Cooler can't point an orchestrator at a task yet. update it, \
+                            or start without --read"
+                    .into());
+            }
             let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
             let r = link
-                .call(with(
-                    req_for("workspace.start_orchestrator", uuid_of(&ws.id)),
-                    request::Payload::WorkspaceStartOrchestrator(pb::WorkspaceStartOrchestrator {
-                        harness: harness.trim().to_string(),
-                        replace,
-                    }),
-                ))
+                .call(start_orchestrator_request(uuid_of(&ws.id), harness.trim(), replace, read))
                 .await
                 .map_err(|e| {
                     workspace_refused(e, "that workspace, or its repository's main checkout, isn't on this runner", "the orchestrator could not be started")
@@ -474,6 +479,29 @@ pub(crate) fn set_role_request(terminal: Uuid, role: Role) -> pb::Request {
         req_for("terminal.set_role", terminal),
         request::Payload::TerminalSetRole(pb::TerminalSetRole { role: role.wire() as i32 }),
     ))
+}
+
+/// `workspace.start_orchestrator`. A `read` names the capability without
+/// which an older runner would drop it and start the orchestrator without
+/// its handoff (`capability::ORCHESTRATOR_HANDOFF`).
+pub(crate) fn start_orchestrator_request(
+    workspace: Uuid,
+    harness: &str,
+    replace: bool,
+    read: Option<&str>,
+) -> pb::Request {
+    let mut r = with(
+        req_for("workspace.start_orchestrator", workspace),
+        request::Payload::WorkspaceStartOrchestrator(pb::WorkspaceStartOrchestrator {
+            harness: harness.to_string(),
+            replace,
+            handoff_task: read.unwrap_or_default().to_string(),
+        }),
+    );
+    if read.is_some() {
+        r.required_capabilities.push(capability::ORCHESTRATOR_HANDOFF.to_string());
+    }
+    r
 }
 
 /// `r`, refused by a runner too old to have workspaces rather than answered
@@ -875,5 +903,20 @@ mod tests {
             let Some(request::Payload::TerminalSetRole(p)) = r.payload else { panic!("payload") };
             assert_eq!(p.role, wire as i32, "{role:?}");
         }
+    }
+
+    /// `--read` goes on the wire as `handoff_task`, with the capability an
+    /// older runner would refuse rather than drop it; without it, neither.
+    #[test]
+    fn a_handoff_names_its_capability() {
+        let r = start_orchestrator_request(Uuid::from_u128(1), "codex", true, Some("bil-3"));
+        assert_eq!(r.required_capabilities, [capability::ORCHESTRATOR_HANDOFF]);
+        let Some(request::Payload::WorkspaceStartOrchestrator(p)) = r.payload else { panic!("payload") };
+        assert_eq!((p.harness.as_str(), p.replace, p.handoff_task.as_str()), ("codex", true, "bil-3"));
+
+        let r = start_orchestrator_request(Uuid::from_u128(1), "claude", false, None);
+        assert!(r.required_capabilities.is_empty());
+        let Some(request::Payload::WorkspaceStartOrchestrator(p)) = r.payload else { panic!("payload") };
+        assert_eq!(p.handoff_task, "");
     }
 }

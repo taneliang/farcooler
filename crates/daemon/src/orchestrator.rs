@@ -141,6 +141,40 @@ pub fn extra_env(h: Harness, l: &OrchestratorLaunch) -> Vec<(String, String)> {
     env
 }
 
+/// The first message an orchestrator starts on, so its first turn runs the
+/// manager skill instead of waiting for the owner to ask for it.
+///
+/// The skill is installed with `disable-model-invocation: true`
+/// (`skill_install::frontmatter`), so a model is never told it exists and
+/// can't reach for it: it runs only when it's invoked by name, and that's
+/// what this is, in each harness's own spelling (`skill_install`'s module
+/// doc):
+///
+/// - **claude**: `/farcooler:manager`, the plugin's namespaced command.
+/// - **codex**: `$farcooler-manager`, an explicit mention of the copy in the
+///   main checkout. `agents/openai.yaml` turns off only implicit invocation.
+/// - **cursor**: `/manager`. cursor-agent submits its `[prompt...]` through
+///   the same send path as a typed message, which reads the skills a message
+///   names (read in cursor-agent 2026.09.26's bundle, not run).
+///
+/// Each harness takes it as its positional prompt, sent once on the first
+/// launch (`Service::open_terminal`); a restart doesn't run it again.
+///
+/// `handoff` is a task on the workspace's own board whose notes the new
+/// orchestrator should read first: the one a split writes its handoff on.
+/// It goes after the invocation, as the skill's argument.
+pub fn first_prompt(h: Harness, handoff: Option<&str>) -> String {
+    let skill = match h {
+        Harness::Claude => "/farcooler:manager",
+        Harness::Codex => "$farcooler-manager",
+        Harness::Cursor => "/manager",
+    };
+    match handoff {
+        Some(key) => format!("{skill} Read the handoff note on {key} first."),
+        None => skill.to_string(),
+    }
+}
+
 /// Claude Code's switch for reading `CLAUDE.md` from an `--add-dir`.
 pub const ADDITIONAL_DIRECTORIES_CLAUDE_MD: &str = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD";
 
@@ -201,6 +235,24 @@ mod tests {
             let claude_md = env.contains(&pair(ADDITIONAL_DIRECTORIES_CLAUDE_MD, "1"));
             assert_eq!(claude_md, h == Harness::Claude, "{h:?}");
         }
+    }
+
+    /// Each harness starts on its own spelling of the manager skill, and
+    /// a handoff is named after it.
+    #[test]
+    fn each_harness_starts_on_the_manager_skill() {
+        assert_eq!(first_prompt(Harness::Claude, None), "/farcooler:manager");
+        assert_eq!(first_prompt(Harness::Codex, None), "$farcooler-manager");
+        assert_eq!(first_prompt(Harness::Cursor, None), "/manager");
+        assert_eq!(
+            first_prompt(Harness::Claude, Some("BIL-4")),
+            "/farcooler:manager Read the handoff note on BIL-4 first."
+        );
+        assert_eq!(
+            first_prompt(Harness::Codex, Some("BIL-4")),
+            "$farcooler-manager Read the handoff note on BIL-4 first."
+        );
+        assert_eq!(first_prompt(Harness::Cursor, Some("BIL-4")), "/manager Read the handoff note on BIL-4 first.");
     }
 
     /// The rule the spike measured, on its own examples.

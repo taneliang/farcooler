@@ -4303,6 +4303,7 @@ mod tests {
             "farcooler workspace delete Billing",
             "farcooler workspace start-orchestrator Billing --harness codex --replace",
             "farcooler workspace start-orchestrator Billing --harness claude:opus",
+            "farcooler workspace start-orchestrator Billing --harness codex --read bil-3 --repo repo",
             "farcooler worktree assign fix-it --to Billing",
             "farcooler terminal set-role abc orchestrator",
             "farcooler terminal set-role abc agent",

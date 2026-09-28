@@ -300,7 +300,7 @@ mod service_tests {
         std::fs::create_dir_all(dir.path().join("repo/.farcooler")).unwrap();
         std::fs::write(dir.path().join("repo").join(REPOSITORY_CHARTER), "from the repo").unwrap();
 
-        let term = svc.start_orchestrator(main.id, "claude", false).await.unwrap();
+        let term = svc.start_orchestrator(main.id, "claude", false, None).await.unwrap();
         let _ = svc.stop_terminal(term.id).await;
         assert_eq!(read(&charter_path(svc.root_dir(), main.id)), "from the repo");
     }

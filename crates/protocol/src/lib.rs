@@ -378,6 +378,14 @@ pub mod capability {
     /// The value keeps the old word, *workspace*: shipped clients ask for it
     /// by this name.
     pub const WORKTREE_FORK_ONLY: &str = "workspace_fork_only";
+    /// `WorkspaceStartOrchestrator.handoff_task`: a new orchestrator told to
+    /// read a task's handoff note first (`--read`).
+    ///
+    /// A field, so its own capability, for `LAUNCH_PROMPT`'s reason: an older
+    /// daemon drops it without a word and starts an orchestrator that never
+    /// hears where the split left its handoff. A client that sends one names
+    /// this in the request.
+    pub const ORCHESTRATOR_HANDOFF: &str = "orchestrator_handoff";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -387,7 +395,7 @@ pub mod capability {
         &[
             WORKTREES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES,
             ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL, WORKTREE_ORDER, TASKS,
-            LAUNCH_PROMPT, TERMINAL_TASK, WORKTREE_FORK_ONLY, WORKSTREAMS,
+            LAUNCH_PROMPT, TERMINAL_TASK, WORKTREE_FORK_ONLY, WORKSTREAMS, ORCHESTRATOR_HANDOFF,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
