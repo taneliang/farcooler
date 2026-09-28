@@ -618,9 +618,18 @@ enum WorktreeCmd {
     ///
     /// The worktree is named after the branch's last segment, so
     /// `feat/rate-limiting` resumes in a directory called `rate-limiting`.
+    ///
+    /// Claimed as `worktree create` claims: for `--workspace`, or else the
+    /// pane's own (FARCOOLER_WORKSPACE) when that is in this repository.
     Adopt {
         repo: String,
         branch: String,
+        /// The workspace that owns the worktree, by name, prefix or id, in
+        /// this repository. Defaults to the pane's own (FARCOOLER_WORKSPACE)
+        /// when that is in this repository; otherwise nobody owns it until
+        /// one of the workspace's agents works in it, or it is assigned.
+        #[arg(long)]
+        workspace: Option<String>,
     },
     /// List branches you could resume work on.
     Branches {
@@ -1942,6 +1951,45 @@ async fn worktree_claim<L: tasks::DispatchLink>(
     Ok(worktree_workspace(&all, repositories, repository, named, pane)?)
 }
 
+/// `worktree adopt`: a new worktree for a branch that already exists,
+/// claimed as `worktree create` claims one (`worktree_claim`).
+async fn adopt_worktree<L: tasks::DispatchLink>(
+    link: &mut L,
+    repositories: &[Repository],
+    repo: &str,
+    branch: String,
+    named: Option<&str>,
+    pane: Option<uuid::Uuid>,
+    warn: &mut impl FnMut(String),
+) -> Result<farcooler_protocol::v1::Worktree, Box<dyn std::error::Error>> {
+    let target = uuid_of(&resolve_repository(repositories, repo)?.id);
+    let workspace = worktree_claim(link, repositories, target, named, pane, warn).await?;
+    let mut req = with(
+        req_for("worktree.create", target),
+        request::Payload::WorktreeCreate(farcooler_protocol::v1::WorktreeCreate {
+            // Ignored for an adoption: the daemon names the worktree after
+            // the branch, so there is nothing to send.
+            task_name: String::new(),
+            branch,
+            base_revision: String::new(),
+            terminal_preset: String::new(),
+            adopt_existing: true,
+            fork_only: false,
+            workspace_id: workspace.map(id_bytes),
+        }),
+    );
+    // As for a create: an older daemon would drop the field and leave the
+    // worktree unclaimed without a word.
+    if workspace.is_some() {
+        req = workspaces::needs_workstreams(req);
+    }
+    let r = link.call(req).await?;
+    let result::Value::Worktree(ws) = expect_value(r.value)? else {
+        return Err(crate::daemon_link::UNREADABLE.into());
+    };
+    Ok(ws)
+}
+
 async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallible {
     let mut link = connect_to(runner).await?;
     match cmd {
@@ -2085,28 +2133,13 @@ async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallibl
             }
         }
 
-        WorktreeCmd::Adopt { repo, branch } => {
+        WorktreeCmd::Adopt { repo, branch, workspace } => {
             let repos = list_repositories(&mut link).await?;
-            let target = resolve_repository(&repos, &repo)?;
-            let r = link
-                .call(with(
-                    req_for("worktree.create", uuid_of(&target.id)),
-                    request::Payload::WorktreeCreate(farcooler_protocol::v1::WorktreeCreate {
-                        // Ignored for an adoption: the daemon names the worktree
-                        // after the branch, so there is nothing to send.
-                        task_name: String::new(),
-                        branch,
-                        base_revision: String::new(),
-                        terminal_preset: String::new(),
-                        adopt_existing: true,
-                        fork_only: false,
-                        workspace_id: None,
-                    }),
-                ))
-                .await?;
-            let result::Value::Worktree(ws) = expect_value(r.value)? else {
-                return Err(crate::daemon_link::UNREADABLE.into());
-            };
+            let pane = workspaces::pane_workspace(std::env::var(workspaces::WORKSPACE_ENV).ok());
+            let ws = adopt_worktree(&mut link, &repos, &repo, branch, workspace.as_deref(), pane, &mut |w| {
+                eprintln!("{w}")
+            })
+            .await?;
             println!("adopted {}  {}", short_bytes(&ws.id), ws.branch);
             if let Some(path) = &ws.worktree_path {
                 println!("  worktree {path}");
@@ -4119,6 +4152,81 @@ mod tests {
         assert_eq!(req.required_capabilities, [farcooler_protocol::capability::WORKSTREAMS]);
         let Some(request::Payload::WorktreeCreate(p)) = req.payload else { panic!("payload") };
         assert_eq!(p.workspace_id.as_deref(), Some(id(12).as_ref()));
+    }
+
+    /// `worktree adopt` claims its worktree as `worktree create` does: for
+    /// `--workspace`, else for the pane's own workspace when it's in the
+    /// repository, else for nobody. It used to claim nothing at all.
+    #[tokio::test]
+    async fn an_adopted_worktree_is_claimed_as_a_created_one_is() {
+        use farcooler_protocol::v1 as pb;
+        let id = |n: u8| bytes::Bytes::copy_from_slice(&[n; 16]);
+        struct Fake {
+            workspaces: Vec<pb::Workspace>,
+            sent: Vec<pb::Request>,
+        }
+        impl tasks::DispatchLink for Fake {
+            fn capabilities(&self) -> Vec<String> {
+                farcooler_protocol::capability::ALL.iter().map(|c| c.to_string()).collect()
+            }
+            async fn pause(&mut self, _: std::time::Duration) {}
+            async fn call(&mut self, req: pb::Request) -> Result<pb::Result, farcooler_transport::ClientError> {
+                let value = match req.method.as_str() {
+                    "workspace.list" => result::Value::WorkspaceList(pb::WorkspaceList {
+                        items: self
+                            .workspaces
+                            .iter()
+                            .filter(|w| req.target_resource_id.as_ref() == Some(&w.repository_id))
+                            .cloned()
+                            .collect(),
+                    }),
+                    "worktree.create" => result::Value::Worktree(pb::Worktree::default()),
+                    other => panic!("adopt sent {other}"),
+                };
+                self.sent.push(req);
+                Ok(pb::Result { value: Some(value) })
+            }
+        }
+        let repositories = [
+            pb::Repository { id: id(1), display_name: "api".into(), ..Default::default() },
+            pb::Repository { id: id(2), display_name: "web".into(), ..Default::default() },
+        ];
+        let workspaces = vec![
+            pb::Workspace { id: id(11), repository_id: id(1), name: "Main".into(), task_prefix: "api".into(), is_main: true, ..Default::default() },
+            pb::Workspace { id: id(12), repository_id: id(1), name: "Billing".into(), task_prefix: "bil".into(), ..Default::default() },
+            pb::Workspace { id: id(21), repository_id: id(2), name: "Web".into(), task_prefix: "web".into(), ..Default::default() },
+        ];
+        let adopt = |named: Option<&'static str>, pane: Option<u8>| {
+            let (repositories, workspaces) = (repositories.clone(), workspaces.clone());
+            async move {
+                let mut link = Fake { workspaces, sent: Vec::new() };
+                let pane = pane.map(|n| uuid_of(&id(n)));
+                adopt_worktree(&mut link, &repositories, "api", "feat/x".into(), named, pane, &mut |_| {})
+                    .await
+                    .expect("adopted");
+                let create = link.sent.pop().expect("a create");
+                assert_eq!(create.method, "worktree.create");
+                let Some(request::Payload::WorktreeCreate(p)) = create.payload else { panic!("payload") };
+                assert!(p.adopt_existing && p.branch == "feat/x");
+                let asked_for_workstreams = create
+                    .required_capabilities
+                    .iter()
+                    .any(|c| c == farcooler_protocol::capability::WORKSTREAMS);
+                assert_eq!(asked_for_workstreams, p.workspace_id.is_some(), "an older daemon would drop it");
+                p.workspace_id
+            }
+        };
+        assert_eq!(adopt(None, Some(12)).await.as_deref(), Some(id(12).as_ref()), "the pane's own");
+        assert_eq!(adopt(Some("Main"), Some(12)).await.as_deref(), Some(id(11).as_ref()), "the flag beats the pane");
+        assert_eq!(adopt(None, Some(21)).await, None, "a pane in another repository claims nothing here");
+        assert_eq!(adopt(None, None).await, None);
+
+        let argv = ["farcooler", "worktree", "adopt", "api", "feat/x", "--workspace", "Billing"];
+        let Command::Worktree(WorktreeCmd::Adopt { workspace, .. }) = Cli::try_parse_from(argv).expect("parses").command
+        else {
+            panic!("worktree adopt")
+        };
+        assert_eq!(workspace.as_deref(), Some("Billing"));
     }
 
     /// Every command that manages a worktree is under `worktree`, with the
