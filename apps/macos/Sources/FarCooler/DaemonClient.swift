@@ -1124,6 +1124,40 @@ final class DaemonClient: ObservableObject {
         return message ?? "The task didn’t move."
     }
 
+    /// Put a new task on a board: New Task…'s (spec §5, ruling 5). Nil means
+    /// it was filed.
+    ///
+    /// `workspace` is the board's (`WorkspaceSummary.boardWorkspace`), or nil
+    /// for a runner without workspaces, whose one board is the repository's.
+    /// Named rather than left to the CLI's default, which is the pane's own
+    /// workspace and then Main: the board it was chosen on is the board it
+    /// goes on. The actor is left unsaid, which is `user`, as `moveTask`'s is.
+    /// The message is the CLI's, for the caller to replace with its own words.
+    func createTask(title: String, workspace: String?, repository: String) async -> String? {
+        let (data, message) = await runRaw(
+            ["task", "create", "--title", title]
+                + (workspace.map { ["--workspace", $0] } ?? [])
+                + ["--repo", repository, "--json"],
+            background: true)
+        if data != nil { return nil }
+        return message ?? "The task wasn’t filed."
+    }
+
+    /// Answer a task's question: an ANSWER note on its record, as the person
+    /// (spec §2.5). Nil means it was written.
+    ///
+    /// A note and nothing else. The record is append-only, so an answer is a
+    /// new entry, never an edit to the question; and the task is left where
+    /// it is, because moving it on is the orchestrator's call once it has
+    /// read the answer.
+    func answerDecision(key: String, body: String, repository: String) async -> String? {
+        let (data, message) = await runRaw(
+            ["task", "note", key, "--kind", "answer", "--body", body, "--repo", repository, "--json"],
+            background: true)
+        if data != nil { return nil }
+        return message ?? "The answer wasn’t written."
+    }
+
     @Published var repositories: [Repository] = []
 
     /// Whether `repositories` is a list this runner actually gave, rather than

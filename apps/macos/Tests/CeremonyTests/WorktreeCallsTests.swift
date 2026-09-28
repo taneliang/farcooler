@@ -196,6 +196,51 @@ struct WorktreeCallsTests {
         }
     }
 
+    /// The two task writes the board makes, each against a stub, with the line
+    /// it sent. `exercise()` doesn't carry them: those are worktree calls,
+    /// and `everyLineTheseCallsSendParsesInTheCLI` adds these by name.
+    private func taskWrites() async -> (create: [[String]], implicit: [[String]], answer: [[String]]) {
+        let create = Recorder()
+        _ = await client(create).createTask(
+            title: "Fix the flaky test", workspace: Self.billing.id, repository: "repo")
+        let implicit = Recorder()
+        _ = await client(implicit).createTask(
+            title: "Fix the flaky test", workspace: nil, repository: "repo")
+        let answer = Recorder()
+        _ = await client(answer).answerDecision(key: "-9", body: "SQLite", repository: "repo")
+        return (create.calls, implicit.calls, answer.calls)
+    }
+
+    /// New Task… files on the board it was chosen from: this workspace's, in
+    /// its repository, or the repository's whole board on a runner without
+    /// workspaces. The title is the one argument a person typed, so it goes
+    /// by `--title` and nowhere else.
+    @Test("New Task sends task create on this workspace's board")
+    func newTaskSendsTaskCreateOnThisWorkspacesBoard() async {
+        let sent = await taskWrites()
+        #expect(
+            sent.create == [
+                [
+                    "task", "create", "--title", "Fix the flaky test", "--workspace", Self.billing.id,
+                    "--repo", "repo", "--json",
+                ]
+            ])
+        #expect(
+            sent.implicit == [["task", "create", "--title", "Fix the flaky test", "--repo", "repo", "--json"]])
+    }
+
+    /// Answering a decision appends an ANSWER note to the record (spec §2.5):
+    /// the option's text, as the person, and nothing moved. The record is
+    /// append-only, so an answer is a note, never an edit.
+    @Test("Answering a decision sends task note as an answer")
+    func answeringADecisionSendsTaskNoteAsAnAnswer() async {
+        let sent = await taskWrites()
+        #expect(
+            sent.answer == [
+                ["task", "note", "-9", "--kind", "answer", "--body", "SQLite", "--repo", "repo", "--json"]
+            ])
+    }
+
     /// A worktree dragged onto another workspace that the runner refuses
     /// stays where it was, and the banner says why in this app's words —
     /// chosen by the `code:` word, never the CLI's `error:` line. One the
@@ -300,6 +345,11 @@ struct WorktreeCallsTests {
         _ = await reader.taskBoard(repository: "repo", workspace: nil)
         #expect(boards.calls.count == 2)
         lines += boards.calls
+
+        // The board's two task writes.
+        let writes = await taskWrites()
+        #expect(!writes.create.isEmpty && !writes.implicit.isEmpty && !writes.answer.isEmpty)
+        lines += writes.create + writes.implicit + writes.answer
 
         var seen = Set<[String]>()
         for line in lines where seen.insert(line).inserted {
