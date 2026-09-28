@@ -1,0 +1,879 @@
+# The workspace UI
+
+Date: 2026-09-28
+Status: design, decided (rulings in §12); plan: `docs/superpowers/plans/2026-09-28-workspace-ui.md`
+Card: follows ov-55 (the UI/UX review)
+Builds on: [`2026-09-27-workspaces-as-workstreams-design.md`](2026-09-27-workspaces-as-workstreams-design.md)
+Evidence: `.claude/agent/reports/workspaces-ux-map*.md` (four maps of `main` at 69b97934), re-checked against
+`main` at fbcc57c4. Every claim below about today's code was read in the tree at fbcc57c4. Lines moved
+since the maps were made, so the citations here are the current ones. Mac paths are relative to
+`apps/macos/Sources/FarCooler/`, `AK/` is `apps/shared/AgentKit/Sources/AgentKit/`, `ios/` is
+`apps/ios/FarCooler/`, and `android/` is `apps/android/app/src/main/java/com/farcooler/`.
+
+## What the owner decided
+
+These are binding. The rest of this document works them out.
+
+1. **Direction A, with B's inbox.**
+   - The Mac sidebar lists workspaces, per repository. Each workspace is one row, with its orchestrator's status
+     and a needs-you count. A "Needs You" row sits at the top.
+   - Selecting a workspace shows its orchestrator's conversation beside its board.
+   - Selecting a task opens its agent's terminal and changes in a third column.
+2. **A worktree is no longer a place of its own.** It's one click under a task, or under a workspace's
+   disclosure of its worktrees, which also holds a shell in a branch that has no task. (The review called this
+   disclosure "Helpers"; it's labeled "Worktrees", per ruling 9 in §12.)
+3. **The board is responsive to its own width.**
+   - Narrow: the status-sectioned list, ported from the iPhone.
+   - Wide: the kanban.
+   - A toggle in the board header forces either one, remembered per workspace.
+   - Empty statuses are never hidden. In the list, an empty status is a collapsed header with a 0 count. In the
+     kanban, every column is drawn.
+4. **The vocabulary stays:** workspace, orchestrator, board, worktree, task, agent. Nothing is renamed; the drift
+   is fixed.
+5. **The phones mirror A as first-class clients.**
+   - The front door is the inbox.
+   - Next come the workspaces, each with Orchestrator, Board and Worktrees.
+   - iOS and Android get the same structure.
+
+## Contents
+
+1. [Vocabulary](#1-vocabulary)
+2. [The "needs you" rollup](#2-the-needs-you-rollup)
+3. [Task, agent and worktree links](#3-task-agent-and-worktree-links)
+4. [The Mac window model](#4-the-mac-window-model)
+5. [The responsive board](#5-the-responsive-board)
+6. [The phones](#6-the-phones)
+7. [Glance surfaces](#7-glance-surfaces-watch-widget-live-activity-push)
+8. [Empty and first-run states](#8-empty-and-first-run-states)
+9. [Migration](#9-migration)
+10. [Slices](#10-slices)
+11. [Risks](#11-risks)
+12. [Rulings](#12-rulings)
+
+---
+
+## 1. Vocabulary
+
+Six nouns, used the same way on every surface. The drift the maps found is listed with its fix. Code
+identifiers aren't touched unless they surface in copy.
+
+| Noun | Means | Today's drift | Fix |
+|---|---|---|---|
+| **workspace** | A workstream: a name, a task prefix, a board, a charter, at most one orchestrator, and the worktrees it owns | The phones never say the word. Headings show only the name (`ios/ShellOverview.swift:1141-1169`; `android/ui/FleetScreen.kt:986-1023`) | Section headings in lists read "Workspaces". Empty states and menus say "workspace" |
+| **orchestrator** | The workspace's lead agent | "The manager" as a note byline (`AK/TaskBoardModel.swift:731`). Android's row shows the program name, and only the tab says "Orchestrator" (`android/model/FleetLayout.kt:100-101`) | "Orchestrator" everywhere in copy. The byline becomes "Orchestrator". `manager` stays the actor and skill name, which users don't see |
+| **board** | A workspace's tasks, by status | "Main board" on Android's row but "Main" on the board it opens (`android/ui/BoardScreen.kt:116`). "Show this project's board" (`Shortcuts.swift:115`) | "Board" as a tab and column title, and "<Workspace> Board" where it stands alone. "Project" goes |
+| **task** | A card on a board, with a key such as `bil-9` | "Quick Task" makes a worktree and an agent but files no task (`ios/QuickTask.swift`, `android/ui/FleetScreen.kt:332`). `PaletteAction.newTask` is the palette's "New Worktree…" (`PaletteIndex.swift:16`) | "Quick Task" becomes "New Worktree…", the Mac's word for the same action (`Commands.swift:89-90`). The palette case is renamed in code |
+| **agent** | A coding agent (claude, codex, cursor) running in a terminal | The same pane is called a terminal, pane, tab or session | "Agent" when a terminal runs an agent; "terminal" when it runs a shell. "Pane", "tab" and "session" leave user-facing copy (VoiceOver included) |
+| **worktree** | A directory and branch | "Primary checkout" (`SidebarViews.swift:208`; `android/ui/NeedsYouScreen.kt:404`) vs the CLI's "main checkout". "Diff" on iOS (`ios/ShellScreen.swift:294`) vs "Changes" on the Mac (`ContentView.swift:189`) | "Main checkout" in every app. "Changes" on every platform |
+
+Two words are not in the six but appear in copy:
+- **Repository** replaces "Project" (`QuickCreate.swift:160`, `ios/TaskComposer.swift:91-92`, `ContentView.swift:2693`).
+- **Runner** stays.
+
+**"Worktrees" labels the disclosure** (and the phone tab) that holds a workspace's worktrees, so no new noun is
+introduced. Rows inside it are worktrees; their terminals are agents or terminals.
+
+**Copy rules.** These follow Apple's conventions:
+- title-case buttons and menu items ("Start Orchestrator", "Open Worktree");
+- sentence-case descriptions and empty states;
+- contractions;
+- no raw runner errors in the UI.
+
+---
+
+## 2. The "needs you" rollup
+
+### 2.1 Why one definition
+
+The surfaces disagree today:
+
+| Surface | Counts today |
+|---|---|
+| Mac header badge and ⌃⌘N | Terminals whose agent is Blocked or Done (`ContentView.swift:2656-2663`; `wants_attention` in `crates/core/src/activity.rs:891-892`) |
+| Mac Board row | Tasks in Needs Decision (`SidebarViews.swift:1278`) |
+| Android front door | Blocked and finished agents, plus unread diffs, grouped by worktree (`android/model/NeedsYou.kt:182`), then Board rows beneath |
+| iOS | No list. The inbox was deleted in 8b08c1f5 |
+| Live Activity | `blocked`, `review` and `working` agent counts that the relay sums over every row (`services/relay/src/push.ts:269-285`) |
+| Widget and watch | Agent rows only, named by program ("claude") |
+
+The result is that none of these numbers agree for the same fleet at the same moment.
+
+### 2.2 The definition
+
+An **item** is one thing a person has to act on. It is one of four kinds, listed in rank order:
+
+| Kind | When | Its subject | Ends when |
+|---|---|---|---|
+| **ask** | An agent is waiting on a permission that has an id and options, so it can be answered away from its terminal. Two sources: a claude TUI's held `PermissionRequest` (ov-14; `crates/daemon/src/hook_asks.rs:1-22`, ids prefixed `hook-ask-`, `:37`), and an ACP chat pane's `AgentEvent::Permission` | The terminal, plus its task when the terminal has one | The ask settles (`hook_asks.rs` `settle`, or the chat's `Resolved`) |
+| **blocked** | An agent is Blocked and has no answerable ask: a codex or cursor TUI, a trust gate, or a question read off the screen. Also a terminal whose last turn failed (`Terminal.turn_failed`) or whose process exited badly (`exit_wants_attention`, `activity.rs:905`) | The terminal, plus its task | Its activity leaves Blocked, or the failure is seen (`terminal.seen`) |
+| **decision** | A task is in Needs Decision (`TASK_STATUS_NEEDS_DECISION`, `proto/farcooler.proto:2602`). Its question is the latest `QUESTION` note (`:2624`) | The task | An `ANSWER` note takes the task out of Needs Decision |
+| **review** | A task is In Review (`TASK_STATUS_IN_REVIEW`, `proto/farcooler.proto:2604`). Nothing else: a Done agent and a worktree with unread changes are not items (ruling 1) | The task | The task leaves In Review |
+
+**Rules on top:**
+- **One item per subject.** When one subject has several signals, the most urgent kind wins, and the others go on
+  the item as `also`. For example, a task in Needs Decision whose agent also holds an ask is one item of kind
+  **ask**, with `also: [decision]`.
+  - A signal whose terminal has a `task_id` has the task as its subject.
+  - An orchestrator is never a task's agent, so its items are always about its own terminal.
+- **Ranking.** Every item has a `rank` on the same scale and rule as `Terminal.rank` (`proto/farcooler.proto`,
+  field 29): a tier per kind, then the oldest first within a tier. The tiers are ask, then blocked, then decision,
+  then review.
+  - Ranks are durations, not clock readings, so two runners' items merge by rank without comparing clocks.
+    `android/model/NeedsYou.kt:36-52` already relies on this property.
+- **The count is the number of items**, not signals and not agents. A workspace's count is the number of its
+  items. The Needs You row, the watch complication, the widget and the Live Activity header all show this one
+  number.
+- **Which workspace an item belongs to:**
+  - the task's `workspace_id`;
+  - failing that, the terminal's `workspace_id` (`proto/farcooler.proto:1178`);
+  - failing that, the worktree's owner;
+  - failing all three, none. An item with no workspace is counted under its repository's Unclaimed group, and in
+    the Needs You total.
+- **Hidden worktrees.** Their items still count. Android drops them today (`android/model/NeedsYou.kt:190`), which
+  would hide an orchestrator whose main checkout is hidden.
+- **Unread diffs and finished agents are not items** (ruling 1). A worktree with unread changes keeps its dot on
+  its row, and a Done agent keeps its `✓` glyph and its existing Done notification. So ⌃⌘N, which walks items, no
+  longer stops at a finished agent; it did before (`wants_attention` counts Done, `activity.rs:891-892`).
+- **An orchestrator's finished turn is not an item** (ruling 10). It's an unread dot on its workspace row and in the
+  conversation column's header, cleared when its terminal is seen. Its asks and blocks are items as usual.
+
+### 2.3 Where it's computed: the daemon
+
+**Each runner's daemon computes its own items.** Each client merges the lists from all its runners by rank.
+
+**Why the daemon, and not `crates/client` or AgentKit:**
+
+1. **Only the daemon holds all four facts:**
+   - held asks, with their ids and options (`hook_asks.rs`);
+   - chat permissions (`AgentSupervisor`);
+   - agent activity, which is derived on the host and never by a client (`proto/farcooler.proto:853-857`);
+   - the tasks.
+
+   A client can't see the ids and options of an ask without subscribing to that terminal's agent stream. That is
+   why the glance surfaces keep their own copy today (`AK/GlancePermissions.swift:1-50`).
+2. **`crates/client` doesn't reach the Mac.**
+   - The Mac talks to runners by running the CLI (`DaemonClient.swift:50-57`).
+   - It links the client core only for the enrollment ceremony (`Sources/CFarCoolerClient/module.modulemap`
+     comment).
+   - A definition in the client core would therefore reach two apps and not the third.
+3. **AgentKit doesn't reach Android.** A definition in AgentKit would need a Kotlin copy, and two copies of a rule
+   are what drifted here in the first place.
+4. **A suspended phone gets news only by push**, and pushes are composed on the daemon (`crates/daemon/src/watch.rs:338-354`)
+   and summed by the relay. A lock-screen count can agree with the app only if both come from the daemon.
+5. **There's precedent.**
+   - `changes.inbox` is a daemon-computed rollup that clients poll (`crates/daemon/src/review_ops.rs:341-399`).
+   - `rank` is computed "here, beside `activity`, so an Island showing one agent and a sidebar showing twelve
+     agree".
+
+**What the shared client core does:** it renders the JSON projection, once.
+- `crates/client` gains `needs_you_json`, shared by `farcooler needs-you --json` (which the Mac reads) and
+  `Session::needs_you` (which the phones read through the FFI).
+- This follows `changes_json::inbox_json`, which is already shared by `farcooler changes inbox --json` and
+  `Session::changes_inbox` (`crates/client/src/session.rs:1636-1644`).
+
+**What each app does:**
+- It decodes the one JSON shape.
+- It merges runners by rank.
+- It renders.
+
+The decode and merge live in AgentKit for the Mac, iPhone, watch, widget and Live Activity, and in Kotlin for
+Android. Both are pinned by one fixture file that both test suites read, as the fleet decode tests already do
+(`AgentKitTests/FleetDecodeTests.swift`, `FleetDecodeTest.kt`).
+
+### 2.4 Wire
+
+**New RPC `needs_you.list`,** Read scope.
+- Read, like `changes.inbox` (`crates/daemon/src/rpc.rs:414`): it is metadata about work.
+- Question text is already redacted on the host, as `blocked_question` is.
+
+**New event `needs_you_changed`** (Empty), sent once per change so clients re-read instead of polling. It fires on:
+- a terminal's activity change;
+- a held ask's `hold` or `settle`;
+- a chat's `Permission` or `Resolved`;
+- `task_changed` into or out of Needs Decision or In Review;
+- `terminal.seen`.
+
+**New capability `needs_you`,** listed in `crates/protocol/src/lib.rs` beside `workstreams` (`:240`).
+
+**The item** (proto sketch; tags are fresh):
+
+```
+message NeedsYouItem {
+  string id = 1;                       // stable across reads: "ask:<ask id>", "blocked:<terminal>",
+                                       // "decision:<task>" or "review:<task>"
+  NeedsYouKind kind = 2;               // ASK, BLOCKED, DECISION, REVIEW
+  repeated NeedsYouKind also = 3;      // the subject's other, less urgent signals
+  uint32 rank = 4;
+  google.protobuf.Timestamp since = 5;
+  optional bytes workspace_id = 6;     // plus its name, so a glance can say "Billing" without a second read
+  string workspace_name = 7;
+  bytes repository_id = 8;
+  optional TaskRef task = 9;           // id, key, title, status
+  optional TerminalRef terminal = 10;  // id, worktree_id, label, role, pane_mode, chat_capable
+  optional WorktreeRef worktree = 11;  // id, name, branch, insertions, deletions
+  string question = 12;                // redacted, one row wide: the ask's title, blocked_question,
+                                       // the QUESTION note, or "Ready for review"
+  optional string detail = 13;         // an ask's command; a review's "+18 −40"
+  optional string ask_id = 14;         // what terminal.agent_answer takes
+  repeated NeedsYouAction actions = 15;
+}
+message NeedsYouAction {
+  string id = 1;        // an ask option id ("allow", "deny"), a decision option's text, or "open"/"seen"
+  string title = 2;     // "Allow", "Deny", or the option as written
+  bool destructive = 3;
+  bool primary = 4;
+}
+```
+
+### 2.5 What each item carries, and how it's answered in place
+
+| Kind | Buttons (Mac, phone) | Sends | Where Open lands |
+|---|---|---|---|
+| ask | **Deny**, **Allow** (the ask's own options, in its order) | `terminal.agent_answer(terminal, ask_id, option)`: the existing path (`rpc.rs:2090`), which refuses a stale or second answer | The workspace, with the task's third column open (or the orchestrator's conversation) |
+| blocked | **Open** | nothing; the answer is typed in the terminal | The same |
+| decision | The question's options, when the note has some (at most three as buttons; more go in a menu). **Answer…** when there are none | `task.note` of kind `ANSWER` (Control scope, `rpc.rs:428-432`), with the option's text, as the user | The task, with its card expanded |
+| review | **Review** only. The inbox opens a review; it never approves one (ruling 2) | nothing | The task's third column, with its changes |
+
+**Read-scoped clients** see the items without buttons, except Open. That is the same rule the board uses.
+
+**Mid-answer.** A button that has sent shows a spinner in place. When the answer succeeds, the item leaves on the
+next `needs_you_changed`. When it's refused, the item stays, with one line:
+- "Someone already answered this." for `NotHeld`;
+- "Couldn't reach claude. Try again." for `NotDelivered`.
+
+This fixes the ov-54 review finding that a failed answer cleared the card silently.
+
+### 2.6 Older runners
+
+A runner without `needs_you` still contributes items, derived in the app from what it already sends:
+- Blocked agents, from `Terminal.activity`, become **blocked** items. No asks, decisions or reviews are derived.
+- Its section in Needs You says: "Update Far Cooler on <runner> to see decisions and asks here."
+- Nothing is guessed.
+
+---
+
+## 3. Task, agent and worktree links
+
+### 3.1 What exists
+
+| Link | Data | Used by |
+|---|---|---|
+| terminal → task | `Terminal.task_id` (`proto/farcooler.proto:1168-1173`), set by `farcooler task dispatch` and `terminal new --task`. Decoded by the Mac (`Model.swift:408-415`), AgentKit (`AK/CoreModel.swift`) and Android (`android/model/Model.kt:343`) | Only the board's "which agent is on this card" rule (`AK/TaskBoardAgents.swift:10-58`; Android `TaskBoard.kt:168-173`). **No pane, pane bar or Changes view names its task on any platform** |
+| task → agent | Derived: the live panes whose `task_id` matches and which run an agent (`TaskAgentLink.isWorking`, `AK/TaskBoardAgents.swift:55-58`) | Board cards' "Go to Agent" (Mac `TaskBoard.swift:742-836`), the iOS Agent pill, and the Android chip |
+| task → worktree | `Task.worktree_id` (`proto/farcooler.proto:2656-2658`), set by dispatch through a second `task.update` after the pane opens (`crates/cli/src/tasks.rs:2588-2597`) | **Nobody.** Decoded by AgentKit (`AK/TaskBoardModel.swift:572, 608`) and Android (`android/model/TaskBoard.kt:85, 290`), and never read by a view. A task in review with no live agent can't reach its changes on any platform |
+| terminal → workspace | `Terminal.workspace_id` and `role` (`proto/farcooler.proto:1174-1180`) | The Mac sidebar's orchestrator rows; ov-60's notifications |
+| workspace → orchestrator | `Workspace.orchestrator_terminal_id` (`proto/farcooler.proto:2970`) | The sidebars' orchestrator rows |
+| worktree → tasks | **None.** Answering "which task is this worktree for" needs every board loaded, and the phones read boards lazily (`AK/RunnerBoards.swift:125-172`) | — |
+
+### 3.2 What's added
+
+1. **A worktree knows its tasks.**
+   - `Worktree` gains `repeated TaskRef tasks`: `{id, key, title, status}` for every task whose `worktree_id` is
+     this worktree and whose status is not Done or Cancelled.
+   - The daemon fills it in `worktree.list`, and `task_changed` triggers `worktree_changed` for the old and new
+     lanes.
+   - This is what lets a Worktrees row read "fc-3-webhooks · bil-9", and a pane's header name its task, without a
+     board read.
+2. **A pane shows its task.** Its task is:
+   - `Terminal.task_id` when it's set;
+   - otherwise its worktree's task, when the worktree has exactly one.
+
+   This is a rule, `TaskLink.task(of:in:)`, stated once in AgentKit and once in Kotlin against one fixture. It
+   draws as a chip in the pane's header: "bil-9 Invoice PDF export". The chip opens the task.
+   - Mac: the task column's header, and a worktree layout's `GroupBar`.
+   - iOS: the pane bar.
+   - Android: the worktree screen's top bar.
+3. **A task reaches its worktree and changes** through `worktree_id`, with or without a live agent.
+   - Mac: **Open Worktree** in the task column.
+   - Phones: **Changes** and **Worktree** rows on the task screen.
+   - Android's decoded-but-unused `worktreeId` gets its first reader here.
+4. **Back from a task's agent to the task.** The Mac keeps the task column open while you're in its agent. The
+   phones push the agent onto the workspace's stack, so Back returns to the task. This removes the iOS dead end
+   where "Go to Agent" closes the board (`ios/ShellScreen.swift:1150-1166`, `:2259`).
+
+**Not changed:** `task_id` stays explicit. The daemon doesn't infer a pane's task from where it works, because a
+person's shell in a task's worktree isn't that task's agent. The worktree fallback in item 2 is a display rule
+only; it never feeds dispatch's "one agent per task" check.
+
+---
+
+## 4. The Mac window model
+
+### 4.1 Today
+
+- **One window**, `WindowGroup { ContentView() }`, with a minimum size of 600×400 (`FarCoolerApp.swift:28`).
+- **A two-column `NavigationSplitView`** (`ContentView.swift:162`). The sidebar is 268–440 pt wide, ideal 320
+  (`:1205`).
+- **The detail shows one `Selection`** (`:138-146`): `.worktree`, `.terminal`, or `.board`.
+- **The detail switch** (`:1813-1939`) draws one of three things:
+  - a tiled tmux layout;
+  - a `WorktreeDetail`;
+  - the full-width `TaskBoardView`.
+- **The board and the orchestrator replace each other.** The orchestrator row selects a `.terminal`
+  (`:942-957`), and the Board row selects `.board` (`:921-938`).
+
+### 4.2 The new selection
+
+```swift
+enum Selection: Hashable {
+    case needsYou
+    case workspace(host: String, workspace: String, focus: Focus?)
+    /// A worktree no workspace owns, or any worktree on a runner without `workstreams`.
+    case looseWorktree(host: String, worktree: String, terminal: String?)
+}
+enum Focus: Hashable {
+    case task(String)                                    // task id
+    case worktree(String, terminal: String?)             // a worktree, from a task's Open Worktree or the Worktrees disclosure
+}
+```
+
+**Where the old cases go:**
+
+| Old | New |
+|---|---|
+| `.board(h, w)` | `.workspace(h, w, focus: nil)` |
+| `.terminal(h, wt, t)`, where `t` is an orchestrator | `.workspace(h, t.workspace, focus: nil)` |
+| `.terminal(h, wt, t)`, where `t` has a task (per §3.2's rule) | `.workspace(h, task.workspace, focus: .task(id))` |
+| `.terminal(h, wt, t)`, any other | `.workspace(h, owner(wt), focus: .worktree(wt, t))`, or `.looseWorktree` when unclaimed |
+| `.worktree(h, wt)` | The same, with `terminal: nil` |
+
+**A runner without `workstreams`** keeps working. Each repository is one implicit workspace
+(`WorkspaceSummary.implicit`, which exists): it has a board and Worktrees, and no orchestrator column.
+
+### 4.3 The workspace view
+
+The detail becomes an `HSplitView` of up to three columns, left to right:
+
+| Column | Holds | Min | Ideal |
+|---|---|---|---|
+| **Conversation** | The orchestrator: its layout as `detailFrame` frames it today (`WorkspaceSidebar.swift:327-340`: its own layout, no bar), drawn as a terminal, or as chat when the pane is in agent mode | 400 pt | fills |
+| **Board** | The board (§5) | 280 pt | 340 pt |
+| **Task** | Present only while `focus` is set. See §4.4 | 500 pt | 620 pt |
+
+**Where the minimums come from.** A 12.5 pt monospaced cell is about 7.5 pt wide.
+- 400 pt holds about 50 columns. Claude Code's TUI stays usable there, and its chat form is comfortable.
+- 500 pt holds about 64 columns, enough for a diff hunk.
+
+These are starting points, not settled numbers. **Slice 2 measures them first**, at a full-screen 13" width
+(1440 and 1470 pt), with claude, codex and cursor in terminal and chat mode, before it fixes any constant. The
+collapse thresholds below follow from whatever it measures. See R2.
+
+**When the columns don't fit**, they give way in a fixed order. `W` is the detail's width.
+
+| Detail width | Shown |
+|---|---|
+| `W ≥ 400 + 280 + 500 = 1180` | All three |
+| `W < 1180`, task open | **The conversation collapses to a 36 pt rail** at the leading edge. The rail shows the orchestrator's status glyph and its needs-you dot. Clicking the rail, pressing Esc, or ⌘[ closes the task column, which brings the conversation back. The task column is navigation, not an arrangement to fit |
+| `W < 680`, no task | One column, with a segmented **Orchestrator \| Board** control in the header: the phone form |
+
+**At a 13-inch laptop's widths:**
+
+| Screen | Window | Sidebar | Detail | Result |
+|---|---|---|---|---|
+| MacBook Air 13" (M2 and later) | Full width, 1470 pt | 248 pt | 1222 pt | All three columns |
+| MacBook Air 13" (M1) | Full width, 1440 pt | 248 pt | 1192 pt | All three columns |
+| Either | A 1280 pt window | 248 pt | 1032 pt | Conversation and board. Opening a task collapses the conversation to its rail. Hiding the sidebar (⌃⌘S) gives 1280 pt, and all three fit |
+
+The sidebar narrows to min 220, ideal 248, max 360 (from 268/320/440, `ContentView.swift:1205`). Its rows are now
+workspaces, and a worktree row shows up only under Worktrees.
+
+**Wireframe, at 1440 pt** (sidebar 248; conversation 412, board 280 and task 500 fill the 1192 pt detail, each near its minimum):
+
+```
+┌ Sidebar ──────────┬ Billing · overnight ────────────────────────────────────────────────────────────┐
+│ ◉ Needs You     3 │ ● Orchestrator  claude  ⋯ │ Board  bil   [≡|▦] ＋ │ bil-9 Invoice PDF export  In Progress ▾│
+│                   │                           │ ▾ Needs Decision   2  │ agent · claude   Open Worktree    ✕   │
+│ overnight         │ Moved fc-3 and fc-4 here. │   bil-7 Approve th…   │ ────────────────────────────────────── │
+│   Main        ●  1│ The webhook agent is on   │   fc-3 Handle Stri…   │ ❯ writing render_invoice()…            │
+│ ▸ Billing  ●  2   │ fc-3.                     │ ▸ Backlog          0  │   tests: 14 passed                     │
+│   Relay   ◌       │ > Hold fc-4 until the     │ ▾ To Do            3  │                                        │
+│ ＋ New Workspace… │   Stripe keys land.       │ ▾ In Progress      1  │ ── Changes  +42 −7 ─────────────────── │
+│ ▸ Unclaimed  1    │ Done. fc-4 is blocked…    │ ▸ In Review        0  │ + fn render_invoice(…)                 │
+│                   │                           │ ▸ Done            12  │ − // TODO pdf                          │
+│ verdela           │ ❯ _                       │ ▸ Canceled         0  │                                        │
+└───────────────────┴───────────────────────────┴───────────────────────┴────────────────────────────────────────┘
+```
+
+(`●` is the orchestrator's status; `◌` means no orchestrator; the number is the workspace's needs-you count;
+`[≡|▦]` is the list/kanban toggle.)
+
+### 4.4 The task column
+
+- **Header:**
+  - the key and title;
+  - a status pop-up that replaces the card's "Move To" menu (`TaskBoard.swift:651`);
+  - the agent, or a picker when several agents are on the task;
+  - **Open Worktree**;
+  - a close button (✕).
+
+  A disclosure expands the header into the card: intent, acceptance, the notes timeline, and, in Needs Decision,
+  the question with its **Answer** buttons.
+  - The card starts expanded when the task is in Needs Decision.
+  - This replaces the modal card sheet (`TaskBoard.swift:423`, at least 560×480 at `:855`).
+- **Agent:** the tmux layout holding the agent's terminal, drawn exactly as selecting that terminal draws it
+  today (`ContentView.swift:1815-1823`). This is usually a layout of one pane.
+  - With no live agent, it reads "No agent is working on this task." When the task has a worktree, **Open Worktree**
+    is shown. Otherwise the line is "Nothing has started on this task yet."
+- **Changes:** the worktree's `ChangesPane`, under the agent, with a draggable divider whose position is
+  remembered per window. **Today's Changes view, reused as it is** (ruling 6). Today it's a SwiftUI view,
+  `ChangesPane`, that `TileView` draws in the rectangle of a tmux pane whose preset is `changes`
+  (`TileView.swift:416`; the pane is made by `toggleChangesPane`, `ContentView.swift:1670-1689`). So the diff is
+  drawn natively, and tmux only reserves its space. The cheapest embedding is the same call without the tmux pane:
+  `ChangesPane(changes: changesStore(for: worktree, client:), isFocused:, agents: reviewTargets)`. There's no new
+  renderer and no runner call, and the agent's tmux window keeps its size on every client. See R3.
+- **Which part leads:**
+  - In Review: the changes take the larger share.
+  - Otherwise: the agent does.
+
+**Open Worktree** replaces the column's contents with the worktree's own layouts: a `TileView` and `GroupBar`,
+the same view `.worktree` draws today. A breadcrumb reads "bil-9 › fc-3-webhooks", and Esc or ⌘[ goes back
+along it. **Focus** (⇧⌘↩) widens the task column over the conversation and board, for tmux work at full size;
+pressing it again restores them.
+
+### 4.5 The sidebar
+
+```
+◉ Needs You                         3     ← selects .needsYou
+overnight                          ⋯ ＋   ← repository header (collapse and menus as today)
+  Main                     ●         1   ← workspace row
+  Billing                  ●         2
+    ▾ Worktrees                             ← disclosure on the workspace row
+        fc-3-webhooks · bil-9   +42 −7
+        main checkout
+        scratch-shell
+  Relay rewrite            ◌
+  Unclaimed  1                            ← collapsed, as today
+  Hidden  2
+```
+
+**A workspace row** shows:
+- the name;
+- the orchestrator's `StatusGlyph`, or `◌` when there is no orchestrator;
+- the needs-you count, in the amber of `AttentionBadge`.
+
+The task prefix is in the tooltip and the window subtitle, not on the row. The row takes the header's context menu
+from ov-60 (`WorkspaceActions.swift:13-32`): Show Board, Start Orchestrator or Replace Orchestrator…, Show
+Charter. It stays a drop target for dragging a worktree onto it (`SidebarViews.swift:1369-1418`).
+
+**Worktrees** lists the workspace's worktrees in the runner's order (`worktree.reorder`, unchanged).
+- A row is: the worktree's name, then its task key(s) from §3.2's `tasks`, its +/− counts, and its attention dot.
+- Expanding a worktree lists its terminals, as today.
+- Selecting either opens it in the third column (`focus: .worktree`).
+- Worktrees opens by itself when the selection is inside it.
+- Its rows are draggable to another workspace row, as today. They also gain a **Move to Workspace ▸** menu item,
+  so the drag has a menu equivalent.
+
+**Rows that go away:**
+- the per-workspace **Board** and **Orchestrator** rows (`ContentView.swift:921-957`);
+- the header's global attention badge (`:1280-1293`), since the Needs You row replaces it.
+
+### 4.6 Needs You on the Mac
+
+Selecting **Needs You** fills the detail with the merged item list, in one column no wider than about 720 pt.
+- Each row shows the workspace name, the question, and the task key or agent, with its buttons trailing.
+- Clicking the row body opens the item as §2.5 says.
+- An item that's answered animates out.
+- With nothing waiting: "Nothing needs you" / "Asks, decisions and reviews from every workspace show up here."
+
+**Launch:** the app opens on Needs You when the count is above zero; otherwise, on the last workspace selection
+(the same rule as the iPhone, ruling 4).
+This replaces `selectFirstRunningTerminal` (`ContentView.swift:2100`).
+
+### 4.7 tmux layouts
+
+Nothing on the runner changes.
+- A worktree is still a tmux session, and a layout is still a tmux window (`Layout.swift:3-15`).
+- The Layout menu, `⌃B` verbs, split, zoom and drag-to-place keep working in whichever `TileView` has focus: the
+  task column's agent, an opened worktree, or the conversation.
+
+What changes is where a layout is reached from:
+- A worktree's layouts move one click down, under its task or Worktrees.
+- The `GroupBar` shows only when a worktree is opened whole. A task's agent is shown as the one layout holding it.
+
+The orchestrator's window stays out of the main checkout's layouts (`ownLayouts`, `WorkspaceSidebar.swift:366-370`).
+
+### 4.8 The ⌘P palette
+
+`PaletteAction` (`PaletteIndex.swift:10-21`) gains two cases:
+- `.openWorkspace(host, id)`: rows such as "Billing" with the detail "Workspace · overnight". A match keeps its
+  workspace, so a workspace with no matching worktree is no longer dropped (`WorkspaceSidebar.swift:217`).
+- `.openTask(host, id)`: rows such as "bil-9 Invoice PDF export" with the detail "Billing · In Progress", matched on
+  key and title, from the boards already loaded.
+
+**Orchestrators** are listed as "Billing Orchestrator".
+
+**Terminals** stay, and each lands in its workspace per §4.2. `.newTask(String)` is renamed `.newWorktree` in code,
+and its title stays "New Worktree…".
+
+The sidebar's search field (Edit ▸ Find, `Commands.swift:301`) becomes "Find Workspace, Task or Agent", and it
+filters workspace rows and Worktrees.
+
+### 4.9 The attention cycle and other commands
+
+- **⌃⌘N, Next Needing Attention** (`Commands.swift:142-143`): walks the merged items in rank order from the
+  current one, opening each as its Open action would. It used to walk terminals in sidebar order
+  (`ContentView.swift:2656-2663`, `WorkspaceSidebar.swift:146-161`), which never reached a decision.
+- **⌘] and ⌘[, ⌥⌘↓ and ⌥⌘↑, ⌘1…:** step through the terminals of the view on screen. That's the task's layout, the
+  opened worktree, or the conversation. They no longer step through the whole sidebar, since the sidebar no longer
+  lists terminals.
+- **⇧⌘B, Show Board:** selects the current workspace and focuses its board column. With nothing selected and one
+  repository, it opens Main. The refusal copy "choose a project's Board" (`ContentView.swift:2693`) becomes
+  "Select a workspace first."
+- **Focus shortcuts for the three columns:** ⌥⌘1, ⌥⌘2, ⌥⌘3. ⌘digits are taken by terminals.
+- **Window title:** the workspace's name, with the subtitle "repository · runner". With a task focused, the title
+  is "bil-9 Invoice PDF export" and the subtitle is "Billing · overnight". This replaces the worktree-derived
+  title (`Model.swift:178-187`) everywhere except a loose worktree.
+
+### 4.10 The orchestrator's conversation
+
+The conversation column draws the orchestrator's terminal as selecting its row does today:
+- a VT grid in terminal mode;
+- `AgentSurface` in agent mode (`pane_mode`, `proto/farcooler.proto:874`).
+
+The existing **Terminal ⟷ Chat** toggle (⌃B a, `Commands.swift:217`) and the palette's `togglePaneMode` work
+there. The column doesn't choose a mode of its own; the pane's mode is the runner's, which every client shares.
+New orchestrators start in chat when `agents.preferChatMode` is on (`Preferences.swift:78`), as other agents do.
+
+The column header shows:
+- `Orchestrator`, then the harness (`claude`) and the status glyph;
+- a `⋯` menu with Replace Orchestrator…, Show Charter, Terminal / Chat, and Restart.
+
+---
+
+## 5. The responsive board
+
+One `TaskBoardView` with two forms. The form is chosen by the board pane's **own** width, measured with
+`GeometryReader` on the board, not by the window's width.
+
+| Board width | Form |
+|---|---|
+| < 824 pt | **List**: status sections, Needs Decision first |
+| ≥ 824 pt | **Kanban**: seven 260 pt columns (`TaskBoard.swift:470, 517`), scrolling sideways past three |
+
+- **Where 824 pt comes from:** the width at which three kanban columns fit (3×260 + 2×12 spacing + 2×10 padding).
+  Below it, a kanban shows fewer than three statuses, which the list does better.
+- **Hysteresis:** the form switches at 824 pt going up and 800 pt going down, so a divider drag across the line
+  doesn't flicker.
+
+**The toggle** is a segmented control in the board header: `≡` List, `▦` Kanban. Choosing one forces that form;
+choosing the selected one again returns to Automatic, which is also in its menu.
+- It is remembered per workspace, on this Mac: `board.form.<host>.<workspace>` = `auto | list | kanban`, default
+  `auto`.
+- It is kept per device, not synced (ruling 7): a phone is always a list, so there's nothing to agree on.
+
+**The list form:**
+- **Sections:** every status in `TaskBoardModel.order` (`AK/TaskBoardModel.swift:406-407`), always.
+- **An empty status:** a collapsed header reading "Backlog 0", which can't be expanded.
+- **A status with tasks:** expanded by default. Done and Canceled start collapsed, and their collapse state is
+  remembered per workspace.
+- **Card rows:** the iPhone's row (key, title, call to action, time, acceptance, agent control), ported from
+  `ios/TaskBoardView.swift` to the shared view layer where it can be shared.
+- **Selecting a row** opens the task column (§4.4).
+
+**The kanban form:** unchanged, except that opening a card opens the task column instead of a sheet.
+
+**Every form, on every platform:**
+- `TaskBoardModel.listed`, which drops empty statuses (`AK/RunnerBoards.swift:246-257`), is replaced by `sections`,
+  which keeps every status with its count. The phones take the same change: owner decision 3 applies there too.
+- **New Task…** (`＋` in the header) files a task on this board with `task.create`, which is Control scope and
+  already exists. The empty state "Put a task on it with farcooler task create." (`TaskBoard.swift:396-397`)
+  becomes a button. In scope (ruling 5), as is Move to Workspace ▸ (§4.5).
+
+---
+
+## 6. The phones
+
+The same structure on iOS and Android, each in its platform's idiom.
+
+```
+Needs You (front door)
+├── [items, answerable in place]
+├── Workspaces
+│   └── overnight  (runner, when more than one)
+│       ├── Main            ●  1
+│       └── Billing         ●  2   ─►  Billing
+│                                      [Orchestrator | Board | Worktrees]
+│                                      ├── Orchestrator: the orchestrator's pane (chat or terminal)
+│                                      ├── Board: the sectioned list  ─► Task
+│                                      │                                 ├── the card (answer here)
+│                                      │                                 ├── Agent  ─► its pane
+│                                      │                                 └── Changes / Worktree
+│                                      └── Worktrees: worktrees  ─► the worktree's panes
+└── Settings, Runners
+```
+
+### 6.1 iOS
+
+**Today:**
+- The app opens onto a full-screen pane (`ios/FarCooler/FarCoolerApp.swift:80-89`).
+- Workspaces are reached through a gesture-only overview.
+- The board is a sheet (`ios/ShellScreen.swift:1150`).
+
+**The new root is a `NavigationStack` whose root view is Needs You:**
+- **Needs You:** the merged items, then a "Workspaces" section per runner and repository. Each workspace row shows
+  its name, its orchestrator's glyph, and its count. Pull to refresh.
+- **The workspace screen:** the workspace's name as the title, and a segmented `Picker` under the navigation bar.
+  - **Orchestrator:** the orchestrator's pane, full height, using the existing terminal and agent views. With no
+    orchestrator, see §8.
+  - **Board:** the list form of §5, in-line, not a sheet. `BoardSheetHost` retires.
+  - **Worktrees:** the workspace's worktrees, with their task keys and counts. **New Worktree…** at the bottom claims
+    the new worktree for this workspace (ruling 8). Today the client core always claims for Main
+    (`crates/client/src/session.rs:1005-1025`); it gains a `workspace` argument.
+  - The segment is remembered per workspace.
+- **The task screen:** the card, with Answer buttons in Needs Decision, then rows for Agent, Changes and Worktree.
+  Each row pushes. Back returns to the task. This fixes the jump that closed the board.
+- **The worktree screen:** today's pane pager and bottom bar, scoped to one worktree.
+  - Swiping sideways on the bar moves between that worktree's terminals, not across the fleet.
+  - The drag-up overview retires; the stack replaces it.
+  - The "Diff" tab is renamed "Changes".
+
+**Launch** (ruling 4): Needs You when it has items. Otherwise the last workspace, pushed on top of the Needs You
+root so Back still reaches it.
+
+**Deep links** (`farcooler://terminal/<id>`, from notifications and widgets) push the workspace, the task (when the
+pane has one), and then the agent, so Back walks up that chain.
+
+### 6.2 Android
+
+**Today:**
+- The front door is Needs You, grouped by worktree (`android/ui/Navigation.kt:57-59`; `android/model/NeedsYou.kt:182`).
+- The worktree list is a drawer and a pushed route.
+- The board is a pushed route.
+
+**Changes:**
+- **Needs You:** its model becomes a rendering of the rollup. Sections by worktree go away; each item is a row
+  labeled with its workspace. The Board-row band (`NeedsYouScreen.kt:276-280`) goes, since decisions are now items.
+  The Workspaces list follows, as on iOS.
+- **Routes:**
+  - `Board` becomes `Workspace(host, workspace, tab)`, with `tab` one of `orchestrator | board | worktrees`.
+  - `BoardTask` stays; it's the task screen.
+  - `Terminal` stays; it's the worktree screen.
+  - `Fleet` retires. The drawer holds the Workspaces list.
+- **The workspace screen:** a `TabRow` of Orchestrator, Board and Worktrees under the top app bar.
+- **The worktree screen:** gains a back arrow when it's reached from a workspace. Today it has a hamburger
+  (`android/ui/TerminalPane.kt:447-449`).
+
+### 6.3 What replaces the board sheet
+
+On both phones, the board is a tab of the workspace screen. A task is a pushed screen in the workspace's stack.
+Going from a task to its agent pushes, too. So the board is never covered or dismissed by a jump.
+
+---
+
+## 7. Glance surfaces: watch, widget, Live Activity, push
+
+Each of these reads the same items.
+
+- **Push.**
+  - The daemon's push payload gains `workspace` (a name) and `needs_you` (this runner's item count).
+  - The title leads with the workspace, as ov-60 did on the Mac: "Billing · claude needs you". For an
+    orchestrator, it's "Billing Orchestrator needs you".
+  - **A task entering Needs Decision sends a push** (ruling 3): "Billing · bil-7 needs a decision", with the
+    question as the subtitle. Today nothing pushes a decision (workstreams spec, "Wake-ups and events").
+- **Relay.** It keeps the latest `needs_you` per machine and sums them for the Live Activity header. Today the
+  header counts blocked rows (`services/relay/src/push.ts:269-285`), which leaves out decisions.
+- **Live Activity.**
+  - The header count is the rollup's count.
+  - The two rows are the top two items, labeled "Billing · bil-9" instead of "claude · studio".
+  - Asks get Allow and Deny buttons (ov-54).
+- **Widget.** `FleetSnapshot` (`AK/FleetSnapshot.swift:18-30`) gains optional `needsYou: [Item]`, written by the app.
+  The widget's count and rows come from it. An older snapshot, without the field, decodes as today.
+- **Watch.**
+  - The list's first section is Needs You.
+  - Asks answer in place, as today.
+  - Decisions and reviews show the question and "Open on iPhone".
+  - The complication shows the count.
+
+---
+
+## 8. Empty and first-run states
+
+| State | Mac | Phones |
+|---|---|---|
+| A repository with only Main, no orchestrator, and an empty board | Sidebar: "Main ◌". The workspace view shows the conversation column's empty state and the board's list, with every status at 0 and **New Task…** | The same, on the Orchestrator tab. Main's row is always listed; it isn't hidden for being empty (today's phones hide empty boards, `AK/RunnerBoards.swift:131-136`) |
+| A workspace with no orchestrator | The conversation column is centered: "No orchestrator" / "An orchestrator runs this workspace's board. It reads the charter, dispatches agents, and asks you when it needs a decision." **Start Orchestrator** is a pop-up offering Claude, Codex and Cursor (`OrchestratorHarness`, from ov-60). While it starts: "Starting Orchestrator…". A refusal becomes a banner, in ov-60's words | **Start Orchestrator** with a harness menu, sending `workspace.start_orchestrator` (Control). Phones haven't sent it before; ruling 8 supersedes the workstreams spec's "no workspace management" line for this action |
+| An orchestrator whose pane was lost | The column shows the lost pane's last screen dimmed, with **Restart** (`terminal.restart`, which resumes the conversation) and **Replace…** | The same actions, in a menu |
+| An orchestrator that is starting and was never confirmed | "Starting Orchestrator…", then after 30 s: "This is taking longer than usual." with **Replace…**, since the seat can stick (CLI map §7.11) | The same |
+| A workspace just created, from a split | It appears in the sidebar with `◌`. The new orchestrator starts on the manager skill and reads its handoff by itself (ov-59: `orchestrator.rs:166-173`) | The same |
+| A workspace with no worktrees | "No worktrees yet. The orchestrator makes them as it dispatches tasks." **New Worktree…** | The same |
+| Nothing needs you | §4.6 | "Nothing needs you", with a caveat when a runner isn't answering (Android's existing line, `reassurance`, `android/model/FleetReading.kt:176`) |
+| No runners | Unchanged onboarding | Unchanged onboarding |
+
+---
+
+## 9. Migration
+
+Nothing on a runner migrates. The daemon adds an RPC, an event, a capability and one `Worktree` field; tmux
+sessions, windows, worktree order and claims are untouched.
+
+**Mac** (`UserDefaults`):
+- `fleet.lastTerminal` (`ContentView.swift:89`) is read once and mapped to a `Selection` by §4.2's table. The
+  result is written to `workspace.lastSelection` as `host | workspace | task-or-worktree`, and the old key is
+  removed.
+- `sidebar.collapsedProjects` (`Preferences.swift:46`) keeps its keys and its meaning, which is repository
+  collapse.
+- Expanded worktree rows were `@State` (`ContentView.swift:11`) and never persisted, so nothing is lost.
+  - Worktrees disclosure state is new: `sidebar.openWorktrees`, empty by default.
+  - A workspace whose worktree was expanded at quit time opens with Worktrees disclosed, once.
+- New: `board.form.*` (§5), and the task column's divider.
+- **The first launch after the update** shows a one-time tip over the sidebar:
+  - "Workspaces are now in the sidebar."
+  - "Select one to see its orchestrator and board side by side. Its worktrees are one click down."
+  - The button is **OK**.
+
+**iOS:**
+- Each worktree's remembered terminal (`ShellFleetMap.resume`, `ios/ShellScreen.swift:1943`) carries over to the
+  worktree screen.
+- The crossing note (`:1823`) retires.
+- The Quick Task drafts (`quicktask.*`, `ios/TaskComposer.swift:28-31`) move to the New Worktree sheet's keys.
+
+**Android:**
+- The saved back stack (`android/ui/Navigation.kt:315-328`) is decoded with the old `@SerialName`s kept as aliases:
+  - `Board` becomes `Workspace(tab = board)`;
+  - `Fleet` is dropped;
+  - a stack that doesn't decode falls back to the root, as it already does.
+
+**Watch and widget:** new fields are optional, so old snapshots decode.
+
+---
+
+## 10. Slices
+
+Each slice ships on its own and is usable without the next.
+
+### Slice 1: the rollup and the links (data)
+
+**Contents:**
+- **Daemon:**
+  - `needs_you.list`, `needs_you_changed` and the `needs_you` capability;
+  - item assembly from `hook_asks`, `AgentSupervisor`, activity and tasks;
+  - `Worktree.tasks`;
+  - push `workspace` and `needs_you`, and the relay's per-machine sum.
+- **`crates/client`:** `needs_you_json`, `Session::needs_you`, and the FFI entry.
+- **CLI:** `farcooler needs-you [--json]`.
+- **AgentKit and Kotlin:** the decode, the rank merge and `TaskLink.task(of:in:)`, against one fixture.
+
+**Usable alone:**
+- The CLI command, for a person or an orchestrator.
+- The Mac's ⌃⌘N and header badge switch to the rollup, so decisions join the cycle.
+- The pane header gains its task chip on all three apps.
+
+**Tests:** see §11 R6 for the ones that must go red first.
+
+### Slice 2: the Mac workspace view
+
+**Contents:**
+- the new `Selection` and its mapping;
+- the sidebar of §4.5;
+- the three columns and their collapse rules;
+- the task column;
+- Needs You;
+- the palette, the commands and the migration.
+
+The board column hosts today's `TaskBoardView` until slice 3 lands, in list form if slice 3 has shipped and
+otherwise as the kanban. That kanban is cramped in 340 pt but works, since it scrolls sideways.
+
+**Depends on:** slice 1, for Needs You and the counts.
+
+### Slice 3: the responsive board
+
+**Contents:**
+- `sections` replaces `listed` in AgentKit and Kotlin;
+- the list form on the Mac;
+- the width rule and the toggle;
+- the task column replaces the card sheet;
+- New Task….
+
+**Usable alone:** yes. On today's full-width board, a narrow window gets the list instead of one visible column.
+
+### Slice 4: the phones
+
+- **4a, iOS:** the root stack, the workspace screen, the task screen, the scoped worktree screen, Start
+  Orchestrator.
+- **4b, Android:** the same.
+- **4c, glances:** the watch, the widget and the Live Activity reading the items.
+
+**Depends on:** slice 1, and on slice 3's `sections`.
+
+### What can run in parallel
+
+```
+slice 1 (daemon, client core, CLI)  ──┬──► slice 2 (Mac view) ──────┐
+                                      ├──► 4a iOS ─┐                 ├──► done
+slice 3 (board: AgentKit, then Mac) ──┼──► 4b Android ─┤             │
+                                      └──► 4c glances ─┘─────────────┘
+```
+
+- **Slice 1 and slice 3 run in parallel from day one.** They touch different code: the daemon and client core, and
+  board views.
+- **Slice 2's view structure can start alongside slice 1** against a stub item list. It merges after slice 1.
+- **4a, 4b and 4c run in parallel with each other and with slice 2,** once slice 1 has landed. 4a and 4b also need
+  slice 3's AgentKit and Kotlin `sections`, which is the first, small part of slice 3.
+- Every lane is its own worktree (one lane per worktree). Slices 2 and 3 both edit `TaskBoard.swift` and
+  `ContentView.swift`, so they land in sequence: slice 3's Mac part first, since it's smaller.
+
+---
+
+## 11. Risks
+
+- **R1. The iOS navigation rewrite is the largest piece.** The app was built "onto terminals" on purpose
+  (`FarCoolerApp.swift:80-89`), and its gesture shell is tuned (the `ios-shell-mechanics` brief).
+  - Mitigation: slice 4a keeps the shell intact as the worktree screen and changes only what's above it.
+  - UI tests go through `scripts/ios-ui-tests.sh`.
+- **R2. Terminal width in a column.** Resizing a tmux pane resizes it for every client: the Mac's `onGeometry`
+  resizes the terminal (`ContentView.swift:1859`). An orchestrator drawn in a 400 pt column reflows to about
+  50 columns on the phone as well.
+  - The size controller (`size_controller_client_id`) already arbitrates this, but the plan must check what a
+    phone sees when the Mac narrows a pane that the phone is showing.
+  - The 400 and 500 pt minimums need measuring with claude, codex and cursor, in both modes.
+- **R3. The task column's Changes lives outside tmux.** `ChangesPane` sits in a tmux pane so that zoom, drag and ⌃B
+  reach it (`ChangesPane.swift:19-27`). In the task column the same view is drawn without the pane, so there it
+  can't be zoomed or dragged. The Changes toolbar button in an opened worktree still makes the tmux pane.
+- **R4. The dispatch link isn't atomic.** Dispatch opens the pane with `task_id`, then sets the task's
+  `worktree_id` in a second call (`crates/cli/src/tasks.rs:2588-2597`). If the second call fails, the pane knows its
+  task but the task doesn't know its worktree.
+  - §3.2's fallback covers the display.
+  - Moving the lane update into the daemon's dispatch is a follow-up.
+- **R5. A finished agent with no task is in no inbox.** Ruling 1 keeps Done agents out of the rollup, so work an
+  agent finishes outside a task shows only as its `✓` and its notification. Android's front door lists them today,
+  so its users lose that list.
+- **R6. Checks that can't fail.** The rollup's tests must each be broken once on purpose and seen to go red:
+  - one item per subject;
+  - the kind precedence;
+  - the rank merge across two runners with skewed clocks;
+  - the fixture that AgentKit and Kotlin both decode;
+  - the count agreeing between the RPC and the push.
+- **R7. Older runners and newer apps.** §2.6 degrades a runner without `needs_you` honestly, but the Needs You
+  count can differ between a Mac that talks to an old runner and a phone that talks to a new one only if the
+  runners differ. Every app updates together, so this is transient.
+
+---
+
+## 12. Rulings
+
+The owner delegated these to the coordinator, who ruled on 2026-09-28. Each is decided.
+
+1. **"Ready for review" is tasks in In Review only.** No unread diffs and no finished agents. *Why:* review is a board
+   state the orchestrator sets on purpose; diffs and finished turns would flood the inbox.
+2. **The inbox opens a review; it doesn't approve one.** *Why:* the charter says who lands work, often the
+   orchestrator, and one tap in a list shouldn't bypass it.
+3. **Decisions send a push.** *Why:* decisions are now in the count, and a lock-screen count that rises silently is a
+   count nobody trusts.
+4. **The iPhone opens to Needs You when it has items, else to the last workspace.** The Mac follows the same rule.
+   *Why:* the front door is the inbox, but an empty inbox is a screen with nothing to do.
+5. **New Task and Move to Workspace on the Mac are in.** *Why:* both are small, and an empty board and an
+   undiscoverable drag were dead ends.
+6. **The task column reuses today's Changes view as it is.** Today it's a native SwiftUI view drawn in a tmux pane's
+   rectangle (`TileView.swift:416`); the column embeds the view directly, without the pane. *Why:* no new renderer,
+   and nothing resizes the agent's window for other clients.
+7. **The list/kanban choice is kept per device, not synced.** *Why:* the phone is always a list, so there's nothing
+   to sync.
+8. **Phones may start orchestrators, and a worktree created from a workspace's screen is claimed for it.** *Why:* a
+   workspace with no orchestrator was a dead end on the phone, and new worktrees landing in Main was a surprise.
+9. **"Helpers" becomes "Worktrees".** *Why:* the vocabulary stays, and "worktree" is already the word.
+10. **An orchestrator's finished turn is an unread dot, not an inbox item.** *Why:* it finishes every turn, so it
+    would always be in the inbox.
+11. **iPad is out of scope; it uses the iPhone layout.** *Why:* nobody asked for it, and the iPhone structure works
+    there.
+
+Also ruled: slice 2 measures the three columns' minimums at a full-screen 13" width before fixing them (§4.3).
