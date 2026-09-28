@@ -110,7 +110,17 @@ struct ShellHarness: View {
                         try? await Task.sleep(for: .milliseconds(300))
                         fleet = fleet.reordered(request)
                     }),
-                onCross: { _, _ in }
+                onCross: { _, _ in },
+                // A close, done the way a runner does it: the tab leaves the
+                // fleet and the shell's vanish rule takes it from there. Only
+                // so `ShellColumnCloseTests` can see that a Close tap reached
+                // this closure at all — the confirmation and the two calls
+                // are `ShellScreen`'s, and a fixture has no runner for them.
+                onCloseTab: { worktree, tab in
+                    guard let index = fleet.worktrees.firstIndex(where: { $0.id == worktree.id })
+                    else { return }
+                    fleet.worktrees[index].tabs.removeAll { $0.id == tab.id }
+                }
             ) { slot in
                 ShellPanePlaceholder(slot: slot, changes: changesStore)
             }

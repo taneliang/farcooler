@@ -19,8 +19,10 @@ import XCTest
 ///
 /// What is deliberately NOT here is the close itself. The two calls go to a
 /// runner, the confirmation is raised from `ShellScreen` against a live
-/// `Terminal`, and a fixture has no runner to answer — asserting it here would
-/// be asserting that the harness's own do-nothing closure does nothing.
+/// `Terminal`, and a fixture has no runner to answer. What IS here is that a
+/// tap on Close reaches the close at all: the harness drops the tab from its
+/// fleet when asked, so `testTappingCloseClosesTheTerminal` can count it.
+/// `NewTerminalTests` closes a real one on a real runner.
 /// `ShellCloseTests` holds the sentence; `Connection.close` is the pair of
 /// calls, in the order the daemon requires.
 final class ShellColumnCloseTests: XCTestCase {
@@ -125,6 +127,41 @@ final class ShellColumnCloseTests: XCTestCase {
         XCTAssertEqual(
             try state(app)["ws"], 0,
             "the swipe was answered by the bar and changed worktree")
+    }
+
+    /// **Tapping the revealed Close closes the terminal.**
+    ///
+    /// The half the swipe test above stops short of, and the half that was
+    /// broken. The bar's own `DragGesture(minimumDistance: 0)` sits over the
+    /// whole column and sees every touch in it, so the tap on Close also
+    /// ended the bar's gesture as a tap over row 1 — which `barRelease` reads
+    /// as choosing that row. The column furled on the spot, the list went with
+    /// it, and the swipe action's own handler never ran: a Close that could be
+    /// revealed and tapped and did nothing. Nothing caught it because the
+    /// harness's close closure did nothing either; it removes the tab now, so
+    /// the count below is the tap arriving.
+    ///
+    /// The worktree is asserted unchanged for the same reason as above.
+    func testTappingCloseClosesTheTerminal() throws {
+        let app = launch()
+        try pinColumn(app)
+        let tabsBefore = try XCTUnwrap(try state(app)["tabs"], "the shell published no tab count")
+
+        let row = app.buttons["shell-column-row-1"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "the column drew no terminal row")
+        swipe(row)
+        let close = app.buttons["Close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5), "swiping a terminal row revealed no Close")
+        close.tap()
+
+        let closed = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in (try? self.state(app)["tabs"]) == tabsBefore - 1 },
+            object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [closed], timeout: 10), .completed,
+            "tapping Close left the worktree with \((try? state(app)["tabs"]) ?? -1) tabs, "
+                + "not \(tabsBefore - 1): the tap never reached the close")
+        XCTAssertEqual(try state(app)["ws"], 0, "tapping Close changed worktree")
     }
 
     /// **The Diff row has no Close, and it is absent rather than disabled.**

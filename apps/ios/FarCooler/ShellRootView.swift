@@ -1211,7 +1211,38 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
                 // Where the bar actually is, for the tap that chooses a column
                 // row. See `barBottom`.
                 .background { barFrameReader }
-                .gesture(barGesture(page: page))
+                // **Over a PINNED column the bar's gesture is the bar row's
+                // only.** A pinned column's rows are a `List`, and every touch
+                // on them is the list's: a row's tap, which its own `Button`
+                // lands through `chooseRow`; a sideways swipe, which
+                // `swipeActions` turns into a Close; and the tap on that
+                // Close. A `DragGesture(minimumDistance: 0)` over them takes
+                // the touch at touch-down, and UIKit's swipe-action button
+                // then never fires — Close could be revealed and tapped and
+                // closed nothing (`ShellColumnCloseTests
+                // .testTappingCloseClosesTheTerminal`, and `NewTerminalTests`,
+                // which could never close the terminal it had made). Measured:
+                // ignoring the gesture's callbacks for such a touch was not
+                // enough, because it is the recognizer and not the callbacks
+                // that takes the touch; only not being there does it.
+                //
+                // So while pinned the full-surface gesture stands down
+                // (`.subviews`) and the same gesture moves to a strip exactly
+                // the bar row's height along the bottom, where every touch
+                // still starts: a tap there still furls the column, and a drag
+                // from there still crosses or lifts. Unpinned, nothing changes
+                // — a dragged column is only ever showing under a finger that
+                // started on the bar row.
+                .overlay(alignment: .bottom) {
+                    if columnPinned {
+                        Color.clear
+                            .frame(height: ShellMetrics.barRow)
+                            .contentShape(.rect)
+                            .gesture(barGesture(page: page))
+                            .accessibilityHidden(true)
+                    }
+                }
+                .gesture(barGesture(page: page), including: columnPinned ? .subviews : .all)
                 .frame(width: page)
 
             neighborBar(nextStep, page: page, width: width)
