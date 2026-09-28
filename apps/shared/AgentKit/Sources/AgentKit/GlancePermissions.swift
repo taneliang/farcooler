@@ -109,6 +109,29 @@ public struct GlancePermissions: Codable, Sendable, Equatable {
         return next
     }
 
+    /// `recording`, for an observer that files the same pane over and over,
+    /// or nil when filing would change nothing worth a write and a redraw.
+    ///
+    /// The fleet poll reads every blocked pane every three seconds, so most of
+    /// its observations are the ask already on file: nil, and nothing written.
+    ///
+    /// Nil too for an ask this phone has already answered. A read that left
+    /// before the answer and came back after it still shows the ask pending,
+    /// and filing it would drop the answer (`recording` drops an answer
+    /// whenever the permission changes, and a sent answer has already cleared
+    /// it) and put the buttons back for a question that is over.
+    public func filing(
+        _ observed: GlancePermission?, for terminal: String
+    ) -> GlancePermissions? {
+        guard permission(for: terminal)?.request != observed?.request else { return nil }
+        if let observed, let standing = answer(for: terminal),
+            standing.request == observed.request, standing.refusesAnotherTap
+        {
+            return nil
+        }
+        return recording(observed, for: terminal)
+    }
+
     /// Forget what an agent was waiting on, keeping whatever this phone last
     /// said about it.
     ///

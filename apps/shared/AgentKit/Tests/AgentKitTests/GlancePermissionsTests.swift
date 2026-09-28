@@ -237,6 +237,62 @@ struct GlancePermissionsTests {
         #expect(sent?.answer(for: "t1")?.outcome == .sent)
     }
 
+    // MARK: - Filing from the fleet poll
+
+    /// A new ask is filed, which is what puts Allow and Deny on the card for a
+    /// claude TUI pane.
+    @Test func filingANewAskRecordsIt() {
+        let next = GlancePermissions().filing(
+            permission([option("allow", "Allow Bash(touch x)", "allow_once")], request: "hook-ask-1"),
+            for: "t1")
+        #expect(next?.permission(for: "t1")?.request == "hook-ask-1")
+    }
+
+    /// The ask already on file is not written again. The poll files every
+    /// blocked pane every three seconds.
+    @Test func filingTheAskAlreadyOnFileWritesNothing() {
+        #expect(
+            claimable.filing(permission([option("a", "Yes", "allow_once")]), for: "t1") == nil)
+    }
+
+    /// Nothing pending, where something was: filed, so the buttons come down
+    /// when the ask resolved somewhere else.
+    @Test func filingNothingClearsAnAskThatResolvedElsewhere() {
+        let next = claimable.filing(nil, for: "t1")
+        #expect(next != nil)
+        #expect(next?.permission(for: "t1") == nil)
+    }
+
+    /// Nothing pending, and nothing on file: no write.
+    @Test func filingNothingOverNothingWritesNothing() {
+        #expect(GlancePermissions().filing(nil, for: "t1") == nil)
+    }
+
+    /// A read that left before this phone's answer and came back after it
+    /// still shows the ask. Filing it would drop the answer and put the
+    /// buttons back for a question that is over.
+    @Test func anAskThisPhoneAnsweredIsNotFiledAgain() {
+        let now = Date(timeIntervalSince1970: 2000)
+        let sent = claimable
+            .claiming(terminal: "t1", request: "r1", option: "a", optionName: "Yes", at: now)?
+            .settling(terminal: "t1", request: "r1", outcome: .sent, message: "Sent “Yes”.", at: now)
+            .clearingPermission(for: "t1")
+        #expect(sent?.filing(permission([option("a", "Yes", "allow_once")]), for: "t1") == nil)
+    }
+
+    /// …unless nothing was sent, which hands the buttons back.
+    @Test func anAskWhoseAnswerSentNothingIsFiledAgain() {
+        let now = Date(timeIntervalSince1970: 2000)
+        let unsent = claimable
+            .claiming(terminal: "t1", request: "r1", option: "a", optionName: "Yes", at: now)?
+            .settling(
+                terminal: "t1", request: "r1", outcome: .nothingSent, message: "Nothing sent.",
+                at: now)
+            .clearingPermission(for: "t1")
+        let next = unsent?.filing(permission([option("a", "Yes", "allow_once")]), for: "t1")
+        #expect(next?.permission(for: "t1")?.request == "r1")
+    }
+
     /// Neither list may grow for the life of an install. The file is read on a
     /// render path.
     @Test func neitherListGrowsWithoutBound() {
