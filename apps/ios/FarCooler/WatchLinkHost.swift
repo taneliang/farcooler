@@ -397,7 +397,7 @@ final class WatchLinkHost: NSObject {
                 observedAt: Date())
         }
         // Written and redrawn only when the ask CHANGED. The fleet poll files
-        // every blocked pane every three seconds (`Connection.readAsks`), and
+        // every blocked pane on every poll (`Connection.readAsks`), and
         // the card reads this file only when it is drawn: a new ask filed after
         // the push that raised the card would otherwise sit unseen until the
         // next push, and a withdrawn one would leave its buttons up.

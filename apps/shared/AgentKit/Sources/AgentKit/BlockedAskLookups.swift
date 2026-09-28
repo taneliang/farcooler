@@ -18,8 +18,11 @@ import Foundation
 /// **Every poll, not only on the edge into blocked.** The daemon's `blocked`
 /// comes off the pane's screen, and claude draws its dialog before the hook's
 /// ask reaches the ring, so the first read can find nothing yet. And claude can
-/// answer one ask and raise the next between two three-second polls, which the
-/// fleet shows as blocked throughout. A read is a delta from a cached cursor
+/// answer one ask and raise the next between two polls, which the fleet shows
+/// as blocked throughout. A poll is every 3 s, or every 15 s while the runner's
+/// event channel is live (sooner when fleet news arrives), and only while the
+/// app is active: the lock screen gets buttons for an ask the app saw before
+/// the phone locked. A read is a delta from a cached cursor
 /// (see `WatchLinkHost.replay`), so reading again costs one short round trip.
 ///
 /// **Cleared on the edge out.** The daemon's own `Resolved` retires an ask that
@@ -35,6 +38,11 @@ public struct BlockedAskLookups: Sendable, Equatable {
     /// Panes with a read still running, which the next poll does not start a
     /// second read for.
     public private(set) var reading: Set<String> = []
+
+    /// Panes with a read out that started in a blocked spell which has since
+    /// ended. What those reads find is never filed, even if the pane is
+    /// blocked again by the time they finish.
+    public private(set) var stale: Set<String> = []
 
     public init() {}
 
@@ -52,21 +60,34 @@ public struct BlockedAskLookups: Sendable, Equatable {
     /// for it.
     public mutating func poll(blocked now: Set<String>) -> Step {
         let clear = blocked.subtracting(now).sorted()
+        stale.formUnion(reading.intersection(clear))
         let read = now.subtracting(reading).sorted()
         blocked = now
         reading.formUnion(read)
         return Step(read: read, clear: clear)
     }
 
+    /// The panes whose asks the poll reads: the blocked TUI panes.
+    ///
+    /// Not a chat pane. Its ask comes from ACP, which never sends `Resolved`,
+    /// so a read that lands after an answer in the chat but before the fleet
+    /// leaves blocked would file the answered ask again, and a lock screen tap
+    /// would answer it a second time. `AgentStream` files a chat pane's asks
+    /// itself, and knows when it answered them.
+    static func asking(_ terminals: [Terminal]) -> Set<String> {
+        Set(terminals.filter { $0.agent == .blocked && !$0.isAgentPane }.map(\.id))
+    }
+
     /// A read has finished, however it went. Returns whether what it found may
     /// still be filed.
     ///
     /// False when a poll that landed while the read was running said the pane
-    /// is no longer blocked. That poll has already cleared its record, and
-    /// filing a read that started before it would put the buttons back for an
-    /// ask that is over.
+    /// is no longer blocked, even if a later poll said it is blocked again.
+    /// That poll has already cleared its record, and filing a read that
+    /// started before it would put the buttons back for an ask that is over.
     public mutating func finished(_ terminal: String) -> Bool {
         reading.remove(terminal)
-        return blocked.contains(terminal)
+        let spellEnded = stale.remove(terminal) != nil
+        return !spellEnded && blocked.contains(terminal)
     }
 }

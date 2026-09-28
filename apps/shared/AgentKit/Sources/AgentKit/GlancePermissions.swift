@@ -112,7 +112,7 @@ public struct GlancePermissions: Codable, Sendable, Equatable {
     /// `recording`, for an observer that files the same pane over and over,
     /// or nil when filing would change nothing worth a write and a redraw.
     ///
-    /// The fleet poll reads every blocked pane every three seconds, so most of
+    /// The fleet poll reads every blocked pane on every poll, so most of
     /// its observations are the ask already on file: nil, and nothing written.
     ///
     /// Nil too for an ask this phone has already answered. A read that left

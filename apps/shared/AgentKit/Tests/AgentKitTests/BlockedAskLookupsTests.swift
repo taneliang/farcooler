@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import AgentKit
@@ -60,6 +61,41 @@ struct BlockedAskLookupsTests {
         _ = lookups.poll(blocked: [])
         let filed = lookups.finished("a")
         #expect(!filed)
+    }
+
+    /// Nor is one from an earlier blocked spell. Blocked, then not, then
+    /// blocked again, all while the first read was out: what it found belongs
+    /// to the spell that ended, and the new spell gets a read of its own.
+    @Test func aReadFromAnEarlierBlockedSpellIsNotFiled() {
+        var lookups = BlockedAskLookups()
+        _ = lookups.poll(blocked: ["a"])
+        _ = lookups.poll(blocked: [])
+        _ = lookups.poll(blocked: ["a"])
+        let filed = lookups.finished("a")
+        #expect(!filed)
+        #expect(lookups.poll(blocked: ["a"]).read == ["a"])
+    }
+
+    private func terminal(_ id: String, activity: String, mode: String? = nil) throws -> Terminal {
+        let pane = mode.map { "\"paneMode\":\"\($0)\"," } ?? ""
+        let json = """
+            {"id":"\(id)","short":"\(id)","title":"claude","preset":"claude",
+             "state":"running",\(pane)"activity":"\(activity)","epoch":1}
+            """
+        return try JSONDecoder().decode(Terminal.self, from: Data(json.utf8))
+    }
+
+    /// Only a blocked TUI pane is read. A chat pane's ask comes from ACP,
+    /// which never sends `Resolved`, so a read there can re-file an ask
+    /// already answered in the chat, and a lock screen tap would answer it
+    /// twice. `AgentStream` files a chat pane's asks itself.
+    @Test func onlyABlockedTUIPaneIsRead() throws {
+        let asking = BlockedAskLookups.asking([
+            try terminal("tui", activity: "blocked"),
+            try terminal("chat", activity: "blocked", mode: "agent"),
+            try terminal("idle", activity: "idle"),
+        ])
+        #expect(asking == ["tui"])
     }
 
     /// And one that finishes while the pane is still blocked is.

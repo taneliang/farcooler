@@ -1072,9 +1072,8 @@ final class Connection: ObservableObject {
     /// blocks, so a phone that was in a pocket the whole time still shows the
     /// card's tap target and no buttons.
     private func readAsks() {
-        let blocked = Set(
-            fleet.worktrees.flatMap(\.terminals).filter { $0.agent == .blocked }.map(\.id))
-        let step = askLookups.poll(blocked: blocked)
+        let step = askLookups.poll(
+            blocked: BlockedAskLookups.asking(fleet.worktrees.flatMap(\.terminals)))
         for terminal in step.clear { WatchLinkHost.record(nil, for: terminal) }
         for terminal in step.read {
             Task { [weak self] in
