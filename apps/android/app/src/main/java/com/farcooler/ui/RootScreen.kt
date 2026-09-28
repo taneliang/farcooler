@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.farcooler.model.WorktreeScope
 import com.farcooler.net.Connection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -129,13 +130,17 @@ fun RootScreen(model: AppModel) {
                 drawerContent = {
                     FleetDrawer(
                         model = model,
-                        onSelect = { ref ->
-                            model.open(ref)
+                        onNeedsYou = {
                             scope.launch { drawer.close() }
+                            model.goHome()
                         },
-                        onOpenBoard = { row ->
+                        onOpenWorkspace = { row ->
                             scope.launch { drawer.close() }
-                            model.openWorkspace(row.hostId, row.key, WorkspaceTab.BOARD)
+                            model.openWorkspace(row.hostId, row.workspace.id)
+                        },
+                        onOpenWorktrees = { host, repository, hidden ->
+                            scope.launch { drawer.close() }
+                            model.navigate(Route.Worktrees(host, repository, hidden))
                         },
                         onSettings = {
                             scope.launch { drawer.close() }
@@ -245,14 +250,7 @@ private fun Ground(model: AppModel, route: Route, visible: Boolean, onOpenDrawer
             // `Route.isOverlay` rather than something to draw; the front door
             // is what `Backstack.ROOT` degrades to, so it is what this degrades
             // to as well.
-            else -> NeedsYouScreen(
-                model = model,
-                onSelect = { model.open(it) },
-                onReviewChanges = { host, worktree -> model.openChanges(host, worktree) },
-                onOpenWorktrees = onOpenDrawer,
-                onOpenBoard = { model.openWorkspace(it.hostId, it.key, WorkspaceTab.BOARD) },
-                onOpenDrawer = onOpenDrawer,
-            )
+            else -> NeedsYouScreen(model = model, onOpenDrawer = onOpenDrawer)
         }
     }
 }
@@ -290,11 +288,11 @@ private fun OverlayScreen(model: AppModel, route: Route, connections: List<Conne
 
         is Route.Devices -> DevicesScreen(model, onBack = { model.back() })
 
-        is Route.Worktrees -> FleetScreen(
+        is Route.Worktrees -> WorktreesScreen(
             model = model,
+            scope = WorktreeScope.OfRepository(route.hostId, route.repositoryId, route.hidden),
+            title = worktreesTitle(route.hidden),
             onSelect = { model.open(it) },
-            onOpenBoard = { model.openWorkspace(it.hostId, it.key, WorkspaceTab.BOARD) },
-            onOpenDrawer = {},
             onBack = { model.back() },
         )
 

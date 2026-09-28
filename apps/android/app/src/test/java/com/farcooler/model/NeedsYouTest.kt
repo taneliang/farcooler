@@ -8,19 +8,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The front door's wire decode, its merge across runners, and its ordering.
+ * The front door: the inbox counts' decode, then the rollup as the front door
+ * renders it — items labeled by workspace and merged by rank, what "Nothing
+ * needs you" may claim, an older runner's derived items, the Workspaces list,
+ * and each item's buttons.
  *
- * All three are pure, which is why they live in `model/` rather than inside the
- * composable — a phone can prove none of this and a JVM can prove all of it.
- * What is deliberately NOT here is anything about layout: no emulator or device
- * was available for this work.
+ * All pure, which is why they live in `model/` rather than inside the
+ * composable: a phone can prove none of this and a JVM can prove all of it.
  *
- * The rank numbers below are real ones. `farcooler_core::feed::rank` is
- * `tier * 100_000_000 + (100_000_000 - 1 - age_seconds)`, with blocked in tier
- * 0 and done-or-failed in tier 1, so a blocked agent's rank is always about
- * 10⁸ below a finished one's and an OLDER state inside a tier gets the SMALLER
- * number. Writing them out rather than naming them is the point: these tests
- * pass only if this app reads that arithmetic the way the host wrote it.
+ * The rank numbers below are real ones: the item scale is a tier per kind —
+ * ask, blocked, decision, review — `100_000_000` wide, then the OLDEST first
+ * inside a tier (spec §2.2). Writing them out rather than naming them is the
+ * point: these pass only if this app reads that arithmetic the way the runner
+ * wrote it.
  */
 class NeedsYouTest {
     // ---- the wire ----
@@ -108,411 +108,234 @@ class NeedsYouTest {
         assertTrue(InboxRow("w", insertions = 0, deletions = 4).hasDiff)
     }
 
-    // ---- what gets a section ----
+    // ---- the items ----
 
+    /**
+     * Spec §6.2: "each item is a row labeled with its workspace", in one list
+     * across runners, by rank. The ask on the second runner is the most urgent
+     * thing in the fleet and comes first, above the first runner's decision,
+     * whichever runner was listed first; and each row names its workspace —
+     * the one the runner sent, the one this phone knows by id, the repository
+     * on a runner without workspaces, or Unclaimed.
+     */
     @Test
-    fun `only agents that want attention put a worktree on the front door`() {
-        val sections = needsYou(
-            listOf(
-                input("a", worktree("w1", terminals = listOf(agent("t1", "working", 250_000_000)))),
-                input("a", worktree("w2", terminals = listOf(agent("t2", "idle", 350_000_000)))),
-                input("a", worktree("w3", terminals = listOf(agent("t3", "blocked", 99_999_399)))),
-            )
+    fun `items are labeled by workspace and ordered by rank`() {
+        val studio = runner(
+            "studio",
+            items = listOf(
+                item("decision:t1", "decision", rank = 299_999_699, workspaceId = "ws-billing", workspaceName = "Billing"),
+                item("review:t2", "review", rank = 399_996_399, workspaceId = null, repositoryId = "repo"),
+            ),
+            workspaces = listOf(WorkspaceSummary(id = "ws-billing", name = "Billing", repository = "repo")),
         )
-        assertEquals(listOf("w3"), sections.map { it.worktree.id })
+        val box = runner(
+            "build-box",
+            // The runner sent no name for its workspace; this phone knows it.
+            items = listOf(item("ask:a1", "ask", rank = 99_999_989, workspaceId = "ws-main")),
+            workspaces = listOf(WorkspaceSummary(id = "ws-main", name = "Main", isMain = true, repository = "r2")),
+        )
+        val older = runner(
+            "old",
+            items = listOf(item("blocked:p", "blocked", rank = 100_000_050, workspaceId = null, repositoryId = "r3")),
+            workspaces = null,
+            repositories = listOf(Repository(id = "r3", displayName = "overnight")),
+        )
+
+        val rows = NeedsYou.rows(listOf(studio, box, older))
+        assertEquals(listOf("ask:a1", "blocked:p", "decision:t1", "review:t2"), rows.map { it.item.id })
+        assertEquals(listOf("Main", "overnight", "Billing", "Unclaimed"), rows.map { it.place })
+        assertEquals(listOf("build-box", "old", "studio", "studio"), rows.map { it.runner })
+
+        // One runner is named nowhere: its name says nothing about which row is which.
+        assertEquals(listOf(null, null), NeedsYou.rows(listOf(studio)).map { it.runner })
     }
 
     /**
-     * The exact case `e480559` added on iOS: an agent that finished and touched
-     * no files. Nothing else brings its worktree here, and the owner's words
-     * are that an answer arriving is the thing this screen most needs to say.
+     * The sentence is a claim about every item, so a decision alone keeps it
+     * off the screen. The old front door said "Nothing needs you" over a Board
+     * row counting a decision in amber (ov-56).
      */
     @Test
-    fun `a finished agent gets a section even with no diff behind it`() {
-        val sections = needsYou(
-            listOf(
-                input(
-                    "a",
-                    worktree("w1", terminals = listOf(agent("t1", "done", 199_999_989))),
-                    counts = InboxRow("w1", changedSinceReviewed = false),
-                )
-            )
-        )
-        assertEquals(1, sections.size)
-        assertEquals(listOf("t1"), sections[0].finished.map { it.id })
-        assertTrue(sections[0].blocked.isEmpty())
-    }
-
-    @Test
-    fun `hidden worktrees are not on the front door however loudly they ask`() {
-        val sections = needsYou(
-            listOf(
-                input(
-                    "a",
-                    worktree(
-                        "w1",
-                        state = "hidden",
-                        terminals = listOf(agent("t1", "blocked", 99_999_399)),
-                    ),
-                )
-            )
-        )
-        assertTrue(sections.isEmpty())
+    fun `nothing needs you is never shown above a decision`() {
+        val deciding = runner("h", items = listOf(item("decision:t", "decision", rank = 299_000_000)))
+        val reviewing = runner("h", items = listOf(item("review:t", "review", rank = 399_000_000)))
+        assertFalse(NeedsYou.nothingNeedsYou(NeedsYou.rows(listOf(deciding))))
+        assertFalse(NeedsYou.nothingNeedsYou(NeedsYou.rows(listOf(reviewing))))
+        assertTrue(NeedsYou.nothingNeedsYou(NeedsYou.rows(listOf(runner("h", items = emptyList())))))
+        // A runner that hasn't answered adds nothing, and invents nothing.
+        assertTrue(NeedsYou.nothingNeedsYou(NeedsYou.rows(listOf(NeedsYouRunner("h", "h", reading = null)))))
     }
 
     /**
-     * Both halves of the second tier, and they are not the same condition.
-     * `hasDiff` stays true after you have read it; `changedSinceReviewed` is
-     * what makes this an inbox rather than a list of every branch in flight.
+     * Ruling 1: a finished agent is not an item. On a runner too old to send
+     * its items, only its blocked agents are derived — the Done agent beside
+     * the blocked one keeps its glyph and its notification, and isn't here.
+     * The old front door listed it under its worktree.
      */
     @Test
-    fun `an unread diff needs both a change and a diff`() {
-        fun only(counts: InboxRow?) = needsYou(listOf(input("a", worktree("w1"), counts)))
-
-        assertEquals(1, only(InboxRow("w1", true, 5, 1)).size)
-        assertTrue("reviewed", only(InboxRow("w1", false, 5, 1)).isEmpty())
-        assertTrue("nothing changed", only(InboxRow("w1", true, 0, 0)).isEmpty())
-        assertTrue("never answered", only(null).isEmpty())
-    }
-
-    // ---- ordering ----
-
-    /**
-     * Blocked above done, and this app does not arrange it. Both agents are
-     * `wantsAttention`; the only thing separating them is the number the host
-     * computed, and the done agent is deliberately given the alphabetically
-     * earlier id so that nothing but rank can produce this order.
-     */
-    @Test
-    fun `blocked outranks done across worktrees, from the hosts rank alone`() {
-        val sections = needsYou(
-            listOf(
-                input("a", worktree("aaa", terminals = listOf(agent("t1", "done", 199_999_989)))),
-                input("a", worktree("zzz", terminals = listOf(agent("t2", "blocked", 99_999_939)))),
-            )
-        )
-        assertEquals(listOf("zzz", "aaa"), sections.map { it.worktree.id })
-    }
-
-    /** The same rule inside one section, which is the other half of what rank buys. */
-    @Test
-    fun `blocked above finished inside one worktree`() {
-        val section = needsYou(
-            listOf(
-                input(
-                    "a",
-                    worktree(
-                        "w1",
-                        terminals = listOf(
-                            agent("done-1", "done", 199_999_989),
-                            agent("blocked-1", "blocked", 99_999_939),
-                        ),
-                    ),
-                )
-            )
-        ).single()
-        assertEquals(listOf("blocked-1"), section.blocked.map { it.id })
-        assertEquals(listOf("done-1"), section.finished.map { it.id })
-    }
-
-    /**
-     * A worktree is as urgent as its MOST urgent agent. An average or a count
-     * would let a worktree with six working agents outrank one with a single
-     * agent stuck for an hour.
-     */
-    @Test
-    fun `a worktree ranks by its lowest rank, not by how many agents it has`() {
-        val sections = needsYou(
-            listOf(
-                input(
-                    "a",
-                    worktree(
-                        "many",
-                        terminals = listOf(
-                            agent("m1", "done", 199_999_900),
-                            agent("m2", "done", 199_999_901),
-                            agent("m3", "done", 199_999_902),
-                        ),
+    fun `a finished agent is not an item`() {
+        val fleet = Fleet(
+            worktrees = listOf(
+                Worktree(
+                    id = "w",
+                    repository = "repo",
+                    terminals = listOf(
+                        agent("stuck", "blocked", rank = 60),
+                        agent("finished", "done", rank = 100_000_030),
+                        agent("busy", "working", rank = 200_000_000),
                     ),
                 ),
-                input(
-                    "a",
-                    // One agent, blocked for ten minutes.
-                    worktree("stuck", terminals = listOf(agent("s1", "blocked", 99_999_399))),
-                ),
-            )
+            ),
         )
-        assertEquals(listOf("stuck", "many"), sections.map { it.worktree.id })
-    }
-
-    /** Oldest first inside a tier, which is what the host's subtraction encodes. */
-    @Test
-    fun `the agent stuck longest sorts first inside a section`() {
-        val section = needsYou(
-            listOf(
-                input(
-                    "a",
-                    worktree(
-                        "w1",
-                        terminals = listOf(
-                            // Blocked one minute.
-                            agent("recent", "blocked", 99_999_939),
-                            // Blocked ten minutes: a SMALLER number.
-                            agent("ancient", "blocked", 99_999_399),
-                        ),
-                    ),
-                )
-            )
-        ).single()
-        assertEquals(listOf("ancient", "recent"), section.blocked.map { it.id })
-    }
-
-    /**
-     * A daemon too old to send `rank` must not be able to outrank a known
-     * blocked agent. `Terminal.sortRank` answers `Long.MAX_VALUE`, and this
-     * pins that the front door respects it.
-     */
-    @Test
-    fun `an agent with no rank sorts last rather than first`() {
-        val section = needsYou(
-            listOf(
-                input(
-                    "a",
-                    worktree(
-                        "w1",
-                        terminals = listOf(
-                            agent("unranked", "blocked", null),
-                            agent("ranked", "blocked", 99_999_939),
-                        ),
-                    ),
-                )
-            )
-        ).single()
-        assertEquals(listOf("ranked", "unranked"), section.blocked.map { it.id })
-    }
-
-    /**
-     * A finished agent goes above an unread diff. The perishable thing above
-     * the durable one: a finished turn expires the moment somebody reads it, a
-     * diff was true before the app was opened and stays true until it is.
-     */
-    @Test
-    fun `a finished agent outranks an unread diff`() {
-        val sections = needsYou(
-            listOf(
-                input("a", worktree("diff"), InboxRow("diff", true, 200, 40)),
-                input("a", worktree("answer", terminals = listOf(agent("t", "done", 199_999_989)))),
-            )
+        val reading = NeedsYou.derivedReading(fleet)
+        assertTrue(reading.derived)
+        val rows = NeedsYou.rows(listOf(NeedsYouRunner("h", "old", reading, fleet)))
+        assertEquals(listOf("blocked:stuck"), rows.map { it.item.id })
+        assertEquals(listOf("old"), NeedsYou.olderRunners(listOf(NeedsYouRunner("h", "old", reading, fleet))))
+        assertEquals(
+            "Update Far Cooler on old to see decisions and asks here.",
+            NeedsYou.olderRunnerNote("old"),
         )
-        assertEquals(listOf("answer", "diff"), sections.map { it.worktree.id })
     }
 
-    /** The second tier keeps the order the fleet arrived in, with no rank invented for it. */
+    // ---- the Workspaces list ----
+
+    /**
+     * Each repository's workspaces, Main first, each with its orchestrator and
+     * its count; an empty Main still has its row (spec §8); worktrees nobody
+     * owns are Unclaimed, hidden ones are Hidden, and an item nobody owns
+     * counts under Unclaimed.
+     */
     @Test
-    fun `unread diffs keep fleet order`() {
-        val sections = needsYou(
-            listOf(
-                input("b", worktree("second"), InboxRow("second", true, 1, 1)),
-                input("a", worktree("first"), InboxRow("first", true, 900, 900)),
-            )
+    fun `the workspaces list counts items and keeps an empty workspace`() {
+        val orchestrator = Terminal(id = "o", preset = "claude", state = "running", role = "orchestrator", workspace = "ws-b")
+        val fleet = Fleet(
+            worktrees = listOf(
+                Worktree(id = "main-co", repository = "repo", workspace = "ws-main", terminals = listOf(orchestrator)),
+                Worktree(id = "w-b", repository = "repo", workspace = "ws-b"),
+                Worktree(id = "w-loose", repository = "repo"),
+                Worktree(id = "w-hid", repository = "repo", workspace = "ws-b", state = "hidden"),
+            ),
+            workspaces = listOf(
+                WorkspaceSummary(id = "ws-b", name = "Billing", ordinal = 1, repository = "repo"),
+                WorkspaceSummary(id = "ws-main", name = "Main", isMain = true, repository = "repo"),
+                WorkspaceSummary(id = "ws-empty", name = "Search", ordinal = 2, repository = "repo"),
+            ),
         )
-        assertEquals(listOf("second", "first"), sections.map { it.worktree.id })
-    }
-
-    // ---- across runners ----
-
-    /**
-     * The whole point of the merge. Runner `a` is listed first and its agent
-     * merely finished; runner `b`'s agent is blocked, and it goes on top.
-     * Nothing about which machine a pane is on is allowed to affect where it
-     * sorts.
-     */
-    @Test
-    fun `a blocked agent on the second runner outranks a finished one on the first`() {
-        val sections = needsYou(
-            listOf(
-                input("a", worktree("w-a", terminals = listOf(agent("t-a", "done", 199_999_989)))),
-                input("b", worktree("w-b", terminals = listOf(agent("t-b", "blocked", 99_999_939)))),
-            )
+        val runner = NeedsYouRunner(
+            "h", "h",
+            RunnerNeedsYou(
+                listOf(
+                    item("ask:1", "ask", 1, workspaceId = "ws-b", repositoryId = "repo"),
+                    item("decision:2", "decision", 300_000_000, workspaceId = "ws-b", repositoryId = "repo"),
+                    item("review:3", "review", 400_000_000, workspaceId = null, repositoryId = "repo"),
+                )
+            ),
+            fleet,
+            listOf(Repository(id = "repo", displayName = "overnight"), Repository(id = "bare", displayName = "bare")),
         )
-        assertEquals(listOf("b", "a"), sections.map { it.hostId })
+        val merged = NeedsYou.rows(listOf(runner)).map { it.entry }
+        val sections = NeedsYou.workspaces(runner, merged)
+
+        val repo = sections.first { it.repository == "repo" }
+        assertEquals("overnight", repo.name)
+        assertEquals(listOf("Main", "Billing", "Search"), repo.workspaces.map { it.name })
+        assertEquals(listOf(0, 2, 0), repo.workspaces.map { it.count })
+        assertEquals("o", repo.workspaces[1].orchestrator?.id)
+        assertNull(repo.workspaces[0].orchestrator)
+        assertEquals(listOf("w-loose"), repo.unclaimed)
+        assertEquals(1, repo.unclaimedCount)
+        assertEquals(listOf("w-hid"), repo.hidden)
+
+        // A registered repository with nothing in it still has its board's row.
+        val bare = sections.first { it.repository == "bare" }
+        assertEquals(listOf("bare"), bare.workspaces.map { it.name })
+        assertTrue(bare.workspaces.single().workspace.isImplicit)
     }
 
-    /**
-     * Ranks from two daemons are directly comparable, because both terms of
-     * `feed::rank` — the tier and the state's AGE in seconds — are quantities
-     * neither machine's wall clock enters. Two agents blocked for the same
-     * length of time on two runners produce the identical integer, which is
-     * exactly the collision the tiebreak exists for.
-     */
+    /** What each list of worktrees holds: a workspace's own, its Unclaimed, its Hidden. */
     @Test
-    fun `identical ranks on two runners break deterministically and not by input order`() {
-        val a = input("alpha", worktree("w", terminals = listOf(agent("t", "blocked", 99_999_939))))
-        val b = input("beta", worktree("w", terminals = listOf(agent("t", "blocked", 99_999_939))))
+    fun `a scope holds its own worktrees and hidden ones only under Hidden`() {
+        val fleet = Fleet(workspaces = listOf(WorkspaceSummary(id = "ws", repository = "repo")))
+        val mine = Worktree(id = "a", repository = "repo", workspace = "ws")
+        val loose = Worktree(id = "b", repository = "repo")
+        val hidden = Worktree(id = "c", repository = "repo", state = "hidden")
+        val elsewhere = Worktree(id = "d", repository = "other")
+        val hiddenMine = Worktree(id = "e", repository = "repo", workspace = "ws", state = "hidden")
+        val all = listOf(mine, loose, hidden, elsewhere, hiddenMine)
+        fun ids(scope: WorktreeScope) = all.filter { scope.includes(it, fleet) }.map { it.id }
 
-        assertEquals(listOf("alpha", "beta"), needsYou(listOf(a, b)).map { it.hostId })
-        assertEquals(listOf("alpha", "beta"), needsYou(listOf(b, a)).map { it.hostId })
-    }
-
-    /**
-     * Worktree ids are minted per daemon, so two runners can hold the same one.
-     * `BackstackTest` pins that the routes stay apart; this pins that the front
-     * door's own identity does too, because that string is what a `LazyColumn`
-     * keys its items on and a collision there would draw one section for two
-     * worktrees.
-     */
-    @Test
-    fun `two runners sharing a worktree id are two sections with two keys`() {
-        val sections = needsYou(
-            listOf(
-                input("a", worktree("shared", terminals = listOf(agent("t", "blocked", 99_999_939)))),
-                input("b", worktree("shared", terminals = listOf(agent("t", "blocked", 99_999_938)))),
-            )
+        assertEquals(listOf("a"), ids(WorktreeScope.OfWorkspace("h", WorkspaceSummary(id = "ws", repository = "repo"))))
+        assertEquals(listOf("b"), ids(WorktreeScope.OfRepository("h", "repo", hidden = false)))
+        assertEquals(listOf("c", "e"), ids(WorktreeScope.OfRepository("h", "repo", hidden = true)))
+        // A runner without workspaces: the implicit workspace holds them all.
+        assertEquals(
+            listOf("a", "b"),
+            all.filter { WorktreeScope.OfWorkspace("h", WorkspaceSummary.implicit("repo")).includes(it, Fleet()) }.map { it.id },
         )
-        assertEquals(2, sections.size)
-        assertEquals(setOf("a/shared", "b/shared"), sections.map { it.key }.toSet())
     }
 
-    /** Every section carries its runner's name, for the header that shows it. */
+    // ---- answering ----
+
+    /** Spec §2.5, per kind, and a Read-scoped reader gets Open and nothing that writes. */
     @Test
-    fun `a section carries the runner it came from`() {
-        val section = needsYou(
-            listOf(
-                input(
-                    "host-1",
-                    worktree("w", terminals = listOf(agent("t", "blocked", 99_999_939))),
-                    label = "studio",
-                )
-            )
-        ).single()
-        assertEquals("host-1", section.hostId)
-        assertEquals("studio", section.hostLabel)
+    fun `each kind offers its own buttons`() {
+        val allow = NeedsYouAction("allow", "Allow", primary = true)
+        val deny = NeedsYouAction("deny", "Deny", destructive = true)
+        val ask = item("ask:1", "ask", 1).copy(askId = "hook-ask-1", actions = listOf(deny, allow))
+        assertEquals(listOf(NeedsYouButton.Answer(deny), NeedsYouButton.Answer(allow)), NeedsYouAnswer.buttons(ask, mayAnswer = true))
+        assertEquals(listOf(NeedsYouButton.Open("Open")), NeedsYouAnswer.buttons(ask, mayAnswer = false))
+
+        val options = (1..5).map { NeedsYouAction("o$it", "o$it") }
+        val decision = item("decision:t", "decision", 3).copy(actions = options)
+        assertEquals(
+            options.take(3).map(NeedsYouButton::Answer) + NeedsYouButton.More(options.drop(3)),
+            NeedsYouAnswer.buttons(decision, mayAnswer = true),
+        )
+        assertEquals(listOf(NeedsYouButton.Write), NeedsYouAnswer.buttons(decision.copy(actions = emptyList()), true))
+        assertEquals(listOf(NeedsYouButton.Open("Open")), NeedsYouAnswer.buttons(decision, mayAnswer = false))
+
+        // The inbox opens a review; it never approves one (ruling 2).
+        val review = item("review:t", "review", 4).copy(actions = listOf(NeedsYouAction("open", "Open")))
+        assertEquals(listOf(NeedsYouButton.Open("Review")), NeedsYouAnswer.buttons(review, mayAnswer = true))
+        assertEquals(listOf(NeedsYouButton.Open("Open")), NeedsYouAnswer.buttons(item("blocked:p", "blocked", 2), true))
     }
 
-    // ---- the diff row ----
-
-    /**
-     * Nil counts and zero counts are different states and get opposite answers.
-     * "Not told yet" draws the row without numbers; "told, and it is clean"
-     * draws nothing.
-     */
     @Test
-    fun `the changes row is present while unanswered and absent once called clean`() {
-        fun showsChanges(counts: InboxRow?) = needsYou(
-            listOf(
-                input(
-                    "a",
-                    worktree("w", terminals = listOf(agent("t", "blocked", 99_999_939))),
-                    counts,
-                )
-            )
-        ).single().showsChanges
-
-        assertTrue("no answer yet is not an answer of zero", showsChanges(null))
-        assertFalse(showsChanges(InboxRow("w", changedSinceReviewed = true)))
-        assertTrue(showsChanges(InboxRow("w", changedSinceReviewed = false, insertions = 1)))
-    }
-
-    /** Ordinals come with the section, computed once rather than once per row. */
-    @Test
-    fun `two panes with the same name are numbered`() {
-        val section = needsYou(
-            listOf(
-                input(
-                    "a",
-                    worktree(
-                        "w",
-                        terminals = listOf(
-                            agent("t1", "blocked", 99_999_939, preset = "claude"),
-                            agent("t2", "blocked", 99_999_938, preset = "claude"),
-                        ),
-                    ),
-                )
-            )
-        ).single()
-        assertEquals(1, section.ordinals["t1"])
-        assertEquals(2, section.ordinals["t2"])
-    }
-
-    // ---- the sentences a truncated group puts under itself ----
-
-    @Test
-    fun `blocked overflow counts in words`() {
-        assertEquals("1 more agent needs you", blockedOverflow(1))
-        assertEquals("4 more agents need you", blockedOverflow(4))
-    }
-
-    /**
-     * A failure must never be swept into "finished", least of all here — the
-     * only place on this screen where agents are counted instead of shown.
-     */
-    @Test
-    fun `finished overflow says failed when any of the hidden ones did`() {
-        val ok = agent("a", "done", 199_999_989)
-        val died = agent("b", "done", 199_999_988).copy(turnFailed = true)
-
-        assertEquals("1 more agent finished", finishedOverflow(listOf(ok)))
-        assertEquals("2 more agents finished", finishedOverflow(listOf(ok, ok)))
-        assertEquals("1 more agent failed", finishedOverflow(listOf(died)))
-        assertEquals("2 more agents failed", finishedOverflow(listOf(died, died)))
-        assertEquals("3 more agents finished, 1 failed", finishedOverflow(listOf(ok, ok, died)))
-    }
-
-    /** A `done` agent whose turn did NOT fail is not counted as one that did. */
-    @Test
-    fun `an absent turnFailed is not a failure`() {
-        assertNull(agent("a", "done", 1).turnFailed)
-        assertEquals("1 more agent finished", finishedOverflow(listOf(agent("a", "done", 1))))
-    }
-
-    // ---- a board's decision ----
-
-    /**
-     * **A board decision needs you** (ov-56). "Nothing needs you" was drawn
-     * above a Board row counting a decision in amber, because the front door
-     * asked only the agents. A task in Needs Decision is waiting on you as
-     * surely as a blocked agent is, so the screen is quiet only when neither
-     * is, and the deciding boards are drawn with what needs you rather than
-     * below it.
-     *
-     * Mutation: the quiet check ignoring the boards. Red.
-     */
-    @Test
-    fun `a board decision is something that needs you`() {
-        val deciding = BoardRow("h", "r", "Billing", decisions = 2, agents = 0)
-        val quiet = BoardRow("h", "r", "Main", decisions = 0, agents = 1)
-        assertFalse(nothingNeedsYou(emptyList(), listOf(quiet, deciding)))
-        assertTrue(nothingNeedsYou(emptyList(), listOf(quiet)))
-        assertTrue(nothingNeedsYou(emptyList(), emptyList()))
-        val blocked = needsYou(listOf(input("h", worktree("w", terminals = listOf(agent("a", "blocked", 1))))))
-        assertFalse(nothingNeedsYou(blocked, listOf(quiet)))
-
-        assertEquals(listOf(deciding), boardsNeedingYou(listOf(quiet, deciding)))
+    fun `a refused answer says which refusal`() {
+        assertEquals("Someone already answered this.", NeedsYouAnswer.refusal("not_held", "claude"))
+        assertEquals("Couldn’t reach claude. Try again.", NeedsYouAnswer.refusal("not_delivered", "claude"))
+        assertEquals("Couldn’t send that answer. Try again.", NeedsYouAnswer.refusal(null, "claude"))
     }
 
     // ---- fixtures ----
 
-    private fun input(
+    private fun runner(
         hostId: String,
-        worktree: Worktree,
-        counts: InboxRow? = null,
-        label: String = hostId,
-    ) = NeedsYouInput(hostId, label, worktree, counts)
+        items: List<NeedsYouItem>,
+        workspaces: List<WorkspaceSummary>? = emptyList(),
+        repositories: List<Repository> = emptyList(),
+    ) = NeedsYouRunner(hostId, hostId, RunnerNeedsYou(items), Fleet(workspaces = workspaces), repositories)
 
-    private fun worktree(
+    private fun item(
         id: String,
-        state: String = "",
-        terminals: List<Terminal> = emptyList(),
-    ) = Worktree(id = id, task = id, branch = "feat/$id", state = state, terminals = terminals)
-
-    private fun agent(
-        id: String,
-        activity: String,
-        rank: Long?,
-        preset: String = "claude",
-    ) = Terminal(
+        kind: String,
+        rank: Long,
+        workspaceId: String? = null,
+        workspaceName: String = "",
+        repositoryId: String? = null,
+    ) = NeedsYouItem(
         id = id,
-        preset = preset,
+        kind = kind,
+        rank = rank,
+        workspaceId = workspaceId,
+        workspaceName = workspaceName,
+        repositoryId = repositoryId,
+    )
+
+    private fun agent(id: String, activity: String, rank: Long?) = Terminal(
+        id = id,
+        preset = "claude",
         state = "running",
         activity = activity,
         rank = rank,

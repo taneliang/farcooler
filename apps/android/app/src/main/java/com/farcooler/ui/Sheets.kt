@@ -47,6 +47,7 @@ import com.farcooler.model.TaskSlug
 import com.farcooler.model.TerminalPresets
 import com.farcooler.model.Trouble
 import com.farcooler.model.Worktree
+import com.farcooler.model.WorkspaceSummary
 import com.farcooler.net.Connection
 import com.farcooler.net.rethrowIfCancellation
 import com.farcooler.core.refusalWord
@@ -236,7 +237,17 @@ fun RunnerEditorSheet(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
+fun QuickTaskSheet(
+    model: AppModel,
+    onDismiss: () -> Unit,
+    /**
+     * The workspace whose screen this was opened from: the runner and the
+     * repository are its, and the new worktree is claimed for it (ruling 8).
+     * Null asks for both, and the runner claims for Main.
+     */
+    workspace: WorkspaceSummary? = null,
+    hostId: String? = null,
+) {
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     val connections by model.fleet.active.collectAsStateWithLifecycle()
@@ -251,6 +262,7 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
     var working by remember { mutableStateOf(false) }
 
     val connected = connections.filter { it.phase.value is Connection.Phase.Connected }
+        .filter { hostId == null || it.host.id == hostId }
     val connection = connected.getOrNull(runnerIndex.coerceIn(0, (connected.size - 1).coerceAtLeast(0)))
     val repositories by (connection?.repositories
         ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList())).collectAsStateWithLifecycle()
@@ -260,8 +272,10 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
         ?: kotlinx.coroutines.flow.MutableStateFlow(Connection.DEFAULT_BRANCH_PREFIX))
         .collectAsStateWithLifecycle()
 
-    LaunchedEffect(repositories) {
-        if (repositories.none { it.id == repositoryId }) {
+    LaunchedEffect(repositories, workspace) {
+        val pinned = workspace?.repository
+        if (pinned != null) repositoryId = pinned
+        else if (repositories.none { it.id == repositoryId }) {
             repositoryId = repositories.firstOrNull()?.id.orEmpty()
         }
     }
@@ -275,7 +289,10 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
                 .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Quick task", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                workspace?.let { "New worktree in ${it.name}" } ?: "New worktree",
+                style = MaterialTheme.typography.headlineSmall,
+            )
 
             OutlinedTextField(
                 value = text,
@@ -306,9 +323,9 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
                 ) { id -> runnerIndex = connected.indexOfFirst { it.host.id == id } }
             }
 
-            if (repositories.size > 1) {
+            if (workspace == null && repositories.size > 1) {
                 Picker(
-                    label = "Project",
+                    label = "Repository",
                     options = repositories.map { it.id to it.displayName },
                     selected = repositoryId,
                     enabled = !working,
@@ -364,6 +381,7 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
                                 // below, so the worktree must not also come up
                                 // with an unused shell beside it.
                                 terminal = "",
+                                workspace = workspace?.boardWorkspace,
                             )
                         }.getOrElse {
                             // One sentence about the step, and the runner's
@@ -482,14 +500,21 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
     }
 }
 
-/** The form next to Quick Task, for a worktree you want to name yourself. */
+/** The form beside New Worktree, for a worktree you want to name yourself. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NewWorktreeSheet(model: AppModel, onDismiss: () -> Unit) {
+fun NewWorktreeSheet(
+    model: AppModel,
+    onDismiss: () -> Unit,
+    /** As [QuickTaskSheet]'s: the workspace to claim the worktree for, and its runner. */
+    workspace: WorkspaceSummary? = null,
+    hostId: String? = null,
+) {
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     val connections by model.fleet.active.collectAsStateWithLifecycle()
     val connected = connections.filter { it.phase.value is Connection.Phase.Connected }
+        .filter { hostId == null || it.host.id == hostId }
 
     var runnerId by remember { mutableStateOf(connected.firstOrNull()?.host?.id.orEmpty()) }
     val connection = connected.firstOrNull { it.host.id == runnerId } ?: connected.firstOrNull()
@@ -533,8 +558,10 @@ fun NewWorktreeSheet(model: AppModel, onDismiss: () -> Unit) {
         if (trimmedName.isEmpty()) "" else TaskSlug.slug(trimmedName, branchPrefix)
     val effectiveBranch = branch.trim().ifEmpty { suggestedBranch }
 
-    LaunchedEffect(repositories) {
-        if (repositories.none { it.id == repositoryId }) {
+    LaunchedEffect(repositories, workspace) {
+        val pinned = workspace?.repository
+        if (pinned != null) repositoryId = pinned
+        else if (repositories.none { it.id == repositoryId }) {
             repositoryId = repositories.firstOrNull()?.id.orEmpty()
         }
     }
@@ -553,7 +580,10 @@ fun NewWorktreeSheet(model: AppModel, onDismiss: () -> Unit) {
                 .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("New worktree", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                workspace?.let { "Name a new worktree in ${it.name}" } ?: "Name a new worktree",
+                style = MaterialTheme.typography.headlineSmall,
+            )
 
             if (connected.size > 1) {
                 Picker(
@@ -563,12 +593,14 @@ fun NewWorktreeSheet(model: AppModel, onDismiss: () -> Unit) {
                     enabled = !working,
                 ) { runnerId = it }
             }
-            Picker(
-                label = "Project",
-                options = repositories.map { it.id to it.displayName },
-                selected = repositoryId,
-                enabled = !working,
-            ) { repositoryId = it }
+            if (workspace == null) {
+                Picker(
+                    label = "Repository",
+                    options = repositories.map { it.id to it.displayName },
+                    selected = repositoryId,
+                    enabled = !working,
+                ) { repositoryId = it }
+            }
 
             val resuming = adopting
             if (resuming != null) {
@@ -616,6 +648,7 @@ fun NewWorktreeSheet(model: AppModel, onDismiss: () -> Unit) {
                                     resuming.name,
                                     resuming.name,
                                     adopt = true,
+                                    workspace = workspace?.boardWorkspace,
                                 )
                             }.onFailure {
                                 // `runCatching` catches the one throwable that
@@ -711,7 +744,12 @@ fun NewWorktreeSheet(model: AppModel, onDismiss: () -> Unit) {
                     working = true
                     scope.launch {
                         runCatching {
-                            target.createWorktree(repositoryId, trimmedName, effectiveBranch)
+                            target.createWorktree(
+                                repositoryId,
+                                trimmedName,
+                                effectiveBranch,
+                                workspace = workspace?.boardWorkspace,
+                            )
                         }.onFailure {
                             // See the adoption arm above: `runCatching` catches
                             // cancellation too, and a sheet dismissed mid-call
@@ -721,7 +759,7 @@ fun NewWorktreeSheet(model: AppModel, onDismiss: () -> Unit) {
                             // core said about a path or a branch was set in the
                             // face this sheet writes its own refusals in — the
                             // two above this button among them. Same sentence
-                            // as Quick Task's, because it is the same failure.
+                            // as the describe-it sheet's, because it is the same failure.
                             failure = troubleAfter(
                                 it.refusalWord, it.message, "Couldn’t create the worktree.")
                             working = false

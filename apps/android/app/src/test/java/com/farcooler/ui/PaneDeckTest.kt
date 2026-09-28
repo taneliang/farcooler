@@ -168,7 +168,7 @@ class PaneDeckTest {
      * decision with an argument behind it:
      *
      *   - THREE is what "the agents I am working with" means in one worktree,
-     *     the same answer `AGENTS_PER_WORKTREE` reached independently.
+     *     the same answer the front door's old per-worktree limit reached.
      *   - TWO more are the shell's track, which draws the pane you are on with
      *     a real neighbour either side — that is what makes an incoming
      *     terminal a terminal rather than a placeholder that appears on commit

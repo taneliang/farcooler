@@ -4,7 +4,6 @@ import com.farcooler.data.Runner
 import com.farcooler.data.RunnerStore
 import com.farcooler.data.Settings
 import com.farcooler.model.InboxRow
-import com.farcooler.model.NeedsYouInput
 import com.farcooler.model.Terminal
 import com.farcooler.model.Worktree
 import kotlinx.coroutines.CoroutineScope
@@ -44,10 +43,7 @@ data class FleetEntry(
      * for why that map is keyed by worktree alone.
      */
     val counts: InboxRow? = null,
-) {
-    /** This entry as the front door's derivation wants it. See `model/NeedsYou.kt`. */
-    fun needsYouInput() = NeedsYouInput(host.id, host.displayLabel, worktree, counts)
-}
+)
 
 /**
  * Every configured runner, connected at once.

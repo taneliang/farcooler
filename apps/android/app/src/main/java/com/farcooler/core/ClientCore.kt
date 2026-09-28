@@ -33,8 +33,16 @@ import java.util.concurrent.ConcurrentHashMap
  * is produced, and half a dozen screens were reduced to matching substrings of
  * a Rust `Display` string because nothing brought it across.
  * [com.farcooler.model.troubleFor] is what turns it into a sentence.
+ *
+ * [what] is which argument or which conflict the runner named, when it named
+ * one: `not_held` or `not_delivered` on a refused `terminal.agent_answer`
+ * (spec §2.5), which share the one `resource-conflict` code.
  */
-open class CoreException(message: String, val word: String? = null) : Exception(message)
+open class CoreException(
+    message: String,
+    val word: String? = null,
+    val what: String? = null,
+) : Exception(message)
 
 /**
  * The link is gone, as opposed to the request being refused.
@@ -338,7 +346,8 @@ class ClientCore {
                 val lost = line["disconnected"]?.jsonPrimitive?.booleanOrNull == true
                 val word = com.farcooler.model.RunnerRefusal.wordInAnswerLine(line)
                 waiter.completeExceptionally(
-                    if (lost) DisconnectedException(message) else CoreException(message, word)
+                    if (lost) DisconnectedException(message)
+                    else CoreException(message, word, line["what"]?.jsonPrimitive?.contentOrNull)
                 )
             }
         }

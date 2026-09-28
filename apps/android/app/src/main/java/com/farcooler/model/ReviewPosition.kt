@@ -25,8 +25,8 @@ import kotlinx.serialization.json.Json
  * Which worktree, on which runner.
  *
  * **The host is half of the identity.** A worktree is a runner and an id, not
- * an id: `df87410` had to solve exactly this for the front door, where
- * [NeedsYouSection.key] is `host/worktree` and never the worktree alone, and
+ * an id: `df87410` had to solve exactly this for the front door, whose rows
+ * were keyed `host/worktree` and never by the worktree alone, and
  * `BackstackTest` pins that the two must not be conflated. This app connects to
  * every runner at once — `net/FleetRepository.kt` — so a bookmark keyed on the
  * worktree alone would let a phone that has read a diff on the laptop resume
@@ -45,8 +45,8 @@ import kotlinx.serialization.json.Json
  * connection per runner now. Its review bookmark is still keyed that way, and
  * survives on the id-shape reason rather than on the one-runner one.
  *
- * Spelled the same way [NeedsYouSection.key] is, so the two never disagree
- * about what identifies a worktree on this phone.
+ * Spelled the same way [com.farcooler.ui.Backstack.key] is, so the two never
+ * disagree about what identifies a worktree on this phone.
  */
 data class ReviewRef(val hostId: String, val worktreeId: String) {
     val key: String get() = "$hostId/$worktreeId"

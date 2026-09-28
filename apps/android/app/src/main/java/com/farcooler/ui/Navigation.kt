@@ -471,6 +471,42 @@ object Backstack {
     }
 
     /**
+     * The stack a Needs You row or a notification lands on (spec §6.1, "Deep
+     * links"): the front door, the workspace, the task when there is one, then
+     * the agent — so Back walks up that chain, and never past the task to a
+     * screen that forgot it.
+     *
+     * - An orchestrator is its workspace's Orchestrator tab, with nothing over
+     *   it: it works no one task.
+     * - A task is pushed over its workspace's Board tab.
+     * - A pane with no task is pushed over the Worktrees tab.
+     * - With no workspace — an unclaimed worktree — the pane goes straight on
+     *   the front door, as it always did.
+     */
+    fun chain(
+        hostId: String,
+        workspaceId: String?,
+        taskId: String?,
+        pane: Route.Terminal?,
+        orchestrator: Boolean = false,
+    ): List<Route> {
+        val stack = mutableListOf(ROOT)
+        if (workspaceId == null) {
+            pane?.let { stack += it }
+            return stack
+        }
+        if (orchestrator) {
+            stack += Route.Workspace(hostId, workspaceId, WorkspaceTab.ORCHESTRATOR)
+            return stack
+        }
+        val task = taskId?.takeIf { it.isNotEmpty() }
+        stack += Route.Workspace(hostId, workspaceId, if (task != null || pane == null) WorkspaceTab.BOARD else WorkspaceTab.WORKTREES)
+        task?.let { stack += Route.BoardTask(hostId, workspaceId, it) }
+        pane?.let { stack += it }
+        return stack
+    }
+
+    /**
      * [stack] with [workspace]'s route on [tab]: the last route naming that
      * workspace, whatever tab it had, and nothing else. A tab tap moves no
      * other navigation state, so the screen keyed on the workspace is not

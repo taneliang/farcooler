@@ -178,9 +178,9 @@ data class PaneDeck(
          * How many PANES stay mounted.
          *
          * **Five: three, plus a previous and a next.** The three are what "the
-         * agents I am working with" means in one worktree — `AGENTS_PER_WORKTREE`
-         * in `model/NeedsYou.kt` independently arrived at three for the front
-         * door, and the agreement is not a coincidence, since both are asking
+         * agents I am working with" means in one worktree — the front door's
+         * old per-worktree limit independently arrived at three, and the
+         * agreement was not a coincidence, since both were asking
          * how many agents of one worktree a person holds in their head at once.
          * It is deliberately NOT that constant: one is a memory budget and the
          * other is a row budget, and a shared name would tie a phone's RSS to a

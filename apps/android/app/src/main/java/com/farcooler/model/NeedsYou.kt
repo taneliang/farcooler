@@ -1,278 +1,316 @@
 package com.farcooler.model
 
 /**
- * What needs a person, across every runner this phone is connected to.
+ * The front door: what needs a person, across every runner this phone is
+ * connected to, and the workspaces under it (spec §6).
  *
- * The derivation behind the front door, kept out of the composable so it can be
- * tested without a device — the same split `ui/Navigation.kt` makes for the back
- * stack. Everything here is pure: a list of worktrees in, an ordered list of
- * sections out.
+ * A rendering of the rollup, and nothing more. Each runner's daemon decides
+ * what an item is — a held ask, a blocked agent, a task in Needs Decision, a
+ * task In Review (spec §2.2) — and `NeedsYouItems` decodes and merges them.
+ * This file labels each item with its workspace, says what the front door may
+ * claim when there are none, and lays out the Workspaces list beneath. Pure,
+ * so `NeedsYouTest` can prove all of it without a device.
  *
- * ## The unit is a worktree, and everything in it is a target
- *
- * One section per worktree: what the work is in the header, a row for each
- * agent inside it that wants a person — blocked first, then finished — and a
- * row for its diff. A worktree that is blocked and finished and unread appears
- * once, saying all three, and every part of what it says is something you can
- * tap. iOS arrived at this in `43a320f` after two row KINDS produced four rows
- * for one piece of work.
- *
- * ## What is not a port: this spans every runner
- *
- * iOS's inbox is scoped to one `Connection` and its screen carries a
- * `HostSwitcherBar` so you can go and look at the others. This app connects to
- * every runner at once — `net/FleetRepository.kt` — because the product's claim
- * is that an agent blocked on a runner in another room is exactly as urgent as
- * one on this desk, and a picker answers that claim by asking you to go and
- * check. So a front door grouped by RUNNER would be that picker again in list
- * form: the most urgent thing in the fleet could sit halfway down the screen,
- * under a heading for a machine with nothing to say.
- *
- * The grouping is therefore by worktree and the ordering spans runners, with
- * [NeedsYouSection.hostId] carried on every section so a tap acts on the right
- * daemon. Ids are minted per daemon, so [NeedsYouSection.key] is `host/worktree`
- * and never the worktree alone.
- *
- * ## Ranks from two runners are comparable, and that is not obvious
- *
- * `farcooler_core::feed::rank` is `tier * TIER_SPAN + (TIER_SPAN - 1 - age)`.
- * The tier is a shared enum — blocked, then done-or-failed, then working, then
- * idle — and the age is a DURATION in seconds, measured by each daemon against
- * its own state change. Neither term is a wall-clock instant, so nothing here
- * compares one machine's clock with another's, and two blocked agents on two
- * runners sort by which has been stuck longer.
- *
- * That is worth writing down because the rest of this model does not have the
- * property: [Terminal.activitySince] IS a wall-clock instant taken on the
- * runner, and `ModelTest` pins what happens when a runner's clock runs ahead of
- * the phone's. Rank sidesteps the whole question, which is what makes a merged
- * front door possible at all.
- *
- * A daemon too old to send `rank` gets [Terminal.sortRank]'s `Long.MAX_VALUE`
- * and sorts last within its tier — an unknown must not outrank a known blocked
- * agent.
+ * It used to derive its own list from the fleet: a section per worktree, its
+ * blocked and finished agents, its unread diff, and Board rows with decisions
+ * beneath. Ruling 1 retired the finished agents and the diffs, a decision is
+ * an item now, and the unit is the item rather than the worktree. What's left
+ * of that model is the one rule it had right: every runner at once, merged by
+ * rank, because an ask on a runner in another room is as urgent as one on
+ * this desk.
  */
 
-/** One worktree, its runner, and what that runner said about its diff. */
-data class NeedsYouInput(
+/**
+ * One runner's reading: its items, and whether they were derived on this
+ * phone from a runner too old to compute them ([NeedsYouItems.derived]).
+ */
+data class RunnerNeedsYou(val items: List<NeedsYouItem>, val derived: Boolean = false)
+
+/** What the front door knows about one runner. */
+data class NeedsYouRunner(
     val hostId: String,
-    /** The runner's own name, shown on a section only when more than one is connected. */
-    val hostLabel: String,
-    val worktree: Worktree,
-    /**
-     * This worktree's `changes.inbox` row, or null.
-     *
-     * Null is the absence of a fact, not the fact that there is nothing. A
-     * runner that has not answered yet — and one whose daemon predates
-     * `changes.inbox` and never will — is null; a worktree the runner has
-     * called clean is a row with no diff. The two get opposite answers from
-     * [NeedsYouSection.showsChanges].
-     */
-    val counts: InboxRow? = null,
+    val label: String,
+    /** Null until this connection has read anything. */
+    val reading: RunnerNeedsYou?,
+    val fleet: Fleet = Fleet.EMPTY,
+    val repositories: List<Repository> = emptyList(),
 )
 
-/**
- * One worktree and every reason it is on the front door.
- *
- * A single type rather than the two cases iOS replaced, because two cases were
- * two rows for one piece of work. The tiers are an ordering over these, not a
- * difference in kind.
- */
-data class NeedsYouSection(
-    val hostId: String,
-    val hostLabel: String,
-    val worktree: Worktree,
-    /** Its blocked agents, most urgent first. Empty on a section here for something else. */
-    val blocked: List<Terminal>,
-    /**
-     * Its finished agents — `done`, which is finished and UNSEEN — most urgent
-     * first.
-     *
-     * A separate list rather than more entries in [blocked], because the two
-     * are counted and worded differently when a section runs out of room: "2
-     * more agents need you" and "2 more agents finished" are not the same
-     * sentence, and one list of five would have to say one of them about both.
-     */
-    val finished: List<Terminal>,
-    val counts: InboxRow?,
-    /** [Worktree.ordinals], computed once per section rather than once per row. */
-    val ordinals: Map<String, Int>,
+/** One row on the front door: an item, where it is, and whose runner. */
+data class NeedsYouRow(
+    val entry: RunnerNeedsYouItem,
+    /** The workspace's name, the repository's for an implicit one, or "Unclaimed". */
+    val place: String,
+    /** The runner's name, only when more than one runner is connected. */
+    val runner: String?,
 ) {
-    /**
-     * Identity, and the runner is half of it. Two runners can hold worktrees
-     * with the same id — `BackstackTest` pins that they must not be conflated —
-     * and this string is what a `LazyColumn` keys its items on.
-     */
-    val key: String get() = "$hostId/${worktree.id}"
-
-    /**
-     * Whether this section draws a row for its diff.
-     *
-     * Absent on a worktree the runner has called clean: `+0 -0` on every
-     * section is noise in the shape of information, and a row onto an empty
-     * diff is the same noise with more height.
-     *
-     * PRESENT while the runner has not answered yet, which is a different state
-     * and gets the opposite answer — see [NeedsYouInput.counts]. A row that
-     * appeared one poll later would push every row under it down, under a thumb
-     * already travelling toward one of them.
-     */
-    val showsChanges: Boolean get() = counts?.hasDiff != false
+    val item: NeedsYouItem get() = entry.item
+    val hostId: String get() = entry.hostId
+    val key: String get() = entry.key
 }
 
-/**
- * How many agents of ONE KIND a section shows before it starts counting them.
- *
- * Three, because each one is a fleet row up to eight lines tall and a worktree
- * with eight blocked agents would otherwise be the whole screen. What is lost
- * is small: the tab strip on the other side of the tap holds every one of them,
- * labelled.
- *
- * Spent per kind rather than over the agents together. A shared budget of
- * three, spent blocked-first, would hide an answer behind three open questions
- * in the same worktree — and an answer arriving is the thing this screen most
- * needs to say, not an edge case it tolerates.
- */
-const val AGENTS_PER_WORKTREE = 3
+/** A workspace's row in the Workspaces list. */
+data class WorkspaceRow(
+    val hostId: String,
+    val workspace: WorkspaceSummary,
+    /** Its name; an implicit workspace's is its repository's. */
+    val name: String,
+    /** The orchestrator's terminal, or null when none is running. */
+    val orchestrator: Terminal?,
+    /** Its items: what the row's count says. */
+    val count: Int,
+) {
+    val key: String get() = "$hostId/${workspace.id}"
+}
 
-/**
- * Every worktree that wants a person, in the order it wants them.
- *
- * Two tiers, and the first one holds two kinds.
- *
- * 1. **Worktrees with an agent wanting attention**, ranked by the LOWEST
- *    [Terminal.sortRank] among them. A worktree is as urgent as its most
- *    urgent agent; an average or a count would let a worktree with six working
- *    agents outrank one with a single agent stuck for an hour.
- * 2. **Unread diffs** — `changedSinceReviewed && hasDiff` with no agent wanting
- *    anything — in the order the fleet arrived in, which is runner order and
- *    then each runner's own.
- *
- * **Blocked before finished, and this function does not arrange it.**
- * `feed::rank` already puts every blocked agent a whole `TIER_SPAN` below every
- * finished one, so filtering on the shared [AgentActivity.wantsAttention] and
- * taking the lowest rank yields blocked-above-finished for free, both across
- * sections and inside one. Nothing here re-scores: a second opinion about which
- * agent matters is the exact thing that number exists to prevent.
- *
- * **A finished agent goes above an unread diff**, which is what the two tiers
- * buy. A diff sits still — it was true before the app was opened and stays true
- * until it is read. A finished turn is news with somebody waiting on the other
- * end, and it expires the moment it is read. The perishable thing goes above
- * the durable one.
- *
- * The second tier has no rank of its own, deliberately. [InboxRow] is a
- * worktree's counts, not an agent's state, and inventing a rank from the
- * worktree's terminals would sort a diff by how blocked some agent in the same
- * worktree happens to be, which is not a fact about the diff.
- *
- * **The tiebreak is the runner and then the worktree**, and it is load-bearing
- * twice over. Ranks genuinely collide — two agents that entered the same tier
- * in the same second get the same number — and across runners they collide more
- * often, because two daemons that each have one agent blocked for four minutes
- * produce the identical integer. Without a total order two equally-ranked
- * sections could swap places on any poll, and a row that moves under a finger
- * already travelling toward it is a tap that lands on something else.
- *
- * **Hidden worktrees are not here.** A hidden worktree is one the user asked
- * not to see; a front door that shows what you hid is not honoring the hiding.
- * They are one tap away in the worktree list, behind the same disclosure they
- * have always been.
- */
-fun needsYou(inputs: List<NeedsYouInput>): List<NeedsYouSection> {
-    val attention = mutableListOf<Pair<Long, NeedsYouSection>>()
-    val unread = mutableListOf<NeedsYouSection>()
+/** One repository's workspaces, then its Unclaimed and Hidden worktrees. */
+data class RepositoryWorkspaces(
+    val hostId: String,
+    val repository: String,
+    val name: String,
+    val workspaces: List<WorkspaceRow>,
+    /** Worktree ids no workspace owns, not hidden. */
+    val unclaimed: List<String>,
+    /** The items no listed workspace holds: the Unclaimed row's count. */
+    val unclaimedCount: Int,
+    /** Hidden worktree ids, whoever owns them. */
+    val hidden: List<String>,
+) {
+    val key: String get() = "$hostId/$repository"
+}
 
-    for (input in inputs) {
-        val worktree = input.worktree
-        if (worktree.isHidden) continue
+object NeedsYou {
+    /**
+     * Every runner's items, most urgent first, each labeled by workspace
+     * (spec §6.2: "each item is a row labeled with its workspace").
+     *
+     * By rank across runners, which is safe because a rank is a duration and
+     * not a clock reading; see [NeedsYouItems.merge]. A runner that hasn't
+     * answered adds nothing yet, and nothing is invented for it.
+     */
+    fun rows(runners: List<NeedsYouRunner>): List<NeedsYouRow> {
+        val byHost = runners.associateBy { it.hostId }
+        val namesRunners = runners.size > 1
+        return NeedsYouItems.merge(runners.associate { it.hostId to it.reading?.items.orEmpty() })
+            .map { entry ->
+                val runner = byHost.getValue(entry.hostId)
+                NeedsYouRow(entry, place(entry.item, runner), if (namesRunners) runner.label else null)
+            }
+    }
 
-        // `wantsAttention` and not a list of cases, because that property IS
-        // the product's single definition of what is worth interrupting
-        // somebody for, shared with the Mac and derived on the host. A screen
-        // writing its own copy of the answer is how iOS came to have one
-        // surface that disagreed with it.
-        //
-        // Sorted once and then split. The split does not reorder: rank puts
-        // every blocked agent a whole tier below every finished one, so the two
-        // slices come out already in the order they are drawn in.
-        val wanting = worktree.terminals
-            .filter { it.agent.wantsAttention }
-            .sortedWith(compareBy({ it.sortRank }, { it.id }))
+    /**
+     * Where an item is, in the words its workspace row uses: the name the
+     * runner sent, else the name this phone has for its workspace, else — a
+     * runner without workspaces — the repository's, else "Unclaimed".
+     */
+    fun place(item: NeedsYouItem, runner: NeedsYouRunner): String {
+        item.workspaceName.takeIf { it.isNotBlank() }?.let { return it }
+        val workspaces = runner.fleet.workspaces
+        item.workspaceId?.let { id -> workspaces?.firstOrNull { it.id == id }?.name?.takeIf { it.isNotBlank() } }
+            ?.let { return it }
+        if (workspaces == null) {
+            repositoryName(item.repositoryId ?: item.worktree?.let { w -> repositoryOf(w.id, runner.fleet) }, runner)
+                ?.let { return it }
+        }
+        return UNCLAIMED
+    }
 
-        val section = NeedsYouSection(
-            hostId = input.hostId,
-            hostLabel = input.hostLabel,
-            worktree = worktree,
-            blocked = wanting.filter { it.agent == AgentActivity.BLOCKED },
-            finished = wanting.filter { it.agent == AgentActivity.DONE },
-            counts = input.counts,
-            ordinals = worktree.ordinals(),
-        )
+    /**
+     * Whether the front door may say "Nothing needs you". Only with no item
+     * at all, so a decision is never under that sentence the way the old
+     * Board rows were (ov-56).
+     */
+    fun nothingNeedsYou(rows: List<NeedsYouRow>): Boolean = rows.isEmpty()
 
-        val first = wanting.firstOrNull()
-        if (first != null) {
-            // A worktree whose only news is a finished agent ranks by that
-            // agent, which lands it below every blocked worktree and above
-            // every unread diff without this line knowing which kind it holds.
-            attention += first.sortRank to section
-        } else if (input.counts?.changedSinceReviewed == true && input.counts.hasDiff) {
-            unread += section
+    /**
+     * The runners whose items were derived on this phone, by name: each gets
+     * [olderRunnerNote], because what they can't send — asks, decisions,
+     * reviews — may be waiting anyway (spec §2.6).
+     */
+    fun olderRunners(runners: List<NeedsYouRunner>): List<String> =
+        runners.filter { it.reading?.derived == true }.map { it.label }
+
+    /**
+     * An older runner's reading, derived from its fleet: its blocked agents
+     * and nothing else (spec §2.6). A finished agent is not an item (ruling
+     * 1), on this path as on the daemon's.
+     */
+    fun derivedReading(fleet: Fleet): RunnerNeedsYou =
+        RunnerNeedsYou(NeedsYouItems.derived(fleet.worktrees), derived = true)
+
+    fun olderRunnerNote(runner: String): String =
+        "Update Far Cooler on $runner to see decisions and asks here."
+
+    /**
+     * One runner's Workspaces list: each repository's workspaces, Main first,
+     * with their orchestrators and counts, then its Unclaimed and Hidden
+     * worktrees (spec §6). A workspace is listed whether or not it has
+     * anything in it: an empty Main is still somewhere to start (spec §8).
+     *
+     * A runner without workspaces lists one implicit workspace per
+     * repository, named for the repository, holding every worktree.
+     */
+    fun workspaces(runner: NeedsYouRunner, items: List<RunnerNeedsYouItem>): List<RepositoryWorkspaces> {
+        val fleet = runner.fleet
+        val mine = items.filter { it.hostId == runner.hostId }.map { it.item }
+        val groups = WorkspaceGrouping.groups(fleet).toMutableList()
+        // A repository the runner has registered and nothing lives in yet
+        // still has its board, and so its row.
+        for (repository in runner.repositories) {
+            if (groups.none { it.repository == repository.id }) {
+                groups += WorkspaceGrouping.group(repository.id, emptyList(), emptyList(), emptyMap())
+            }
+        }
+        val terminals = fleet.worktrees.flatMap { it.terminals }.associateBy { it.id }
+        val hiddenIds = fleet.worktrees.filter { it.isHidden }.map { it.id }.toSet()
+        return groups.filter { it.repository.isNotEmpty() || it.workspaces.isNotEmpty() }.map { group ->
+            val repository = group.repository
+            val listed = group.workspaces.map { it.id }.toSet()
+            val inRepository = mine.filter { it.repositoryId == repository }
+            RepositoryWorkspaces(
+                hostId = runner.hostId,
+                repository = repository,
+                name = repositoryName(repository, runner) ?: repository.take(8),
+                workspaces = group.workspaces.map { workspace ->
+                    val summary = workspace.workspace
+                    WorkspaceRow(
+                        hostId = runner.hostId,
+                        workspace = summary,
+                        name = if (summary.isImplicit) repositoryName(repository, runner) ?: summary.name
+                        else summary.name,
+                        orchestrator = workspace.orchestrator?.let(terminals::get),
+                        count = if (summary.isImplicit) inRepository.size
+                        else inRepository.count { it.workspaceId == summary.id },
+                    )
+                },
+                unclaimed = group.unclaimed.filter { it !in hiddenIds },
+                unclaimedCount = if (group.workspaces.any { it.workspace.isImplicit }) 0
+                else inRepository.count { it.workspaceId == null || it.workspaceId !in listed },
+                hidden = fleet.worktrees.filter { it.isHidden && it.repository == repository }.map { it.id },
+            )
         }
     }
 
-    attention.sortWith(
-        compareBy({ it.first }, { it.second.hostId }, { it.second.worktree.id })
-    )
-    return attention.map { it.second } + unread
+    /**
+     * A workspace's worktrees as its Worktrees tab lists them: the ones it
+     * owns, in runner order, hidden ones left to the Hidden row. An implicit
+     * workspace owns every worktree in its repository.
+     */
+    fun worktreesOf(workspace: WorkspaceSummary, fleet: Fleet): List<Worktree> =
+        fleet.worktrees.filter { worktree ->
+            !worktree.isHidden && if (workspace.isImplicit) worktree.repository == workspace.repository
+            else worktree.workspace == workspace.id
+        }
+
+    const val UNCLAIMED = "Unclaimed"
+
+    private fun repositoryName(repository: String?, runner: NeedsYouRunner): String? =
+        runner.repositories.firstOrNull { it.id == repository }?.let { it.displayName.ifEmpty { it.short } }
+            ?.takeIf { it.isNotBlank() }
+
+    private fun repositoryOf(worktree: String, fleet: Fleet): String? =
+        fleet.worktrees.firstOrNull { it.id == worktree }?.repository
 }
 
-/**
- * The blocked agents a section ran out of room for.
- *
- * A sentence rather than a bare number, because "+2" under a list of agents
- * reads as two more of something and does not say what.
- */
-fun blockedOverflow(count: Int): String =
-    if (count == 1) "1 more agent needs you" else "$count more agents need you"
+/** What a row offers, in the order it draws them (spec §2.5). */
+sealed interface NeedsYouButton {
+    /** Sends [action]: an ask's option, or a decision's option as the answer. */
+    data class Answer(val action: NeedsYouAction) : NeedsYouButton
 
-/**
- * The finished agents a section ran out of room for.
- *
- * Says "failed" when any of the hidden ones did, and the words are the daemon's
- * rather than a third set: `watch.rs` titles a finished turn "<name> finished"
- * and a died-halfway one "<name> failed", and [Terminal.activityLabel] puts the
- * same distinction on the rows above this line. A sentence that swept a failure
- * into "finished" would hide the one thing in the group most worth going in for
- * — in the only place on this screen where agents are counted instead of shown.
- *
- * Takes the terminals rather than a count, because a count cannot answer which
- * of them failed.
- */
-fun finishedOverflow(hidden: List<Terminal>): String {
-    val failures = hidden.count { it.turnDidFail }
-    if (failures == hidden.size) {
-        return if (failures == 1) "1 more agent failed" else "$failures more agents failed"
+    /** A decision's options past the third, behind one "More" menu. */
+    data class More(val actions: List<NeedsYouAction>) : NeedsYouButton
+
+    /** A decision with no options: the answer is typed. "Answer…" */
+    data object Write : NeedsYouButton
+
+    /** Goes to it and sends nothing: "Open", or "Review" for a review. */
+    data class Open(val title: String) : NeedsYouButton
+}
+
+object NeedsYouAnswer {
+    /** Decisions show this many options as buttons; the rest go in a menu. */
+    const val OPTION_BUTTONS = 3
+
+    /**
+     * An item's buttons. [mayAnswer] false is a reader below Control scope,
+     * who sees the item and Open, and nothing that writes (spec §2.5) — the
+     * runner already sent it no actions, and "Answer…" would be refused.
+     *
+     * A review only ever opens: the inbox opens a review and never approves
+     * one (ruling 2).
+     */
+    fun buttons(item: NeedsYouItem, mayAnswer: Boolean): List<NeedsYouButton> {
+        val answers = item.actions.filter { it.id != OPEN }
+        return when (item.kindValue) {
+            NeedsYouKind.ASK ->
+                if (mayAnswer && answers.isNotEmpty() && item.askId != null) answers.map(NeedsYouButton::Answer)
+                else listOf(NeedsYouButton.Open(OPEN_TITLE))
+            NeedsYouKind.DECISION -> when {
+                !mayAnswer -> listOf(NeedsYouButton.Open(OPEN_TITLE))
+                answers.isEmpty() -> listOf(NeedsYouButton.Write)
+                answers.size <= OPTION_BUTTONS -> answers.map(NeedsYouButton::Answer)
+                else -> answers.take(OPTION_BUTTONS).map(NeedsYouButton::Answer) +
+                    NeedsYouButton.More(answers.drop(OPTION_BUTTONS))
+            }
+            NeedsYouKind.REVIEW -> listOf(NeedsYouButton.Open(REVIEW_TITLE))
+            NeedsYouKind.BLOCKED, NeedsYouKind.UNKNOWN -> listOf(NeedsYouButton.Open(OPEN_TITLE))
+        }
     }
-    if (failures > 0) return "${hidden.size} more agents finished, $failures failed"
-    return if (hidden.size == 1) "1 more agent finished" else "${hidden.size} more agents finished"
+
+    /**
+     * The one line a refused answer leaves on its row (spec §2.5), from the
+     * runner's `what`. Anything else — a dropped link, a runner too old to
+     * say which — is the generic line; never the runner's own words.
+     */
+    fun refusal(what: String?, agent: String): String = when (what) {
+        "not_held" -> "Someone already answered this."
+        "not_delivered" -> "Couldn’t reach $agent. Try again."
+        else -> "Couldn’t send that answer. Try again."
+    }
+
+    const val OPEN = "open"
+    const val OPEN_TITLE = "Open"
+    const val REVIEW_TITLE = "Review"
 }
 
-/**
- * Whether the front door has nothing for you: no agent wants you, and no
- * board has a task in Needs Decision (ov-56).
- *
- * A board's decision is waiting on you as surely as a blocked agent is, and
- * "Nothing needs you" above a Board row counting one in amber said two things
- * at once. [boards] are every runner's rows as last read, the same numbers
- * the rows draw, so the sentence and the count can't disagree.
- */
-fun nothingNeedsYou(sections: List<NeedsYouSection>, boards: List<BoardRow>): Boolean =
-    sections.isEmpty() && boardsNeedingYou(boards).isEmpty()
+/** Which worktrees a list shows: one workspace's, or a repository's Unclaimed or Hidden ones. */
+sealed interface WorktreeScope {
+    val hostId: String
 
-/**
- * The Board rows with a decision waiting on you, in the order given: the
- * ones the front door draws with what needs you, rather than down beside the
- * way to the worktrees.
- */
-fun boardsNeedingYou(boards: List<BoardRow>): List<BoardRow> = boards.filter { it.decisions > 0 }
+    /** Whether [worktree], on a runner whose fleet is [fleet], belongs in this list. */
+    fun includes(worktree: Worktree, fleet: Fleet): Boolean
+
+    /** What an empty list says. */
+    val emptySentence: String
+
+    /** A workspace's own worktrees: its Worktrees tab. See [NeedsYou.worktreesOf]. */
+    data class OfWorkspace(override val hostId: String, val workspace: WorkspaceSummary) : WorktreeScope {
+        override fun includes(worktree: Worktree, fleet: Fleet): Boolean =
+            !worktree.isHidden && if (workspace.isImplicit) worktree.repository == workspace.repository
+            else worktree.workspace == workspace.id
+
+        override val emptySentence: String
+            get() = "No worktrees yet. The orchestrator makes them as it dispatches tasks."
+    }
+
+    /**
+     * A repository's worktrees no listed workspace owns ([hidden] false), or
+     * its hidden ones, whoever owns them ([hidden] true).
+     */
+    data class OfRepository(
+        override val hostId: String,
+        val repository: String,
+        val hidden: Boolean,
+    ) : WorktreeScope {
+        override fun includes(worktree: Worktree, fleet: Fleet): Boolean {
+            if (worktree.repository != repository) return false
+            if (hidden) return worktree.isHidden
+            if (worktree.isHidden) return false
+            val listed = fleet.workspaces ?: return false
+            return worktree.workspace == null || listed.none { it.id == worktree.workspace }
+        }
+
+        override val emptySentence: String
+            get() = if (hidden) "Nothing is hidden." else "Every worktree here belongs to a workspace."
+    }
+}

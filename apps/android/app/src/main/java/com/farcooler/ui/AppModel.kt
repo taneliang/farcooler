@@ -10,6 +10,8 @@ import com.farcooler.data.Runner
 import com.farcooler.data.RunnerStore
 import com.farcooler.data.Identity
 import com.farcooler.data.Settings
+import com.farcooler.model.NeedsYouItem
+import com.farcooler.model.NeedsYouKind
 import com.farcooler.model.Terminal
 import com.farcooler.net.Connection
 import com.farcooler.data.PreferenceReviewStorage
@@ -341,6 +343,37 @@ class AppModel(
     }
 
     /**
+     * Land on a Needs You item: its workspace, its task, then its agent, as
+     * [Backstack.chain] lays them out. A decision or a review opens its task;
+     * an ask or a blocked agent opens the agent, over its task when it has
+     * one. The pane is pointed at, not chosen — see [Focus].
+     */
+    fun openItem(hostId: String, item: NeedsYouItem) {
+        val terminal = item.terminal
+        val orchestrator = terminal?.role == "orchestrator"
+        val pane = terminal?.takeIf {
+            item.kindValue == NeedsYouKind.ASK || item.kindValue == NeedsYouKind.BLOCKED
+        }?.let { t -> t.worktreeId?.let { Route.Terminal(hostId, it) to t.id } }
+        pane?.let { (route, id) -> point(TerminalRef(hostId, route.worktreeId, id)) }
+        val workspace = boardIdOf(hostId, item.workspaceId, item.repositoryId)
+        workspace?.let { settings.setLastWorkspace(hostId, it) }
+        _landed.value = true
+        saved[LANDED] = true
+        install(Backstack.chain(hostId, workspace, item.task?.id, pane?.first, orchestrator))
+    }
+
+    /**
+     * The id a workspace route takes for an item or a pane: its workspace's,
+     * or on a runner without workspaces its repository's implicit one. Null
+     * for a worktree no workspace owns.
+     */
+    private fun boardIdOf(hostId: String, workspaceId: String?, repositoryId: String?): String? {
+        workspaceId?.takeIf { it.isNotEmpty() }?.let { return it }
+        val fleet = fleet.connection(hostId)?.fleet?.value ?: return null
+        return if (fleet.workspaces == null) repositoryId else null
+    }
+
+    /**
      * A workspace's tab row was tapped. The route's value changes and nothing
      * else in the stack does, and the tab is remembered for that workspace.
      */
@@ -373,9 +406,20 @@ class AppModel(
         pendingTerminal = null
         _landed.value = true
         saved[LANDED] = true
-        // `open`, not `choose`: a 3am ping is not a preference about where this
-        // worktree should open tomorrow.
-        open(TerminalRef(entry.host.id, entry.worktree.id, wanted))
+        // `point`, not `choose`: a 3am ping is not a preference about where
+        // this worktree should open tomorrow. Over its workspace and its task,
+        // so Back walks up to them (spec §6.1).
+        val terminal = entry.worktree.terminals.first { it.id == wanted }
+        point(TerminalRef(entry.host.id, entry.worktree.id, wanted))
+        install(
+            Backstack.chain(
+                hostId = entry.host.id,
+                workspaceId = boardIdOf(entry.host.id, terminal.workspace ?: entry.worktree.workspace, entry.worktree.repository),
+                taskId = terminal.taskId,
+                pane = Route.Terminal(entry.host.id, entry.worktree.id),
+                orchestrator = terminal.isOrchestrator,
+            )
+        )
     }
 
     fun navigate(route: Route) {

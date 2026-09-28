@@ -13,6 +13,9 @@ import com.farcooler.data.Theme
 import com.farcooler.model.AdapterInfo
 import com.farcooler.model.AdapterTestOutcome
 import com.farcooler.model.BoardNotice
+import com.farcooler.model.NeedsYou
+import com.farcooler.model.NeedsYouList
+import com.farcooler.model.RunnerNeedsYou
 import com.farcooler.model.BranchListReply
 import com.farcooler.model.BranchRef
 import com.farcooler.model.ChangeSet
@@ -588,10 +591,95 @@ class Connection(
     fun board(workspaceId: String): WorkspaceSummary =
         boardList().firstOrNull { it.id == workspaceId } ?: WorkspaceSummary.implicit(workspaceId)
 
-    /** A runner notice, on the core's thread. Only boards read these; see [ClientCore.onNotice]. */
+    // ---- needs you ----
+
+    private val _needsYou = MutableStateFlow<RunnerNeedsYou?>(null)
+
+    /**
+     * What this runner says needs a person (spec §2), or null before it has
+     * said anything on this connection.
+     *
+     * Read through `needs_you` from a runner that advertises it — on the link
+     * coming up, on its `needs_you` and `resync` notices, and on the poll when
+     * there is no event channel to bring those. A runner without it gets its
+     * blocked agents derived from each fleet read instead (spec §2.6), marked
+     * [RunnerNeedsYou.derived] so the screen can say what it can't see.
+     *
+     * The last good reading stays when a read fails: an inbox that empties on a
+     * dropped packet says "Nothing needs you" about a fleet nobody read.
+     */
+    val needsYou: StateFlow<RunnerNeedsYou?> = _needsYou.asStateFlow()
+
+    /** A `needs_you` notice arrived while nothing read it; the next poll does. */
+    @Volatile
+    private var needsYouOwed = true
+
+    /** Read what needs you now, from the runner or, on an older one, from the fleet. */
+    suspend fun readNeedsYou() {
+        if (_phase.value !is Phase.Connected) return
+        val build = _daemon.value ?: return
+        needsYouOwed = false
+        if (!build.can(NEEDS_YOU_CAPABILITY)) {
+            if (_fleetRead.value == FleetRead.THIS_LINK) {
+                _needsYou.value = NeedsYou.derivedReading(_fleet.value)
+            }
+            return
+        }
+        val data = attempt { core.call("needs_you") }.getOrNull()
+        val list = data?.let { runCatching { json.decodeFromJsonElement(NeedsYouList.serializer(), it) }.getOrNull() }
+        if (list == null) {
+            needsYouOwed = true
+            return
+        }
+        _needsYou.value = RunnerNeedsYou(list.items, derived = false)
+    }
+
+    /**
+     * Answer a held ask with one of its options (spec §2.5). Throws on a
+     * refusal, whose [com.farcooler.core.CoreException.what] says which:
+     * see [com.farcooler.model.NeedsYouAnswer.refusal].
+     */
+    suspend fun answerAsk(terminal: String, askId: String, option: String) {
+        core.call(
+            "terminal.agent_answer",
+            args("terminal" to terminal, "requestId" to askId, "optionId" to option),
+        )
+        readNeedsYou()
+    }
+
+    /**
+     * Answer a task's decision: an `answer` note, as the person, with [body].
+     * The task stays in Needs Decision until its orchestrator moves it; the
+     * item ends because the answer is newer than the question.
+     */
+    suspend fun answerDecision(task: String, body: String) {
+        core.call("task.note", args("task" to task, "kind" to "answer", "body" to body))
+        readNeedsYou()
+    }
+
+    /**
+     * Start [workspace]'s orchestrator on [harness] (`claude`, `codex` or
+     * `cursor`), stopping a live one first when [replace] (ruling 8). Throws on
+     * a refusal; answers the new terminal's id.
+     */
+    suspend fun startOrchestrator(workspace: String, harness: String, replace: Boolean = false): String {
+        val data = core.call(
+            "workspace.start_orchestrator",
+            args("workspace" to workspace, "harness" to harness, "replace" to replace),
+        )
+        refresh()
+        return data["id"]?.jsonPrimitive?.contentOrNull
+            ?: throw com.farcooler.core.CoreException("The runner started an orchestrator but did not name it.")
+    }
+
+    /** A runner notice, on the core's thread. Boards and needs-you read these; see [ClientCore.onNotice]. */
     private fun noticeArrived(notice: JsonObject) {
         val event = notice["event"]?.jsonPrimitive?.contentOrNull
         val moved = BoardNotice.of(notice)
+        if (event == "needs_you" || event == "resync") {
+            needsYouOwed = true
+            if (isForeground) scope.launch { readNeedsYou() }
+        }
         if (event != "task" && event != "resync") return
         scope.launch {
             // Boards are not read in the background — the fleet poll stops
@@ -789,6 +877,7 @@ class Connection(
         // Forced, so a fresh link reads the diff counts on its first poll
         // rather than up to [INBOX_EVERY] polls later. See [loadInboxIfDue].
         refresh(force = true)
+        readNeedsYou()
         loadRepositories()
         loadThemes()
         startPolling()
@@ -1108,6 +1197,11 @@ class Connection(
         // the poll — which is what lets a late build read its boards (see
         // [loadDaemonBuild]).
         if (_daemon.value == null) loadDaemonBuild()
+        // What needs you: derived from this very fleet on a runner that can't
+        // say, owed after a notice nobody read, and on the poll when no event
+        // channel would bring the notice.
+        val derives = _daemon.value?.can(NEEDS_YOU_CAPABILITY) == false
+        if (derives || needsYouOwed || (polls % INBOX_EVERY == 1L && !core.eventsLive())) readNeedsYou()
         // No event channel: nothing will say a board moved, so read them on
         // the poll, at most once a minute.
         if (System.currentTimeMillis() - boardReads.lastSweepAt > BOARD_SWEEP_WITHOUT_EVENTS_MS &&
@@ -1776,6 +1870,9 @@ class Connection(
      * False for every caller that predates it, and absent from an older client,
      * which `crates/client/src/ffi.rs` reads as false: the behavior
      * `worktree.create` always had.
+     *
+     * [workspace] claims the new worktree for that workspace; null leaves it
+     * to the runner, which claims it for Main.
      */
     suspend fun createWorktree(
         repository: String,
@@ -1783,18 +1880,21 @@ class Connection(
         branch: String,
         terminal: String = "shell",
         adopt: Boolean = false,
+        workspace: String? = null,
     ): String {
-        val data = core.call(
-            "worktree.create",
-            args(
-                "repository" to repository,
-                "task" to name,
-                "branch" to branch,
-                "base" to "",
-                "terminal" to terminal,
-                "adopt" to adopt,
-            ),
+        val pairs = mutableListOf<Pair<String, Any>>(
+            "repository" to repository,
+            "task" to name,
+            "branch" to branch,
+            "base" to "",
+            "terminal" to terminal,
+            "adopt" to adopt,
         )
+        // Claimed for the workspace whose screen made it (ruling 8). Absent,
+        // as from the drawer, is the repository's Main — what it always was.
+        // Never for an implicit workspace, whose id is the repository's.
+        if (workspace != null) pairs += "workspace" to workspace
+        val data = core.call("worktree.create", args(*pairs.toTypedArray()))
         return data["id"]?.jsonPrimitive?.contentOrNull
             ?: throw com.farcooler.core.CoreException("The host created a worktree but did not name it.")
     }
@@ -2099,6 +2199,9 @@ class Connection(
          * installing it later should be noticed without relaunching the app.
          */
         private const val SLOW_RETRY_MS = 300_000L
+
+        /** The capability a runner advertises when it computes `needs_you` itself. */
+        const val NEEDS_YOU_CAPABILITY = "needs_you"
 
         /**
          * How long to wait before the next attempt.

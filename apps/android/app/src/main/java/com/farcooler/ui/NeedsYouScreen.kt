@@ -1,10 +1,12 @@
 package com.farcooler.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,126 +16,82 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircleOutline
-import androidx.compose.material.icons.outlined.Difference
-import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.background
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.farcooler.core.CoreException
 import com.farcooler.data.Runner
+import com.farcooler.model.AgentActivity
+import com.farcooler.model.GlancePalette
+import com.farcooler.model.NeedsYou
+import com.farcooler.model.NeedsYouAnswer
+import com.farcooler.model.NeedsYouButton
+import com.farcooler.model.NeedsYouKind
+import com.farcooler.model.NeedsYouRow
 import com.farcooler.model.RunnerCount
 import com.farcooler.model.RunnerLink
 import com.farcooler.model.reassurance
-import com.farcooler.model.AGENTS_PER_WORKTREE
-import com.farcooler.model.AgentActivity
-import com.farcooler.model.NeedsYouSection
-import com.farcooler.model.blockedOverflow
-import com.farcooler.model.finishedOverflow
-import com.farcooler.model.needsYou
-import com.farcooler.model.BoardRow
-import com.farcooler.model.boardsNeedingYou
-import com.farcooler.model.nothingNeedsYou
 import com.farcooler.net.Connection
-import com.farcooler.net.TerminalRef
+import com.farcooler.net.rethrowIfCancellation
 import kotlinx.coroutines.launch
 
 /**
- * What the phone opens onto: everything, on every runner, that wants a person.
+ * What the phone opens onto: every item, on every runner, that needs a person,
+ * then the workspaces (spec §6).
  *
- * The app used to open into a terminal. `FleetRepository.landing()` picked one
- * on connect and the worktree list was the fallback for a fleet with nothing
- * running — the right front door for exactly one of the four situations
- * `docs/jobs-to-be-done.md` names, on the couch about to drive an agent. In the
- * other three, the first question is *what needs me*, and a terminal is an
- * answer to a question nobody asked. iOS deleted the same shape in `1be6264`.
+ * The items are the rollup's (spec §2): held asks, blocked agents, tasks in
+ * Needs Decision, tasks In Review — each runner's own list, merged by rank in
+ * `model/NeedsYou.kt`, and each row labeled with its workspace. An ask and a
+ * decision are answered here, in place, with the runner's own options; a
+ * blocked agent and a review open. It used to be a section per worktree, with
+ * finished agents and unread diffs, and Board rows beneath; ruling 1 took the
+ * finished agents and diffs out of the inbox, and a decision is an item now.
  *
- * ## One section per worktree, spanning every runner
+ * Under the items, the Workspaces list: each repository's workspaces, each
+ * with its orchestrator's mark and its count, then its Unclaimed and Hidden
+ * worktrees. It's the way into everything else, and the drawer holds the same
+ * list.
  *
- * The derivation and its ordering live in `model/NeedsYou.kt`, where they can
- * be tested without a device; the argument for grouping by worktree rather
- * than by RUNNER is written down there too, and it is the one decision on this
- * screen that is not a port. In short: grouping by runner is iOS's
- * `HostSwitcherBar` in list form, and it would let the most urgent thing in the
- * fleet sit halfway down the screen under a heading for a machine with nothing
- * to say.
- *
- * The runner is on every section instead — [NeedsYouSection.hostId] in the key
- * and the tap, its name on the header's second line, and only once more than
- * one runner is connected. That last rule is `FleetScreen`'s already: with a
- * single runner its name is on every row and says nothing about which row is
- * which.
- *
- * ## This screen sorts by rank, and the fleet list still does not
- *
- * `231f81a` decoded `sortRank` and deliberately did NOT sort the fleet list by
- * it, because a row that slides as an agent finishes takes the tap you had
- * already committed to. That reasoning is right and it does not transfer,
- * because the two lists have different jobs:
- *
- * - **The fleet list is a map.** It holds every pane on every runner, wanted or
- *   not, and you navigate it by memory — the row you tapped yesterday is where
- *   you left it. Attention is a MARK on a row there, and a mark you can find in
- *   a list that holds still beats one that comes to you by moving the list.
- * - **The front door is a queue.** Every row on it is a row you already care
- *   about, there are typically none to five of them, and the answer to "what
- *   needs me first" IS an ordering. A queue in creation order is not a queue.
- *
- * The slide-under-the-thumb hazard is paid for rather than waved away, three
- * ways. `feed::rank` is tiered a whole `TIER_SPAN` apart and ordered by AGE
- * inside a tier, so relative order only changes when an agent actually crosses
- * a tier boundary — never as a working pane merely ages, which is most of what
- * moves in the fleet list. The tiebreak in [needsYou] is total, so equal ranks
- * cannot swap on a poll. And every row here carries `Modifier.animateItem()`,
- * so the motion that is left is motion you can see happening rather than a row
- * teleporting mid-reach.
- *
- * ## Material, not HIG
- *
- * `LazyColumn` with `stickyHeader`, so the worktree a row belongs to stays on
- * screen while you read down its agents — which is the thing iOS's inset cards
- * were doing structurally and which this does not reproduce. Sentence case
- * throughout, settled in `cb13d31`.
- *
- * `ListItem` for the two rows that fit it — the diff and the way to the
- * worktree list. NOT for an agent: [TerminalRow] is four bands running one to
- * eight lines, and `ListItem` has three text slots and a specified minimum
- * height per variant. Drawing an agent a second way here would also be a second
- * chance for two screens to say different things about one pane.
+ * Every runner at once, as before: an ask on a runner in another room is as
+ * urgent as one on this desk, and the order spans runners because a rank is a
+ * duration, not a clock reading.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun NeedsYouScreen(
-    model: AppModel,
-    onSelect: (TerminalRef) -> Unit,
-    onReviewChanges: (hostId: String, worktreeId: String) -> Unit,
-    onOpenWorktrees: () -> Unit,
-    onOpenBoard: (BoardRow) -> Unit,
-    onOpenDrawer: () -> Unit,
-) {
+fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
     val entries by model.fleet.entries.collectAsStateWithLifecycle()
     val connections by model.fleet.active.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -141,33 +99,22 @@ fun NeedsYouScreen(
     var refreshing by remember { mutableStateOf(false) }
     var editingRunner by remember { mutableStateOf<Runner?>(null) }
 
-    // Derived from the entries alone, which already carry the counts — see
-    // `FleetEntry.counts`. Nothing here re-subscribes per runner.
-    val sections = remember(entries) { needsYou(entries.map { it.needsYouInput() }) }
-    val visible = entries.filter { !it.worktree.isHidden }
+    val runners = rememberNeedsYouRunners(connections)
+    val rows = NeedsYou.rows(runners.map { it.second })
+    val merged = rows.map { it.entry }
     val namesRunners = connections.size > 1
-    // Derived from `entries`, which is what this composable is subscribed to.
-    // Reading it off each connection's fleet would be a value nothing here
-    // observes, so the sentence under "Nothing needs you" would go stale the
-    // moment the last agent finished.
-    //
-    // Per runner, because only an answering runner's count is believed: see
-    // `reassurance`. Summed across every runner, a runner that had dropped went
-    // on reporting its last working agents for the whole reconnect.
-    val working = visible.groupBy { it.host.id }.mapValues { (_, entries) ->
-        entries.sumOf { entry ->
-            entry.worktree.terminals.count { it.agent == AgentActivity.WORKING }
-        }
+    val older = NeedsYou.olderRunners(runners.map { it.second })
+    val sections = runners.flatMap { (connection, runner) ->
+        NeedsYou.workspaces(runner, merged).map { connection to it }
     }
 
-    // Every runner's Board rows, with the runner each is on. Read here rather
-    // than row by row below, because a board's decision needs you too: it
-    // decides whether this screen may say "Nothing needs you" (ov-56).
-    val boards: List<Pair<Connection, BoardRow>> = connections.flatMap { connection ->
-        key(connection.host.id) { rememberBoardRows(connection).map { connection to it } }
+    // What's running, for the sentence under "Nothing needs you": per runner,
+    // because only an answering runner's count is believed. Hidden worktrees
+    // are left out, as they always were here.
+    val visible = entries.filter { !it.worktree.isHidden }
+    val working = visible.groupBy { it.host.id }.mapValues { (_, entries) ->
+        entries.sumOf { entry -> entry.worktree.terminals.count { it.agent == AgentActivity.WORKING } }
     }
-    val deciding = boardsNeedingYou(boards.map { it.second }).toSet()
-    val quiet = nothingNeedsYou(sections, boards.map { it.second })
 
     Scaffold(
         topBar = {
@@ -175,7 +122,7 @@ fun NeedsYouScreen(
                 title = { Text("Needs you") },
                 navigationIcon = {
                     IconButton(onClick = onOpenDrawer) {
-                        Icon(Icons.Outlined.Menu, contentDescription = "Show the fleet")
+                        Icon(Icons.Outlined.Menu, contentDescription = "Show workspaces")
                     }
                 },
             )
@@ -187,15 +134,15 @@ fun NeedsYouScreen(
                 scope.launch {
                     refreshing = true
                     model.fleet.refreshAll()
+                    connections.forEach { it.readNeedsYou() }
                     refreshing = false
                 }
             },
             modifier = Modifier.padding(padding),
         ) {
-            LazyColumn(Modifier.fillMaxSize()) {
-                // Above the sections, because a runner nobody can reach is the
-                // reason the sections below may not be everything. Each row
-                // draws nothing at all while its runner is answering.
+            LazyColumn(Modifier.fillMaxSize().testTag("needs-you")) {
+                // Above the items, because a runner nobody can reach is the
+                // reason the items below may not be everything.
                 items(connections, key = { "runner/${it.host.id}" }) { connection ->
                     RunnerStatusRow(
                         connection = connection,
@@ -209,8 +156,7 @@ fun NeedsYouScreen(
                                 connection.host.copy(fingerprint = fingerprint),
                             )
                         },
-                        // Both halves, for the reason `FleetScreen`'s copy of
-                        // this states: forgetting a key that was never pinned
+                        // Both halves: forgetting a key that was never pinned
                         // changes nothing, and the dial is what puts the
                         // fingerprint back on screen.
                         onReviewKey = {
@@ -225,75 +171,48 @@ fun NeedsYouScreen(
                     )
                 }
 
-                if (quiet) {
-                    item(key = "reassurance") {
-                        Reassurance(connections, working, visible.size)
-                    }
+                if (NeedsYou.nothingNeedsYou(rows)) {
+                    item(key = "reassurance") { Reassurance(connections, working, visible.size) }
                 }
 
-                for (section in sections) {
-                    stickyHeader(key = "header/${section.key}") {
-                        SectionHeader(section, showRunner = namesRunners)
-                    }
-
-                    items(
-                        section.blocked.take(AGENTS_PER_WORKTREE),
-                        key = { "agent/${section.hostId}/${it.id}" },
-                    ) { terminal ->
-                        AgentRow(model, section, terminal, onSelect, Modifier.animateItem())
-                    }
-                    if (section.blocked.size > AGENTS_PER_WORKTREE) {
-                        item(key = "more-blocked/${section.key}") {
-                            Overflow(blockedOverflow(section.blocked.size - AGENTS_PER_WORKTREE))
-                        }
-                    }
-
-                    // Below the blocked ones and above the diff. The same row,
-                    // deliberately: `TerminalRow` already says "Done" with a
-                    // green check and "Failed" with a red cross, so a finished
-                    // agent is drawn here exactly as it is drawn in the fleet
-                    // list and the tab strip.
-                    //
-                    // Tapping one is what ENDS it — `terminal.seen` clears
-                    // `done` to `idle` on the next poll and the row goes. That
-                    // is the intended shape of this row, not a wrinkle in it.
-                    items(
-                        section.finished.take(AGENTS_PER_WORKTREE),
-                        key = { "agent/${section.hostId}/${it.id}" },
-                    ) { terminal ->
-                        AgentRow(model, section, terminal, onSelect, Modifier.animateItem())
-                    }
-                    if (section.finished.size > AGENTS_PER_WORKTREE) {
-                        item(key = "more-finished/${section.key}") {
-                            Overflow(
-                                finishedOverflow(section.finished.drop(AGENTS_PER_WORKTREE))
-                            )
-                        }
-                    }
-
-                    if (section.showsChanges) {
-                        item(key = "changes/${section.key}") {
-                            ChangesRow(section, onReviewChanges, Modifier.animateItem())
-                        }
-                    }
+                items(rows, key = { "item/${it.key}" }) { row ->
+                    val connection = connections.firstOrNull { it.host.id == row.hostId }
+                    NeedsYouItemRow(
+                        row = row,
+                        connection = connection,
+                        onOpen = { model.openItem(row.hostId, row.item) },
+                        modifier = Modifier.animateItem(),
+                    )
                 }
 
-                // A board with a decision waiting is something that needs you,
-                // and is drawn with the rest of it, under the agents.
-                boardItems(boards.filter { it.second in deciding }, namesRunners, onOpenBoard)
-
-                // Every other Board row, one per workspace, empty or not (see
-                // [RunnerBoards.rows]), directly above the door to the
-                // worktrees — where the Mac puts its Board row above a
-                // workspace's worktrees. Here rather than in the worktree
-                // list, because this screen is the one every session starts
-                // on; each row names its workspace, and its repository where
-                // that is not the whole of the name.
-                boardItems(boards.filter { it.second !in deciding }, namesRunners, onOpenBoard)
-
-                item(key = "worktrees") {
-                    WorktreesRow(visible.size, entries.size, connections, onOpenWorktrees)
+                // An older runner can say only which agents are blocked; its
+                // asks, decisions and reviews may be waiting anyway.
+                items(older, key = { "older/$it" }) { runner ->
+                    Text(
+                        NeedsYou.olderRunnerNote(runner),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
                 }
+
+                if (sections.isNotEmpty()) {
+                    item(key = "workspaces") {
+                        Text(
+                            "Workspaces",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.padding(start = 16.dp, top = 24.dp, bottom = 0.dp),
+                        )
+                    }
+                }
+                workspaceItems(
+                    sections = sections,
+                    namesRunners = namesRunners,
+                    onOpenWorkspace = { model.openWorkspace(it.hostId, it.workspace.id) },
+                    onOpenWorktrees = { host, repository, hidden ->
+                        model.navigate(Route.Worktrees(host, repository, hidden))
+                    },
+                )
             }
         }
     }
@@ -308,203 +227,218 @@ fun NeedsYouScreen(
     }
 }
 
-/** Board rows, keyed by runner and workspace, each naming its runner where there are several. */
-private fun LazyListScope.boardItems(
-    rows: List<Pair<Connection, BoardRow>>,
-    namesRunners: Boolean,
-    onOpen: (BoardRow) -> Unit,
-) {
-    items(rows, key = { (connection, row) -> "board/${connection.host.id}/${row.key}" }) { (connection, row) ->
-        BoardRowItem(row, if (namesRunners) connection.host.label else null, onOpen)
-    }
-}
-
 /**
- * One agent, wherever it came from.
+ * One item: its mark, where it is, what it asks, and its buttons.
  *
- * Shared by the blocked group and the finished one because the row is the same
- * row and the destination is the same destination: the worktree, opened on
- * that pane, which is what somebody wants from both — the answer to the
- * question, or the answer to the question they asked.
- *
- * `point`, not `choose`. [AppModel.open] is the sent-here door and does not
- * write the remembered tab down: arriving from the front door is the app
- * routing you, not a preference about where this worktree opens tomorrow. The
- * tab strip stays the one writer. See [Focus].
+ * The row opens the item (its workspace, task and agent; see
+ * `AppModel.openItem`). The buttons answer it in place. A button that has sent
+ * shows a spinner where it was; a refused answer leaves one line under the
+ * row, in the words of spec §2.5, and the item stays until the runner says it
+ * has gone.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AgentRow(
-    model: AppModel,
-    section: NeedsYouSection,
-    terminal: com.farcooler.model.Terminal,
-    onSelect: (TerminalRef) -> Unit,
+private fun NeedsYouItemRow(
+    row: NeedsYouRow,
+    connection: Connection?,
+    onOpen: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    // Looked up rather than carried on the section: a reconnect replaces the
-    // Connection, and a row holding the old one would act on a dead session.
-    val connection = model.fleet.connection(section.hostId)
-    // Blocked and done hold whether or not the runner answers, which is every
-    // row this screen lists; the mark and the status only lose a claim about
-    // now. Read anyway, so the row says the same thing here as in the drawer.
-    val answering = connection?.link?.collectAsStateWithLifecycle()?.value ==
-        RunnerLink.ANSWERING
-    Column(modifier) {
-        TerminalRow(
-            terminal = terminal,
-            ordinal = section.ordinals[terminal.id],
-            answering = answering,
-            onClick = {
-                onSelect(TerminalRef(section.hostId, section.worktree.id, terminal.id))
-            },
-            onAction = { action ->
-                connection?.let { scope.launch { it.act(action, terminal) } }
-            },
-        )
-    }
-}
+    val item = row.item
+    val daemon = connection?.daemon?.collectAsStateWithLifecycle()?.value
+    // Below Control scope a runner sends no actions, and "Answer…" would be
+    // refused. Unknown is not "read": see `DaemonBuild.grantedScope`.
+    val mayAnswer = daemon?.grantedScope != "read" && connection != null
+    val buttons = NeedsYouAnswer.buttons(item, mayAnswer)
+    var sending by remember(item.id) { mutableStateOf<String?>(null) }
+    var refusal by remember(item.id) { mutableStateOf<String?>(null) }
+    var writing by remember(item.id) { mutableStateOf(false) }
+    var more by remember(item.id) { mutableStateOf(false) }
+    val agent = item.terminal?.label?.ifBlank { null } ?: "the agent"
 
-/**
- * The worktree's own line: what the work is, which branch it is on, and — once
- * there is more than one — whose runner.
- *
- * A header, not a target, so nothing here competes with the rows below it and
- * they read as things inside this worktree without an indent having to say so.
- * Sticky, so the worktree stays named while you read down its agents.
- *
- * Deliberately no amber up here, and no counts. That color is reserved across
- * this app for an agent waiting on you and [TerminalRow] already spends it on
- * exactly those, inside; a second mark here would say the same thing twice and
- * weaken it both times. The counts moved down to the row that opens them.
- *
- * An opaque background, because a sticky header scrolls OVER the rows behind it
- * — the one thing this needs that the fleet list's version of the same header
- * does not.
- */
-@Composable
-private fun SectionHeader(section: NeedsYouSection, showRunner: Boolean) {
+    fun send(id: String, answer: suspend (Connection) -> Unit) {
+        val live = connection ?: return
+        sending = id
+        refusal = null
+        scope.launch {
+            try {
+                answer(live)
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                refusal = NeedsYouAnswer.refusal((e as? CoreException)?.what, agent)
+            } finally {
+                sending = null
+            }
+        }
+    }
+
+    fun answer(id: String, body: String) {
+        when (item.kindValue) {
+            NeedsYouKind.ASK -> {
+                val terminal = item.terminal?.id ?: return
+                val ask = item.askId ?: return
+                send(id) { it.answerAsk(terminal, ask, id) }
+            }
+            NeedsYouKind.DECISION -> {
+                val task = item.task?.id ?: return
+                send(id) { it.answerDecision(task, body) }
+            }
+            else -> onOpen()
+        }
+    }
+
     Column(
-        Modifier
+        modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 2.dp)
+            .clickable(onClick = onOpen)
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .testTag("needs-you-item-${item.id}"),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            KindMark(item.kindValue)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                listOfNotNull(row.place, row.runner).joinToString(" · "),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         Text(
-            section.worktree.task.ifBlank { section.worktree.branch },
-            style = MaterialTheme.typography.titleSmall,
-            maxLines = 1,
+            item.question.ifBlank { kindTitle(item.kindValue) },
+            style = MaterialTheme.typography.bodyLarge,
+            maxLines = 3,
             overflow = TextOverflow.Ellipsis,
         )
-        Text(
-            buildString {
-                // Which branch is not the useful fact about the main checkout;
-                // that it IS the repository is. `FleetScreen`'s header and
-                // iOS's both say it the same way.
-                append(
-                    if (section.worktree.isMainCheckout) "Primary checkout"
-                    else section.worktree.branch
-                )
-                if (showRunner) append(" · ${section.hostLabel}")
+        subject(row)?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        item.detail?.takeIf { it.isNotBlank() }?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (button in buttons) {
+                when (button) {
+                    is NeedsYouButton.Answer -> {
+                        val action = button.action
+                        if (sending == action.id) {
+                            Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            }
+                        } else if (action.primary) {
+                            Button(onClick = { answer(action.id, action.id) }, enabled = sending == null) {
+                                Text(action.title.ifBlank { action.id })
+                            }
+                        } else {
+                            OutlinedButton(onClick = { answer(action.id, action.id) }, enabled = sending == null) {
+                                Text(
+                                    action.title.ifBlank { action.id },
+                                    color = if (action.destructive) MaterialTheme.colorScheme.error
+                                    else MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+                    is NeedsYouButton.More -> Box {
+                        OutlinedButton(onClick = { more = true }, enabled = sending == null) { Text("More") }
+                        DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
+                            button.actions.forEach { action ->
+                                DropdownMenuItem(
+                                    text = { Text(action.title.ifBlank { action.id }) },
+                                    onClick = {
+                                        more = false
+                                        answer(action.id, action.id)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                    NeedsYouButton.Write ->
+                        if (sending == WRITTEN) {
+                            Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            }
+                        } else {
+                            OutlinedButton(onClick = { writing = true }, enabled = sending == null) {
+                                Text("Answer…")
+                            }
+                        }
+                    is NeedsYouButton.Open -> TextButton(onClick = onOpen) { Text(button.title) }
+                }
+            }
+        }
+        refusal?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
+    }
+
+    if (writing) {
+        var text by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { writing = false },
+            title = { Text(item.task?.key?.let { "Answer $it" } ?: "Answer") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(item.question, style = MaterialTheme.typography.bodyMedium)
+                    OutlinedTextField(value = text, onValueChange = { text = it }, minLines = 2)
+                }
             },
-            style = MaterialTheme.typography.labelSmall,
-            fontFamily = FontFamily.Monospace,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            confirmButton = {
+                TextButton(
+                    enabled = text.isNotBlank(),
+                    onClick = {
+                        writing = false
+                        answer(WRITTEN, text.trim())
+                    },
+                ) { Text("Send") }
+            },
+            dismissButton = { TextButton(onClick = { writing = false }) { Text("Cancel") } },
         )
     }
 }
 
-/**
- * The diff, as a row of its own — and it opens the diff.
- *
- * Why it gets a row at all: no road into a worktree had ever opened it on its
- * diff, so from the front door the diff cost two taps while `+82 -13` sat on
- * the header looking like the control for it.
- * `docs/jobs-to-be-done.md` F4 has the phone's review experience load-bearing
- * rather than a scaled-down Mac feature, which makes the diff the most
- * important target on this screen.
- *
- * **Both of the reasons this row used to point at the worktree instead are
- * spent, and the second one is worth keeping rather than deleting.** The first
- * was that the worktree screen drew a `changes` pane as raw VT bytes, so
- * aiming here at one would be worse than aiming at the worktree; the Changes
- * tab and [Pane]'s fold closed that. The second was the one that actually
- * decided it: that tab could say how big the diff was and could not show it,
- * and sending somebody who asked to review changes to a screen saying "not yet"
- * is worse than sending them to the agents that made them. There is a review
- * behind that tab now, and — as this comment predicted — the one line that had
- * to change is the tap.
- *
- * What it does NOT do is name a pane on the runner. The tab is asked for by
- * worktree id, so it answers during a handshake where a remembered terminal
- * cannot: tapping this row on a runner that is still connecting lands on the
- * diff and waits there, rather than on "Waiting for that runner." See
- * [AppModel.openChanges] for why the focus is written before the route moves.
- *
- * A `ListItem`, unlike the agent rows above it. This one is a leading icon,
- * one line of text and a trailing pair of numbers, which is exactly the shape
- * `ListItem` specifies — and giving it the same full width as the rows above
- * is what keeps every target in a section the same kind of thing. A small
- * target beside a large one, tapped while walking, is a coin toss with a wrong
- * side.
- */
-@Composable
-private fun ChangesRow(
-    section: NeedsYouSection,
-    onReview: (hostId: String, worktreeId: String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val counts = section.counts
-    ListItem(
-        headlineContent = { Text("Review changes") },
-        leadingContent = {
-            Icon(
-                Icons.Outlined.Difference,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        },
-        trailingContent = {
-            // The counts, drawn by the one composable that knows what those
-            // two colors mean — the worktree's Changes chip shows the same
-            // pair for the same worktree, and they must not be able to come out
-            // different. See [DiffCounts].
-            if (counts != null && counts.hasDiff) DiffCounts(counts)
-        },
-        modifier = modifier
-            .clickable { onReview(section.hostId, section.worktree.id) }
-            // Spoken as one target, in the Changes chip's own words. `+82` and
-            // `-13` read aloud as two orphaned numbers, and the clause about
-            // uncommitted work exists nowhere else — so the row and the tab it
-            // now opens say the same sentence about the same worktree, which
-            // they could not while the row went somewhere else. Set on the
-            // whole `ListItem` rather than on the counts, because a row with
-            // two elements in it is a row TalkBack stops on twice.
-            .semantics(mergeDescendants = true) {
-                contentDescription = changesDescription(counts, lead = "Review changes")
-            },
-    )
+/** What a typed answer's spinner is keyed by: no option has this id. */
+private const val WRITTEN = "\u0000written"
+
+/** The task an item is about, "bil-7 Invoice PDF export", or its pane and worktree. */
+private fun subject(row: NeedsYouRow): String? {
+    val item = row.item
+    item.task?.let { task -> return listOf(task.key, task.title).filter { it.isNotBlank() }.joinToString(" ") }
+    val terminal = item.terminal ?: return null
+    val who = if (terminal.role == "orchestrator") "Orchestrator" else terminal.label
+    val where = item.worktree?.name?.takeIf { it.isNotBlank() }
+    return listOfNotNull(who.ifBlank { null }, where).joinToString(" in ").ifBlank { null }
 }
 
-/**
- * The line a group puts under itself when it ran out of room.
- *
- * Indented to the left edge of the words in the rows above it rather than to
- * the row's own edge, so the sentence summarizing a group sits inside the group.
- * `TerminalRow` starts its text 34dp in: a 16dp margin, an 8dp `PROCESS_DOT`
- * and a 10dp gap. Read as three numbers rather than one, so that changing any
- * of them there and not here is a visible mistake rather than a silent one.
- */
+private fun kindTitle(kind: NeedsYouKind): String = when (kind) {
+    NeedsYouKind.ASK -> "Asking to use a tool"
+    NeedsYouKind.BLOCKED -> "Needs you"
+    NeedsYouKind.DECISION -> "Needs a decision"
+    NeedsYouKind.REVIEW -> "Ready for review"
+    NeedsYouKind.UNKNOWN -> "Needs you"
+}
+
+/** Amber for what waits on you, the review ink for a review. */
 @Composable
-private fun Overflow(sentence: String) {
-    Text(
-        sentence,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-        modifier = Modifier.padding(start = 34.dp, top = 2.dp, bottom = 6.dp),
-    )
+private fun KindMark(kind: NeedsYouKind) {
+    val color = glanceColor(if (kind == NeedsYouKind.REVIEW) GlancePalette.review else GlancePalette.amber)
+    Box(Modifier.size(PROCESS_DOT).clip(CircleShape).background(color))
 }
 
 /**
@@ -575,71 +509,4 @@ private fun Reassurance(
         }
     }
 }
-
-// What is happening, given that nothing needs you, is `reassurance` in
-// `model/FleetReading.kt`, where a test can read it back.
-//
-// It counts `working` only, which is disjoint from the two states that put a
-// row on this screen, so it answers "is anything happening", asked only once
-// nothing needs you. Hidden worktrees are left out, to agree with the rest of
-// the screen. It names the runner only when there is exactly one: with one,
-// naming it tells you which machine the app is speaking for; with several the
-// scope is the whole fleet, and picking one name to put in the sentence would
-// be the runner picker sneaking back in through the copy.
-
-/**
- * The door to the whole fleet, counting the thing that is actually behind it.
- *
- * It counts what the destination LISTS. iOS's version of this row said
- * "Working" over a count of agents mid-turn, which at 3am with nothing running
- * read `Working 0` on the only way in — a label telling you not to open the one
- * door you needed.
- *
- * Hidden worktrees are left out of the number, so it is a number you can find
- * by counting rows over there — and the supporting line says so when there are
- * any, because "12" over a list with fourteen rows in it is the same kind of
- * lie.
- *
- * A count of zero is still worth a tap: the quick task and the new-worktree
- * form live in that screen and nowhere else on the phone, so an empty fleet is
- * the state in which going there matters most.
- */
-@Composable
-private fun WorktreesRow(
-    visible: Int,
-    total: Int,
-    connections: List<Connection>,
-    onOpen: () -> Unit,
-) {
-    val hidden = total - visible
-    ListItem(
-        headlineContent = { Text("Worktrees") },
-        leadingContent = {
-            Icon(
-                Icons.Outlined.Folder,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        },
-        supportingContent = {
-            val sentence = when {
-                hidden == 1 -> "1 more is hidden."
-                hidden > 1 -> "$hidden more are hidden."
-                connections.isEmpty() -> "No runners yet. This is where you add one."
-                total == 0 -> "No worktrees yet. This is where you start one."
-                else -> null
-            }
-            if (sentence != null) Text(sentence)
-        },
-        trailingContent = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("$visible", style = MaterialTheme.typography.labelLarge)
-                Spacer(Modifier.width(4.dp))
-            }
-        },
-        modifier = Modifier.clickable(onClick = onOpen),
-    )
-}
-
 
