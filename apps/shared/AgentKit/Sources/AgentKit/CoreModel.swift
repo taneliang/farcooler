@@ -1177,7 +1177,7 @@ extension Fleet {
                 NeedsYou.OlderPane(
                     terminal: NeedsYouTerminal(
                         id: terminal.id, worktreeID: worktree.id,
-                        label: Terminal.name(of: terminal.preset), role: terminal.role ?? "",
+                        label: Terminal.name(of: terminal.preset), role: terminal.role,
                         paneMode: terminal.paneMode ?? "terminal",
                         chatCapable: terminal.chatCapable == true),
                     activity: terminal.activity,

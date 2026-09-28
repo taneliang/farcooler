@@ -55,12 +55,15 @@ public struct NeedsYouTask: Hashable, Sendable, Decodable {
 /// The terminal an item is about. `TerminalRef` on the wire.
 public struct NeedsYouTerminal: Hashable, Sendable, Decodable {
     public var id: String
-    public var worktreeID: String
+    /// Nil when the runner sent none.
+    public var worktreeID: String?
     /// What the runner calls it: the agent running in it (`claude`), else its
     /// title.
     public var label: String
-    /// `shell`, `agent` or `orchestrator`.
-    public var role: String
+    /// `shell`, `agent` or `orchestrator`, or nil for a role the client core
+    /// doesn't know. Optional so a newer runner's new role costs its item
+    /// nothing, rather than failing the runner's whole list.
+    public var role: String?
     /// `terminal`, `agent` or `changes`.
     public var paneMode: String
     public var chatCapable: Bool
@@ -68,7 +71,7 @@ public struct NeedsYouTerminal: Hashable, Sendable, Decodable {
     public var isOrchestrator: Bool { role == "orchestrator" }
 
     public init(
-        id: String, worktreeID: String, label: String, role: String, paneMode: String,
+        id: String, worktreeID: String?, label: String, role: String?, paneMode: String,
         chatCapable: Bool
     ) {
         self.id = id
@@ -142,8 +145,9 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
     /// which is what lets two runners' items be compared at all.
     public var rank: UInt32
     /// When the signal began, by the runner's clock. For showing an age, never
-    /// for sorting: two runners' clocks don't agree.
-    public var since: Date
+    /// for sorting: two runners' clocks don't agree. Nil when the runner
+    /// didn't say, which shows no age: never "just now" in its place.
+    public var since: Date?
     /// The workspace it's counted under, or nil for none (its repository's
     /// Unclaimed group).
     public var workspaceID: String?
@@ -164,17 +168,23 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
     public var actions: [NeedsYouAction]
     /// The runner it came from. Not on the wire: set by `NeedsYou.merge`.
     public var runner: String
+    /// Whether this app built the item from an older runner's fleet
+    /// (`NeedsYou.derived`) rather than decoding it from the runner's own
+    /// list. Not on the wire. A row can hedge with `olderRunnerNote` without
+    /// tracking which runner runs which version. Android's `isDerived`.
+    public var isDerived: Bool
 
     /// This item's identity across every runner.
     public var key: String { "\(runner)\u{1F}\(itemID)" }
     public var id: String { key }
 
     public init(
-        id: String, kind: NeedsYouKind, also: [NeedsYouKind] = [], rank: UInt32, since: Date,
+        id: String, kind: NeedsYouKind, also: [NeedsYouKind] = [], rank: UInt32, since: Date?,
         workspaceID: String? = nil, workspaceName: String = "", repositoryID: String? = nil,
         task: NeedsYouTask? = nil, terminal: NeedsYouTerminal? = nil,
         worktree: NeedsYouWorktree? = nil, question: String, detail: String? = nil,
-        askID: String? = nil, actions: [NeedsYouAction] = [], runner: String = ""
+        askID: String? = nil, actions: [NeedsYouAction] = [], runner: String = "",
+        isDerived: Bool = false
     ) {
         self.itemID = id
         self.kind = kind
@@ -192,6 +202,7 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
         self.askID = askID
         self.actions = actions
         self.runner = runner
+        self.isDerived = isDerived
     }
 
     enum CodingKeys: String, CodingKey {
@@ -210,8 +221,9 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
         also = try c.decodeIfPresent([NeedsYouKind].self, forKey: .also) ?? []
         rank = try c.decode(UInt32.self, forKey: .rank)
         // Unix milliseconds on the wire.
-        let millis = try c.decode(Int64.self, forKey: .since)
-        since = Date(timeIntervalSince1970: TimeInterval(millis) / 1000)
+        since = try c.decodeIfPresent(Int64.self, forKey: .since).map {
+            Date(timeIntervalSince1970: TimeInterval($0) / 1000)
+        }
         workspaceID = try c.decodeIfPresent(String.self, forKey: .workspaceID)
         workspaceName = try c.decodeIfPresent(String.self, forKey: .workspaceName) ?? ""
         repositoryID = try c.decodeIfPresent(String.self, forKey: .repositoryID)
@@ -223,6 +235,7 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
         askID = try c.decodeIfPresent(String.self, forKey: .askID)
         actions = try c.decodeIfPresent([NeedsYouAction].self, forKey: .actions) ?? []
         runner = ""
+        isDerived = false
     }
 }
 
@@ -357,9 +370,10 @@ extension NeedsYou {
     /// Hidden worktrees' panes belong in `panes` too: their items still
     /// count (spec §2.2).
     ///
-    /// `now` stands in for `since` when the runner didn't send one.
-    /// Android's `NeedsYouItems.derived` is the same rule.
-    public static func derived(fromTerminals panes: [OlderPane], now: Date = Date()) -> [NeedsYouItem] {
+    /// A pane with no `activitySince` gets no `since`, and so shows no age.
+    /// Every item is marked `isDerived`. Android's `NeedsYouItems.derived` is
+    /// the same rule.
+    public static func derived(fromTerminals panes: [OlderPane]) -> [NeedsYouItem] {
         panes
             .filter { $0.activity == "blocked" }
             .map { pane in
@@ -368,7 +382,7 @@ extension NeedsYou {
                     id: "blocked:\(pane.terminal.id)",
                     kind: .blocked,
                     rank: tierSpan + age,
-                    since: pane.activitySince ?? now,
+                    since: pane.activitySince,
                     workspaceID: pane.workspaceID,
                     repositoryID: pane.repositoryID,
                     task: pane.task,
@@ -376,7 +390,8 @@ extension NeedsYou {
                     worktree: pane.worktree,
                     question: pane.blockedQuestion.flatMap { $0.isEmpty ? nil : $0 }
                         ?? "\(pane.terminal.label) needs you",
-                    actions: [NeedsYouAction(id: "open", title: "Open", destructive: false, primary: false)])
+                    actions: [NeedsYouAction(id: "open", title: "Open", destructive: false, primary: false)],
+                    isDerived: true)
             }
             .sorted { $0.rank < $1.rank }
     }

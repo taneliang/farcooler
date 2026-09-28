@@ -143,13 +143,20 @@ func twoRunnersMergeByRankNotByClock() {
     #expect(merged.map(\.itemID) == ["ask:a", "ask:b", "review:c"])
     #expect(merged.map(\.runner) == ["studio", "build-box", "build-box"])
 
-    // A tie in rank falls to the runner, so the order doesn't shuffle.
+    // A tie in rank falls to the runner, so the order doesn't shuffle. The
+    // ids run the other way, so dropping the runner's clause changes the
+    // order every time rather than by the dictionary's luck.
     let tied = NeedsYou.merge([
+        "studio": [NeedsYouItem(id: "ask:a", kind: .ask, rank: 5, since: .now, question: "")],
+        "build-box": [NeedsYouItem(id: "ask:z", kind: .ask, rank: 5, since: .now, question: "")],
+    ])
+    #expect(tied.map(\.runner) == ["build-box", "studio"])
+
+    let same = NeedsYou.merge([
         "studio": [NeedsYouItem(id: "ask:x", kind: .ask, rank: 5, since: .now, question: "")],
         "build-box": [NeedsYouItem(id: "ask:x", kind: .ask, rank: 5, since: .now, question: "")],
     ])
-    #expect(tied.map(\.runner) == ["build-box", "studio"])
-    #expect(Set(tied.map(\.key)).count == 2, "one id on two runners is two items")
+    #expect(Set(same.map(\.key)).count == 2, "one id on two runners is two items")
 }
 
 @Test("An unknown kind decodes and sorts last")
@@ -219,6 +226,7 @@ func anOlderRunnersBlockedAgentIsABlockedItemNeverAboveARealAsk() throws {
     #expect(old[0].since == millis(1_789_999_000_000))
     #expect(old[0].actions.map(\.id) == ["open"])
     #expect(old[1].rank == 199_999_999, "no rank is the youngest in the tier")
+    #expect(old.allSatisfy { $0.isDerived }, "built here, and marked so")
     #expect(old[1].question == "codex needs you", "an empty question is none")
     #expect(old[1].task?.key == "bil-9", "the task it was dispatched for")
     #expect(old[0].task == nil)
@@ -273,4 +281,37 @@ func thePhonesFleetFeedsTheOlderRunnerItems() throws {
     #expect(item.task?.key == "bil-9")
     #expect(item.worktree?.name == "Widen the model")
     #expect(item.since == Date(timeIntervalSince1970: 1_755_900_000))
+}
+
+/// What a client core writes as null: a role it doesn't know (a newer
+/// runner's), a terminal with no worktree id, and an item with no `since`.
+/// Each costs its own field, never the runner's whole list.
+@Test("Nulls the client core may write decode as absent")
+func nullsTheClientCoreMayWriteDecodeAsAbsent() throws {
+    let json = Data(
+        """
+        {"items": [{"id": "blocked:t", "kind": "blocked", "also": [], "rank": 100000001,
+          "since": null, "workspace_id": null, "workspace_name": "", "repository_id": null,
+          "task": null, "worktree": null, "question": "q", "detail": null, "ask_id": null,
+          "actions": [],
+          "terminal": {"id": "t", "worktree_id": null, "label": "codex", "role": null,
+                       "pane_mode": "terminal", "chat_capable": false}}]}
+        """.utf8)
+    let item = try #require(try JSONDecoder().decode(NeedsYouList.self, from: json).items.first)
+    #expect(item.since == nil)
+    #expect(item.terminal?.role == nil)
+    #expect(item.terminal?.worktreeID == nil)
+    #expect(item.terminal?.isOrchestrator == false)
+    #expect(!item.isDerived, "decoded from a runner's own list")
+}
+
+/// A pane whose runner didn't say when it blocked shows no age. `now` in its
+/// place would read "just now" for an agent stuck an hour.
+@Test("An older pane with no activity time has no since")
+func anOlderPaneWithNoActivityTimeHasNoSince() {
+    var blocked = pane("t", activity: "blocked", rank: 5)
+    blocked.activitySince = nil
+    let item = NeedsYou.derived(fromTerminals: [blocked])
+    #expect(item.count == 1)
+    #expect(item.first?.since == nil)
 }
