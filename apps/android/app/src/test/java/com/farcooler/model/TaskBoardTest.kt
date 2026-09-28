@@ -115,7 +115,12 @@ class TaskBoardTest {
 
     // ---- order and counts ----
 
-    /** Needs Decision first, then the order work moves, and only statuses with tasks. */
+    /**
+     * Needs Decision first, then the order work moves, and only statuses with
+     * tasks. `listed` is deprecated for `sections` (ov-55) and kept until both
+     * phones move off it; this pins it until then.
+     */
+    @Suppress("DEPRECATION")
     @Test
     fun theBoardListsStatusesWithTasksNeedsDecisionFirst() {
         val board = TaskBoard.decode(listJson)
@@ -432,7 +437,7 @@ class TaskBoardTest {
     /** An implicit board's row is the repository's, as it always was, and names nothing twice. */
     @Test
     fun anImplicitBoardIsTheRepositorysRow() {
-        val row = RunnerBoards.rows("h", repositories, boards, panes, both, link = RunnerLink.ANSWERING).single()
+        val row = RunnerBoards.rows("h", repositories, boards, panes, both, link = RunnerLink.ANSWERING).first()
         assertEquals("r-busy", row.key)
         assertEquals(null, row.repositoryName)
         assertEquals(null, row.workspace.boardWorkspace)
@@ -496,16 +501,45 @@ class TaskBoardTest {
         assertEquals(listOf(0, 0), rows.map { it.agents })
     }
 
+    /**
+     * **Every status is a section, the empty ones included** (ov-55, owner
+     * decision 3). The list draws an empty status as a collapsed header
+     * reading "Backlog 0"; a list that dropped it said nothing about what
+     * isn't there. AgentKit's `everyStatusIsASectionEmptyOnesIncluded`.
+     *
+     * Mutation: `sections` returning `listed`. Red.
+     */
     @Test
-    fun onlyARepositoryWithSomethingOnItsBoardGetsARow() {
+    fun `every status is a section empty ones included`() {
+        assertEquals(TaskStatus.ORDER, busy.sections.map { it.status })
+        assertEquals(listOf(2, 0, 0, 2, 0, 0, 0), busy.sections.map { it.count })
+        assertEquals(TaskStatus.ORDER, TaskBoard.EMPTY.sections.map { it.status })
+        assertTrue(TaskBoard.EMPTY.sections.all { it.count == 0 })
+        val partial = TaskBoard(listOf(TaskBoardColumn(TaskStatus.DONE, listOf(row("5", TaskStatus.DONE)))))
+        assertEquals(listOf(0, 0, 0, 0, 0, 1, 0), partial.sections.map { it.count })
+        assertEquals(listOf("5"), partial.sections.first { it.status == TaskStatus.DONE }.rows.map { it.id })
+    }
+
+    /**
+     * **An empty implicit board still has a row** (ov-55, spec §5 and §8),
+     * read or not, like a workspace's (ov-56). The workspace view treats an
+     * implicit board as a workspace, and an empty one with no row was a
+     * board nobody could open to put a task on. AgentKit's
+     * `anEmptyImplicitBoardStillHasARow`.
+     *
+     * Mutation: the implicit-board filter back in `rows`. Red.
+     */
+    @Test
+    fun `an empty implicit board still has a row`() {
         val rows = RunnerBoards.rows("h", repositories, boards, panes, both, link = RunnerLink.ANSWERING)
-        assertEquals(listOf("r-busy"), rows.map { it.repository })
-        assertEquals("overnight", rows.single().name)
+        assertEquals(listOf("r-busy", "r-empty", "r-unread"), rows.map { it.repository })
+        assertEquals(listOf("overnight", "scratch", "never-read"), rows.map { it.name })
+        assertEquals(listOf(2, 0, 0), rows.map { it.decisions })
     }
 
     @Test
     fun aRowCountsDecisionsAndTheTasksAgentsAreOn() {
-        val row = RunnerBoards.rows("h", repositories, boards, panes, both, link = RunnerLink.ANSWERING).single()
+        val row = RunnerBoards.rows("h", repositories, boards, panes, both, link = RunnerLink.ANSWERING).first()
         assertEquals(2, row.decisions)
         assertEquals(2, row.agents)
         assertEquals("2 tasks need a decision, Agents are on 2 tasks", row.spoken)
@@ -527,18 +561,18 @@ class TaskBoardTest {
         val reconnected = RunnerLink.ANSWERING.given(FleetRead.EARLIER_LINK)
         assertFalse(TaskAgentLink.speaksOfAgents(reconnected, records))
         assertEquals(
-            0, RunnerBoards.rows("h", repositories, boards, panes, both, reconnected).single().agents)
+            0, RunnerBoards.rows("h", repositories, boards, panes, both, reconnected).first().agents)
         val read = RunnerLink.ANSWERING.given(FleetRead.THIS_LINK)
-        assertEquals(2, RunnerBoards.rows("h", repositories, boards, panes, both, read).single().agents)
+        assertEquals(2, RunnerBoards.rows("h", repositories, boards, panes, both, read).first().agents)
     }
 
     @Test
     fun aRunnerThatCannotBeBelievedAboutItsPanesCountsNoAgents() {
-        val dropped = RunnerBoards.rows("h", repositories, boards, panes, both, link = RunnerLink.AWAY).single()
+        val dropped = RunnerBoards.rows("h", repositories, boards, panes, both, link = RunnerLink.AWAY).first()
         assertEquals(0, dropped.agents)
         assertEquals(2, dropped.decisions)
         val older = DaemonBuild("1", true, "", setOf("workspaces", "tasks"))
-        assertEquals(0, RunnerBoards.rows("h", repositories, boards, panes, older, link = RunnerLink.ANSWERING).single().agents)
+        assertEquals(0, RunnerBoards.rows("h", repositories, boards, panes, older, link = RunnerLink.ANSWERING).first().agents)
     }
 
     @Test

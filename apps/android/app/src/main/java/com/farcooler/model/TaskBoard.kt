@@ -210,7 +210,10 @@ data class TaskRow(
 data class UnreadableTaskRow(val id: String, val key: String, val title: String, val status: String)
 
 /** One status's worth of rows, in the order the runner listed them. */
-data class TaskBoardColumn(val status: TaskStatus, val rows: List<TaskRow>)
+data class TaskBoardColumn(val status: TaskStatus, val rows: List<TaskRow>) {
+    /** How many tasks are in this status: what a section's header shows, 0 included. */
+    val count: Int get() = rows.size
+}
 
 /** A repository's board. */
 data class TaskBoard(
@@ -226,7 +229,21 @@ data class TaskBoard(
     val waitingOnYou: Int get() = columns.firstOrNull { it.status == TaskStatus.NEEDS_DECISION }?.rows?.size ?: 0
 
     /** The statuses a phone lists: those with a task in them, in [TaskStatus.ORDER]. */
+    @Deprecated("Use sections, which keeps the empty statuses (ov-55). Deleted in 4D.")
     val listed: List<TaskBoardColumn> get() = columns.filter { it.rows.isNotEmpty() }
+
+    /**
+     * Every status in [TaskStatus.ORDER], Needs Decision first, each with its
+     * rows and count, the empty ones included (ov-55, owner decision 3). An
+     * empty status is a collapsed header reading "Backlog 0", not a gap.
+     * Built over the order rather than [columns], so a board with some
+     * columns or none ([EMPTY]) still has all seven. AgentKit's
+     * `TaskBoardModel.sections`.
+     */
+    val sections: List<TaskBoardColumn>
+        get() = TaskStatus.ORDER.map { status ->
+            TaskBoardColumn(status, columns.firstOrNull { it.status == status }?.rows.orEmpty())
+        }
 
     /** Tasks (not panes) at least one live agent is on. */
     fun tasksWithLiveAgents(panes: List<Terminal>): Int = rows.count { it.livePanes(panes).isNotEmpty() }
@@ -480,11 +497,11 @@ object RunnerBoards {
      * - A workspace gets a row whenever it exists, its board read or not and
      *   empty or not (ov-56): the row is the way onto the board, and a
      *   workspace made a moment ago has nothing on it yet. The board screen
-     *   draws the empty and unread states. Here the phone parts from the
-     *   iPhone, whose `RunnerBoards.rows` still drops an empty board.
+     *   draws the empty and unread states.
      * - An implicit board — a repository's, on a runner without workspaces —
-     *   gets a row only once it has been read and has something on it. No
-     *   workspace was made there, and an empty board is most repositories.
+     *   gets a row the same way, empty or unread (ov-55, spec §5 and §8). It
+     *   used to need something on it; but the workspace view treats it as a
+     *   workspace, and an empty one with no row could never be opened.
      * - [BoardRow.agents] is counted only where [TaskAgentLink.speaksOfAgents]
      *   holds; anywhere else it is 0, which draws nothing — "can't say".
      * - A workspace's row is called by its name; an implicit one's by its
@@ -504,9 +521,8 @@ object RunnerBoards {
         if (build?.can("tasks") != true) return emptyList()
         val speaks = TaskAgentLink.speaksOfAgents(link, build)
         val names = repositories.associate { it.id to it.displayName.ifEmpty { it.short } }
-        return boards.mapNotNull { workspace ->
+        return boards.map { workspace ->
             val board = models[workspace.id]
-            if (workspace.isImplicit && (board == null || board.isEmpty)) return@mapNotNull null
             val repository = workspace.repository ?: workspace.id
             val repositoryName = names[repository]
             BoardRow(
