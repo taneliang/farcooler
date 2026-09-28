@@ -392,12 +392,7 @@ fn item(
         workspace_id: workspace.map(id_bytes).unwrap_or_default(),
         workspace_name: workspace.and_then(|w| inputs.workspaces.get(&w).cloned()).unwrap_or_default(),
         repository_id: repository.map(id_bytes).unwrap_or_default(),
-        task: task.map(|t| pb::TaskRef {
-            id: id_bytes(t.id),
-            key: t.key.clone(),
-            title: t.title.clone(),
-            status: crate::task_ops::pb_status(t.status),
-        }),
+        task: task.map(crate::wire::task_ref),
         terminal: terminal.map(|t| {
             let observed = inputs.observed.get(&t.id);
             pb::TerminalRef {

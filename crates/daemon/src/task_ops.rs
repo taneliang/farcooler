@@ -241,6 +241,11 @@ fn announce(watcher: &Watcher, task: &Task, actor: Actor) {
     watcher.announce_task_changed(task, None, actor);
 }
 
+/// Whether a task in this status is off its worktree's open tasks.
+fn is_closed(status: TaskStatus) -> bool {
+    matches!(status, TaskStatus::Done | TaskStatus::Cancelled)
+}
+
 /// Whether a task in this status is on the needs-you list: a decision or a
 /// review.
 fn is_an_item(status: TaskStatus) -> bool {
@@ -425,6 +430,9 @@ pub fn create(svc: &Service, watcher: &Watcher, req: &pb::TaskCreate) -> Result<
     };
 
     announce(watcher, &task, actor);
+    if let Some(lane) = task.worktree_id {
+        watcher.announce_worktree_changed(lane);
+    }
     Ok(pb_task(&task))
 }
 
@@ -467,8 +475,19 @@ pub fn update(svc: &Service, watcher: &Watcher, req: &pb::TaskUpdate) -> Result<
         labels: req.labels.clone(),
         worktree_id: optional_id(req.worktree_id.as_ref(), "worktree_id")?,
     };
+    let before = svc.store.get_task(id)?;
     let task = svc.store.update_task(id, req.expected_version, &update)?;
     announce(watcher, &task, actor);
+    // A worktree names its open tasks, so a task moving lanes changes both,
+    // and a new title changes the one it's on.
+    if before.worktree_id != task.worktree_id || before.title != task.title {
+        for lane in [before.worktree_id, task.worktree_id].into_iter().flatten() {
+            watcher.announce_worktree_changed(lane);
+            if before.worktree_id == task.worktree_id {
+                break;
+            }
+        }
+    }
     Ok(pb_task(&task))
 }
 
@@ -491,6 +510,12 @@ pub fn set_status(svc: &Service, watcher: &Watcher, req: &pb::TaskSetStatus) -> 
     let before = svc.store.get_task(id)?.status;
     let task = svc.store.set_task_status(id, status, actor)?;
     announce(watcher, &task, actor);
+    // Into or out of Done or Cancelled: on its worktree's open tasks, or off.
+    if is_closed(before) != is_closed(task.status)
+        && let Some(lane) = task.worktree_id
+    {
+        watcher.announce_worktree_changed(lane);
+    }
     if before != task.status && (is_an_item(before) || is_an_item(task.status)) {
         watcher.announce_needs_you();
     }

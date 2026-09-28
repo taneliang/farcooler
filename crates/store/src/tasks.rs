@@ -392,6 +392,27 @@ impl Store {
             .map_err(map_err)
     }
 
+    /// Every task whose lane is `worktree` and which is neither Done nor
+    /// Cancelled, in the order they were filed: what `Worktree.open_tasks`
+    /// carries, so a row can name its task without a board read.
+    pub fn open_tasks_in_worktree(&self, worktree: Uuid) -> Result<Vec<Task>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {TASK_COLUMNS} FROM tasks
+                  WHERE worktree_id = ?1 AND status NOT IN (?2, ?3)
+                  ORDER BY created_at, rowid"
+            ))
+            .map_err(map_err)?;
+        let rows = stmt
+            .query_map(
+                params![uuid_blob(worktree), TaskStatus::Done.as_str(), TaskStatus::Cancelled.as_str()],
+                row_to_task,
+            )
+            .map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
+    }
+
     /// Every task whose key is `key`, on one board or on all of them.
     ///
     /// The lookup a person's `fc-42` deserves. Resolving a key had exactly one

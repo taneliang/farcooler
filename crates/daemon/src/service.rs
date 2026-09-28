@@ -2182,6 +2182,9 @@ pub struct WorktreeView {
     /// here (`claims`). `wire::foreign_writers` adds these to the ones that
     /// sit here.
     pub observed_writers: Vec<Uuid>,
+    /// The tasks whose lane this is, neither Done nor Cancelled, in the order
+    /// they were filed. `Worktree.open_tasks`.
+    pub open_tasks: Vec<models::Task>,
 }
 
 #[derive(Debug)]
@@ -5044,7 +5047,8 @@ impl Service {
         );
 
         let observed_writers = self.observed_writers(ws);
-        Ok(WorktreeView { worktree: ws.clone(), state, terminals: views, observed_writers })
+        let open_tasks = self.store.open_tasks_in_worktree(ws.id)?;
+        Ok(WorktreeView { worktree: ws.clone(), state, terminals: views, observed_writers, open_tasks })
     }
 
     /// The workspaces of live, non-orchestrator terminals `claims` saw working

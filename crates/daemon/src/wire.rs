@@ -209,7 +209,18 @@ pub fn worktree(view: &WorktreeView, scope: Scope) -> wire::Worktree {
         workspace_id: ws.workspace_id.map(id_bytes),
         claim_source: ws.claim_source.map(|source| source.as_str().to_string()),
         foreign_writer_workspace_ids: foreign_writers(view).into_iter().map(id_bytes).collect(),
-        open_tasks: Vec::new(),
+        open_tasks: view.open_tasks.iter().map(task_ref).collect(),
+    }
+}
+
+/// A task as a worktree row or a needs-you item names it: id, key, title and
+/// status, and nothing else.
+pub fn task_ref(task: &models::Task) -> wire::TaskRef {
+    wire::TaskRef {
+        id: id_bytes(task.id),
+        key: task.key.clone(),
+        title: task.title.clone(),
+        status: crate::task_ops::pb_status(task.status),
     }
 }
 

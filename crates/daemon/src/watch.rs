@@ -3285,6 +3285,33 @@ impl Watcher {
         });
     }
 
+    /// Broadcast one worktree as it is now, for a change the fleet's own
+    /// passes don't see: its `open_tasks` moved because a task was filed on
+    /// it, moved off or onto it, renamed, or finished.
+    ///
+    /// Read scope, so no path crosses to a client not entitled to one: a
+    /// broadcast has one shape for every connection, and a client re-reads
+    /// the fleet on it anyway. Detached, since the task writes that call it
+    /// are not async; a runner with no runtime to spawn on has no client to
+    /// tell either.
+    pub fn announce_worktree_changed(&self, worktree: Uuid) {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else { return };
+        let service = self.service.clone();
+        let events = self.events.clone();
+        runtime.spawn(async move {
+            let Ok(ws) = service.store.get_worktree(worktree) else { return };
+            let Ok(view) = service.worktree_view(&ws).await else { return };
+            let _ = events.send(Event {
+                event_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
+                sequence: 0,
+                payload: Some(farcooler_protocol::v1::event::Payload::WorktreeChanged(wire::worktree(
+                    &view,
+                    farcooler_protocol::v1::Scope::Read,
+                ))),
+            });
+        });
+    }
+
     /// Tell every connected client that the needs-you list moved: re-read it.
     ///
     /// Debounced, unlike `announce_fleet_changed`: at most one per
