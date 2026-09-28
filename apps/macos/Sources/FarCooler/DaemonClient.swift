@@ -659,7 +659,9 @@ final class DaemonClient: ObservableObject {
             fleet.worktrees[w].terminals[t].turnFailed = event.turnFailed
 
             let terminal = fleet.worktrees[w].terminals[t]
-            Notifier.shared.report(terminal: terminal, worktree: fleet.worktrees[w].task)
+            Notifier.shared.report(
+                terminal: terminal,
+                place: Notifier.place(of: terminal, in: fleet.worktrees[w], workspaces: fleet.workspaces))
             reapIfExited(terminal)
             return
         }
@@ -1928,6 +1930,24 @@ final class DaemonClient: ObservableObject {
         await refresh()
         if data != nil { return nil }
         return Self.assignRefusal(message, worktree: worktree, workspace: workspace)
+    }
+
+    /// Start `workspace`'s orchestrator, or replace the one running.
+    ///
+    /// `startOrchestratorArguments` in `WorkspaceActions.swift`, whose
+    /// `orchestratorRefusal` words a refusal.
+    ///
+    /// Nil once the runner has started it, or the sentence to show when it
+    /// didn't. Followed by a refresh either way: the row turns into the live
+    /// orchestrator when the runner lists one.
+    func startOrchestrator(
+        _ workspace: WorkspaceSummary, harness: OrchestratorHarness, replace: Bool
+    ) async -> String? {
+        let (data, message) = await runRaw(
+            Self.startOrchestratorArguments(workspace, harness: harness, replace: replace))
+        await refresh()
+        if data != nil { return nil }
+        return Self.orchestratorRefusal(message, workspace: workspace, replace: replace)
     }
 
     /// The banner for a worktree that moved to `workspace` and then couldn't

@@ -71,8 +71,10 @@ final class Notifier {
     }
 
     /// Announce a change, if it is worth announcing.
-    func report(terminal: Terminal, worktree: String) {
-        reportFailedExit(terminal: terminal, worktree: worktree)
+    ///
+    /// `place` is where the pane is, workspace first — see `place(of:in:workspaces:)`.
+    func report(terminal: Terminal, place: String) {
+        reportFailedExit(terminal: terminal, place: place)
 
         let activity = terminal.agent
         defer { announced[terminal.id] = activity }
@@ -87,56 +89,13 @@ final class Notifier {
         // on the order they happen to be reached in.
         guard Self.canNotify, authorized else { return }
 
+        // The words are `words(for:place:)`'s, in `WorkspaceActions.swift`,
+        // where they can be tested without a notification centre.
+        guard let words = Self.words(for: terminal, place: place) else { return }
         let content = UNMutableNotificationContent()
-        switch activity {
-        case .blocked:
-            content.title = "\(terminal.title) needs you"
-            // Capitalized to match the daemon's own `watch::notification`, which
-            // writes this same sentence into the push it sends when this app is
-            // closed. One person gets whichever of the two is delivered, about
-            // one pane, and two casings of one sentence is two notifications.
-            content.body = "\(worktree) — Waiting for your answer"
-            content.interruptionLevel = .timeSensitive
-        case .done:
-            // How the turn ENDED, which `activity` alone cannot say — the
-            // daemon reads it out of the agent's own log and sends it beside
-            // this. Telling someone an agent finished when its turn died is
-            // the same lie the green dot used to tell, in the surface they are
-            // most likely to be looking at.
-            if terminal.status == .failedTurn {
-                content.title = "\(terminal.title) failed"
-                content.body = "\(worktree) — Its last turn didn’t finish"
-            } else {
-                content.title = "\(terminal.title) finished"
-                // What it finished, where there is an answer to that. The body
-                // was the worktree alone, which the title had very nearly said
-                // already — so the whole notification was a sentence about Far
-                // Cooler rather than about the work. What follows the dash is
-                // the agent's own last words, already redacted and already cut
-                // by the daemon.
-                //
-                // The same change as the phone's, in the same words, because
-                // the two notifications are read by one person about one pane.
-                //
-                // `lastSaid`, not `recentSteps.last`, which is what this used
-                // to read. A step is a wrapped ROW, so the last of them is the
-                // last forty characters of the window — the END of the message
-                // — and a notification reports something already over, where
-                // what a sentence opens with is what it is about. A turn that
-                // ended "More shit. An industrial quantity of shit, shipped in
-                // carefully authorized batches to avoid N+1 shits." arrived as
-                // "batches to avoid N+1 shits." until it did not. The daemon
-                // sends the whole message cut from its start; see
-                // `Terminal.lastSaid`.
-                if let said = terminal.lastSaid, !said.isEmpty {
-                    content.body = "\(worktree) — \(said)"
-                } else {
-                    content.body = worktree
-                }
-            }
-        default:
-            return
-        }
+        content.title = words.title
+        content.body = words.body
+        if activity == .blocked { content.interruptionLevel = .timeSensitive }
         content.sound = .default
         // Keyed by terminal so a later state replaces the earlier notification
         // for the same one instead of stacking up.
@@ -159,7 +118,7 @@ final class Notifier {
     /// command has no agent to be blocked or done — so it needs its own guard
     /// and its own dedup, not a case squeezed into an enum it doesn't belong
     /// to.
-    private func reportFailedExit(terminal: Terminal, worktree: String) {
+    private func reportFailedExit(terminal: Terminal, place: String) {
         guard terminal.status == .failedRun else {
             // Cleared rather than left set, so a terminal that is rerun after
             // a failure — same pane, same id, `exit` and the command run
@@ -174,15 +133,15 @@ final class Notifier {
         guard Self.canNotify, authorized else { return }
 
         let content = UNMutableNotificationContent()
-        content.title = "\(terminal.title) failed"
+        content.title = "\(Self.speaker(terminal)) failed"
         // The code or the signal, whichever the command actually left behind
         // — never both, since a signal means there is no exit code to show.
         if let signal = terminal.exitSignal {
-            content.body = "\(worktree) — Stopped by signal \(signal)"
+            content.body = "\(place) — Stopped by signal \(signal)"
         } else if let code = terminal.exitCode {
-            content.body = "\(worktree) — Exit code \(code)"
+            content.body = "\(place) — Exit code \(code)"
         } else {
-            content.body = worktree
+            content.body = place
         }
         content.sound = .default
         content.interruptionLevel = .timeSensitive

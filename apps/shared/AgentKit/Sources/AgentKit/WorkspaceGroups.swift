@@ -31,22 +31,27 @@ public struct WorkspaceSummary: Identifiable, Equatable, Hashable, Sendable, Dec
     public let ordinal: Int
     /// The live orchestrator's terminal id, or nil when none is running.
     public let orchestrator: String?
+    /// Where the workspace's charter is, on the runner's own disk. The runner
+    /// sends it to `host_admin` clients only, so nil for any other, for a
+    /// runner older than the key, and for an implicit workspace.
+    public let charter: String?
     /// Whether this stands in for a runner without workspaces: one per
     /// repository, whose id is the repository's own. Never decoded.
     public let isImplicit: Bool
 
     public init(
         id: String, name: String, taskPrefix: String, isMain: Bool, ordinal: Int,
-        repository: String? = nil, orchestrator: String? = nil
+        repository: String? = nil, orchestrator: String? = nil, charter: String? = nil
     ) {
         self.init(
             id: id, repository: repository, name: name, taskPrefix: taskPrefix,
-            isMain: isMain, ordinal: ordinal, orchestrator: orchestrator, isImplicit: false)
+            isMain: isMain, ordinal: ordinal, orchestrator: orchestrator, charter: charter,
+            isImplicit: false)
     }
 
     private init(
         id: String, repository: String?, name: String, taskPrefix: String, isMain: Bool,
-        ordinal: Int, orchestrator: String?, isImplicit: Bool
+        ordinal: Int, orchestrator: String?, charter: String? = nil, isImplicit: Bool
     ) {
         self.id = id
         self.repository = repository
@@ -55,6 +60,7 @@ public struct WorkspaceSummary: Identifiable, Equatable, Hashable, Sendable, Dec
         self.isMain = isMain
         self.ordinal = ordinal
         self.orchestrator = orchestrator
+        self.charter = charter
         self.isImplicit = isImplicit
     }
 
@@ -75,7 +81,7 @@ public struct WorkspaceSummary: Identifiable, Equatable, Hashable, Sendable, Dec
     public var boardWorkspace: String? { isImplicit ? nil : id }
 
     enum CodingKeys: String, CodingKey {
-        case id, repository, name, ordinal, orchestrator
+        case id, repository, name, ordinal, orchestrator, charter
         case taskPrefix = "task_prefix"
         case isMain = "is_main"
     }
@@ -92,6 +98,9 @@ public struct WorkspaceSummary: Identifiable, Equatable, Hashable, Sendable, Dec
         isMain = ((try? c.decodeIfPresent(Bool.self, forKey: .isMain)) ?? nil) ?? false
         ordinal = ((try? c.decodeIfPresent(Int.self, forKey: .ordinal)) ?? nil) ?? 0
         orchestrator = (try? c.decodeIfPresent(String.self, forKey: .orchestrator)) ?? nil
+        charter = ((try? c.decodeIfPresent(String.self, forKey: .charter)) ?? nil).flatMap {
+            $0.isEmpty ? nil : $0
+        }
         isImplicit = false
     }
 }
