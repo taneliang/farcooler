@@ -1944,6 +1944,55 @@ async fn a_permission_answered_from_a_phone_reaches_the_held_hook() {
     asking.never_trapped();
 }
 
+/// A held ask reaches `needs_you` spelled exactly as the shared fixture
+/// (`test/fixtures/needs-you.json`) spells the studio's ask, so the phones'
+/// decoders are pinned to what a daemon writes, not to what a test imagined.
+#[tokio::test]
+async fn a_held_ask_reaches_needs_you_as_the_shared_fixture_spells_it() {
+    let mut asking = a_claude_asking().await;
+    let (terminal, id) = (asking.terminal, asking.id.clone());
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../../../test/fixtures/needs-you.json")).expect("the fixture");
+    let spelled = &fixture["runners"][0]["needs_you"]["items"][0];
+    assert_eq!(spelled["kind"], "ask", "the fixture's first item is its ask");
+
+    let mut item = serde_json::Value::Null;
+    for _ in 0..100 {
+        let listed = asking.session.needs_you().await.expect("needs_you");
+        if let Some(found) = listed["items"].as_array().unwrap().iter().find(|i| i["ask_id"] == id.as_str()) {
+            item = found.clone();
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(!item.is_null(), "the held ask never reached needs_you");
+    assert_eq!(item["id"], format!("ask:{id}"));
+    assert!(id.starts_with("hook-ask-"), "{id}");
+    assert!(spelled["ask_id"].as_str().unwrap().starts_with("hook-ask-"), "the fixture's ask id isn't a hook ask's");
+    assert_eq!(item["terminal"]["id"], terminal.to_string());
+    assert_eq!(item["terminal"]["label"], spelled["terminal"]["label"]);
+    assert_eq!(item["terminal"]["role"], spelled["terminal"]["role"]);
+    assert_eq!(item["terminal"]["pane_mode"], spelled["terminal"]["pane_mode"]);
+    assert!(item["detail"].is_null() && spelled["detail"].is_null(), "an ask has no detail");
+    assert!(item["worktree"].is_object(), "Control sees the worktree: {item}");
+    // The buttons, in order, with the allow option's own name as both the
+    // question and its title: only the tool's words differ.
+    let buttons = |i: &serde_json::Value| -> Vec<(String, bool, bool)> {
+        i["actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| (a["id"].as_str().unwrap().to_string(), a["destructive"] == true, a["primary"] == true))
+            .collect()
+    };
+    assert_eq!(buttons(&item), buttons(spelled));
+    assert_eq!(item["question"], item["actions"][0]["title"]);
+    assert_eq!(spelled["question"], spelled["actions"][0]["title"]);
+    assert_eq!(item["actions"][1]["title"], spelled["actions"][1]["title"]);
+    asking.session.agent_answer(terminal, &id, "deny").await.expect("the answer landed");
+    asking.never_trapped();
+}
+
 /// The local socket has no client id, so the device is the runner itself:
 /// "Mac" on macOS, "this computer" elsewhere.
 #[tokio::test]

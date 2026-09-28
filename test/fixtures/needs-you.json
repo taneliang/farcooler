@@ -6,29 +6,29 @@
           {
             "actions": [
               {
-                "destructive": true,
-                "id": "reject",
-                "primary": false,
-                "title": "Deny"
-              },
-              {
                 "destructive": false,
                 "id": "allow",
                 "primary": true,
-                "title": "Allow"
+                "title": "Allow touch x"
+              },
+              {
+                "destructive": true,
+                "id": "deny",
+                "primary": false,
+                "title": "Deny"
               }
             ],
             "also": [
               "decision"
             ],
-            "ask_id": "a-41",
-            "detail": "touch x",
-            "id": "ask:a-41",
+            "ask_id": "hook-ask-01000000-0000-7000-8000-000000000029",
+            "detail": null,
+            "id": "ask:hook-ask-01000000-0000-7000-8000-000000000029",
             "kind": "ask",
             "question": "Allow touch x",
-            "rank": 12,
+            "rank": 99999939,
             "repository_id": "01000000-0000-7000-8000-000000000002",
-            "since": 1790000000250,
+            "since": 1789999940000,
             "task": {
               "id": "01000000-0000-7000-8000-000000000003",
               "key": "bil-7",
@@ -39,7 +39,7 @@
               "chat_capable": true,
               "id": "01000000-0000-7000-8000-000000000004",
               "label": "claude",
-              "pane_mode": "agent",
+              "pane_mode": "terminal",
               "role": "agent",
               "worktree_id": "01000000-0000-7000-8000-000000000005"
             },
@@ -58,7 +58,7 @@
               {
                 "destructive": false,
                 "id": "open",
-                "primary": true,
+                "primary": false,
                 "title": "Open"
               }
             ],
@@ -68,9 +68,9 @@
             "id": "blocked:01000000-0000-7000-8000-00000000000a",
             "kind": "blocked",
             "question": "Run the migration now?",
-            "rank": 3600020,
+            "rank": 199999879,
             "repository_id": "01000000-0000-7000-8000-000000000002",
-            "since": 1790000100000,
+            "since": 1789999880000,
             "task": null,
             "terminal": {
               "chat_capable": false,
@@ -82,7 +82,13 @@
             },
             "workspace_id": "01000000-0000-7000-8000-000000000001",
             "workspace_name": "Billing",
-            "worktree": null
+            "worktree": {
+              "branch": "main",
+              "deletions": 0,
+              "id": "01000000-0000-7000-8000-00000000000b",
+              "insertions": 0,
+              "name": "demo"
+            }
           },
           {
             "actions": [
@@ -105,9 +111,9 @@
             "id": "decision:01000000-0000-7000-8000-00000000000c",
             "kind": "decision",
             "question": "Postgres or SQLite for the queue?",
-            "rank": 7200300,
+            "rank": 299999699,
             "repository_id": "01000000-0000-7000-8000-000000000002",
-            "since": 1789999000000,
+            "since": 1789999700000,
             "task": {
               "id": "01000000-0000-7000-8000-00000000000c",
               "key": "bil-9",
@@ -118,6 +124,41 @@
             "workspace_id": "01000000-0000-7000-8000-000000000001",
             "workspace_name": "Billing",
             "worktree": null
+          },
+          {
+            "actions": [
+              {
+                "destructive": false,
+                "id": "open",
+                "primary": false,
+                "title": "Open"
+              }
+            ],
+            "also": [],
+            "ask_id": null,
+            "detail": "+18 −40",
+            "id": "review:01000000-0000-7000-8000-00000000000d",
+            "kind": "review",
+            "question": "Ready for review",
+            "rank": 399996399,
+            "repository_id": "01000000-0000-7000-8000-000000000002",
+            "since": 1789996400000,
+            "task": {
+              "id": "01000000-0000-7000-8000-00000000000d",
+              "key": "bil-4",
+              "status": "in_review",
+              "title": "Webhook signatures"
+            },
+            "terminal": null,
+            "workspace_id": "01000000-0000-7000-8000-000000000001",
+            "workspace_name": "Billing",
+            "worktree": {
+              "branch": "bil/webhooks",
+              "deletions": 40,
+              "id": "01000000-0000-7000-8000-000000000005",
+              "insertions": 18,
+              "name": "fc-3-webhooks"
+            }
           }
         ]
       },
@@ -131,15 +172,15 @@
             "also": [],
             "ask_id": null,
             "detail": null,
-            "id": "ask:b-2",
+            "id": "ask:hook-ask-01000000-0000-7000-8000-00000000002a",
             "kind": "ask",
             "question": "claude is asking to use a tool",
-            "rank": 40,
+            "rank": 99999989,
             "repository_id": "01000000-0000-7000-8000-000000000015",
-            "since": 1790000200000,
+            "since": 1789999990000,
             "task": null,
             "terminal": {
-              "chat_capable": true,
+              "chat_capable": false,
               "id": "01000000-0000-7000-8000-000000000016",
               "label": "claude",
               "pane_mode": "terminal",
@@ -158,9 +199,9 @@
             "id": "review:01000000-0000-7000-8000-00000000001e",
             "kind": "review",
             "question": "Ready for review",
-            "rank": 10800000,
+            "rank": 399992799,
             "repository_id": "01000000-0000-7000-8000-000000000015",
-            "since": 1789990000000,
+            "since": 1789992800000,
             "task": {
               "id": "01000000-0000-7000-8000-00000000001e",
               "key": "ops-2",

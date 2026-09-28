@@ -129,22 +129,63 @@ mod tests {
         pb::NeedsYouAction { id: id.into(), title: title.into(), destructive, primary }
     }
 
-    /// The two runners the shared fixture holds, as the wire sends them.
+    /// When the fixture's runners were read, in Unix milliseconds.
+    const NOW: i64 = 1_790_000_000_000;
+    /// `needs_you::TIER_SPAN` in the daemon, which `feed::rank` shares.
+    const TIER_SPAN: u32 = 100_000_000;
+
+    /// The rank the daemon gives an item of `tier` that has waited `age_secs`
+    /// (`needs_you::rank`): the tier dominates, then the oldest first.
+    fn rank(tier: u32, age_secs: u32) -> u32 {
+        tier * TIER_SPAN + (TIER_SPAN - 1 - age_secs)
+    }
+
+    fn ago(age_secs: u32) -> Option<prost_types::Timestamp> {
+        at(NOW - i64::from(age_secs) * 1000)
+    }
+
+    /// A hook ask's options exactly as the daemon offers them
+    /// (`agent_core::permission::permission_options`), turned into actions as
+    /// `needs_you::terminal_signal` turns them: allow first and primary, deny
+    /// destructive.
+    fn hook_ask_actions(allow: &str) -> Vec<pb::NeedsYouAction> {
+        vec![action("allow", allow, false, true), action("deny", "Deny", true, false)]
+    }
+
+    /// `needs_you::open_action`.
+    fn open() -> pb::NeedsYouAction {
+        action("open", "Open", false, false)
+    }
+
+    /// The two runners the shared fixture holds, as the daemon sends them.
     ///
-    /// The studio's ask sets every optional field and every repeated one, so
-    /// the decoders' tests can't pass by reading nothing. The build box's list
-    /// is what a Read-scoped client gets, plus a review from a runner that
-    /// names no workspace.
+    /// Every value is one the daemon's builders write (`needs_you.rs`): hook
+    /// ask ids, ranks on `TIER_SPAN`, an ask's question as its allow option,
+    /// no detail on an ask, a review's `+N −M`, `open` never primary.
+    ///
+    /// The studio is read at Control. Between its items every optional field
+    /// is set and every repeated one is non-empty, so the decoders' tests
+    /// can't pass by reading nothing. The build box is read below Control
+    /// (`redact_below_control`), and its review is on a task with no
+    /// workspace.
     fn runners() -> Vec<(&'static str, pb::NeedsYouList)> {
         use pb::NeedsYouKind as K;
+        let lane = pb::WorktreeRef {
+            id: id(5),
+            name: "fc-3-webhooks".into(),
+            branch: "bil/webhooks".into(),
+            insertions: 18,
+            deletions: 40,
+        };
         let studio = pb::NeedsYouList {
             items: vec![
                 pb::NeedsYouItem {
-                    id: "ask:a-41".into(),
+                    id: "ask:hook-ask-01000000-0000-7000-8000-000000000029".into(),
                     kind: K::Ask as i32,
+                    // Its task is also waiting on a decision.
                     also: vec![K::Decision as i32],
-                    rank: 12,
-                    since: at(1_790_000_000_250),
+                    rank: rank(0, 60),
+                    since: ago(60),
                     workspace_id: id(1),
                     workspace_name: "Billing".into(),
                     repository_id: id(2),
@@ -159,29 +200,20 @@ mod tests {
                         worktree_id: id(5),
                         label: "claude".into(),
                         role: pb::TerminalRole::Agent as i32,
-                        pane_mode: pb::PaneMode::Agent as i32,
+                        pane_mode: pb::PaneMode::Terminal as i32,
                         chat_capable: true,
                     }),
-                    worktree: Some(pb::WorktreeRef {
-                        id: id(5),
-                        name: "fc-3-webhooks".into(),
-                        branch: "bil/webhooks".into(),
-                        insertions: 18,
-                        deletions: 40,
-                    }),
+                    worktree: Some(lane.clone()),
                     question: "Allow touch x".into(),
-                    detail: Some("touch x".into()),
-                    ask_id: Some("a-41".into()),
-                    actions: vec![
-                        action("reject", "Deny", true, false),
-                        action("allow", "Allow", false, true),
-                    ],
+                    detail: None,
+                    ask_id: Some("hook-ask-01000000-0000-7000-8000-000000000029".into()),
+                    actions: hook_ask_actions("Allow touch x"),
                 },
                 pb::NeedsYouItem {
                     id: "blocked:01000000-0000-7000-8000-00000000000a".into(),
                     kind: K::Blocked as i32,
-                    rank: 3_600_020,
-                    since: at(1_790_000_100_000),
+                    rank: rank(1, 120),
+                    since: ago(120),
                     workspace_id: id(1),
                     workspace_name: "Billing".into(),
                     repository_id: id(2),
@@ -193,15 +225,22 @@ mod tests {
                         pane_mode: pb::PaneMode::Terminal as i32,
                         chat_capable: false,
                     }),
+                    worktree: Some(pb::WorktreeRef {
+                        id: id(11),
+                        name: "demo".into(),
+                        branch: "main".into(),
+                        insertions: 0,
+                        deletions: 0,
+                    }),
                     question: "Run the migration now?".into(),
-                    actions: vec![action("open", "Open", false, true)],
+                    actions: vec![open()],
                     ..Default::default()
                 },
                 pb::NeedsYouItem {
                     id: "decision:01000000-0000-7000-8000-00000000000c".into(),
                     kind: K::Decision as i32,
-                    rank: 7_200_300,
-                    since: at(1_789_999_000_000),
+                    rank: rank(2, 300),
+                    since: ago(300),
                     workspace_id: id(1),
                     workspace_name: "Billing".into(),
                     repository_id: id(2),
@@ -218,15 +257,35 @@ mod tests {
                     ],
                     ..Default::default()
                 },
+                pb::NeedsYouItem {
+                    id: "review:01000000-0000-7000-8000-00000000000d".into(),
+                    kind: K::Review as i32,
+                    rank: rank(3, 3600),
+                    since: ago(3600),
+                    workspace_id: id(1),
+                    workspace_name: "Billing".into(),
+                    repository_id: id(2),
+                    task: Some(pb::TaskRef {
+                        id: id(13),
+                        key: "bil-4".into(),
+                        title: "Webhook signatures".into(),
+                        status: pb::TaskStatus::InReview as i32,
+                    }),
+                    worktree: Some(lane),
+                    question: "Ready for review".into(),
+                    detail: Some("+18 −40".into()),
+                    actions: vec![open()],
+                    ..Default::default()
+                },
             ],
         };
         let build_box = pb::NeedsYouList {
             items: vec![
                 pb::NeedsYouItem {
-                    id: "ask:b-2".into(),
+                    id: "ask:hook-ask-01000000-0000-7000-8000-00000000002a".into(),
                     kind: K::Ask as i32,
-                    rank: 40,
-                    since: at(1_790_000_200_000),
+                    rank: rank(0, 10),
+                    since: ago(10),
                     workspace_id: id(20),
                     workspace_name: "Main".into(),
                     repository_id: id(21),
@@ -236,7 +295,7 @@ mod tests {
                         label: "claude".into(),
                         role: pb::TerminalRole::Agent as i32,
                         pane_mode: pb::PaneMode::Terminal as i32,
-                        chat_capable: true,
+                        chat_capable: false,
                     }),
                     question: "claude is asking to use a tool".into(),
                     ..Default::default()
@@ -244,8 +303,8 @@ mod tests {
                 pb::NeedsYouItem {
                     id: "review:01000000-0000-7000-8000-00000000001e".into(),
                     kind: K::Review as i32,
-                    rank: 10_800_000,
-                    since: at(1_789_990_000_000),
+                    rank: rank(3, 7200),
+                    since: ago(7200),
                     repository_id: id(21),
                     task: Some(pb::TaskRef {
                         id: id(30),
@@ -339,22 +398,31 @@ mod tests {
         let items: Vec<&serde_json::Value> =
             runners.iter().flat_map(|r| r["needs_you"]["items"].as_array().expect("items")).collect();
 
-        let set_somewhere = |pointer: &str| {
-            items.iter().any(|i| {
-                i.pointer(pointer).is_some_and(|v| !v.is_null() && v.as_array().is_none_or(|a| !a.is_empty()))
-            })
+        // Set means the daemon wrote something: not null, "", 0, false or [].
+        // A field left at its zero in every item would let a decoder that
+        // never reads it pass.
+        let set = |v: &serde_json::Value| match v {
+            serde_json::Value::Null => false,
+            serde_json::Value::Bool(b) => *b,
+            serde_json::Value::Number(n) => n.as_f64() != Some(0.0),
+            serde_json::Value::String(s) => !s.is_empty(),
+            serde_json::Value::Array(a) => !a.is_empty(),
+            serde_json::Value::Object(_) => true,
         };
+        let set_somewhere =
+            |pointer: &str| items.iter().any(|i| i.pointer(pointer).is_some_and(set));
         let mut paths: Vec<String> = proto_fields("NeedsYouItem").iter().map(|f| format!("/{f}")).collect();
         for (message, key) in [("TaskRef", "task"), ("TerminalRef", "terminal"), ("WorktreeRef", "worktree")] {
             paths.extend(proto_fields(message).iter().map(|f| format!("/{key}/{f}")));
         }
-        paths.extend(proto_fields("NeedsYouAction").iter().map(|f| format!("/actions/0/{f}")));
         for path in paths {
             assert!(set_somewhere(&path), "no item in the fixture sets {path}");
         }
-        // A `false` is set but says nothing; each flag is true somewhere.
-        for flag in ["/terminal/chat_capable", "/actions/0/primary", "/actions/0/destructive"] {
-            assert!(items.iter().any(|i| i.pointer(flag) == Some(&json!(true))), "{flag} is never true");
+        // An action's fields, in any action of any item: an ask's deny, the
+        // destructive one, comes second.
+        for field in proto_fields("NeedsYouAction") {
+            let anywhere = items.iter().flat_map(|i| i["actions"].as_array().into_iter().flatten()).any(|a| set(&a[&field]));
+            assert!(anywhere, "no action in the fixture sets {field}");
         }
         for kind in ["ask", "blocked", "decision", "review"] {
             assert!(items.iter().any(|i| i["kind"] == kind), "no {kind} item in the fixture");
