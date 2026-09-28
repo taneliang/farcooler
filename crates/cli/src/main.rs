@@ -145,6 +145,12 @@ enum Command {
     /// automatable, so this exists for agents as much as for people.
     #[command(subcommand)]
     Layout(LayoutCmd),
+    /// Show what's waiting on you: asks, blocked agents, decisions and
+    /// reviews, most urgent first.
+    ///
+    /// The runner decides what's on it, so this, the Mac's Needs You and the
+    /// phones' can't disagree. `--json` prints the shape the phones read.
+    NeedsYou,
     /// Show how to attach to a worktree's live tmux session.
     Attach { worktree: String },
     /// Stream changes as they happen, one JSON object per line.
@@ -883,7 +889,7 @@ async fn main() {
 
     if let Err(e) = run().await {
         eprintln!("error: {e}");
-        if let Some(line) = error_code_line(e.as_ref(), std::env::args().any(|a| a == "--json")) {
+        for line in error_code_lines(e.as_ref(), std::env::args().any(|a| a == "--json")) {
             eprintln!("{line}");
         }
         std::process::exit(1);
@@ -903,19 +909,151 @@ pub(crate) type Fallible = Result<(), Box<dyn std::error::Error>>;
 ///
 /// A refusal the board commands reworded (`tasks::Refused`) carries the same
 /// word, so rewording a sentence for a person doesn't take it from a script.
-fn error_code_line(error: &(dyn std::error::Error + 'static), json: bool) -> Option<String> {
+///
+/// `what: <word>` follows it when the runner named one (`Error.what`): which
+/// argument it refused, or which conflict. `terminal.agent_answer`'s two
+/// conflicts are one code, `resource-conflict`, and only `what` tells
+/// `not_held` ("someone already answered this") from `not_delivered` ("try
+/// again"), which the Mac's Needs You words differently.
+fn error_code_lines(error: &(dyn std::error::Error + 'static), json: bool) -> Vec<String> {
     if !json {
-        return None;
+        return Vec::new();
     }
-    if let Some(refused) = error.downcast_ref::<tasks::Refused>() {
-        return refused.word().map(|word| format!("code: {word}"));
+    let (word, what) = if let Some(refused) = error.downcast_ref::<tasks::Refused>() {
+        (refused.word(), refused.what().map(str::to_string))
+    } else if let Some(farcooler_transport::ClientError::Daemon { code, what, .. }) =
+        error.downcast_ref::<farcooler_transport::ClientError>()
+    {
+        (Some(farcooler_core::error::word_for(*code)), Some(what.clone()).filter(|w| !w.is_empty()))
+    } else {
+        return Vec::new();
+    };
+    let Some(word) = word else { return Vec::new() };
+    let mut lines = vec![format!("code: {word}")];
+    lines.extend(what.map(|w| format!("what: {w}")));
+    lines
+}
+
+/// `terminal agent-answer`'s call, with its refusals said by `answer_refused`.
+async fn answer_agent<L: tasks::DispatchLink>(
+    link: &mut L,
+    terminal: Uuid,
+    request_id: String,
+    option_id: String,
+) -> Fallible {
+    link.call(with(
+        req("terminal.agent_answer"),
+        request::Payload::AgentAnswer(farcooler_protocol::v1::AgentAnswer {
+            terminal_id: id_bytes(terminal),
+            request_id,
+            option_id,
+        }),
+    ))
+    .await
+    .map_err(answer_refused)?;
+    Ok(())
+}
+
+/// A refused `terminal agent-answer`, in this CLI's words when the runner
+/// named which of its two conflicts it was.
+///
+/// Both are `resource-conflict`, and the runner's own message is the apps'
+/// capitalized sentence. `said_about` holds this CLI's line for each, in
+/// clap's style. Anything else is left as it was.
+fn answer_refused(e: farcooler_transport::ClientError) -> Box<dyn std::error::Error> {
+    if let farcooler_transport::ClientError::Daemon { code, what, .. } = &e
+        && matches!(what.as_str(), "not_held" | "not_delivered")
+        && let Some(said) = tasks::said_about(what)
+    {
+        return Box::new(tasks::Refused::naming(said.to_string(), *code, what.clone()));
     }
-    match error.downcast_ref::<farcooler_transport::ClientError>()? {
-        farcooler_transport::ClientError::Daemon { code, .. } => {
-            Some(format!("code: {}", farcooler_core::error::word_for(*code)))
+    Box::new(e)
+}
+
+/// What a runner too old for Needs You is told.
+const NO_NEEDS_YOU: &str =
+    "this runner's Far Cooler is older than needs-you. update it and try again";
+
+/// `farcooler needs-you`.
+async fn needs_you(runner: Option<&str>, json: bool) -> Fallible {
+    let mut link = connect_to(runner).await?;
+    println!("{}", needs_you_read(&mut link, json).await?);
+    Ok(())
+}
+
+/// The list, read and printed as `needs_you_output` prints it.
+async fn needs_you_read<L: tasks::DispatchLink>(
+    link: &mut L,
+    json: bool,
+) -> Result<String, Box<dyn std::error::Error>> {
+    needs_you_served(&link.capabilities())?;
+    let r = link.call(req("needs_you.list")).await.map_err(|e| match &e {
+        farcooler_transport::ClientError::Daemon { code, .. }
+            if farcooler_core::error::word_for(*code) == "capability-unsupported" =>
+        {
+            Box::new(tasks::Refused::new(NO_NEEDS_YOU.to_string(), Some(*code))) as Box<dyn std::error::Error>
         }
-        _ => None,
+        _ => Box::new(tasks::refusal(e, "the runner couldn't say what needs you")),
+    })?;
+    let result::Value::NeedsYouList(list) = expect_value(r.value)? else {
+        return Err(crate::daemon_link::UNREADABLE.into());
+    };
+    Ok(needs_you_output(&list, json))
+}
+
+/// Refused here, before a round trip, on a runner that doesn't advertise
+/// `needs_you`, with the runner's own code so `--json` still says
+/// `capability-unsupported`.
+fn needs_you_served(capabilities: &[String]) -> Result<(), tasks::Refused> {
+    if capabilities.iter().any(|c| c == farcooler_protocol::capability::NEEDS_YOU) {
+        return Ok(());
     }
+    Err(tasks::Refused::new(
+        NO_NEEDS_YOU.to_string(),
+        Some(farcooler_protocol::v1::ErrorCode::CapabilityUnsupported as i32),
+    ))
+}
+
+/// What `needs-you` prints: the client core's JSON under `--json`, the one
+/// shape the phones read too, and otherwise one line per item, most urgent
+/// first.
+fn needs_you_output(list: &farcooler_protocol::v1::NeedsYouList, json: bool) -> String {
+    if json {
+        return farcooler_client::needs_you_json::needs_you_json(list).to_string();
+    }
+    let mut items: Vec<_> = list.items.iter().collect();
+    if items.is_empty() {
+        return "nothing needs you".to_string();
+    }
+    // The daemon sends rank order already. Sorted again, stably, so a line
+    // never depends on that.
+    items.sort_by_key(|i| i.rank);
+    items
+        .iter()
+        .map(|i| {
+            let who = i
+                .task
+                .as_ref()
+                .map(|t| t.key.clone())
+                .or_else(|| i.terminal.as_ref().map(|t| t.label.clone()))
+                .unwrap_or_default();
+            let place = [i.workspace_name.as_str(), who.as_str()]
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join(" · ");
+            let detail = i.detail.as_deref().map(|d| format!("  {d}")).unwrap_or_default();
+            format!(
+                "{:8}  {:24}  {}{detail}",
+                farcooler_client::needs_you_json::kind_word(i.kind),
+                truncate(&place, 24),
+                i.question
+            )
+            .trim_end()
+            .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Pair, unpair, or report — on this runner or, with `--runner`, on another.
@@ -1031,6 +1169,7 @@ async fn run() -> Fallible {
         Command::Task(c) => tasks::task(runner, c, cli.json).await,
         Command::Worktree(c) => worktree(runner, c, cli.json).await,
         Command::Layout(c) => layout(runner, c, cli.json).await,
+        Command::NeedsYou => needs_you(runner, cli.json).await,
         Command::Attach { worktree } => attach(runner, &worktree).await,
         Command::Events => events(runner).await,
         Command::Push(c) => push(runner, c).await,
@@ -2826,15 +2965,7 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
 
         TerminalCmd::AgentAnswer { terminal, request_id, option_id } => {
             let (mut link, id) = terminal_by_record(runner, &terminal).await?;
-            link.call(with(
-                req("terminal.agent_answer"),
-                request::Payload::AgentAnswer(farcooler_protocol::v1::AgentAnswer {
-                    terminal_id: id_bytes(id),
-                    request_id,
-                    option_id,
-                }),
-            ))
-            .await?;
+            answer_agent(&mut link, id, request_id, option_id).await?;
             println!("answered {}", short(id));
         }
 
@@ -3311,6 +3442,10 @@ fn worktree_list_row(
         "workspace": workspaces_json::workspace_of(w.workspace_id.as_deref()),
         "claim_source": w.claim_source,
         "foreign_writers": workspaces_json::foreign_writers(w, workspaces),
+        // The tasks working here that aren't finished, `{id, key, title,
+        // status}`, from the same builder as the phones' fleet. `[]` from a
+        // runner too old to fill it.
+        "open_tasks": farcooler_client::needs_you_json::open_tasks_json(&w.open_tasks),
     })
 }
 
@@ -3890,10 +4025,191 @@ mod tests {
             message: "branch already exists".into(),
             what: String::new(),
         });
-        assert_eq!(error_code_line(refused.as_ref(), true).as_deref(), Some("code: branch-exists"));
-        assert_eq!(error_code_line(refused.as_ref(), false), None, "a person has the sentence");
+        assert_eq!(error_code_lines(refused.as_ref(), true), ["code: branch-exists"]);
+        assert!(error_code_lines(refused.as_ref(), false).is_empty(), "a person has the sentence");
         let other: Box<dyn std::error::Error> = "no such worktree".into();
-        assert_eq!(error_code_line(other.as_ref(), true), None);
+        assert!(error_code_lines(other.as_ref(), true).is_empty());
+    }
+
+    /// A runner that answers every call with `answer`, and records them.
+    struct Answering {
+        capabilities: Vec<String>,
+        answer: Result<farcooler_protocol::v1::Result, farcooler_transport::ClientError>,
+        sent: Vec<farcooler_protocol::v1::Request>,
+    }
+
+    impl tasks::DispatchLink for Answering {
+        fn capabilities(&self) -> Vec<String> {
+            self.capabilities.clone()
+        }
+        async fn call(
+            &mut self,
+            req: farcooler_protocol::v1::Request,
+        ) -> Result<farcooler_protocol::v1::Result, farcooler_transport::ClientError> {
+            self.sent.push(req);
+            match &self.answer {
+                Ok(r) => Ok(r.clone()),
+                Err(farcooler_transport::ClientError::Daemon { code, retryable, message, what }) => {
+                    Err(farcooler_transport::ClientError::Daemon {
+                        code: *code,
+                        retryable: *retryable,
+                        message: message.clone(),
+                        what: what.clone(),
+                    })
+                }
+                Err(_) => Err(farcooler_transport::ClientError::EmptyResult),
+            }
+        }
+        async fn pause(&mut self, _: std::time::Duration) {}
+    }
+
+    fn answering(answer: Result<farcooler_protocol::v1::Result, farcooler_transport::ClientError>) -> Answering {
+        Answering { capabilities: farcooler_protocol::capability::ALL.iter().map(|c| c.to_string()).collect(), answer, sent: Vec::new() }
+    }
+
+    fn conflict(what: &str) -> farcooler_transport::ClientError {
+        farcooler_transport::ClientError::Daemon {
+            code: farcooler_protocol::v1::ErrorCode::ResourceConflict as i32,
+            retryable: false,
+            message: "Someone already answered this.".into(),
+            what: what.into(),
+        }
+    }
+
+    fn needs_you_item(kind: farcooler_protocol::v1::NeedsYouKind, rank: u32, question: &str) -> farcooler_protocol::v1::NeedsYouItem {
+        farcooler_protocol::v1::NeedsYouItem {
+            id: format!("{rank}"),
+            kind: kind as i32,
+            rank,
+            workspace_name: "Billing".into(),
+            question: question.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn needs_you_prints_one_line_per_item_in_rank_order() {
+        use farcooler_protocol::v1 as pb;
+        let list = pb::NeedsYouList {
+            items: vec![
+                pb::NeedsYouItem {
+                    task: Some(pb::TaskRef { key: "bil-9".into(), ..Default::default() }),
+                    detail: Some("+18 −40".into()),
+                    ..needs_you_item(pb::NeedsYouKind::Review, 900, "Ready for review")
+                },
+                pb::NeedsYouItem {
+                    terminal: Some(pb::TerminalRef { label: "claude".into(), ..Default::default() }),
+                    ..needs_you_item(pb::NeedsYouKind::Ask, 5, "Allow touch x")
+                },
+                pb::NeedsYouItem {
+                    task: Some(pb::TaskRef { key: "bil-7".into(), ..Default::default() }),
+                    workspace_name: String::new(),
+                    ..needs_you_item(pb::NeedsYouKind::Decision, 300, "Postgres or SQLite?")
+                },
+            ],
+        };
+        let printed = needs_you_output(&list, false);
+        let lines: Vec<&str> = printed.lines().collect();
+        assert_eq!(
+            lines,
+            [
+                "ask       Billing · claude          Allow touch x",
+                "decision  bil-7                     Postgres or SQLite?",
+                "review    Billing · bil-9           Ready for review  +18 −40",
+            ],
+            "{printed}"
+        );
+        assert_eq!(needs_you_output(&pb::NeedsYouList::default(), false), "nothing needs you");
+    }
+
+    #[tokio::test]
+    async fn needs_you_json_is_the_client_cores_shape() {
+        use farcooler_protocol::v1 as pb;
+        let list = pb::NeedsYouList {
+            items: vec![pb::NeedsYouItem {
+                ask_id: Some("a-1".into()),
+                ..needs_you_item(pb::NeedsYouKind::Ask, 5, "Allow touch x")
+            }],
+        };
+        let mut link = answering(Ok(pb::Result {
+            value: Some(pb::result::Value::NeedsYouList(list.clone())),
+            ..Default::default()
+        }));
+        let printed = needs_you_read(&mut link, true).await.expect("read");
+        assert_eq!(link.sent[0].method, "needs_you.list");
+        let printed: serde_json::Value = serde_json::from_str(&printed).expect("--json prints JSON");
+        assert_eq!(printed, farcooler_client::needs_you_json::needs_you_json(&list));
+        assert_eq!(printed["items"][0]["ask_id"], "a-1", "and not an empty object that happens to match");
+    }
+
+    #[tokio::test]
+    async fn needs_you_on_a_runner_without_the_capability_says_to_update_it() {
+        let mut old = answering(Err(conflict("")));
+        old.capabilities = vec![farcooler_protocol::capability::TASKS.to_string()];
+        let refused = needs_you_read(&mut old, false).await.expect_err("an older runner is refused");
+        assert!(refused.to_string().contains("update it"), "{refused}");
+        assert_eq!(error_code_lines(refused.as_ref(), true), ["code: capability-unsupported"], "a script can still tell");
+        assert!(old.sent.is_empty(), "refused without a round trip");
+
+        let mut ancient = answering(Err(conflict("")));
+        ancient.capabilities.clear();
+        assert!(needs_you_read(&mut ancient, false).await.is_err(), "a runner too old to name capabilities at all");
+
+        // One that advertises it and refuses anyway says the same.
+        let mut refusing = answering(Err(farcooler_transport::ClientError::Daemon {
+            code: farcooler_protocol::v1::ErrorCode::CapabilityUnsupported as i32,
+            retryable: false,
+            message: "capability unsupported".into(),
+            what: String::new(),
+        }));
+        let refused = needs_you_read(&mut refusing, false).await.expect_err("refused");
+        assert_eq!(refused.to_string(), NO_NEEDS_YOU, "not the board's sentence");
+    }
+
+    /// The runner's two answer conflicts are said in this CLI's words, not
+    /// its own capitalized sentence, and keep their `what`; any other failure
+    /// is left as it was.
+    #[tokio::test]
+    async fn a_refused_answer_says_which_conflict_in_this_clis_words() {
+        let terminal = Uuid::now_v7();
+        let mut link = answering(Err(conflict("not_held")));
+        let held = answer_agent(&mut link, terminal, "a-1".into(), "allow".into()).await.expect_err("refused");
+        assert_eq!(link.sent[0].method, "terminal.agent_answer");
+        assert_eq!(held.to_string(), "someone already answered this");
+        assert_eq!(error_code_lines(held.as_ref(), true), ["code: resource-conflict", "what: not_held"]);
+        let mut link = answering(Err(conflict("not_delivered")));
+        let lost = answer_agent(&mut link, terminal, "a-1".into(), "allow".into()).await.expect_err("refused");
+        assert_eq!(lost.to_string(), "the answer didn't reach the agent. try again");
+
+        let other = answer_refused(farcooler_transport::ClientError::Daemon {
+            code: farcooler_protocol::v1::ErrorCode::NotFound as i32,
+            retryable: false,
+            message: "resource not found".into(),
+            what: String::new(),
+        });
+        assert_eq!(other.to_string(), farcooler_transport::ClientError::Daemon {
+            code: farcooler_protocol::v1::ErrorCode::NotFound as i32,
+            retryable: false,
+            message: "resource not found".into(),
+            what: String::new(),
+        }.to_string());
+    }
+
+    /// `what` reaches the error lines, from a bare refusal and from one this
+    /// CLI reworded, and only when the runner named one.
+    #[test]
+    fn a_refusals_what_reaches_the_error_json() {
+        let bare: Box<dyn std::error::Error> = Box::new(conflict("not_held"));
+        assert_eq!(error_code_lines(bare.as_ref(), true), ["code: resource-conflict", "what: not_held"]);
+
+        let reworded: Box<dyn std::error::Error> = Box::new(tasks::refusal(conflict("not_delivered"), ""));
+        assert_eq!(
+            error_code_lines(reworded.as_ref(), true),
+            ["code: resource-conflict", "what: not_delivered"]
+        );
+
+        let unnamed: Box<dyn std::error::Error> = Box::new(conflict(""));
+        assert_eq!(error_code_lines(unnamed.as_ref(), true), ["code: resource-conflict"], "no empty what");
     }
 
     /// `fork_only` is a field an older daemon would drop, checking out a
@@ -4051,6 +4367,12 @@ mod tests {
             workspace_id: Some(id(3)),
             claim_source: Some("hook".into()),
             foreign_writer_workspace_ids: vec![id(4)],
+            open_tasks: vec![pb::TaskRef {
+                id: id(8),
+                key: "bil-9".into(),
+                title: "Invoice PDF export".into(),
+                status: pb::TaskStatus::InProgress as i32,
+            }],
             ..Default::default()
         };
         let pane = |n: u8, role: pb::TerminalRole, workspace: Option<bytes::Bytes>| Terminal {
@@ -4071,16 +4393,27 @@ mod tests {
         assert_eq!(row["workspace"], uuid_of(&id(3)).to_string());
         assert_eq!(row["claim_source"], "hook");
         assert_eq!(row["foreign_writers"], serde_json::json!(["Billing"]));
+        assert_eq!(
+            row["open_tasks"],
+            serde_json::json!([{
+                "id": uuid_of(&id(8)).to_string(),
+                "key": "bil-9",
+                "title": "Invoice PDF export",
+                "status": "in_progress",
+            }])
+        );
         let panes = row["terminals"].as_array().expect("terminals");
         assert_eq!(panes.len(), 2, "only this worktree's panes");
         assert_eq!((&panes[0]["role"], &panes[0]["workspace"]), (&serde_json::json!("orchestrator"), &serde_json::json!(uuid_of(&id(3)).to_string())));
         assert_eq!((&panes[1]["role"], &panes[1]["workspace"]), (&serde_json::json!("agent"), &serde_json::json!(uuid_of(&id(4)).to_string())));
 
-        let unclaimed = Worktree { workspace_id: None, claim_source: None, foreign_writer_workspace_ids: vec![], ..w };
+        let unclaimed =
+            Worktree { workspace_id: None, claim_source: None, foreign_writer_workspace_ids: vec![], open_tasks: vec![], ..w };
         let row = worktree_list_row(&unclaimed, None, &repositories, &[], &workspaces);
         assert_eq!(row["workspace"], serde_json::json!(null));
         assert_eq!(row["claim_source"], serde_json::json!(null));
         assert_eq!(row["foreign_writers"], serde_json::json!([]));
+        assert_eq!(row["open_tasks"], serde_json::json!([]), "an empty list, not a missing key");
         assert_eq!(row["repository_id"], uuid_of(&id(2)).to_string(), "unclaimed still says where it is");
     }
 

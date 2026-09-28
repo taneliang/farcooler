@@ -1799,21 +1799,30 @@ fn refused(err: ClientError, invalid: &str) -> Box<dyn std::error::Error> {
 /// the runner's stable code.
 ///
 /// The sentence is for a person; the code is for a script. `main`'s
-/// `error_code_line` prints `code: <word>` under `--json` for a bare
+/// `error_code_lines` prints `code: <word>` under `--json` for a bare
 /// `ClientError`, and a refusal reworded into a `String` used to lose it on
 /// the way: `task dispatch --json` couldn't tell `capability-unsupported`
 /// from a conflict. This keeps the two together however often the sentence
 /// is reworded (see `reworded`). `code` is `None` when there's no runner
 /// code to keep: a transport failure, or a refusal of this CLI's own.
+///
+/// `what` is the runner's `Error.what`, kept for the same reason: a script
+/// tells `not_held` from `not_delivered` by it, and both are one code.
 #[derive(Debug)]
 pub(crate) struct Refused {
     said: String,
     code: Option<i32>,
+    what: String,
 }
 
 impl Refused {
     pub(crate) fn new(said: String, code: Option<i32>) -> Refused {
-        Refused { said, code }
+        Refused { said, code, what: String::new() }
+    }
+
+    /// A refusal that keeps the runner's `what` as well as its code.
+    pub(crate) fn naming(said: String, code: i32, what: String) -> Refused {
+        Refused { said, code: Some(code), what }
     }
 
     /// The runner's stable word for this refusal, if it sent one.
@@ -1821,9 +1830,14 @@ impl Refused {
         self.code.map(farcooler_core::error::word_for)
     }
 
+    /// Which argument or which conflict the runner named, if it named one.
+    pub(crate) fn what(&self) -> Option<&str> {
+        Some(self.what.as_str()).filter(|w| !w.is_empty())
+    }
+
     /// The same refusal, and the same code, said differently.
     fn reworded(self, f: impl FnOnce(String) -> String) -> Refused {
-        Refused { said: f(self.said), code: self.code }
+        Refused { said: f(self.said), ..self }
     }
 }
 
@@ -1876,11 +1890,11 @@ pub(crate) fn refusal(err: ClientError, invalid: &str) -> Refused {
         // client-facing vocabulary, and it is what a bug report needs.
         other => format!("the runner refused that ({other})"),
     };
-    Refused { said, code: Some(code) }
+    Refused::naming(said, code, what)
 }
 
 fn uncoded(said: &str) -> Refused {
-    Refused { said: said.to_string(), code: None }
+    Refused::new(said.to_string(), None)
 }
 
 // ---------------------------------------------------------------------------
@@ -2223,7 +2237,7 @@ fn pane_refused(e: ClientError) -> Refused {
         }
         _ => return refusal(e, "that pane could not be opened"),
     };
-    Refused { said: said.to_string(), code: Some(code) }
+    Refused::naming(said.to_string(), code, what)
 }
 
 /// A refusal of the worktree `--new` asked for, in this command's words.
@@ -2251,7 +2265,7 @@ fn new_lane_refused(e: ClientError, branch: &str, on_it: Option<&str>) -> Refuse
              one. pick another --branch"
         ),
     };
-    Refused { said, code: Some(code) }
+    Refused::new(said, Some(code))
 }
 
 /// The state of `terminal` in `worktree` once the runner has had a moment
@@ -3580,12 +3594,12 @@ mod tests {
 
     /// A refused dispatch as `main` prints it under `--json`: the sentence,
     /// and the `code:` line after it, read through `main`'s own
-    /// `error_code_line`.
+    /// `error_code_lines`.
     async fn refused_with_code(link: &mut FakeLink, lane: Lane) -> (String, Option<String>) {
         let task = fc_2();
         let asked = Dispatch { task: &task, lane, preset: "claude", actor: Actor::Manager, again: false };
         let e = dispatch(link, asked, &mut |_| {}).await.expect_err("refused");
-        (e.to_string(), crate::error_code_line(e.as_ref(), true))
+        (e.to_string(), crate::error_code_lines(e.as_ref(), true).into_iter().next())
     }
 
     /// `--new` makes the worktree for the task's own workspace, so it is that
