@@ -136,12 +136,18 @@ pub fn move_tasks(svc: &Service, watcher: &Watcher, req: &pb::TaskMove) -> Resul
         .map(|&id| svc.store.get_task(id).map(|t| t.workspace_id))
         .collect::<Result<Vec<_>>>()?;
     let moved = svc.store.move_tasks(&ids, to, actor)?;
+    let mut any = false;
     for (task, from) in moved.iter().zip(before) {
         if from != task.workspace_id {
             watcher.announce_task_changed(task, Some(from), actor);
+            any = true;
         }
     }
     watcher.announce_fleet_changed();
+    // An item takes its task's board as its workspace.
+    if any {
+        watcher.announce_needs_you();
+    }
     Ok(pb::TaskList { items: moved.iter().map(pb_task).collect() })
 }
 
@@ -174,6 +180,8 @@ pub async fn set_role(
         wire::terminal_role_from_wire(req.role).ok_or(DomainError::InvalidArgument { what: "role" })?;
     svc.set_terminal_role(terminal, role).await?;
     watcher.announce_fleet_changed();
+    // An orchestrator's items are about its own terminal, never a task's.
+    watcher.announce_needs_you();
     Ok(())
 }
 

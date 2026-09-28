@@ -271,6 +271,16 @@ const TASK_COLUMNS: &str = concat!(
     updated_at_sql!()
 );
 
+/// `Store::open_tasks_in_worktree`'s query, one copy for it and for the test
+/// that checks it is served by an index.
+fn open_tasks_sql() -> String {
+    format!(
+        "SELECT {TASK_COLUMNS} FROM tasks
+          WHERE worktree_id = ?1 AND status NOT IN (?2, ?3)
+          ORDER BY created_at, rowid"
+    )
+}
+
 /// The same, for `row_to_task_note`.
 const NOTE_COLUMNS: &str = "id, task_id, kind, actor, at, body, extra, supersedes";
 
@@ -398,11 +408,7 @@ impl Store {
     pub fn open_tasks_in_worktree(&self, worktree: Uuid) -> Result<Vec<Task>> {
         let conn = self.conn();
         let mut stmt = conn
-            .prepare(&format!(
-                "SELECT {TASK_COLUMNS} FROM tasks
-                  WHERE worktree_id = ?1 AND status NOT IN (?2, ?3)
-                  ORDER BY created_at, rowid"
-            ))
+            .prepare(&open_tasks_sql())
             .map_err(map_err)?;
         let rows = stmt
             .query_map(
@@ -1257,6 +1263,24 @@ mod tests {
         let after = store.next_task_key(main).expect("key");
         assert_eq!(before, "fc-1");
         assert_eq!(after, before, "the prefix is Main's, once, forever");
+    }
+
+    /// A worktree's open tasks are read on every fleet read, one worktree at
+    /// a time, so the read is by index rather than a scan of every task.
+    #[test]
+    fn a_worktrees_open_tasks_are_found_by_index() {
+        let store = Store::open_in_memory().expect("store");
+        let plan: Vec<String> = {
+            let conn = store.conn();
+            let mut stmt = conn
+                .prepare(&format!("EXPLAIN QUERY PLAN {}", open_tasks_sql()))
+                .unwrap();
+            stmt.query_map(params![uuid_blob(Uuid::now_v7()), "done", "cancelled"], |r| r.get::<_, String>(3))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        assert!(plan.iter().any(|step| step.contains("tasks_by_worktree")), "{plan:?}");
     }
 
     /// Asking for a repository's Main again, even after a rename, hands back

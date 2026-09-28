@@ -27,6 +27,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_0013_task_edited_at,
     migration_0014_worktrees,
     migration_0015_workspaces,
+    migration_0016_tasks_by_worktree,
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -767,6 +768,13 @@ fn migration_0015_workspaces(tx: &Transaction) -> rusqlite::Result<()> {
         END;
         "#,
     )
+}
+
+/// An index on a task's lane, for `Worktree.open_tasks`: the fleet read asks
+/// every worktree for its open tasks, and without this each ask scanned the
+/// whole table.
+fn migration_0016_tasks_by_worktree(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch("CREATE INDEX tasks_by_worktree ON tasks (worktree_id, status);")
 }
 
 /// Every migration below `version`, applied in one transaction, with the

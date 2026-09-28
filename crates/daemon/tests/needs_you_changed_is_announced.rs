@@ -158,3 +158,41 @@ async fn ten_changes_inside_the_window_announce_once() {
     h.watcher.announce_needs_you();
     assert_eq!(needs_you_events(&mut listener, Duration::from_secs(1)).await, 1);
 }
+
+/// An item takes its task's board as its workspace, so moving the task moves
+/// the item.
+#[tokio::test]
+async fn moving_a_task_to_another_board_announces_needs_you_changed() {
+    let h = start(Scope::Control).await;
+    let repo = a_repository(&h);
+    let billing = h.service.store.create_workspace(repo.id, "Billing", "bil").unwrap();
+    let task = h.service.store.create_task(repo.workspace, "Invoice PDF export", Actor::User).unwrap();
+    let mut listener = connect(&h).await;
+
+    let mut moved = request("task.move");
+    moved.payload = Some(payload::Payload::TaskMove(pb::TaskMove {
+        task_ids: vec![id(task.id)],
+        workspace_id: id(billing.id),
+        actor: "user".into(),
+    }));
+    connect(&h).await.call(moved).await.expect("task.move");
+    assert_eq!(needs_you_events(&mut listener, Duration::from_secs(1)).await, 1);
+}
+
+/// An orchestrator's items are about its own terminal, so a role change
+/// moves them.
+#[tokio::test]
+async fn setting_a_terminals_role_announces_needs_you_changed() {
+    let h = start(Scope::Control).await;
+    let repo = a_repository(&h);
+    let pane = a_pane(&h, repo.worktree, None);
+    let mut listener = connect(&h).await;
+
+    let mut role = request("terminal.set_role");
+    role.target_resource_id = Some(id(pane));
+    role.payload = Some(payload::Payload::TerminalSetRole(pb::TerminalSetRole {
+        role: pb::TerminalRole::Shell as i32,
+    }));
+    let _ = connect(&h).await.call(role).await;
+    assert_eq!(needs_you_events(&mut listener, Duration::from_secs(1)).await, 1);
+}

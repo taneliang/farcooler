@@ -192,7 +192,7 @@ Group 5 (after 4A, 4B): [4D delete `listed`]
 - `crates/daemon/src/watch.rs`:
   - The title leads with the workspace.
   - A decision notice goes out when a task enters Needs Decision. It has no terminal.
-  - A count notice, debounced to 2 s, goes out after a `needs_you_changed` that no other notice carried.
+  - A count notice, at most one per 5 s window (the coordinator's ruling; spec §7), goes out after a `needs_you_changed` that no other notice carried.
   - The count comes from the same `assemble` call.
 - Tests (`watch.rs` and `push.rs` `mod tests`):
   - `a_blocked_agents_notice_leads_with_its_workspace`

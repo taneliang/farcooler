@@ -760,8 +760,11 @@ Each of these reads the same items.
     - a **decision notice** has `kind: "decision"`, `task` (the key), `workspace`, `title`, `subtitle` and
       `needsYou`, and **no `terminal`**. The relay alerts on it and writes no roster row, since rows are one per
       `(account, terminal)` (`services/relay/migrations/0008_fleet_rows.sql`);
-    - a **count notice** has `kind: "count"` and `needsYou` only. The daemon sends one, debounced to 2 s, after any
-      `needs_you_changed` that no other notice carried. So answering a decision or a chat ask, which changes no
+    - a **count notice** has `kind: "count"` and `needsYou` only. The daemon sends one after any
+      `needs_you_changed` that no other notice carried: at most one per 5 s window, opened by the first change and
+      read at its close, so the last count of a burst is the one sent. A count the relay already has, from any
+      notice that landed, is not sent again. The relay refreshes the card on every count notice at APNs priority
+      10, so the daemon does the pacing. So answering a decision or a chat ask, which changes no
       terminal, still updates the lock screen. It alerts nothing.
     - A notice with no `kind` is an agent notice, as today.
   - The title leads with the workspace, as ov-60 did on the Mac: "Billing · claude needs you". For an
