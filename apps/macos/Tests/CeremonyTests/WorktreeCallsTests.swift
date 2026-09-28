@@ -111,6 +111,19 @@ struct WorktreeCallsTests {
         await record("assign", ["worktree", "assign", "w1", "--to", Self.billing.id, "--json"]) {
             _ = await $0.assignWorktree(Self.worktree, to: Self.billing)
         }
+        // The "No orchestrator" row and the workspace header's menu.
+        await record(
+            "startOrchestrator",
+            ["workspace", "start-orchestrator", Self.billing.id, "--harness", "cursor", "--json"]
+        ) {
+            _ = await $0.startOrchestrator(Self.billing, harness: .cursor, replace: false)
+        }
+        await record(
+            "replaceOrchestrator",
+            ["workspace", "start-orchestrator", Self.billing.id, "--harness", "codex", "--replace", "--json"]
+        ) {
+            _ = await $0.startOrchestrator(Self.billing, harness: .codex, replace: true)
+        }
 
         // The layout commands the ⌃B keys and the tile view send, each naming
         // the layout on screen, so the main checkout's row never acts on an

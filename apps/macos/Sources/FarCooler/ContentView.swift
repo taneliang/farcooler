@@ -120,6 +120,11 @@ struct ContentView: View {
     /// refusal, and by copying back whatever the client itself set on
     /// failure.
     @State private var errorBanner: String?
+    /// Workspaces whose orchestrator this app has asked to start and the
+    /// runner hasn't answered, by `orchestratorKey`.
+    @State private var startingOrchestrators: Set<String> = []
+    /// A Replace Orchestrator waiting on its confirmation.
+    @State private var orchestratorReplacement: OrchestratorReplacement?
 
     /// What the detail pane is showing.
     ///
@@ -586,6 +591,21 @@ struct ContentView: View {
                     }
             }
         }
+        .confirmationDialog(
+            orchestratorReplacement.map { "Replace \($0.workspace.name)’s orchestrator?" } ?? "",
+            isPresented: Binding(
+                get: { orchestratorReplacement != nil },
+                set: { if !$0 { orchestratorReplacement = nil } }),
+            presenting: orchestratorReplacement
+        ) { pending in
+            Button("Replace Orchestrator", role: .destructive) {
+                startOrchestrator(
+                    pending.workspace, host: pending.host, harness: pending.harness, replace: true)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { pending in
+            Text("The orchestrator running now closes, and a new one starts with \(pending.harness.title).")
+        }
         .sheet(item: $pendingPaneModeSwitch) { pending in
             PaneModeConfirmSheet(message: pending.message) {
                 await act(
@@ -917,15 +937,74 @@ struct ContentView: View {
     }
 
     /// A workspace's orchestrator row. Selecting it selects the orchestrator's
-    /// pane, in the checkout it runs in.
+    /// pane, in the checkout it runs in; clicking an empty one offers to
+    /// start one.
     private func orchestratorRow(_ entry: SidebarEntry) -> some View {
         let pane = entry.orchestrator
         let target = pane.map {
             Selection.terminal(host: entry.host, worktree: $0.worktree.id, terminal: $0.terminal.id)
         }
+        let workspace = entry.workspace
         return OrchestratorRow(
             pane: pane, isSelected: target != nil && selection == target,
-            onSelect: { if let target { selection = target } })
+            onSelect: { if let target { selection = target } },
+            isStarting: workspace.map { startingOrchestrators.contains(orchestratorKey($0, host: entry.host)) }
+                ?? false,
+            onStart: workspace.flatMap { workspace in
+                store.refusal(for: entry.host) == nil
+                    ? { harness in startOrchestrator(workspace, host: entry.host, harness: harness, replace: false) }
+                    : nil
+            })
+    }
+
+    /// A workspace header's menu: its board, its orchestrator, its charter.
+    private func workspaceActions(_ entry: SidebarEntry) -> WorkspaceHeaderActions? {
+        guard let workspace = entry.workspace, !workspace.isImplicit else { return nil }
+        let host = entry.host
+        return WorkspaceHeaderActions(
+            // The Board row's own gate — see `boardRow`.
+            hasBoard: store.clients[host]?.daemonBuild?.can("tasks") == true,
+            hasOrchestrator: entry.orchestrator != nil,
+            charter: CharterAccess.of(workspace, host: host),
+            onShowBoard: { selection = .board(host: host, workspace: workspace.id) },
+            onStart: { harness, replace in
+                if replace {
+                    orchestratorReplacement = OrchestratorReplacement(
+                        host: host, workspace: workspace, harness: harness)
+                } else {
+                    startOrchestrator(workspace, host: host, harness: harness, replace: false)
+                }
+            },
+            onShowCharter: { url in
+                if !NSWorkspace.shared.open(url) {
+                    errorBanner = "Couldn’t open \(workspace.name)’s charter. It may have been moved or deleted."
+                }
+            })
+    }
+
+    /// What `startingOrchestrators` holds for a workspace.
+    private func orchestratorKey(_ workspace: WorkspaceSummary, host: String) -> String {
+        "\(host)\u{1}\(workspace.id)"
+    }
+
+    /// Start `workspace`'s orchestrator, or replace the one running. The row
+    /// says "Starting Orchestrator…" until the runner answers; a refusal is
+    /// the banner, in `orchestratorRefusal`'s words.
+    private func startOrchestrator(
+        _ workspace: WorkspaceSummary, host: String, harness: OrchestratorHarness, replace: Bool
+    ) {
+        if let why = store.refusal(for: host) {
+            errorBanner = "Cannot do that: \(why)"
+            return
+        }
+        guard let client = store.clients[host] else { return }
+        let key = orchestratorKey(workspace, host: host)
+        guard startingOrchestrators.insert(key).inserted else { return }
+        Task {
+            let refused = await client.startOrchestrator(workspace, harness: harness, replace: replace)
+            startingOrchestrators.remove(key)
+            if let refused { errorBanner = refused }
+        }
     }
 
     /// Every pane on one runner, for the board to find the ones working a
@@ -988,7 +1067,9 @@ struct ContentView: View {
         case _ where preferences.isProjectCollapsed(key):
             EmptyView()
         case .workspace(let name):
-            WorkspaceHeader(name: name, workspace: entry.workspace?.id ?? "")
+            WorkspaceHeader(
+                name: name, workspace: entry.workspace?.id ?? "",
+                actions: usable ? workspaceActions(entry) : nil)
         case .board:
             boardRow(entry)
         case .orchestrator:

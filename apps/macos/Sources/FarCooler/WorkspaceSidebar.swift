@@ -44,7 +44,8 @@ struct SidebarEntry: Identifiable {
     /// The worktree a worktree row draws, without its orchestrators.
     var worktree: Worktree?
     /// The orchestrator, and the worktree it runs in, which is where
-    /// selecting it goes. Nil on an orchestrator row with none running.
+    /// selecting it goes. Nil on an orchestrator row with none running; on a
+    /// workspace header, the same seat, for its menu.
     var orchestrator: BoardPane?
     /// A repository header's shown worktrees, or an Unclaimed or Hidden
     /// group's.
@@ -218,6 +219,9 @@ extension ContentView {
                 if !workspace.isImplicit {
                     var title = entry(.workspace(workspace.name))
                     title.workspace = workspace
+                    // For its menu, which offers Replace rather than Start
+                    // while one runs.
+                    title.orchestrator = seat
                     body.append(title)
                 }
                 var board = entry(.board)

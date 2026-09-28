@@ -9,7 +9,7 @@ import Foundation
 
 /// What a workspace header's menu offers, in order.
 enum WorkspaceMenu {
-    enum Item: Equatable {
+    enum Item: Hashable {
         case showBoard, startOrchestrator, replaceOrchestrator, showCharter
 
         var title: String {
@@ -166,4 +166,12 @@ extension Notifier {
             return nil
         }
     }
+}
+
+/// A Replace Orchestrator the person hasn't confirmed yet.
+struct OrchestratorReplacement: Identifiable {
+    let host: String
+    let workspace: WorkspaceSummary
+    let harness: OrchestratorHarness
+    var id: String { "\(host)\u{1}\(workspace.id)" }
 }

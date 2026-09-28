@@ -110,14 +110,25 @@ struct SidebarMenuButton: View {
     }
 
     private func present() {
+        SidebarMenuItem.popUp(items, under: anchor)
+    }
+}
+
+extension SidebarMenuItem {
+    /// Pop `items` as a real `NSMenu` below `anchor`'s view, headed by
+    /// `header` when there is one — a section header, as a context menu's
+    /// `Section` draws it.
+    @MainActor
+    static func popUp(_ items: [SidebarMenuItem], header: String? = nil, under anchor: MenuAnchor) {
         let menu = NSMenu()
+        if let header { menu.addItem(.sectionHeader(title: header)) }
         for item in items {
             if item.isSeparator {
                 menu.addItem(.separator())
                 continue
             }
-            let entry = NSMenuItem(title: item.title, action: #selector(Invoker.fire), keyEquivalent: "")
-            let invoker = Invoker(item.action)
+            let entry = NSMenuItem(title: item.title, action: #selector(MenuInvoker.fire), keyEquivalent: "")
+            let invoker = MenuInvoker(item.action)
             entry.target = invoker
             entry.representedObject = invoker
             menu.addItem(entry)
@@ -131,15 +142,15 @@ struct SidebarMenuButton: View {
             menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
         }
     }
+}
 
-    /// `NSMenuItem` wants a target and a selector, and a SwiftUI closure is
-    /// neither — so one tiny object bridges them, kept alive by the item that
-    /// points at it.
-    private final class Invoker: NSObject {
-        private let action: () -> Void
-        init(_ action: @escaping () -> Void) { self.action = action }
-        @objc func fire() { action() }
-    }
+/// `NSMenuItem` wants a target and a selector, and a SwiftUI closure is
+/// neither — so one tiny object bridges them, kept alive by the item that
+/// points at it.
+private final class MenuInvoker: NSObject {
+    private let action: () -> Void
+    init(_ action: @escaping () -> Void) { self.action = action }
+    @objc func fire() { action() }
 }
 
 /// Somewhere to hang the button's `NSView` between drawing it and using it.
@@ -156,7 +167,7 @@ final class MenuAnchor {
     fileprivate(set) weak var view: NSView?
 }
 
-private struct MenuAnchorView: NSViewRepresentable {
+struct MenuAnchorView: NSViewRepresentable {
     let anchor: MenuAnchor
 
     func makeNSView(context: Context) -> NSView {

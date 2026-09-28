@@ -1363,19 +1363,24 @@ struct BoardRow: View {
 ///
 /// Drawn even when Main is the only workspace, and Main like any other, so
 /// the shape is visible before anybody splits a repository in two. A label
-/// and not a place: it is not selectable, and it offers nothing — making,
+/// and not a place: it is not selectable. Its context menu reaches the
+/// workspace's board, orchestrator and charter (`WorkspaceMenu`); making,
 /// moving and splitting workspaces is the CLI's in this release.
 struct WorkspaceHeader: View {
     let name: String
     /// The workspace's id: what a worktree dropped here is assigned to.
     let workspace: String
+    /// What the context menu does, or nil for no menu: a runner that can't
+    /// be reached right now.
+    let actions: WorkspaceHeaderActions?
     /// The one drag in flight, for lighting this header while a worktree is
     /// over it. See `WorktreeSection.drag`.
     @ObservedObject private var drag = WorktreeDrag.shared
 
-    init(name: String, workspace: String) {
+    init(name: String, workspace: String, actions: WorkspaceHeaderActions? = nil) {
         self.name = name
         self.workspace = workspace
+        self.actions = actions
     }
 
     var body: some View {
@@ -1403,9 +1408,68 @@ struct WorkspaceHeader: View {
                 .padding(.horizontal, SidebarGrid.highlightInset)
         )
         .onDrop(of: [.text], delegate: WorkspaceDropTarget(workspace: workspace))
+        .contextMenu {
+            if let actions { WorkspaceMenuItems(actions: actions) }
+        }
         .padding(.top, 4)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// What a workspace header's menu needs to know and do.
+struct WorkspaceHeaderActions {
+    /// Whether the sidebar draws this workspace a Board row.
+    let hasBoard: Bool
+    /// Whether an orchestrator is running, which makes Start into Replace.
+    let hasOrchestrator: Bool
+    let charter: CharterAccess
+    let onShowBoard: () -> Void
+    /// Start the orchestrator, or with `replace`, ask to replace the one
+    /// running.
+    let onStart: (_ harness: OrchestratorHarness, _ replace: Bool) -> Void
+    let onShowCharter: (URL) -> Void
+}
+
+/// The header's menu, item by item, in `WorkspaceMenu`'s order.
+private struct WorkspaceMenuItems: View {
+    let actions: WorkspaceHeaderActions
+
+    var body: some View {
+        ForEach(
+            WorkspaceMenu.items(hasBoard: actions.hasBoard, hasOrchestrator: actions.hasOrchestrator),
+            id: \.self
+        ) { item in
+            switch item {
+            case .showBoard:
+                Button(item.title, action: actions.onShowBoard)
+            case .startOrchestrator:
+                Menu(item.title) {
+                    ForEach(OrchestratorHarness.allCases) { harness in
+                        Button(harness.title) { actions.onStart(harness, false) }
+                    }
+                }
+            case .replaceOrchestrator:
+                // An ellipsis on each harness: choosing one asks first,
+                // because the orchestrator running now closes.
+                Menu(item.title) {
+                    ForEach(OrchestratorHarness.allCases) { harness in
+                        Button("\(harness.title)…") { actions.onStart(harness, true) }
+                    }
+                }
+            case .showCharter:
+                switch actions.charter {
+                case .open(let url):
+                    Button(item.title) { actions.onShowCharter(url) }
+                case .unavailable(let why):
+                    // Disabled with the reason rather than left out: the
+                    // item is how anybody learns a charter exists.
+                    Button(item.title) {}
+                        .disabled(true)
+                        .help(why)
+                }
+            }
+        }
     }
 }
 
@@ -1414,14 +1478,24 @@ struct WorkspaceHeader: View {
 /// Its own row because it belongs to the workspace, not to the checkout it
 /// happens to run in — which is where the runner lists it, and why the
 /// worktree rows leave it out. "No orchestrator", dimmed, when none is
-/// running, rather than no row: an empty seat is worth seeing.
+/// running, rather than no row: an empty seat is worth seeing — and clicking
+/// it offers to fill it, with a choice of harness.
 struct OrchestratorRow: View {
     /// The orchestrator and the worktree it runs in, or nil for none.
     let pane: BoardPane?
     let isSelected: Bool
     let onSelect: () -> Void
+    /// Whether a start this app asked for hasn't been answered yet.
+    var isStarting = false
+    /// Start one, for an empty seat. Nil offers nothing: a runner that
+    /// can't be reached right now.
+    var onStart: ((OrchestratorHarness) -> Void)? = nil
 
     @State private var hovering = false
+    /// Where the click's harness menu pops. See `SidebarMenuButton`.
+    @State private var anchor = MenuAnchor()
+    /// Whether clicking this row offers a start.
+    private var offersStart: Bool { pane == nil && onStart != nil && !isStarting }
     @Environment(\.controlActiveState) private var controlActiveState
     private var windowActive: Bool { controlActiveState == .key }
 
@@ -1450,7 +1524,7 @@ struct OrchestratorRow: View {
                     .lineLimit(1)
                     .padding(.leading, SidebarGrid.gap)
             } else {
-                Text("No orchestrator")
+                Text(isStarting ? "Starting Orchestrator…" : "No orchestrator")
                     .font(WorkspaceStyle.sidebarPrimary)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
@@ -1464,16 +1538,56 @@ struct OrchestratorRow: View {
                 .fill(
                     isSelected
                         ? WorkspaceStyle.navigatorSelection(active: windowActive)
-                        : (hovering && pane != nil ? Color.primary.opacity(0.045) : .clear))
+                        : (hovering && (pane != nil || offersStart)
+                            ? Color.primary.opacity(0.045) : .clear))
         )
         .padding(.horizontal, SidebarGrid.highlightInset)
         .animation(Motion.snap, value: hovering)
         .contentShape(Rectangle())
-        .onTapGesture { if pane != nil { onSelect() } }
+        .background(MenuAnchorView(anchor: anchor))
+        .onTapGesture {
+            if pane != nil {
+                onSelect()
+            } else if offersStart {
+                offerStart()
+            }
+        }
         .onHover { hovering = $0 }
+        .contextMenu {
+            if offersStart, let onStart {
+                Section(WorkspaceMenu.Item.startOrchestrator.title) {
+                    ForEach(OrchestratorHarness.allCases) { harness in
+                        Button(harness.title) { onStart(harness) }
+                    }
+                }
+            }
+        }
+        .help(offersStart ? "Start an orchestrator to run this workspace’s board" : "")
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(
-            pane == nil ? [] : (isSelected ? [.isButton, .isSelected] : .isButton))
+            pane == nil
+                ? (offersStart ? .isButton : [])
+                : (isSelected ? [.isButton, .isSelected] : .isButton))
+        // What VoiceOver's press does, which a tap gesture isn't.
+        .accessibilityAction {
+            if pane != nil {
+                onSelect()
+            } else if offersStart {
+                offerStart()
+            }
+        }
+    }
+
+    /// The harness menu, below the row: Start Orchestrator, then Claude,
+    /// Codex and Cursor.
+    private func offerStart() {
+        guard let onStart else { return }
+        SidebarMenuItem.popUp(
+            OrchestratorHarness.allCases.map { harness in
+                SidebarMenuItem(title: harness.title) { onStart(harness) }
+            },
+            header: WorkspaceMenu.Item.startOrchestrator.title,
+            under: anchor)
     }
 }
 
