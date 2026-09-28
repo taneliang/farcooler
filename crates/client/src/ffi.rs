@@ -224,6 +224,7 @@ fn event_line(what: &crate::session::FleetEvent) -> String {
     match what {
         FleetEvent::Fleet => json!({ "event": "fleet" }),
         FleetEvent::Resync => json!({ "event": "resync" }),
+        FleetEvent::NeedsYou => json!({ "event": "needs_you" }),
         FleetEvent::ChangeSet { worktree } => {
             json!({ "event": "change_set", "worktree": worktree.to_string() })
         }
@@ -2424,6 +2425,13 @@ mod tests {
     #[test]
     fn a_resync_reaches_the_line_as_one() {
         assert_eq!(event_line(&crate::session::FleetEvent::Resync), r#"{"event":"resync"}"#);
+    }
+
+    /// The needs-you notice reaches a phone as a line of its own, which is
+    /// what tells it to re-read the list rather than the fleet.
+    #[test]
+    fn a_needs_you_notice_reaches_the_line_as_one() {
+        assert_eq!(event_line(&crate::session::FleetEvent::NeedsYou), r#"{"event":"needs_you"}"#);
     }
 
     /// **A stand-in agent reaches the phone's runner settings** (ov-20

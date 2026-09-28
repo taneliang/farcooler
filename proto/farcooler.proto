@@ -267,6 +267,9 @@ message Result {
     TaskNoteHitList task_note_hit_list = 42;
     Workspace workspace = 43;
     WorkspaceList workspace_list = 44;
+    // `needs_you.list`: this runner's items, in rank order. Behind the
+    // `needs_you` capability.
+    NeedsYouList needs_you_list = 45;
   }
 }
 
@@ -500,6 +503,11 @@ message Event {
     // dropped them with nothing but a line in its own log, and a phone's
     // boards, read only on their own news, stayed where they were.
     Empty events_missed = 23;
+    // Something a person has to act on appeared, changed or went away:
+    // re-read `needs_you.list`. Empty, like `fleet_changed`, because the list
+    // is ranked as a whole and a delta would have to re-rank anyway.
+    // Debounced on the runner: at most one per 250 ms, on the trailing edge.
+    Empty needs_you_changed = 24;
   }
 }
 
@@ -812,6 +820,11 @@ message Worktree {
   // moves. Orchestrators are left out, because a harness may require one to
   // run in a worktree another workspace owns. Empty while unclaimed.
   repeated bytes foreign_writer_workspace_ids = 13;
+  // The tasks whose lane is this worktree and which are neither Done nor
+  // Cancelled, so a row can name its task without a board read. Not `tasks`:
+  // the CLI's worktree JSON already has `task`, the worktree's own name.
+  // Empty from a runner without the `needs_you` capability.
+  repeated TaskRef open_tasks = 14;
 }
 
 message WorktreeList { repeated Worktree items = 1; }
@@ -3032,3 +3045,100 @@ message WorkspaceStartOrchestrator {
   // (`handoff_task`) before anything is stopped or started.
   string handoff_task = 3;
 }
+
+// ---------------------------------------------------------------------------
+// Needs you
+//
+// `needs_you.list` (Read scope, empty payload, the `needs_you` capability):
+// everything on this runner a person has to act on, one item per subject,
+// ranked. Each runner computes its own list; a client merges runners by rank.
+//
+// Below Control scope an item carries its `id`, `kind`, `also`, `rank`,
+// `since`, workspace, task and terminal, and nothing else: `question` is a
+// fixed sentence for its kind, and `detail`, `ask_id`, `actions` and the
+// worktree are left out, because an ask's option names carry the raw command
+// or file path.
+// ---------------------------------------------------------------------------
+
+// What an item is, in rank order: an ask outranks a block outranks a
+// decision outranks a review.
+enum NeedsYouKind {
+  NEEDS_YOU_KIND_UNSPECIFIED = 0;
+  // An agent waiting on a permission that has an id and options, so it can
+  // be answered away from its terminal.
+  NEEDS_YOU_KIND_ASK = 1;
+  // An agent that is blocked with no answerable ask, or whose last turn
+  // failed.
+  NEEDS_YOU_KIND_BLOCKED = 2;
+  // A task in Needs Decision whose latest question has no later answer.
+  NEEDS_YOU_KIND_DECISION = 3;
+  // A task in In Review.
+  NEEDS_YOU_KIND_REVIEW = 4;
+}
+
+message NeedsYouItem {
+  // Stable across reads: `ask:<ask id>`, `blocked:<terminal>`,
+  // `decision:<task>` or `review:<task>`.
+  string id = 1;
+  NeedsYouKind kind = 2;
+  // The subject's other, less urgent signals.
+  repeated NeedsYouKind also = 3;
+  // SMALLER sorts FIRST, on `Terminal.rank`'s scale: a tier per kind, then
+  // the oldest first. A duration, not a clock reading, so two runners' items
+  // merge by rank without comparing clocks.
+  uint32 rank = 4;
+  google.protobuf.Timestamp since = 5;
+  // Empty for none, as `Task.workspace_id` is.
+  bytes workspace_id = 6;
+  string workspace_name = 7;
+  bytes repository_id = 8;
+  optional TaskRef task = 9;
+  optional TerminalRef terminal = 10;
+  // Control scope only.
+  optional WorktreeRef worktree = 11;
+  // One row wide: the ask's allow option, `blocked_question`, the QUESTION
+  // note, or "Ready for review". A fixed sentence per kind below Control.
+  string question = 12;
+  // An ask's command; a review's "+18 −40". Control scope only.
+  optional string detail = 13;
+  // What `terminal.agent_answer` takes. Control scope only.
+  optional string ask_id = 14;
+  // Control scope only.
+  repeated NeedsYouAction actions = 15;
+}
+
+message NeedsYouAction {
+  // An ask option id (`allow`, `deny`), a decision option's text, or
+  // `open`/`seen`.
+  string id = 1;
+  // "Allow", "Deny", or the option as written.
+  string title = 2;
+  bool destructive = 3;
+  bool primary = 4;
+}
+
+message TaskRef {
+  bytes id = 1;
+  string key = 2;
+  string title = 3;
+  TaskStatus status = 4;
+}
+
+message TerminalRef {
+  bytes id = 1;
+  bytes worktree_id = 2;
+  string label = 3;
+  TerminalRole role = 4;
+  PaneMode pane_mode = 5;
+  bool chat_capable = 6;
+}
+
+message WorktreeRef {
+  bytes id = 1;
+  string name = 2;
+  string branch = 3;
+  uint32 insertions = 4;
+  uint32 deletions = 5;
+}
+
+message NeedsYouList { repeated NeedsYouItem items = 1; }

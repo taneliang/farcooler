@@ -3571,6 +3571,12 @@ fn event_json(payload: farcooler_protocol::v1::event::Payload) -> Option<serde_j
         farcooler_protocol::v1::event::Payload::EventsMissed(_) => serde_json::json!({
             "kind": "events_missed",
         }),
+        // Something a person has to act on moved: re-read `needs-you`. The
+        // Mac's Needs You row and header badge hear the list move here,
+        // since an answered decision or chat ask changes nothing else.
+        farcooler_protocol::v1::event::Payload::NeedsYouChanged(_) => serde_json::json!({
+            "kind": "needs_you",
+        }),
         // Other resources have no events yet. `None` is right: a client that
         // reacted to a line it cannot read would be worse. What is NOT right
         // is a resource that HAS a reader landing here by omission, which is
@@ -4354,6 +4360,7 @@ mod tests {
             // may have been lost — and it fell into `_` exactly the way the
             // board arm once did, so a Mac that fell behind never re-read.
             (Payload::EventsMissed(farcooler_protocol::v1::Empty {}), "events_missed"),
+            (Payload::NeedsYouChanged(farcooler_protocol::v1::Empty {}), "needs_you"),
         ];
         for (payload, kind) in kinds {
             let line = event_json(payload)

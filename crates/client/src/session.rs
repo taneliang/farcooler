@@ -251,6 +251,11 @@ pub enum FleetEvent {
         from_workspace: Option<Uuid>,
         actor: String,
     },
+    /// Something a person has to act on appeared, changed or went away:
+    /// re-read `needs_you.list`. Its own notice rather than `Fleet`, because
+    /// answering a decision or a chat ask changes no terminal and no
+    /// worktree, so nothing else would say the list moved.
+    NeedsYou,
 }
 
 impl FleetEvent {
@@ -293,6 +298,9 @@ impl FleetEvent {
             // The daemon dropped events addressed to this connection. What
             // they were is gone, so everything is re-read.
             Payload::EventsMissed(_) => Some(FleetEvent::Resync),
+            // Already debounced on the runner, and coalesced again by the
+            // FFI's queue, since the line carries nothing to tell two apart.
+            Payload::NeedsYouChanged(_) => Some(FleetEvent::NeedsYou),
             // This arm used to return `None`, with a note saying to revisit it
             // when a board existed to hear it. The Mac board is that board, so
             // here it is. Kept as a sentence rather than deleted because the
@@ -2099,6 +2107,7 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::TaskNoteHitList(_) => "task_note_hit_list",
         result::Value::Workspace(_) => "workspace",
         result::Value::WorkspaceList(_) => "workspace_list",
+        result::Value::NeedsYouList(_) => "needs_you_list",
     }
 }
 
@@ -2377,6 +2386,18 @@ mod tests {
         assert_eq!(
             super::FleetEvent::of(Payload::EventsMissed(farcooler_protocol::v1::Empty {})),
             Some(super::FleetEvent::Resync)
+        );
+    }
+
+    /// The needs-you event is news of its own, not `Fleet` and not nothing:
+    /// an answered decision moves no terminal, so a client that read this as
+    /// anything else would never re-read the list.
+    #[test]
+    fn a_needs_you_event_is_a_fleet_event() {
+        use farcooler_protocol::v1::event::Payload;
+        assert_eq!(
+            super::FleetEvent::of(Payload::NeedsYouChanged(farcooler_protocol::v1::Empty {})),
+            Some(super::FleetEvent::NeedsYou)
         );
     }
 

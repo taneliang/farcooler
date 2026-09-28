@@ -386,6 +386,15 @@ pub mod capability {
     /// hears where the split left its handoff. A client that sends one names
     /// this in the request.
     pub const ORCHESTRATOR_HANDOFF: &str = "orchestrator_handoff";
+    /// The needs-you rollup: `needs_you.list`, the `needs_you_changed`
+    /// event, and `Worktree.open_tasks`.
+    ///
+    /// Its own capability for `WATCHING`'s reason: every daemon before this
+    /// one advertises `terminals` and `tasks` and cannot serve the list. A
+    /// client that reads it absent derives blocked items from
+    /// `Terminal.activity` and says the runner needs an update to show asks
+    /// and decisions.
+    pub const NEEDS_YOU: &str = "needs_you";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -396,6 +405,7 @@ pub mod capability {
             WORKTREES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES,
             ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL, WORKTREE_ORDER, TASKS,
             LAUNCH_PROMPT, TERMINAL_TASK, WORKTREE_FORK_ONLY, WORKSTREAMS, ORCHESTRATOR_HANDOFF,
+            NEEDS_YOU,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -476,6 +486,7 @@ pub mod capability {
             | "workspace.start_orchestrator" => WORKSTREAMS,
             "terminal.watching" => WATCHING,
             "terminal.attach" => TERMINAL_STREAM,
+            "needs_you.list" => NEEDS_YOU,
             _ => return None,
         })
     }
@@ -631,6 +642,8 @@ mod tests {
             ("Worktree", "workspace_id", 11, ""),
             ("Worktree", "claim_source", 12, ""),
             ("Worktree", "foreign_writer_workspace_ids", 13, ""),
+            // Added by the needs-you rollup, on a fresh tag.
+            ("Worktree", "open_tasks", 14, ".farcooler.v1.TaskRef"),
             ("WorktreeList", "items", 1, WT),
             ("WorktreeReorder", "worktree_ids", 1, ""),
             ("WorktreeCreate", "task_name", 1, ""),
@@ -784,6 +797,58 @@ mod tests {
         assert_eq!(number("TaskChanged", "actor"), 3);
     }
 
+    /// The needs-you additions, each on a tag nothing held before: the
+    /// event after `events_missed`, the result after `workspace_list` (27 to
+    /// 31 stay unused), and the worktree's tasks after its foreign writers.
+    #[test]
+    fn needs_you_takes_fresh_tags() {
+        use prost::Message;
+        use prost_types::FileDescriptorSet;
+
+        let set = FileDescriptorSet::decode(
+            &include_bytes!(concat!(env!("OUT_DIR"), "/farcooler_descriptor.bin"))[..],
+        )
+        .expect("the build writes a descriptor");
+        let file = set.file.iter().find(|f| f.package() == "farcooler.v1").expect("farcooler.v1");
+        let number = |m: &str, f: &str| {
+            file.message_type
+                .iter()
+                .find(|x| x.name() == m)
+                .unwrap_or_else(|| panic!("no message {m}"))
+                .field
+                .iter()
+                .find(|x| x.name() == f)
+                .unwrap_or_else(|| panic!("{m} has no field {f}"))
+                .number()
+        };
+        for (m, f, n) in [
+            ("Event", "needs_you_changed", 24),
+            ("Result", "needs_you_list", 45),
+            ("Worktree", "open_tasks", 14),
+        ] {
+            assert_eq!(number(m, f), n, "{m}.{f} moved off tag {n}");
+        }
+        // The last field each of these carried before, still where it was.
+        assert_eq!(number("Event", "events_missed"), 23);
+        assert_eq!(number("Result", "workspace_list"), 44);
+        assert_eq!(number("Worktree", "foreign_writer_workspace_ids"), 13);
+        // And the gap in `Result` stays a gap.
+        let result = file.message_type.iter().find(|x| x.name() == "Result").expect("Result");
+        for n in 27..=31 {
+            assert!(result.field.iter().all(|x| x.number() != n), "Result reused tag {n}");
+        }
+    }
+
+    /// The list is asked for by a word of its own, and the daemon
+    /// advertises it: a method whose capability is missing from `ALL` is one
+    /// the daemon refuses on every runner.
+    #[test]
+    fn needs_you_list_is_gated_on_its_own_advertised_capability() {
+        assert_eq!(capability::NEEDS_YOU, "needs_you");
+        assert_eq!(capability::for_method("needs_you.list"), Some(capability::NEEDS_YOU));
+        assert!(capability::ALL.contains(&capability::NEEDS_YOU), "the daemon would not advertise it");
+    }
+
     /// `workspaces` already means worktrees and is frozen; workspaces as
     /// workstreams are asked for by a word of their own.
     #[test]
@@ -871,6 +936,7 @@ mod tests {
             "worktree.assign",
             "terminal.set_role",
             "workspace.start_orchestrator",
+            "needs_you.list",
         ] {
             let cap = capability::for_method(method).expect("a known method");
             assert!(capability::ALL.contains(&cap), "{method} names {cap}, which is not advertised");
