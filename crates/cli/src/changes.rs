@@ -464,7 +464,7 @@ fn refusal(err: ClientError, about: About) -> Refused {
         // it: a stable vocabulary, and what a bug report needs.
         (other, _) => format!("the runner refused that ({other})"),
     };
-    Refused::new(said, Some(code))
+    Refused::naming(said, code, what)
 }
 
 /// This command's sentence for an argument the runner named.
@@ -485,6 +485,22 @@ fn said_about(what: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `changes` refusal keeps the runner's `what` for `--json`, as the
+    /// board's and the workspaces' do.
+    #[test]
+    fn a_changes_refusal_keeps_its_what() {
+        let refused = refusal(
+            ClientError::Daemon {
+                code: farcooler_protocol::v1::ErrorCode::InvalidArgument as i32,
+                retryable: false,
+                message: "invalid argument: worktree_id".into(),
+                what: "worktree_id".into(),
+            },
+            About::Worktree,
+        );
+        assert_eq!(refused.what(), Some("worktree_id"));
+    }
 
     fn file(path: &str, status: pb::FileStatus, ins: u32, del: u32) -> pb::FileChange {
         pb::FileChange {

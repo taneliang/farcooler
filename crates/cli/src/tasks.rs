@@ -2248,8 +2248,8 @@ fn pane_refused(e: ClientError) -> Refused {
 /// depends on whether this repository has a worktree on that branch
 /// already, so it's named when there is one.
 fn new_lane_refused(e: ClientError, branch: &str, on_it: Option<&str>) -> Refused {
-    let code = match &e {
-        ClientError::Daemon { code, .. } => *code,
+    let (code, what) = match &e {
+        ClientError::Daemon { code, what, .. } => (*code, what.clone()),
         _ => return refusal(e, "that worktree could not be made"),
     };
     if farcooler_core::error::word_for(code) != "branch-exists" {
@@ -2265,7 +2265,7 @@ fn new_lane_refused(e: ClientError, branch: &str, on_it: Option<&str>) -> Refuse
              one. pick another --branch"
         ),
     };
-    Refused::new(said, Some(code))
+    Refused::naming(said, code, what)
 }
 
 /// The state of `terminal` in `worktree` once the runner has had a moment
@@ -3586,6 +3586,24 @@ mod tests {
 
     fn existing() -> Lane {
         Lane::Existing("lane".into())
+    }
+
+    /// `--new`'s refusal keeps the runner's `what`, as every other refusal
+    /// here does.
+    #[test]
+    fn a_new_lane_refusal_keeps_its_what() {
+        let refused = new_lane_refused(
+            ClientError::Daemon {
+                code: pb::ErrorCode::BranchExists as i32,
+                retryable: false,
+                message: "branch already exists".into(),
+                what: "branch".into(),
+            },
+            "fix/it",
+            None,
+        );
+        assert_eq!(refused.word(), Some("branch-exists"));
+        assert_eq!(refused.what(), Some("branch"));
     }
 
     fn new_lane() -> Lane {

@@ -720,12 +720,30 @@ pub(crate) fn workspace_refused(e: ClientError, missing: &str, fallback: &str) -
         "capability-unsupported" => NO_WORKSPACES.to_string(),
         _ => return refusal(e, fallback),
     };
-    Refused::new(said, Some(code))
+    Refused::naming(said, code, what.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A workspace refusal keeps the runner's `what`, so `--json` can say
+    /// `what: orchestrator_taken` under its code, as the board's do.
+    #[test]
+    fn a_workspace_refusal_keeps_its_what() {
+        let refused = workspace_refused(
+            ClientError::Daemon {
+                code: pb::ErrorCode::InvalidArgument as i32,
+                retryable: false,
+                message: "invalid argument: orchestrator_taken".into(),
+                what: "orchestrator_taken".into(),
+            },
+            "gone",
+            "fallback",
+        );
+        assert_eq!(refused.what(), Some("orchestrator_taken"));
+        assert_eq!(refused.to_string(), "this workspace already has an orchestrator running");
+    }
 
     fn id(n: u8) -> bytes::Bytes {
         bytes::Bytes::copy_from_slice(&[n; 16])
