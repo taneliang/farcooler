@@ -7,23 +7,28 @@ import Testing
 // person's toggle (owner decision 3, spec §5). The view measures and draws;
 // every rule about what the measurement means is here.
 
-@Test("Below 800 it's a list, at 824 and up a kanban")
-func belowEightHundredItsAListAtEightTwentyFourAndUpAKanban() {
+/// The thresholds come from the kanban's own metrics: three whole 280 pt
+/// columns, two 12 pt gaps and 14 pt each side is 892 (the 2A measurement,
+/// which replaced spec §5's 824), and the band is 24 pt under it.
+@Test("Below 868 it's a list, at 892 and up a kanban")
+func belowEightSixtyEightItsAListAtEightNinetyTwoAndUpAKanban() {
+    #expect(BoardForm.kanbanFrom == 892)
+    #expect(BoardForm.listBelow == 868)
     for previous: BoardForm? in [nil, .list, .kanban] {
         #expect(BoardForm.resolve(width: 600, previous: previous, forced: .auto) == .list)
-        #expect(BoardForm.resolve(width: 799.5, previous: previous, forced: .auto) == .list)
-        #expect(BoardForm.resolve(width: 824, previous: previous, forced: .auto) == .kanban)
+        #expect(BoardForm.resolve(width: 867.5, previous: previous, forced: .auto) == .list)
+        #expect(BoardForm.resolve(width: 892, previous: previous, forced: .auto) == .kanban)
         #expect(BoardForm.resolve(width: 1600, previous: previous, forced: .auto) == .kanban)
     }
 }
 
 /// The hysteresis: a divider dragged back and forth across one line would
-/// flicker between the forms, so going up it switches at 824 and going down
-/// at 800, and in between it stays what it was. A board with no form yet
-/// starts as a list there, because below 824 three columns don't fit.
-@Test("Between 800 and 824 it keeps the form it had")
-func betweenEightHundredAndEightTwentyFourItKeepsTheFormItHad() {
-    for width in [800.0, 812, 823.5] {
+/// flicker between the forms, so going up it switches at 892 and going down
+/// at 868, and in between it stays what it was. A board with no form yet
+/// starts as a list there, because below 892 three columns don't fit.
+@Test("Between 868 and 892 it keeps the form it had")
+func betweenEightSixtyEightAndEightNinetyTwoItKeepsTheFormItHad() {
+    for width in [868.0, 880, 891.5] {
         #expect(BoardForm.resolve(width: width, previous: .list, forced: .auto) == .list)
         #expect(BoardForm.resolve(width: width, previous: .kanban, forced: .auto) == .kanban)
         #expect(BoardForm.resolve(width: width, previous: nil, forced: .auto) == .list)
@@ -32,7 +37,7 @@ func betweenEightHundredAndEightTwentyFourItKeepsTheFormItHad() {
 
 @Test("A forced form ignores width")
 func aForcedFormIgnoresWidth() {
-    for width in [300.0, 812, 2000] {
+    for width in [300.0, 880, 2000] {
         for previous: BoardForm? in [nil, .list, .kanban] {
             #expect(BoardForm.resolve(width: width, previous: previous, forced: .list) == .list)
             #expect(BoardForm.resolve(width: width, previous: previous, forced: .kanban) == .kanban)
@@ -88,4 +93,23 @@ func anEmptySectionIsCollapsedAndCantOpen() {
     #expect(!BoardForm.isExpanded(full, collapsed: [.todo]))
     #expect(!BoardForm.isExpanded(empty, collapsed: []))
     #expect(BoardForm.collapsedByDefault == [.done, .cancelled])
+}
+
+/// Which sections a board has collapsed, kept per device and per board like
+/// the form: Done and Canceled until the person says otherwise, and what
+/// they said after that, an empty set included.
+@Test("Collapsed sections are kept per board, Done and Canceled by default")
+func collapsedSectionsAreKeptPerBoard() throws {
+    let suite = "BoardFormTests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    #expect(BoardForm.collapsedKey(host: "mini", workspace: "w-1") == "board.collapsed.mini.w-1")
+    #expect(BoardForm.collapsed(host: "mini", workspace: "w-1", from: defaults) == [.done, .cancelled])
+    BoardForm.setCollapsed([.backlog], host: "mini", workspace: "w-1", in: defaults)
+    #expect(BoardForm.collapsed(host: "mini", workspace: "w-1", from: defaults) == [.backlog])
+    #expect(BoardForm.collapsed(host: "mini", workspace: "w-2", from: defaults) == [.done, .cancelled])
+    // Everything opened is remembered as everything opened, not as unset.
+    BoardForm.setCollapsed([], host: "mini", workspace: "w-1", in: defaults)
+    #expect(BoardForm.collapsed(host: "mini", workspace: "w-1", from: defaults).isEmpty)
 }

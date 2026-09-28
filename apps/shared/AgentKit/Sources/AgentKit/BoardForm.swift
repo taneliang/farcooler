@@ -12,23 +12,43 @@ import Foundation
 public enum BoardForm: String, Sendable, Hashable {
     case list, kanban
 
-    /// Below this, a list, whatever it was.
-    ///
-    /// 24 pt under `kanbanFrom`, so a divider dragged back and forth across
-    /// one line doesn't flicker the board between its forms.
-    public static let listBelow: Double = 800
+    // The kanban's metrics, which the Mac's board draws with, so the width
+    // at which three columns fit is derived from the columns it draws rather
+    // than written down beside them.
 
-    /// At this and up, a kanban. The width at which three of its 260 pt
-    /// columns fit: 3 × 260 + 2 × 12 spacing + 2 × 10 padding. Narrower, a
-    /// kanban shows fewer than three statuses, which the list does better.
-    public static let kanbanFrom: Double = 824
+    /// A kanban column's card width.
+    public static let columnWidth: Double = 260
+    /// The padding inside a column, each side.
+    public static let columnPadding: Double = 10
+    /// The gap between two columns.
+    public static let columnSpacing: Double = 12
+    /// The padding around the row of columns, each side.
+    public static let boardPadding: Double = 14
+
+    /// At this and up, a kanban: the width at which three whole columns fit,
+    /// 3 × (260 + 2 × 10) + 2 × 12 + 2 × 14 = 892 pt. Narrower, a kanban
+    /// shows fewer than three statuses, which the list does better.
+    ///
+    /// Spec §5 first said 824, which left out each column's own padding and
+    /// took the outer padding as 10; the 2A measurement lane found three
+    /// columns need 892 (`.claude/agent/reports/ui/2a-report.md`).
+    public static let kanbanFrom: Double =
+        3 * (columnWidth + 2 * columnPadding) + 2 * columnSpacing + 2 * boardPadding
+
+    /// The hysteresis band: going up the board switches at `kanbanFrom`, and
+    /// going down 24 pt lower, so a divider dragged back and forth across one
+    /// line doesn't flicker the board between its forms.
+    public static let hysteresis: Double = 24
+
+    /// Below this, a list, whatever it was: 868 pt.
+    public static let listBelow: Double = kanbanFrom - hysteresis
 
     /// The form for a board `width` points wide.
     ///
     /// - A forced form is the form, at any width.
     /// - Under Automatic, below `listBelow` a list and at `kanbanFrom` and up
     ///   a kanban. In between, the form it already had: going up it switches
-    ///   at 824 and going down at 800. A board with no form yet is a list
+    ///   at 892 and going down at 868. A board with no form yet is a list
     ///   there, since three columns don't fit.
     public static func resolve(width: Double, previous: BoardForm?, forced: Choice) -> BoardForm {
         switch forced {
@@ -105,5 +125,32 @@ public enum BoardForm: String, Sendable, Hashable {
     /// collapsed. An empty one never is.
     public static func isExpanded(_ section: TaskBoardColumn, collapsed: Set<TaskStatus>) -> Bool {
         canExpand(section) && !collapsed.contains(section.status)
+    }
+
+    /// Where a board's collapsed sections are kept on this device:
+    /// `board.collapsed.<host>.<workspace>`, beside its form.
+    public static func collapsedKey(host: String, workspace: String) -> String {
+        "board.collapsed.\(host).\(workspace)"
+    }
+
+    /// The sections this board has collapsed on this device:
+    /// `collapsedByDefault` until the person opens or closes one. A status
+    /// word this build doesn't know is dropped.
+    public static func collapsed(
+        host: String, workspace: String, from defaults: UserDefaults = .standard
+    ) -> Set<TaskStatus> {
+        guard let words = defaults.stringArray(forKey: collapsedKey(host: host, workspace: workspace))
+        else { return collapsedByDefault }
+        return Set(words.compactMap(TaskStatus.init(rawValue:)))
+    }
+
+    /// Keep this board's collapsed sections. An empty set is kept as one,
+    /// so a board with Done opened on purpose stays that way.
+    public static func setCollapsed(
+        _ statuses: Set<TaskStatus>, host: String, workspace: String,
+        in defaults: UserDefaults = .standard
+    ) {
+        defaults.set(
+            statuses.map(\.rawValue).sorted(), forKey: collapsedKey(host: host, workspace: workspace))
     }
 }
