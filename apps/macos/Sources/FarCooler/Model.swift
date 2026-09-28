@@ -131,6 +131,12 @@ struct Worktree: Decodable, Identifiable, Hashable {
     var repositoryID: String?
     /// The workspace that owns this worktree, or nil for an unclaimed one.
     var workspace: String?
+    /// The tasks working in this worktree that aren't Done or Cancelled, as
+    /// the runner fills `Worktree.open_tasks`: what a Worktrees row names
+    /// ("fc-3-webhooks · bil-9") and what `TaskLink` reads for a pane with no
+    /// task of its own. Nil from a CLI older than the key; `[]` from a runner
+    /// too old to fill it.
+    var openTasks: [NeedsYouTask]?
 
     enum CodingKeys: String, CodingKey {
         case id, short, task, branch, repository, host, ordinal, state, terminals
@@ -138,6 +144,7 @@ struct Worktree: Decodable, Identifiable, Hashable {
         case path = "worktree"
         case repositoryID = "repository_id"
         case workspace
+        case openTasks = "open_tasks"
     }
 
     /// This worktree as its sidebar row draws it: without the terminals
@@ -418,6 +425,11 @@ struct Terminal: Decodable, Identifiable, Hashable {
     var workspace: String?
     /// `orchestrator`, `agent` or `shell`, or nil when the runner set none.
     var role: String?
+    /// Where this pane sorts among those wanting attention, on its runner's
+    /// scale (`Terminal.rank`): a tier, then the oldest first. Read only to
+    /// derive an older runner's Needs You items (`NeedsYou.derived`); nil
+    /// from a CLI older than the key.
+    var rank: UInt32?
 
     var agent: AgentActivity { AgentActivity.parse(activity) }
 
@@ -912,6 +924,15 @@ enum StateKind {
 /// A terminal as the board reads it. Both rules are AgentKit's —
 /// `TaskAgentLink.isWorking`, and `TaskAgentLink.runsAgent` for what "runs an
 /// agent" means — so this app and the phone agree about the same pane.
+/// A pane as `TaskLink` asks about it: its own task, and whether it leads a
+/// workspace. Both are already here; this only says so.
+extension Terminal: TaskLinkPane {}
+
+/// A worktree as `TaskLink` asks about it.
+extension Worktree: TaskLinkWorktree {
+    var openTaskIDs: [String] { (openTasks ?? []).map(\.id) }
+}
+
 extension Terminal: TaskBoardPane {
     var boardTaskID: String? { taskId }
     var boardState: String { state }

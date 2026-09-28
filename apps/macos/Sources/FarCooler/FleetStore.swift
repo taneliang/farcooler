@@ -1,3 +1,4 @@
+import AgentKit
 import Combine
 import SwiftUI
 
@@ -270,7 +271,16 @@ final class FleetStore: ObservableObject {
             hosts.compactMap { host in clients[host].map { (host, $0.state, $0.fleet) } })
         fleet = merged.fleet
         if reading != merged.reading { reading = merged.reading }
+        let items = NeedsYou.merge(
+            Dictionary(clients.map { ($0.key, $0.value.needsYouItems) }, uniquingKeysWith: { a, _ in a }))
+        if items != needsYou { needsYou = items }
     }
+
+    /// Everything a person has to act on, on every runner, most urgent first:
+    /// each runner's own list, or its derived one, merged by rank
+    /// (`NeedsYou.merge`). Each item's `runner` is its host, `""` for this
+    /// Mac. What the Needs You row counts and ⌃⌘N walks.
+    @Published private(set) var needsYou: [NeedsYouItem] = []
 
     /// `remerge`'s arithmetic, apart from the clients it reads, so it can be
     /// asked about: every runner's rows in order, and the connected runners'

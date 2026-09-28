@@ -29,10 +29,37 @@ struct WorktreeCallsTests {
     @MainActor
     final class Recorder {
         var calls: [[String]] = []
+        /// What `status` says this runner can do, or nil to answer nothing.
+        var capabilities: [String]?
+        /// What `terminal agent-answer` fails with, or nil to take it.
+        var answerRefusal: String?
 
         func answer(_ args: [String]) -> (data: Data?, message: String?) {
             calls.append(args)
             let words = args.filter { $0 != "--json" }
+            if words == ["status"], let capabilities {
+                let body: [String: Any] = [
+                    "daemonVersion": "0.1.0", "buildsMatch": true, "platform": "macos",
+                    "capabilities": capabilities,
+                ]
+                return (try? JSONSerialization.data(withJSONObject: body), nil)
+            }
+            if words.first == "needs-you" {
+                return (
+                    Data(
+                        #"""
+                        {"items":[{"id":"decision:t-9","kind":"decision","also":[],"rank":300,
+                          "since":null,"workspace_id":"ws-1","workspace_name":"Billing",
+                          "repository_id":"r-1","task":{"id":"t-9","key":"bil-9",
+                          "title":"Invoice PDF export","status":"needs_decision"},
+                          "terminal":null,"worktree":null,"question":"Postgres or SQLite?",
+                          "detail":null,"ask_id":null,"actions":[]}]}
+                        """#.utf8), nil
+                )
+            }
+            if Array(words.prefix(2)) == ["terminal", "agent-answer"], let answerRefusal {
+                return (nil, answerRefusal)
+            }
             switch Array(words.prefix(2)) {
             case ["worktree", "list"]:
                 return (
@@ -241,6 +268,52 @@ struct WorktreeCallsTests {
             ])
     }
 
+    /// A runner with `needs_you` is read with the one command whose JSON is
+    /// the client core's, and what it said becomes this runner's items. A
+    /// runner without it isn't asked at all: its blocked agents are derived
+    /// from the fleet instead, and its section says to update it.
+    @Test("Needs You is read with farcooler needs-you --json")
+    func needsYouIsReadWithFarcoolerNeedsYouJSON() async {
+        let current = Recorder()
+        current.capabilities = ["workspaces", "terminals", "needs_you"]
+        let reader = client(current)
+        await reader.refreshNeedsYou()
+        #expect(current.calls.contains(["needs-you", "--json"]), "\(current.calls)")
+        #expect(reader.needsYouItems.map(\.itemID) == ["decision:t-9"])
+        #expect(reader.needsYouItems.first?.task?.key == "bil-9")
+        #expect(!reader.needsYouFromOlderRunner)
+
+        let older = Recorder()
+        older.capabilities = ["workspaces", "terminals", "workstreams"]
+        let old = client(older)
+        await old.refreshNeedsYou()
+        #expect(!older.calls.contains { $0.first == "needs-you" }, "\(older.calls)")
+        #expect(old.needsYouFromOlderRunner)
+    }
+
+    /// An ask's Allow and Deny send `terminal agent-answer` with the ask's own
+    /// ids, exactly as the runner sent them. A refusal is told apart by its
+    /// `what:` word: someone else answered, or the agent didn't take it.
+    @Test("An ask is answered with terminal agent-answer")
+    func anAskIsAnsweredWithTerminalAgentAnswer() async {
+        let recorder = Recorder()
+        let said = await client(recorder).answerAsk(
+            terminal: "t-4", request: "hook-ask-29", option: "allow")
+        #expect(said == nil)
+        #expect(recorder.calls == [["terminal", "agent-answer", "t-4", "hook-ask-29", "allow", "--json"]])
+
+        func refused(_ stderr: String) async -> DaemonClient.AskRefusal? {
+            let recorder = Recorder()
+            recorder.answerRefusal = stderr
+            return await client(recorder).answerAsk(terminal: "t-4", request: "hook-ask-29", option: "deny")
+        }
+        #expect(await refused("error: gone\ncode: resource-conflict\nwhat: not_held") == .notHeld)
+        #expect(await refused("error: no\ncode: resource-conflict\nwhat: not_delivered") == .notDelivered)
+        #expect(await refused("error: no\ncode: resource-conflict") == .failed)
+        #expect(DaemonClient.AskRefusal.notHeld.sentence(agent: "claude") == "Someone already answered this.")
+        #expect(DaemonClient.AskRefusal.notDelivered.sentence(agent: "claude") == "Couldn’t reach claude. Try again.")
+    }
+
     /// A worktree dragged onto another workspace that the runner refuses
     /// stays where it was, and the banner says why in this app's words —
     /// chosen by the `code:` word, never the CLI's `error:` line. One the
@@ -345,6 +418,15 @@ struct WorktreeCallsTests {
         _ = await reader.taskBoard(repository: "repo", workspace: nil)
         #expect(boards.calls.count == 2)
         lines += boards.calls
+
+        // Needs You's read, and an ask's answer.
+        let needs = Recorder()
+        needs.capabilities = ["needs_you"]
+        await self.client(needs).refreshNeedsYou()
+        lines += needs.calls.filter { $0.first == "needs-you" }
+        let answering = Recorder()
+        _ = await self.client(answering).answerAsk(terminal: "t-4", request: "hook-ask-29", option: "allow")
+        lines += answering.calls
 
         // The board's two task writes.
         let writes = await taskWrites()

@@ -273,6 +273,19 @@ enum TaskFailure {
             .first
     }
 
+    /// The word on a `what:` line of the CLI's stderr, if there is one: which
+    /// argument or conflict the runner named (`not_held`, `not_delivered`).
+    static func what(in message: String?) -> String? {
+        (message ?? "").split(whereSeparator: \.isNewline)
+            .lazy
+            .compactMap { line -> String? in
+                let line = line.trimmingCharacters(in: .whitespaces)
+                guard line.hasPrefix("what: ") else { return nil }
+                return String(line.dropFirst("what: ".count))
+            }
+            .first
+    }
+
     /// Why a task that was to be typed in never was.
     enum Undelivered {
         /// The agent asked something first: a trust screen, a resume dialog.

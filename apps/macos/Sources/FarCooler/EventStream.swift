@@ -197,6 +197,10 @@ final class EventStream {
     /// nothing, because the only answer is to re-read everything the lines
     /// above would have said — the phones' `resync`.
     private let onMissed: @Sendable () -> Void
+    /// Something a person has to act on moved (`needs_you_changed`): re-read
+    /// `needs-you`. Carries nothing, as `fleet` doesn't: the list is small and
+    /// read whole.
+    private let onNeedsYou: @Sendable () -> Void
     private let onEnd: @Sendable () -> Void
 
     init(
@@ -206,6 +210,7 @@ final class EventStream {
         onChangeSet: @escaping @Sendable () -> Void = {},
         onTask: @escaping @Sendable (TaskEvent) -> Void = { _ in },
         onMissed: @escaping @Sendable () -> Void = {},
+        onNeedsYou: @escaping @Sendable () -> Void = {},
         onEnd: @escaping @Sendable () -> Void = {}
     ) {
         self.onEvent = onEvent
@@ -214,6 +219,7 @@ final class EventStream {
         self.onChangeSet = onChangeSet
         self.onTask = onTask
         self.onMissed = onMissed
+        self.onNeedsYou = onNeedsYou
         self.onEnd = onEnd
     }
 
@@ -239,7 +245,8 @@ final class EventStream {
         let buffer = LineBuffer()
         let handle = out.fileHandleForReading
         outputHandle = handle
-        handle.readabilityHandler = { [onEvent, onLayout, onFleet, onChangeSet, onTask, onMissed] h in
+        handle.readabilityHandler = {
+            [onEvent, onLayout, onFleet, onChangeSet, onTask, onMissed, onNeedsYou] h in
             let chunk = h.availableData
             if chunk.isEmpty { return }
             let decoder = JSONDecoder()
@@ -247,7 +254,7 @@ final class EventStream {
                 Self.dispatch(
                     line, decoder: decoder, onEvent: onEvent, onLayout: onLayout,
                     onFleet: onFleet, onChangeSet: onChangeSet, onTask: onTask,
-                    onMissed: onMissed)
+                    onMissed: onMissed, onNeedsYou: onNeedsYou)
             }
         }
 
@@ -279,7 +286,8 @@ final class EventStream {
         onFleet: () -> Void = {},
         onChangeSet: () -> Void = {},
         onTask: (TaskEvent) -> Void = { _ in },
-        onMissed: () -> Void = {}
+        onMissed: () -> Void = {},
+        onNeedsYou: () -> Void = {}
     ) {
         // Dispatched on `kind` rather than by trying each shape in turn.
         // Guessing worked while there was one shape; with two, a layout
@@ -308,6 +316,9 @@ final class EventStream {
         // behind went on showing boards nobody would ever tell it had moved.
         case "events_missed":
             onMissed()
+        // The CLI's name for `needs_you_changed`.
+        case "needs_you":
+            onNeedsYou()
         // Resources this app does not track yet are skipped, not an error.
         default: return
         }

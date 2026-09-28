@@ -503,6 +503,14 @@ final class DaemonClient: ObservableObject {
                     await self.eventsMissed()
                 }
             },
+            onNeedsYou: { [weak self] in
+                Task { @MainActor in
+                    // Stale-guarded like every other arm here, for the reason
+                    // `onEvent` states.
+                    guard let self, self.streamGeneration == generation else { return }
+                    await self.refreshNeedsYou()
+                }
+            },
             onEnd: { [weak self] in
                 Task { @MainActor in
                     // Stale: either this stream was deliberately stopped, or
@@ -801,7 +809,13 @@ final class DaemonClient: ObservableObject {
                 // reconnection before the fleet could be drawn.
                 daemonBuild = nil
                 daemonBuildUnreadable = false
-                Task { await self.readDaemonBuild() }
+                // The list comes after the build, which says whether this
+                // runner has one to read. `needs_you_changed` keeps it fresh
+                // from here; nothing polls it.
+                Task {
+                    await self.readDaemonBuild()
+                    await self.refreshNeedsYou()
+                }
             }
             // Reap on every read, not only on events. A terminal that exited
             // while the app was closed produces no event to react to, so
@@ -1156,6 +1170,116 @@ final class DaemonClient: ObservableObject {
             background: true)
         if data != nil { return nil }
         return message ?? "The answer wasn’t written."
+    }
+
+    // MARK: - Needs You
+
+    /// This runner's own list, as `needs-you --json` last read it. Empty
+    /// until the first read, and on a runner without `needs_you`, whose items
+    /// are `needsYouItems`'s derivation instead.
+    @Published private(set) var needsYouRead: [NeedsYouItem] = []
+
+    /// Whether this runner computes its own list (`needs_you`). A runner not
+    /// yet asked counts as not, so its blocked agents still show while the
+    /// first `status` read is in flight.
+    var servesNeedsYou: Bool { daemonBuild?.can("needs_you") == true }
+
+    /// Whether this runner is known to be too old to send decisions and
+    /// asks: its section says `NeedsYou.olderRunnerNote`. Not while its build
+    /// is still unknown: that's not yet a thing to tell anybody.
+    var needsYouFromOlderRunner: Bool { daemonBuild != nil && !servesNeedsYou }
+
+    /// Everything on this runner a person has to act on: its own list when it
+    /// computes one, and otherwise its blocked agents, derived from the fleet
+    /// it already sends (spec §2.6). Hidden worktrees' panes are included:
+    /// their items still count.
+    var needsYouItems: [NeedsYouItem] {
+        servesNeedsYou ? needsYouRead : NeedsYou.derived(fromTerminals: Self.olderPanes(in: fleet.worktrees))
+    }
+
+    /// What `needs-you` is asked with.
+    static let needsYouArguments = ["needs-you", "--json"]
+
+    /// Read this runner's list again. Nothing on a runner without
+    /// `needs_you`, whose items are derived from the fleet instead; a read
+    /// that fails keeps the last list rather than emptying the count.
+    func refreshNeedsYou() async {
+        if daemonBuild == nil { await readDaemonBuild() }
+        guard servesNeedsYou else {
+            if !needsYouRead.isEmpty { needsYouRead = [] }
+            return
+        }
+        let (data, _) = await runRaw(Self.needsYouArguments, background: true)
+        guard let data, let list = try? JSONDecoder().decode(NeedsYouList.self, from: data) else { return }
+        if list.items != needsYouRead { needsYouRead = list.items }
+    }
+
+    /// What an older runner's fleet already says about each pane, for
+    /// `NeedsYou.derived`. The task is the pane's own (`taskId`), named from
+    /// its worktree's open tasks; never the worktree's one open task, which is
+    /// a display rule and not the daemon's subject rule.
+    nonisolated static func olderPanes(in worktrees: [Worktree]) -> [NeedsYou.OlderPane] {
+        worktrees.flatMap { worktree in
+            worktree.terminals.map { terminal in
+                NeedsYou.OlderPane(
+                    terminal: NeedsYouTerminal(
+                        id: terminal.id, worktreeID: worktree.id, label: terminal.label,
+                        role: terminal.role, paneMode: terminal.paneMode ?? "terminal",
+                        chatCapable: terminal.chatCapable ?? false),
+                    activity: terminal.activity,
+                    rank: terminal.rank,
+                    activitySince: terminal.activitySince.map { Date(timeIntervalSince1970: $0 / 1000) },
+                    blockedQuestion: terminal.blockedQuestion,
+                    workspaceID: terminal.workspace ?? worktree.workspace,
+                    repositoryID: worktree.repositoryID,
+                    task: terminal.taskId.flatMap { id in (worktree.openTasks ?? []).first { $0.id == id } },
+                    worktree: NeedsYouWorktree(
+                        id: worktree.id, name: worktree.task, branch: worktree.branch,
+                        insertions: 0, deletions: 0))
+            }
+        }
+    }
+
+    /// Why an ask wasn't answered, by the `what:` the runner named.
+    enum AskRefusal: Equatable {
+        /// `not_held`: it was answered somewhere else, or it went.
+        case notHeld
+        /// `not_delivered`: the agent didn't take it.
+        case notDelivered
+        /// Anything else, in this app's words.
+        case failed
+
+        /// The one line an item keeps under its buttons (spec §2.5), naming
+        /// the agent as its item does (`claude`).
+        func sentence(agent: String?) -> String {
+            let who = (agent ?? "").isEmpty ? "the agent" : agent!
+            switch self {
+            case .notHeld: return "Someone already answered this."
+            case .notDelivered: return "Couldn’t reach \(who). Try again."
+            case .failed: return "Couldn’t send that answer. Try again."
+            }
+        }
+
+        /// Chosen by the `what:` line of the CLI's stderr, never its
+        /// sentence: both conflicts are one code, `resource-conflict`.
+        static func from(_ message: String?) -> AskRefusal {
+            switch TaskFailure.what(in: message) {
+            case "not_held": return .notHeld
+            case "not_delivered": return .notDelivered
+            default: return .failed
+            }
+        }
+    }
+
+    /// Answer an agent's held ask with one of its own options
+    /// (`terminal agent-answer`): what an ask's Allow and Deny buttons send.
+    /// Nil means it was answered; the item leaves on the next
+    /// `needs_you_changed`.
+    func answerAsk(terminal: String, request: String, option: String) async -> AskRefusal? {
+        let (data, message) = await runRaw(
+            ["terminal", "agent-answer", terminal, request, option, "--json"], background: true)
+        if data != nil { return nil }
+        return AskRefusal.from(message)
     }
 
     @Published var repositories: [Repository] = []
