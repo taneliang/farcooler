@@ -150,4 +150,86 @@ struct WorkspaceSelectionTests {
             WorkspaceSelection.mapping(old: .worktree(host: "", id: "stray"), in: nameless)
                 == .looseWorktree(host: "", worktree: "stray", terminal: nil))
     }
+
+    // MARK: - Where the window reopens
+
+    private static func scratchDefaults() -> UserDefaults {
+        let name = "fc-selection-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return defaults
+    }
+
+    /// `fleet.lastTerminal` is read once its runner has been read, mapped by
+    /// the table, written as `workspace.lastSelection`, and removed; a second
+    /// launch finds nothing to migrate and leaves the new key alone. A key
+    /// naming a terminal that's gone is removed and leaves nothing.
+    @Test("The old last-terminal key migrates once and is removed")
+    func theOldLastTerminalKeyMigratesOnceAndIsRemoved() {
+        let defaults = Self.scratchDefaults()
+        defaults.set("/lane/agent", forKey: SelectionMemory.legacyKey)
+        #expect(!SelectionMemory.migrate(defaults, fleet: Self.fleet(), ready: { _ in false }))
+        #expect(defaults.string(forKey: SelectionMemory.legacyKey) == "/lane/agent", "migrated before its runner was read")
+
+        #expect(SelectionMemory.migrate(defaults, fleet: Self.fleet(), ready: { _ in true }))
+        #expect(defaults.string(forKey: SelectionMemory.legacyKey) == nil)
+        let saved = defaults.string(forKey: SelectionMemory.key)
+        #expect(saved.flatMap(SelectionMemory.decode) == .workspace(host: "", workspace: Self.billing, focus: .task(Self.task)))
+
+        // Once: the new key isn't overwritten by an old one written again.
+        defaults.set("/checkout/conductor", forKey: SelectionMemory.legacyKey)
+        SelectionMemory.migrate(defaults, fleet: Self.fleet(), ready: { _ in true })
+        #expect(defaults.string(forKey: SelectionMemory.key) == saved)
+        #expect(defaults.string(forKey: SelectionMemory.legacyKey) == nil)
+
+        let gone = Self.scratchDefaults()
+        gone.set("/gone/t", forKey: SelectionMemory.legacyKey)
+        #expect(SelectionMemory.migrate(gone, fleet: Self.fleet(), ready: { _ in true }))
+        #expect(gone.string(forKey: SelectionMemory.legacyKey) == nil)
+        #expect(gone.string(forKey: SelectionMemory.key) == nil)
+
+        // Every shape round-trips.
+        for selection: Selection in [
+            .workspace(host: "", workspace: Self.billing, focus: nil),
+            .workspace(host: "me@box", workspace: Self.billing, focus: .task(Self.task)),
+            .workspace(host: "", workspace: Self.main, focus: .worktree("checkout", terminal: "shell")),
+            .workspace(host: "", workspace: Self.main, focus: .worktree("checkout", terminal: nil)),
+            .looseWorktree(host: "", worktree: "stray", terminal: "stray-shell"),
+            .looseWorktree(host: "", worktree: "stray", terminal: nil),
+        ] {
+            #expect(SelectionMemory.encode(selection).flatMap(SelectionMemory.decode) == selection)
+        }
+        #expect(SelectionMemory.encode(.needsYou) == nil)
+    }
+
+    /// Needs You when anything is waiting, as the iPhone opens (ruling 4).
+    /// Otherwise, once every runner has said, the last workspace selection
+    /// while it's still there, else the first workspace; and nothing is
+    /// decided while a runner hasn't said yet, so the window doesn't open on
+    /// a workspace a moment before a decision arrives.
+    @Test("Launch opens Needs You when it has items, else the last workspace")
+    func launchOpensNeedsYouWhenItHasItemsElseTheLastWorkspace() {
+        let fleet = Self.fleet()
+        let last = Selection.workspace(host: "", workspace: Self.billing, focus: .worktree("scratch", terminal: nil))
+        #expect(SelectionMemory.launch(needsYou: 2, settled: false, last: last, in: fleet) == .some(.needsYou))
+        #expect(SelectionMemory.launch(needsYou: 0, settled: false, last: last, in: fleet) == nil)
+        #expect(SelectionMemory.launch(needsYou: 0, settled: true, last: last, in: fleet) == .some(last))
+        // Its opened worktree gone: the workspace, with the column closed.
+        let goneLane = Selection.workspace(host: "", workspace: Self.billing, focus: .worktree("gone", terminal: nil))
+        #expect(
+            SelectionMemory.launch(needsYou: 0, settled: true, last: goneLane, in: fleet)
+                == .some(.workspace(host: "", workspace: Self.billing, focus: nil)))
+        // Its workspace gone, or nothing saved: the first workspace listed.
+        let gone = Selection.workspace(host: "", workspace: "0198f2c0-0000-7000-8000-0000000000ee", focus: nil)
+        #expect(
+            SelectionMemory.launch(needsYou: 0, settled: true, last: gone, in: fleet)
+                == .some(.workspace(host: "", workspace: Self.main, focus: nil)))
+        #expect(
+            SelectionMemory.launch(needsYou: 0, settled: true, last: nil, in: fleet)
+                == .some(.workspace(host: "", workspace: Self.main, focus: nil)))
+        // And a runner still making its first connection holds it open.
+        #expect(!FleetStore.settled([(.connected, true), (.connecting, false)]))
+        #expect(FleetStore.settled([(.connected, true), (.unreachable(reason: "x"), false)]))
+        #expect(!FleetStore.settled([(.connected, false)]))
+    }
 }

@@ -76,17 +76,18 @@ struct ContentView: View {
     /// closing and reopening.
     @StateObject private var taskSubmission = TaskSubmission()
     @AppStorage("tasks.lastProject") private var lastProject = ""
-    /// The terminal that was open when the app last closed, as
-    /// `host/worktree/terminal`.
+    /// The workspace selection that was on screen when the app last closed,
+    /// as `SelectionMemory.encode` writes it. Recorded as it changes rather
+    /// than on quit: an app that is force quit, crashes, or is killed by a
+    /// rebuild never gets a last word.
     ///
     /// Reopening somewhere else is a small thing that costs a real one: the
-    /// pane you were reading is the reason you came back, and finding it again
-    /// means walking a sidebar you had already navigated once. The host is part
-    /// of the key now, same as `Selection`: a worktree id alone does not say
-    /// which runner to look for it on, and it does not need to — full ids are
-    /// unique per runner already — but resolving it needs the client, and the
-    /// client is looked up by host.
-    @AppStorage("fleet.lastTerminal") private var lastTerminal = ""
+    /// workspace you were in is the reason you came back. It replaces
+    /// `fleet.lastTerminal`, which `SelectionMemory.migrate` maps once.
+    @AppStorage(SelectionMemory.key) private var lastSelection = ""
+    /// Whether the launch rule has chosen where the window opens. See
+    /// `settleLaunch`.
+    @State private var launched = false
     @FocusState private var searchFocused: Bool
     @State private var removeWorktree: Worktree?
     @State private var removeRepository: RepositoryToRemove?
@@ -232,7 +233,7 @@ struct ContentView: View {
             // client's `state` still reading whatever it was, but nothing
             // actually listening.
             store.resume()
-            selectFirstRunningTerminal()
+            settleLaunch()
         }
         .onDisappear {
             for client in store.clients.values { client.stopEvents() }
@@ -267,9 +268,13 @@ struct ContentView: View {
             // A runner's first read can land well after this view's own
             // `.task` already ran and found nothing to select — `FleetStore`
             // brings every client up in the background, on its own schedule.
-            // Guarded on `selection == nil` inside, so this is a no-op once
-            // something is already selected.
-            selectFirstRunningTerminal()
+            // A no-op once the window has opened somewhere.
+            settleLaunch()
+        }
+        .onChange(of: store.needsYou) { _, _ in settleLaunch() }
+        .onChange(of: store.needsYouSettled) { _, _ in settleLaunch() }
+        .onChange(of: selection) { _, now in
+            if let saved = SelectionMemory.encode(now) { lastSelection = saved }
         }
         // Coming back to the app is reading whatever it comes back to. The
         // notification did its job while you were away; leaving the row lit
@@ -2043,41 +2048,29 @@ struct ContentView: View {
         if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
     }
 
-    /// Land on something usable rather than an empty pane.
-    /// Where to land on launch.
+    /// Where the window opens: Needs You when anything is waiting, else the
+    /// last workspace selection (spec §4.6, ruling 4). See
+    /// `SelectionMemory.launch`.
     ///
-    /// Whatever wants you first, wherever it is — including on another runner.
-    /// Falling back to "the first running terminal" would open a fleet on
-    /// something arbitrary while an agent two projects down waits for an answer.
-    private func selectFirstRunningTerminal() {
-        guard selection == nil else { return }
-
-        // Where you left off, if it is still there, mapped to where it lives
-        // now. A terminal that has since exited falls through to the rules
-        // below rather than selecting nothing — the saved id is a preference,
-        // not a promise.
-        if let saved = LegacySelection(lastTerminal: lastTerminal),
-            let landed = WorkspaceSelection.mapping(old: saved, in: store.fleet)
-        {
-            selection = landed
+    /// Asked on every fleet and Needs You change until it has an answer, since
+    /// each runner comes up on its own schedule, and never again after: a
+    /// window that has opened somewhere, or where somebody already clicked,
+    /// isn't moved by a count that rises later.
+    private func settleLaunch() {
+        SelectionMemory.migrate(
+            .standard, fleet: store.fleet, ready: { host in store.clients[host]?.hasLoaded ?? true })
+        guard !launched else { return }
+        guard selection == nil else {
+            launched = true
             return
         }
-
-        for ws in store.fleet.worktrees {
-            if let t = ws.terminals.first(where: { $0.status.wantsAttention }) {
-                land(on: PaneRef(host: ws.host ?? "", worktree: ws.id, terminal: t.id))
-                return
-            }
-        }
-        for ws in store.fleet.worktrees {
-            if let t = ws.terminals.first(where: { StateKind.parse($0.state) == .running }) {
-                land(on: PaneRef(host: ws.host ?? "", worktree: ws.id, terminal: t.id))
-                return
-            }
-        }
-        if let ws = store.fleet.worktrees.first {
-            selection = Self.opening(ws, terminal: nil, in: store.fleet)
-        }
+        guard
+            let decided = SelectionMemory.launch(
+                needsYou: store.needsYou.count, settled: store.needsYouSettled,
+                last: SelectionMemory.decode(lastSelection), in: store.fleet)
+        else { return }
+        launched = true
+        selection = decided
     }
 
     // MARK: - Commands

@@ -1179,6 +1179,11 @@ final class DaemonClient: ObservableObject {
     /// are `needsYouItems`'s derivation instead.
     @Published private(set) var needsYouRead: [NeedsYouItem] = []
 
+    /// Whether this runner has said what's waiting at least once: its list
+    /// read, or its build known not to have one. What the window waits for
+    /// before it opens anywhere but Needs You (`FleetStore.needsYouSettled`).
+    @Published private(set) var needsYouKnown = false
+
     /// Whether this runner computes its own list (`needs_you`). A runner not
     /// yet asked counts as not, so its blocked agents still show while the
     /// first `status` read is in flight.
@@ -1205,6 +1210,9 @@ final class DaemonClient: ObservableObject {
     /// that fails keeps the last list rather than emptying the count.
     func refreshNeedsYou() async {
         if daemonBuild == nil { await readDaemonBuild() }
+        // Known after this whatever it found: a read that failed keeps the
+        // last list, and the window mustn't wait on a runner that can't say.
+        defer { if !needsYouKnown { needsYouKnown = true } }
         guard servesNeedsYou else {
             if !needsYouRead.isEmpty { needsYouRead = [] }
             return

@@ -274,6 +274,25 @@ final class FleetStore: ObservableObject {
         let items = NeedsYou.merge(
             Dictionary(clients.map { ($0.key, $0.value.needsYouItems) }, uniquingKeysWith: { a, _ in a }))
         if items != needsYou { needsYou = items }
+        let settled = Self.settled(clients.values.map { ($0.state, $0.needsYouKnown) })
+        if settled != needsYouSettled { needsYouSettled = settled }
+    }
+
+    /// Whether every runner has said what's waiting, as far as it can: none
+    /// still making its first connection, and every one that's connected
+    /// has read its list. What the window waits for before opening anywhere
+    /// but Needs You, so it doesn't open on a workspace a moment before a
+    /// runner's decisions arrive.
+    @Published private(set) var needsYouSettled = false
+
+    static func settled(_ runners: [(state: HostState, known: Bool)]) -> Bool {
+        runners.allSatisfy { runner in
+            switch runner.state {
+            case .connecting: return false
+            case .connected: return runner.known
+            default: return true
+            }
+        }
     }
 
     /// Everything a person has to act on, on every runner, most urgent first:
