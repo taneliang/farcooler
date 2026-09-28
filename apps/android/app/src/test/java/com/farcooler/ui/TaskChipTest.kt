@@ -85,6 +85,7 @@ class TaskChipTest {
                     terminal = pane,
                     worktree = worktree,
                     boards = boards,
+                    boardsNow = { boards },
                     boardList = { list },
                     readBoard = { ws ->
                         reads += ws.id

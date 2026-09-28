@@ -159,6 +159,7 @@ fun TerminalPane(
         terminal = terminal,
         worktree = worktree,
         boards = boards,
+        boardsNow = { connection.boards.value },
         boardList = connection::boardList,
         readBoard = connection::readBoard,
         navigate = model::navigate,
@@ -561,6 +562,7 @@ fun rememberTaskChip(
     terminal: Terminal?,
     worktree: Worktree?,
     boards: Map<String, TaskBoard>,
+    boardsNow: () -> Map<String, TaskBoard>,
     boardList: () -> List<WorkspaceSummary>,
     readBoard: suspend (WorkspaceSummary) -> Unit,
     navigate: (Route) -> Unit,
@@ -569,8 +571,14 @@ fun rememberTaskChip(
     val board = task?.let { taskBoardOf(it.id, boards) }
     val searching = task != null && board == null
     LaunchedEffect(task?.id, searching) {
-        if (!searching) return@LaunchedEffect
-        for (candidate in boardsToRead(boards, boardList(), terminal, worktree)) readBoard(candidate)
+        if (task == null || !searching) return@LaunchedEffect
+        for (candidate in boardsToRead(boards, boardList(), terminal, worktree)) {
+            readBoard(candidate)
+            // The boards as they are now, not as this effect began with: each
+            // read lands in them, and the search stops at the first that holds
+            // the card rather than reading the rest.
+            if (taskBoardOf(task.id, boardsNow()) != null) break
+        }
     }
     if (task == null || board == null) return null
     return TaskChip(task) { navigate(Route.BoardTask(hostId, board, task.id)) }
