@@ -91,7 +91,9 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *   repositories           {}                     -> registered repositories
  *   host                   {}                     -> what that runner is, and
  *                                                    what this session may do
- *   worktree.create        {repository, task, branch, base?}
+ *   worktree.create        {repository, task, branch, base?, workspace?}
+ *                                                    claimed for `workspace`,
+ *                                                    or for Main without one
  *   worktree.hide          {worktree}
  *   worktree.unhide        {worktree}
  *   worktree.reorder       {worktrees: ["<uuid>", ...]}
@@ -111,6 +113,11 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *   task.list              {repository}           -> {"tasks": [...]}, one
  *                                                    repository's board
  *   task.get               {task}                 -> {"task", "notes", "blocks"}
+ *   task.note              {task, kind, body}     -> the note; written as
+ *                                                    `user`. `kind` "answer"
+ *                                                    answers a decision
+ *   workspace.start_orchestrator {workspace, harness, replace?}
+ *                                                 -> {"id": "<terminal>"}
  *   needs_you              {}                     -> {"items": [...]}, in rank
  *                                                    order; see below
  *

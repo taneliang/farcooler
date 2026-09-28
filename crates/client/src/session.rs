@@ -1010,16 +1010,39 @@ impl Session {
         terminal_preset: &str,
         adopt: bool,
     ) -> Result<Worktree, SessionError> {
-        // Claimed for the repository's Main, where the runner has workspaces:
-        // a pane opened in an unclaimed worktree has no workspace, so nothing
-        // it does there could ever claim it, and the worktree would sit in
-        // Unclaimed for good. The phones make worktrees from nowhere more
-        // specific than the repository, so Main is the one they mean.
+        self.create_worktree_in(repository, task, branch, base, terminal_preset, adopt, None).await
+    }
+
+    /// `create_worktree`, claimed for `workspace` when one is named.
+    ///
+    /// A phone making a worktree from a workspace's screen means that
+    /// workspace, so the worktree is claimed for it (ruling 8). A runner
+    /// without `workstreams` has no workspace but the implicit one, so the
+    /// name is dropped there rather than refused, as `task_list_request`
+    /// drops it.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_worktree_in(
+        &mut self,
+        repository: Uuid,
+        task: &str,
+        branch: &str,
+        base: &str,
+        terminal_preset: &str,
+        adopt: bool,
+        workspace: Option<Uuid>,
+    ) -> Result<Worktree, SessionError> {
+        let workstreams = self.can(farcooler_protocol::capability::WORKSTREAMS);
+        let chosen = workspace.filter(|_| workstreams);
+        // Otherwise claimed for the repository's Main, where the runner has
+        // workspaces: a pane opened in an unclaimed worktree has no
+        // workspace, so nothing it does there could ever claim it, and the
+        // worktree would sit in Unclaimed for good. A phone making one from
+        // nowhere more specific than the repository means Main.
         //
         // A list that can't be read makes the worktree unclaimed rather than
         // refusing it: the claim is a convenience, and the create is what
-        // was asked for.
-        let workspaces = if self.can(farcooler_protocol::capability::WORKSTREAMS) {
+        // was asked for. A named workspace needs no list at all.
+        let workspaces = if workstreams && chosen.is_none() {
             match self.workspaces().await {
                 Ok(listed) => Some(listed),
                 Err(e) => {
@@ -1030,7 +1053,7 @@ impl Session {
         } else {
             None
         };
-        let (workspace_id, required) = main_claim(repository, workspaces.as_deref());
+        let (workspace_id, required) = claim(repository, chosen, workspaces.as_deref());
         let payload = request::Payload::WorktreeCreate(farcooler_protocol::v1::WorktreeCreate {
             task_name: task.into(),
             branch: branch.into(),
@@ -1785,6 +1808,42 @@ impl Session {
         }
     }
 
+    /// Append an entry to a task's record, as the person holding this
+    /// device: a phone answering a decision writes an `answer` note, which is
+    /// what takes the decision off Needs You. Gated like `tasks`.
+    /// Answers with the entry, in `task show --json`'s note shape.
+    pub async fn task_note(
+        &mut self,
+        append: farcooler_protocol::v1::TaskNoteAppend,
+    ) -> Result<serde_json::Value, SessionError> {
+        require(self.capabilities(), farcooler_protocol::capability::TASKS, "task.note")?;
+        let task = uuid_of(&append.task_id);
+        match self.value("task.note", Some(task), Some(request::Payload::TaskNoteAppend(append))).await? {
+            result::Value::TaskNote(n) => Ok(crate::tasks_json::note_json(&n)),
+            other => Err(wrong("task_note", &other)),
+        }
+    }
+
+    /// Open a workspace's orchestrator (ruling 8: a workspace with none was a
+    /// dead end on the phone). Refused without a round trip on a runner
+    /// without `workstreams`, which has no orchestrators.
+    pub async fn start_orchestrator(
+        &mut self,
+        workspace: Uuid,
+        start: farcooler_protocol::v1::WorkspaceStartOrchestrator,
+    ) -> Result<Terminal, SessionError> {
+        require(
+            self.capabilities(),
+            farcooler_protocol::capability::WORKSTREAMS,
+            "workspace.start_orchestrator",
+        )?;
+        let payload = request::Payload::WorkspaceStartOrchestrator(start);
+        match self.value("workspace.start_orchestrator", Some(workspace), Some(payload)).await? {
+            result::Value::Terminal(t) => Ok(t),
+            other => Err(wrong("terminal", &other)),
+        }
+    }
+
     /// What the daemon is, and what it can do.
     ///
     /// Named apart from the `daemon_version` accessor above, which answers from
@@ -2026,14 +2085,24 @@ fn task_list_request(
 }
 
 /// The workspace a worktree the phones make is claimed for, and the
-/// capabilities that claim depends on: `repository`'s Main, from `workspaces`
-/// as a runner with `workstreams` listed them. `None` from a runner without
-/// them, which has no workspace to claim for and would refuse the
-/// requirement, and where the list names no Main for the repository.
-fn main_claim(
+/// capabilities that claim depends on.
+///
+/// `chosen`, when the phone named one on a runner with `workstreams`.
+/// Otherwise `repository`'s Main, from `workspaces` as that runner listed
+/// them. `None` from a runner without them, which has no workspace to claim
+/// for and would refuse the requirement, and where the list names no Main for
+/// the repository.
+pub(crate) fn claim(
     repository: Uuid,
+    chosen: Option<Uuid>,
     workspaces: Option<&[farcooler_protocol::v1::Workspace]>,
 ) -> (Option<bytes::Bytes>, Vec<String>) {
+    if let Some(chosen) = chosen {
+        return (
+            Some(bytes::Bytes::copy_from_slice(chosen.as_bytes())),
+            vec![farcooler_protocol::capability::WORKSTREAMS.to_string()],
+        );
+    }
     let main = workspaces
         .unwrap_or_default()
         .iter()
@@ -2041,6 +2110,23 @@ fn main_claim(
     match main {
         Some(w) => (Some(w.id.clone()), vec![farcooler_protocol::capability::WORKSTREAMS.to_string()]),
         None => (None, Vec::new()),
+    }
+}
+
+/// A note a phone writes: always as `user`, because the person holding the
+/// device is the only actor a phone can be.
+pub fn task_note_append(
+    task: Uuid,
+    kind: farcooler_protocol::v1::TaskNoteKind,
+    body: &str,
+) -> farcooler_protocol::v1::TaskNoteAppend {
+    farcooler_protocol::v1::TaskNoteAppend {
+        task_id: bytes::Bytes::copy_from_slice(task.as_bytes()),
+        kind: kind as i32,
+        body: body.to_string(),
+        extra_json: String::new(),
+        supersedes: None,
+        actor: "user".to_string(),
     }
 }
 
@@ -2545,12 +2631,12 @@ mod tests {
             pb::Workspace { id: bytes(billing), repository_id: bytes(repository), ..Default::default() },
             pb::Workspace { id: bytes(main), repository_id: bytes(repository), is_main: true, ..Default::default() },
         ];
-        let (claim, required) = super::main_claim(repository, Some(&listed));
+        let (claim, required) = super::claim(repository, None, Some(&listed));
         assert_eq!(claim, Some(bytes(main)), "this repository's Main");
         assert_eq!(required, vec![farcooler_protocol::capability::WORKSTREAMS.to_string()]);
 
-        assert_eq!(super::main_claim(repository, None), (None, Vec::new()), "a runner without workstreams");
-        assert_eq!(super::main_claim(repository, Some(&listed[..2])), (None, Vec::new()), "no Main listed");
+        assert_eq!(super::claim(repository, None, None), (None, Vec::new()), "a runner without workstreams");
+        assert_eq!(super::claim(repository, None, Some(&listed[..2])), (None, Vec::new()), "no Main listed");
     }
 
     /// A pane's task is a uuid string or nothing: never the nil uuid, which

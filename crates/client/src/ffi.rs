@@ -1515,6 +1515,55 @@ fn optional_id(
     }
 }
 
+/// `task.note`'s arguments: `{task, kind, body}`, as the note a phone writes.
+///
+/// `kind` is `tasks_json`'s word for it. The two kinds only the runner writes,
+/// `status_change` and `created`, are refused here: a phone that sent one
+/// would be forging the record's own bookkeeping.
+fn task_note_of(args: &Value) -> Result<farcooler_protocol::v1::TaskNoteAppend, SessionError> {
+    use farcooler_protocol::v1::TaskNoteKind;
+    let refused = |key: &str| SessionError::Protocol(format!("task.note needs a {key}"));
+    let task = args
+        .get("task")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<uuid::Uuid>().ok())
+        .ok_or_else(|| refused("task"))?;
+    let kind = match args.get("kind").and_then(|v| v.as_str()).unwrap_or_default() {
+        "answer" => TaskNoteKind::Answer,
+        "question" => TaskNoteKind::Question,
+        "decision" => TaskNoteKind::Decision,
+        "finding" => TaskNoteKind::Finding,
+        "progress" => TaskNoteKind::Progress,
+        "comment" => TaskNoteKind::Comment,
+        _ => return Err(refused("kind")),
+    };
+    let body = args.get("body").and_then(|v| v.as_str()).unwrap_or_default();
+    Ok(crate::session::task_note_append(task, kind, body))
+}
+
+/// `workspace.start_orchestrator`'s arguments: `{workspace, harness,
+/// replace?}`. `replace` absent is false: a second orchestrator is refused
+/// (`orchestrator_taken`) unless the person asked to replace the first.
+fn start_orchestrator_of(
+    args: &Value,
+) -> Result<(uuid::Uuid, farcooler_protocol::v1::WorkspaceStartOrchestrator), SessionError> {
+    const METHOD: &str = "workspace.start_orchestrator";
+    let workspace = optional_id(args, "workspace", METHOD)?
+        .ok_or_else(|| SessionError::Protocol(format!("{METHOD} needs a workspace")))?;
+    let harness = args.get("harness").and_then(|v| v.as_str()).unwrap_or_default();
+    if harness.trim().is_empty() {
+        return Err(SessionError::Protocol(format!("{METHOD} needs a harness")));
+    }
+    Ok((
+        workspace,
+        farcooler_protocol::v1::WorkspaceStartOrchestrator {
+            harness: harness.to_string(),
+            replace: args.get("replace").and_then(|v| v.as_bool()).unwrap_or(false),
+            handoff_task: String::new(),
+        },
+    ))
+}
+
 async fn dispatch(
     session: &mut Session,
     method: &str,
@@ -1789,14 +1838,18 @@ async fn dispatch(
             // older client, and absent means create — the behavior every caller
             // that predates the key already had.
             let adopt = args.get("adopt").and_then(|v| v.as_bool()).unwrap_or(false);
+            // The workspace whose screen it was made from, claimed for it.
+            // Absent, as from every older client, is the repository's Main.
+            let workspace = optional_id(args, "workspace", method)?;
             let worktree = session
-                .create_worktree(
+                .create_worktree_in(
                     id("repository")?,
                     &text("task"),
                     &text("branch"),
                     &base,
                     &text("terminal"),
                     adopt,
+                    workspace,
                 )
                 .await?;
             Ok(json!({ "id": uuid_of(&worktree.id).to_string() }))
@@ -1921,6 +1974,19 @@ async fn dispatch(
         }
 
         "task.get" => Ok(session.task(id("task")?).await?),
+
+        // The first board write a phone makes: answering a decision, as
+        // `{task, kind: "answer", body}`, which takes the decision off Needs
+        // You. Always as `user`; see `task_note_of`.
+        "task.note" => Ok(session.task_note(task_note_of(args)?).await?),
+
+        // Ruling 8: a phone may start a workspace's orchestrator. `{workspace,
+        // harness, replace?}`; `replace` stops a live one first.
+        "workspace.start_orchestrator" => {
+            let (workspace, start) = start_orchestrator_of(args)?;
+            let terminal = session.start_orchestrator(workspace, start).await?;
+            Ok(json!({ "id": uuid_of(&terminal.id).to_string() }))
+        }
 
         // ---- the runner itself ----
 
@@ -2514,6 +2580,83 @@ mod tests {
         let ok = line(Ok(json!({ "fine": true })), false);
         assert_eq!(ok["ok"], true);
         assert!(ok.get("code").is_none());
+    }
+
+    #[test]
+    fn task_note_sends_an_answer_as_the_user() {
+        use farcooler_protocol::v1::TaskNoteKind;
+        let task = uuid::Uuid::now_v7();
+        let note = task_note_of(&json!({ "task": task.to_string(), "kind": "answer", "body": "Postgres" }))
+            .expect("a note");
+        assert_eq!(note.task_id.as_ref(), task.as_bytes());
+        assert_eq!(note.kind, TaskNoteKind::Answer as i32);
+        assert_eq!(note.body, "Postgres");
+        assert_eq!(note.actor, "user", "a phone answers as the person holding it");
+        assert_eq!((note.extra_json.as_str(), note.supersedes.as_ref()), ("", None));
+
+        for forged in ["status_change", "created", "", "Answer"] {
+            let refused = task_note_of(&json!({ "task": task.to_string(), "kind": forged, "body": "x" }));
+            assert!(refused.is_err(), "{forged:?} was accepted");
+        }
+        assert!(task_note_of(&json!({ "kind": "answer", "body": "x" })).is_err(), "no task");
+    }
+
+    #[test]
+    fn start_orchestrator_sends_its_harness_and_replace() {
+        let workspace = uuid::Uuid::now_v7();
+        let (to, start) = start_orchestrator_of(&json!({
+            "workspace": workspace.to_string(),
+            "harness": "codex:gpt-5",
+            "replace": true,
+        }))
+        .expect("a start");
+        assert_eq!(to, workspace);
+        assert_eq!(start.harness, "codex:gpt-5");
+        assert!(start.replace);
+        assert_eq!(start.handoff_task, "", "a phone names no handoff");
+
+        let (_, plain) =
+            start_orchestrator_of(&json!({ "workspace": workspace.to_string(), "harness": "claude" })).expect("a start");
+        assert!(!plain.replace, "absent is not a replace");
+        assert!(start_orchestrator_of(&json!({ "workspace": workspace.to_string() })).is_err(), "no harness");
+        assert!(start_orchestrator_of(&json!({ "harness": "claude" })).is_err(), "no workspace");
+    }
+
+    fn listed(repository: uuid::Uuid, main: uuid::Uuid) -> Vec<farcooler_protocol::v1::Workspace> {
+        vec![farcooler_protocol::v1::Workspace {
+            id: bytes::Bytes::copy_from_slice(main.as_bytes()),
+            repository_id: bytes::Bytes::copy_from_slice(repository.as_bytes()),
+            is_main: true,
+            ..Default::default()
+        }]
+    }
+
+    /// Read off the arguments the way the `worktree.create` arm reads them.
+    fn claimed(args: &Value, repository: uuid::Uuid, listed: &[farcooler_protocol::v1::Workspace]) -> Option<uuid::Uuid> {
+        let chosen = optional_id(args, "workspace", "worktree.create").expect("args");
+        let (claim, required) = crate::session::claim(repository, chosen, chosen.is_none().then_some(listed));
+        if claim.is_some() {
+            assert_eq!(required, [farcooler_protocol::capability::WORKSTREAMS], "a claim names what it needs");
+        }
+        claim.map(|b| crate::session::uuid_of(&b))
+    }
+
+    #[test]
+    fn a_worktree_made_with_a_workspace_is_claimed_for_it() {
+        let (repository, main, billing) = (uuid::Uuid::now_v7(), uuid::Uuid::now_v7(), uuid::Uuid::now_v7());
+        let args = json!({ "repository": repository.to_string(), "workspace": billing.to_string() });
+        assert_eq!(claimed(&args, repository, &listed(repository, main)), Some(billing));
+        let malformed = json!({ "repository": repository.to_string(), "workspace": "billing" });
+        assert!(optional_id(&malformed, "workspace", "worktree.create").is_err(), "never widened to Main");
+    }
+
+    #[test]
+    fn a_worktree_made_without_one_is_still_claimed_for_main() {
+        let (repository, main) = (uuid::Uuid::now_v7(), uuid::Uuid::now_v7());
+        let args = json!({ "repository": repository.to_string() });
+        assert_eq!(claimed(&args, repository, &listed(repository, main)), Some(main));
+        let null = json!({ "repository": repository.to_string(), "workspace": null });
+        assert_eq!(claimed(&null, repository, &listed(repository, main)), Some(main));
     }
 
     /// A pair whose public half the fence would refuse never reaches an app.

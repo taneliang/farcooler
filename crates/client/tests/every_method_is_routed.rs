@@ -41,7 +41,10 @@ const BOARD: [&str; 2] = ["task.list", "task.get"];
 /// The rollup a phone opens to. Unrouted, the app would fall back to deriving
 /// blocked items from the fleet on every runner, and no ask, decision or
 /// review would ever reach a phone.
-const NEEDS_YOU: [&str; 1] = ["needs_you"];
+///
+/// Answering a decision is `task.note`, and a workspace with no orchestrator
+/// is a dead end without `workspace.start_orchestrator` (ruling 8).
+const NEEDS_YOU: [&str; 3] = ["needs_you", "task.note", "workspace.start_orchestrator"];
 
 /// Closing a pane: a stop, then a remove, from both phones (`Connection.close`
 /// on iOS and Android). `terminal.remove` had no arm, so every close stopped

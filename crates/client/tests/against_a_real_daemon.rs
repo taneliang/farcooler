@@ -1295,6 +1295,136 @@ async fn a_board_and_the_pane_working_it_come_back_through_the_client() {
     assert!(stand_in.ran.exists(), "the agent pane never ran the stand-in");
 }
 
+/// **A decision reaches Needs You, and a phone's answer takes it away**
+/// (ov-55 1C). Through the phone's own routes: a worktree made from a
+/// workspace's screen is claimed for that workspace, one made from nowhere
+/// for Main; the worktree names its open task; a QUESTION written through
+/// `task_note` on a task in Needs Decision is a decision item on
+/// `needs_you`; and the ANSWER, written as the user, is what removes it.
+#[tokio::test]
+async fn a_decision_answered_from_a_phone_leaves_needs_you() {
+    use farcooler_client::session::{task_note_append, uuid_of};
+    use farcooler_protocol::v1::request::Payload;
+    use farcooler_protocol::v1::{TaskNoteKind, result::Value};
+
+    let daemon = start().await;
+    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    assert!(session.can(farcooler_protocol::capability::NEEDS_YOU), "this daemon has the rollup");
+
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("demo");
+    std::fs::create_dir(&repo).unwrap();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "commit.gpgsign", "false"],
+        vec!["config", "user.name", "t"],
+        vec!["commit", "-q", "--allow-empty", "-m", "base"],
+    ] {
+        std::process::Command::new("git").args(&args).current_dir(&repo).status().unwrap();
+    }
+    register_root_and_repository(&daemon.socket, dir.path(), &repo).await;
+    let repositories = session.repositories().await.expect("repositories");
+    let repository = uuid_of(&repositories[0].id);
+
+    let mut raw = raw_client(&daemon.socket).await;
+    let mut create = farcooler_transport::request("workspace.create");
+    create.target_resource_id = Some(bytes::Bytes::copy_from_slice(repository.as_bytes()));
+    create.payload = Some(Payload::WorkspaceCreate(farcooler_protocol::v1::WorkspaceCreate {
+        name: "Billing".into(),
+        task_prefix: "bil".into(),
+    }));
+    let Some(Value::Workspace(billing)) = raw.call(create).await.expect("workspace.create").value else {
+        panic!("workspace.create answered with something else");
+    };
+    let main = session
+        .workspaces()
+        .await
+        .expect("workspaces")
+        .into_iter()
+        .find(|w| w.is_main && w.repository_id == repositories[0].id)
+        .expect("the repository's Main");
+
+    let lane = session
+        .create_worktree_in(repository, "billing lane", "feat/billing", "HEAD", "", false, Some(uuid_of(&billing.id)))
+        .await
+        .expect("a worktree made from Billing's screen");
+    let plain = session
+        .create_worktree(repository, "plain lane", "feat/plain", "HEAD", "", false)
+        .await
+        .expect("a worktree made from nowhere in particular");
+
+    let mut create = farcooler_transport::request("task.create");
+    create.target_resource_id = Some(bytes::Bytes::copy_from_slice(repository.as_bytes()));
+    create.payload = Some(Payload::TaskCreate(farcooler_protocol::v1::TaskCreate {
+        repository_id: repositories[0].id.clone(),
+        title: "Pick the queue".into(),
+        worktree_id: Some(lane.id.clone()),
+        workspace_id: Some(billing.id.clone()),
+        actor: "user".into(),
+        ..Default::default()
+    }));
+    let Some(Value::Task(task)) = raw.call(create).await.expect("task.create").value else {
+        panic!("task.create answered with something else");
+    };
+    let task_id = uuid_of(&task.id);
+
+    let fleet = session.fleet().await.expect("fleet");
+    let row = |id: &[u8]| {
+        fleet["worktrees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|w| w["id"] == uuid_of(id).to_string().as_str())
+            .cloned()
+            .expect("the worktree is in the fleet")
+    };
+    assert_eq!(row(&lane.id)["workspace"], uuid_of(&billing.id).to_string(), "claimed for the workspace named");
+    assert_eq!(row(&plain.id)["workspace"], uuid_of(&main.id).to_string(), "claimed for Main");
+    assert_eq!(row(&lane.id)["open_tasks"][0]["key"], task.key, "{}", row(&lane.id));
+    assert_eq!(row(&plain.id)["open_tasks"], serde_json::json!([]));
+
+    // Into Needs Decision as an agent puts it there: the move, then the
+    // question. A question alone moves nothing.
+    let mut decide = farcooler_transport::request("task.set_status");
+    decide.target_resource_id = Some(task.id.clone());
+    decide.payload = Some(Payload::TaskSetStatus(farcooler_protocol::v1::TaskSetStatus {
+        task_id: task.id.clone(),
+        status: farcooler_protocol::v1::TaskStatus::NeedsDecision as i32,
+        actor: "manager".into(),
+    }));
+    raw.call(decide).await.expect("task.set_status");
+    let asked = session
+        .task_note(task_note_append(task_id, TaskNoteKind::Question, "Postgres or SQLite?"))
+        .await
+        .expect("a question");
+    assert_eq!((asked["kind"].as_str(), asked["actor"].as_str()), (Some("question"), Some("user")));
+
+    let decision = format!("decision:{task_id}");
+    let listed = session.needs_you().await.expect("needs_you");
+    let item = listed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["id"] == decision.as_str())
+        .unwrap_or_else(|| panic!("no decision item: {listed}"));
+    assert_eq!(item["kind"], "decision");
+    assert_eq!(item["question"], "Postgres or SQLite?");
+    assert_eq!(item["task"]["key"], task.key);
+    assert_eq!(item["workspace_id"], uuid_of(&billing.id).to_string());
+
+    let answered = session
+        .task_note(task_note_append(task_id, TaskNoteKind::Answer, "Postgres"))
+        .await
+        .expect("the answer");
+    assert_eq!(answered["actor"], "user");
+    let listed = session.needs_you().await.expect("needs_you after the answer");
+    assert!(
+        !listed["items"].as_array().unwrap().iter().any(|i| i["id"] == decision.as_str()),
+        "the answered decision is still there: {listed}"
+    );
+}
+
 /// **A daemon started with `FARCOOLER_TEST_STUB_AGENTS` never starts a real
 /// agent** (ov-10). Integration tests build the daemon without `cfg(test)`,
 /// so a `claude` pane here would run whatever `claude` its login shell
