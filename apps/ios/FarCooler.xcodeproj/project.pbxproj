@@ -91,6 +91,8 @@
 		733EEBCDB5F45D6F9D202683 /* KeyedCallbacks.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3B53F80F74A5B56B84A392A; };
 		DDFED44004F959D3925C9889 /* PaneDrafts.swift in Sources */ = {isa = PBXBuildFile; fileRef = D89177D8A0095993B6F4020A; };
 		BBDB8BF8714656B68C4682E6 /* CoreModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B769F86F9C5F24BEF550F9; };
+		4ADB499B0FBF529681F23EFB /* NeedsYou.swift in Sources */ = {isa = PBXBuildFile; fileRef = B85E58C2F8205636AE768473; };
+		7A0AAA1C167C5EA286E5B2F6 /* TaskLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F6F350DBB7A5AB1A429C7EB; };
 		7085A89CB40151A38D5558EA /* WatchLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 516D0CB825B4559CA317F71C; };
 		632171FFBA8F5CDF8F083C43 /* DiffComputation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15A666CD6FD525982BAC34F; };
 		16899492A4275EB883D341F7 /* GeneratedFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7163CD1143A653B5AD87CDF7; };
@@ -266,6 +268,8 @@
 		B3B53F80F74A5B56B84A392A /* KeyedCallbacks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyedCallbacks.swift; sourceTree = "<group>"; };
 		D89177D8A0095993B6F4020A /* PaneDrafts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneDrafts.swift; sourceTree = "<group>"; };
 		94B769F86F9C5F24BEF550F9 /* CoreModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreModel.swift; sourceTree = "<group>"; };
+		B85E58C2F8205636AE768473 /* NeedsYou.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeedsYou.swift; sourceTree = "<group>"; };
+		9F6F350DBB7A5AB1A429C7EB /* TaskLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskLink.swift; sourceTree = "<group>"; };
 		516D0CB825B4559CA317F71C /* WatchLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchLink.swift; sourceTree = "<group>"; };
 		B15A666CD6FD525982BAC34F /* DiffComputation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffComputation.swift; sourceTree = "<group>"; };
 		7163CD1143A653B5AD87CDF7 /* GeneratedFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneratedFiles.swift; sourceTree = "<group>"; };
@@ -545,6 +549,8 @@
 				B3B53F80F74A5B56B84A392A /* KeyedCallbacks.swift */,
 				D89177D8A0095993B6F4020A /* PaneDrafts.swift */,
 				94B769F86F9C5F24BEF550F9 /* CoreModel.swift */,
+				B85E58C2F8205636AE768473 /* NeedsYou.swift */,
+				9F6F350DBB7A5AB1A429C7EB /* TaskLink.swift */,
 				516D0CB825B4559CA317F71C /* WatchLink.swift */,
 				B15A666CD6FD525982BAC34F /* DiffComputation.swift */,
 				7163CD1143A653B5AD87CDF7 /* GeneratedFiles.swift */,
@@ -935,6 +941,8 @@
 				733EEBCDB5F45D6F9D202683 /* KeyedCallbacks.swift in Sources */,
 				DDFED44004F959D3925C9889 /* PaneDrafts.swift in Sources */,
 				BBDB8BF8714656B68C4682E6 /* CoreModel.swift in Sources */,
+				4ADB499B0FBF529681F23EFB /* NeedsYou.swift in Sources */,
+				7A0AAA1C167C5EA286E5B2F6 /* TaskLink.swift in Sources */,
 				7085A89CB40151A38D5558EA /* WatchLink.swift in Sources */,
 				632171FFBA8F5CDF8F083C43 /* DiffComputation.swift in Sources */,
 				16899492A4275EB883D341F7 /* GeneratedFiles.swift in Sources */,

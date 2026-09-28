@@ -338,6 +338,13 @@ AGENTKIT_SOURCES = [
     # `Session::fleet` into these types on the host, with no simulator, which
     # the app target's UI-testing bundle could never do.
     "CoreModel.swift",
+    # What a pane's header names as its task, and the decode, merge and count
+    # of the needs-you list. `CoreModel.swift` reads both: a worktree's
+    # `open_tasks` rows are `NeedsYouTask`s, and its `Terminal` and `Worktree`
+    # conform to `TaskLink`'s protocols. See `TaskLinkTests` and
+    # `NeedsYouTests`.
+    "NeedsYou.swift",
+    "TaskLink.swift",
     # In this list AND in `WATCH_AGENTKIT_SOURCES` below: the phone and the
     # watch are two binaries that have to agree about these messages down to the
     # key names, which is the whole reason the file exists. A `WatchRequest` the
