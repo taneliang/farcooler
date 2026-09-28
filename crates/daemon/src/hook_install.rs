@@ -33,23 +33,20 @@ use serde_json::{Value, json};
 /// claude and codex spell every one of these identically, so one table
 /// drives both `claude_settings` and `merge_codex`.
 ///
-/// **Cut down to exactly what something consumes today, fix round 1.** The
-/// original table also carried `PreToolUse`, `PostToolUse` and
-/// `PermissionRequest` (gating); nothing in this crate reads any of the
-/// three yet — `assemble.rs`'s assembler only matches `UserPromptSubmit` and
-/// `Stop`, and `hook_ingress::announced_terminal` binds a pane from ANY
-/// event's `Facts`, not from `SessionStart` by name, but is still worth an
-/// early hook so a pane binds before its first prompt rather than waiting
-/// for one. Registering a gating event that nothing answers is not free: a
-/// gating hook blocks on the socket for `hook::HOOK_DEADLINE` (400ms) before
-/// deferring, so `PermissionRequest` today would add up to 400ms to every
-/// permission prompt in every pane for no return. `PreToolUse`/`PostToolUse`
-/// are cheaper — measured at ~15-18ms per invocation in the design doc — but
-/// still buy nothing yet. Task 11 is what gives the daemon an opinion on a
-/// permission request and re-adds `PermissionRequest`; whichever task wires
-/// up a `PreToolUse`/`PostToolUse` consumer re-adds those two. This is
-/// sequencing, not an oversight: see fix round 1 in
+/// **Only what something consumes.** `assemble.rs`'s assembler reads
+/// `UserPromptSubmit` and `Stop`. `hook_ingress::announced_terminal` binds a
+/// pane from ANY event's `Facts`, not from `SessionStart` by name, but that
+/// early hook still lets a pane bind before its first prompt rather than
+/// waiting for one. `PreToolUse` and `PostToolUse` cost about 15-18 ms per
+/// invocation (measured in the design doc) and buy nothing yet. Whichever
+/// task wires up a consumer for them adds them back. See fix round 1 in
 /// `.superpowers/sdd/2026-09-07-live-agent-sessions/task-9-report.md`.
+///
+/// No gate is shared. Claude's `PermissionRequest` is claude's alone
+/// (`CLAUDE_ONLY_EVENTS`). Codex fires an event of the same name, but what it
+/// reads from a hook's output is unmeasured, and a gate costs the agent the
+/// hook's 400 ms first contact on every prompt. So until codex's shape is
+/// measured it gets no gate.
 const CLAUDE_CODEX_EVENTS: &[(&str, bool)] = &[
     ("SessionStart", false),
     ("UserPromptSubmit", false),
@@ -76,12 +73,29 @@ const CLAUDE_CODEX_EVENTS: &[(&str, bool)] = &[
 /// and codex are "both registered against" every entry in it a small lie.
 /// `claude_settings` unions this with `CLAUDE_CODEX_EVENTS`; `merge_codex`
 /// deliberately does not.
-const CLAUDE_ONLY_EVENTS: &[(&str, bool)] = &[("MessageDisplay", false)];
+///
+/// `PermissionRequest` is the one gate (ov-14), and it matches
+/// `farcooler_agent_hooks::wire::GATES`. Claude runs it while it draws its
+/// own dialog. The daemon either says "no decision" at once, or holds the
+/// ask while the owner's phone and watch are offered it. Its entry carries
+/// `"matcher": "*"` and a `timeout` of `CLAUDE_GATE_TIMEOUT_S`, which is the
+/// shape the ov-14 spike measured.
+const CLAUDE_ONLY_EVENTS: &[(&str, bool)] = &[("MessageDisplay", false), ("PermissionRequest", true)];
+
+/// What claude's permission hook may take before claude SIGTERMs it, in
+/// seconds (measured: spike run 9, 8.004 s for `timeout: 8`).
+///
+/// It has to sit above everything the hook can legitimately wait: 0.4 s of
+/// first contact, the daemon's 60 s hold (`LONGEST_HOLD`) and the hook's 2 s
+/// grace past it (`HOLD_GRACE`). Then the daemon's own "no decision" always
+/// arrives first, and only a hook that has wedged is killed.
+const CLAUDE_GATE_TIMEOUT_S: u64 = 70;
 
 /// Cursor's own vocabulary for the same three moments, camelCase. Its tool
-/// gates — `beforeShellExecution` and `beforeMCPExecution`, where claude and
-/// codex both say `PreToolUse` — are cut for the same reason and by the same
-/// fix round as `PermissionRequest` above; Task 11 re-adds both alongside it.
+/// gates are `beforeShellExecution` and `beforeMCPExecution`, where claude and
+/// codex both say `PreToolUse`. Neither is registered: cursor's output shape
+/// for them is unmeasured, and so is what it does with a hook that prints
+/// nothing, which is the answer a gate gives far more often than any other.
 const CURSOR_EVENTS: &[(&str, bool)] = &[
     ("sessionStart", false),
     ("beforeSubmitPrompt", false),
@@ -523,14 +537,17 @@ fn render_command(binary: &str, agent: &str, event: &str, socket: &str, gating: 
 pub fn claude_settings(socket: &Path) -> Value {
     let mut hooks = serde_json::Map::new();
     for (event, gating) in CLAUDE_CODEX_EVENTS.iter().chain(CLAUDE_ONLY_EVENTS) {
-        hooks.insert(
-            (*event).to_string(),
-            json!([{
-                "hooks": [
-                    { "type": "command", "command": hook_command("claude", event, socket, *gating) }
-                ]
-            }]),
-        );
+        let command = hook_command("claude", event, socket, *gating);
+        let entry = if *gating {
+            // Every tool's ask, and room for a whole hold before claude kills it.
+            json!({
+                "matcher": "*",
+                "hooks": [ { "type": "command", "command": command, "timeout": CLAUDE_GATE_TIMEOUT_S } ]
+            })
+        } else {
+            json!({ "hooks": [ { "type": "command", "command": command } ] })
+        };
+        hooks.insert((*event).to_string(), json!([entry]));
     }
     json!({ "hooks": Value::Object(hooks) })
 }
@@ -970,8 +987,9 @@ mod tests {
     /// hook that carried it would keep an agent waiting up to a minute on a
     /// daemon that has wedged. Every hook an agent runs must get the CLI's
     /// 400 ms `HOOK_DEADLINE`, so nothing written here may name the flag:
-    /// `hook_command` in both gate states (no table sets `gating` today, and
-    /// Task 11 will), and every command in all three agents' files.
+    /// `hook_command` in both gate states, and every command in all three
+    /// agents' files, claude's `PermissionRequest` gate included. A gate waits
+    /// longer only on the daemon's hold, never on a deadline of its own.
     #[test]
     fn no_installed_hook_carries_a_deadline_of_its_own() {
         let socket = Path::new("/tmp/h.sock");
@@ -1473,5 +1491,94 @@ mod tests {
         assert_eq!(commands_under(&merge_codex(&both, socket), "Stop"), [ours], "a gone home's entry is dropped");
         assert!(holds_only_ours(&both, socket), "and removal doesn't ask about it");
         assert!(!remove_ours(&both, socket).contains("farcooler"), "removing ours takes it too");
+    }
+
+    /// Every event an installed file registers for `agent`, and whether its
+    /// command gates, read off the files themselves rather than the tables
+    /// that wrote them.
+    fn registered(agent: farcooler_agent_hooks::Agent) -> Vec<(String, bool)> {
+        use farcooler_agent_hooks::Agent;
+        let socket = Path::new("/tmp/h.sock");
+        let file = match agent {
+            Agent::Claude => claude_settings(socket),
+            Agent::Codex => serde_json::from_str(&merge_codex("{}", socket)).expect("json"),
+            Agent::Cursor => serde_json::from_str(&merge_cursor("{}", socket)).expect("json"),
+        };
+        file["hooks"]
+            .as_object()
+            .expect("a hooks object")
+            .iter()
+            .map(|(event, entries)| {
+                let entry = &entries[0];
+                let command = entry["hooks"][0]["command"].as_str().or(entry["command"].as_str());
+                (event.clone(), command.expect("a command").contains("--gating"))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn claudes_permission_request_is_registered_as_a_gate() {
+        let settings = claude_settings(Path::new("/tmp/h.sock"));
+        let entry = &settings["hooks"]["PermissionRequest"][0];
+        let command = entry["hooks"][0]["command"].as_str().expect("a PermissionRequest hook");
+        assert!(command.contains("--agent claude --event PermissionRequest "), "{command}");
+        assert!(command.ends_with("--gating"), "{command}");
+        assert_eq!(entry["matcher"], "*", "every tool's ask, the shape the spike measured");
+        assert_eq!(entry["hooks"][0]["timeout"], 70);
+        for event in ["Stop", "MessageDisplay"] {
+            let entry = &settings["hooks"][event][0];
+            assert!(entry.get("matcher").is_none() && entry["hooks"][0].get("timeout").is_none(), "{event}: {entry}");
+        }
+    }
+
+    /// claude SIGTERMs a hook at its `timeout` (spike run 9). So the timeout
+    /// has to sit above everything the hook can legitimately wait: its first
+    /// contact, the daemon's hold, and the hook's grace past that. Then the
+    /// daemon's own "no decision" always arrives first, and only a wedged hook
+    /// is killed.
+    #[test]
+    fn claudes_permission_hook_outlives_the_longest_hold() {
+        use farcooler_agent_hooks::wire::{HOLD_GRACE, LONGEST_HOLD};
+        /// `hook::HOOK_DEADLINE` in `crates/cli/src/hook.rs`, copied because
+        /// the daemon does not depend on the CLI.
+        const FIRST_CONTACT: std::time::Duration = std::time::Duration::from_millis(400);
+        const HEADROOM: std::time::Duration = std::time::Duration::from_secs(5);
+        let settings = claude_settings(Path::new("/tmp/h.sock"));
+        let timeout = settings["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"]
+            .as_u64()
+            .expect("a gate carries a timeout");
+        let longest = FIRST_CONTACT + LONGEST_HOLD + HOLD_GRACE + HEADROOM;
+        assert!(std::time::Duration::from_secs(timeout) > longest, "{timeout} s is not above {longest:?}");
+    }
+
+    /// `GATES` is what the daemon treats as an ask, and these files are what
+    /// the agents run. The two must name the same hooks, in both directions:
+    /// a gate the daemon holds that no agent registers is a feature that never
+    /// runs, and a registered gate the daemon doesn't hold costs every prompt
+    /// the hook's 400 ms for nothing.
+    #[test]
+    fn every_gate_is_registered_as_gating_for_its_agent_and_nothing_else_is() {
+        use farcooler_agent_hooks::Agent;
+        use farcooler_agent_hooks::wire::GATES;
+        for agent in [Agent::Claude, Agent::Codex, Agent::Cursor] {
+            let mut installed: Vec<String> =
+                registered(agent).into_iter().filter(|(_, gating)| *gating).map(|(e, _)| e).collect();
+            let mut gates: Vec<String> =
+                GATES.iter().filter(|(a, _)| *a == agent).map(|(_, e)| e.to_string()).collect();
+            installed.sort();
+            gates.sort();
+            assert_eq!(installed, gates, "{agent:?}");
+        }
+    }
+
+    /// Their output shapes are unmeasured, and so is what cursor does with a
+    /// hook that prints nothing, so neither is given a gate to wait on.
+    #[test]
+    fn codex_and_cursor_get_no_gate() {
+        use farcooler_agent_hooks::Agent;
+        for agent in [Agent::Codex, Agent::Cursor] {
+            let gating: Vec<_> = registered(agent).into_iter().filter(|(_, g)| *g).collect();
+            assert!(gating.is_empty(), "{agent:?} gates on {gating:?}");
+        }
     }
 }
