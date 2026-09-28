@@ -128,12 +128,14 @@ public enum RunnerBoards {
     ///   rows. Nor does one no link has asked yet (`build` and
     ///   `lastKnownBuild` both nil): a row that appeared and then vanished on
     ///   the first answer would move every card under it.
-    /// - A workspace gets a row only once its board has been read and has
-    ///   something on it, unreadable rows included. An empty board is most
-    ///   workspaces on most runners, and a row for each would push the
-    ///   worktrees down for nothing to look at. This is where the phone
-    ///   differs from the Mac, whose sidebar row is also the board's only
-    ///   way in and so is drawn for an empty one too.
+    /// - A workspace gets a row whenever it exists, its board read or not
+    ///   and empty or not (ov-56): the row is the way onto the board, and a
+    ///   workspace made a moment ago has nothing on it yet. The board draws
+    ///   the empty and unread states. Android does the same (8819fc06).
+    /// - An implicit board, a repository's on a runner without workspaces,
+    ///   gets a row only once it has been read and has something on it,
+    ///   unreadable rows included. Nobody made a workspace there, and an
+    ///   empty board is most repositories.
     /// - `agents` is counted only where `TaskAgentLink.speaksOfAgents` says
     ///   the runner can be believed about its panes. Anywhere else it is 0,
     ///   which draws nothing: "can't say", not "none".
@@ -164,15 +166,15 @@ public enum RunnerBoards {
         guard (build ?? lastKnownBuild)?.can("tasks") == true else { return [] }
         let speaks = TaskAgentLink.speaksOfAgents(connected: connected, build: build)
         return boards.compactMap { workspace in
-            guard let board = models[workspace.id],
-                !board.rows.isEmpty || !board.unreadable.isEmpty
-            else { return nil }
+            let board = models[workspace.id]
+            let hasSomething = board.map { !$0.rows.isEmpty || !$0.unreadable.isEmpty } ?? false
+            if workspace.isImplicit && !hasSomething { return nil }
             let repository = workspace.repository ?? workspace.id
             return RunnerBoardRow(
                 workspace: workspace,
                 name: workspace.isImplicit ? (names[repository] ?? workspace.name) : workspace.name,
-                decisions: board.waitingOnYou,
-                agents: speaks ? board.tasksWithLiveAgents(in: panes) : 0)
+                decisions: board?.waitingOnYou ?? 0,
+                agents: speaks ? (board?.tasksWithLiveAgents(in: panes) ?? 0) : 0)
         }
     }
 

@@ -1256,8 +1256,8 @@ final class Connection: ObservableObject {
     /// so its boards are keyed exactly as they were.
     ///
     /// Only boards that have been read: a workspace with no entry has not
-    /// answered yet, which `RunnerBoards.rows` draws as no row rather than as
-    /// an empty board. Kept through a dropped link and a failed read, on the
+    /// answered yet. `RunnerBoards.rows` still gives a workspace its row, and
+    /// an implicit repository board none. Kept through a dropped link and a failed read, on the
     /// same terms as `fleet` and `inbox` — a Needs Decision count that vanished
     /// every time the Wi-Fi blinked would be a count nobody could trust.
     @Published private(set) var boards: [String: TaskBoardModel] = [:]

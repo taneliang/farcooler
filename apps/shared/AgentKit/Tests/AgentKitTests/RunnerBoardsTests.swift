@@ -215,15 +215,21 @@ private func workspace(
     #expect(rows.map(\.workspace.boardWorkspace) == ["w-main", "w-billing"])
 }
 
-/// A workspace's empty board is no row, as a repository's was.
-@Test func anEmptyWorkspaceBoardIsNoRow() {
+/// **A workspace's board has a row as soon as the workspace exists** (ov-56),
+/// empty or not read yet. A workspace made a moment ago has nothing on its
+/// board, and a row only for a board with something on it left the new
+/// workspace a heading whose board could not be opened. The board draws the
+/// empty and unread states. Android's `aWorkspacesBoardHasARowWhileEmptyOrUnread`.
+@Test func aWorkspacesBoardHasARowWhileEmptyOrUnread() {
     let main = workspace("w-main", "Main", in: "r", main: true)
     let billing = workspace("w-billing", "Billing", in: "r", ordinal: 1)
     let rows = RunnerBoards.rows(
         boards: [main, billing], names: [:],
-        models: ["w-main": board([]), "w-billing": board([row("2", .todo)])],
+        models: ["w-main": board([])],
         panes: panes, build: both, connected: true)
-    #expect(rows.map(\.id) == ["w-billing"])
+    #expect(rows.map(\.id) == ["w-main", "w-billing"])
+    #expect(rows.map(\.decisions) == [0, 0])
+    #expect(rows.map(\.agents) == [0, 0])
 }
 
 /// What a sweep reads — a link coming up, a reconnect: every workspace's
