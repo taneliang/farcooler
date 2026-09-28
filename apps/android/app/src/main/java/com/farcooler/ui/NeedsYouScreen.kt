@@ -31,6 +31,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -53,6 +54,9 @@ import com.farcooler.model.NeedsYouSection
 import com.farcooler.model.blockedOverflow
 import com.farcooler.model.finishedOverflow
 import com.farcooler.model.needsYou
+import com.farcooler.model.BoardRow
+import com.farcooler.model.boardsNeedingYou
+import com.farcooler.model.nothingNeedsYou
 import com.farcooler.net.Connection
 import com.farcooler.net.TerminalRef
 import kotlinx.coroutines.launch
@@ -127,7 +131,7 @@ fun NeedsYouScreen(
     onSelect: (TerminalRef) -> Unit,
     onReviewChanges: (hostId: String, worktreeId: String) -> Unit,
     onOpenWorktrees: () -> Unit,
-    onOpenBoard: (com.farcooler.model.BoardRow) -> Unit,
+    onOpenBoard: (BoardRow) -> Unit,
     onOpenDrawer: () -> Unit,
 ) {
     val entries by model.fleet.entries.collectAsStateWithLifecycle()
@@ -155,6 +159,15 @@ fun NeedsYouScreen(
             entry.worktree.terminals.count { it.agent == AgentActivity.WORKING }
         }
     }
+
+    // Every runner's Board rows, with the runner each is on. Read here rather
+    // than row by row below, because a board's decision needs you too: it
+    // decides whether this screen may say "Nothing needs you" (ov-56).
+    val boards: List<Pair<Connection, BoardRow>> = connections.flatMap { connection ->
+        key(connection.host.id) { rememberBoardRows(connection).map { connection to it } }
+    }
+    val deciding = boardsNeedingYou(boards.map { it.second }).toSet()
+    val quiet = nothingNeedsYou(sections, boards.map { it.second })
 
     Scaffold(
         topBar = {
@@ -212,7 +225,7 @@ fun NeedsYouScreen(
                     )
                 }
 
-                if (sections.isEmpty()) {
+                if (quiet) {
                     item(key = "reassurance") {
                         Reassurance(connections, working, visible.size)
                     }
@@ -265,19 +278,18 @@ fun NeedsYouScreen(
                     }
                 }
 
-                // A Board row per workspace, empty or not (see [RunnerBoards.rows]),
-                // directly above the door to the worktrees — where the Mac puts
-                // its Board row above a workspace's worktrees. Here rather
-                // than in the worktree list, because this screen is the one
-                // every session starts on; each row names its workspace, and
-                // its repository where that is not the whole of the name.
-                // One item per runner, because each runner's
-                // boards are flows of their own; see [RunnerBoardRows].
-                connections.forEach { connection ->
-                    item(key = "boards/${connection.host.id}") {
-                        RunnerBoardRows(connection, namesRunner = namesRunners, onOpen = onOpenBoard)
-                    }
-                }
+                // A board with a decision waiting is something that needs you,
+                // and is drawn with the rest of it, under the agents.
+                boardItems(boards.filter { it.second in deciding }, namesRunners, onOpenBoard)
+
+                // Every other Board row, one per workspace, empty or not (see
+                // [RunnerBoards.rows]), directly above the door to the
+                // worktrees — where the Mac puts its Board row above a
+                // workspace's worktrees. Here rather than in the worktree
+                // list, because this screen is the one every session starts
+                // on; each row names its workspace, and its repository where
+                // that is not the whole of the name.
+                boardItems(boards.filter { it.second !in deciding }, namesRunners, onOpenBoard)
 
                 item(key = "worktrees") {
                     WorktreesRow(visible.size, entries.size, connections, onOpenWorktrees)
@@ -293,6 +305,17 @@ fun NeedsYouScreen(
             onRemove = { model.removeHost(it) },
             onDismiss = { editingRunner = null },
         )
+    }
+}
+
+/** Board rows, keyed by runner and workspace, each naming its runner where there are several. */
+private fun LazyListScope.boardItems(
+    rows: List<Pair<Connection, BoardRow>>,
+    namesRunners: Boolean,
+    onOpen: (BoardRow) -> Unit,
+) {
+    items(rows, key = { (connection, row) -> "board/${connection.host.id}/${row.key}" }) { (connection, row) ->
+        BoardRowItem(row, if (namesRunners) connection.host.label else null, onOpen)
     }
 }
 

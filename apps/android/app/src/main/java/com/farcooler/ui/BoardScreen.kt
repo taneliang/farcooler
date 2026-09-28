@@ -82,24 +82,6 @@ import kotlinx.coroutines.launch
 // same here as on the Mac and the iPhone.
 
 /**
- * One runner's Board rows, for the front door: a row per workspace whose board
- * has something on it (per repository, on a runner without workspaces). Collected here rather than in the screen because each
- * runner's boards are their own flows, and a runner that drops keeps its rows
- * as last read — its agent count goes quiet, the row does not vanish.
- */
-@Composable
-fun RunnerBoardRows(
-    connection: Connection,
-    namesRunner: Boolean,
-    onOpen: (BoardRow) -> Unit,
-) {
-    val rows = rememberBoardRows(connection)
-    Column {
-        rows.forEach { row -> BoardRowItem(row, if (namesRunner) connection.host.label else null, onOpen) }
-    }
-}
-
-/**
  * One runner's Board rows, as last read: what the front door lists, and what
  * the worktree list draws under each workspace's heading
  * (`FleetLayout.boardRows`).

@@ -465,6 +465,31 @@ class NeedsYouTest {
         assertEquals("1 more agent finished", finishedOverflow(listOf(agent("a", "done", 1))))
     }
 
+    // ---- a board's decision ----
+
+    /**
+     * **A board decision needs you** (ov-56). "Nothing needs you" was drawn
+     * above a Board row counting a decision in amber, because the front door
+     * asked only the agents. A task in Needs Decision is waiting on you as
+     * surely as a blocked agent is, so the screen is quiet only when neither
+     * is, and the deciding boards are drawn with what needs you rather than
+     * below it.
+     *
+     * Mutation: the quiet check ignoring the boards. Red.
+     */
+    @Test
+    fun `a board decision is something that needs you`() {
+        val deciding = BoardRow("h", "r", "Billing", decisions = 2, agents = 0)
+        val quiet = BoardRow("h", "r", "Main", decisions = 0, agents = 1)
+        assertFalse(nothingNeedsYou(emptyList(), listOf(quiet, deciding)))
+        assertTrue(nothingNeedsYou(emptyList(), listOf(quiet)))
+        assertTrue(nothingNeedsYou(emptyList(), emptyList()))
+        val blocked = needsYou(listOf(input("h", worktree("w", terminals = listOf(agent("a", "blocked", 1))))))
+        assertFalse(nothingNeedsYou(blocked, listOf(quiet)))
+
+        assertEquals(listOf(deciding), boardsNeedingYou(listOf(quiet, deciding)))
+    }
+
     // ---- fixtures ----
 
     private fun input(

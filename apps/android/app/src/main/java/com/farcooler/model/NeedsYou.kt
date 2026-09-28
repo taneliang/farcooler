@@ -257,3 +257,22 @@ fun finishedOverflow(hidden: List<Terminal>): String {
     if (failures > 0) return "${hidden.size} more agents finished, $failures failed"
     return if (hidden.size == 1) "1 more agent finished" else "${hidden.size} more agents finished"
 }
+
+/**
+ * Whether the front door has nothing for you: no agent wants you, and no
+ * board has a task in Needs Decision (ov-56).
+ *
+ * A board's decision is waiting on you as surely as a blocked agent is, and
+ * "Nothing needs you" above a Board row counting one in amber said two things
+ * at once. [boards] are every runner's rows as last read, the same numbers
+ * the rows draw, so the sentence and the count can't disagree.
+ */
+fun nothingNeedsYou(sections: List<NeedsYouSection>, boards: List<BoardRow>): Boolean =
+    sections.isEmpty() && boardsNeedingYou(boards).isEmpty()
+
+/**
+ * The Board rows with a decision waiting on you, in the order given: the
+ * ones the front door draws with what needs you, rather than down beside the
+ * way to the worktrees.
+ */
+fun boardsNeedingYou(boards: List<BoardRow>): List<BoardRow> = boards.filter { it.decisions > 0 }
