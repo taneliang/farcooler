@@ -1467,7 +1467,16 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
                                     worktree: worktree,
                                     width: cardWidth,
                                     onOpen: { onCross(group, worktree) })
-                                    .id("\(group.id)/\(worktree.id)")
+                                    // Under `elsewhere/`, for the heading's
+                                    // reason above and at the card's scale: a
+                                    // live card's id is also `<runner>/<worktree>`
+                                    // (`ShellIdentity.worktree`), and a runner
+                                    // retired by a switch moves its worktrees from
+                                    // the live list to this one under the same
+                                    // ids. The lazy grid kept the live cards it
+                                    // had drawn — tab counts and all, under a
+                                    // "Last seen" heading — and never drew these.
+                                    .id("\(group.elsewhereSectionID)/\(worktree.id)")
                             }
                         } header: {
                             // No drag here, and nothing that looks like one:
