@@ -519,6 +519,10 @@ pub fn set_status(svc: &Service, watcher: &Watcher, req: &pb::TaskSetStatus) -> 
     if before != task.status && (is_an_item(before) || is_an_item(task.status)) {
         watcher.announce_needs_you();
     }
+    // Ruling 3: a decision pushes.
+    if before != TaskStatus::NeedsDecision && task.status == TaskStatus::NeedsDecision {
+        watcher.announce_decision(&task);
+    }
     Ok(pb_task(&task))
 }
 

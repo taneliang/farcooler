@@ -425,6 +425,73 @@ fn notification(
     }
 }
 
+/// Who a notice is about, as its title names it: the agent, and the
+/// workspace whose work it is doing.
+#[derive(Debug, Clone, Default)]
+struct Who {
+    /// What the agent is called on its own: `claude`.
+    label: String,
+    /// The terminal's workspace, by name. `None` for an unclaimed worktree's.
+    workspace: Option<String>,
+    orchestrator: bool,
+}
+
+impl Who {
+    /// The title's subject. It leads with the workspace, as ov-60's Mac
+    /// banners do: "Billing · claude". An orchestrator is its workspace's:
+    /// "Billing Orchestrator".
+    fn name(&self) -> String {
+        match (&self.workspace, self.orchestrator) {
+            (Some(workspace), true) => format!("{workspace} Orchestrator"),
+            (None, true) => "Orchestrator".to_string(),
+            (Some(workspace), false) => format!("{workspace} · {}", self.label),
+            (None, false) => self.label.clone(),
+        }
+    }
+}
+
+/// `notification`, titled for `who`. A working notice's title stays the
+/// label alone: it is a card the relay moves in place, and the relay names
+/// its row with the workspace itself.
+fn agent_notice(
+    activity: AgentActivity,
+    who: &Who,
+    quoted: Quoted<'_>,
+    failed: bool,
+    started_at: Option<i64>,
+) -> Option<Notice> {
+    let name = if activity == AgentActivity::Working { who.label.clone() } else { who.name() };
+    notification(activity, &name, quoted, failed, started_at)
+}
+
+/// A decision notice's title: "Billing · bil-7 needs a decision".
+fn decision_title(workspace: Option<&str>, key: &str) -> String {
+    match workspace {
+        Some(workspace) => format!("{workspace} · {key} needs a decision"),
+        None => format!("{key} needs a decision"),
+    }
+}
+
+/// How long count notices are gathered before one goes out.
+///
+/// The relay refreshes the lock screen card on every count notice, at APNs
+/// priority 10, and leaves the pacing to the daemon. Trailing, so the last
+/// count of a burst is always the one sent; and a count the relay was
+/// already told is not sent again.
+const COUNT_NOTICE_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// What the watcher sent, or would have sent to a paired relay, for a test to
+/// read. See `Watcher::tap_notices`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Tapped {
+    pub kind: Option<&'static str>,
+    pub title: String,
+    pub terminal: Option<Uuid>,
+    pub task: Option<String>,
+    pub workspace: Option<String>,
+    pub needs_you: Option<u32>,
+}
+
 /// How often a live card may be refreshed while an agent stays in one tier.
 ///
 /// A signal line can change several times a second, and pushing each one spends
@@ -693,6 +760,16 @@ pub struct Watcher {
     /// Whether a `needs_you_changed` is already scheduled. See
     /// `announce_needs_you`, the only reader and writer.
     needs_you_pending: Arc<std::sync::atomic::AtomicBool>,
+    /// This watcher, for the detached tasks that have to come back to it: a
+    /// count notice reads the needs-you list when it goes out.
+    me: std::sync::Weak<Watcher>,
+    /// Whether a count notice is already scheduled. See `schedule_count_notice`.
+    count_pending: std::sync::atomic::AtomicBool,
+    /// The needs-you count the relay was last told, by any notice. A count
+    /// notice repeating it is not sent.
+    last_count: std::sync::Mutex<Option<u32>>,
+    /// Where a test reads the notices this watcher sends. `None` in a daemon.
+    taps: std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<Tapped>>>,
     /// Each pane's attachment to its own session log.
     ///
     /// A std mutex for the same reason `worktree_marks` is one, and with the
@@ -2552,7 +2629,11 @@ impl Watcher {
     }
 
     fn build(service: Arc<Service>, events: broadcast::Sender<Event>) -> Arc<Self> {
-        Arc::new(Self {
+        Arc::new_cyclic(|me| Self {
+            me: me.clone(),
+            count_pending: std::sync::atomic::AtomicBool::new(false),
+            last_count: std::sync::Mutex::new(None),
+            taps: std::sync::Mutex::new(None),
             service,
             events,
             state: tokio::sync::Mutex::new(HashMap::new()),
@@ -2605,10 +2686,11 @@ impl Watcher {
         turn_failed: bool,
         started_at: Option<i64>,
     ) {
-        let Some(notice) = notification(activity, label, quoted, turn_failed, started_at) else {
+        let who = self.who(terminal, label);
+        let Some(notice) = agent_notice(activity, &who, quoted, turn_failed, started_at) else {
             return;
         };
-        self.push_notice(terminal, label, notice);
+        self.push_notice(terminal, who, notice);
     }
 
     /// Refresh the live card of an agent that is still working, at most once
@@ -2674,7 +2756,8 @@ impl Watcher {
         exit_code: Option<i32>,
         exit_signal: Option<i32>,
     ) {
-        self.push_notice(terminal, label, exit_notice(label, worktree, exit_code, exit_signal));
+        let who = self.who(terminal, label);
+        self.push_notice(terminal, who.clone(), exit_notice(&who.name(), worktree, exit_code, exit_signal));
     }
 
     /// Send one notice to the relay, detached from the sampling loop.
@@ -2690,12 +2773,16 @@ impl Watcher {
     ///
     /// Reading the pairing file happens in the spawned task for the same
     /// reason. It is blocking I/O, and it does not belong under a lock either.
-    fn push_notice(&self, terminal: Uuid, label: &str, notice: Notice) {
-        // Owned, because the spawned task outlives this call by design and the
-        // label is borrowed from the sampling loop's stack. The sentences are
-        // already owned — the label is the one the phone needs on its own, for
-        // the half of the live card that is not a sentence.
-        let label = label.to_string();
+    fn push_notice(&self, terminal: Uuid, who: Who, notice: Notice) {
+        // Owned, because the spawned task outlives this call by design. The
+        // label is the one the phone needs on its own, for the half of the
+        // live card that is not a sentence; the workspace names its row.
+        let Who { label, workspace, .. } = who;
+        let me = self.me.clone();
+        // The pairing beside this service's own database, which in a daemon
+        // is the runtime directory `Pairing::load` reads, and in a test is the
+        // test's own: no test can reach a real phone.
+        let root = self.service.root_dir().to_path_buf();
         // Sampled HERE and not inside the spawn, which is the same rule
         // `started_at` follows: the spawn runs whenever the executor gets to it,
         // and a row whose numbers were read a second after the sentence was
@@ -2705,17 +2792,42 @@ impl Watcher {
         // clone keeps the connection reuse the one-client-per-daemon buys.
         let client = self.push.clone();
         tokio::spawn(async move {
-            let Some(pairing) = crate::push::Pairing::load() else { return };
+            // The count at the moment of sending, from the list's own
+            // assembly, and noted as told so no count notice repeats it.
+            let watcher = me.upgrade();
+            let needs_you = match &watcher {
+                Some(watcher) => watcher.needs_you_count().await,
+                None => None,
+            };
+            if let Some(watcher) = &watcher {
+                if let Some(count) = needs_you {
+                    watcher.told(count);
+                }
+                watcher.tap(Tapped {
+                    kind: None,
+                    title: notice.title.clone(),
+                    terminal: Some(terminal),
+                    task: None,
+                    workspace: workspace.clone(),
+                    needs_you,
+                });
+            }
+            drop(watcher);
+            let Some(pairing) = crate::push::Pairing::load_in(&root) else { return };
             crate::push::notify(
                 &client,
                 &pairing,
                 crate::push::Outgoing {
+                    kind: None,
                     title: &notice.title,
                     subtitle: &notice.subtitle,
                     status: notice.status,
                     failed: notice.failed,
                     label: &label,
-                    terminal: &terminal.to_string(),
+                    terminal: Some(&terminal.to_string()),
+                    task: None,
+                    workspace: workspace.as_deref(),
+                    needs_you,
                     started_at: notice.started_at,
                     insertions: stats.insertions,
                     deletions: stats.deletions,
@@ -3285,6 +3397,141 @@ impl Watcher {
         });
     }
 
+    /// This runner's needs-you count: the length of the list
+    /// `needs_you.list` answers with, from the same `gather` and `assemble`.
+    /// `None` when the store can't be read.
+    pub async fn needs_you_count(&self) -> Option<u32> {
+        let inputs = crate::needs_you::gather(&self.service, self).await.ok()?;
+        Some(crate::needs_you::assemble(&inputs, std::time::SystemTime::now()).len() as u32)
+    }
+
+    /// Every notice this watcher sends from now on, paired or not. For tests.
+    #[cfg(test)]
+    pub(crate) fn tap_notices(&self) -> tokio::sync::mpsc::UnboundedReceiver<Tapped> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        *self.taps.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
+        rx
+    }
+
+    fn tap(&self, tapped: Tapped) {
+        if let Some(tx) = self.taps.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            let _ = tx.send(tapped);
+        }
+    }
+
+    /// Note that the relay is being told `count`, and say whether that is news.
+    fn told(&self, count: u32) -> bool {
+        let mut last = self.last_count.lock().unwrap_or_else(|e| e.into_inner());
+        last.replace(count) != Some(count)
+    }
+
+    /// Send a count notice in `COUNT_NOTICE_EVERY`, unless one is already on
+    /// its way, and then only if the count is not the one the relay already
+    /// has. So answering a decision or a chat ask, which changes no terminal
+    /// and so sends no agent notice, still moves the lock screen's count; and
+    /// a burst of changes moves it once.
+    fn schedule_count_notice(&self) {
+        use std::sync::atomic::Ordering;
+        if self.count_pending.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            self.count_pending.store(false, Ordering::SeqCst);
+            return;
+        };
+        let me = self.me.clone();
+        runtime.spawn(async move {
+            tokio::time::sleep(COUNT_NOTICE_EVERY).await;
+            let Some(watcher) = me.upgrade() else { return };
+            watcher.count_pending.store(false, Ordering::SeqCst);
+            let Some(count) = watcher.needs_you_count().await else { return };
+            if !watcher.told(count) {
+                return;
+            }
+            watcher.tap(Tapped {
+                kind: Some("count"),
+                title: String::new(),
+                terminal: None,
+                task: None,
+                workspace: None,
+                needs_you: Some(count),
+            });
+            let Some(pairing) = crate::push::Pairing::load_in(watcher.service.root_dir()) else { return };
+            crate::push::notify(
+                &watcher.push,
+                &pairing,
+                crate::push::Outgoing { kind: Some("count"), needs_you: Some(count), ..Default::default() },
+            )
+            .await;
+        });
+    }
+
+    /// Push a decision: `task` has just entered Needs Decision (ruling 3).
+    ///
+    /// "Billing · bil-7 needs a decision", with the question as the subtitle.
+    /// It is about a task, so it names no terminal and the relay writes no
+    /// roster row for it. Detached, like every push.
+    pub fn announce_decision(&self, task: &farcooler_store::models::Task) {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else { return };
+        let me = self.me.clone();
+        let (id, key, workspace) = (task.id, task.key.clone(), task.workspace_id);
+        runtime.spawn(async move {
+            let Some(watcher) = me.upgrade() else { return };
+            let store = &watcher.service.store;
+            let workspace = store.get_workspace(workspace).ok().map(|w| w.name);
+            let question = store
+                .notes_for(id, Some(farcooler_store::models::NoteKind::Question))
+                .ok()
+                .and_then(|notes| notes.last().map(|n| n.body.clone()))
+                .unwrap_or_default();
+            let title = decision_title(workspace.as_deref(), &key);
+            let count = watcher.needs_you_count().await;
+            if let Some(count) = count {
+                watcher.told(count);
+            }
+            watcher.tap(Tapped {
+                kind: Some("decision"),
+                title: title.clone(),
+                terminal: None,
+                task: Some(key.clone()),
+                workspace: workspace.clone(),
+                needs_you: count,
+            });
+            let Some(pairing) = crate::push::Pairing::load_in(watcher.service.root_dir()) else { return };
+            crate::push::notify(
+                &watcher.push,
+                &pairing,
+                crate::push::Outgoing {
+                    kind: Some("decision"),
+                    title: &title,
+                    subtitle: &question,
+                    task: Some(&key),
+                    workspace: workspace.as_deref(),
+                    needs_you: count,
+                    ..Default::default()
+                },
+            )
+            .await;
+        });
+    }
+
+    /// Who `terminal` is, for a notice's title: its workspace's name and
+    /// whether it is that workspace's orchestrator. Read from the store at the
+    /// transition, which is rare, rather than carried through every sample.
+    fn who(&self, terminal: Uuid, label: &str) -> Who {
+        let row = self.service.store.get_terminal(terminal).ok();
+        let workspace = row
+            .as_ref()
+            .and_then(|t| t.workspace_id)
+            .and_then(|w| self.service.store.get_workspace(w).ok())
+            .map(|w| w.name);
+        Who {
+            label: label.to_string(),
+            workspace,
+            orchestrator: row.is_some_and(|t| t.role == farcooler_store::models::TerminalRole::Orchestrator),
+        }
+    }
+
     /// Broadcast one worktree as it is now, for a change the fleet's own
     /// passes don't see: its `open_tasks` moved because a task was filed on
     /// it, moved off or onto it, renamed, or finished.
@@ -3334,6 +3581,7 @@ impl Watcher {
         }
         let events = self.events.clone();
         let pending = self.needs_you_pending.clone();
+        let me = self.me.clone();
         let send = move || {
             pending.store(false, Ordering::SeqCst);
             let _ = events.send(Event {
@@ -3343,6 +3591,10 @@ impl Watcher {
                     farcooler_protocol::v1::Empty {},
                 )),
             });
+            // And the lock screen's count, if no other notice carries it.
+            if let Some(watcher) = me.upgrade() {
+                watcher.schedule_count_notice();
+            }
         };
         match tokio::runtime::Handle::try_current() {
             Ok(runtime) => {
@@ -7757,5 +8009,156 @@ mod tests {
         assert_eq!(payload.workspace_id.as_deref(), Some(&billing.as_bytes()[..]));
         assert_eq!(payload.from_workspace_id.as_deref(), Some(&main.as_bytes()[..]));
         assert_eq!(payload.repository_id.as_ref(), repository.as_bytes());
+    }
+}
+
+/// Pushes and the needs-you rollup: the title leads with the workspace, a
+/// decision pushes, and the lock screen's count moves when nothing else
+/// would carry it (spec §7).
+#[cfg(test)]
+mod needs_you_push_tests {
+    use super::*;
+    use farcooler_agent::event::{AgentEvent, PermissionOption};
+    use farcooler_store::models::{Actor, TaskStatus};
+
+    fn blocked() -> Quoted<'static> {
+        Quoted { worktree: "fc-3-webhooks", question: None, said: None }
+    }
+
+    #[test]
+    fn a_blocked_agents_notice_leads_with_its_workspace() {
+        let who = Who { label: "claude".into(), workspace: Some("Billing".into()), orchestrator: false };
+        let notice = agent_notice(AgentActivity::Blocked, &who, blocked(), false, None).unwrap();
+        assert_eq!(notice.title, "Billing · claude needs you");
+        // With no workspace, what it always said.
+        let bare = Who { workspace: None, ..who };
+        assert_eq!(agent_notice(AgentActivity::Blocked, &bare, blocked(), false, None).unwrap().title, "claude needs you");
+    }
+
+    #[test]
+    fn an_orchestrators_notice_is_its_workspace_alone() {
+        let who = Who { label: "claude".into(), workspace: Some("Billing".into()), orchestrator: true };
+        let notice = agent_notice(AgentActivity::Blocked, &who, blocked(), false, None).unwrap();
+        assert_eq!(notice.title, "Billing Orchestrator needs you");
+    }
+
+    /// A service with a Main workspace and one claude pane in its checkout.
+    async fn a_runner() -> (crate::test_support::ScratchDir, Arc<Service>, Uuid, Uuid) {
+        let (dir, svc, repo) = crate::test_support::fixture().await;
+        let main = svc.store.ensure_main_workspace(repo).unwrap();
+        let rows = svc.store.list_worktrees_for_repository(repo).unwrap();
+        let checkout = rows.iter().find(|w| w.is_main_checkout).unwrap();
+        let pane = svc.store.create_terminal_for_test(checkout.id, main.id);
+        (dir, svc, main.id, pane)
+    }
+
+    fn ask(id: &str) -> AgentEvent {
+        AgentEvent::Permission {
+            id: id.into(),
+            tool_call: String::new(),
+            options: vec![PermissionOption { id: "allow".into(), name: "Allow touch x".into(), kind: "allow_once".into() }],
+        }
+    }
+
+    /// The next notice the watcher sends, waiting out any debounce.
+    async fn next(taps: &mut tokio::sync::mpsc::UnboundedReceiver<Tapped>) -> Option<Tapped> {
+        tokio::time::timeout(std::time::Duration::from_secs(30), taps.recv()).await.ok().flatten()
+    }
+
+    #[tokio::test]
+    async fn a_decision_notice_has_a_task_and_no_terminal() {
+        let (_dir, svc, workspace, _) = a_runner().await;
+        let watcher = Watcher::new(svc.clone());
+        let mut taps = watcher.tap_notices();
+        let task = svc.store.create_task(workspace, "Pick a PDF library", Actor::User).unwrap();
+        svc.store
+            .add_note(task.id, farcooler_store::models::NoteKind::Question, Actor::Manager, "Which?", serde_json::json!({}))
+            .unwrap();
+        crate::task_ops::set_status(
+            &svc,
+            &watcher,
+            &farcooler_protocol::v1::TaskSetStatus {
+                task_id: crate::wire::id_bytes(task.id),
+                status: farcooler_protocol::v1::TaskStatus::NeedsDecision as i32,
+                actor: "manager".into(),
+            },
+        )
+        .unwrap();
+        let sent = next(&mut taps).await.expect("a decision pushes");
+        assert_eq!(sent.kind, Some("decision"));
+        assert_eq!(sent.terminal, None, "a decision is about a task, not a pane");
+        assert_eq!(sent.task.as_deref(), Some(task.key.as_str()));
+        assert_eq!(sent.title, format!("Main · {} needs a decision", task.key));
+        assert_eq!(sent.needs_you, Some(1), "the decision itself is counted");
+    }
+
+    #[tokio::test]
+    async fn answering_a_chat_ask_sends_a_count_notice() {
+        let (_dir, svc, _, pane) = a_runner().await;
+        let watcher = Watcher::new(svc.clone());
+        let mut taps = watcher.tap_notices();
+        tokio::time::pause();
+        svc.agents().record(pane, vec![ask("chat-1")], &|_, _| {});
+        let asked = next(&mut taps).await.expect("the ask moved the count");
+        assert_eq!((asked.kind, asked.needs_you), (Some("count"), Some(1)));
+        // Answered: the chat's `Resolved` changes no terminal, so no agent
+        // notice goes out, and the count notice is what tells the lock screen.
+        svc.agents().record(pane, vec![AgentEvent::Resolved { id: "chat-1".into(), chosen: "allow".into() }], &|_, _| {});
+        let answered = next(&mut taps).await.expect("the answer moved the count");
+        assert_eq!((answered.kind, answered.needs_you, answered.terminal), (Some("count"), Some(0), None));
+    }
+
+    /// The relay refreshes the card on every count notice, so a burst of
+    /// changes is one notice, trailing, and a count it already has is none.
+    #[tokio::test]
+    async fn a_burst_of_changes_sends_one_count_notice_and_never_a_repeat() {
+        let (_dir, svc, workspace, pane) = a_runner().await;
+        let checkout = svc.store.get_terminal(pane).unwrap().worktree_id;
+        let mut panes = vec![pane];
+        for _ in 0..3 {
+            panes.push(svc.store.create_terminal_for_test(checkout, workspace));
+        }
+        let watcher = Watcher::new(svc.clone());
+        let mut taps = watcher.tap_notices();
+        tokio::time::pause();
+        // Four asks on four panes, a second apart: the count goes 1, 2, 3, 4.
+        for (n, pane) in panes.iter().enumerate() {
+            svc.agents().record(*pane, vec![ask(&format!("chat-{n}"))], &|_, _| {});
+            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        }
+        let first = next(&mut taps).await.expect("a count notice");
+        assert_eq!(first.needs_you, Some(4), "the burst's last count, not its first");
+        assert_eq!(next(&mut taps).await, None, "one notice for the whole burst");
+        // A change that leaves the count where it was says nothing.
+        watcher.announce_needs_you();
+        assert_eq!(next(&mut taps).await, None, "the relay already has this count");
+    }
+
+    #[tokio::test]
+    async fn the_push_count_is_the_lists_length() {
+        let (_dir, svc, workspace, pane) = a_runner().await;
+        let watcher = Watcher::new(svc.clone());
+        let mut taps = watcher.tap_notices();
+        for (title, status) in [("Review me", TaskStatus::InReview), ("Decide me", TaskStatus::NeedsDecision)] {
+            let task = svc.store.create_task(workspace, title, Actor::User).unwrap();
+            svc.store.set_task_status(task.id, status, Actor::Manager).unwrap();
+        }
+        watcher
+            .observe_for_tests(pane, crate::needs_you::Observation {
+                activity: AgentActivity::Blocked,
+                state_since: now_millis(),
+                command: "claude".into(),
+                ..Default::default()
+            })
+            .await;
+        watcher.push_if_paired(pane, AgentActivity::Blocked, "claude", blocked(), false, None);
+        let sent = next(&mut taps).await.expect("the blocked agent's notice");
+        let listed = crate::needs_you::assemble(
+            &crate::needs_you::gather(&svc, &watcher).await.unwrap(),
+            std::time::SystemTime::now(),
+        );
+        assert_eq!(sent.needs_you, Some(listed.len() as u32));
+        assert_eq!(sent.needs_you, Some(3), "a block, a decision and a review; one pane");
+        assert_eq!(sent.title, "Main · claude needs you");
     }
 }

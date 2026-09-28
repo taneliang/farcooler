@@ -122,10 +122,22 @@ impl Pairing {
 /// body at all. The rule has not been relaxed — the relay is a delivery
 /// service, and a payload it does not keep is a payload it cannot leak — but
 /// it has to be stated about what actually crosses.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Default, serde::Serialize)]
 struct Notification<'a> {
-    title: &'a str,
-    subtitle: &'a str,
+    /// What this notice is: absent for an agent notice, `"decision"` for a
+    /// task entering Needs Decision, `"count"` for the runner's needs-you
+    /// count moving with nothing else to say. Spec §7.
+    ///
+    /// Absent rather than `"agent"` on an agent notice, so a relay older than
+    /// the field reads every agent notice exactly as it always did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<&'a str>,
+    /// Absent on a count notice, which says nothing to a person. Present on
+    /// every other kind: the relay refuses an alert with no title.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subtitle: Option<&'a str>,
     /// `"working"`, `"blocked"` or `"done"` — the same three `Notice` in
     /// `watch.rs` states, and nothing else.
     ///
@@ -143,7 +155,10 @@ struct Notification<'a> {
     /// A daemon too old to send this omits the field and the relay falls back
     /// to a plain notification — so an empty or invented status is worse than
     /// none, and this is never either.
-    status: &'a str,
+    ///
+    /// An agent notice's alone: a decision and a count carry none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status: Option<&'a str>,
     /// What the agent is called, on its own: the resolved agent name — "claude",
     /// "codex", a harness preset — and not the worktree, which does not exist at
     /// the call site. Deliberately the same string already interpolated into
@@ -153,7 +168,8 @@ struct Notification<'a> {
     /// It is already inside `title` as a fragment, and that is exactly the
     /// problem: the live card puts the name and the status in separate places
     /// on the lock screen, and neither can be cut back out of a sentence.
-    label: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    label: Option<&'a str>,
     /// Whether the turn this `"done"` is about ENDED BADLY.
     ///
     /// A second field rather than a fourth status, because it answers a
@@ -174,9 +190,31 @@ struct Notification<'a> {
     /// Always sent, including as `false`. A relay or a phone too old to know
     /// the field ignores it and behaves exactly as it did; skipping it when
     /// false would save nothing and make "absent" and "false" two spellings a
-    /// reader has to tell apart.
-    failed: bool,
-    terminal: &'a str,
+    /// reader has to tell apart. On every AGENT notice, that is: a decision and
+    /// a count are about no turn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failed: Option<bool>,
+    /// The pane an agent notice is about. Never on a decision or a count: the
+    /// relay keys its roster rows by `(account, terminal)`, and a task is not
+    /// a row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    terminal: Option<&'a str>,
+    /// The task a decision is about, by its key (`bil-7`), so a tap can open
+    /// it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task: Option<&'a str>,
+    /// The workspace this notice's agent or task belongs to, by name. Absent
+    /// for none, never `""`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    workspace: Option<&'a str>,
+    /// This runner's needs-you count when the notice was sent, from the same
+    /// `needs_you::assemble` its `needs_you.list` answers with. The relay
+    /// overwrites this machine's count with it and sums machines.
+    ///
+    /// camelCase on the wire, as `startedAt` is and for its reason: a
+    /// `needs_you` key reaches the relay as `undefined`.
+    #[serde(rename = "needsYou", skip_serializing_if = "Option::is_none")]
+    needs_you: Option<u32>,
     /// What this runner is running, so the devices screen can show which of
     /// someone's runners is behind without them going to each one to look.
     ///
@@ -288,13 +326,22 @@ struct Notification<'a> {
 /// Borrowed throughout. Every field is already owned by the caller's stack for
 /// the length of the await, and a payload that allocated five strings per
 /// notification would be paying for a copy nothing keeps.
+#[derive(Default)]
 pub struct Outgoing<'a> {
+    /// `None` for an agent notice, else `"decision"` or `"count"`. See
+    /// `Notification::kind` for what each carries; `wire_body` is what enforces it.
+    pub kind: Option<&'a str>,
     pub title: &'a str,
     pub subtitle: &'a str,
     pub status: &'a str,
     pub failed: bool,
     pub label: &'a str,
-    pub terminal: &'a str,
+    /// Required when `kind` is absent: an agent notice names its pane.
+    pub terminal: Option<&'a str>,
+    /// A decision's task key.
+    pub task: Option<&'a str>,
+    pub workspace: Option<&'a str>,
+    pub needs_you: Option<u32>,
     pub started_at: Option<i64>,
     /// What this agent's row on the card draws beside its name. See
     /// `Notification::insertions` for why absent is not zero, and
@@ -327,47 +374,61 @@ fn wire_anchor(trace: &[u8], anchor: Option<i64>) -> Option<i64> {
     anchor.filter(|_| !trace.is_empty())
 }
 
+/// What `notify` sends for an `Outgoing`, keyed by its kind: spec §7's contract.
+///
+/// - An agent notice (no kind) carries everything it always has, plus its
+///   workspace and the count. `None` if it names no terminal: the relay would
+///   write a roster row keyed by nothing.
+/// - A decision carries its kind, task, workspace, title, subtitle and count,
+///   and no terminal, status, label or `failed`.
+/// - A count carries its kind and the count, and nothing else.
+fn wire_body<'a>(o: &Outgoing<'a>) -> Option<Notification<'a>> {
+    let shared = Notification {
+        kind: o.kind,
+        needs_you: o.needs_you,
+        version: farcooler_protocol::BUILD,
+        ..Notification::default()
+    };
+    Some(match o.kind {
+        None => Notification {
+            title: Some(o.title),
+            subtitle: Some(o.subtitle),
+            status: Some(o.status),
+            label: Some(o.label),
+            failed: Some(o.failed),
+            terminal: Some(o.terminal?),
+            workspace: o.workspace,
+            started_at: o.started_at,
+            insertions: o.insertions,
+            deletions: o.deletions,
+            commits: o.commits,
+            trace: wire_trace(o.trace),
+            trace_anchor: wire_anchor(o.trace, o.trace_anchor),
+            ..shared
+        },
+        Some("decision") => Notification {
+            title: Some(o.title),
+            subtitle: Some(o.subtitle),
+            task: o.task,
+            workspace: o.workspace,
+            ..shared
+        },
+        Some(_) => shared,
+    })
+}
+
 /// Send one, or quietly do nothing if this runner was never paired.
 ///
 /// Failure is logged and swallowed on purpose. A push that does not arrive is a
 /// missed notification; a push that takes the watcher down with it is every
 /// future notification missed as well, plus the fleet.
 pub async fn notify(client: &reqwest::Client, pairing: &Pairing, notice: Outgoing<'_>) {
-    let Outgoing {
-        title,
-        subtitle,
-        status,
-        failed,
-        label,
-        terminal,
-        started_at,
-        insertions,
-        deletions,
-        commits,
-        trace,
-        trace_anchor,
-    } = notice;
+    let Some(body) = wire_body(&notice) else {
+        tracing::warn!(kind = ?notice.kind, "an agent notice named no terminal, and was not sent");
+        return;
+    };
     let url = format!("{}/v1/notify", pairing.relay.trim_end_matches('/'));
-    let result = client
-        .post(&url)
-        .bearer_auth(&pairing.token)
-        .json(&Notification {
-            title,
-            subtitle,
-            status,
-            failed,
-            label,
-            terminal,
-            version: farcooler_protocol::BUILD,
-            started_at,
-            insertions,
-            deletions,
-            commits,
-            trace: wire_trace(trace),
-            trace_anchor: wire_anchor(trace, trace_anchor),
-        })
-        .send()
-        .await;
+    let result = client.post(&url).bearer_auth(&pairing.token).json(&body).send().await;
 
     match result {
         Ok(response) if response.status().is_success() => {}
@@ -513,21 +574,23 @@ mod tests {
         trace: &[u8],
         trace_anchor: Option<i64>,
     ) -> serde_json::Value {
-        serde_json::to_value(Notification {
-            title: "claude",
-            subtitle: "3/7 · Designing test matrix",
-            status: "working",
-            failed: false,
-            label: "claude",
-            terminal: "term-1",
-            version: "test",
-            started_at,
-            insertions,
-            deletions,
-            commits,
-            trace: wire_trace(trace),
-            trace_anchor: wire_anchor(trace, trace_anchor),
-        })
+        serde_json::to_value(
+            wire_body(&Outgoing {
+                title: "claude",
+                subtitle: "3/7 · Designing test matrix",
+                status: "working",
+                label: "claude",
+                terminal: Some("term-1"),
+                started_at,
+                insertions,
+                deletions,
+                commits,
+                trace,
+                trace_anchor,
+                ..Outgoing::default()
+            })
+            .expect("an agent notice with a terminal"),
+        )
         .expect("serialize")
     }
 
@@ -602,6 +665,71 @@ mod tests {
         // the caller handed in.
         let lone = stats_body(None, None, None, None, &[], Some(5_960_000));
         assert!(lone.get("traceAnchor").is_none(), "an anchor for no trace: {lone}");
+    }
+
+    /// The count's key is the relay's spelling. A `needs_you` key arrives
+    /// there as `undefined`, the machine's count never moves, and the lock
+    /// screen keeps showing the blocked count as if nothing were decided.
+    #[test]
+    fn the_body_spells_needs_you_in_camel_case() {
+        let agent = serde_json::to_value(
+            wire_body(&Outgoing {
+                title: "Billing · claude needs you",
+                status: "blocked",
+                label: "claude",
+                terminal: Some("term-1"),
+                workspace: Some("Billing"),
+                needs_you: Some(3),
+                ..Outgoing::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(agent["needsYou"], serde_json::json!(3), "{agent}");
+        assert!(agent.get("needs_you").is_none(), "{agent}");
+        assert_eq!(agent["workspace"], "Billing");
+        assert!(agent.get("kind").is_none(), "an agent notice has no kind: {agent}");
+
+        let count = serde_json::to_value(
+            wire_body(&Outgoing { kind: Some("count"), needs_you: Some(0), ..Outgoing::default() }).unwrap(),
+        )
+        .unwrap();
+        let mut keys: Vec<_> = count.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, ["kind", "needsYou", "version"], "a count is the count and nothing else: {count}");
+        assert_eq!(count["needsYou"], serde_json::json!(0), "zero is a count, and is sent");
+    }
+
+    /// A decision is about a task, which is not a roster row: no terminal,
+    /// and none of an agent notice's status fields.
+    #[test]
+    fn a_decision_notice_names_its_task_and_no_terminal() {
+        let decision = serde_json::to_value(
+            wire_body(&Outgoing {
+                kind: Some("decision"),
+                title: "Billing · bil-7 needs a decision",
+                subtitle: "Which PDF library?",
+                terminal: Some("term-1"),
+                task: Some("bil-7"),
+                workspace: Some("Billing"),
+                needs_you: Some(2),
+                ..Outgoing::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        for key in ["terminal", "status", "label", "failed"] {
+            assert!(decision.get(key).is_none(), "a decision carries no `{key}`: {decision}");
+        }
+        assert_eq!(decision["task"], "bil-7");
+        assert_eq!(decision["kind"], "decision");
+        assert_eq!(decision["title"], "Billing · bil-7 needs a decision");
+    }
+
+    /// And an agent notice that names no pane is not sent at all.
+    #[test]
+    fn an_agent_notice_without_a_terminal_is_not_a_body() {
+        assert!(wire_body(&Outgoing { title: "claude needs you", status: "blocked", ..Outgoing::default() }).is_none());
     }
 
     #[test]
