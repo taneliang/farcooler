@@ -376,38 +376,83 @@ The detail becomes an `HSplitView` of up to three columns, left to right:
 
 | Column | Holds | Min | Ideal |
 |---|---|---|---|
-| **Conversation** | The orchestrator: its layout as `detailFrame` frames it today (`WorkspaceSidebar.swift:327-340`: its own layout, no bar), drawn as a terminal, or as chat when the pane is in agent mode | 400 pt | fills |
+| **Conversation** | The orchestrator: its layout as `detailFrame` frames it today (`WorkspaceSidebar.swift:327-340`: its own layout, no bar), drawn as a terminal, or as chat when the pane is in agent mode | 48 columns: 412 pt | fills; with a task open, its minimum |
 | **Board** | The board (§5) | 280 pt | 340 pt |
-| **Task** | Present only while `focus` is set. See §4.4 | 500 pt | 620 pt |
+| **Task** | Present only while `focus` is set. See §4.4 | 58 columns: 489 pt | fills |
 
-**Where the minimums come from.** A 12.5 pt monospaced cell is about 7.5 pt wide.
-- 400 pt holds about 50 columns. Claude Code's TUI stays usable there, and its chat form is comfortable.
-- 500 pt holds about 64 columns, enough for a diff hunk.
+**Where the minimums come from.** Measured on 2026-09-28 (ov-55, 2A) against the app's own code, not estimated:
+- **A cell is 7.727 pt wide** at the default terminal font (SF Mono, 12.5 pt; `TerminalMetrics.cell`), not 7.5.
+- **A column of `W` pt holds `floor((W − 40) / 7.727)` terminal columns.** The 40 pt is the canvas inset
+  (`Pane.inset`, 10 each side) plus the terminal's own padding (`TerminalMetrics.padding`, 10 each side), as
+  `TileGeometry.viewport` counts it. Chat mode reports the same grid (`AgentSurface.report`). So 400 pt is 46
+  columns, not 50, and 500 pt is 59, not 64.
+- **The conversation's 48 columns.** The real screens in `crates/core/captures` set it:
+  - Claude Code reflows cleanly down to 40 columns (`claude-background-agent-main-idle-40col.txt`). Only its mode
+    line truncates.
+  - At 48, every fixed line an orchestrator shows on its own screen fits, except that claude's AskUserQuestion
+    footer (`Enter to select · ↑/↓ to navigate · Esc to cancel`, 49 columns) wraps by one.
+  - 48 is also what an iPhone shows. SF Mono 13 on a 393–402 pt screen, less 12 pt of padding, is 47–48
+    columns. Narrowing the orchestrator to its minimum barely changes a phone that's showing it. See R2.
+  - In chat mode, 412 pt leaves the transcript about 60 characters of 13 pt body text a line, and the composer
+    shows one selector inline and folds the rest into its `⋯` menu (`AgentComposer.inlineCount`).
+- **The task column's 58 columns.** That's the width at which no fixed line of a permission prompt wraps, for all
+  three harnesses:
 
-These are starting points, not settled numbers. **Slice 2 measures them first**, at a full-screen 13" width
-(1440 and 1470 pt), with claude, codex and cursor in terminal and chat mode, before it fixes any constant. The
-collapse thresholds below follow from whatever it measures. See R2.
+  | Harness | Widest fixed line in its permission prompt | Columns, with its indent |
+  |---|---|---|
+  | claude | `2. Yes, allow all edits during this session (shift+tab)` | 58 |
+  | codex | `3. No, and tell Codex what to do differently (esc)` | 52 (its banner box is 56) |
+  | cursor | `Skip & tell the agent what to do instead (esc or n)` | 55 |
+
+  Lines that carry a command or a path wrap at any width, and do no harm when they do. Claude 2.1.283's
+  `3. Yes, and switch to auto mode · auto mode handles these prompts for you` (76) and the tip above it (82) wrap
+  once.
+- **Changes never wraps a line.** `ChangesPane` scrolls a long line sideways (`contentWidth`). Below `wideEnough`
+  (620 pt) it has no file column, and a diff `D` pt wide shows `floor((D − 69) / 7.727) − 2` characters before
+  scrolling: 52 at 489 pt, 80 at 703 pt and 100 at 858 pt. From 620 pt up, a file column takes
+  `min(280, max(220, W × 0.2))` of it, plus a 1 pt divider. So widening a task column past 620 pt narrows its diff: 69 characters at 619 pt, 40 at
+  620, and 69 again only at 839 pt. 2D has to decide whether the task column accepts that cliff or keeps
+  `ChangesPane` compact below about 840 pt.
+- **The board's 280 pt** is one kanban column's outer width: the 260 pt card that has always held a task, plus its
+  10 pt padding each side (`TaskBoard.swift:517-518`).
+- **The dividers cost 1 pt each.** An `HSplitView` of three children at their minimums needs their sum plus 2 pt.
+  Below that it doesn't collapse or hide anything: it overflows the window, clipped. The collapse has to be
+  done by `layout(width:taskOpen:)`.
+- **The minimums are in columns.** At a larger font they're wider in points: at 13 pt, 48 and 58 columns are
+  426 and 507 pt, and all three no longer fit at 1440 pt. `layout(width:taskOpen:)` takes the cell width, and
+  its tests use the default font.
 
 **When the columns don't fit**, they give way in a fixed order. `W` is the detail's width.
 
 | Detail width | Shown |
 |---|---|
-| `W ≥ 400 + 280 + 500 = 1180` | All three |
-| `W < 1180`, task open | **The conversation collapses to a 36 pt rail** at the leading edge. The rail shows the orchestrator's status glyph and its needs-you dot. Clicking the rail, Back (⌃⌘←), or Esc when no terminal has focus closes the task column, which brings the conversation back. The task column is navigation, not an arrangement to fit |
-| `W < 680`, no task | One column, with a segmented **Orchestrator \| Board** control in the header: the phone form |
+| `W ≥ 412 + 280 + 489 + 2 = 1183` | All three |
+| `W < 1183`, task open | **The conversation collapses to a 36 pt rail** at the leading edge. The rail shows the orchestrator's status glyph and its needs-you dot. Clicking the rail, Back (⌃⌘←), or Esc when no terminal has focus closes the task column, which brings the conversation back. The task column is navigation, not an arrangement to fit |
+| `W < 36 + 280 + 489 + 2 = 807`, task open | The task column alone, with Back. The board comes back when it closes |
+| `W < 412 + 280 + 1 = 693`, no task | One column, with a segmented **Orchestrator \| Board** control in the header: the phone form |
 
-**At a 13-inch laptop's widths:**
+In the one-column forms, a column may be narrower than its minimum: the window's minimum is 600 pt, so the detail
+can be 352 pt, which is 40 columns.
+
+**At a 13-inch laptop's widths** (measured by hosting a real `NavigationSplitView` in a window of each width: the
+detail is the window's width less the sidebar's, with no gap):
 
 | Screen | Window | Sidebar | Detail | Result |
 |---|---|---|---|---|
-| MacBook Air 13" (M2 and later) | Full width, 1470 pt | 248 pt | 1222 pt | All three columns |
-| MacBook Air 13" (M1) | Full width, 1440 pt | 248 pt | 1192 pt | All three columns |
-| Either | A 1280 pt window | 248 pt | 1032 pt | Conversation and board. Opening a task collapses the conversation to its rail. Hiding the sidebar (⌃⌘S) gives 1280 pt, and all three fit |
+| MacBook Air 13" (M2 and later) | Full width, 1470 pt | 248 pt | 1222 pt | All three columns, 39 pt to spare. The task column gets it: 528 pt, 63 columns |
+| MacBook Air 13" (M1) | Full width, 1440 pt | 248 pt | 1192 pt | All three columns, 9 pt to spare. Widening the sidebar past 257 pt collapses the conversation to its rail |
+| Either | A 1280 pt window | 248 pt | 1032 pt | Conversation and board. Opening a task collapses the conversation to its rail, and the task column gets 714 pt: 87 columns, but only 52 characters of diff, since the file column takes 220 pt of it. Hiding the sidebar (⌃⌘S) gives 1280 pt, and all three fit |
 
-The sidebar narrows to min 220, ideal 248, max 360 (from 268/320/440, `ContentView.swift:1205`). Its rows are now
-workspaces, and a worktree row shows up only under Worktrees.
+The sidebar narrows to min 220, ideal 248, max 360 (from 268/320/440, `ContentView.swift:1205`). It has to: at
+today's ideal of 320, a full-screen 1470 pt window leaves a 1150 pt detail, and all three columns don't fit even
+there. Its rows are now workspaces, and a worktree row shows up only under Worktrees.
+- At 248 pt, a workspace row has about 175 pt for its name.
+- A worktree row two levels in (at 50 pt) has 184 pt for everything. After `+42 −7` (38 pt), its gaps and its
+  dot, that's about 128 pt for the name and task key: `fc-3-webhooks · bil-9` (136 pt) loses its last characters.
+- At the 220 pt minimum, the same row has about 100 pt, which is `fc-3-webhooks` and no key. Names truncate, as
+  they do today, so the narrower sidebar still works.
 
-**Wireframe, at 1440 pt** (sidebar 248; conversation 412, board 280 and task 500 fill the 1192 pt detail, each near its minimum):
+**Wireframe, at 1440 pt** (sidebar 248; conversation 412, board 280 and task 498 fill the 1192 pt detail, each near its minimum):
 
 ```
 ┌ Sidebar ──────────┬ Billing · overnight ────────────────────────────────────────────────────────────┐
@@ -879,11 +924,23 @@ fixes the groups:
   - Mitigation: slice 4a keeps the shell intact as the worktree screen and changes only what's above it.
   - UI tests go through `scripts/ios-ui-tests.sh`.
 - **R2. Terminal width in a column.** Resizing a tmux pane resizes it for every client: the Mac's `onGeometry`
-  resizes the terminal (`ContentView.swift:1859`). An orchestrator drawn in a 400 pt column reflows to about
-  50 columns on the phone as well.
-  - The size controller (`size_controller_client_id`) already arbitrates this, but the plan must check what a
-    phone sees when the Mac narrows a pane that the phone is showing.
-  - The 400 and 500 pt minimums need measuring with claude, codex and cursor, in both modes.
+  resizes the terminal (`ContentView.swift:1859`). An orchestrator drawn in a 412 pt column reflows to 48 columns
+  on the phone as well.
+  - Nothing arbitrates this. `size_controller_client_id` is never set (`crates/daemon/src/wire.rs:302` always
+    sends `None`), and tmux runs `window-size latest` (`crates/tmux/src/server.rs:53`). The last client to
+    resize a pane sets its size for everyone.
+  - Measured in 2A: a phone showing the pane notices the Mac's resize within its 2-second geometry poll
+    (`TerminalSession.checkGeometry`, `geometryInterval`). It reopens at the Mac's width. It doesn't resize the
+    pane back until its own viewport changes or the app returns to the foreground (`reassertSize`). When it
+    leaves the pane, it hands back the shape it found (`releasePane`). The Mac reports only when its geometry changes
+    (`lastReportedGeometry`), so the two don't fight.
+  - For the conversation this costs nothing. An iPhone is 47–48 columns (SF Mono 13 on 393–402 pt), which is
+    the conversation's minimum.
+  - For the task column, at 58 columns or more, a phone opening the same agent narrows it to 48 until the Mac
+    lays out again.
+  - The 412 and 489 pt minimums were measured in 2A (§4.3) from the real captures of claude, codex and cursor.
+    No harness was run live: Far Cooler's lanes don't run the real agents. Claude 2.1.283's newest permission
+    lines (76 and 82 columns) are wider than any minimum here, and wrap once.
 - **R3. The task column's Changes lives outside tmux.** `ChangesPane` sits in a tmux pane so that zoom, drag and ⌃B
   reach it (`ChangesPane.swift:19-27`). In the task column the same view is drawn without the pane, so there it
   can't be zoomed or dragged. The Changes toolbar button in an opened worktree still makes the tmux pane.
