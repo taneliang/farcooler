@@ -158,11 +158,18 @@ final class TerminalPermissionTests: XCTestCase {
             waitFor(20) { self.probe(app, "terminal-ask")["blocked"] == "0" },
             "the pane is still blocked 20 s after Deny, so the hook never got its answer: "
                 + "\(probe(app, "terminal-ask"))")
+        // And it landed as a deny: the daemon's `Resolved` for this ask names
+        // the option it was settled with.
+        XCTAssertTrue(
+            waitFor(10) { self.probe(app, "terminal-ask")["resolved"] == "deny" },
+            "the ask was not resolved as a deny: \(probe(app, "terminal-ask"))")
     }
 
     /// **Answered somewhere else, the card goes by itself.** A second line is
     /// the keyboard answering claude's own dialog; nothing on the phone is
-    /// tapped.
+    /// tapped. The card is not tied to the fleet's `blocked`, so only the
+    /// daemon's `Resolved` for the ask can take it down, and the probe says
+    /// the ask ended with no option chosen.
     func testATUIAskAnsweredAtTheKeyboardLeavesThePhone() throws {
         let app = try launch()
         try openTheAskingClaude(app)
@@ -183,5 +190,8 @@ final class TerminalPermissionTests: XCTestCase {
             waitFor(15) { !card.exists },
             "the card is still up after the keyboard answered: \(probe(app, "terminal-ask"))")
         XCTAssertEqual(probe(app, "terminal-ask")["ask"], "-")
+        XCTAssertEqual(
+            probe(app, "terminal-ask")["resolved"], "none",
+            "the card went, but not on a Resolved with no option chosen")
     }
 }

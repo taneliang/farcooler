@@ -159,8 +159,24 @@ final class AgentStream: ObservableObject {
 
     deinit { pollTask?.cancel() }
 
+    /// Whether the stream has been read since it last started.
+    ///
+    /// What it held before may be out of date: an ask resolved while nothing
+    /// was reading still shows as pending until the next read brings its
+    /// `Resolved`. See `TerminalAskCard.shows`.
+    @Published private(set) var caughtUp = false
+
+    /// How the last resolved ask ended, as the daemon recorded it: the option
+    /// chosen, or empty for one answered at the keyboard or withdrawn.
+    /// `TerminalPermissionTests` reads it off the bar's probe.
+    @Published private(set) var lastResolution: (id: String, chosen: String)?
+
+    /// The answer to a pending ask, while it is out and after it failed.
+    @Published private(set) var answering = PermissionAnswering()
+
     func start() {
         pollTask?.cancel()
+        caughtUp = false
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.pump()
@@ -178,6 +194,7 @@ final class AgentStream: ObservableObject {
     func stop() {
         pollTask?.cancel()
         pollTask = nil
+        caughtUp = false
     }
 
     /// The shape `terminal.agent_subscribe` answers with.
@@ -264,6 +281,7 @@ final class AgentStream: ObservableObject {
     private func answered() {
         enter(hasSession ? .live : .starting)
         connectionError = nil
+        if !caughtUp { caughtUp = true }
     }
 
     private func pump() async {
@@ -320,6 +338,9 @@ final class AgentStream: ObservableObject {
                 return Sequenced(seq: frame.seq, event: event)
             }
             transcript.apply(decoded)
+            for case let .resolved(id, chosen) in decoded.map(\.event) {
+                lastResolution = (id, chosen)
+            }
             recordForGlances()
             answered()
         } catch {
@@ -452,19 +473,34 @@ final class AgentStream: ObservableObject {
     }
 
     func answer(_ requestID: String, _ optionID: String) async {
-        // Taken down on tap, not on an echo. The agent resumes without
-        // acknowledging the request it was blocked on, so a card that waited
-        // for confirmation sat there after the work it gated had happened —
-        // the same fix the Mac already carries.
+        // Taken down when the runner takes the answer, not on the tap.
+        //
+        // It used to come down on the tap with the call's error dropped. For a
+        // claude TUI ask the daemon holds the hook until an answer lands, so a
+        // refused answer left the ask held on the runner and gone from this
+        // pane for good: its `Permission` is behind the cursor. The buttons
+        // are off while the answer is out instead, and a failure keeps the
+        // card and says so. See `PermissionAnswering`.
+        guard answering.begin(requestID) else { return }
+        let outcome: PermissionAnswering.Outcome
+        do {
+            _ = try await core.call(
+                "terminal.agent_answer",
+                ["terminal": terminal, "requestId": requestID, "optionId": optionID])
+            outcome = .sent
+        } catch {
+            outcome = PermissionAnswering.outcome(refusedWith: ClientCore.refusalWord(of: error))
+        }
+        guard answering.finish(requestID, outcome),
+            transcript.pendingPermission?.id == requestID
+        else { return }
+        // The agent resumes without acknowledging the request it was blocked
+        // on (ACP sends no `Resolved`), so the card comes down here. And down
+        // on every OTHER surface with it: a lock screen card offering an
+        // answer to a permission this pane just answered is the duplicate
+        // this whole seam is careful about.
         transcript.clearPendingPermission()
-        // And down on every OTHER surface with it. A lock screen card offering
-        // an answer to a permission this pane just answered is the duplicate
-        // this whole seam is careful about, and this is the moment the phone
-        // knows it is gone.
         recordForGlances()
-        _ = try? await core.call(
-            "terminal.agent_answer",
-            ["terminal": terminal, "requestId": requestID, "optionId": optionID])
     }
 
     /// Write what this agent is waiting on into the App Group, for the surfaces

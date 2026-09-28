@@ -515,7 +515,11 @@ struct AgentView: View {
                 }
 
                 if let pending = unattachedPermission {
-                    ApprovalCard(pending: pending) { optionID in
+                    ApprovalCard(
+                        pending: pending,
+                        failure: stream.answering.sentence(for: pending.id),
+                        sending: stream.answering.sending == pending.id
+                    ) { optionID in
                         Task { await stream.answer(pending.id, optionID) }
                     }
                 }
@@ -2053,6 +2057,10 @@ struct ApprovalControls: View {
 /// pane, so a question looks the same in a chat pane and over a terminal.
 struct ApprovalCard: View {
     let pending: PendingPermission
+    /// Why the last answer to this ask did not land, if it did not.
+    var failure: String? = nil
+    /// An answer is out, so the buttons are off until it lands or fails.
+    var sending: Bool = false
     let onChoose: (String) -> Void
 
     var body: some View {
@@ -2065,6 +2073,14 @@ struct ApprovalCard: View {
                 .foregroundStyle(.orange)
 
             ApprovalControls(options: pending.options, onChoose: onChoose)
+                .disabled(sending)
+
+            if let failure {
+                Label(failure, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("approval-failure")
+            }
         }
         // Radius 22 and no inset of its own — one of `composerStack`'s
         // surfaces, and that stack draws the edge now. This was 12, curving at

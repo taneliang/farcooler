@@ -11,24 +11,26 @@ import SwiftUI
 /// This reads the same ring through `AgentStream`, and draws the same
 /// `ApprovalCard` a chat pane draws, so the question looks the same in both.
 /// A tap goes through `AgentStream.answer`, which is `terminal.agent_answer`
-/// with the hook-ask id, and takes the card down at once.
+/// with the hook-ask id. The card comes down when the runner takes the answer;
+/// if it doesn't, the card stays and says so.
 ///
-/// **Read only while the pane is blocked and on screen.** `AgentStream` polls
-/// every 700 ms, and a terminal pane is usually not asking anything. The
-/// daemon's `blocked` for a claude pane comes off its screen, which shows
-/// claude's dialog for as long as the hook is held.
+/// **The card is the ask, keyed by its id.** It is drawn while the stream
+/// holds an unresolved ask, and it goes when the daemon's `Resolved` for that
+/// ask arrives, or a newer ask supersedes it: answered at the keyboard, from
+/// the watch or another phone, or withdrawn when the hold ran out. Not when the
+/// fleet stops saying blocked, which comes first; see `TerminalAskCard.reads`
+/// for why the stream keeps reading until the `Resolved`.
 ///
-/// **Resolved somewhere else, the card goes.** An ask answered at the
-/// keyboard, from the watch, from another phone or by the hold running out
-/// ends in the daemon's `Resolved`, which `Transcript` applies by clearing the
-/// pending permission. And the card is drawn only while the fleet says the
-/// pane is blocked, so a stream stopped before its `Resolved` arrived cannot
-/// leave the card up.
+/// **Read only while it can be seen**, and only while the pane is blocked or
+/// still holds an ask: `AgentStream` polls every 700 ms, and a terminal pane is
+/// usually not asking anything.
 struct TerminalPermissionBar: View {
     let blocked: Bool
     let isVisible: Bool
 
     @StateObject private var stream: AgentStream
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.shellOverviewShowing) private var overviewShowing
 
     init(terminalID: String, core: ClientCore, blocked: Bool, isVisible: Bool) {
         self.blocked = blocked
@@ -36,14 +38,26 @@ struct TerminalPermissionBar: View {
         _stream = StateObject(wrappedValue: AgentStream(terminal: terminalID, core: core))
     }
 
+    private var onScreen: Bool { isVisible && !overviewShowing && scenePhase == .active }
+
+    private var held: PendingPermission? { stream.transcript.pendingPermission }
+
+    private var reads: Bool {
+        TerminalAskCard.reads(onScreen: onScreen, blocked: blocked, asking: held != nil)
+    }
+
     private var pending: PendingPermission? {
-        blocked ? stream.transcript.pendingPermission : nil
+        TerminalAskCard.shows(asking: held != nil, caughtUp: stream.caughtUp) ? held : nil
     }
 
     var body: some View {
         VStack {
             if let pending {
-                ApprovalCard(pending: pending) { optionID in
+                ApprovalCard(
+                    pending: pending,
+                    failure: stream.answering.sentence(for: pending.id),
+                    sending: stream.answering.sending == pending.id
+                ) { optionID in
                     Task { await stream.answer(pending.id, optionID) }
                 }
                 // The card's own fill is a tint for a chat's plain ground. Over
@@ -57,6 +71,7 @@ struct TerminalPermissionBar: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("terminal-permission")
                 .transition(.move(edge: .bottom).combined(with: .opacity))
+                .id(pending.id)
             }
         }
         .frame(maxWidth: .infinity)
@@ -65,7 +80,10 @@ struct TerminalPermissionBar: View {
             // Only the visible pane publishes it: the shell mounts every pane
             // in the fleet, and several probes would be a guess at which one
             // is being read. `blocked` is the fleet's word, so a test can see
-            // an answer take the pane off blocked.
+            // an answer take the pane off blocked; `resolved` is what the
+            // daemon recorded the last ask as ended by (`none` for the
+            // keyboard or the hold running out), so a test can see which
+            // answer landed.
             if isVisible {
                 Rectangle()
                     .fill(Color.white.opacity(0.001))
@@ -73,13 +91,19 @@ struct TerminalPermissionBar: View {
                     .accessibilityElement()
                     .accessibilityIdentifier("terminal-ask")
                     .accessibilityValue(
-                        "blocked=\(blocked ? 1 : 0) ask=\(pending?.id ?? "-")")
+                        "blocked=\(blocked ? 1 : 0) ask=\(pending?.id ?? "-") "
+                            + "resolved=\(resolvedWord)")
             }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pending?.id)
-        .task(id: blocked && isVisible) {
-            if blocked && isVisible { stream.start() } else { stream.stop() }
+        .task(id: reads) {
+            if reads { stream.start() } else { stream.stop() }
         }
         .onDisappear { stream.stop() }
+    }
+
+    private var resolvedWord: String {
+        guard let resolution = stream.lastResolution else { return "-" }
+        return resolution.chosen.isEmpty ? "none" : resolution.chosen
     }
 }

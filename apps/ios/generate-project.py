@@ -409,6 +409,11 @@ AGENTKIT_SOURCES = [
     # screen card can offer Allow and Deny for a claude TUI pane. App only: the
     # extensions reach no runner. See `BlockedAskLookupsTests`.
     "BlockedAskLookups.swift",
+    # When a terminal pane reads its claude ask and shows it, and how an answer
+    # to an ask ended. App only, like the one above. See
+    # `TerminalAskCardTests` and `PermissionAnsweringTests`.
+    "TerminalAskCard.swift",
+    "PermissionAnswering.swift",
     # The board: its model, which agent is on which card, and which
     # repositories get a Board row in the overview. The Mac has drawn the first
     # two since card -19; the phone draws the same cards off the same rules, so
