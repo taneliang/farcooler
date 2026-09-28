@@ -1768,6 +1768,9 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "workspace" => "this terminal doesn't belong to a workspace yet",
         "role" => "choose a role: shell, agent or orchestrator",
         "task_ids" => "name at least one task to move",
+        // `terminal.agent_answer`'s two conflicts.
+        "not_held" => "someone already answered this",
+        "not_delivered" => "the answer didn't reach the agent. try again",
         _ => return None,
     })
 }

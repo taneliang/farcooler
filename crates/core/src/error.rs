@@ -51,7 +51,7 @@ pub enum DomainError {
     /// `not_held` (someone already answered the ask) and `not_delivered` (the
     /// answer was taken but never reached the agent). Before this both were
     /// the same bare conflict, so no client could tell them apart.
-    #[error("{}", conflict_sentence(what))]
+    #[error("{}", sentence(what).unwrap_or("resource version is stale"))]
     Conflict { what: &'static str },
 
     #[error("resource not found")]
@@ -256,16 +256,6 @@ impl DomainError {
     }
 }
 
-/// What a named conflict says in `Error.message`. A client owns its own
-/// sentence and switches on `what`; this is for one that shows the message.
-fn conflict_sentence(what: &str) -> &'static str {
-    match what {
-        "not_held" => "someone already answered this",
-        "not_delivered" => "the answer didn't reach the agent",
-        _ => "resource version is stale",
-    }
-}
-
 /// The sentence for an argument word, where the runner has one a client can
 /// say as it is.
 ///
@@ -310,6 +300,9 @@ const SENTENCES: &[(&str, &str)] = &[
     ("role", "Choose a role: shell, agent or orchestrator."),
     ("task_ids", "Name at least one task to move."),
     ("handoff_task", "That task isn't on this workspace's board."),
+    // `terminal.agent_answer`'s two conflicts (`DomainError::Conflict`).
+    ("not_held", "Someone already answered this."),
+    ("not_delivered", "The answer didn't reach the agent. Try again."),
 ];
 
 /// The word a client switches on, for a code that came off the wire.
@@ -421,6 +414,7 @@ mod tests {
             DomainError::DispatchUnknown,
             DomainError::CapabilityUnsupported { needed: "changes" },
             DomainError::AgentNotConnected,
+            DomainError::Conflict { what: "not_held" },
         ]
     }
 
@@ -450,7 +444,9 @@ mod tests {
     #[test]
     fn codes_are_distinct_per_variant() {
         let mut seen = std::collections::HashSet::new();
-        for e in all_variants() {
+        // `Conflict` is `ResourceConflict`'s code on purpose, naming which in
+        // `what`; `a_named_conflict_keeps_the_conflict_code_and_says_which`.
+        for e in all_variants().into_iter().filter(|e| !matches!(e, DomainError::Conflict { .. })) {
             assert!(seen.insert(e.code() as i32), "{e:?} reuses a wire code");
         }
     }
@@ -477,6 +473,10 @@ mod tests {
             let w = word(e.code());
             assert_ne!(w, "unspecified", "{e:?} has no word");
             assert_ne!(w, UNRECOGNIZED_WORD, "{e:?} has no word");
+            // `Conflict` shares `resource-conflict` by design; see above.
+            if matches!(e, DomainError::Conflict { .. }) {
+                continue;
+            }
             assert!(seen.insert(w), "{e:?} reuses the word {w}");
         }
     }
@@ -530,7 +530,7 @@ mod tests {
     #[test]
     fn every_other_refusal_carries_no_argument() {
         for e in all_variants() {
-            if matches!(e, DomainError::InvalidArgument { .. }) {
+            if matches!(e, DomainError::InvalidArgument { .. } | DomainError::Conflict { .. }) {
                 continue;
             }
             assert_eq!(e.what(), "", "{e:?} started carrying an argument");
