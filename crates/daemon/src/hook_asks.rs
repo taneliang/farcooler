@@ -175,6 +175,13 @@ impl HookAsks {
         self.settle(terminal, Some(id), Settled { decision: None, ack: None }, "", true, "withdrawn");
     }
 
+    /// `serve` giving up on an ask nobody was ever offered: the hold frame
+    /// could not be written, so no `Permission` was recorded and no
+    /// `Resolved` is owed.
+    pub fn abandon(&self, terminal: Uuid, id: &str) {
+        self.settle(terminal, Some(id), Settled { decision: None, ack: None }, "", false, "abandoned");
+    }
+
     /// `terminal`'s row is gone. Its ask ends with no decision and no
     /// `Resolved`: the ring goes with the row, and recording into it would
     /// bring an entry back for a terminal nothing can reach.
@@ -471,6 +478,17 @@ mod tests {
         assert!(!asks.is_holding(pane));
         assert_eq!(rx.await.expect("an ending arrives").decision, None);
         assert_eq!(resolved(&recorded, &id), [""]);
+    }
+
+    #[tokio::test]
+    async fn an_ask_nobody_was_offered_is_abandoned_without_a_resolved() {
+        let (asks, recorded) = ledger();
+        let pane = Uuid::now_v7();
+        let (id, rx) = asks.hold(pane);
+        asks.abandon(pane, &id);
+        assert!(!asks.is_holding(pane));
+        assert_eq!(rx.await.expect("an ending arrives").decision, None);
+        assert!(resolved(&recorded, &id).is_empty(), "nothing was offered, so nothing is taken back");
     }
 
     #[tokio::test]

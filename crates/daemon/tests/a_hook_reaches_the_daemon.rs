@@ -1020,3 +1020,233 @@ async fn a_cursor_sessions_hooks_claim_nothing_because_they_carry_no_cwd() {
     assert!(claims.terminals_in(s.main_checkout).is_empty());
     assert!(!claims.take_changed());
 }
+
+// ---- Held permission asks (ov-14) ----------------------------------------
+
+/// How long a test waits for a line it expects. Far above the hook's 400 ms,
+/// so a loaded machine can't turn a late line into a red; the tests about
+/// timing say so and use `FIRST_CONTACT` instead.
+const A_LINE: Duration = Duration::from_secs(5);
+
+/// The hook's first-contact deadline, with headroom. A reply that the hook
+/// must hear inside 400 ms must at least arrive inside this.
+const FIRST_CONTACT: Duration = Duration::from_secs(1);
+
+/// A claude `PermissionRequest` from `session`, asking to run `touch x`.
+fn a_permission_request(agent: Agent, session: &str) -> HookLine {
+    HookLine {
+        agent,
+        event: "PermissionRequest".to_string(),
+        payload: serde_json::json!({
+            "session_id": session,
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Bash",
+            "tool_input": { "command": "touch x" },
+        }),
+    }
+}
+
+/// A gating hook's half of the socket: write the frame and keep the
+/// connection open, reading, as `farcooler hook` does.
+struct Asking {
+    reader: tokio::io::BufReader<tokio::net::unix::OwnedReadHalf>,
+    _writer: tokio::net::unix::OwnedWriteHalf,
+}
+
+impl Asking {
+    async fn open(socket: &std::path::Path, line: &HookLine) -> Asking {
+        let stream = tokio::net::UnixStream::connect(socket).await.expect("connect");
+        let (read, mut write) = stream.into_split();
+        write.write_all(encode_line(line).unwrap().as_bytes()).await.expect("write");
+        Asking { reader: tokio::io::BufReader::new(read), _writer: write }
+    }
+
+    /// The daemon's next line, or `None` if none came within `within`.
+    async fn line(&mut self, within: Duration) -> Option<String> {
+        let mut line = String::new();
+        let read = tokio::io::AsyncBufReadExt::read_line(&mut self.reader, &mut line);
+        match tokio::time::timeout(within, read).await {
+            Ok(Ok(n)) if n > 0 => Some(line),
+            _ => None,
+        }
+    }
+}
+
+/// The id of the `Permission` the sink got for `terminal`, once it has.
+async fn the_permission(seen: &Seen, terminal: Uuid) -> (String, Vec<String>) {
+    eventually(|| {
+        seen.lock().unwrap().iter().filter(|(t, _)| *t == terminal).flat_map(|(_, e)| e).find_map(
+            |e| match e {
+                AgentEvent::Permission { id, options, .. } => {
+                    Some((id.clone(), options.iter().map(|o| o.id.clone()).collect()))
+                }
+                _ => None,
+            },
+        )
+    })
+    .await
+    .expect("the sink got a Permission")
+}
+
+/// What was chosen, for every `Resolved` the sink got for `id`.
+fn resolutions(seen: &Seen, id: &str) -> Vec<String> {
+    seen.lock()
+        .unwrap()
+        .iter()
+        .flat_map(|(_, e)| e)
+        .filter_map(|e| match e {
+            AgentEvent::Resolved { id: r, chosen } if r == id => Some(chosen.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn any_permission(seen: &Seen) -> bool {
+    seen.lock()
+        .unwrap()
+        .iter()
+        .flat_map(|(_, e)| e)
+        .any(|e| matches!(e, AgentEvent::Permission { .. }))
+}
+
+/// A claude pane with an ask held on it, and everything a test needs to
+/// answer it or watch it end.
+struct HeldAsk {
+    ingress: HookIngress,
+    terminal: Uuid,
+    seen: Seen,
+    asking: Asking,
+    id: String,
+    socket: std::path::PathBuf,
+    _dir: tempfile::TempDir,
+}
+
+async fn a_held_ask(worktree: &str, hold: Option<Duration>) -> HeldAsk {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, terminal) = store_with_terminal(worktree, "claude", Some("sess-1"));
+    let mut ingress = ingress_claiming(store, &[terminal]);
+    if let Some(hold) = hold {
+        ingress = ingress.with_hold(hold);
+    }
+    let (socket, seen) = listening_on(ingress.clone(), dir.path()).await;
+    let mut asking = Asking::open(&socket, &a_permission_request(Agent::Claude, "sess-1")).await;
+    let first = asking.line(A_LINE).await.expect("the daemon answers a held ask at once");
+    assert!(first.contains("hold_ms"), "the first line is the hold: {first:?}");
+    let (id, _) = the_permission(&seen, terminal).await;
+    HeldAsk { ingress, terminal, seen, asking, id, socket, _dir: dir }
+}
+
+#[tokio::test]
+async fn a_permission_request_from_a_bound_claude_is_held_and_offered() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, terminal) = store_with_terminal("/wt/held", "claude", Some("sess-1"));
+    let (socket, seen) = listening(store, &[terminal], dir.path()).await;
+    let mut asking = Asking::open(&socket, &a_permission_request(Agent::Claude, "sess-1")).await;
+
+    let first = asking.line(FIRST_CONTACT).await.expect("the hook hears back inside its deadline");
+    let hold: serde_json::Value = serde_json::from_str(first.trim()).expect("json");
+    assert_eq!(hold, serde_json::json!({ "hold_ms": 60_000 }), "a hold, and nothing but a hold");
+
+    let (id, options) = the_permission(&seen, terminal).await;
+    assert!(id.starts_with("hook-ask-"), "{id}");
+    assert_eq!(options, ["allow", "deny"]);
+}
+
+#[tokio::test]
+async fn a_permission_request_nobody_claims_is_told_no_decision_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, terminal) = store_with_terminal("/wt/nobody", "claude", Some("sess-1"));
+    let (socket, seen) = listening(store, &[terminal], dir.path()).await;
+    let mut asking =
+        Asking::open(&socket, &a_permission_request(Agent::Claude, "a-session-nobody-declared")).await;
+
+    let first = asking.line(FIRST_CONTACT).await.expect("no decision, said at once");
+    assert_eq!(first, "{}\n");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(seen.lock().unwrap().is_empty(), "an ask nobody can answer offers nothing");
+}
+
+/// A chat pane's permissions arrive over its shim. A hook ask there would be
+/// the same question twice.
+#[tokio::test]
+async fn a_permission_request_from_a_chat_pane_is_told_no_decision_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, terminal) = store_with_terminal("/wt/chat", "claude", Some("sess-1"));
+    let row = store.get_terminal(terminal).unwrap();
+    store
+        .set_pane_mode(terminal, row.resource_version, PaneMode::Agent, Some("sess-1".to_string()), false)
+        .unwrap();
+    let (socket, seen) = listening(store, &[terminal], dir.path()).await;
+    let mut asking = Asking::open(&socket, &a_permission_request(Agent::Claude, "sess-1")).await;
+
+    assert_eq!(asking.line(FIRST_CONTACT).await.as_deref(), Some("{}\n"));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!any_permission(&seen));
+}
+
+/// Codex registers no gate. Its `PermissionRequest` is an ordinary hook line.
+#[tokio::test]
+async fn a_codex_permission_request_is_never_held() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, terminal) = store_with_terminal("/wt/codex-ask", "codex", None);
+    let (socket, seen) = listening(store, &[terminal], dir.path()).await;
+    let mut line = a_permission_request(Agent::Codex, "codex-sess");
+    line.payload["cwd"] = serde_json::json!("/wt/codex-ask");
+    let mut asking = Asking::open(&socket, &line).await;
+
+    assert_eq!(asking.line(Duration::from_millis(500)).await, None, "no reply to a hook that does not gate");
+    assert!(!any_permission(&seen));
+}
+
+#[tokio::test]
+async fn a_held_ask_answered_from_a_device_writes_the_verdict_to_the_hook() {
+    let HeldAsk { ingress, terminal, seen, mut asking, id, .. } = a_held_ask("/wt/answered", None).await;
+
+    let answered = ingress.answer(terminal, &id, "deny", "iPhone").await;
+    assert_eq!(answered, Ok(()), "the verdict reached the hook");
+    let verdict = asking.line(A_LINE).await.expect("the verdict follows the hold");
+    let verdict: serde_json::Value = serde_json::from_str(verdict.trim()).expect("json");
+    assert_eq!(
+        verdict,
+        serde_json::json!({ "decision": { "behavior": "deny", "message": "Denied from iPhone" } })
+    );
+    assert_eq!(resolutions(&seen, &id), ["deny"]);
+}
+
+#[tokio::test]
+async fn a_held_ask_nobody_answers_is_released_with_no_decision_when_the_hold_ends() {
+    let HeldAsk { ingress, terminal, seen, mut asking, id, .. } =
+        a_held_ask("/wt/unanswered", Some(Duration::from_millis(300))).await;
+
+    assert_eq!(asking.line(A_LINE).await.as_deref(), Some("{}\n"), "no decision when the hold ends");
+    assert_eq!(resolutions(&seen, &id), [""]);
+    assert!(!ingress.asks().is_holding(terminal));
+}
+
+#[tokio::test]
+async fn a_hook_that_hangs_up_mid_hold_withdraws_its_ask() {
+    let HeldAsk { ingress, terminal, seen, asking, id, .. } = a_held_ask("/wt/hung-up", None).await;
+
+    drop(asking);
+    let gone = eventually(|| (!ingress.asks().is_holding(terminal)).then_some(())).await;
+    assert!(gone.is_some(), "the ask outlived its hook");
+    assert_eq!(resolutions(&seen, &id), [""]);
+}
+
+/// A turn cannot end with the dialog up, so a `Stop` means the keyboard
+/// answered, whether or not a screen sample saw it.
+#[tokio::test]
+async fn a_stop_from_the_same_session_withdraws_its_held_ask() {
+    let HeldAsk { seen, mut asking, id, socket, _dir, .. } = a_held_ask("/wt/stopped", None).await;
+    send(
+        &socket,
+        &HookLine {
+            agent: Agent::Claude,
+            event: "Stop".to_string(),
+            payload: serde_json::json!({ "session_id": "sess-1" }),
+        },
+    )
+    .await;
+    assert_eq!(asking.line(A_LINE).await.as_deref(), Some("{}\n"));
+    assert_eq!(resolutions(&seen, &id), [""]);
+}

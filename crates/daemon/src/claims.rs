@@ -196,6 +196,13 @@ impl Ledger {
         self.changed.store(true, Ordering::Relaxed);
     }
 
+    /// Hold this ledger's lock until the guard drops, so a test can make
+    /// every claim check wait on it.
+    #[cfg(test)]
+    pub(crate) fn lock_for_test(&self) -> impl Sized + '_ {
+        self.seen.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Whether a claim, or a foreign writer arriving or leaving, happened
     /// since the last call.
     pub fn take_changed(&self) -> bool {

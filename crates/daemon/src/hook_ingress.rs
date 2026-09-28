@@ -12,7 +12,8 @@
 //! week, so it is logged loudly.
 //!
 //! Silence is the shape of every failure on this side, and that is worth
-//! saying plainly. `farcooler hook` bounds its whole conversation at 400ms,
+//! saying plainly. `farcooler hook` bounds its first contact at 400ms (a held
+//! permission ask waits up to a minute more, and only on this side's word),
 //! exits 0 and prints nothing whatever happens — which is the property that
 //! keeps Far Cooler out of the way of somebody's agent, and also means a
 //! listener that is slow, wrong or absent looks from the agent's end exactly
@@ -42,25 +43,26 @@ use farcooler_agent::event::{AgentEvent, Role};
 use farcooler_agent_hooks::Agent;
 use farcooler_agent_hooks::assemble::MessageAssembler;
 use farcooler_agent_hooks::facts::{Facts, facts};
-use farcooler_agent_hooks::wire::{HookLine, decode_line};
+use farcooler_agent_hooks::ask::{is_gate, permission_ask};
+use farcooler_agent_hooks::wire::{HookLine, LONGEST_HOLD, Reply, decode_line, encode_line};
 use farcooler_core::derive;
 use farcooler_core::inventory::{RuntimeInventory, RuntimeSnapshot};
 use farcooler_protocol::v1::TerminalState;
 use farcooler_store::{Store, Terminal};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{UnixListener, UnixStream};
 use uuid::Uuid;
 
-use crate::hook_asks::HookAsks;
+use crate::hook_asks::{AnswerRefused, HookAsks, Settled};
 use crate::transcript_tail::TranscriptTail;
 
 /// How long a connection may say nothing at all before it is dropped.
 ///
-/// NOT a deadline on a decision. `farcooler hook` bounds its whole
-/// conversation at 400ms today, and the design says a permission somebody is
-/// looking at "may take as long as a person takes" — so this is deliberately
-/// far longer than any answer a person would give, and a gating hook added
-/// later must still fit inside it.
+/// NOT a deadline on a decision. `farcooler hook` bounds its first contact at
+/// 400ms, and a held permission ask is bounded by `LONGEST_HOLD` in
+/// `hold_ask`, which does not read under this at all. So this is deliberately
+/// far longer than either.
 ///
 /// It exists because nothing else reclaims a connection. A hook process that
 /// leaked, or a peer that connected and died, holds a descriptor and a task
@@ -181,7 +183,7 @@ pub struct HookIngress {
     /// can call it long after the hook connection that started the tail has
     /// closed. `serve`'s own `on_events: &F` is borrowed from the ONE
     /// connection it is handling and does not outlive it — `farcooler hook`
-    /// bounds a whole conversation at 400ms — while a tail must keep
+    /// bounds a conversation at 400ms, or a minute when held — while a tail must keep
     /// delivering for as long as the terminal exists. `None` until `listen`
     /// has run once; a hook connection reached any other way (a test calling
     /// `accept` directly, say) starts no tail rather than spawning one with
@@ -193,6 +195,9 @@ pub struct HookIngress {
     /// Claude's permission asks, held while a phone may answer them. Shares
     /// `sink`, so an ask's `Resolved` lands where its `Permission` did.
     asks: Arc<HookAsks>,
+    /// How long a held ask waits for a device. `LONGEST_HOLD`, except in
+    /// tests (`with_hold`).
+    hold: std::time::Duration,
 }
 
 /// Free `terminal`'s `tails` slot, but only while it still holds `mine`,
@@ -231,7 +236,30 @@ impl HookIngress {
             asks: Arc::new(HookAsks::new(sink.clone())),
             sink,
             claims,
+            hold: LONGEST_HOLD,
         }
+    }
+
+    /// The same ingress, holding each ask for `hold` rather than
+    /// `LONGEST_HOLD`, so a test of the hold running out takes less than a
+    /// minute.
+    pub fn with_hold(mut self, hold: std::time::Duration) -> Self {
+        self.hold = hold.min(LONGEST_HOLD);
+        self
+    }
+
+    /// A device's answer to the ask held under `id` on `terminal`: `allow`
+    /// or `deny`, and `decider`, the device's name, which a deny carries.
+    ///
+    /// Returns once the verdict is on the hook's socket.
+    pub async fn answer(
+        &self,
+        terminal: Uuid,
+        id: &str,
+        option: &str,
+        decider: &str,
+    ) -> Result<(), AnswerRefused> {
+        self.asks.answer(terminal, id, option, decider).await
     }
 
     /// Short, for `agent_supervisor::socket_path`'s reason.
@@ -743,10 +771,11 @@ impl HookIngress {
         // `Arc::new`-ing a fresh one of the generic `F` this function used to
         // be instantiated with. One sink behind both paths is the whole
         // point: `install_sink`'s own doc says why a tail cannot borrow the
-        // one `serve` gets for the length of a single 400ms connection.
+        // one `serve` gets for the length of a single short connection.
         F: Fn(Uuid, Vec<AgentEvent>) + ?Sized,
     {
-        let mut reader = BufReader::new(stream);
+        let (read, mut write) = stream.into_split();
+        let mut reader = BufReader::new(read);
         let mut line = String::new();
         loop {
             line.clear();
@@ -792,16 +821,33 @@ impl HookIngress {
                 continue;
             };
             let f = facts(hook.agent, &hook.payload);
-            let Some(terminal) = self.terminal_for(&f, hook.agent) else {
+            let terminal = self.terminal_for(&f, hook.agent);
+            if is_gate(hook.agent, &hook.event) {
+                let Some(terminal) = terminal else {
+                    // Said at once. Silence here costs the agent the hook's
+                    // whole 400 ms for an ask nobody can be shown: a session
+                    // no pane claims, an ambiguous one, or a chat pane, whose
+                    // asks arrive over its shim.
+                    tracing::debug!(session = ?f.session_id, "an ask no terminal can take");
+                    write_reply(&mut write, &Reply::verdict(None)).await?;
+                    continue;
+                };
+                return self.hold_ask(terminal, hook, f, reader, write, on_events).await;
+            }
+            let Some(terminal) = terminal else {
                 tracing::debug!(session = ?f.session_id, "a hook from a session no terminal claims");
                 continue;
             };
+            // A turn cannot end or begin with claude's dialog up, so whatever
+            // was asked on this pane has been answered at the keyboard.
+            if hook.agent == Agent::Claude && matches!(hook.event.as_str(), "Stop" | "UserPromptSubmit") {
+                self.asks.turn_boundary(terminal);
+            }
             self.start_transcript_tail(terminal, hook.agent, &f);
             // A store read, and a write when it claims. Nothing waits on it
-            // today: this side never answers a hook, and a hook that isn't
-            // gating hangs up once it has written. A gating hook that comes
-            // back waits for its verdict within `hook::HOOK_DEADLINE`
-            // (400 ms), so its reply goes before this, not after (ov-14).
+            // here: a hook that isn't gating hangs up once it has written. The
+            // gating hook, which does wait, is `hold_ask`'s, and there this
+            // runs after the reply.
             self.observe_cwd(terminal, hook.agent, &f);
 
             let events =
@@ -809,6 +855,94 @@ impl HookIngress {
             if !events.is_empty() {
                 on_events(terminal, events);
             }
+        }
+    }
+
+    /// Hold a gating hook's ask until a device, the keyboard or the clock
+    /// ends it, and write the hook its verdict.
+    ///
+    /// In this order, because the hook hears nothing after its 400 ms:
+    /// hold the ask, reply with the hold, and only then offer it (a
+    /// `Permission` for an ask whose hook had already gone would be a button
+    /// nothing answers) and check the claim. The claim check is a store read
+    /// and maybe a write, under the claims ledger's lock, and it runs off this
+    /// task, so none of that can make the reply late.
+    ///
+    /// One ask per connection: the hook reads its verdict and hangs up.
+    async fn hold_ask<F>(
+        &self,
+        terminal: Uuid,
+        hook: HookLine,
+        f: Facts,
+        mut reader: BufReader<OwnedReadHalf>,
+        mut write: OwnedWriteHalf,
+        on_events: &F,
+    ) -> std::io::Result<()>
+    where
+        F: Fn(Uuid, Vec<AgentEvent>) + ?Sized,
+    {
+        let (id, mut settled) = self.asks.hold(terminal);
+        if let Err(e) = write_reply(&mut write, &Reply::hold(self.hold)).await {
+            // The hook missed its deadline and has gone. Nobody was offered
+            // this ask, so it ends with nothing to take back.
+            self.asks.abandon(terminal, &id);
+            return Err(e);
+        }
+        on_events(terminal, vec![permission_ask(&id, &hook.payload)]);
+        let this = self.clone();
+        tokio::task::spawn_blocking(move || {
+            this.start_transcript_tail(terminal, hook.agent, &f);
+            this.observe_cwd(terminal, hook.agent, &f);
+            let events =
+                this.accept(terminal, hook.agent, &hook.event, &hook.payload, f.session_id.as_deref());
+            let sink = this.sink.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            if let (false, Some(sink)) = (events.is_empty(), sink) {
+                sink(terminal, events);
+            }
+        });
+
+        let ended = tokio::select! {
+            ended = &mut settled => ended.ok(),
+            () = tokio::time::sleep(self.hold) => {
+                // Withdrawn, unless something ended it first; either way it
+                // has ended now, and `settled` says how.
+                self.asks.withdraw(terminal, &id);
+                (&mut settled).await.ok()
+            }
+            () = hung_up(&mut reader) => {
+                self.asks.withdraw(terminal, &id);
+                return Ok(());
+            }
+        };
+        let Some(Settled { decision, ack }) = ended else { return Ok(()) };
+        write_reply(&mut write, &Reply::verdict(decision)).await?;
+        // Only now is a device told its answer landed. A write that failed
+        // drops `ack`, and the device hears that instead.
+        if let Some(ack) = ack {
+            let _ = ack.send(());
+        }
+        Ok(())
+    }
+}
+
+/// One line to a hook.
+async fn write_reply(write: &mut OwnedWriteHalf, reply: &Reply) -> std::io::Result<()> {
+    let line = encode_line(reply).map_err(std::io::Error::other)?;
+    write.write_all(line.as_bytes()).await
+}
+
+/// Resolves when the hook's side of the connection is gone.
+///
+/// A held hook writes nothing more, so anything it does send is discarded;
+/// what matters is EOF or an error, which is claude exiting, the pane dying,
+/// or the hook being killed at its `timeout`.
+async fn hung_up(reader: &mut BufReader<OwnedReadHalf>) {
+    let mut discard = String::new();
+    loop {
+        discard.clear();
+        match reader.read_line(&mut discard).await {
+            Ok(0) | Err(_) => return,
+            Ok(_) => {}
         }
     }
 }
@@ -996,6 +1130,84 @@ mod tests {
     // -- start_transcript_tail: the side effect `serve` reaches for codex
     // and cursor -- exercised directly against `install_sink`, without a
     // real socket, since `listen` never returns except on a broken listener.
+
+    /// The hook hears back inside its 400 ms whatever the claim check costs.
+    ///
+    /// `observe_cwd` is a store read, a write when it claims, and the claims
+    /// ledger's lock. A claude hook's `cwd` inside its pane's own worktree
+    /// reaches that lock (`claims::observe_in` settles an owned worktree), so
+    /// holding it here stands in for a claim check that is slow for any
+    /// reason. Multi-threaded, because the check that waits on it must not
+    /// take the only thread the reply could be written from.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_reply_does_not_wait_for_the_claim_check() {
+        use farcooler_protocol::v1::TerminalIntent;
+        use farcooler_store::models::{ClaimSource, PaneMode};
+
+        let dir = tempfile::tempdir().expect("dir");
+        let root = std::fs::canonicalize(dir.path()).expect("canonical");
+        let repo_path = root.join("repo");
+        std::fs::create_dir_all(&repo_path).expect("repo dir");
+        let store = Store::open_in_memory().expect("store");
+        let host = Uuid::now_v7();
+        let root_row = store.create_repository_root(host, &root.to_string_lossy(), 1_000).unwrap();
+        let repo = store
+            .create_repository(host, root_row.id, "repo", &repo_path.join(".git").to_string_lossy(), "")
+            .unwrap();
+        let main = store.ensure_main_workspace(repo.id).unwrap();
+        let checkout = store.create_worktree(repo.id, "main", &repo_path.to_string_lossy(), true).unwrap();
+        store.claim_worktree(checkout.id, main.id, ClaimSource::Explicit).unwrap();
+        let term = store.create_terminal(checkout.id, "pane", "claude", TerminalIntent::Running, 80, 24).unwrap();
+        let term = store.set_terminal_workspace(term.id, main.id).unwrap();
+        store
+            .set_pane_mode(term.id, term.resource_version, PaneMode::Terminal, Some("sess-1".to_string()), false)
+            .unwrap();
+
+        let claims = Arc::new(crate::claims::Ledger::default());
+        let inventory: Arc<dyn RuntimeInventory> =
+            Arc::new(farcooler_core::inventory::FakeInventory::default());
+        let ingress = HookIngress::new(Arc::new(store), inventory, claims.clone());
+        let sock = tempfile::tempdir().expect("dir");
+        {
+            let ingress = ingress.clone();
+            let sock = sock.path().to_path_buf();
+            tokio::spawn(async move { ingress.listen(&sock, |_, _| {}).await });
+        }
+        let socket = HookIngress::socket_path(sock.path());
+        for _ in 0..200 {
+            if socket.exists() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        let busy = claims.lock_for_test();
+        let line = HookLine {
+            agent: Agent::Claude,
+            event: "PermissionRequest".to_string(),
+            payload: serde_json::json!({
+                "session_id": "sess-1",
+                "cwd": repo_path,
+                "tool_name": "Bash",
+                "tool_input": { "command": "touch x" },
+            }),
+        };
+        // A std socket with the kernel's read timeout, not tokio's timer:
+        // with a worker parked in the claim check, nothing is certain to
+        // drive tokio's time driver, and a test that hangs proves nothing.
+        let frame = farcooler_agent_hooks::wire::encode_line(&line).expect("encode");
+        let mut stream = std::os::unix::net::UnixStream::connect(&socket).expect("connect");
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(1))).expect("timeout");
+        std::io::Write::write_all(&mut stream, frame.as_bytes()).expect("write");
+        let mut reply = String::new();
+        let heard = std::io::BufRead::read_line(&mut std::io::BufReader::new(&stream), &mut reply);
+        drop(busy);
+        assert!(
+            matches!(heard, Ok(n) if n > 0),
+            "the hook heard nothing while the claim check waited: {heard:?}"
+        );
+        assert!(reply.contains("hold_ms"), "{reply:?}");
+    }
 
     fn ingress_for_test() -> HookIngress {
         let store = Arc::new(Store::open_in_memory().expect("store"));
