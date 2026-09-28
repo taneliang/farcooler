@@ -396,7 +396,27 @@ final class WatchLinkHost: NSObject {
                 },
                 observedAt: Date())
         }
-        GlancePermissionStore.update { $0.recording(observed, for: terminal) }
+        // Written and redrawn only when the ask CHANGED. The fleet poll files
+        // every blocked pane every three seconds (`Connection.readAsks`), and
+        // the card reads this file only when it is drawn: a new ask filed after
+        // the push that raised the card would otherwise sit unseen until the
+        // next push, and a withdrawn one would leave its buttons up.
+        guard let next = GlancePermissionStore.read().filing(observed, for: terminal) else { return }
+        GlancePermissionStore.write(next)
+        Task { await redraw(leading: terminal) }
+    }
+
+    /// What a blocked pane on `connection` is asking, for the fleet poll.
+    ///
+    /// The same read the watch's question makes. `nil` when it could not be
+    /// read, which establishes nothing; `.some(nil)` when the pane is asking
+    /// nothing.
+    func readAsk(terminal: String, on connection: Connection) async -> WatchPermission?? {
+        guard
+            case let .permission(found) = await pendingPermission(
+                terminal: terminal, on: connection, within: Self.replayBudget)
+        else { return nil }
+        return .some(found)
     }
 
     /// One core call, reported as `sent` or as a sentence.

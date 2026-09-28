@@ -401,6 +401,10 @@ AGENTKIT_SOURCES = [
     # every scroll test would skip rather than fail — so it is guarded by
     # `swift test --package-path apps/shared/AgentKit`, which CI does run.
     "TerminalScreenAsk.swift",
+    # Which blocked panes the fleet poll reads a permission off, so the lock
+    # screen card can offer Allow and Deny for a claude TUI pane. App only: the
+    # extensions reach no runner. See `BlockedAskLookupsTests`.
+    "BlockedAskLookups.swift",
     # The board: its model, which agent is on which card, and which
     # repositories get a Board row in the overview. The Mac has drawn the first
     # two since card -19; the phone draws the same cards off the same rules, so

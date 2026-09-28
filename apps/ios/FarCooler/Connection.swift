@@ -1007,6 +1007,10 @@ final class Connection: ObservableObject {
                 }
             }
 
+            // And write down what each blocked agent is asking, for the lock
+            // screen card. See `readAsks`.
+            readAsks()
+
             // And end `done` for whatever is on screen, from the same fleet.
             //
             // Here as well as on the taps in `TerminalView`, because an agent
@@ -1049,6 +1053,38 @@ final class Connection: ObservableObject {
         // without reaching it, so a fleet nobody could read is never followed
         // by counts describing it.
         await loadInbox()
+    }
+
+    // MARK: - Asks for the lock screen
+
+    /// Which blocked panes are being read. See `BlockedAskLookups`.
+    private var askLookups = BlockedAskLookups()
+
+    /// Read what each blocked agent on this runner is asking, and file it where
+    /// the lock screen card reads its Allow and Deny from.
+    ///
+    /// Without this, a claude TUI pane's ask (the `Permission` the daemon
+    /// records while it holds claude's `PermissionRequest` hook) reached the
+    /// card with no buttons unless a watch had asked about it: the only other
+    /// writer, `AgentStream`, runs only for a chat pane on screen.
+    ///
+    /// Only while this app runs. Nothing wakes a suspended app when a pane
+    /// blocks, so a phone that was in a pocket the whole time still shows the
+    /// card's tap target and no buttons.
+    private func readAsks() {
+        let blocked = Set(
+            fleet.worktrees.flatMap(\.terminals).filter { $0.agent == .blocked }.map(\.id))
+        let step = askLookups.poll(blocked: blocked)
+        for terminal in step.clear { WatchLinkHost.record(nil, for: terminal) }
+        for terminal in step.read {
+            Task { [weak self] in
+                guard let self else { return }
+                let found = await WatchLinkHost.shared.readAsk(terminal: terminal, on: self)
+                // Not filed if a poll since said the pane is no longer blocked.
+                guard askLookups.finished(terminal), let found else { return }
+                WatchLinkHost.record(found, for: terminal)
+            }
+        }
     }
 
     // MARK: - Attention
