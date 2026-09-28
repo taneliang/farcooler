@@ -298,46 +298,6 @@ extension ContentView {
         return nil
     }
 
-    /// The orchestrator row `selection` stands for, if it is one: the pane
-    /// an orchestrator row drew, in the checkout it runs in.
-    ///
-    /// Taken from the rows rather than from the terminal's role, so it is the
-    /// same decision the sidebar made: a stopped orchestrator the runner no
-    /// longer seats is drawn among its checkout's terminals, and is framed as
-    /// one of them.
-    static func orchestratorRow(for selection: Selection?, in rows: [SidebarEntry]) -> SidebarEntry? {
-        guard case .terminal(let host, let worktree, let terminal) = selection else { return nil }
-        return rows.first {
-            $0.kind == .orchestrator && $0.host == host
-                && $0.orchestrator?.terminal.id == terminal && $0.orchestrator?.worktree.id == worktree
-        }
-    }
-
-    /// What the detail pane draws around a selected pane: which of its
-    /// worktree's layouts the bar offers, and the window's title.
-    ///
-    /// A worktree's own pane gets that worktree's own layouts — `ownLayouts`,
-    /// without the orchestrators' windows — and its title. A pane in a layout that isn't one of those (a shell moved into
-    /// an orchestrator's window) gets that layout alone.
-    ///
-    /// An orchestrator's pane is in the checkout only because that is where
-    /// the runner opens it: it gets its own layout and no bar — the
-    /// checkout's other layouts are Main's shells and the other workspaces'
-    /// orchestrators — and it is titled with its workspace, as the board is.
-    static func detailFrame(
-        _ worktree: Worktree, layouts: [PaneGroup]?, holding group: PaneGroup, seat: SidebarEntry?
-    ) -> (groups: [PaneGroup], title: String, subtitle: String) {
-        guard let seat, let workspace = seat.workspace else {
-            let own = ownLayouts(layouts ?? [group], of: worktree)
-            let groups = own.contains { $0.id == group.id } ? own : [group]
-            return (groups, worktree.windowTitle, worktree.windowSubtitle)
-        }
-        let subtitle = [seat.project, "Orchestrator", seat.host.isEmpty ? nil : seat.host]
-            .compactMap { $0 }
-            .joined(separator: " · ")
-        return ([group], workspace.name, subtitle)
-    }
-
     /// The orchestrators the runner lists in `worktree`, by their role:
     /// what `ownLayouts` leaves out of the checkout they run in.
     ///
@@ -362,7 +322,7 @@ extension ContentView {
     ///
     /// A stopped orchestrator the runner no longer seats is drawn among the
     /// checkout's terminals, and its window is left out all the same:
-    /// selecting it shows that window alone. See `detailFrame`.
+    /// selecting it shows that window alone. See `WorkspaceScreen.shown`.
     static func ownLayouts(_ groups: [PaneGroup], of worktree: Worktree) -> [PaneGroup] {
         let orchestrators = orchestrators(in: worktree)
         guard !orchestrators.isEmpty else { return groups }
@@ -406,20 +366,14 @@ extension ContentView {
         of selection: Selection, in fleet: Fleet
     ) -> (host: String, worktree: Worktree?, id: String?)? {
         switch selection {
-        case .board(let host, let id):
+        case .needsYou:
+            return nil
+        case .workspace(let host, let id, _):
             return (host, nil, id)
-        case .worktree(let host, let id), .terminal(let host, let id, _):
+        case .looseWorktree(let host, let id, _):
             guard
                 let worktree = fleet.worktrees.first(where: { ($0.host ?? "") == host && $0.id == id })
             else { return nil }
-            if case .terminal(_, _, let terminal) = selection,
-                let conductor = worktree.terminals.first(where: { $0.id == terminal }),
-                conductor.isOrchestrator, let workspace = conductor.workspace
-            {
-                // Drawn under its own workspace, which need not be the
-                // checkout's owner.
-                return (host, worktree, workspace)
-            }
             return (host, worktree, worktree.workspace)
         }
     }

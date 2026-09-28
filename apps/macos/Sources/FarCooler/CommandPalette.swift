@@ -28,7 +28,7 @@ struct CommandPalette: View {
     /// What the window is looking at, used for two small things: which tile the
     /// highlight avoids starting on, and where a new terminal goes when the
     /// query matched no worktree.
-    let current: ContentView.Selection?
+    let current: PaneRef?
     /// A terminal's rendered screen. Passed as a function rather than as a
     /// `DaemonClient`, so the panel has no way to write anything — it can look
     /// and it can report what was chosen, and nothing else.
@@ -85,18 +85,9 @@ struct CommandPalette: View {
         return worktrees.lazy.flatMap(\.terminals).first { $0.id == currentTerminal }
     }
 
-    private var currentWorktree: String? {
-        switch current {
-        case .worktree(_, let id): return id
-        case .terminal(_, let worktree, _): return worktree
-        case .board, nil: return nil
-        }
-    }
+    private var currentWorktree: String? { current?.worktree }
 
-    private var currentTerminal: String? {
-        if case .terminal(_, _, let id) = current { return id }
-        return nil
-    }
+    private var currentTerminal: String? { current?.terminal }
 
     /// The terminals the panel is currently showing a picture of.
     ///

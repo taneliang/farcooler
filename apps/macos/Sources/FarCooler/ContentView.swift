@@ -126,24 +126,14 @@ struct ContentView: View {
     /// A Replace Orchestrator waiting on its confirmation.
     @State private var orchestratorReplacement: OrchestratorReplacement?
 
-    /// What the detail pane is showing.
-    ///
-    /// Carries the host alongside the id. A worktree's own id is a full
-    /// per-daemon UUID and is not expected to collide across runners, but
-    /// resolving a selection means finding both the worktree AND the client
-    /// that owns it, and `FleetStore.client(for:)` — deliberately, see its own
-    /// doc comment — never routes by id alone. Matching on host as well here
-    /// keeps that same rule rather than leaning on id uniqueness as the only
-    /// thing standing between a click and the right runner.
-    enum Selection: Hashable {
-        case worktree(host: String, id: String)
-        case terminal(host: String, worktree: String, terminal: String)
-        /// A workspace's board, by the workspace's uuid — or by the
-        /// repository's, on a runner without workspaces, where that is the
-        /// one board. The row above its worktrees in the sidebar, and where
-        /// ⇧⌘B goes.
-        case board(host: String, workspace: String)
-    }
+    /// The pane last clicked or focused, which the keyboard acts on while
+    /// it's on screen. See `WorkspaceScreen.keyPane`: with a task open, the
+    /// conversation and the task's agent are both on screen, and ⌃B has to
+    /// act on the one you were last in.
+    @State private var keyPane: PaneRef?
+    /// The agent each task's column shows, by task id, when several are on
+    /// it and one was picked.
+    @State private var chosenAgents: [String: String] = [:]
 
     /// What confirming a pane-mode switch would do, and to which pane.
     struct PaneModeConfirmation: Identifiable {
@@ -247,11 +237,6 @@ struct ContentView: View {
         // Recorded as it changes rather than on quit: an app that is force
         // quit, crashes, or is killed by a rebuild never gets a last word, and
         // this is exactly the state worth surviving all three.
-        .onChange(of: selection) { _, now in
-            if case let .terminal(host, worktree, terminal) = now {
-                lastTerminal = "\(host)/\(worktree)/\(terminal)"
-            }
-        }
         // Tells the menu bar the main window is key, and whether an overlay
         // is open over it. See `MainWindowFocus`.
         .focusedSceneValue(
@@ -309,11 +294,13 @@ struct ContentView: View {
             // charge — so clicking Terminal 6 landed you on whichever pane of that
             // layout you had used last. `⌘P` had the same fault for the same
             // reason: both set a selection and let the layout overrule it.
-            if case .terminal(let host, let wsID, let termID) = new,
-                let worktree = worktree(host: host, id: wsID),
+            let arrived = WorkspaceScreen.keyPane(nil, in: shownLayouts(for: new), selection: new)
+            keyPane = arrived
+            if let arrived,
+                let worktree = worktree(host: arrived.host, id: arrived.worktree),
                 let c = store.client(for: worktree),
-                let holder = c.group(holding: termID, in: wsID),
-                let pane = holder.pane(termID),
+                let holder = c.group(holding: arrived.terminal, in: arrived.worktree),
+                let pane = holder.pane(arrived.terminal),
                 !holder.isActive || !pane.focused
             {
                 Task {
@@ -334,7 +321,7 @@ struct ContentView: View {
             // one case where the row's choice differs from the runner's. Any
             // other row shows the window tmux already calls active, and
             // selecting it moves nothing on the runner.
-            if case .worktree(let host, let wsID) = new,
+            if let (host, wsID) = Self.openedWhole(new),
                 let worktree = worktree(host: host, id: wsID),
                 let c = store.client(for: worktree),
                 let active = c.activeGroup(wsID),
@@ -349,13 +336,13 @@ struct ContentView: View {
                 }
             }
 
-            if case .terminal(_, _, let id) = new {
+            if let arrived {
                 // Stamped here rather than in the palette, so every way of
                 // arriving counts: a sidebar click, ⌘], ⌃B o, a jump from the
                 // palette itself. A switcher that only learned from its own
                 // choices would order by where you had used IT, not by where you
                 // have been.
-                VisitLog.shared.visited(id)
+                VisitLog.shared.visited(arrived.terminal)
             }
 
             // Opening a terminal is what ends `done`. Being LISTED is still not
@@ -433,7 +420,7 @@ struct ContentView: View {
                         .onTapGesture { showPalette = false }
                     CommandPalette(
                         worktrees: store.fleet.worktrees,
-                        current: selection,
+                        current: selectedPane,
                         screen: { short in await screen(forTerminalShort: short) },
                         onRun: { perform($0) },
                         onClose: { showPalette = false }
@@ -931,8 +918,8 @@ struct ContentView: View {
                 store: boardStore(for: board, client: client, host: entry.host),
                 client: client,
                 agents: boardAgents(host: entry.host, client: client),
-                isSelected: selection == .board(host: entry.host, workspace: board.id),
-                onSelect: { selection = .board(host: entry.host, workspace: board.id) })
+                isSelected: selection?.host == entry.host && selection?.workspace == board.id,
+                onSelect: { selection = .workspace(host: entry.host, workspace: board.id, focus: nil) })
         }
     }
 
@@ -941,12 +928,10 @@ struct ContentView: View {
     /// start one.
     private func orchestratorRow(_ entry: SidebarEntry) -> some View {
         let pane = entry.orchestrator
-        let target = pane.map {
-            Selection.terminal(host: entry.host, worktree: $0.worktree.id, terminal: $0.terminal.id)
-        }
         let workspace = entry.workspace
+        let target = workspace.map { Selection.workspace(host: entry.host, workspace: $0.id, focus: nil) }
         return OrchestratorRow(
-            pane: pane, isSelected: target != nil && selection == target,
+            pane: pane, isSelected: false,
             onSelect: { if let target { selection = target } },
             isStarting: workspace.map { startingOrchestrators.isStarting($0, host: entry.host) } ?? false,
             onStart: workspace.flatMap { workspace in
@@ -965,7 +950,7 @@ struct ContentView: View {
             hasBoard: store.clients[host]?.daemonBuild?.can("tasks") == true,
             hasOrchestrator: entry.orchestrator != nil,
             charter: CharterAccess.of(workspace, host: host),
-            onShowBoard: { selection = .board(host: host, workspace: workspace.id) },
+            onShowBoard: { selection = .workspace(host: host, workspace: workspace.id, focus: nil) },
             onStart: { harness, replace in
                 switch OrchestratorRequest(harness: harness, replace: replace) {
                 case .confirmReplace(let harness):
@@ -1026,15 +1011,12 @@ struct ContentView: View {
     /// `BoardPane.landing`: its worktree when the pane has gone, and the
     /// board with a sentence when the worktree has too.
     private func go(to pane: BoardPane) {
-        switch BoardPane.landing(for: pane, in: store.fleet.worktrees) {
-        case .terminal(let host, let worktree, let terminal):
-            expanded.insert(worktree)
-            selection = .terminal(host: host, worktree: worktree, terminal: terminal)
-        case let landed?:
-            selection = landed
-        case nil:
+        guard let landed = BoardPane.landing(for: pane, in: store.fleet) else {
             errorBanner = "That agent has closed, and its worktree is gone."
+            return
         }
+        expanded.insert(pane.worktree.id)
+        selection = landed
     }
 
     /// One row of the sidebar, drawn from its entry.
@@ -1598,7 +1580,8 @@ struct ContentView: View {
         return WorktreeSection(
             worktree: ws,
             isExpanded: expanded.contains(ws.id),
-            selection: $selection,
+            selected: Self.selected(in: ws, by: selection),
+            onSelect: { terminal in selection = Self.opening(ws, terminal: terminal, in: store.fleet) },
             onToggle: { toggle(ws.id) },
             onNewTerminal: { newTerminal(in: ws) },
             onHide: {
@@ -1751,7 +1734,7 @@ struct ContentView: View {
     /// exactly like a workspace with somebody else's work on it. See
     /// `ContentView.boardWorkspace(for:in:)`.
     private var boardTarget: (host: String, workspace: WorkspaceSummary)? {
-        if let selection, let host = Self.host(of: selection) {
+        if let selection, let host = selection.host {
             if let found = Self.boardWorkspace(for: selection, in: store.fleet) {
                 return (host, found)
             }
@@ -1771,13 +1754,6 @@ struct ContentView: View {
             $0.isMain && $0.repository == only.repository.id
         }
         return (only.host, main ?? .implicit(repository: only.repository.id))
-    }
-
-    /// Which runner a selection is on.
-    private static func host(of selection: Selection) -> String? {
-        switch selection {
-        case .worktree(let host, _), .terminal(let host, _, _), .board(let host, _): return host
-        }
     }
 
     /// The board a `.board` selection names, as its runner lists it now: a
@@ -1809,128 +1785,44 @@ struct ContentView: View {
         return made
     }
 
+    /// Every layout the detail draws for `selection`. See `WorkspaceScreen`.
+    private func shownLayouts(for selection: Selection?) -> [ShownLayout] {
+        WorkspaceScreen.shown(
+            selection, in: store.fleet,
+            layouts: { host, worktree in store.clients[host]?.layouts[worktree] },
+            repositories: { host in store.clients[host]?.repositories.map(\.id) ?? [] },
+            chosen: { chosenAgents[$0] })
+    }
+
+    /// What the detail draws now.
+    private var shown: [ShownLayout] { shownLayouts(for: selection) }
+
     @ViewBuilder
     private var detail: some View {
         switch selection {
-        case .terminal(let host, let wsID, let termID):
-            // Every terminal is in a layout now — it IS a tmux window, and a
-            // window IS a layout — so the second branch is reached only in the
-            // seconds before the first `layout show` comes back, and after that
-            // never. It is kept because "we have not read the layouts yet" and
-            // "this terminal is in no layout" look identical from here, and
-            // showing the terminal is the right answer to both.
-            //
-            // The condition deliberately asks whether the terminal is in ANY
-            // layout rather than in the ACTIVE one. It used to ask the latter, so
-            // selecting a pane belonging to a different layout showed it on its
-            // own and the view bounced between arrangement and single terminal as
-            // you clicked down the sidebar.
-            //
-            // And that same layout is the one DRAWN — it used to be a guard whose
-            // answer was thrown away in favour of `activeGroup`. Selecting a pane
-            // asks the runner to focus it, and focusing brings its layout
-            // forward, but that is a `farcooler` process and a `tmux
-            // select-window` away: until it answered, the runner still called the
-            // layout you left active, so the pane on screen was another
-            // terminal's, drawn live and indistinguishable from the one asked
-            // for. Measured at 123ms and 269ms of that on a quiet local runner.
-            //
-            // An orchestrator's pane is framed as its workspace's, not as the
-            // checkout's it happens to run in. See `detailFrame`.
-            if let ws = worktree(host: host, id: wsID),
-                let c = store.client(for: ws),
-                let group = c.group(holding: termID, in: wsID)
-            {
-                let rows = Self.sidebarRows(fleet: store.fleet)
-                tiled(
-                    ws, client: c, group: group,
-                    seat: Self.orchestratorRow(for: selection, in: rows))
-            } else if let ws = worktree(host: host, id: wsID),
-                let term = ws.terminals.first(where: { $0.id == termID })
-            {
-                TerminalPane(
-                    terminal: term,
-                    worktree: ws,
-                    binary: store.client(for: ws)?.cliPath,
-                    environment: store.client(for: ws)?.cliEnvironment ?? [:],
-                    hostArguments: store.client(for: ws)?.cliHostArguments ?? [],
-                    linkGeneration: store.client(for: ws)?.linkGeneration ?? 0,
-                    refusal: { store.refusal(for: ws) },
-                    onGeometry: { cols, rows in
-                        // Not routed through `act(on:_:)`, deliberately: this
-                        // fires from window and pane geometry, not a click —
-                        // the same reasoning `markVisibleSeen()` documents
-                        // above. Selecting a row on a sleeping machine is
-                        // exactly what the design wants readable, and a
-                        // window resize while it's selected must not put
-                        // "Cannot do that" over a pane nobody touched.
-                        await store.client(for: ws)?.resize(
-                            terminal: term.short, columns: cols, rows: rows)
-                    },
-                    onSearchFiles: { query in
-                        await store.client(for: ws)?.searchFiles(in: ws, query: query) ?? []
-                    },
-                    onAction: { action in Task { await run(action, on: term, in: ws) } }
-                )
+        case .needsYou:
+            ContentUnavailableView {
+                Label("Needs You", systemImage: "tray")
+            } description: {
+                Text(store.needsYou.isEmpty ? "Nothing needs you." : "\(store.needsYou.count) waiting on you.")
+            }
+
+        case .looseWorktree(let host, let id, _):
+            if let front = shown.last {
+                tiled(front)
+            } else if let ws = worktree(host: host, id: id) {
+                worktreeDetail(ws)
             } else {
                 placeholder
             }
 
-        case .worktree(let host, let wsID):
-            // A worktree with a layout shows the layout. The card list was the
-            // right answer when a worktree had no arrangement of its own; once
-            // it does, showing a summary of the panes instead of the panes is a
-            // click in the way.
-            //
-            // Its own layout: never an orchestrator's window, which tmux calls
-            // the main checkout's active one once it has been focused. See
-            // `ownLayouts`.
-            if let ws = worktree(host: host, id: wsID),
-                let c = store.client(for: ws),
-                let group = Self.shownLayout(c.layouts[wsID], of: ws),
-                !group.terminals.isEmpty
-            {
-                tiled(ws, client: c, group: group)
-            } else if let ws = worktree(host: host, id: wsID) {
-                WorktreeDetail(
-                    worktree: ws,
-                    onNewTerminal: { newTerminal(in: ws) },
-                    onHide: { Task { await act(on: ws) { c in await c.hideWorktree(ws.short) } } },
-                    onUnhide: { Task { await act(on: ws) { c in await c.unhideWorktree(ws.short) } } },
-                    onRemove: { removeWorktree = ws },
-                    onOpenTerminal: { t in
-                        selection = .terminal(host: host, worktree: ws.id, terminal: t.id)
-                    }
-                )
+        case .workspace(let host, let id, let focus):
+            if focus != nil, let front = shown.last(where: { $0.column != .conversation }) {
+                tiled(front)
+            } else if case .worktree(let wt, _)? = focus, let ws = worktree(host: host, id: wt) {
+                worktreeDetail(ws)
             } else {
-                placeholder
-            }
-
-        case .board(let host, let id):
-            if let client = store.clients[host], let workspace = board(host: host, id: id),
-                let repository = client.repositories.first(where: {
-                    $0.id == (workspace.repository ?? workspace.id)
-                })
-            {
-                TaskBoardView(
-                    store: boardStore(for: workspace, client: client, host: host),
-                    client: client,
-                    agents: boardAgents(host: host, client: client),
-                    onGoTo: { pane in go(to: pane) }
-                )
-                // The workspace, and the repository it is in beneath it; the
-                // repository alone on a runner without workspaces, as before.
-                .navigationTitle(workspace.isImplicit ? repository.displayName : workspace.name)
-                .navigationSubtitle(
-                    workspace.isImplicit ? "Board" : "\(repository.displayName) · Board")
-            } else {
-                // Said, rather than the generic "Select a worktree": this
-                // was a board, and the reader should know where it went.
-                ContentUnavailableView {
-                    Label("This board isn’t here", systemImage: "checklist")
-                } description: {
-                    Text(missingBoardSentence(host: host))
-                }
+                boardColumn(host: host, id: id)
             }
 
         case nil:
@@ -1938,29 +1830,83 @@ struct ContentView: View {
         }
     }
 
-    /// The layout, wired up.
+    /// A worktree with no layout yet: its card of terminals.
+    private func worktreeDetail(_ ws: Worktree) -> some View {
+        WorktreeDetail(
+            worktree: ws,
+            onNewTerminal: { newTerminal(in: ws) },
+            onHide: { Task { await act(on: ws) { c in await c.hideWorktree(ws.short) } } },
+            onUnhide: { Task { await act(on: ws) { c in await c.unhideWorktree(ws.short) } } },
+            onRemove: { removeWorktree = ws },
+            onOpenTerminal: { t in
+                selection = Self.opening(ws, terminal: t.id, in: store.fleet)
+            }
+        )
+    }
+
+    /// A workspace's board, or a sentence saying where it went.
+    @ViewBuilder
+    private func boardColumn(host: String, id: String) -> some View {
+        if let client = store.clients[host], let workspace = board(host: host, id: id),
+            let repository = client.repositories.first(where: {
+                $0.id == (workspace.repository ?? workspace.id)
+            })
+        {
+            TaskBoardView(
+                store: boardStore(for: workspace, client: client, host: host),
+                client: client,
+                agents: boardAgents(host: host, client: client),
+                onGoTo: { pane in go(to: pane) }
+            )
+            // The workspace, and the repository it is in beneath it; the
+            // repository alone on a runner without workspaces, as before.
+            .navigationTitle(workspace.isImplicit ? repository.displayName : workspace.name)
+            .navigationSubtitle(
+                workspace.isImplicit ? "Board" : "\(repository.displayName) · Board")
+        } else {
+            // Said, rather than the generic "Select a worktree": this
+            // was a board, and the reader should know where it went.
+            ContentUnavailableView {
+                Label("This board isn’t here", systemImage: "checklist")
+            } description: {
+                Text(missingBoardSentence(host: host))
+            }
+        }
+    }
+
+    /// One shown layout, wired up.
     ///
-    /// One builder for both selections. Selecting a pane and selecting the
-    /// worktree it is in put the same view on screen with the same six callbacks,
-    /// and while they were written out twice they drifted: the drag handler was
-    /// fixed in one copy and not the other, so dropping a pane behaved differently
-    /// depending on which sidebar row you had clicked last.
+    /// One builder for every column. Selecting a pane and selecting the
+    /// worktree it is in put the same view on screen with the same six
+    /// callbacks, and while they were written out twice they drifted: the drag
+    /// handler was fixed in one copy and not the other, so dropping a pane
+    /// behaved differently depending on which sidebar row you had clicked last.
+    @ViewBuilder
+    private func tiled(_ shown: ShownLayout) -> some View {
+        let ws = shown.worktree
+        if let client = store.client(for: ws) {
+            tiled(shown, client: client, frame: Self.frame(of: shown, in: store.fleet))
+        } else {
+            placeholder
+        }
+    }
+
     private func tiled(
-        _ ws: Worktree, client: DaemonClient, group: PaneGroup, seat: SidebarEntry? = nil
+        _ shown: ShownLayout, client: DaemonClient, frame: (title: String, subtitle: String)
     ) -> some View {
-        let frame = Self.detailFrame(ws, layouts: client.layouts[ws.id], holding: group, seat: seat)
+        let ws = shown.worktree
         return TileView(
-            groups: frame.groups,
-            showing: group.id,
+            groups: shown.groups,
+            showing: shown.group.id,
             worktree: ws,
             changes: changesStore(for: ws, client: client),
-            binary: store.client(for: ws)?.cliPath,
-            environment: store.client(for: ws)?.cliEnvironment ?? [:],
-            hostArguments: store.client(for: ws)?.cliHostArguments ?? [],
-            linkGeneration: store.client(for: ws)?.linkGeneration ?? 0,
+            binary: client.cliPath,
+            environment: client.cliEnvironment,
+            hostArguments: client.cliHostArguments,
+            linkGeneration: client.linkGeneration,
             refusal: { store.refusal(for: ws) },
             onFocus: { id in
-                selection = .terminal(host: ws.host ?? "", worktree: ws.id, terminal: id)
+                focus(PaneRef(host: ws.host ?? "", worktree: ws.id, terminal: id))
                 guard let pane = store.client(for: ws)?.group(holding: id, in: ws.id)?.pane(id)
                 else { return }
                 Task { await act(on: ws) { c in await c.focusPane(pane.short, in: ws) } }
@@ -1978,14 +1924,14 @@ struct ContentView: View {
             onDropOnPane: { dragged, target, side in
                 placePane(dragged, onto: target, side: side, in: ws)
             },
-            onViewport: { shown, columns, rows in
+            onViewport: { layout, columns, rows in
                 // Not routed through `act(on:_:)` — see `onGeometry`'s
                 // comment above: this fires from pane geometry, not a click.
                 //
                 // The layout drawn, by name: tmux's active window can be an
                 // orchestrator's while the checkout's own is on screen.
                 await store.client(for: ws)?.viewport(
-                    columns: columns, rows: rows, in: ws, layout: shown)
+                    columns: columns, rows: rows, in: ws, layout: layout)
             },
             onResizeDivider: { terminal, side, cells in
                 resizeDivider(terminal, side: side, cells: cells, in: ws)
@@ -2100,44 +2046,31 @@ struct ContentView: View {
     private func selectFirstRunningTerminal() {
         guard selection == nil else { return }
 
-        // Where you left off, if it is still there. A terminal that has since
-        // exited falls through to the rules below rather than selecting
-        // nothing — the saved id is a preference, not a promise.
-        //
-        // Split with empty subsequences kept: the host component is empty for
-        // this Mac, so the saved string starts with "/" and the default
-        // omitting behavior would swallow that leading empty piece and shift
-        // everything over by one.
-        let saved = lastTerminal
-            .split(separator: "/", maxSplits: 2, omittingEmptySubsequences: false)
-            .map(String.init)
-        if saved.count == 3,
-            let ws = store.fleet.worktrees.first(where: {
-                ($0.host ?? "") == saved[0] && $0.id == saved[1]
-            }),
-            ws.terminals.contains(where: { $0.id == saved[2] })
+        // Where you left off, if it is still there, mapped to where it lives
+        // now. A terminal that has since exited falls through to the rules
+        // below rather than selecting nothing — the saved id is a preference,
+        // not a promise.
+        if let saved = LegacySelection(lastTerminal: lastTerminal),
+            let landed = WorkspaceSelection.mapping(old: saved, in: store.fleet)
         {
-            expanded.insert(ws.id)
-            selection = .terminal(host: saved[0], worktree: ws.id, terminal: saved[2])
+            selection = landed
             return
         }
 
         for ws in store.fleet.worktrees {
             if let t = ws.terminals.first(where: { $0.status.wantsAttention }) {
-                expanded.insert(ws.id)
-                selection = .terminal(host: ws.host ?? "", worktree: ws.id, terminal: t.id)
+                land(on: PaneRef(host: ws.host ?? "", worktree: ws.id, terminal: t.id))
                 return
             }
         }
         for ws in store.fleet.worktrees {
             if let t = ws.terminals.first(where: { StateKind.parse($0.state) == .running }) {
-                expanded.insert(ws.id)
-                selection = .terminal(host: ws.host ?? "", worktree: ws.id, terminal: t.id)
+                land(on: PaneRef(host: ws.host ?? "", worktree: ws.id, terminal: t.id))
                 return
             }
         }
         if let ws = store.fleet.worktrees.first {
-            selection = .worktree(host: ws.host ?? "", id: ws.id)
+            selection = Self.opening(ws, terminal: nil, in: store.fleet)
         }
     }
 
@@ -2157,36 +2090,29 @@ struct ContentView: View {
         terminalOrder(sidebarRows(fleet: fleet))
     }
 
+    /// The pane the keyboard acts on, with its worktree and terminal. See
+    /// `WorkspaceScreen.keyPane`.
+    private var selectedPane: PaneRef? { WorkspaceScreen.keyPane(keyPane, in: shown, selection: selection) }
+
     private var selectedTerminal: (worktree: Worktree, terminal: Terminal)? {
-        guard case .terminal(let host, let worktreeID, let terminalID) = selection,
-            let worktree = store.fleet.worktrees.first(where: {
-                ($0.host ?? "") == host && $0.id == worktreeID
-            }),
-            let terminal = worktree.terminals.first(where: { $0.id == terminalID })
+        guard let pane = selectedPane, let worktree = worktree(host: pane.host, id: pane.worktree),
+            let terminal = worktree.terminals.first(where: { $0.id == pane.terminal })
         else { return nil }
         return (worktree, terminal)
     }
 
-    /// The layout `detail` draws for `ws` under the current selection, and
-    /// the layouts its bar offers beside it. Nil when it draws none.
+    /// The layout the detail draws for `ws`, and the layouts its bar offers
+    /// beside it. Nil when it draws none.
     ///
     /// What the keyboard's layout commands act on, so ⌃B and a digit counts
     /// the panes on screen and ⌃B n steps through the layouts in the bar —
     /// not through the window tmux calls active, which in the main checkout
-    /// can be an orchestrator's.
+    /// can be an orchestrator's. With two columns showing one worktree's
+    /// layouts, the one holding the key pane.
     private func onScreen(in ws: Worktree) -> (group: PaneGroup, groups: [PaneGroup])? {
-        guard let c = store.client(for: ws) else { return nil }
-        if case .terminal(let host, let id, let terminal) = selection,
-            host == (ws.host ?? ""), id == ws.id,
-            let group = c.group(holding: terminal, in: id)
-        {
-            let frame = Self.detailFrame(
-                ws, layouts: c.layouts[id], holding: group,
-                seat: Self.orchestratorRow(for: selection, in: Self.sidebarRows(fleet: store.fleet)))
-            return (group, frame.groups)
-        }
-        guard let group = Self.shownLayout(c.layouts[ws.id], of: ws) else { return nil }
-        return (group, Self.ownLayouts(c.layouts[ws.id] ?? [], of: ws))
+        let mine = shown.filter { $0.host == (ws.host ?? "") && $0.worktree.id == ws.id }
+        let pick = selectedPane.flatMap { key in mine.first { $0.contains(key) } } ?? mine.last
+        return pick.map { ($0.group, $0.groups) }
     }
 
     // MARK: - Attention
@@ -2198,33 +2124,15 @@ struct ContentView: View {
     /// screen as the one with focus — reading it took no extra click, so it
     /// cannot go on asking for one.
     ///
-    /// The branches mirror `detail` exactly — through `onScreen(in:)`, which
-    /// is the layout `detail` draws. Anything else would have this marking
+    /// Read from `shown`, which is every layout `detail` draws, column by
+    /// column. Anything else would have this marking
     /// terminals read that are not on screen, which is the one mistake worse
     /// than the bug it fixes. It used to ask for the layout tmux calls active,
     /// from when `detail` drew that one; since the orchestrators run in the
     /// main checkout's session, that can be Billing's orchestrator while the
     /// checkout's own shells are on screen.
     private var visibleTerminals: [Terminal] {
-        switch selection {
-        case .terminal(let host, let worktreeID, let terminalID):
-            guard let ws = worktree(host: host, id: worktreeID) else { return [] }
-            if let group = onScreen(in: ws)?.group {
-                return ws.terminals.filter { group.terminals.contains($0.id) }
-            }
-            return ws.terminals.filter { $0.id == terminalID }
-
-        case .worktree(let host, let worktreeID):
-            guard let ws = worktree(host: host, id: worktreeID),
-                let group = onScreen(in: ws)?.group,
-                !group.terminals.isEmpty
-            else { return [] }
-            return ws.terminals.filter { group.terminals.contains($0.id) }
-
-        // A board shows cards, not panes: nothing on it has been seen.
-        case .board, nil:
-            return []
-        }
+        shown.flatMap { layout in layout.worktree.terminals.filter { layout.group.terminals.contains($0.id) } }
     }
 
     /// End `done` for everything on screen, if anyone is there to see it.
@@ -2267,7 +2175,7 @@ struct ContentView: View {
     /// answer is the point.
     private func markVisibleSeen() {
         guard NSApp.isActive else { return }
-        let client = detailWorktree.flatMap { store.client(for: $0) }
+        let client = selection?.host.flatMap { store.clients[$0] }
         // Full ids, not `short`: resolving an abbreviation costs the CLI a
         // fleet listing, and this runs on a clock. See the `Watching` command
         // in `crates/cli/src/main.rs`.
@@ -2316,7 +2224,7 @@ struct ContentView: View {
         /// The pane a keystroke acts on: the selected one, else whatever tmux says
         /// is focused.
         let here: PaneRect? = {
-            if case .terminal(_, _, let id) = selection, let pane = group?.pane(id) { return pane }
+            if let id = selectedPane?.terminal, let pane = group?.pane(id) { return pane }
             return group?.panes.first(where: \.focused)
         }()
 
@@ -2578,17 +2486,59 @@ struct ContentView: View {
         guard let active = groups.first(where: { $0.isActive }) ?? groups.first else {
             // No layouts left, which now means no terminals left. Fall back to
             // the worktree rather than to a pane that no longer exists.
-            selection = .worktree(host: host, id: worktree.id)
+            if Self.shows(worktree, selection) { selection = Self.opening(worktree, terminal: nil, in: store.fleet) }
             return
         }
         let target = preferring.flatMap { active.terminals.contains($0) ? $0 : nil }
             ?? active.focused
             ?? active.terminals.first
         guard let target else {
-            selection = .worktree(host: host, id: worktree.id)
+            if Self.shows(worktree, selection) { selection = Self.opening(worktree, terminal: nil, in: store.fleet) }
             return
         }
-        selection = .terminal(host: host, worktree: worktree.id, terminal: target)
+        focus(PaneRef(host: host, worktree: worktree.id, terminal: target))
+    }
+
+    /// Whether `selection` opens `worktree` whole: the one case where a
+    /// layout command's answer can move the selection within it.
+    nonisolated static func shows(_ worktree: Worktree, _ selection: Selection?) -> Bool {
+        selected(in: worktree, by: selection) != nil
+    }
+
+    /// Put the keyboard in `pane`, which is on screen or about to be.
+    ///
+    /// Within the view on screen: a worktree opened whole selects the pane
+    /// in it, so its sidebar row lights and it's what the window reopens on;
+    /// in the conversation or a task's column, the selection stays and only
+    /// the key pane moves. A pane on no column of this view goes to where it
+    /// lives, as `land(on:)` does.
+    private func focus(_ pane: PaneRef) {
+        guard let worktree = worktree(host: pane.host, id: pane.worktree) else { return }
+        if Self.shows(worktree, selection) {
+            let next = Self.opening(worktree, terminal: pane.terminal, in: store.fleet)
+            if case .workspace(let host, let id, .worktree(let wt, let t)) = next,
+                case .workspace(_, let current, _)? = selection, current != id
+            {
+                // Opened from another workspace's Worktrees or a task's Open
+                // Worktree: stay in the workspace it was opened from.
+                selection = .workspace(host: host, workspace: current, focus: .worktree(wt, terminal: t))
+            } else {
+                selection = next
+            }
+        } else if !shown.contains(where: { $0.contains(pane) }) {
+            land(on: pane)
+            return
+        }
+        keyPane = pane
+    }
+
+    /// Go to `pane` wherever it lives: its workspace, its task, or its
+    /// worktree (`WorkspaceSelection.landing`).
+    private func land(on pane: PaneRef) {
+        expanded.insert(pane.worktree)
+        guard let landed = WorkspaceSelection.landing(on: pane, in: store.fleet) else { return }
+        selection = landed
+        keyPane = pane
     }
 
     /// Follow the layout's focus when something else moved it.
@@ -2609,14 +2559,14 @@ struct ContentView: View {
     /// the runner and the app disagree about which layout is at the front, which
     /// nothing on screen claims either way.
     private func followLayoutFocus() {
-        guard case .terminal(let host, let wsID, let termID) = selection,
-            let worktree = worktree(host: host, id: wsID),
-            let group = store.client(for: worktree)?.activeGroup(wsID),
+        guard let pane = selectedPane,
+            let worktree = worktree(host: pane.host, id: pane.worktree),
+            let group = store.client(for: worktree)?.activeGroup(pane.worktree),
             let focused = group.focused,
-            focused != termID,
-            group.terminals.contains(termID)
+            focused != pane.terminal,
+            group.terminals.contains(pane.terminal)
         else { return }
-        selection = .terminal(host: host, worktree: wsID, terminal: focused)
+        focus(PaneRef(host: pane.host, worktree: pane.worktree, terminal: focused))
     }
 
     private func run(_ command: AppCommand) {
@@ -2679,14 +2629,14 @@ struct ContentView: View {
             // to create into.
             if store.repositories.isEmpty {
                 showAddRepository = true
-            } else if case .board(let host, let id) = selection {
+            } else if case .workspace(let host, let id, nil) = selection {
                 // Already there — unless "there" has gone, which is said
                 // rather than answered with nothing.
                 if board(host: host, id: id) == nil {
                     errorBanner = missingBoardSentence(host: host)
                 }
             } else if let target = boardTarget {
-                selection = .board(host: target.host, workspace: target.workspace.id)
+                selection = .workspace(host: target.host, workspace: target.workspace.id, focus: nil)
             } else {
                 // Never a guess between several. The rows are in the sidebar
                 // for exactly this case.
@@ -2734,14 +2684,13 @@ struct ContentView: View {
         showPalette = false
         switch action {
         case .openTerminal(let worktree, let terminal):
-            expanded.insert(worktree)
             let host = store.fleet.worktrees.first { $0.id == worktree }?.host ?? ""
-            selection = .terminal(host: host, worktree: worktree, terminal: terminal)
+            land(on: PaneRef(host: host, worktree: worktree, terminal: terminal))
 
-        case .openWorktree(let worktree):
-            expanded.insert(worktree)
-            let host = store.fleet.worktrees.first { $0.id == worktree }?.host ?? ""
-            selection = .worktree(host: host, id: worktree)
+        case .openWorktree(let id):
+            expanded.insert(id)
+            guard let worktree = store.fleet.worktrees.first(where: { $0.id == id }) else { return }
+            selection = Self.opening(worktree, terminal: nil, in: store.fleet)
 
         case .newTerminal(let id):
             guard let worktree = store.fleet.worktrees.first(where: { $0.id == id }) else {
@@ -2849,8 +2798,11 @@ struct ContentView: View {
         case .started(let worktree, let terminal, let name):
             // By the ids the create calls returned, not by a later look at
             // the fleet — which, this soon, may not have the terminal yet.
+            // A new worktree with no task yet is opened whole, under the
+            // workspace it was claimed for.
             expanded.insert(worktree)
-            selection = .terminal(host: host, worktree: worktree, terminal: terminal)
+            selection = arrival(host: host, worktree: worktree, terminal: terminal)
+            keyPane = PaneRef(host: host, worktree: worktree, terminal: terminal)
             return .started(name: name)
         case .failed(let sentence, let made):
             if let made { reveal(made.id) }
@@ -2896,11 +2848,20 @@ struct ContentView: View {
         expanded.insert(worktree)
         let found = store.fleet.worktrees.first { $0.id == worktree }
         let host = found?.host ?? ""
-        if let terminal = found?.terminals.first {
-            selection = .terminal(host: host, worktree: worktree, terminal: terminal.id)
-        } else {
-            selection = .worktree(host: host, id: worktree)
+        selection = arrival(host: host, worktree: worktree, terminal: found?.terminals.first?.id)
+    }
+
+    /// Where a worktree this window just made lands, with `terminal` in it:
+    /// opened whole under the workspace the window is in when the fleet
+    /// hasn't listed it yet, which, this soon after making it, is usual.
+    private func arrival(host: String, worktree: String, terminal: String?) -> Selection {
+        if let found = self.worktree(host: host, id: worktree) {
+            return Self.opening(found, terminal: terminal, in: store.fleet)
         }
+        if case .workspace(host, let current, _)? = selection {
+            return .workspace(host: host, workspace: current, focus: .worktree(worktree, terminal: terminal))
+        }
+        return .looseWorktree(host: host, worktree: worktree, terminal: terminal)
     }
 
     /// Create a terminal and go straight to it.
@@ -2936,7 +2897,7 @@ struct ContentView: View {
                         title: "Terminal \(worktree.terminals.count + 1)")
                 })
         else { return nil }
-        selection = .terminal(host: worktree.host ?? "", worktree: worktree.id, terminal: created.id)
+        focus(PaneRef(host: worktree.host ?? "", worktree: worktree.id, terminal: created.id))
         return created
     }
 
@@ -2951,11 +2912,7 @@ struct ContentView: View {
     /// each name still reads as what it answers: this one, what the detail
     /// pane draws; `currentWorktree`, what a keystroke acts on.
     private var detailWorktree: Worktree? {
-        switch selection {
-        case .worktree(let host, let id): return worktree(host: host, id: id)
-        case .terminal(let host, let id, _): return worktree(host: host, id: id)
-        case .board, nil: return nil
-        }
+        currentWorktree
     }
 
     /// The worktree the selection is in — nil when nothing is selected.
@@ -2971,13 +2928,12 @@ struct ContentView: View {
     /// there is now no target, and `tileTarget`'s and `.newTerminal`'s own
     /// `guard`/`if let` already do nothing rather than guess.
     private var currentWorktree: Worktree? {
-        switch selection {
-        case .worktree(let host, let id): return worktree(host: host, id: id)
-        case .terminal(let host, let id, _): return worktree(host: host, id: id)
-        // A board is a repository's, not a worktree's: a keystroke that acts
-        // on "the current worktree" has nothing to act on here.
-        case .board, nil: return nil
-        }
+        // The key pane's, which is on screen by construction. A board alone
+        // is a workspace's, not a worktree's: a keystroke that acts on "the
+        // current worktree" has nothing to act on there.
+        if let pane = selectedPane { return worktree(host: pane.host, id: pane.worktree) }
+        if let (host, id) = Self.openedWhole(selection) { return worktree(host: host, id: id) }
+        return nil
     }
 
     private func step(by offset: Int) {
@@ -3030,17 +2986,30 @@ struct ContentView: View {
         let terminalID: String?
         switch selection {
         case nil: return nil
-        // A board has nothing to heal: it is a repository's, and a runner
-        // that loses the repository draws the placeholder until you choose.
-        case .board: return selection
-        case .worktree(let h, let w): (host, worktreeID, terminalID) = (h, w, nil)
-        case .terminal(let h, let w, let t): (host, worktreeID, terminalID) = (h, w, t)
+        // Needs You is every runner's, and has nothing to heal.
+        case .needsYou: return selection
+        // A workspace with nothing opened has nothing to heal either: a
+        // runner that loses it draws the column's sentence until you choose.
+        // A task is the task column's to say it's gone.
+        case .workspace(_, _, nil), .workspace(_, _, .task): return selection
+        case .workspace(let h, _, .worktree(let w, let t)): (host, worktreeID, terminalID) = (h, w, t)
+        case .looseWorktree(let h, let w, let t): (host, worktreeID, terminalID) = (h, w, t)
+        }
+        /// The same selection, opening `worktree` with `terminal` in it.
+        func with(_ worktree: String, terminal: String?) -> Selection {
+            switch selection {
+            case .workspace(let h, let id, _)?: return .workspace(host: h, workspace: id, focus: .worktree(worktree, terminal: terminal))
+            default: return .looseWorktree(host: host, worktree: worktree, terminal: terminal)
+            }
         }
         guard
             let worktree = worktrees.first(where: {
                 ($0.host ?? "") == host && $0.id == worktreeID
             })
         else {
+            // Gone: a workspace's column closes, back to the workspace; a
+            // loose worktree lands on a sibling on its runner.
+            if case .workspace(let h, let id, _)? = selection { return .workspace(host: h, workspace: id, focus: nil) }
             return sibling(of: worktreeID, host: host, in: worktrees, was: previous)
         }
         guard let terminalID, !worktree.terminals.contains(where: { $0.id == terminalID })
@@ -3052,8 +3021,7 @@ struct ContentView: View {
         let next = candidates.first(where: { $0.status.wantsAttention })
             ?? candidates.first(where: { StateKind.parse($0.state) == .running })
             ?? candidates.first
-        return next.map { .terminal(host: host, worktree: worktreeID, terminal: $0.id) }
-            ?? .worktree(host: host, id: worktreeID)
+        return with(worktreeID, terminal: next?.id)
     }
 
     /// The worktree to land on when `worktreeID` is gone: one on the same
@@ -3074,7 +3042,7 @@ struct ContentView: View {
             shown.first(where: { repository != nil && $0.repository == repository })
             ?? shown.first
             ?? sameRunner.first
-        return next.map { .worktree(host: host, id: $0.id) }
+        return next.map { .looseWorktree(host: host, worktree: $0.id, terminal: nil) }
     }
 
     private func selectTerminal(at index: Int) {
@@ -3088,15 +3056,7 @@ struct ContentView: View {
             let worktree = store.fleet.worktrees
                 .first(where: { $0.terminals.contains(where: { $0.id == terminal.id }) })
         else { return }
-        select(terminal, in: worktree)
-    }
-
-    /// The same, when the worktree is already known — a board's pill found
-    /// the pane on its own runner, and a second search of the whole fleet
-    /// would be one that could land on another.
-    private func select(_ terminal: Terminal, in worktree: Worktree) {
-        expanded.insert(worktree.id)
-        selection = .terminal(host: worktree.host ?? "", worktree: worktree.id, terminal: terminal.id)
+        land(on: PaneRef(host: worktree.host ?? "", worktree: worktree.id, terminal: terminal.id))
     }
 
 }

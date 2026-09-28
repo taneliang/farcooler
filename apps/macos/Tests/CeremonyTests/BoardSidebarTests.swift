@@ -110,7 +110,7 @@ struct BoardSidebarTests {
     /// A board selection is a workspace's, and nothing about a terminal
     /// closing moves it.
     @Test func aBoardSelectionIsLeftWhereItIs() {
-        let board = ContentView.Selection.board(host: "", workspace: "w1")
+        let board = ContentView.Selection.workspace(host: "", workspace: "w1", focus: nil)
         #expect(ContentView.healed(board, in: [Self.worktree("lane", [])]) == board)
         #expect(ContentView.healed(board, in: []) == board)
     }
@@ -616,17 +616,20 @@ struct BoardSidebarTests {
     @Test func goingToAnAgentLandsWhereTheFleetIsNow() {
         let agent = Self.terminal("agent")
         let pane = BoardPane(terminal: agent, worktree: Self.worktree("lane", [agent]))
+        func fleet(_ worktrees: [Worktree]) -> Fleet {
+            Fleet(runtimeHealthy: true, livePanes: 0, worktrees: worktrees, branchPrefix: nil)
+        }
         #expect(
-            BoardPane.landing(for: pane, in: [Self.worktree("lane", [agent])])
-                == .terminal(host: "", worktree: "lane", terminal: "agent"))
+            BoardPane.landing(for: pane, in: fleet([Self.worktree("lane", [agent])]))
+                == .looseWorktree(host: "", worktree: "lane", terminal: "agent"))
         #expect(
-            BoardPane.landing(for: pane, in: [Self.worktree("lane", [])])
-                == .worktree(host: "", id: "lane"))
-        #expect(BoardPane.landing(for: pane, in: [Self.worktree("other", [])]) == nil)
+            BoardPane.landing(for: pane, in: fleet([Self.worktree("lane", [])]))
+                == .looseWorktree(host: "", worktree: "lane", terminal: nil))
+        #expect(BoardPane.landing(for: pane, in: fleet([Self.worktree("other", [])])) == nil)
         // Never another runner's worktree that happens to share the id.
         var elsewhere = Self.worktree("lane", [agent])
         elsewhere.host = "remote"
-        #expect(BoardPane.landing(for: pane, in: [elsewhere]) == nil)
+        #expect(BoardPane.landing(for: pane, in: fleet([elsewhere])) == nil)
     }
 
     /// Two agents in one worktree are two menu items you can tell apart.
@@ -1038,16 +1041,16 @@ struct BoardSidebarTests {
         func target(_ selection: ContentView.Selection) -> String? {
             ContentView.boardWorkspace(for: selection, in: fleet)?.id
         }
-        #expect(target(.worktree(host: "", id: "bill")) == Self.billing)
-        #expect(target(.worktree(host: "", id: "stray")) == Self.main)
-        #expect(target(.terminal(host: "", worktree: "checkout", terminal: "conductor")) == Self.billing)
-        #expect(target(.worktree(host: "", id: "checkout")) == Self.main)
-        #expect(target(.board(host: "", workspace: Self.billing)) == Self.billing)
-        #expect(target(.worktree(host: "", id: "gone")) == nil)
+        #expect(target(.workspace(host: "", workspace: Self.billing, focus: .worktree("bill", terminal: nil))) == Self.billing)
+        #expect(target(.looseWorktree(host: "", worktree: "stray", terminal: nil)) == Self.main)
+        #expect(target(.workspace(host: "", workspace: Self.billing, focus: nil)) == Self.billing)
+        #expect(target(.workspace(host: "", workspace: Self.main, focus: .worktree("checkout", terminal: nil))) == Self.main)
+        #expect(target(.looseWorktree(host: "", worktree: "gone", terminal: nil)) == nil)
+        #expect(target(.needsYou) == nil)
 
         let older = Self.fleet(workspaces: nil, worktrees: [Self.worktree("a", workspace: nil)])
         #expect(
-            ContentView.boardWorkspace(for: .worktree(host: "", id: "a"), in: older)
+            ContentView.boardWorkspace(for: .looseWorktree(host: "", worktree: "a", terminal: nil), in: older)
                 == WorkspaceSummary.implicit(repository: Self.repoA))
     }
 
@@ -1068,11 +1071,12 @@ struct BoardSidebarTests {
         func claim(_ selection: ContentView.Selection?, host: String = "", repository: String = Self.repoA) -> String? {
             ContentView.claim(newWorktreeIn: repository, on: host, from: selection, in: fleet)
         }
-        #expect(claim(.worktree(host: "", id: "bill")) == Self.billing)
-        #expect(claim(.board(host: "", workspace: Self.main)) == Self.main)
-        #expect(claim(.worktree(host: "", id: "stray")) == Self.main, "Unclaimed claims for Main")
-        #expect(claim(.worktree(host: "", id: "bill"), repository: Self.repoB) == Self.otherMain)
-        #expect(claim(.worktree(host: "", id: "bill"), host: "remote") == nil, "no workspaces there")
+        let bill = ContentView.Selection.workspace(host: "", workspace: Self.billing, focus: .worktree("bill", terminal: nil))
+        #expect(claim(bill) == Self.billing)
+        #expect(claim(.workspace(host: "", workspace: Self.main, focus: nil)) == Self.main)
+        #expect(claim(.looseWorktree(host: "", worktree: "stray", terminal: nil)) == Self.main, "Unclaimed claims for Main")
+        #expect(claim(bill, repository: Self.repoB) == Self.otherMain)
+        #expect(claim(bill, host: "remote") == nil, "no workspaces there")
         // Not even where another runner lists a workspace by the same id: a
         // selection on this Mac says nothing about a worktree made there, so
         // it's that runner's Main.
@@ -1080,11 +1084,11 @@ struct BoardSidebarTests {
         twice.runnerWorkspaces["remote"] = fleet.runnerWorkspaces[""]
         #expect(
             ContentView.claim(
-                newWorktreeIn: Self.repoA, on: "remote", from: .worktree(host: "", id: "bill"), in: twice)
+                newWorktreeIn: Self.repoA, on: "remote", from: bill, in: twice)
                 == Self.main)
         #expect(claim(nil) == Self.main, "nothing selected claims for Main")
         let older = Self.fleet(workspaces: nil, worktrees: [Self.worktree("a", workspace: nil)])
-        #expect(ContentView.claim(newWorktreeIn: Self.repoA, on: "", from: .board(host: "", workspace: Self.repoA), in: older) == nil)
+        #expect(ContentView.claim(newWorktreeIn: Self.repoA, on: "", from: .workspace(host: "", workspace: Self.repoA, focus: nil), in: older) == nil)
     }
 
     // MARK: - A repository header's actions
@@ -1281,25 +1285,28 @@ struct BoardSidebarTests {
         let shells = PaneGroup(id: "@1", name: "zsh", active: true, columns: 80, rows: 24, layout: "a", panes: [pane("shell")])
         let own = PaneGroup(id: "@2", name: "orchestrator", active: false, columns: 80, rows: 24, layout: "b", panes: [pane("conductor")])
 
-        let seat = ContentView.orchestratorRow(
-            for: .terminal(host: "", worktree: "checkout", terminal: "conductor"), in: rows)
-        #expect(seat?.workspace?.id == Self.billing)
-        let framed = ContentView.detailFrame(checkout, layouts: [shells, own], holding: own, seat: seat)
-        #expect(framed.groups.map(\.id) == ["@2"], "the checkout's other layouts offered beside it")
-        #expect(framed.title == "Billing")
-        #expect(framed.subtitle == "overnight · Orchestrator")
+        let fleet = Self.fleet(
+            workspaces: [
+                Self.summary(Self.main, "Main", isMain: true),
+                Self.summary(Self.billing, "Billing", orchestrator: "conductor"),
+            ],
+            worktrees: [checkout])
+        #expect(rows.contains { $0.kind == .orchestrator && $0.orchestrator?.terminal.id == "conductor" })
+        func shown(_ selection: ContentView.Selection) -> [ShownLayout] {
+            WorkspaceScreen.shown(selection, in: fleet, layouts: { _, _ in [shells, own] })
+        }
+        let billing = shown(.workspace(host: "", workspace: Self.billing, focus: nil))
+        #expect(billing.map(\.column) == [.conversation])
+        #expect(billing.first?.groups.map(\.id) == ["@2"], "the checkout's other layouts offered beside it")
+        guard let framed = billing.first else { return }
+        #expect(ContentView.frame(of: framed, in: fleet).title == "Billing")
+        #expect(ContentView.frame(of: framed, in: fleet).subtitle == "overnight · Orchestrator")
 
-        let plain = ContentView.orchestratorRow(
-            for: .terminal(host: "", worktree: "checkout", terminal: "shell"), in: rows)
-        #expect(plain == nil)
-        let asShell = ContentView.detailFrame(
-            checkout, layouts: [shells, own], holding: shells, seat: plain)
-        #expect(asShell.groups.map(\.id) == ["@1"], "Billing's orchestrator offered in the checkout's bar")
-        #expect(asShell.title == checkout.windowTitle)
-        #expect(ContentView.orchestratorRow(for: .worktree(host: "", id: "checkout"), in: rows) == nil)
-        #expect(
-            ContentView.orchestratorRow(
-                for: .terminal(host: "remote", worktree: "checkout", terminal: "conductor"), in: rows) == nil)
+        let asShell = shown(.workspace(host: "", workspace: Self.main, focus: .worktree("checkout", terminal: "shell")))
+        #expect(asShell.map(\.column) == [.worktree], "Main has no orchestrator of its own here")
+        #expect(asShell.first?.groups.map(\.id) == ["@1"], "Billing's orchestrator offered in the checkout's bar")
+        #expect(asShell.first.map { ContentView.frame(of: $0, in: fleet).title } == checkout.windowTitle)
+        #expect(shown(.workspace(host: "remote", workspace: Self.billing, focus: nil)).isEmpty)
     }
 
     // MARK: - The main checkout's own layouts
@@ -1359,16 +1366,19 @@ struct BoardSidebarTests {
         third[2].active = true
         #expect(ContentView.shownLayout(third, of: checkout)?.id == "@3")
 
-        let framed = ContentView.detailFrame(checkout, layouts: layouts, holding: layouts[2], seat: nil)
-        #expect(framed.groups.map(\.id) == ["@1", "@3"], "the checkout's bar offers the orchestrator")
+        let fleet = Self.fleet(workspaces: nil, worktrees: [checkout])
+        let framed = WorkspaceScreen.shown(
+            .looseWorktree(host: "", worktree: "checkout", terminal: "s3"), in: fleet, layouts: { _, _ in layouts })
+        #expect(framed.first?.groups.map(\.id) == ["@1", "@3"], "the checkout's bar offers the orchestrator")
 
         // A shell moved into the orchestrator's window is shown there, alone,
         // rather than in a bar that doesn't list the layout on screen.
         var shared = layouts[1]
         shared.panes.append(layouts[2].panes[0])
-        let moved = ContentView.detailFrame(
-            checkout, layouts: [layouts[0], shared], holding: shared, seat: nil)
-        #expect(moved.groups.map(\.id) == ["@2"])
+        let moved = WorkspaceScreen.shown(
+            .looseWorktree(host: "", worktree: "checkout", terminal: "s3"), in: fleet,
+            layouts: { _, _ in [layouts[0], shared] })
+        #expect(moved.first?.groups.map(\.id) == ["@2"])
 
         // No orchestrator row drawn — no workspaces in the fleet read for
         // this runner — and its window is still left out.

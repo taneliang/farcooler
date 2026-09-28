@@ -367,18 +367,14 @@ struct BoardPane: Identifiable, Equatable {
     /// A menu is open while the fleet moves under it, so the pane can have
     /// exited and been reaped by the time it is chosen. Then: its worktree,
     /// if that is still there, and nil — stay on the board and say so — if
-    /// neither is.
-    static func landing(for pane: BoardPane, in fleet: [Worktree]) -> ContentView.Selection? {
+    /// neither is. Either lands as `WorkspaceSelection` says a pane or a
+    /// worktree does.
+    static func landing(for pane: BoardPane, in fleet: Fleet) -> ContentView.Selection? {
         let host = pane.worktree.host ?? ""
-        guard
-            let worktree = fleet.first(where: {
-                ($0.host ?? "") == host && $0.id == pane.worktree.id
-            })
+        guard let worktree = WorkspaceSelection.worktree(host: host, id: pane.worktree.id, in: fleet)
         else { return nil }
-        if worktree.terminals.contains(where: { $0.id == pane.terminal.id }) {
-            return .terminal(host: host, worktree: worktree.id, terminal: pane.terminal.id)
-        }
-        return .worktree(host: host, id: worktree.id)
+        let live = worktree.terminals.contains(where: { $0.id == pane.terminal.id })
+        return WorkspaceSelection.landing(in: worktree, terminal: live ? pane.terminal.id : nil, fleet: fleet)
     }
 }
 

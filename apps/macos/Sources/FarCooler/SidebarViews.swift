@@ -69,7 +69,11 @@ struct WorktreeSection: View {
     @State private var headerHeight: CGFloat = 0
     let worktree: Worktree
     let isExpanded: Bool
-    @Binding var selection: ContentView.Selection?
+    /// What of this worktree the window is showing: the worktree itself
+    /// (`.some(nil)`), one of its terminals, or nothing (`nil`).
+    let selected: String??
+    /// Open the worktree, or one of its terminals, in the window.
+    let onSelect: (_ terminal: String?) -> Void
     let onToggle: () -> Void
     let onNewTerminal: () -> Void
     let onHide: () -> Void
@@ -139,19 +143,18 @@ struct WorktreeSection: View {
     private var windowActive: Bool { controlActiveState == .key }
 
     private var isSelected: Bool {
-        selection == .worktree(host: worktree.host ?? "", id: worktree.id)
+        if case .some(nil) = selected { return true }
+        return false
     }
 
     /// Open whether or not the user opened it.
     private var showsTerminals: Bool { isExpanded || !worktree.attention.isEmpty }
 
     private func row(_ terminal: Terminal, ordinal: Int?) -> some View {
-        let id = ContentView.Selection.terminal(
-            host: worktree.host ?? "", worktree: worktree.id, terminal: terminal.id)
-        return TerminalRow(
+        TerminalRow(
             terminal: terminal,
-            isSelected: selection == id,
-            onSelect: { selection = id },
+            isSelected: selected == .some(terminal.id),
+            onSelect: { onSelect(terminal.id) },
             isTiled: tiled.contains(terminal.id),
             layouts: layouts,
             onMoveToLayout: { onMoveToLayout(terminal, $0) },
@@ -377,7 +380,7 @@ struct WorktreeSection: View {
         .padding(.horizontal, SidebarGrid.highlightInset)
         .animation(Motion.snap, value: hovering)
         .contentShape(Rectangle())
-        .onTapGesture { selection = .worktree(host: worktree.host ?? "", id: worktree.id) }
+        .onTapGesture { onSelect(nil) }
         .onHover { hovering = $0 }
         // On the ROW, not on the counts, and that is the whole of it.
         //

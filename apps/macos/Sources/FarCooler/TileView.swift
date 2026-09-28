@@ -82,7 +82,7 @@ struct TileView: View {
     /// Switch a pane between its terminal and its chat.
     let onSwitchPaneMode: (Terminal) -> Void
     /// The window's title and subtitle: the worktree's, or, for an
-    /// orchestrator's pane, its workspace's. See `ContentView.detailFrame`.
+    /// orchestrator's pane, its workspace's. See `ContentView.frame(of:in:)`.
     let title: String
     let subtitle: String
 
