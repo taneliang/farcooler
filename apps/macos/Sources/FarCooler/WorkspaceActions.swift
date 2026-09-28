@@ -57,12 +57,22 @@ enum CharterAccess: Equatable {
     /// The path is on the runner's own disk, sent to `host_admin` clients
     /// only. So it opens only when the runner is this Mac (`host` empty) and
     /// the runner said where it is.
-    static func of(_ workspace: WorkspaceSummary, host: String) -> CharterAccess {
+    static func of(
+        _ workspace: WorkspaceSummary, host: String,
+        exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> CharterAccess {
         guard host.isEmpty else {
             return .unavailable("This charter is on \(host), so it can’t be opened on this Mac.")
         }
         guard let path = workspace.charter else {
             return .unavailable("This runner didn’t say where the charter is. Updating Far Cooler on it may help.")
+        }
+        // The runner sends the path whether or not the file is there: Main
+        // has none until the repository has a manager file, and a new
+        // workspace's is the orchestrator's to write. Not made here — an
+        // empty charter would skip the orchestrator's interview.
+        guard exists(path) else {
+            return .unavailable("No charter yet. The orchestrator writes one when you first talk to it.")
         }
         return .open(URL(fileURLWithPath: path))
     }
@@ -105,6 +115,11 @@ extension DaemonClient {
             return "\(name) changed while its orchestrator was starting. Try again."
         case .some:
             return "This runner couldn’t start an orchestrator for \(name). That’s a problem in the app, not in anything you did."
+        // A workspace deleted since the sidebar drew it: the CLI can't find
+        // its id, so it never asks the daemon and there's no code to read.
+        // Matched on `resolve`'s sentence in crates/cli/src/main.rs.
+        case nil where said.contains("no workspace matching"):
+            return "\(name) isn’t on this runner anymore."
         case nil:
             return replace
                 ? "Couldn’t replace \(name)’s orchestrator. Check that the runner is reachable, then try again."
@@ -174,4 +189,40 @@ struct OrchestratorReplacement: Identifiable {
     let workspace: WorkspaceSummary
     let harness: OrchestratorHarness
     var id: String { "\(host)\u{1}\(workspace.id)" }
+}
+
+/// What choosing a harness from the header's menu does: Start goes to the
+/// runner, Replace only asks. It's the confirmation that sends `--replace`,
+/// because the orchestrator running now closes.
+enum OrchestratorRequest: Equatable {
+    case start(OrchestratorHarness)
+    case confirmReplace(OrchestratorHarness)
+
+    init(harness: OrchestratorHarness, replace: Bool) {
+        self = replace ? .confirmReplace(harness) : .start(harness)
+    }
+}
+
+/// The orchestrator starts this app has asked for and the runner hasn't
+/// answered, by runner and workspace: a second click while one is in flight
+/// is dropped, and the row reads "Starting Orchestrator…" meanwhile.
+struct OrchestratorStarts {
+    private var inFlight: Set<String> = []
+
+    private static func key(_ workspace: WorkspaceSummary, _ host: String) -> String {
+        "\(host)\u{1}\(workspace.id)"
+    }
+
+    /// Whether this start may go ahead: false while another is in flight.
+    mutating func begin(_ workspace: WorkspaceSummary, host: String) -> Bool {
+        inFlight.insert(Self.key(workspace, host)).inserted
+    }
+
+    mutating func end(_ workspace: WorkspaceSummary, host: String) {
+        inFlight.remove(Self.key(workspace, host))
+    }
+
+    func isStarting(_ workspace: WorkspaceSummary, host: String) -> Bool {
+        inFlight.contains(Self.key(workspace, host))
+    }
 }

@@ -122,7 +122,7 @@ struct ContentView: View {
     @State private var errorBanner: String?
     /// Workspaces whose orchestrator this app has asked to start and the
     /// runner hasn't answered, by `orchestratorKey`.
-    @State private var startingOrchestrators: Set<String> = []
+    @State private var startingOrchestrators = OrchestratorStarts()
     /// A Replace Orchestrator waiting on its confirmation.
     @State private var orchestratorReplacement: OrchestratorReplacement?
 
@@ -948,8 +948,7 @@ struct ContentView: View {
         return OrchestratorRow(
             pane: pane, isSelected: target != nil && selection == target,
             onSelect: { if let target { selection = target } },
-            isStarting: workspace.map { startingOrchestrators.contains(orchestratorKey($0, host: entry.host)) }
-                ?? false,
+            isStarting: workspace.map { startingOrchestrators.isStarting($0, host: entry.host) } ?? false,
             onStart: workspace.flatMap { workspace in
                 store.refusal(for: entry.host) == nil
                     ? { harness in startOrchestrator(workspace, host: entry.host, harness: harness, replace: false) }
@@ -968,10 +967,11 @@ struct ContentView: View {
             charter: CharterAccess.of(workspace, host: host),
             onShowBoard: { selection = .board(host: host, workspace: workspace.id) },
             onStart: { harness, replace in
-                if replace {
+                switch OrchestratorRequest(harness: harness, replace: replace) {
+                case .confirmReplace(let harness):
                     orchestratorReplacement = OrchestratorReplacement(
                         host: host, workspace: workspace, harness: harness)
-                } else {
+                case .start(let harness):
                     startOrchestrator(workspace, host: host, harness: harness, replace: false)
                 }
             },
@@ -980,11 +980,6 @@ struct ContentView: View {
                     errorBanner = "Couldn’t open \(workspace.name)’s charter. It may have been moved or deleted."
                 }
             })
-    }
-
-    /// What `startingOrchestrators` holds for a workspace.
-    private func orchestratorKey(_ workspace: WorkspaceSummary, host: String) -> String {
-        "\(host)\u{1}\(workspace.id)"
     }
 
     /// Start `workspace`'s orchestrator, or replace the one running. The row
@@ -998,11 +993,10 @@ struct ContentView: View {
             return
         }
         guard let client = store.clients[host] else { return }
-        let key = orchestratorKey(workspace, host: host)
-        guard startingOrchestrators.insert(key).inserted else { return }
+        guard startingOrchestrators.begin(workspace, host: host) else { return }
         Task {
             let refused = await client.startOrchestrator(workspace, harness: harness, replace: replace)
-            startingOrchestrators.remove(key)
+            startingOrchestrators.end(workspace, host: host)
             if let refused { errorBanner = refused }
         }
     }
