@@ -115,7 +115,7 @@ conversation, so the handoff matters more than the moves.
 
 1. `{{cli}} workspace create --repo <repo> --name <Name> --prefix <prefix>`:
    ask the owner for both, and suggest a prefix of 2 to 4 letters.
-2. Its charter starts as a copy of yours: edit it down to this workstream.
+2. Its charter starts as a copy of Main's: edit it down to this workstream.
    `{{cli}} --json workspace show <Name> --repo <repo>` gives its `charter` path.
 3. Move its tasks and the worktrees its agents work in:
    `{{cli}} task move <key>… --to <Name> --repo <repo> --actor manager`, then
