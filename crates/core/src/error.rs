@@ -45,6 +45,15 @@ pub enum DomainError {
     #[error("resource version is stale")]
     ResourceConflict,
 
+    /// `ResourceConflict`'s code, naming which conflict in `Error.what`.
+    ///
+    /// For the refusals a client words differently: `terminal.agent_answer`'s
+    /// `not_held` (someone already answered the ask) and `not_delivered` (the
+    /// answer was taken but never reached the agent). Before this both were
+    /// the same bare conflict, so no client could tell them apart.
+    #[error("{}", conflict_sentence(what))]
+    Conflict { what: &'static str },
+
     #[error("resource not found")]
     NotFound,
 
@@ -145,6 +154,7 @@ impl DomainError {
             DomainError::ClientTooSlow => (ErrorCode::ClientTooSlow, true),
             DomainError::OperationFailed => (ErrorCode::OperationFailed, true),
             DomainError::ResourceConflict => (ErrorCode::ResourceConflict, false),
+            DomainError::Conflict { .. } => (ErrorCode::ResourceConflict, false),
             DomainError::NotFound => (ErrorCode::NotFound, false),
             DomainError::InvalidArgument { .. } => (ErrorCode::InvalidArgument, false),
             DomainError::IdempotencyMismatch => (ErrorCode::IdempotencyMismatch, false),
@@ -191,7 +201,7 @@ impl DomainError {
     /// print it.
     pub fn what(&self) -> &'static str {
         match self {
-            DomainError::InvalidArgument { what } => what,
+            DomainError::InvalidArgument { what } | DomainError::Conflict { what } => what,
             DomainError::AuthRequired
             | DomainError::ScopeDenied { .. }
             | DomainError::VersionIncompatible
@@ -243,6 +253,16 @@ impl DomainError {
             },
             _ => self.to_string(),
         }
+    }
+}
+
+/// What a named conflict says in `Error.message`. A client owns its own
+/// sentence and switches on `what`; this is for one that shows the message.
+fn conflict_sentence(what: &str) -> &'static str {
+    match what {
+        "not_held" => "someone already answered this",
+        "not_delivered" => "the answer didn't reach the agent",
+        _ => "resource version is stale",
     }
 }
 
@@ -402,6 +422,18 @@ mod tests {
             DomainError::CapabilityUnsupported { needed: "changes" },
             DomainError::AgentNotConnected,
         ]
+    }
+
+    /// A named conflict is a conflict on the wire, and says which one.
+    #[test]
+    fn a_named_conflict_keeps_the_conflict_code_and_says_which() {
+        for what in ["not_held", "not_delivered"] {
+            let e = DomainError::Conflict { what };
+            assert_eq!(e.wire(), DomainError::ResourceConflict.wire());
+            assert_eq!(e.what(), what);
+            let m = e.redacted_message();
+            assert!(!m.contains('/') && !m.contains(what), "{m}");
+        }
     }
 
     #[test]

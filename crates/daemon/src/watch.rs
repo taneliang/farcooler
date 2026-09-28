@@ -3099,6 +3099,24 @@ impl Watcher {
             .collect()
     }
 
+    /// Put a terminal where a sample would have: its activity, when that
+    /// began, what it is asking, and how its last turn went.
+    ///
+    /// For the tests that drive the RPC layer over a socket with no sampling
+    /// loop behind it, which is every one of them: there is no tmux screen to
+    /// read a Blocked off. The live path is `sample`.
+    #[doc(hidden)]
+    pub async fn observe_for_tests(&self, terminal: Uuid, seen: crate::needs_you::Observation) {
+        let mut state = self.state.lock().await;
+        let observed = state.entry(terminal).or_insert_with(|| Observed::begin(seen.activity, seen.state_since));
+        observed.activity = seen.activity;
+        observed.state_since = seen.state_since;
+        observed.blocked_question = seen.blocked_question;
+        observed.turn_failed = seen.turn_failed;
+        observed.command = seen.command;
+        observed.chat_capable = seen.chat_capable;
+    }
+
     /// What the agent is asking, if it is.
     pub async fn blocked_question(&self, terminal: Uuid) -> Option<String> {
         self.state.lock().await.get(&terminal).and_then(|o| o.blocked_question.clone())

@@ -412,6 +412,11 @@ fn required_scope(method: &str) -> Option<Scope> {
         // needs-you badge let a read-scoped phone triage the fleet without being
         // able to read a line of the code.
         "changes.inbox" | "stack.get" => Scope::Read,
+        // The shape of the work, like `changes.inbox`: what is waiting on a
+        // person and where. Below `control` the converter drops what an ask's
+        // option names carry, which is the raw command or path
+        // (`needs_you::redact_below_control`).
+        "needs_you.list" => Scope::Read,
         // The board reads. A task's title, intent and record are metadata about
         // work, not the work: no path, no diff, no terminal byte — the same
         // ground `changes.inbox` stands on, and a read-scoped phone has to be
@@ -1856,6 +1861,15 @@ impl Rpc {
                 Ok(result::Value::ChangesInbox(crate::review_ops::inbox(svc).await?))
             }
 
+            "needs_you.list" => {
+                let inputs = crate::needs_you::gather(svc, &self.watcher).await?;
+                let mut items = crate::needs_you::assemble(&inputs, std::time::SystemTime::now());
+                if !satisfies(self.peer.scope, Scope::Control) {
+                    items = items.into_iter().map(crate::needs_you::redact_below_control).collect();
+                }
+                Ok(result::Value::NeedsYouList(farcooler_protocol::v1::NeedsYouList { items }))
+            }
+
             "stack.get" => {
                 let Some(request::Payload::StackGet(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
@@ -2106,7 +2120,10 @@ impl Rpc {
                         use crate::hook_asks::AnswerRefused;
                         match refused {
                             AnswerRefused::UnknownOption => DomainError::InvalidArgument { what: "option_id" },
-                            AnswerRefused::NotHeld | AnswerRefused::NotDelivered => DomainError::ResourceConflict,
+                            // Named, so a client can say which: someone else
+                            // answered, or this answer never reached the hook.
+                            AnswerRefused::NotHeld => DomainError::Conflict { what: "not_held" },
+                            AnswerRefused::NotDelivered => DomainError::Conflict { what: "not_delivered" },
                         }
                     })?;
                 } else {
@@ -3007,16 +3024,34 @@ mod hook_answer_tests {
     }
 
     #[tokio::test]
-    async fn an_answer_to_an_ask_no_longer_held_is_a_conflict() {
+    async fn a_second_answer_is_refused_as_not_held() {
         let r = a_runner("iPhone").await;
         let (id, hook) = held(&r);
         let phone = handler(&r.svc, Some("phone-1"));
         assert_eq!(refusal(&phone, an_answer(r.terminal, &id, "allow")).await, None);
         hook.await.unwrap();
+        let refused = refusal(&phone, an_answer(r.terminal, &id, "deny")).await;
         assert_eq!(
-            refusal(&phone, an_answer(r.terminal, &id, "deny")).await,
-            Some(code(DomainError::ResourceConflict)),
-            "the first answer won; this one is told something else changed it"
+            refused,
+            Some((farcooler_protocol::v1::ErrorCode::ResourceConflict as i32, "not_held".to_string())),
+            "the first answer won; this one is told someone already answered"
+        );
+    }
+
+    /// The ask was settled, but its hook went away before it could be told:
+    /// the answer never reached claude, which is a different sentence.
+    #[tokio::test]
+    async fn an_undelivered_answer_is_refused_as_not_delivered() {
+        let r = a_runner("iPhone").await;
+        let (id, rx) = r.svc.hooks().asks().hold(r.terminal);
+        // A hook that hears its ending and hangs up without acknowledging it.
+        let hook = tokio::spawn(async move { drop(rx.await) });
+        let phone = handler(&r.svc, Some("phone-1"));
+        let refused = refusal(&phone, an_answer(r.terminal, &id, "allow")).await;
+        hook.await.unwrap();
+        assert_eq!(
+            refused,
+            Some((farcooler_protocol::v1::ErrorCode::ResourceConflict as i32, "not_delivered".to_string()))
         );
     }
 
