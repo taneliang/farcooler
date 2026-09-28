@@ -47,6 +47,9 @@ class FleetDecodeTest {
               "workspace": "0198f2c0-0000-7000-8000-0000000000bb",
               "claim_source": "hook",
               "foreign_writers": ["Payments"],
+              "open_tasks": [
+                {"id": "0198f2c0-0000-7000-8000-00000000a001", "key": "bil-9", "title": "Invoice PDF export", "status": "in_progress"}
+              ],
               "terminals": [
                 {
                   "id": "aab3238922bcc25a6f606eb525ffdc56",
@@ -163,6 +166,12 @@ class FleetDecodeTest {
         assertEquals(3, w.ordinal)
         assertTrue(w.worktreeMissing)
         assertFalse(w.isHidden)
+        // Snake_case, from `open_tasks_json`, which the CLI shares: what lets
+        // a pane name its task without reading a board.
+        assertEquals(
+            listOf(TaskRef("0198f2c0-0000-7000-8000-00000000a001", "bil-9", "Invoice PDF export", "in_progress")),
+            w.openTasks,
+        )
     }
 
     /**
@@ -215,6 +224,8 @@ class FleetDecodeTest {
         assertNull(w.workspace)
         assertNull(w.claimSource)
         assertNull(w.foreignWriters)
+        // No `open_tasks`: no task, which is all such a runner can say.
+        assertEquals(emptyList<TaskRef>(), w.openTasks)
         assertNull(w.terminals.first().workspace)
         assertNull(w.terminals.first().role)
         assertFalse(w.terminals.first().isOrchestrator)

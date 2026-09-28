@@ -1,0 +1,55 @@
+package com.farcooler.model
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+/** Which task a pane names (spec §3.2), and that naming one doesn't make a shell its agent. */
+class TaskLinkTest {
+    private val invoice = TaskRef("t-9", "bil-9", "Invoice PDF export", "in_progress")
+    private val retries = TaskRef("t-4", "bil-4", "Retry failed webhooks", "in_review")
+
+    private fun worktree(vararg open: TaskRef, terminals: List<Terminal> = emptyList()) =
+        Worktree(id = "w", terminals = terminals, openTasks = open.toList())
+
+    @Test
+    fun `a dispatched pane's task is its own, over its worktree's`() {
+        val pane = Terminal(id = "p", preset = "claude", state = "running", taskId = "t-4")
+        assertEquals(retries, TaskLink.task(pane, worktree(invoice, retries)))
+        // Its own even when the worktree has one other open task.
+        assertEquals("t-4", TaskLink.taskId(pane, worktree(invoice)))
+    }
+
+    @Test
+    fun `one open task is the pane's task`() {
+        val pane = Terminal(id = "p", preset = "claude", state = "running")
+        assertEquals(invoice, TaskLink.task(pane, worktree(invoice)))
+        assertEquals("bil-9 Invoice PDF export", TaskLink.task(pane, worktree(invoice))?.label)
+    }
+
+    @Test
+    fun `two open tasks are none`() {
+        val pane = Terminal(id = "p", preset = "claude", state = "running")
+        assertNull(TaskLink.task(pane, worktree(invoice, retries)))
+        assertNull(TaskLink.task(pane, worktree()))
+        assertNull(TaskLink.task(pane, null))
+    }
+
+    @Test
+    fun `a shell under a task is not its agent`() {
+        val shell = Terminal(id = "s", preset = "zsh", state = "running")
+        val wt = worktree(invoice, terminals = listOf(shell))
+        // The chip names the task over the shell...
+        assertEquals(invoice, TaskLink.task(shell, wt))
+        // ...and the board still counts no agent on it.
+        val board = TaskBoard(
+            columns = listOf(
+                TaskBoardColumn(
+                    TaskStatus.IN_PROGRESS,
+                    listOf(TaskRow("t-9", "bil-9", "Invoice PDF export", TaskStatus.IN_PROGRESS, 0L, worktreeId = "w")),
+                )
+            ),
+        )
+        assertEquals(0, board.tasksWithLiveAgents(wt.terminals))
+    }
+}

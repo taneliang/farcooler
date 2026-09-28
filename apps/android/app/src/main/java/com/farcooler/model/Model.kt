@@ -100,6 +100,16 @@ data class Worktree(
     /** The names of the other workspaces with a live terminal in this worktree. */
     @SerialName("foreign_writers") val foreignWriters: List<String>? = null,
     val terminals: List<Terminal> = emptyList(),
+    /**
+     * The tasks working here that aren't Done or Canceled, each as
+     * `{id, key, title, status}`. What lets a pane name its task without a
+     * board read; see [TaskLink].
+     *
+     * Snake_case because `Session::fleet` takes it from `open_tasks_json`,
+     * which the CLI's `worktree list --json` shares. Empty from a runner too
+     * old to fill it, which reads as "no task" — all such a runner can say.
+     */
+    @SerialName("open_tasks") val openTasks: List<TaskRef> = emptyList(),
 ) {
     /**
      * Which of several identically-labelled terminals each one is, keyed by
@@ -135,6 +145,25 @@ data class Worktree(
      * terminals fail separately underneath. No screen here says it yet.
      */
     val worktreeMissing: Boolean get() = state.equals("worktree_missing", ignoreCase = true)
+}
+
+/**
+ * A task named from somewhere other than its board: a worktree's
+ * [Worktree.openTasks], and a Needs You item's task.
+ *
+ * [status] is the board's wire word (`needs_decision`, `in_review`, …), kept
+ * as the word rather than a [TaskStatus] so a status this build doesn't know
+ * costs nothing but its name.
+ */
+@Serializable
+data class TaskRef(
+    val id: String,
+    val key: String = "",
+    val title: String = "",
+    val status: String = "",
+) {
+    /** `bil-9 Invoice PDF export`: the key, then the title, either one alone when that's all there is. */
+    val label: String get() = listOf(key, title).filter { it.isNotBlank() }.joinToString(" ")
 }
 
 @Serializable
