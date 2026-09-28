@@ -2653,41 +2653,103 @@ mod tests {
         assert!(start_orchestrator_of(&json!({ "harness": "claude" })).is_err(), "no workspace");
     }
 
-    fn listed(repository: uuid::Uuid, main: uuid::Uuid) -> Vec<farcooler_protocol::v1::Workspace> {
-        vec![farcooler_protocol::v1::Workspace {
-            id: bytes::Bytes::copy_from_slice(main.as_bytes()),
-            repository_id: bytes::Bytes::copy_from_slice(repository.as_bytes()),
-            is_main: true,
-            ..Default::default()
-        }]
+    /// A runner with workstreams whose only workspace is `repository`'s
+    /// Main. It keeps every `worktree.create` it is sent, and answers it.
+    async fn a_runner_with_main(
+        socket: &std::path::Path,
+        repository: uuid::Uuid,
+        main: uuid::Uuid,
+    ) -> Arc<Mutex<Vec<farcooler_protocol::v1::WorktreeCreate>>> {
+        use farcooler_protocol::v1::{self as pb, request, response, result, wire_envelope};
+        use farcooler_transport::codec::{FrameReader, FrameWriter};
+        let envelope = |body| pb::WireEnvelope {
+            protocol_version: farcooler_protocol::PROTOCOL_VERSION,
+            message_id: farcooler_protocol::ids::new_id(),
+            body: Some(body),
+        };
+        let listener = tokio::net::UnixListener::bind(socket).expect("bind");
+        let created = Arc::new(Mutex::new(Vec::new()));
+        let kept = Arc::clone(&created);
+        tokio::spawn(async move {
+            let Ok((stream, _)) = listener.accept().await else { return };
+            let (read, write) = stream.into_split();
+            let mut reader = FrameReader::new(read);
+            let mut writer = FrameWriter::new(write);
+            let Ok(Some(_hello)) = reader.read_frame().await else { return };
+            let hello = envelope(wire_envelope::Body::ServerHello(pb::ServerHello {
+                selected_protocol_version: farcooler_protocol::PROTOCOL_VERSION,
+                daemon_version: "a runner with Main".into(),
+                max_control_envelope_bytes: farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES as u32,
+                max_terminal_payload_bytes: farcooler_protocol::MAX_TERMINAL_PAYLOAD_BYTES as u32,
+                capabilities: farcooler_protocol::capability::ALL.iter().map(|c| c.to_string()).collect(),
+                ..Default::default()
+            }));
+            if writer.write_frame(&hello).await.is_err() {
+                return;
+            }
+            while let Ok(Some(frame)) = reader.read_frame().await {
+                let Some(wire_envelope::Body::Request(req)) = frame.body else { continue };
+                let value = match (req.method.as_str(), req.payload) {
+                    ("workspace.list", _) => result::Value::WorkspaceList(pb::WorkspaceList {
+                        items: vec![pb::Workspace {
+                            id: bytes::Bytes::copy_from_slice(main.as_bytes()),
+                            repository_id: bytes::Bytes::copy_from_slice(repository.as_bytes()),
+                            is_main: true,
+                            ..Default::default()
+                        }],
+                    }),
+                    ("worktree.create", Some(request::Payload::WorktreeCreate(p))) => {
+                        locked(&kept).push(p);
+                        result::Value::Worktree(pb::Worktree {
+                            id: bytes::Bytes::copy_from_slice(&[1; 16]),
+                            ..Default::default()
+                        })
+                    }
+                    _ => continue,
+                };
+                let reply = envelope(wire_envelope::Body::Response(pb::Response {
+                    request_id: req.request_id,
+                    outcome: Some(response::Outcome::Result(pb::Result { value: Some(value) })),
+                }));
+                if writer.write_frame(&reply).await.is_err() {
+                    return;
+                }
+            }
+        });
+        created
     }
 
-    /// Read off the arguments the way the `worktree.create` arm reads them.
-    fn claimed(args: &Value, repository: uuid::Uuid, listed: &[farcooler_protocol::v1::Workspace]) -> Option<uuid::Uuid> {
-        let chosen = optional_id(args, "workspace", "worktree.create").expect("args");
-        let (claim, required) = crate::session::claim(repository, chosen, chosen.is_none().then_some(listed));
-        if claim.is_some() {
-            assert_eq!(required, [farcooler_protocol::capability::WORKSTREAMS], "a claim names what it needs");
-        }
-        claim.map(|b| crate::session::uuid_of(&b))
+    /// What the `worktree.create` arm itself, through `dispatch`, claims the
+    /// new worktree for, given a phone's `args`.
+    async fn claimed(args: Value, repository: uuid::Uuid, main: uuid::Uuid) -> Option<uuid::Uuid> {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("runner.sock");
+        let created = a_runner_with_main(&socket, repository, main).await;
+        let mut session = Session::connect_local(&socket).await.expect("connect");
+        let mut args = args;
+        args["repository"] = json!(repository.to_string());
+        args["task"] = json!("phone task");
+        args["branch"] = json!("feat/phone");
+        dispatch(&mut session, "worktree.create", &args).await.expect("created");
+        let sent = locked(&created).clone();
+        assert_eq!(sent.len(), 1, "one create reached the runner");
+        sent[0].workspace_id.as_deref().map(crate::session::uuid_of)
     }
 
-    #[test]
-    fn a_worktree_made_with_a_workspace_is_claimed_for_it() {
+    #[tokio::test]
+    async fn a_worktree_made_with_a_workspace_is_claimed_for_it() {
         let (repository, main, billing) = (uuid::Uuid::now_v7(), uuid::Uuid::now_v7(), uuid::Uuid::now_v7());
-        let args = json!({ "repository": repository.to_string(), "workspace": billing.to_string() });
-        assert_eq!(claimed(&args, repository, &listed(repository, main)), Some(billing));
+        let chosen = claimed(json!({ "workspace": billing.to_string() }), repository, main).await;
+        assert_eq!(chosen, Some(billing));
         let malformed = json!({ "repository": repository.to_string(), "workspace": "billing" });
         assert!(optional_id(&malformed, "workspace", "worktree.create").is_err(), "never widened to Main");
     }
 
-    #[test]
-    fn a_worktree_made_without_one_is_still_claimed_for_main() {
+    #[tokio::test]
+    async fn a_worktree_made_without_one_is_still_claimed_for_main() {
         let (repository, main) = (uuid::Uuid::now_v7(), uuid::Uuid::now_v7());
-        let args = json!({ "repository": repository.to_string() });
-        assert_eq!(claimed(&args, repository, &listed(repository, main)), Some(main));
-        let null = json!({ "repository": repository.to_string(), "workspace": null });
-        assert_eq!(claimed(&null, repository, &listed(repository, main)), Some(main));
+        assert_eq!(claimed(json!({}), repository, main).await, Some(main));
+        assert_eq!(claimed(json!({ "workspace": null }), repository, main).await, Some(main));
     }
 
     /// A pair whose public half the fence would refuse never reaches an app.
