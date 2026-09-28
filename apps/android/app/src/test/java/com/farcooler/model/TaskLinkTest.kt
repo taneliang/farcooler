@@ -28,6 +28,14 @@ class TaskLinkTest {
     }
 
     @Test
+    fun `an orchestrator shows no task`() {
+        val orchestrator = Terminal(id = "o", preset = "claude", state = "running", role = "orchestrator")
+        assertNull(TaskLink.task(orchestrator, worktree(invoice)))
+        // An agent in the same worktree still shows it.
+        assertEquals(invoice, TaskLink.task(orchestrator.copy(role = "agent"), worktree(invoice)))
+    }
+
+    @Test
     fun `two open tasks are none`() {
         val pane = Terminal(id = "p", preset = "claude", state = "running")
         assertNull(TaskLink.task(pane, worktree(invoice, retries)))

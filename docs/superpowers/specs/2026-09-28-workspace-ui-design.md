@@ -307,6 +307,7 @@ A runner without `needs_you` still contributes items, derived in the app from wh
 2. **A pane shows its task.** Its task is:
    - `Terminal.task_id` when it's set;
    - otherwise its worktree's task, when the worktree has exactly one.
+   - never, for an orchestrator pane: it leads the workspace and works no one task (ruled during ov-55 1E).
 
    This is a rule, `TaskLink.task(of:in:)`, stated once in AgentKit and once in Kotlin against one fixture. It
    draws as a chip in the pane's header: "bil-9 Invoice PDF export". The chip opens the task.

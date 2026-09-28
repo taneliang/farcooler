@@ -15,8 +15,13 @@ package com.farcooler.model
  * feeds it or dispatch's one-agent-per-task check.
  */
 object TaskLink {
-    /** The id of [pane]'s task in [worktree], or null. */
+    /**
+     * The id of [pane]'s task in [worktree], or null. Never for an
+     * orchestrator: it leads the workspace rather than working one task, even
+     * in a worktree with exactly one open task (coordinator ruling, ov-55).
+     */
     fun taskId(pane: Terminal, worktree: Worktree?): String? {
+        if (pane.isOrchestrator) return null
         pane.taskId?.takeIf { it.isNotEmpty() }?.let { return it }
         return worktree?.openTasks?.singleOrNull()?.id
     }
