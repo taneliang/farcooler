@@ -134,6 +134,9 @@ struct ContentView: View {
     /// The agent each task's column shows, by task id, when several are on
     /// it and one was picked.
     @State private var chosenAgents: [String: String] = [:]
+    /// The Needs You item ⌃⌘N last opened, by its key: where the next
+    /// press goes on from, while the window is still showing it.
+    @State private var lastAttention: String?
 
     /// What confirming a pane-mode switch would do, and to which pane.
     struct PaneModeConfirmation: Identifiable {
@@ -1237,7 +1240,10 @@ struct ContentView: View {
     /// hosts: an agent blocked on a runner in another room is exactly as
     /// urgent as one on this desk.
     private var attentionWaiting: [Status] {
-        store.fleet.worktrees.flatMap(\.terminals).map(\.status).filter(\.wantsAttention)
+        // Items, not terminals: a decision is one, and a finished agent
+        // isn't. Every item is something waiting on an answer, so each is
+        // drawn in the blocked amber.
+        store.needsYou.map { _ in Status.blocked }
     }
 
     private var sidebarHeader: some View {
@@ -2532,6 +2538,16 @@ struct ContentView: View {
         keyPane = pane
     }
 
+    /// Open a Needs You item where spec §2.5 says it lands.
+    private func open(_ item: NeedsYouItem) {
+        lastAttention = item.key
+        guard let landed = NeedsYouNavigation.landing(for: item, in: store.fleet) else {
+            errorBanner = "That’s no longer on its runner."
+            return
+        }
+        selection = landed
+    }
+
     /// Go to `pane` wherever it lives: its workspace, its task, or its
     /// worktree (`WorkspaceSelection.landing`).
     private func land(on pane: PaneRef) {
@@ -2604,14 +2620,15 @@ struct ContentView: View {
         case .previousTerminal: step(by: -1)
 
         case .nextAttention:
-            // Straight to whatever is waiting on you. On a fleet of twenty this
-            // is the difference between the app being useful and being a list.
-            let ordered = allTerminals
-            let start = ordered.firstIndex { $0.id == selectedTerminal?.terminal.id } ?? -1
-            let rotated = ordered[(start + 1)...] + ordered[...max(start, 0)]
-            if let next = rotated.first(where: { $0.agent.wantsAttention }) {
-                select(next)
-            }
+            // Straight to whatever is waiting on you, in rank order across
+            // every runner. On a fleet of twenty this is the difference
+            // between the app being useful and being a list. Walked from the
+            // item last opened while the window still shows it, else from the
+            // top.
+            let items = store.needsYou
+            let current = lastAttention.flatMap { key in items.first { $0.key == key } }
+                .flatMap { NeedsYouNavigation.landing(for: $0, in: store.fleet) == selection ? $0.key : nil }
+            if let next = NeedsYouNavigation.next(after: current, in: items) { open(next) }
 
         case .newWorktree:
             // Only reachable with a project registered; the panel has nothing
