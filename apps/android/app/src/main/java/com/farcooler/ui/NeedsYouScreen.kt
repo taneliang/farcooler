@@ -238,11 +238,13 @@ fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun NeedsYouItemRow(
+internal fun NeedsYouItemRow(
     row: NeedsYouRow,
     connection: Connection?,
     onOpen: () -> Unit,
     modifier: Modifier = Modifier,
+    /** False on the task screen, which is already the item's place. */
+    showPlace: Boolean = true,
 ) {
     val scope = rememberCoroutineScope()
     val item = row.item
@@ -300,7 +302,7 @@ private fun NeedsYouItemRow(
             KindMark(item.kindValue)
             Spacer(Modifier.width(8.dp))
             Text(
-                listOfNotNull(row.place, row.runner).joinToString(" · "),
+                if (showPlace) listOfNotNull(row.place, row.runner).joinToString(" · ") else kindTitle(item.kindValue),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -313,7 +315,7 @@ private fun NeedsYouItemRow(
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
         )
-        subject(row)?.let {
+        subject(row).takeIf { showPlace }?.let {
             Text(
                 it,
                 style = MaterialTheme.typography.bodySmall,

@@ -132,6 +132,8 @@ fun WorktreeScreen(
      */
     onScreen: Boolean = true,
     onOpenDrawer: () -> Unit,
+    /** Back to what pushed this worktree, drawn as an arrow in place of the menu; see [WorktreeTopBar]. */
+    onBack: (() -> Unit)? = null,
 ) {
     val connection = model.fleet.connection(route.hostId) ?: run {
         // The runner this worktree was on is gone — removed in settings, or
@@ -387,6 +389,7 @@ fun WorktreeScreen(
                                         )
                                     },
                                     onOpenDrawer = onOpenDrawer,
+                                    onBack = onBack,
                                 )
 
                                 is Pane.Changes -> ChangesTab(
@@ -403,6 +406,7 @@ fun WorktreeScreen(
                                     // `ChangesPane.visible`.
                                     visible = showing && onScreen,
                                     onOpenDrawer = onOpenDrawer,
+                                    onBack = onBack,
                                 )
                             }
                         }
@@ -517,7 +521,7 @@ fun WorktreeScreen(
  * watch, and must not put its composer over the pane you are actually in. The
  * `live` flag each pane is given is `showing && foreground` and nothing else.
  */
-private fun Modifier.mountedPane(showing: Boolean): Modifier =
+internal fun Modifier.mountedPane(showing: Boolean): Modifier =
     this
         .zIndex(if (showing) 1f else 0f)
         .then(if (showing) Modifier else HIDDEN_PANE)
@@ -585,6 +589,8 @@ private fun ChangesTab(
     runnerLabel: String,
     visible: Boolean,
     onOpenDrawer: () -> Unit,
+    /** Back to what pushed this worktree, drawn as an arrow in place of the menu; see [WorktreeTopBar]. */
+    onBack: (() -> Unit)? = null,
 ) {
     val fontChoice by model.settings.font.collectAsStateWithLifecycle()
     val fontSize by model.settings.fontSize.collectAsStateWithLifecycle()
@@ -612,5 +618,6 @@ private fun ChangesTab(
             model.choose(route.hostId, route.worktreeId, Pane.Terminal(target.id))
         },
         onOpenDrawer = onOpenDrawer,
+        onBack = onBack,
     )
 }

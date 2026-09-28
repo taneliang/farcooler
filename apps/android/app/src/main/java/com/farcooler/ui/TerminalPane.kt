@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Image
@@ -127,7 +128,14 @@ fun TerminalPane(
      */
     live: Boolean,
     onPickImage: () -> Unit,
+    /**
+     * False on a workspace's Orchestrator tab, whose own bar names the
+     * workspace and holds the pane's controls; see `WorkspaceScreen`.
+     */
+    showTopBar: Boolean = true,
     onOpenDrawer: () -> Unit,
+    /** Back to what pushed this worktree, drawn as an arrow in place of the menu; see [WorktreeTopBar]. */
+    onBack: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
@@ -257,12 +265,13 @@ fun TerminalPane(
             .fillMaxSize()
             .background(Color(TerminalPalette.BACKGROUND))
     ) {
-        WorktreeTopBar(
+        if (showTopBar) WorktreeTopBar(
             worktree = worktree,
             fallbackTitle = name,
             showRunner = showRunner,
             runnerLabel = connection.host.displayLabel,
             onOpenDrawer = onOpenDrawer,
+            onBack = onBack,
             task = chip?.task,
             onOpenTask = chip?.open,
         ) {
@@ -448,6 +457,8 @@ fun WorktreeTopBar(
     showRunner: Boolean,
     runnerLabel: String,
     onOpenDrawer: () -> Unit,
+    /** Back to what pushed this worktree, drawn as an arrow in place of the menu; see [WorktreeTopBar]. */
+    onBack: (() -> Unit)? = null,
     task: TaskRef? = null,
     onOpenTask: (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
@@ -495,8 +506,18 @@ fun WorktreeTopBar(
             }
         },
         navigationIcon = {
-            IconButton(onClick = onOpenDrawer) {
-                Icon(Icons.Outlined.Menu, contentDescription = "Show the fleet")
+            // A back arrow when this worktree was pushed from somewhere — a
+            // workspace, a task, Needs You — which, since the front door
+            // became the root, is every time (spec §6.2). The menu, which
+            // opens the drawer, stays for a worktree with nothing under it.
+            if (onBack != null) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+            } else {
+                IconButton(onClick = onOpenDrawer) {
+                    Icon(Icons.Outlined.Menu, contentDescription = "Show workspaces")
+                }
             }
         },
         actions = actions,

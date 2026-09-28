@@ -97,7 +97,7 @@ class ChangesSheetsTest {
     fun `an empty index says whether it is the comparison or the filter`() {
         assertEquals("Nothing changed in this comparison.", noFilesHere(comparisonIsEmpty = true))
         assertEquals("No files match that.", noFilesHere(comparisonIsEmpty = false))
-        assertEquals("This project has no branches yet.", noBranchesHere(repositoryIsEmpty = true))
+        assertEquals("This repository has no branches yet.", noBranchesHere(repositoryIsEmpty = true))
         assertEquals("No branches match that.", noBranchesHere(repositoryIsEmpty = false))
     }
 

@@ -250,6 +250,8 @@ fun ChangesPane(
      */
     visible: Boolean,
     onOpenDrawer: () -> Unit,
+    /** Back to what pushed this worktree, drawn as an arrow in place of the menu; see [WorktreeTopBar]. */
+    onBack: (() -> Unit)? = null,
 ) {
     val state by store.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
@@ -332,6 +334,7 @@ fun ChangesPane(
             showRunner = showRunner,
             runnerLabel = runnerLabel,
             onOpenDrawer = onOpenDrawer,
+            onBack = onBack,
         ) {
             ReviewMenu(
                 hasCommits = state.changeSet.commits.isNotEmpty(),

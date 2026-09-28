@@ -71,98 +71,29 @@ import com.farcooler.model.TaskRow
 import com.farcooler.model.Terminal
 import com.farcooler.model.Worktree
 import com.farcooler.model.landingWorktree
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Difference
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.farcooler.core.CoreException
+import com.farcooler.model.NeedsYouAnswer
+import com.farcooler.model.NeedsYouRow
+import com.farcooler.model.RunnerNeedsYouItem
+import com.farcooler.model.TaskStatus
+import com.farcooler.model.WorkspaceSummary
+import com.farcooler.net.rethrowIfCancellation
 import com.farcooler.net.Connection
 import com.farcooler.net.TerminalRef
 import kotlinx.coroutines.launch
 
-// A workspace's task board on Android: a Board row on the front door, the
-// board itself, and a card opened. Read-and-jump: see the board, see how far
-// along each card is, go to the agent on it. Every rule and sentence is in
-// `model/TaskBoard.kt`, the Android twin of AgentKit's, so a card reads the
-// same here as on the Mac and the iPhone.
-
-/**
- * One runner's Board rows, as last read: what the front door lists, and what
- * the worktree list draws under each workspace's heading
- * (`FleetLayout.boardRows`).
- */
-@Composable
-fun rememberBoardRows(connection: Connection): List<BoardRow> {
-    val repositories by connection.repositories.collectAsStateWithLifecycle()
-    val boards by connection.boards.collectAsStateWithLifecycle()
-    val fleet by connection.fleet.collectAsStateWithLifecycle()
-    val daemon by connection.daemon.collectAsStateWithLifecycle()
-    val link by connection.link.collectAsStateWithLifecycle()
-
-    // A row per workspace, or per repository on a runner without
-    // workspaces, empty or not and read or not (ov-55). The list is the
-    // fleet's and the repositories', which is why both are read above.
-    return RunnerBoards.rows(
-        hostId = connection.host.id,
-        boards = RunnerBoards.boards(repositories.map { it.id }, fleet.workspaces),
-        repositories = repositories,
-        models = boards,
-        panes = fleet.worktrees.flatMap { it.terminals },
-        build = daemon,
-        link = link,
-    )
-}
-
-/** One Board row: the workspace, a quiet count of tasks with agents, and the decisions in amber. */
-@Composable
-internal fun BoardRowItem(row: BoardRow, runner: String?, onOpen: (BoardRow) -> Unit) {
-    val amber = glanceColor(GlancePalette.amber)
-    ListItem(
-        headlineContent = { Text("${row.name} board", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        // Which repository's workspace, and which runner's, as far as either
-        // needs saying: "Main board" alone would not say whose Main it is.
-        supportingContent = listOfNotNull(row.repositoryName, runner).joinToString(" · ")
-            .takeIf { it.isNotEmpty() }?.let { { Text(it) } },
-        leadingContent = {
-            Icon(
-                Icons.Outlined.Checklist,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        },
-        trailingContent = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (row.agents > 0) {
-                    Icon(
-                        Icons.Outlined.AutoAwesome,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.width(2.dp))
-                    Text(
-                        "${row.agents}",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.width(12.dp))
-                }
-                if (row.decisions > 0) {
-                    Text(
-                        "${row.decisions}",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.SemiBold,
-                        color = amber,
-                    )
-                }
-            }
-        },
-        modifier = Modifier
-            .clickable { onOpen(row) }
-            .testTag("board-row-${row.hostId}-${row.key}")
-            .semantics {
-                contentDescription = listOfNotNull("${row.name} board", row.spoken).joinToString(", ")
-            },
-    )
-}
+// A workspace's task board on Android: the Board tab of its workspace screen,
+// and a card opened. Every rule and sentence is in `model/TaskBoard.kt`, the
+// Android twin of AgentKit's, so a card reads the same here as on the Mac and
+// the iPhone; the list form's rows are `BoardList`'s.
 
 /** The panes working [row] on one runner, named for a menu: the pane, then its worktree. */
 fun boardAgents(row: TaskRow, worktrees: List<Worktree>): List<Pair<Terminal, String>> {
@@ -177,21 +108,24 @@ fun boardAgents(row: TaskRow, worktrees: List<Worktree>): List<Pair<Terminal, St
 }
 
 /**
- * One workspace's board: a list grouped by status, Needs Decision first, and
- * only the statuses with something in them. On a runner without workspaces
- * the workspace is its repository's implicit one, and the board the
- * repository's.
+ * A workspace's Board tab: the list form of spec §5, from
+ * [TaskBoard.sections] — every status, Needs Decision first, an empty one a
+ * collapsed header reading "Backlog 0", Done and Canceled collapsed until
+ * opened. On a runner without workspaces the workspace is its repository's
+ * implicit one, and the board the repository's.
+ *
+ * A card opens the task screen over the workspace; its Agent control opens
+ * the agent over that, so Back comes out onto the board it was chosen from.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BoardScreen(
+fun BoardTab(
     connection: Connection,
-    workspaceId: String,
+    workspace: WorkspaceSummary,
     onOpenTask: (taskId: String) -> Unit,
     onJump: (TerminalRef) -> Unit,
-    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val repositories by connection.repositories.collectAsStateWithLifecycle()
     val boards by connection.boards.collectAsStateWithLifecycle()
     val unread by connection.unreadBoards.collectAsStateWithLifecycle()
     val fleet by connection.fleet.collectAsStateWithLifecycle()
@@ -200,55 +134,24 @@ fun BoardScreen(
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var refreshing by remember { mutableStateOf(false) }
+    // The statuses flipped from their first state, per workspace, for as long
+    // as the screen's saved state is kept.
+    var toggled by rememberSaveable(workspace.id) { mutableStateOf(emptyList<String>()) }
 
     // Read on opening, whatever was last read: the row that opened this may
     // be showing a count from before the last reconnect. While it is open, a
     // reconnect's sweep reads it again (`Connection.loadBoardsDetached`), and
     // so does a notice naming this workspace.
-    val workspace = remember(workspaceId, fleet.workspaces, repositories) {
-        connection.board(workspaceId)
-    }
-    LaunchedEffect(workspaceId) { connection.readBoard(workspace) }
+    LaunchedEffect(workspace.id) { connection.readBoard(workspace) }
 
-    // The row's own name, so the board is titled what its row was: the
-    // workspace's, or for an implicit one the repository's.
-    val name = if (workspace.isImplicit) {
-        repositories.firstOrNull { it.id == workspace.id }
-            ?.let { it.displayName.ifEmpty { it.short } } ?: "Board"
-    } else {
-        workspace.name.ifEmpty { "Board" }
-    }
-    val board = boards[workspaceId]
+    val board = boards[workspace.id]
     val speaks = TaskAgentLink.speaksOfAgents(link, daemon)
     val jump = boardJump(connection.host.id, fleet.worktrees, onJump) { why ->
         scope.launch { snackbar.showSnackbar(why) }
     }
+    val flipped = toggled.mapNotNull(TaskStatus::parse).toSet()
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        val waiting = board?.let { TaskBoard.waitingSentence(it.waitingOnYou) }
-                        if (waiting != null) {
-                            Text(
-                                waiting,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-            )
-        },
-        snackbarHost = { SnackbarHost(snackbar) },
-    ) { padding ->
+    Box(modifier.fillMaxSize()) {
         PullToRefreshBox(
             isRefreshing = refreshing,
             onRefresh = {
@@ -258,19 +161,18 @@ fun BoardScreen(
                     refreshing = false
                 }
             },
-            modifier = Modifier.fillMaxSize().padding(padding),
+            modifier = Modifier.fillMaxSize(),
         ) {
             when {
-                board == null && workspaceId in unread -> Empty(
+                board == null && workspace.id in unread -> Empty(
                     "Couldn’t read this board",
                     "Far Cooler couldn’t read this board. Pull down to try again.",
                 )
                 board == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
-                board.isEmpty -> Empty("No tasks", "Nothing is on this board yet.")
                 else -> LazyColumn(Modifier.fillMaxSize().testTag("board")) {
-                    if (workspaceId in unread) {
+                    if (workspace.id in unread) {
                         item(key = "unread") {
                             ListItem(
                                 headlineContent = {
@@ -280,27 +182,36 @@ fun BoardScreen(
                             )
                         }
                     }
-                    board.listed.forEach { column ->
-                        item(key = "header/${column.status.wire}") {
+                    TaskBoard.waitingSentence(board.waitingOnYou)?.let { waiting ->
+                        item(key = "waiting") {
                             Text(
-                                "${column.status.title}  ${column.rows.size}",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier
-                                    .padding(start = 16.dp, top = 20.dp, bottom = 4.dp)
-                                    .testTag("board-section-${column.status.wire}"),
+                                waiting,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = glanceColor(GlancePalette.amber),
+                                modifier = Modifier.padding(start = 16.dp, top = 12.dp),
                             )
                         }
-                        items(column.rows, key = { "task/${it.id}" }) { row ->
-                            val agents = if (speaks) boardAgents(row, fleet.worktrees) else emptyList()
-                            TaskCardRow(
-                                row = row,
-                                agents = agents,
-                                presence = row.agentPresence(agents.size, speaks),
-                                onOpen = { onOpenTask(row.id) },
-                                onJump = jump,
-                            )
-                            HorizontalDivider()
+                    }
+                    for (entry in BoardList.entries(board, flipped)) {
+                        when (entry) {
+                            is BoardListEntry.Header -> item(key = entry.key) {
+                                SectionHeader(entry) {
+                                    val word = entry.status.wire
+                                    toggled = if (word in toggled) toggled - word else toggled + word
+                                }
+                            }
+                            is BoardListEntry.Card -> item(key = entry.key) {
+                                val row = entry.row
+                                val agents = if (speaks) boardAgents(row, fleet.worktrees) else emptyList()
+                                TaskCardRow(
+                                    row = row,
+                                    agents = agents,
+                                    presence = row.agentPresence(agents.size, speaks),
+                                    onOpen = { onOpenTask(row.id) },
+                                    onJump = jump,
+                                )
+                                HorizontalDivider()
+                            }
                         }
                     }
                     if (board.unreadable.isNotEmpty()) {
@@ -321,6 +232,53 @@ fun BoardScreen(
                     }
                 }
             }
+        }
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
+    }
+}
+
+/**
+ * A status's header: its title and count, and a chevron when it has tasks to
+ * show or hide. An empty one says 0 and does nothing when tapped.
+ */
+@Composable
+private fun SectionHeader(header: BoardListEntry.Header, onToggle: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (header.expandable) Modifier.clickable(onClick = onToggle) else Modifier)
+            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp)
+            .testTag("board-section-${header.status.wire}")
+            .semantics(mergeDescendants = true) {
+                contentDescription = buildString {
+                    append("${header.status.title}, ${header.count}")
+                    if (header.expandable) append(if (header.expanded) ", expanded" else ", collapsed")
+                }
+            },
+    ) {
+        Text(
+            header.status.title,
+            style = MaterialTheme.typography.titleSmall,
+            color = if (header.count > 0) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "${header.count}",
+            style = MaterialTheme.typography.labelMedium,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.weight(1f))
+        if (header.expandable) {
+            Icon(
+                if (header.expanded) Icons.Outlined.KeyboardArrowDown
+                else Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -512,16 +470,32 @@ fun TaskDetailScreen(
     workspaceId: String,
     taskId: String,
     onJump: (TerminalRef) -> Unit,
+    /** Its worktree, pushed over this task: on its Changes tab when [changes]. */
+    onOpenWorktree: (worktreeId: String, changes: Boolean) -> Unit,
     onBack: () -> Unit,
 ) {
     val boards by connection.boards.collectAsStateWithLifecycle()
+    val unread by connection.unreadBoards.collectAsStateWithLifecycle()
     val fleet by connection.fleet.collectAsStateWithLifecycle()
     val daemon by connection.daemon.collectAsStateWithLifecycle()
     val link by connection.link.collectAsStateWithLifecycle()
+    val needsYou by connection.needsYou.collectAsStateWithLifecycle()
+    val inbox by connection.inbox.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
 
+    // Reached from Needs You or a notification, the board may not have been
+    // read on this link yet: read it rather than say the task has gone.
+    LaunchedEffect(workspaceId) {
+        if (connection.boards.value[workspaceId] == null) connection.readBoard(connection.board(workspaceId))
+    }
+
     val row = boards[workspaceId]?.row(taskId)
+    // What this task asks of you, as the runner put it: a decision with its
+    // options, a review, or an ask its agent holds. Answered here as on Needs
+    // You, by the same row.
+    val asking = needsYou?.items?.firstOrNull { it.task?.id == taskId }
+    val mayAnswer = daemon?.grantedScope != "read"
     val speaks = TaskAgentLink.speaksOfAgents(link, daemon)
     val jump = boardJump(connection.host.id, fleet.worktrees, onJump) { why ->
         scope.launch { snackbar.showSnackbar(why) }
@@ -542,7 +516,11 @@ fun TaskDetailScreen(
     ) { padding ->
         if (row == null) {
             Box(Modifier.padding(padding)) {
-                Empty("Not on this board", "This task isn’t on the board anymore.")
+                if (boards[workspaceId] == null && workspaceId !in unread) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                } else {
+                    Empty("Not on this board", "This task isn’t on the board anymore.")
+                }
             }
             return@Scaffold
         }
@@ -560,11 +538,59 @@ fun TaskDetailScreen(
                     CardDetails(row.copy(acceptance = emptyList()), rememberMinuteClock())
                 }
             }
+            if (asking != null) {
+                item(key = "asking") {
+                    NeedsYouItemRow(
+                        row = NeedsYouRow(RunnerNeedsYouItem(connection.host.id, asking), place = "", runner = null),
+                        connection = connection,
+                        showPlace = false,
+                        // Open from here is the agent it's about, if any: the
+                        // task is already on screen.
+                        onOpen = {
+                            asking.terminal?.id?.let { id ->
+                                fleet.worktrees.firstOrNull { w -> w.terminals.any { it.id == id } }
+                                    ?.terminals?.firstOrNull { it.id == id }?.let(jump)
+                            }
+                        },
+                    )
+                }
+            } else if (row.status == TaskStatus.NEEDS_DECISION && mayAnswer) {
+                // A runner too old to list its decisions: the answer is still
+                // a note, and still written here.
+                item(key = "answer") {
+                    AnswerDecision(connection, row)
+                }
+            }
             if (presence != TaskAgentPresence.Unsaid) {
                 item(key = "agent") {
                     ListItem(
                         headlineContent = { Text("Agent") },
                         trailingContent = { AgentControl(row.key, agents, presence, jump) },
+                    )
+                }
+            }
+            // Its worktree and changes, through the task's own worktree_id:
+            // reachable whether or not an agent is still on it (spec §3.2).
+            items(TaskLinks.rows(row, fleet.worktrees), key = { "link/${it::class.simpleName}" }) { link ->
+                when (link) {
+                    is TaskLinkRow.Changes -> {
+                        val counts = inbox[link.worktreeId]
+                        ListItem(
+                            headlineContent = { Text("Changes") },
+                            leadingContent = { Icon(Icons.Outlined.Difference, contentDescription = null) },
+                            trailingContent = { if (counts != null && counts.hasDiff) DiffCounts(counts) },
+                            modifier = Modifier
+                                .clickable { onOpenWorktree(link.worktreeId, true) }
+                                .testTag("task-changes"),
+                        )
+                    }
+                    is TaskLinkRow.Worktree -> ListItem(
+                        headlineContent = { Text("Worktree") },
+                        supportingContent = { Text(link.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        leadingContent = { Icon(Icons.Outlined.Folder, contentDescription = null) },
+                        modifier = Modifier
+                            .clickable { onOpenWorktree(link.worktreeId, false) }
+                            .testTag("task-worktree"),
                     )
                 }
             }
@@ -608,6 +634,52 @@ fun TaskDetailScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * "Answer…" on a task in Needs Decision whose runner didn't list the
+ * decision: a typed answer, sent as an `answer` note.
+ */
+@Composable
+private fun AnswerDecision(connection: Connection, row: TaskRow) {
+    val scope = rememberCoroutineScope()
+    var writing by remember { mutableStateOf(false) }
+    var sending by remember { mutableStateOf(false) }
+    var refusal by remember { mutableStateOf<String?>(null) }
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        if (sending) {
+            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+        } else {
+            OutlinedButton(onClick = { writing = true }) { Text("Answer…") }
+        }
+        refusal?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+    }
+    if (writing) {
+        var text by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { writing = false },
+            title = { Text("Answer ${row.key}") },
+            text = { OutlinedTextField(value = text, onValueChange = { text = it }, minLines = 2) },
+            confirmButton = {
+                TextButton(enabled = text.isNotBlank(), onClick = {
+                    writing = false
+                    sending = true
+                    refusal = null
+                    scope.launch {
+                        try {
+                            connection.answerDecision(row.id, text.trim())
+                        } catch (e: Exception) {
+                            e.rethrowIfCancellation()
+                            refusal = NeedsYouAnswer.refusal((e as? CoreException)?.what, "the runner")
+                        } finally {
+                            sending = false
+                        }
+                    }
+                }) { Text("Send") }
+            },
+            dismissButton = { TextButton(onClick = { writing = false }) { Text("Cancel") } },
+        )
     }
 }
 

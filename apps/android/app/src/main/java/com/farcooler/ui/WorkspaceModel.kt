@@ -1,0 +1,163 @@
+package com.farcooler.ui
+
+import com.farcooler.model.StateKind
+import com.farcooler.model.TaskBoard
+import com.farcooler.model.TaskRow
+import com.farcooler.model.TaskStatus
+import com.farcooler.model.Terminal
+import com.farcooler.model.Worktree
+
+// The workspace screen's rules, apart from the drawing of them, so a JVM test
+// can hold them: which rows the Board tab lists, which rows a task links to,
+// and what the Orchestrator tab says.
+
+/** One line of the Board tab: a status's header, or a card under it. */
+sealed interface BoardListEntry {
+    val key: String
+
+    /**
+     * A status and its count. An empty status is a header reading
+     * "Backlog 0" that can't be expanded (spec §5, owner decision 3): never
+     * hidden, never a gap.
+     */
+    data class Header(val status: TaskStatus, val count: Int, val expanded: Boolean) : BoardListEntry {
+        val expandable: Boolean get() = count > 0
+        override val key: String get() = "header/${status.wire}"
+    }
+
+    data class Card(val row: TaskRow) : BoardListEntry {
+        override val key: String get() = "task/${row.id}"
+    }
+}
+
+object BoardList {
+    /** Statuses that start collapsed when they have tasks: work that has stopped. */
+    val COLLAPSED_AT_FIRST: Set<TaskStatus> = setOf(TaskStatus.DONE, TaskStatus.CANCELLED)
+
+    /**
+     * The list form (spec §5), from [TaskBoard.sections]: every status,
+     * Needs Decision first. A status with tasks is expanded, except Done and
+     * Canceled, which start collapsed; [toggled] are the statuses the person
+     * flipped from that. An empty one is a collapsed header with a 0.
+     */
+    fun entries(board: TaskBoard, toggled: Set<TaskStatus>): List<BoardListEntry> =
+        board.sections.flatMap { section ->
+            val count = section.rows.size
+            val expanded = count > 0 && ((section.status !in COLLAPSED_AT_FIRST) != (section.status in toggled))
+            listOf(BoardListEntry.Header(section.status, count, expanded)) +
+                if (expanded) section.rows.map(BoardListEntry::Card) else emptyList()
+        }
+}
+
+/** A row on the task screen that pushes somewhere other than an agent. */
+sealed interface TaskLinkRow {
+    val worktreeId: String
+
+    /** The worktree's changes: the diff, as its Changes tab shows it. */
+    data class Changes(override val worktreeId: String, val insertions: Int?, val deletions: Int?) : TaskLinkRow
+
+    /** The worktree itself: its panes. */
+    data class Worktree(override val worktreeId: String, val name: String) : TaskLinkRow
+}
+
+object TaskLinks {
+    /**
+     * A task's Changes and Worktree rows, through `Task.worktree_id` (spec
+     * §3.2, item 3) — with or without a live agent, so a task in review whose
+     * agent has gone still reaches its changes. None when the task names no
+     * worktree, or one this runner's fleet doesn't have (removed since).
+     */
+    fun rows(task: TaskRow, worktrees: List<Worktree>): List<TaskLinkRow> {
+        val id = task.worktreeId?.takeIf { it.isNotEmpty() } ?: return emptyList()
+        val worktree = worktrees.firstOrNull { it.id == id } ?: return emptyList()
+        return listOf(
+            TaskLinkRow.Changes(id, null, null),
+            TaskLinkRow.Worktree(id, worktree.task.ifBlank { worktree.branch }),
+        )
+    }
+}
+
+/** What a workspace's Orchestrator tab shows (spec §8). */
+sealed interface OrchestratorSeat {
+    /** No orchestrator. [canStart] is false on a runner without workspaces, or below Control scope. */
+    data class Empty(val canStart: Boolean) : OrchestratorSeat
+
+    /**
+     * Asked for and not yet confirmed: "Starting Orchestrator…", then after
+     * [SLOW_AFTER_MS] "This is taking longer than usual." with Replace…,
+     * since the seat can stick.
+     */
+    data class Starting(val slow: Boolean) : OrchestratorSeat
+
+    /** Running in [worktreeId]: the tab is its pane. */
+    data class Live(val terminal: Terminal, val worktreeId: String) : OrchestratorSeat
+
+    /** Its pane was lost, or its process ended: Restart and Replace…. */
+    data class Lost(val terminal: Terminal, val worktreeId: String) : OrchestratorSeat
+
+    companion object {
+        const val SLOW_AFTER_MS = 30_000L
+
+        /**
+         * [seated] is the workspace's orchestrator terminal id as the runner
+         * last said, [startedAt] when this phone asked for one and hasn't seen
+         * it since (null if it didn't ask).
+         */
+        fun of(
+            seated: String?,
+            worktrees: List<Worktree>,
+            startedAt: Long?,
+            now: Long,
+            canStart: Boolean,
+        ): OrchestratorSeat {
+            val found = seated?.let { id ->
+                worktrees.firstNotNullOfOrNull { w -> w.terminals.firstOrNull { it.id == id }?.let { it to w.id } }
+            }
+            if (found != null) {
+                val (terminal, worktree) = found
+                return when (StateKind.parse(terminal.state)) {
+                    StateKind.LOST, StateKind.EXITED, StateKind.ERROR -> Lost(terminal, worktree)
+                    else -> Live(terminal, worktree)
+                }
+            }
+            // A seat the runner names with no pane in the fleet was never
+            // confirmed. This phone can't say how long ago it was taken, so
+            // Replace… is offered at once; one it asked for itself waits its
+            // thirty seconds first.
+            if (startedAt != null) return Starting(slow = now - startedAt >= SLOW_AFTER_MS)
+            if (seated != null) return Starting(slow = true)
+            return Empty(canStart)
+        }
+    }
+}
+
+/** The harnesses an orchestrator runs on, in the Mac's order (`OrchestratorHarness`). */
+enum class OrchestratorHarness(val wire: String, val title: String) {
+    CLAUDE("claude", "Claude"),
+    CODEX("codex", "Codex"),
+    CURSOR("cursor", "Cursor"),
+}
+
+/**
+ * Why an orchestrator didn't start, in this app's words: the Mac's
+ * `orchestratorRefusal` (ov-60), read from the runner's word and, where it
+ * named one, its `what`. Never the runner's own sentence.
+ */
+fun orchestratorRefusal(word: String?, what: String?, message: String?, name: String, replace: Boolean): String {
+    val said = message.orEmpty().lowercase()
+    return when {
+        what == "orchestrator_taken" || (word == "invalid-argument" && "already has an orchestrator" in said) ->
+            "$name already has an orchestrator. Choose Replace to start a new one."
+        what == "orchestrator_home" || (word == "invalid-argument" && "folder" in said) ->
+            "The runner couldn’t make $name’s folder, so no orchestrator started."
+        word == "not-found" -> "$name isn’t on this runner anymore."
+        word == "capability-unsupported" ->
+            "This runner’s Far Cooler is too old to start an orchestrator. Update it there, then try again."
+        word == "scope-denied" -> "This runner lets Far Cooler see its workspaces but not change them."
+        word == "resource-conflict" -> "$name changed while its orchestrator was starting. Try again."
+        word != null ->
+            "This runner couldn’t start an orchestrator for $name. That’s a problem in the app, not in anything you did."
+        replace -> "Couldn’t replace $name’s orchestrator. Check that the runner is reachable, then try again."
+        else -> "Couldn’t start an orchestrator for $name. Check that the runner is reachable, then try again."
+    }
+}

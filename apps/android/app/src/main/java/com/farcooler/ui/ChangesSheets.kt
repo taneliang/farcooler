@@ -1052,7 +1052,7 @@ internal fun BaseBranchSheet(
         } catch (e: Exception) {
             e.rethrowIfCancellation()
             failure = troubleFor(
-                e.refusalWord, e.message, "Couldn’t read this project’s branches.")
+                e.refusalWord, e.message, "Couldn’t read this repository’s branches.")
         }
     }
 
@@ -1067,7 +1067,7 @@ internal fun BaseBranchSheet(
 
         when {
             repositoryId == null -> SheetNote(
-                "This runner didn’t say which project this worktree belongs to, so its " +
+                "This runner didn’t say which repository this worktree belongs to, so its " +
                     "branches can’t be listed. A newer Far Cooler on that runner will."
             )
 
@@ -1232,7 +1232,7 @@ internal fun noFilesHere(comparisonIsEmpty: Boolean): String =
     if (comparisonIsEmpty) "Nothing changed in this comparison." else "No files match that."
 
 internal fun noBranchesHere(repositoryIsEmpty: Boolean): String =
-    if (repositoryIsEmpty) "This project has no branches yet." else "No branches match that."
+    if (repositoryIsEmpty) "This repository has no branches yet." else "No branches match that."
 
 /**
  * The base is named when it is known. It is empty until the first read lands,
@@ -1259,7 +1259,7 @@ internal fun baseDescription(set: ChangeSet): String {
         "guessed" -> "Guessed as $ref, so the diff may be wrong. Pin the right one."
         "upstream" -> "$ref, from this branch’s upstream."
         "pr_base" -> "$ref, from the pull request this branch targets."
-        "default_branch" -> "$ref, the project’s default branch."
+        "default_branch" -> "$ref, the repository’s default branch."
         else -> "Compared against $ref."
     }
 }

@@ -158,7 +158,7 @@ class RunnerSettingsCopyTest {
         assertFalse(agents == folders)
         assertTrue(agents.replace("agents", "X") == folders.replace("watched folders", "X"))
         // The same words the base picker uses for the same shape of failure —
-        // "Couldn’t read this project’s branches." Two sentences for one kind of
+        // "Couldn’t read this repository’s branches." Two sentences for one kind of
         // silence is how one screen comes to sound like two.
         assertTrue(agents.startsWith("Couldn’t read"))
     }

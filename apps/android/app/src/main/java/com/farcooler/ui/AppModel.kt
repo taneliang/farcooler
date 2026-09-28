@@ -11,6 +11,11 @@ import com.farcooler.data.RunnerStore
 import com.farcooler.data.Identity
 import com.farcooler.data.Settings
 import com.farcooler.model.NeedsYouItem
+import com.farcooler.model.RunnerNeedsYou
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import com.farcooler.model.NeedsYouKind
 import com.farcooler.model.Terminal
 import com.farcooler.net.Connection
@@ -47,6 +52,7 @@ import kotlinx.coroutines.launch
  * `orientation` itself, so rotation never recreates the activity — the only
  * rehearsal most apps get for the real thing.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class AppModel(
     application: Application,
     private val saved: SavedStateHandle,
@@ -132,6 +138,13 @@ class AppModel(
     private val _landed = MutableStateFlow(saved.get<Boolean>(LANDED) ?: false)
     val landed: StateFlow<Boolean> = _landed.asStateFlow()
 
+    /**
+     * Whether this launch has been decided: Needs You, or the last workspace
+     * over it (ruling 4). Saved, so a restored process doesn't decide again
+     * over a stack somebody already has.
+     */
+    private var launchDecided: Boolean = saved.get<Boolean>(LAUNCH) ?: false
+
     init {
         Identity.initialize(application)
         // Beside [Identity] and not lazily: both read the same preference file,
@@ -161,6 +174,17 @@ class AppModel(
                     notifier.report(terminal, worktree.task, host.displayLabel)
                 }
             }
+        }
+
+        // The first moment every runner has said what needs you — or failed —
+        // decides where this launch opens (ruling 4). Once.
+        viewModelScope.launch {
+            fleet.active
+                .flatMapLatest { list ->
+                    if (list.isEmpty()) flowOf(emptyList())
+                    else combine(list.map { c -> c.needsYou.combine(c.phase) { reading, phase -> reading to phase } }) { it.toList() }
+                }
+                .collect { readings -> decideLaunch(readings) }
         }
 
         account.afterSignIn = { viewModelScope.launch { push.sendIfPossible() } }
@@ -202,6 +226,31 @@ class AppModel(
         resolvePendingTerminal()
         if (_landed.value) return
         land(if (hosts.hosts.value.isEmpty()) Route.Onboarding else Backstack.ROOT)
+    }
+
+    /**
+     * Decide once every runner has answered `needs_you` or failed: until then
+     * "nothing is waiting" is a claim nobody can make. A runner that answers
+     * nothing for long is a runner the front door already says is quiet.
+     */
+    private fun decideLaunch(readings: List<Pair<RunnerNeedsYou?, Connection.Phase>>) {
+        if (launchDecided || readings.isEmpty()) return
+        val settled = readings.all { (reading, phase) -> reading != null || phase is Connection.Phase.Failed }
+        if (!settled || readings.none { it.first != null }) return
+        launchDecided = true
+        saved[LAUNCH] = true
+        val waiting = readings.sumOf { it.first?.items?.size ?: 0 }
+        val last = settings.lastWorkspace?.let { saved ->
+            val host = saved.substringBefore('/')
+            val workspace = saved.substringAfter('/', "")
+            if (workspace.isEmpty() || hosts.hosts.value.none { it.id == host }) null
+            else Route.Workspace(
+                host,
+                workspace,
+                WorkspaceTab.parse(settings.workspaceTab(host, workspace)) ?: WorkspaceTab.ORCHESTRATOR,
+            )
+        }
+        install(Backstack.launch(_stack.value, waiting, last))
     }
 
     private fun land(route: Route) {
@@ -380,6 +429,16 @@ class AppModel(
     fun selectTab(route: Route.Workspace, tab: WorkspaceTab) {
         settings.setWorkspaceTab(route.hostId, route.workspaceId, tab.name)
         install(Backstack.withTab(_stack.value, route, tab))
+    }
+
+    /**
+     * A task's Changes or Worktree row: its worktree pushed over the task, so
+     * Back returns to it — on its Changes tab when [changes]. Pointed at, not
+     * chosen: see [openChanges] for why the focus is written first.
+     */
+    fun openWorktreeFromTask(hostId: String, worktreeId: String, changes: Boolean) {
+        if (changes) record(Backstack.key(hostId, worktreeId), Pane.Changes, chosen = false)
+        install(Backstack.goToFromBoard(_stack.value, Route.Terminal(hostId, worktreeId)))
     }
 
     /**
@@ -615,5 +674,6 @@ class AppModel(
         const val STACK = "farcooler.nav.stack"
         const val FOCUS = "farcooler.nav.focus"
         const val LANDED = "farcooler.nav.landed"
+        const val LAUNCH = "farcooler.nav.launch"
     }
 }

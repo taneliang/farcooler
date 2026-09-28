@@ -227,22 +227,22 @@ private fun Ground(model: AppModel, route: Route, visible: Boolean, onOpenDrawer
                     route = route,
                     onScreen = visible,
                     onOpenDrawer = onOpenDrawer,
+                    // Pushed, always, since the front door became the root:
+                    // a back arrow where the menu was (spec §6.2).
+                    onBack = { model.back() },
                 )
             }
 
+            // Keyed on the workspace and not its tab: a tab tap changes the
+            // route's value and must not rebuild the screen (its orchestrator
+            // pane holds a session). See [Route.Workspace].
             is Route.Workspace -> key(route.hostId, route.workspaceId) {
-                val live = model.fleet.connection(route.hostId)
-                if (live != null) {
-                    BoardScreen(
-                        connection = live,
-                        workspaceId = route.workspaceId,
-                        onOpenTask = {
-                            model.navigate(Route.BoardTask(route.hostId, route.workspaceId, it))
-                        },
-                        onJump = { model.openFromBoard(it) },
-                        onBack = { model.back() },
-                    )
-                }
+                WorkspaceScreen(
+                    model = model,
+                    route = route,
+                    onScreen = visible,
+                    onBack = { model.back() },
+                )
             }
 
             // The root, and the fallback for anything that has no ground of its
@@ -309,6 +309,9 @@ private fun OverlayScreen(model: AppModel, route: Route, connections: List<Conne
                     workspaceId = route.workspaceId,
                     taskId = route.taskId,
                     onJump = { model.openFromBoard(it) },
+                    onOpenWorktree = { worktree, changes ->
+                        model.openWorktreeFromTask(route.hostId, worktree, changes)
+                    },
                     onBack = { model.back() },
                 )
             }

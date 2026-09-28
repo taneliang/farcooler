@@ -588,7 +588,7 @@ fun ResumeBranchSheet(
         } catch (e: Exception) {
             e.rethrowIfCancellation()
             failure = troubleFor(
-                e.refusalWord, e.message, "Couldn’t read this project’s branches.")
+                e.refusalWord, e.message, "Couldn’t read this repository’s branches.")
         }
     }
 
