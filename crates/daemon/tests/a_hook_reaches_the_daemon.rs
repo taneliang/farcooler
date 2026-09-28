@@ -1250,3 +1250,24 @@ async fn a_stop_from_the_same_session_withdraws_its_held_ask() {
     assert_eq!(asking.line(A_LINE).await.as_deref(), Some("{}\n"));
     assert_eq!(resolutions(&seen, &id), [""]);
 }
+
+/// Claude's own questions and its plan approval are not tool permissions. A
+/// phone's "Allow" on one of those has an unmeasured effect, so they are told
+/// "no decision" at once: no hold, no ask in the ledger, nothing on a phone.
+#[tokio::test]
+async fn a_permission_request_that_is_not_a_tool_permission_is_never_held() {
+    for tool in ["AskUserQuestion", "ExitPlanMode"] {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, terminal) = store_with_terminal("/wt/not-a-tool", "claude", Some("sess-1"));
+        let ingress = ingress_claiming(store, &[terminal]);
+        let (socket, seen) = listening_on(ingress.clone(), dir.path()).await;
+        let mut line = a_permission_request(Agent::Claude, "sess-1");
+        line.payload["tool_name"] = serde_json::json!(tool);
+        let mut asking = Asking::open(&socket, &line).await;
+
+        assert_eq!(asking.line(FIRST_CONTACT).await.as_deref(), Some("{}\n"), "{tool}: no decision, at once");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(!ingress.asks().is_holding(terminal), "{tool} reached the ledger");
+        assert!(!any_permission(&seen), "{tool} reached the phones");
+    }
+}

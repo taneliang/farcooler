@@ -70,6 +70,19 @@ use crate::transcript_tail::TranscriptTail;
 /// `listen` now has to survive.
 const IDLE: std::time::Duration = std::time::Duration::from_secs(600);
 
+/// Tools whose `PermissionRequest` is not an ordinary "may this tool run" ask,
+/// so it is never held or offered to a phone.
+///
+/// The gate's `matcher` is `"*"`, so it fires for every tool, and claude
+/// routes more than tool permissions through this hook: a question it asks
+/// the person (`AskUserQuestion`), and its request to leave plan mode
+/// (`ExitPlanMode`). A phone offers only Allow and Deny, and what an Allow does
+/// to one of these is unmeasured. It could answer a question nobody read, or
+/// approve a plan nobody saw. So these are told "no decision" at once, and the
+/// dialog stays with the keyboard. An explicit list, not a guess from the
+/// name: a tool added here is one somebody has decided a phone must not answer.
+const NOT_TOOL_PERMISSIONS: &[&str] = &["AskUserQuestion", "ExitPlanMode"];
+
 /// How long to wait before accepting again after a refusal.
 ///
 /// `LiveInventory::RETRY_PAUSE`'s reasoning, for the same kind of condition:
@@ -832,6 +845,11 @@ impl HookIngress {
                     write_reply(&mut write, &Reply::verdict(None)).await?;
                     continue;
                 };
+                if hook.payload["tool_name"].as_str().is_some_and(|t| NOT_TOOL_PERMISSIONS.contains(&t)) {
+                    tracing::debug!(%terminal, "a PermissionRequest that is not a tool permission; not held");
+                    write_reply(&mut write, &Reply::verdict(None)).await?;
+                    continue;
+                }
                 return self.hold_ask(terminal, hook, f, reader, write).await;
             }
             let Some(terminal) = terminal else {
