@@ -36,7 +36,7 @@ use crate::wire::id_bytes;
 // wire conversions
 // ---------------------------------------------------------------------------
 
-fn pb_status(status: TaskStatus) -> i32 {
+pub(crate) fn pb_status(status: TaskStatus) -> i32 {
     (match status {
         TaskStatus::Backlog => pb::TaskStatus::Backlog,
         TaskStatus::Todo => pb::TaskStatus::Todo,

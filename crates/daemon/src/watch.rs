@@ -3079,6 +3079,26 @@ impl Watcher {
         }
     }
 
+    /// Every sampled terminal as the needs-you list reads it, from one hold
+    /// of the lock, so no two terminals are read a tick apart.
+    pub async fn observed_snapshot(&self) -> HashMap<Uuid, crate::needs_you::Observation> {
+        self.state
+            .lock()
+            .await
+            .iter()
+            .map(|(id, o)| {
+                (*id, crate::needs_you::Observation {
+                    activity: o.activity,
+                    state_since: o.state_since,
+                    blocked_question: o.blocked_question.clone(),
+                    turn_failed: o.turn_failed,
+                    command: o.command.clone(),
+                    chat_capable: o.chat_capable,
+                })
+            })
+            .collect()
+    }
+
     /// What the agent is asking, if it is.
     pub async fn blocked_question(&self, terminal: Uuid) -> Option<String> {
         self.state.lock().await.get(&terminal).and_then(|o| o.blocked_question.clone())
