@@ -290,7 +290,8 @@ fn to_the_shim(svc: &Service, terminal: Uuid, message: DaemonMessage) -> Result<
 /// The name a deny carries for the device that sent it: "Denied from iPhone".
 ///
 /// `local` is a caller on this runner's own socket, the Mac app or the CLI,
-/// and it has no enrollment to name it. A remote device is named by its
+/// and it has no enrollment to name it, so it is named for the computer the
+/// runner is (`local_name`). A remote device is named by its
 /// enrollment label, which is whatever a device sent when it paired, so it is
 /// cut to one short line: a newline or a control character in a message
 /// claude shows the model is not something a device gets to put there.
@@ -299,12 +300,19 @@ fn decider_name(local: bool, label: Option<&str>) -> String {
     /// one line in the model's context.
     const LONGEST_NAME: usize = 40;
     if local {
-        return "Mac".to_string();
+        return local_name(cfg!(target_os = "macos")).to_string();
     }
     let clean: String = label.unwrap_or_default().chars().filter(|c| !c.is_control()).collect();
     let name: String = clean.trim().chars().take(LONGEST_NAME).collect();
     let name = name.trim_end();
     if name.is_empty() { "a paired device".to_string() } else { name.to_string() }
+}
+
+/// What the computer the runner runs on is called in a deny from its own
+/// socket. "Mac" is only true on a Mac; a Linux runner's local caller is the
+/// CLI on that machine.
+fn local_name(macos: bool) -> &'static str {
+    if macos { "Mac" } else { "this computer" }
 }
 
 /// The scope each method requires.
@@ -3030,6 +3038,13 @@ mod hook_answer_tests {
         assert_eq!(decider_name(false, Some("  iPad  ")), "iPad");
         assert_eq!(decider_name(false, Some(" \t ")), "a paired device");
         assert_eq!(decider_name(false, None), "a paired device");
-        assert_eq!(decider_name(true, None), "Mac");
+        assert_eq!(decider_name(true, None), local_name(cfg!(target_os = "macos")));
+    }
+
+    /// "Denied from Mac" is wrong on a Linux runner.
+    #[test]
+    fn a_local_answer_is_named_for_the_computer_the_runner_is() {
+        assert_eq!(local_name(true), "Mac");
+        assert_eq!(local_name(false), "this computer");
     }
 }
