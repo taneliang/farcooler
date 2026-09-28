@@ -852,6 +852,26 @@ mod tests {
         }
     }
 
+    /// The new orchestrator is pointed at the task holding the handoff when
+    /// it starts (`--read`), and the rule for picking the harness survives.
+    /// Named in the charter alone, the handoff was read only if the new
+    /// orchestrator happened to read that section before acting.
+    #[test]
+    fn a_split_starts_the_new_orchestrator_on_its_handoff() {
+        for h in ALL {
+            let text = skill_body(h);
+            let split = text.find("\n## Splitting a workstream off\n").expect("no split section");
+            let section = text[split..].split_whitespace().collect::<Vec<_>>().join(" ");
+            let start = section.find("farcooler workspace start-orchestrator").expect("the split starts one");
+            let fifth = &section[start..];
+            let command =
+                "farcooler workspace start-orchestrator <Name> --harness <harness> --read <key> --repo <repo>";
+            assert!(fifth.starts_with(command), "{h:?}: {fifth}");
+            assert!(fifth.contains("the task holding the handoff"), "{h:?}: {fifth}");
+            assert!(fifth.contains("the harness you are unless the owner says otherwise"), "{h:?}: {fifth}");
+        }
+    }
+
     /// A dispatched agent is never told where the charter is (only an
     /// orchestrator's pane carries `FARCOOLER_CHARTER`), so what it needs from
     /// the charter has to reach it on its task.

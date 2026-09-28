@@ -129,11 +129,11 @@ conversation, so the handoff matters more than the moves.
    read first, holding what this conversation knows that the board doesn't:
    open questions, the owner's preferences for this work, what was tried and
    dropped. Name that task under the new charter's `## Anything else`.
-5. `{{cli}} workspace start-orchestrator <Name> --harness <harness> --repo <repo>`,
-   the harness you are unless the owner says otherwise. Tell the owner it's
-   running, and which task holds the handoff. From then on it isn't yours:
-   don't dispatch into its worktrees or write on its tasks. If you come across
-   its work, tell the owner.
+5. `{{cli}} workspace start-orchestrator <Name> --harness <harness> --read <key> --repo <repo>`,
+   with `<key>` the task holding the handoff, and the harness you are unless the
+   owner says otherwise. Tell the owner it's running, and which task holds the
+   handoff. From then on it isn't yours: don't dispatch into its worktrees or
+   write on its tasks. If you come across its work, tell the owner.
 
 ## The interview
 

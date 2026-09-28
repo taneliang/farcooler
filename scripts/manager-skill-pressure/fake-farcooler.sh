@@ -199,7 +199,7 @@ first_word() {
   shift 2
   while [ $# -gt 0 ]; do
     case "$1" in
-      --repo|--name|--prefix|--harness|--to|--actor|--runner|--host) shift; [ $# -gt 0 ] && shift ;;
+      --repo|--name|--prefix|--harness|--read|--to|--actor|--runner|--host) shift; [ $# -gt 0 ] && shift ;;
       -*) shift ;;
       *) echo "$1"; return ;;
     esac
@@ -211,7 +211,7 @@ positional_words() {
   shift 2
   while [ $# -gt 0 ]; do
     case "$1" in
-      --repo|--name|--prefix|--harness|--to|--actor|--runner|--host) shift; [ $# -gt 0 ] && shift ;;
+      --repo|--name|--prefix|--harness|--read|--to|--actor|--runner|--host) shift; [ $# -gt 0 ] && shift ;;
       -*) shift ;;
       *) echo "$1"; shift ;;
     esac
