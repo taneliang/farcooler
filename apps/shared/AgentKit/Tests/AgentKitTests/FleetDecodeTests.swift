@@ -53,6 +53,14 @@ struct FleetDecodeTests {
           "workspace": "0198f2c0-0000-7000-8000-0000000000bb",
           "claim_source": "hook",
           "foreign_writers": ["Payments"],
+          "open_tasks": [
+            {
+              "id": "0198f2c0-0000-7000-8000-00000000a002",
+              "key": "bil-9",
+              "title": "Invoice PDF export",
+              "status": "in_progress"
+            }
+          ],
           "terminals": [
             {
               "id": "aab3238922bcc25a6f606eb525ffdc56",
@@ -358,6 +366,10 @@ struct FleetDecodeTests {
         #expect(worktree.workspace == nil)
         #expect(worktree.claimSource == nil)
         #expect(worktree.foreignWriters == nil)
+        // No `open_tasks`: no task, and a pane header that names none.
+        #expect(worktree.openTasks == nil)
+        #expect(worktree.openTaskIDs.isEmpty)
+        #expect(TaskLink.task(of: terminal, in: worktree) == nil)
         #expect(terminal.workspace == nil)
         #expect(terminal.role == nil)
         #expect(!terminal.isOrchestrator)

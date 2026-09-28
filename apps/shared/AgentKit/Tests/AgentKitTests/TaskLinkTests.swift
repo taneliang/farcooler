@@ -1,0 +1,87 @@
+import Foundation
+import Testing
+
+@testable import AgentKit
+
+// Which task a pane's header names. Android's `TaskLinkTest.kt` states the same
+// cases, so the phones and the Mac agree about one pane.
+
+/// A pane with only what the two rules read.
+private struct Pane: TaskLinkPane, TaskBoardPane {
+    var boardTaskID: String?
+    var boardState: String = "running"
+    var runsAgent: Bool = true
+}
+
+private struct Lane: TaskLinkWorktree {
+    var openTaskIDs: [String]
+}
+
+private let bil9 = "0198f2c0-0000-7000-8000-00000000a009"
+private let bil7 = "0198f2c0-0000-7000-8000-00000000a007"
+
+@Test("A dispatched pane's task is its own, over its worktree's")
+func aDispatchedPanesTaskIsItsOwnOverItsWorktrees() {
+    #expect(TaskLink.task(of: Pane(boardTaskID: bil7), in: Lane(openTaskIDs: [bil9])) == bil7)
+    // Even where its own task has left the worktree's open list: Done, or
+    // moved to another lane. The pane was opened for it all the same.
+    #expect(TaskLink.task(of: Pane(boardTaskID: bil7), in: Lane(openTaskIDs: [])) == bil7)
+    #expect(
+        TaskLink.task(of: Pane(boardTaskID: bil7), in: Lane(openTaskIDs: [bil9, bil7])) == bil7)
+}
+
+@Test("A pane in a worktree with one open task shows that task")
+func aPaneInAWorktreeWithOneOpenTaskShowsThatTask() {
+    #expect(TaskLink.task(of: Pane(boardTaskID: nil), in: Lane(openTaskIDs: [bil9])) == bil9)
+    // An empty id is no id: the runner never sends one, but it isn't a task.
+    #expect(TaskLink.task(of: Pane(boardTaskID: ""), in: Lane(openTaskIDs: [bil9])) == bil9)
+    #expect(TaskLink.task(of: Pane(boardTaskID: nil), in: Lane(openTaskIDs: [])) == nil)
+}
+
+@Test("A pane in a worktree with two open tasks shows none")
+func aPaneInAWorktreeWithTwoOpenTasksShowsNone() {
+    #expect(TaskLink.task(of: Pane(boardTaskID: nil), in: Lane(openTaskIDs: [bil9, bil7])) == nil)
+}
+
+@Test("A shell shown under a task is not counted as that task's agent")
+func aShellShownUnderATaskIsNotCountedAsThatTasksAgent() {
+    // A person's shell, and an agent somebody started by hand: neither was
+    // dispatched for the task, and `task_id` stays explicit.
+    let shell = Pane(boardTaskID: nil, runsAgent: false)
+    let byHand = Pane(boardTaskID: nil, runsAgent: true)
+    let lane = Lane(openTaskIDs: [bil9])
+    #expect(TaskLink.task(of: shell, in: lane) == bil9, "its header names the task")
+    #expect(TaskLink.task(of: byHand, in: lane) == bil9)
+
+    let board = TaskBoardModel(columns: [
+        TaskBoardColumn(
+            status: .inProgress,
+            rows: [
+                TaskRow(
+                    id: bil9, key: "bil-9", title: "Invoice PDF export", status: .inProgress,
+                    statusSince: .now)
+            ])
+    ])
+    #expect(board.tasksWithLiveAgents(in: [shell, byHand]) == 0, "and neither is its agent")
+    #expect(
+        board.rows[0].agentPresence(
+            livePanes: board.rows[0].livePanes(in: [shell, byHand]).count,
+            runnerRecordsTasks: true) == .noAgent)
+}
+
+/// The phone's own types answer through the fleet it decodes: `open_tasks`
+/// on the worktree and `taskId` on the terminal.
+@Test("The phone's fleet names a pane's task from open_tasks")
+func thePhonesFleetNamesAPanesTaskFromOpenTasks() throws {
+    let worktree = try #require(FleetDecodeTests.decodeFleet().worktrees.first)
+    #expect(
+        worktree.openTasks == [
+            NeedsYouTask(
+                id: "0198f2c0-0000-7000-8000-00000000a002", key: "bil-9",
+                title: "Invoice PDF export", status: "in_progress")
+        ])
+    #expect(worktree.openTaskIDs == ["0198f2c0-0000-7000-8000-00000000a002"])
+    var shell = try #require(worktree.terminals.first)
+    shell.taskId = nil
+    #expect(TaskLink.task(of: shell, in: worktree) == "0198f2c0-0000-7000-8000-00000000a002")
+}

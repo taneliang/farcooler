@@ -200,17 +200,28 @@ struct Worktree: Decodable, Identifiable, Hashable {
     /// The names of the other workspaces with a live terminal in this
     /// worktree. Empty or nil is nobody else.
     var foreignWriters: [String]?
+    /// The tasks working in this worktree that aren't Done or Cancelled, as
+    /// `{id, key, title, status}`: what lets a row and a pane name their task
+    /// without reading a board. See `TaskLink`.
+    ///
+    /// `open_tasks`, snake_case for the workspace keys' reason:
+    /// `Session::fleet` and the CLI's `worktree list --json` fill it from one
+    /// function (`open_tasks_json`). Nil from a client core too old to send
+    /// it; `[]` from a runner too old to fill it. Both read as "no task".
+    var openTasks: [NeedsYouTask]?
 
-    /// Every key but the three workspace ones is the property's own name;
-    /// see `isMainCheckout` for why that matters. Those three are snake_case
-    /// because `Session::fleet` takes them from `workspaces_json`, which the
-    /// CLI shares, and a workspace key spelled two ways across two producers
-    /// is the trap this file's header describes.
+    /// Every key but the three workspace ones and `open_tasks` is the
+    /// property's own name; see `isMainCheckout` for why that matters. Those
+    /// four are snake_case because `Session::fleet` takes them from functions
+    /// the CLI shares (`workspaces_json`, `open_tasks_json`), and a key
+    /// spelled two ways across two producers is the trap this file's header
+    /// describes.
     enum CodingKeys: String, CodingKey {
         case id, short, repository, task, branch, worktree, state, terminals
         case isMainCheckout, ordinal, workspace
         case claimSource = "claim_source"
         case foreignWriters = "foreign_writers"
+        case openTasks = "open_tasks"
     }
 
     /// The decided answer, for the two screens that draw it.
@@ -1148,4 +1159,12 @@ extension Terminal: TaskBoardPane {
     var boardTaskID: String? { taskId }
     var boardState: String { state }
     var runsAgent: Bool { TaskAgentLink.runsAgent(preset: preset, isChangesPane: isChangesPane) }
+}
+
+/// The phone's terminal and worktree, as `TaskLink` asks about them. The
+/// pane's `boardTaskID` is `TaskBoardPane`'s, above.
+extension Terminal: TaskLinkPane {}
+
+extension Worktree: TaskLinkWorktree {
+    var openTaskIDs: [String] { (openTasks ?? []).map(\.id) }
 }
