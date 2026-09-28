@@ -85,6 +85,16 @@ impl Reply {
 /// the other longer than this.
 pub const LONGEST_HOLD: Duration = Duration::from_secs(60);
 
+/// How much longer than its hold a held hook keeps reading.
+///
+/// The two sides start the hold's clock at different moments: the hook when it
+/// reads the hold frame, the daemon only after writing it. So the daemon's
+/// verdict, and its own "no decision" when the hold runs out, can land a few
+/// milliseconds after the hook's hold has ended. Without this margin a phone's
+/// answer written in that gap would be acked as sent into a socket nobody was
+/// reading any more.
+pub const HOLD_GRACE: Duration = Duration::from_secs(2);
+
 /// The hooks that gate: an agent waits on their answer before it goes on.
 ///
 /// Claude's `PermissionRequest` only. The installer registers exactly these as

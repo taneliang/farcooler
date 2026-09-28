@@ -15,7 +15,7 @@
 //! answer that never comes — ends the same way, at the same moment, with
 //! nothing printed. Only a gating hook whose daemon answered inside that
 //! deadline with a hold waits longer, for one more line, and never for more
-//! than `LONGEST_HOLD`; see `HOOK_DEADLINE`.
+//! than `LONGEST_HOLD` and its `HOLD_GRACE`; see `HOOK_DEADLINE`.
 //!
 //! It is a subcommand of the binary that already ships rather than a second
 //! executable, so there is nothing extra to build, sign, notarize or install.
@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use farcooler_agent_hooks::wire::{
-    Decision, HookLine, HookVerdict, LONGEST_HOLD, decode_line, encode_line,
+    Decision, HOLD_GRACE, HookLine, HookVerdict, LONGEST_HOLD, decode_line, encode_line,
 };
 use farcooler_agent_hooks::Agent;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -41,7 +41,7 @@ use tokio::time::Instant;
 /// imperceptible to the person at the keyboard.
 ///
 /// It is the whole of the wait for every hook but one kind. A gating hook can
-/// wait longer, up to `LONGEST_HOLD`, and only on the daemon's word: a first
+/// wait longer, up to `LONGEST_HOLD` (plus `HOLD_GRACE`), and only on the daemon's word: a first
 /// line of `{"hold_ms":…}` says the ask is in front of a phone, and the hook
 /// then reads one more line for the verdict. That word has to arrive inside
 /// this deadline, so the long wait is granted by a daemon that has just shown
@@ -86,7 +86,7 @@ pub fn hold_from_ms(ms: u64) -> Duration {
 ///
 /// Only a gating hook can be held, so only a gating hook gets the hold's room.
 fn ceiling(gating: bool, deadline: Duration) -> Duration {
-    if gating { deadline + LONGEST_HOLD } else { deadline }
+    if gating { deadline + LONGEST_HOLD + HOLD_GRACE } else { deadline }
 }
 
 /// `deadline` is `HOOK_DEADLINE` for every hook an agent runs. It is a
@@ -206,7 +206,7 @@ async fn with_input(
     // first and so still dominates: the process is over inside one ceiling,
     // whichever route it took to get there. `converse` bounds its two parts
     // more tightly still; this is the backstop to its arithmetic.
-    let hold = if gating { LONGEST_HOLD } else { Duration::ZERO };
+    let hold = if gating { LONGEST_HOLD + HOLD_GRACE } else { Duration::ZERO };
     tokio::time::timeout_at(by + hold, converse(&socket, &encoded, gating, by))
         .await
         .unwrap_or_default()
@@ -239,7 +239,10 @@ async fn converse(socket: &Path, encoded: &str, gating: bool, by: Instant) -> St
     let verdict = match verdict.hold_ms {
         None => verdict,
         Some(ms) => {
-            let rest = tokio::time::timeout(hold_from_ms(ms), read_verdict(&mut reader)).await;
+            // The grace, because the daemon's clock for this hold started
+            // after ours did (`HOLD_GRACE`).
+            let rest =
+                tokio::time::timeout(hold_from_ms(ms) + HOLD_GRACE, read_verdict(&mut reader)).await;
             let Ok(Some(verdict)) = rest else {
                 return String::new();
             };
@@ -565,7 +568,7 @@ mod tests {
         a_daemon_that(&socket, vec![Say::Write(b"{\"hold_ms\":300}\n")]);
         let (out, took) = ask(socket, true, SHAPE_NOT_SPEED).await;
         assert_eq!(out, "", "a hold that runs out leaves the agent to ask at the keyboard");
-        assert!(took < Duration::from_secs(2), "a 300 ms hold took {took:?}");
+        assert!(took < Duration::from_secs(4), "a 300 ms hold (plus its 2 s grace) took {took:?}");
     }
 
     /// A daemon that goes away mid-hold frees the hook at once, not at the
@@ -610,6 +613,23 @@ mod tests {
         let (out, took) = ask(socket, false, SHAPE_NOT_SPEED).await;
         assert_eq!(out, "", "a non-gating hook read past its frame");
         assert!(took < Duration::from_secs(5), "a non-gating hook took {took:?}");
+    }
+
+    /// The daemon's clock for a hold starts after the hook's, so its verdict
+    /// can land a little after the hold the hook was told. The hook reads on
+    /// for `HOLD_GRACE` past it, so a verdict the daemon wrote at the end of
+    /// its hold still reaches the agent instead of an unread socket.
+    #[tokio::test]
+    async fn a_verdict_written_as_the_hold_ends_still_reaches_the_agent() {
+        let dir = tempfile::tempdir().expect("a directory");
+        let socket = dir.path().join("h.sock");
+        a_daemon_that(&socket, vec![
+            Say::Write(b"{\"hold_ms\":300}\n"),
+            Say::Wait(Duration::from_millis(600)),
+            Say::Write(A_DENY),
+        ]);
+        let (out, _) = ask(socket, true, SHAPE_NOT_SPEED).await;
+        assert!(out.contains("Denied from a test"), "the late verdict was lost: {out:?}");
     }
 
     #[test]
