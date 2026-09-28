@@ -422,20 +422,24 @@ fn wire_body<'a>(o: &Outgoing<'a>) -> Option<Notification<'a>> {
 /// Failure is logged and swallowed on purpose. A push that does not arrive is a
 /// missed notification; a push that takes the watcher down with it is every
 /// future notification missed as well, plus the fleet.
-pub async fn notify(client: &reqwest::Client, pairing: &Pairing, notice: Outgoing<'_>) {
+pub async fn notify(client: &reqwest::Client, pairing: &Pairing, notice: Outgoing<'_>) -> bool {
     let Some(body) = wire_body(&notice) else {
         tracing::warn!(kind = ?notice.kind, "an agent notice named no terminal, and was not sent");
-        return;
+        return false;
     };
     let url = format!("{}/v1/notify", pairing.relay.trim_end_matches('/'));
     let result = client.post(&url).bearer_auth(&pairing.token).json(&body).send().await;
 
     match result {
-        Ok(response) if response.status().is_success() => {}
+        Ok(response) if response.status().is_success() => true,
         Ok(response) => {
-            tracing::warn!(status = %response.status(), "relay refused a notification")
+            tracing::warn!(status = %response.status(), "relay refused a notification");
+            false
         }
-        Err(e) => tracing::warn!(error = %e, "could not reach the relay"),
+        Err(e) => {
+            tracing::warn!(error = %e, "could not reach the relay");
+            false
+        }
     }
 }
 

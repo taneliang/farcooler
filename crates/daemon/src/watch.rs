@@ -472,12 +472,15 @@ fn decision_title(workspace: Option<&str>, key: &str) -> String {
     }
 }
 
-/// How long count notices are gathered before one goes out.
+/// The count notice's window: the first change opens it, and the count is
+/// read and sent when it closes. A window rather than a debounce: it does
+/// not restart on later changes, so a steady stream of them still sends one
+/// every window.
 ///
 /// The relay refreshes the lock screen card on every count notice, at APNs
-/// priority 10, and leaves the pacing to the daemon. Trailing, so the last
-/// count of a burst is always the one sent; and a count the relay was
-/// already told is not sent again.
+/// priority 10, and leaves the pacing to the daemon. Read at the close, so
+/// the last count of a burst is the one sent; and a count the relay already
+/// has, from any notice that landed, is not sent again.
 const COUNT_NOTICE_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// What the watcher sent, or would have sent to a paired relay, for a test to
@@ -770,6 +773,10 @@ pub struct Watcher {
     last_count: std::sync::Mutex<Option<u32>>,
     /// Where a test reads the notices this watcher sends. `None` in a daemon.
     taps: std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<Tapped>>>,
+    /// How many times a count was gathered, so a test can see an unpaired
+    /// runner gather none.
+    #[cfg(test)]
+    counts_gathered: std::sync::atomic::AtomicUsize,
     /// Each pane's attachment to its own session log.
     ///
     /// A std mutex for the same reason `worktree_marks` is one, and with the
@@ -2634,6 +2641,8 @@ impl Watcher {
             count_pending: std::sync::atomic::AtomicBool::new(false),
             last_count: std::sync::Mutex::new(None),
             taps: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            counts_gathered: std::sync::atomic::AtomicUsize::new(0),
             service,
             events,
             state: tokio::sync::Mutex::new(HashMap::new()),
@@ -2779,10 +2788,6 @@ impl Watcher {
         // live card that is not a sentence; the workspace names its row.
         let Who { label, workspace, .. } = who;
         let me = self.me.clone();
-        // The pairing beside this service's own database, which in a daemon
-        // is the runtime directory `Pairing::load` reads, and in a test is the
-        // test's own: no test can reach a real phone.
-        let root = self.service.root_dir().to_path_buf();
         // Sampled HERE and not inside the spawn, which is the same rule
         // `started_at` follows: the spawn runs whenever the executor gets to it,
         // and a row whose numbers were read a second after the sentence was
@@ -2790,53 +2795,51 @@ impl Watcher {
         let stats = self.card_stats(terminal);
         // Cheap: a `reqwest::Client` is a handle to a shared pool, so this
         // clone keeps the connection reuse the one-client-per-daemon buys.
-        let client = self.push.clone();
         tokio::spawn(async move {
+            let Some(watcher) = me.upgrade() else { return };
+            // The pairing beside this service's own database: the runtime
+            // directory in a daemon, a test's own in a test, so no test can
+            // reach a real phone. Read first, so an unpaired runner never
+            // gathers a count nobody will be sent.
+            let Some(pairing) = watcher.audience() else { return };
             // The count at the moment of sending, from the list's own
-            // assembly, and noted as told so no count notice repeats it.
-            let watcher = me.upgrade();
-            let needs_you = match &watcher {
-                Some(watcher) => watcher.needs_you_count().await,
-                None => None,
-            };
-            if let Some(watcher) = &watcher {
-                if let Some(count) = needs_you {
-                    watcher.told(count);
-                }
-                watcher.tap(Tapped {
-                    kind: None,
-                    title: notice.title.clone(),
-                    terminal: Some(terminal),
-                    task: None,
-                    workspace: workspace.clone(),
-                    needs_you,
-                });
+            // assembly, and noted as told once it lands so no count notice
+            // repeats it.
+            let needs_you = watcher.needs_you_count().await;
+            watcher.tap(Tapped {
+                kind: None,
+                title: notice.title.clone(),
+                terminal: Some(terminal),
+                task: None,
+                workspace: workspace.clone(),
+                needs_you,
+            });
+            let landed = watcher
+                .deliver(
+                    pairing,
+                    crate::push::Outgoing {
+                        kind: None,
+                        title: &notice.title,
+                        subtitle: &notice.subtitle,
+                        status: notice.status,
+                        failed: notice.failed,
+                        label: &label,
+                        terminal: Some(&terminal.to_string()),
+                        task: None,
+                        workspace: workspace.as_deref(),
+                        needs_you,
+                        started_at: notice.started_at,
+                        insertions: stats.insertions,
+                        deletions: stats.deletions,
+                        commits: stats.commits,
+                        trace: &stats.trace,
+                        trace_anchor: stats.trace_anchor,
+                    },
+                )
+                .await;
+            if landed && let Some(count) = needs_you {
+                watcher.told(count);
             }
-            drop(watcher);
-            let Some(pairing) = crate::push::Pairing::load_in(&root) else { return };
-            crate::push::notify(
-                &client,
-                &pairing,
-                crate::push::Outgoing {
-                    kind: None,
-                    title: &notice.title,
-                    subtitle: &notice.subtitle,
-                    status: notice.status,
-                    failed: notice.failed,
-                    label: &label,
-                    terminal: Some(&terminal.to_string()),
-                    task: None,
-                    workspace: workspace.as_deref(),
-                    needs_you,
-                    started_at: notice.started_at,
-                    insertions: stats.insertions,
-                    deletions: stats.deletions,
-                    commits: stats.commits,
-                    trace: &stats.trace,
-                    trace_anchor: stats.trace_anchor,
-                },
-            )
-            .await;
         });
     }
 
@@ -3401,6 +3404,8 @@ impl Watcher {
     /// `needs_you.list` answers with, from the same `gather` and `assemble`.
     /// `None` when the store can't be read.
     pub async fn needs_you_count(&self) -> Option<u32> {
+        #[cfg(test)]
+        self.counts_gathered.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let inputs = crate::needs_you::gather(&self.service, self).await.ok()?;
         Some(crate::needs_you::assemble(&inputs, std::time::SystemTime::now()).len() as u32)
     }
@@ -3420,9 +3425,37 @@ impl Watcher {
     }
 
     /// Note that the relay is being told `count`, and say whether that is news.
-    fn told(&self, count: u32) -> bool {
-        let mut last = self.last_count.lock().unwrap_or_else(|e| e.into_inner());
-        last.replace(count) != Some(count)
+    fn already_told(&self, count: u32) -> bool {
+        *self.last_count.lock().unwrap_or_else(|e| e.into_inner()) == Some(count)
+    }
+
+    /// Note that the relay now has `count`: called only once a notice
+    /// carrying it has landed, so a push that failed doesn't stop the same
+    /// count being sent again.
+    fn told(&self, count: u32) {
+        *self.last_count.lock().unwrap_or_else(|e| e.into_inner()) = Some(count);
+    }
+
+    /// Whether a test is reading this watcher's notices.
+    fn tapping(&self) -> bool {
+        self.taps.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+    }
+
+    /// The relay this runner is paired with, if it is, and whether anything
+    /// at all will read a notice: a pairing, or a test's tap. Checked before
+    /// the count is gathered, so an unpaired runner pays nothing for one.
+    fn audience(&self) -> Option<Option<crate::push::Pairing>> {
+        let pairing = crate::push::Pairing::load_in(self.service.root_dir());
+        (pairing.is_some() || self.tapping()).then_some(pairing)
+    }
+
+    /// Send `outgoing` if paired; `true` once it has landed. A test's tap
+    /// with no pairing counts as landed.
+    async fn deliver(&self, pairing: Option<crate::push::Pairing>, outgoing: crate::push::Outgoing<'_>) -> bool {
+        match pairing {
+            Some(pairing) => crate::push::notify(&self.push, &pairing, outgoing).await,
+            None => true,
+        }
     }
 
     /// Send a count notice in `COUNT_NOTICE_EVERY`, unless one is already on
@@ -3444,8 +3477,9 @@ impl Watcher {
             tokio::time::sleep(COUNT_NOTICE_EVERY).await;
             let Some(watcher) = me.upgrade() else { return };
             watcher.count_pending.store(false, Ordering::SeqCst);
+            let Some(pairing) = watcher.audience() else { return };
             let Some(count) = watcher.needs_you_count().await else { return };
-            if !watcher.told(count) {
+            if watcher.already_told(count) {
                 return;
             }
             watcher.tap(Tapped {
@@ -3456,13 +3490,10 @@ impl Watcher {
                 workspace: None,
                 needs_you: Some(count),
             });
-            let Some(pairing) = crate::push::Pairing::load_in(watcher.service.root_dir()) else { return };
-            crate::push::notify(
-                &watcher.push,
-                &pairing,
-                crate::push::Outgoing { kind: Some("count"), needs_you: Some(count), ..Default::default() },
-            )
-            .await;
+            let outgoing = crate::push::Outgoing { kind: Some("count"), needs_you: Some(count), ..Default::default() };
+            if watcher.deliver(pairing, outgoing).await {
+                watcher.told(count);
+            }
         });
     }
 
@@ -3477,6 +3508,7 @@ impl Watcher {
         let (id, key, workspace) = (task.id, task.key.clone(), task.workspace_id);
         runtime.spawn(async move {
             let Some(watcher) = me.upgrade() else { return };
+            let Some(pairing) = watcher.audience() else { return };
             let store = &watcher.service.store;
             let workspace = store.get_workspace(workspace).ok().map(|w| w.name);
             let question = store
@@ -3486,9 +3518,6 @@ impl Watcher {
                 .unwrap_or_default();
             let title = decision_title(workspace.as_deref(), &key);
             let count = watcher.needs_you_count().await;
-            if let Some(count) = count {
-                watcher.told(count);
-            }
             watcher.tap(Tapped {
                 kind: Some("decision"),
                 title: title.clone(),
@@ -3497,21 +3526,20 @@ impl Watcher {
                 workspace: workspace.clone(),
                 needs_you: count,
             });
-            let Some(pairing) = crate::push::Pairing::load_in(watcher.service.root_dir()) else { return };
-            crate::push::notify(
-                &watcher.push,
-                &pairing,
-                crate::push::Outgoing {
-                    kind: Some("decision"),
-                    title: &title,
-                    subtitle: &question,
-                    task: Some(&key),
-                    workspace: workspace.as_deref(),
-                    needs_you: count,
-                    ..Default::default()
-                },
-            )
-            .await;
+            let outgoing = crate::push::Outgoing {
+                kind: Some("decision"),
+                title: &title,
+                subtitle: &question,
+                task: Some(&key),
+                workspace: workspace.as_deref(),
+                needs_you: count,
+                ..Default::default()
+            };
+            if watcher.deliver(pairing, outgoing).await
+                && let Some(count) = count
+            {
+                watcher.told(count);
+            }
         });
     }
 
@@ -4292,6 +4320,7 @@ impl Watcher {
         {
             let mut state = self.state.lock().await;
             let ids: std::collections::HashSet<Uuid> = live.iter().map(|s| s.id).collect();
+            let before = state.len();
             state.retain(|id, _| {
                 if ids.contains(id) {
                     return true;
@@ -4316,6 +4345,12 @@ impl Watcher {
             // that came back would otherwise resume reading a log at the byte
             // the terminal it replaced had reached.
             self.logs.lock().unwrap_or_else(|e| e.into_inner()).retain(|id, _| ids.contains(id));
+            // A closed pane takes its items with it: its ask (`HookAsks::forget`
+            // records no `Resolved`, and the supervisor's ring goes with the
+            // row) and its block. Nothing else would say the list moved.
+            if state.len() != before {
+                self.announce_needs_you();
+            }
         }
 
         // Every live terminal's ring moves forward, whether or not this tick
@@ -5073,6 +5108,72 @@ mod tests {
         assert!(!asks.is_holding(term.id), "two samples without the dialog release the ask");
         let ended = settled.try_recv().expect("the hook was told");
         assert_eq!(ended.decision, None, "the keyboard decided, so the hook says nothing");
+    }
+
+    /// The sampling loop says the needs-you list moved when an agent blocks,
+    /// and again when its pane is closed: a real pane showing claude's
+    /// permission dialog, sampled, then removed and sampled.
+    #[tokio::test]
+    async fn blocking_and_closing_a_pane_announce_needs_you_changed() {
+        use farcooler_protocol::v1::event::Payload;
+        fn heard(rx: &mut broadcast::Receiver<Event>) -> bool {
+            let mut seen = false;
+            while let Ok(event) = rx.try_recv() {
+                seen |= matches!(event.payload, Some(Payload::NeedsYouChanged(_)));
+            }
+            seen
+        }
+        async fn after_the_debounce() {
+            tokio::time::sleep(NEEDS_YOU_DEBOUNCE + std::time::Duration::from_millis(100)).await;
+        }
+        let (dir, svc, repo) = crate::test_support::fixture().await;
+        let rows = svc.store.list_worktrees_for_repository(repo).unwrap();
+        let main = rows.iter().find(|w| w.is_main_checkout).unwrap();
+        let term = svc.create_terminal(main.id, "shell", "shell").await.expect("a shell pane");
+        let capture = dir.path().join("blocked.txt");
+        std::fs::write(&capture, include_str!("../../core/captures/claude-blocked.txt")).unwrap();
+        let watcher = Watcher::new(svc.clone());
+        for _ in 0..100 {
+            if svc.runtime().screen(term.id).await.is_ok_and(|(s, _, _)| !s.trim().is_empty()) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        let pane = svc
+            .tmux
+            .list_tagged_panes()
+            .await
+            .expect("tmux answered")
+            .into_iter()
+            .find(|p| p.terminal_id == term.id)
+            .expect("the pane is tagged")
+            .pane_id;
+        // A first sighting, settled, before anything is listened for.
+        watcher.sample().await;
+        after_the_debounce().await;
+        let mut rx = watcher.subscribe();
+        // `/bin/cat`: a shell may alias `cat` to a pager.
+        let show = format!("clear; /bin/cat '{}'; sleep 600\n", capture.display());
+        svc.tmux.send_keys(&pane, &show).await.expect("typed");
+
+        let mut blocked = false;
+        for _ in 0..50 {
+            watcher.sample().await;
+            if watcher.activity(term.id).await.0 == AgentActivity::Blocked {
+                blocked = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        assert!(blocked, "the dialog never read as Blocked: {:?}", svc.runtime().screen(term.id).await.map(|s| s.0));
+        after_the_debounce().await;
+        assert!(heard(&mut rx), "the agent blocked and nothing said the list moved");
+
+        svc.stop_terminal(term.id).await.expect("stopped");
+        svc.remove_terminal(term.id).await.expect("closed");
+        watcher.sample().await;
+        after_the_debounce().await;
+        assert!(heard(&mut rx), "the pane closed and nothing said the list moved");
     }
 
     /// Every tick walks the panes' processes: a real shell in a real pane,
@@ -8094,16 +8195,69 @@ mod needs_you_push_tests {
 
     #[tokio::test]
     async fn answering_a_chat_ask_sends_a_count_notice() {
+        use farcooler_agent::link::{ShimMessage, encode_line};
+        use farcooler_transport::Handler;
+        use tokio::io::AsyncWriteExt;
         let (_dir, svc, _, pane) = a_runner().await;
         let watcher = Watcher::new(svc.clone());
         let mut taps = watcher.tap_notices();
+        // The ask comes from a shim, as a chat's does: a socket the supervisor
+        // listens on, in a directory short enough to bind.
+        let sockets = tempfile::Builder::new().prefix("fcw").tempdir_in("/tmp").unwrap();
+        svc.agents().ensure_listening(sockets.path(), pane);
+        let path = crate::agent_supervisor::socket_path(sockets.path(), pane);
+        let mut shim = loop {
+            if let Ok(stream) = tokio::net::UnixStream::connect(&path).await {
+                break stream;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        };
+        let events = vec![farcooler_agent::event::Sequenced { seq: 0, event: ask("chat-1") }];
+        shim.write_all(encode_line(&ShimMessage::Events { events }).unwrap().as_bytes()).await.unwrap();
+        while svc.agents().open_permission(pane).is_none() {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        watcher
+            .observe_for_tests(pane, crate::needs_you::Observation {
+                activity: AgentActivity::Blocked,
+                state_since: now_millis(),
+                command: "claude".into(),
+                ..Default::default()
+            })
+            .await;
         tokio::time::pause();
-        svc.agents().record(pane, vec![ask("chat-1")], &|_, _| {});
         let asked = next(&mut taps).await.expect("the ask moved the count");
         assert_eq!((asked.kind, asked.needs_you), (Some("count"), Some(1)));
-        // Answered: the chat's `Resolved` changes no terminal, so no agent
-        // notice goes out, and the count notice is what tells the lock screen.
-        svc.agents().record(pane, vec![AgentEvent::Resolved { id: "chat-1".into(), chosen: "allow".into() }], &|_, _| {});
+
+        // Answered the way a phone answers, with nothing recorded by hand: the
+        // answer's own `Resolved` is what announces the change. The agent is
+        // then put back to work, as the next sample would, so the count the
+        // notice carries is 0.
+        let rpc = crate::rpc::RpcFactory::new(
+            svc.clone(),
+            watcher.clone(),
+            Arc::new(tokio::sync::Notify::new()),
+            farcooler_transport::Peer { client_id: None, scope: farcooler_protocol::v1::Scope::Control },
+        );
+        let answer = farcooler_protocol::v1::Request {
+            method: "terminal.agent_answer".into(),
+            payload: Some(farcooler_protocol::v1::request::Payload::AgentAnswer(farcooler_protocol::v1::AgentAnswer {
+                terminal_id: crate::wire::id_bytes(pane),
+                request_id: "chat-1".into(),
+                option_id: "allow".into(),
+            })),
+            ..Default::default()
+        };
+        rpc.handle(answer).await;
+        assert!(svc.agents().open_permission(pane).is_none(), "the answer left the ask open");
+        watcher
+            .observe_for_tests(pane, crate::needs_you::Observation {
+                activity: AgentActivity::Working,
+                state_since: now_millis(),
+                command: "claude".into(),
+                ..Default::default()
+            })
+            .await;
         let answered = next(&mut taps).await.expect("the answer moved the count");
         assert_eq!((answered.kind, answered.needs_you, answered.terminal), (Some("count"), Some(0), None));
     }
@@ -8123,6 +8277,14 @@ mod needs_you_push_tests {
         tokio::time::pause();
         // Four asks on four panes, a second apart: the count goes 1, 2, 3, 4.
         for (n, pane) in panes.iter().enumerate() {
+            watcher
+                .observe_for_tests(*pane, crate::needs_you::Observation {
+                    activity: AgentActivity::Blocked,
+                    state_since: now_millis(),
+                    command: "claude".into(),
+                    ..Default::default()
+                })
+                .await;
             svc.agents().record(*pane, vec![ask(&format!("chat-{n}"))], &|_, _| {});
             tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         }
@@ -8132,6 +8294,47 @@ mod needs_you_push_tests {
         // A change that leaves the count where it was says nothing.
         watcher.announce_needs_you();
         assert_eq!(next(&mut taps).await, None, "the relay already has this count");
+    }
+
+    /// A runner nobody paired, and no test tapping, sends nothing and so
+    /// gathers no count for it: a working agent's card refresh every ten
+    /// seconds would otherwise cost a whole gather each.
+    #[tokio::test]
+    async fn an_unpaired_runner_gathers_no_count() {
+        let (_dir, svc, _, pane) = a_runner().await;
+        let watcher = Watcher::new(svc.clone());
+        tokio::time::pause();
+        watcher.push_if_paired(pane, AgentActivity::Blocked, "claude", blocked(), false, None);
+        watcher.announce_needs_you();
+        tokio::time::sleep(COUNT_NOTICE_EVERY * 2).await;
+        assert_eq!(watcher.counts_gathered.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    /// A count is the relay's only once a notice carrying it landed: a push
+    /// that failed leaves the same count to be sent again.
+    #[tokio::test]
+    async fn a_count_that_never_landed_is_sent_again() {
+        let (_dir, svc, _, pane) = a_runner().await;
+        // Paired with a relay nothing answers on.
+        crate::push::Pairing { relay: "http://127.0.0.1:9".into(), token: "t".into() }
+            .save_in(svc.root_dir())
+            .unwrap();
+        let watcher = Watcher::new(svc.clone());
+        let mut taps = watcher.tap_notices();
+        let blocked_now = crate::needs_you::Observation {
+            activity: AgentActivity::Blocked,
+            state_since: now_millis(),
+            command: "claude".into(),
+            ..Default::default()
+        };
+        watcher.observe_for_tests(pane, blocked_now).await;
+        watcher.announce_needs_you();
+        let first = next(&mut taps).await.expect("a count notice");
+        assert_eq!(first.needs_you, Some(1));
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        watcher.announce_needs_you();
+        let again = next(&mut taps).await.expect("the same count, since the first never landed");
+        assert_eq!(again.needs_you, Some(1));
     }
 
     #[tokio::test]
