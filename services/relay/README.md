@@ -59,6 +59,17 @@ the leader's `done` ends it. `/v1/notify/retire` still names terminals, because
 the runner is the side that knows whether a run is still behind one; at most one
 of them can be the leader, and only that one takes the card down.
 
+**The header counts what needs you, per machine.** Every notice may carry
+`needsYou`, that runner's count of its asks, blocked agents, decisions and
+reviews. The relay keeps the latest per machine on `daemons` (migration 0010),
+overwriting and never adding, and the card's `needsYou` is the sum over the
+account's machines. A machine silent for a day is purged from the sum, and a
+revoked one is gone with its row. With no machine reporting, the card has no
+`needsYou` and the app counts `blocked` rows as before. Two notices carry no
+agent: `kind: "decision"` alerts and moves the card silently, and
+`kind: "count"` only moves the card. Neither writes a roster row or starts a
+card.
+
 The alert is the guarantee and the card is the enhancement: an activity push
 that fails is logged and dropped, never allowed to cost anyone the
 notification. A daemon that sends no `status` gets the alert and nothing else,
