@@ -974,6 +974,9 @@ fn answer_refused(e: farcooler_transport::ClientError) -> Box<dyn std::error::Er
 const NO_NEEDS_YOU: &str =
     "this runner's Far Cooler is older than needs-you. update it and try again";
 
+/// What a refused needs-you read is told, whatever the runner's reason.
+const NEEDS_YOU_UNREAD: &str = "the runner couldn't say what needs you. try again";
+
 /// `farcooler needs-you`.
 async fn needs_you(runner: Option<&str>, json: bool) -> Fallible {
     let mut link = connect_to(runner).await?;
@@ -993,7 +996,14 @@ async fn needs_you_read<L: tasks::DispatchLink>(
         {
             Box::new(tasks::Refused::new(NO_NEEDS_YOU.to_string(), Some(*code))) as Box<dyn std::error::Error>
         }
-        _ => Box::new(tasks::refusal(e, "the runner couldn't say what needs you")),
+        // Its own sentence for any other refusal, keeping the code and the
+        // `what`: the board's would call this a task that isn't there.
+        farcooler_transport::ClientError::Daemon { code, what, .. } => {
+            Box::new(tasks::Refused::naming(NEEDS_YOU_UNREAD.to_string(), *code, what.clone()))
+        }
+        // A dropped link or an unreadable answer: the board's sentences for
+        // those name no task.
+        _ => Box::new(tasks::refusal(e, NEEDS_YOU_UNREAD)),
     })?;
     let result::Value::NeedsYouList(list) = expect_value(r.value)? else {
         return Err(crate::daemon_link::UNREADABLE.into());
@@ -4139,6 +4149,25 @@ mod tests {
         let printed: serde_json::Value = serde_json::from_str(&printed).expect("--json prints JSON");
         assert_eq!(printed, farcooler_client::needs_you_json::needs_you_json(&list));
         assert_eq!(printed["items"][0]["ask_id"], "a-1", "and not an empty object that happens to match");
+    }
+
+    #[tokio::test]
+    async fn needs_you_refused_otherwise_says_so_in_its_own_words() {
+        for code in [farcooler_protocol::v1::ErrorCode::NotFound, farcooler_protocol::v1::ErrorCode::ResourceConflict] {
+            let mut link = answering(Err(farcooler_transport::ClientError::Daemon {
+                code: code as i32,
+                retryable: false,
+                message: "resource not found".into(),
+                what: String::new(),
+            }));
+            let refused = needs_you_read(&mut link, false).await.expect_err("refused");
+            assert_eq!(refused.to_string(), NEEDS_YOU_UNREAD, "not the board's sentence");
+            assert_eq!(
+                error_code_lines(refused.as_ref(), true),
+                [format!("code: {}", farcooler_core::error::word_for(code as i32))],
+                "the code still reaches a script"
+            );
+        }
     }
 
     #[tokio::test]
