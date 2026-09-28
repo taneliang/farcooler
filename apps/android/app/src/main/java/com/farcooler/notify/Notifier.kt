@@ -218,5 +218,12 @@ class Notifier(private val context: Context, private val settings: Settings) {
          * `crates/daemon/src/watch.rs`, `Payload.status` in the relay.
          */
         const val PUSH_EXTRA_STATUS = "status"
+
+        /**
+         * The push's `data.kind`: `"decision"` for a task entering Needs
+         * Decision (ov-55, spec §7), absent for an agent notice. A decision
+         * notice carries no `status`, since it's about a task and not a pane.
+         */
+        const val PUSH_EXTRA_KIND = "kind"
     }
 }

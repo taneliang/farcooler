@@ -78,7 +78,10 @@ class FarCoolerMessagingService : FirebaseMessagingService() {
         // What that commit could not fix here it fixed elsewhere — a phone
         // nobody is holding never reaches this line at all, and takes the
         // `android.notification.channel_id` the same commit added instead.
-        val channel = NotificationCopy.channelFor(data[Notifier.PUSH_EXTRA_STATUS])
+        val channel = NotificationCopy.channelFor(
+            data[Notifier.PUSH_EXTRA_STATUS],
+            data[Notifier.PUSH_EXTRA_KIND],
+        )
 
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP

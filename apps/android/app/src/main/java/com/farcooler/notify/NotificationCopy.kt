@@ -138,9 +138,14 @@ object NotificationCopy {
      * neither, and gets what it always got — this function answering
      * [Notifier.CHANNEL_DONE] for everything, and the manifest's default
      * channel doing the same for every card this process never sees.
+     *
+     * [kind] `"decision"` is the other thing that alerts (ruling 3): a task in
+     * Needs Decision is waiting on you as surely as a blocked agent, and its
+     * notice has no `status` at all. The relay's `androidChannel` makes the
+     * same choice for the tray card.
      */
-    fun channelFor(status: String?): String =
-        if (status == "blocked") Notifier.CHANNEL_BLOCKED else Notifier.CHANNEL_DONE
+    fun channelFor(status: String?, kind: String? = null): String =
+        if (status == "blocked" || kind == "decision") Notifier.CHANNEL_BLOCKED else Notifier.CHANNEL_DONE
 
     /**
      * One notification body: which pane this is about, what there is to say
