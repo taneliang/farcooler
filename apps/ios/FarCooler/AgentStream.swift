@@ -491,19 +491,19 @@ final class AgentStream: ObservableObject {
         let pending = transcript.pendingPermission
         guard pending?.id != recordedRequest else { return }
         recordedRequest = pending?.id
-        GlancePermissionStore.update {
-            $0.recording(
-                pending.map { permission in
-                    GlancePermission(
-                        terminal: terminal,
-                        request: permission.id,
-                        options: permission.options.map {
-                            GlancePermissionOption(id: $0.id, name: $0.name, kind: $0.kind)
-                        },
-                        observedAt: Date())
-                },
-                for: terminal)
-        }
+        // Through the one door that also redraws the card: see
+        // `WatchLinkHost.file`.
+        WatchLinkHost.file(
+            pending.map { permission in
+                GlancePermission(
+                    terminal: terminal,
+                    request: permission.id,
+                    options: permission.options.map {
+                        GlancePermissionOption(id: $0.id, name: $0.name, kind: $0.kind)
+                    },
+                    observedAt: Date())
+            },
+            for: terminal)
     }
 
     /// The id this pane last filed, so an unchanged permission is not refiled.

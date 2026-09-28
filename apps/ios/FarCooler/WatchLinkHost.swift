@@ -333,6 +333,7 @@ final class WatchLinkHost: NSObject {
             // thing still worth doing.
             if case .sent = reply {
                 GlancePermissionStore.update { $0.clearingPermission(for: terminal) }
+                Task { await Self.redraw(leading: terminal) }
             }
             // Cleared on SUCCESS only, and the ordering is the whole point.
             //
@@ -396,14 +397,23 @@ final class WatchLinkHost: NSObject {
                 },
                 observedAt: Date())
         }
-        // Written and redrawn only when the ask CHANGED. The fleet poll files
-        // every blocked pane on every poll (`Connection.readAsks`), and
-        // the card reads this file only when it is drawn: a new ask filed after
-        // the push that raised the card would otherwise sit unseen until the
-        // next push, and a withdrawn one would leave its buttons up.
-        guard let next = GlancePermissionStore.read().filing(observed, for: terminal) else { return }
-        GlancePermissionStore.write(next)
-        Task { await redraw(leading: terminal) }
+        file(observed, for: terminal)
+    }
+
+    /// File what a pane is asking, for the lock screen card, and redraw the
+    /// card when it changed. Every writer of an observation goes through here.
+    ///
+    /// Written and redrawn only when the ask CHANGED. The fleet poll files
+    /// every blocked pane on every poll (`Connection.readAsks`), and the card
+    /// reads this file only when it is drawn: a new ask filed after the push
+    /// that raised the card would otherwise sit unseen until the next push, and
+    /// a withdrawn one would leave its buttons up. `AgentStream` files through
+    /// here too, so whichever writer sees the ask first is the one that
+    /// redraws.
+    static func file(_ observed: GlancePermission?, for terminal: String) {
+        GlancePermissionStore.file(observed, for: terminal) { changed in
+            Task { await redraw(leading: changed) }
+        }
     }
 
     /// What a blocked pane on `connection` is asking, for the fleet poll.

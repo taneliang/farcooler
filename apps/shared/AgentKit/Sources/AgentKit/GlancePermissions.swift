@@ -492,6 +492,35 @@ public enum GlancePermissionStore {
         try data.write(to: container.appendingPathComponent(fileName), options: .atomic)
     }
 
+    /// File what a pane is asking, write it, and redraw the card for that
+    /// pane when it changed. Returns whether it changed.
+    ///
+    /// The one door every observer files through (`AgentStream`, the watch's
+    /// question and the fleet poll). The card reads this file only when it is
+    /// drawn, so a writer that skipped the redraw left a card without buttons
+    /// until the next push, and another writer finding the file already
+    /// current had nothing to redraw for.
+    @discardableResult
+    public static func file(
+        _ observed: GlancePermission?, for terminal: String,
+        redraw: (String) -> Void
+    ) -> Bool {
+        guard let directory = container() else { return false }
+        return file(observed, for: terminal, inContainer: directory, redraw: redraw)
+    }
+
+    @discardableResult
+    public static func file(
+        _ observed: GlancePermission?, for terminal: String, inContainer container: URL,
+        redraw: (String) -> Void
+    ) -> Bool {
+        guard let next = read(fromContainer: container).filing(observed, for: terminal)
+        else { return false }
+        try? write(next, toContainer: container)
+        redraw(terminal)
+        return true
+    }
+
     /// Read, change, write.
     ///
     /// Safe because there is exactly ONE writer — the app, on the main actor —

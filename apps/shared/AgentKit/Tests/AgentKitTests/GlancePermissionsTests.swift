@@ -343,6 +343,25 @@ struct GlancePermissionsTests {
         #expect(GlancePermissionStore.read(fromContainer: dir) == stored)
     }
 
+    /// Filing through the store redraws the card, and only on a change. A
+    /// writer that did not redraw left the lock screen card without buttons
+    /// until the next push, whichever writer came second.
+    @Test func filingThroughTheStoreRedrawsOnAChangeOnly() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var redrawn: [String] = []
+        let ask = permission([option("allow", "Allow touch x", "allow_once")], request: "hook-ask-1")
+        GlancePermissionStore.file(ask, for: "t1", inContainer: dir) { redrawn.append($0) }
+        #expect(GlancePermissionStore.read(fromContainer: dir).permission(for: "t1") == ask)
+        GlancePermissionStore.file(ask, for: "t1", inContainer: dir) { redrawn.append($0) }
+        GlancePermissionStore.file(nil, for: "t1", inContainer: dir) { redrawn.append($0) }
+        #expect(redrawn == ["t1", "t1"])
+        #expect(GlancePermissionStore.read(fromContainer: dir).permission(for: "t1") == nil)
+    }
+
     /// An unreadable file says the same thing as an absent one — nothing is
     /// known — and a card with no buttons is the correct rendering of that.
     @Test func anUnreadableFileReadsAsEmpty() {
