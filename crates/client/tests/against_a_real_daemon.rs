@@ -131,10 +131,19 @@ async fn start_with_only_the_stub_switch() -> Daemon {
     spawn_with(true, Some(Launch::StubOnly)).await
 }
 
+/// A daemon like `start_with_a_stand_in_agent`'s, whose stand-in runs `body`
+/// (a `/bin/sh` script, after the shebang) instead of only leaving its marker.
+/// `@OUT@` in `body` is the daemon's scratch directory.
+async fn spawn_with_stand_in(body: &str) -> Daemon {
+    spawn_with(true, Some(Launch::StandInRunning(body.to_string()))).await
+}
+
 /// What a trapped daemon's agent launches run. See `spawn_with`.
 enum Launch {
     /// `FARCOOLER_STAND_IN_AGENT` names the stand-in.
     StandIn,
+    /// The same, with the stand-in running this body.
+    StandInRunning(String),
     /// Nothing but `FARCOOLER_TEST_STUB_AGENTS`.
     StubOnly,
 }
@@ -180,14 +189,21 @@ impl StandIn {
 
     /// Write the stand-in, the trap, and a login-shell config for every shell
     /// this could be that puts the trap first.
-    fn install(&self, home: &std::path::Path) {
+    ///
+    /// `body` is the stand-in's script after its shebang; `None` is the one
+    /// that only leaves its marker and sleeps.
+    fn install(&self, home: &std::path::Path, body: Option<&str>) {
         use std::os::unix::fs::PermissionsExt;
         let exec = |path: &std::path::Path, body: String| {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, body).unwrap();
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
         };
-        exec(&self.program, format!("#!/bin/sh\ntouch '{}'\nexec sleep 60\n", self.ran.display()));
+        let body = match body {
+            Some(body) => body.replace("@OUT@", &home.display().to_string()),
+            None => "exec sleep 60\n".to_string(),
+        };
+        exec(&self.program, format!("#!/bin/sh\ntouch '{}'\n{body}", self.ran.display()));
         exec(
             &self.trap_dir.join("claude"),
             format!("#!/bin/sh\ntouch '{}'\nexit 97\n", self.trapped.display()),
@@ -239,12 +255,16 @@ async fn spawn_with(scratch_home: bool, trapped: Option<Launch>) -> Daemon {
     }
     if let Some(launch) = trapped {
         let stand_in = StandIn::under(dir.path());
-        stand_in.install(dir.path());
+        let body = match &launch {
+            Launch::StandInRunning(body) => Some(body.as_str()),
+            _ => None,
+        };
+        stand_in.install(dir.path(), body);
         for name in stripped_agent_environment() {
             command.env_remove(name);
         }
         command.env("PATH", stand_in_path(&stand_in));
-        if let Launch::StandIn = launch {
+        if matches!(launch, Launch::StandIn | Launch::StandInRunning(_)) {
             command.env("FARCOOLER_STAND_IN_AGENT", &stand_in.program);
         }
     }
@@ -1591,4 +1611,268 @@ async fn register_root_and_repository(
         },
     ));
     client.call(register).await.expect("register");
+}
+
+// ---- A claude TUI's permission, answered from a phone (ov-14) --------------
+
+/// A stand-in claude that asks one permission the way claude 2.1.283 does.
+///
+/// Launched as `<stand-in> claude --session-id S --settings F …`. It:
+/// - takes its `PermissionRequest` hook out of `F`, the settings Far Cooler
+///   wrote for it (pretty-printed JSON with the command on a line of its own);
+/// - draws the spike's dialog, banner included, so the watcher knows it is
+///   claude;
+/// - runs the hook in the background, the way claude runs it while its dialog
+///   is up, with the payload claude sends, and keeps what the hook printed;
+/// - answers at the keyboard on a line of input, which takes the dialog down
+///   and draws the working footer, as claude does.
+const ASKING_CLAUDE: &str = r#"
+OUT='@OUT@'
+S=; F=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --session-id) S=$2; shift ;;
+    --settings) F=$2; shift ;;
+  esac
+  shift
+done
+cmd=$(grep -e '--event PermissionRequest' "$F" | sed -e 's/^ *"command": "//' -e 's/",*$//')
+printf '%s
+' "$cmd" > "$OUT/hook-command"
+clear
+cat "$OUT/dialog.txt"
+(
+  printf '{"session_id":"%s","cwd":"%s","hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"touch x"}}' "$S" "$PWD"     | sh -c "$cmd" > "$OUT/hook-stdout" 2> "$OUT/hook-stderr"
+  touch "$OUT/hook-exited"
+  if [ -s "$OUT/hook-stdout" ]; then
+    clear
+    printf '  ⎿  Answered by PermissionRequest hook
+'
+  fi
+) &
+read answer
+clear
+printf '  <spinner>
+❯ 
+  ⏸ manual mode on · esc to interrupt
+'
+touch "$OUT/tui-answered"
+exec sleep 600
+"#;
+
+/// A daemon running `ASKING_CLAUDE` in a `claude` pane, the pane, and the id
+/// of the ask its hook is being held on.
+struct Asking {
+    daemon: Daemon,
+    session: Session,
+    terminal: uuid::Uuid,
+    id: String,
+    _repo: tempfile::TempDir,
+}
+
+impl Asking {
+    fn out(&self, name: &str) -> PathBuf {
+        self.daemon.dir.path().join(name)
+    }
+
+    /// Every event in the pane's ring, as JSON.
+    async fn ring(&mut self) -> Vec<serde_json::Value> {
+        let batch = self.session.agent_subscribe(self.terminal, 0, 0).await.expect("subscribe");
+        batch
+            .events
+            .iter()
+            .map(|e| serde_json::from_str(&e.payload_json).expect("an event is json"))
+            .collect()
+    }
+
+    /// Waits for the ring to end in this ask's `Resolved`, and returns what
+    /// was chosen.
+    async fn resolved(&mut self) -> String {
+        for _ in 0..200 {
+            let ring = self.ring().await;
+            if let Some(last) = ring.last() {
+                if last["Resolved"]["id"] == self.id.as_str() {
+                    return last["Resolved"]["chosen"].as_str().expect("chosen").to_string();
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        panic!("the ring never ended in this ask's Resolved: {:?}", self.ring().await);
+    }
+
+    /// Waits for `name` under the daemon's directory to exist.
+    async fn exists(&self, name: &str, within: std::time::Duration) -> bool {
+        let until = std::time::Instant::now() + within;
+        while std::time::Instant::now() < until {
+            if self.out(name).exists() {
+                return true;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        false
+    }
+
+    fn hook_printed(&self) -> String {
+        std::fs::read_to_string(self.out("hook-stdout")).unwrap_or_default()
+    }
+
+    /// The trap never ran: nothing searched for a real `claude`.
+    fn never_trapped(&self) {
+        let stand_in = StandIn::under(self.daemon.dir.path());
+        assert!(stand_in.ran.exists(), "the pane never ran the stand-in");
+        assert!(!stand_in.trapped.exists(), "the pane searched for claude and found the trap");
+    }
+}
+
+/// Start the daemon, open a `claude` pane, and wait for its ask to reach the
+/// ring as a `Permission`.
+async fn a_claude_asking() -> Asking {
+    // The hook the daemon writes into claude's settings is the `farcooler`
+    // beside `farcoolerd` (`shim_binary`). Without one there, it would be
+    // whatever `farcooler` is on PATH, which is not this build.
+    let cli = daemon_binary().with_file_name("farcooler");
+    assert!(cli.is_file(), "no farcooler at {} — run `cargo build -p farcooler-cli` first", cli.display());
+    assert!(farcooler_core::programs::find("tmux").is_some(), "tmux is required for a pane");
+
+    let daemon = spawn_with_stand_in(ASKING_CLAUDE).await;
+    std::fs::write(
+        daemon.dir.path().join("dialog.txt"),
+        include_str!("../../core/captures/claude-permission-hook-waiting.txt"),
+    )
+    .unwrap();
+    let stand_in = StandIn::under(daemon.dir.path());
+    assert_eq!(
+        bare_claude_resolves_to(&daemon, &stand_in),
+        stand_in.trap_dir.join("claude").display().to_string(),
+        "the trap is not first for a bare claude, so its silence would prove nothing"
+    );
+    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+
+    let repo_dir = tempfile::tempdir().unwrap();
+    let repo = repo_dir.path().join("demo");
+    std::fs::create_dir(&repo).unwrap();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "commit.gpgsign", "false"],
+        vec!["config", "user.name", "t"],
+        vec!["commit", "-q", "--allow-empty", "-m", "base"],
+    ] {
+        std::process::Command::new("git").args(&args).current_dir(&repo).status().unwrap();
+    }
+    register_root_and_repository(&daemon.socket, repo_dir.path(), &repo).await;
+    let repositories = session.repositories().await.expect("repositories");
+    let repository = farcooler_client::session::uuid_of(&repositories[0].id);
+    let worktree = session
+        .create_worktree(repository, "asks", "feat/asks", "HEAD", "", false)
+        .await
+        .expect("create_worktree");
+    let worktree_id = farcooler_client::session::uuid_of(&worktree.id);
+    let terminal = session.create_terminal(worktree_id, "claude", "claude", false).await.expect("a claude pane");
+    let terminal = farcooler_client::session::uuid_of(&terminal.id);
+
+    let mut asking = Asking { daemon, session, terminal, id: String::new(), _repo: repo_dir };
+    for _ in 0..400 {
+        let ring = asking.ring().await;
+        if let Some(id) = ring.iter().find_map(|e| e["Permission"]["id"].as_str()) {
+            asking.id = id.to_string();
+            let options: Vec<&str> = ring
+                .iter()
+                .find_map(|e| e["Permission"]["options"].as_array())
+                .unwrap()
+                .iter()
+                .filter_map(|o| o["id"].as_str())
+                .collect();
+            assert_eq!(options, ["allow", "deny"]);
+            return asking;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!(
+        "no Permission reached the ring. hook command: {:?}, hook stderr: {:?}",
+        std::fs::read_to_string(asking.out("hook-command")),
+        std::fs::read_to_string(asking.out("hook-stderr")),
+    );
+}
+
+#[tokio::test]
+async fn a_permission_answered_from_a_phone_reaches_the_held_hook() {
+    let mut asking = a_claude_asking().await;
+    let (terminal, id) = (asking.terminal, asking.id.clone());
+    asking.session.agent_answer(terminal, &id, "allow").await.expect("the answer landed");
+
+    assert!(asking.exists("hook-exited", std::time::Duration::from_secs(5)).await, "the hook never exited");
+    let printed: serde_json::Value =
+        serde_json::from_str(asking.hook_printed().trim()).expect("the hook printed json");
+    assert_eq!(
+        printed,
+        serde_json::json!({
+            "hookSpecificOutput": { "hookEventName": "PermissionRequest", "decision": { "behavior": "allow" } }
+        })
+    );
+    assert_eq!(asking.resolved().await, "allow");
+    asking.never_trapped();
+}
+
+/// The local socket has no client id, so the device is the Mac.
+#[tokio::test]
+async fn a_permission_denied_from_the_mac_says_so_to_the_model() {
+    let mut asking = a_claude_asking().await;
+    let (terminal, id) = (asking.terminal, asking.id.clone());
+    asking.session.agent_answer(terminal, &id, "deny").await.expect("the answer landed");
+
+    assert!(asking.exists("hook-exited", std::time::Duration::from_secs(5)).await, "the hook never exited");
+    let printed: serde_json::Value =
+        serde_json::from_str(asking.hook_printed().trim()).expect("the hook printed json");
+    assert_eq!(printed["hookSpecificOutput"]["decision"]["behavior"], "deny");
+    assert_eq!(printed["hookSpecificOutput"]["decision"]["message"], "Denied from Mac");
+    assert_eq!(asking.resolved().await, "deny");
+    asking.never_trapped();
+}
+
+/// The keyboard answers first. The hook is released with nothing to say
+/// (claude already has its answer), every surface is told the ask is over,
+/// and a phone that answers late is told something else changed it.
+#[tokio::test]
+async fn a_permission_answered_at_the_keyboard_releases_the_held_hook_and_the_phone() {
+    use farcooler_client::session::SessionError;
+
+    let mut asking = a_claude_asking().await;
+    let terminal = asking.terminal;
+    // The dialog has to have been SEEN before it can be seen to leave (a
+    // keyboard answer no sample saw is left to the turn's end or the hold's),
+    // so wait for the watcher to call the pane blocked.
+    let mut blocked = false;
+    for _ in 0..100 {
+        let fleet = asking.session.fleet().await.expect("fleet");
+        blocked = fleet["worktrees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|w| w["terminals"].as_array().unwrap())
+            .any(|t| t["id"] == terminal.to_string().as_str() && t["activity"] == "blocked");
+        if blocked {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(blocked, "the watcher never saw the dialog");
+
+    asking.session.write(terminal, b"1\n".to_vec()).await.expect("typed");
+    assert!(asking.exists("tui-answered", std::time::Duration::from_secs(5)).await, "the keyboard answer never landed");
+    assert!(
+        asking.exists("hook-exited", std::time::Duration::from_secs(5)).await,
+        "the hook was still held 5 s after the dialog left"
+    );
+    assert_eq!(asking.hook_printed(), "", "the keyboard decided; the hook has nothing to say");
+    assert_eq!(asking.resolved().await, "");
+
+    let id = asking.id.clone();
+    match asking.session.agent_answer(terminal, &id, "allow").await {
+        Err(SessionError::Refused { code, .. }) => {
+            assert_eq!(farcooler_core::error::word_for(code), "resource-conflict");
+        }
+        other => panic!("a late answer was not refused as a conflict: {other:?}"),
+    }
+    asking.never_trapped();
 }
