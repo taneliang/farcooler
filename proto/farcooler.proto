@@ -3009,7 +3009,8 @@ message TaskMove {
 }
 
 // `worktree.assign`: give a worktree to a workspace, whoever owned it. The
-// one way a claim moves. `target_resource_id` is the worktree.
+// one way a claim moves. The worktree's agent terminals move with it; its
+// orchestrator and shells don't. `target_resource_id` is the worktree.
 message WorktreeAssign { bytes workspace_id = 1; }
 
 // `terminal.set_role`. `target_resource_id` is the terminal.

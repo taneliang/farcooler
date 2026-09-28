@@ -515,6 +515,9 @@ impl Store {
     ///
     /// A repository's main checkout belongs to Main: giving it to any other
     /// workspace is refused (`main_checkout`). Giving it back to Main is not.
+    ///
+    /// The worktree's agent terminals move with it, in the same transaction.
+    /// Its orchestrator and shells keep their workspace.
     pub fn assign_worktree(&self, worktree: Uuid, workspace: Uuid) -> Result<Worktree> {
         {
             let mut conn = self.conn();
@@ -533,6 +536,14 @@ impl Store {
                 return Err(DomainError::InvalidArgument { what: "main_checkout" });
             }
             give_worktree(&tx, worktree, workspace, ClaimSource::Explicit)?;
+            // Its agents go with it: what they're doing in it is now this
+            // workspace's work. Its orchestrator and shells stay put.
+            tx.execute(
+                "UPDATE terminals SET workspace_id = ?1, resource_version = resource_version + 1
+                  WHERE worktree_id = ?2 AND role = ?3 AND workspace_id IS NOT ?1",
+                params![uuid_blob(workspace), uuid_blob(worktree), TerminalRole::Agent.as_i64()],
+            )
+            .map_err(map_err)?;
             tx.commit().map_err(map_err)?;
         }
         self.get_worktree(worktree)
@@ -1025,7 +1036,7 @@ mod tests {
         assert_eq!(
             store.get_terminal(shell.id).unwrap().workspace_id,
             Some(billing.id),
-            "a terminal's workspace is whose work it is, and does not follow the worktree"
+            "a shell doesn't follow the worktree; only agents do"
         );
         let later = store.create_terminal(wt.id, "a", "codex", TerminalIntent::Running, 80, 24).unwrap();
         assert_eq!((later.workspace_id, later.role), (Some(main.id), TerminalRole::Agent));
@@ -1034,6 +1045,39 @@ mod tests {
         let elsewhere = store.ensure_main_workspace(other).unwrap();
         let err = store.assign_worktree(wt.id, elsewhere.id).unwrap_err();
         assert!(refused("other_repository")(&err), "{err:?}");
+    }
+
+    /// Moving a worktree takes its agents with it: they're working in it, so
+    /// their work is the new workspace's. Its orchestrator and shells stay
+    /// where they are, and so does an agent in some other worktree.
+    #[test]
+    fn assigning_a_worktree_moves_its_agents_and_nothing_else() {
+        let store = Store::open_in_memory().unwrap();
+        let repo = store.register_repository_for_test("r");
+        let main = store.ensure_main_workspace(repo).unwrap();
+        let billing = store.create_workspace(repo, "Billing", "bil").unwrap();
+        let wt = store.create_unclaimed_worktree_for_test(repo, "/r/.worktrees/x");
+        store.assign_worktree(wt, main.id).unwrap();
+        let agent = store.create_terminal_for_test(wt, main.id);
+        let shell = store.create_terminal(wt, "s", "shell", TerminalIntent::Running, 80, 24).unwrap().id;
+        let orchestrator = store.create_terminal_for_test(wt, main.id);
+        store.set_terminal_role(orchestrator, TerminalRole::Orchestrator).unwrap();
+        let other_wt = store.create_unclaimed_worktree_for_test(repo, "/r/.worktrees/y");
+        let elsewhere = store.create_terminal_for_test(other_wt, main.id);
+        let before = store.get_terminal(agent).unwrap().resource_version;
+
+        store.assign_worktree(wt, billing.id).unwrap();
+        let workspace_of = |t| store.get_terminal(t).unwrap().workspace_id;
+        assert_eq!(workspace_of(agent), Some(billing.id), "the agent follows its worktree");
+        assert!(store.get_terminal(agent).unwrap().resource_version > before, "and a client sees it change");
+        assert_eq!(workspace_of(shell), Some(main.id), "a shell stays");
+        assert_eq!(workspace_of(orchestrator), Some(main.id), "the orchestrator stays");
+        assert_eq!(workspace_of(elsewhere), Some(main.id), "an agent in another worktree stays");
+
+        // Refused, it moves nothing.
+        let err = store.assign_worktree(wt, store.ensure_main_workspace(store.register_repository_for_test("o")).unwrap().id);
+        assert!(refused("other_repository")(&err.unwrap_err()));
+        assert_eq!(workspace_of(agent), Some(billing.id));
     }
 
     /// A repository's main checkout is Main's: the runner refuses to give it

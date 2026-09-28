@@ -647,7 +647,8 @@ enum WorktreeCmd {
     ///
     /// The strongest claim there is: a worktree a workspace's agents were
     /// seen working in stays with the first workspace that claimed it, and
-    /// this is how it moves.
+    /// this is how it moves. Its agent terminals move with it; its
+    /// orchestrator and shells don't.
     Assign {
         /// By name or id.
         worktree: String,
