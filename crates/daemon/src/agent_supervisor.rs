@@ -32,7 +32,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use farcooler_agent::event::{AgentEvent, AgentGapReason, Seq, Sequenced};
+use farcooler_agent::event::{AgentEvent, AgentGapReason, PermissionOption, Seq, Sequenced};
 use farcooler_agent::link::{AgentFailure, DaemonMessage, ShimMessage, decode_line, encode_line};
 use farcooler_agent::activity_source;
 use farcooler_core::activity;
@@ -163,6 +163,11 @@ pub struct AgentSupervisor {
     /// The fast-attach window described at the top of this file. Bounded to
     /// `RECENT_WINDOW` per terminal, oldest first.
     recent: Arc<Mutex<HashMap<Uuid, Vec<Sequenced>>>>,
+    /// When each `Permission` in `recent` arrived, by terminal and ask id, so
+    /// an open ask can say how long it has waited. A `Sequenced` carries no
+    /// time. Pruned when the ask's `Resolved` arrives and when the terminal is
+    /// forgotten.
+    asked_at: Arc<Mutex<HashMap<Uuid, HashMap<String, std::time::SystemTime>>>>,
     /// Terminals whose socket is already bound.
     ///
     /// Without this, a second `set_pane_mode` would bind the same path again
@@ -314,6 +319,41 @@ impl AgentSupervisor {
             return (epoch, all);
         }
         (epoch, all.into_iter().filter(|e| e.seq >= from_seq).collect())
+    }
+
+    /// The ask `terminal` is waiting on, if any: the last `Permission` in its
+    /// transcript with no later `Resolved` of the same id, as (id, options,
+    /// when it arrived).
+    ///
+    /// Serves both sources of an answerable ask. A chat's permission lands
+    /// here from its shim, and a claude TUI's held hook ask lands here through
+    /// the hook ingress's sink, with its `Resolved` recorded by
+    /// `HookAsks::settle`.
+    pub fn open_permission(
+        &self,
+        terminal: Uuid,
+    ) -> Option<(String, Vec<PermissionOption>, std::time::SystemTime)> {
+        let (id, options) = {
+            let recent = self.recent.lock().ok()?;
+            let mut resolved = HashSet::new();
+            recent.get(&terminal)?.iter().rev().find_map(|s| match &s.event {
+                AgentEvent::Resolved { id, .. } => {
+                    resolved.insert(id.clone());
+                    None
+                }
+                AgentEvent::Permission { id, options, .. } if !resolved.contains(id) => {
+                    Some((id.clone(), options.clone()))
+                }
+                _ => None,
+            })?
+        };
+        let at = self
+            .asked_at
+            .lock()
+            .ok()
+            .and_then(|a| a.get(&terminal).and_then(|asks| asks.get(&id)).copied())
+            .unwrap_or_else(std::time::SystemTime::now);
+        Some((id, options, at))
     }
 
     /// Hand a message to this terminal's shim, and say whether it got there.
@@ -615,6 +655,22 @@ impl AgentSupervisor {
             }
         }
 
+        if let Ok(mut asked_at) = self.asked_at.lock() {
+            for event in &events {
+                match event {
+                    AgentEvent::Permission { id, .. } => {
+                        asked_at.entry(terminal).or_default().insert(id.clone(), std::time::SystemTime::now());
+                    }
+                    AgentEvent::Resolved { id, .. } => {
+                        if let Some(asks) = asked_at.get_mut(&terminal) {
+                            asks.remove(id);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         let mut renumbered: Vec<Sequenced> = Vec::new();
         if let Ok(mut recent) = self.recent.lock() {
             let entry = recent.entry(terminal).or_default();
@@ -695,6 +751,9 @@ impl AgentSupervisor {
     pub fn forget(&self, terminal: Uuid) {
         if let Ok(mut sessions) = self.sessions.lock() {
             sessions.remove(&terminal);
+        }
+        if let Ok(mut asked_at) = self.asked_at.lock() {
+            asked_at.remove(&terminal);
         }
         if let Ok(mut recent) = self.recent.lock() {
             recent.remove(&terminal);
@@ -814,6 +873,41 @@ mod tests {
             options: vec![PermissionOption { id: "a".into(), name: "Yes".into(), kind: "allow_once".into() }],
         };
         assert_eq!(fold_activity(AgentActivity::Working, &e), AgentActivity::Blocked);
+    }
+
+    fn ask(id: &str) -> AgentEvent {
+        AgentEvent::Permission {
+            id: id.into(),
+            tool_call: String::new(),
+            options: vec![
+                PermissionOption { id: "allow".into(), name: "Allow touch x".into(), kind: "allow_once".into() },
+                PermissionOption { id: "deny".into(), name: "Deny".into(), kind: "reject_once".into() },
+            ],
+        }
+    }
+
+    #[test]
+    fn open_permission_is_none_once_its_resolved_arrives() {
+        let supervisor = AgentSupervisor::new();
+        let pane = Uuid::now_v7();
+        supervisor.record(pane, vec![ask("p1")], &|_, _| {});
+        let (id, options, _) = supervisor.open_permission(pane).expect("an unanswered ask is open");
+        assert_eq!(id, "p1");
+        assert_eq!(options.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(), ["allow", "deny"]);
+        supervisor.record(pane, vec![AgentEvent::Resolved { id: "p1".into(), chosen: "allow".into() }], &|_, _| {});
+        assert_eq!(supervisor.open_permission(pane).map(|o| o.0), None, "an answered ask stayed open");
+    }
+
+    #[test]
+    fn open_permission_returns_the_later_of_two_unresolved_asks() {
+        let supervisor = AgentSupervisor::new();
+        let pane = Uuid::now_v7();
+        supervisor.record(pane, vec![ask("p1")], &|_, _| {});
+        supervisor.record(pane, vec![ask("p2")], &|_, _| {});
+        assert_eq!(supervisor.open_permission(pane).map(|o| o.0).as_deref(), Some("p2"));
+        // And with the later one answered, the earlier one is what's left.
+        supervisor.record(pane, vec![AgentEvent::Resolved { id: "p2".into(), chosen: "deny".into() }], &|_, _| {});
+        assert_eq!(supervisor.open_permission(pane).map(|o| o.0).as_deref(), Some("p1"));
     }
 
     #[test]

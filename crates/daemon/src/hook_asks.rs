@@ -23,7 +23,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use farcooler_agent::event::AgentEvent;
 use farcooler_agent_hooks::wire::Decision;
@@ -76,6 +76,10 @@ pub enum AnswerRefused {
 struct Held {
     id: String,
     since: Instant,
+    /// When it was held, by the wall clock, for the needs-you item's `since`.
+    /// Beside `since` rather than instead of it: the hold's own timing wants a
+    /// clock that never jumps.
+    at: SystemTime,
     seen_dialog: bool,
     absent_samples: u8,
     /// Whether its `Permission` was recorded. Only an offered ask is owed a
@@ -103,7 +107,15 @@ impl HookAsks {
     pub fn hold(&self, terminal: Uuid) -> (String, oneshot::Receiver<Settled>) {
         let id = format!("{HOOK_ASK_PREFIX}{}", Uuid::now_v7());
         let (reply, rx) = oneshot::channel();
-        let held = Held { id: id.clone(), since: Instant::now(), seen_dialog: false, absent_samples: 0, offered: false, reply };
+        let held = Held {
+            id: id.clone(),
+            since: Instant::now(),
+            at: SystemTime::now(),
+            seen_dialog: false,
+            absent_samples: 0,
+            offered: false,
+            reply,
+        };
         let sink = self.sink();
         let mut asks = self.lock();
         if let Some(older) = asks.insert(terminal, held) {
@@ -209,6 +221,20 @@ impl HookAsks {
     /// bring an entry back for a terminal nothing can reach.
     pub fn forget(&self, terminal: Uuid) {
         self.settle(terminal, None, Settled { decision: None, ack: None }, "", false, "forgotten");
+    }
+
+    /// Every ask held and offered, as (terminal, id, when it was held), for
+    /// the needs-you list.
+    ///
+    /// Offered only: an ask not yet offered has no `Permission` in its
+    /// terminal's ring, so no surface has its options to answer with. At most
+    /// one per terminal, as the ledger holds them.
+    pub fn open(&self) -> Vec<(Uuid, String, SystemTime)> {
+        self.lock()
+            .iter()
+            .filter(|(_, ask)| ask.offered)
+            .map(|(terminal, ask)| (*terminal, ask.id.clone(), ask.at))
+            .collect()
     }
 
     /// Whether an ask is held on `terminal`. For tests and for logs.
@@ -349,6 +375,34 @@ mod tests {
         let (id, rx) = asks.hold(pane);
         assert!(asks.offer(pane, &id, a_permission(&id)), "a fresh ask is still held");
         (id, rx)
+    }
+
+    /// An offered ask is open until it settles, and then it isn't.
+    #[tokio::test]
+    async fn open_lists_a_held_ask_and_forgets_it_once_settled() {
+        let (asks, _recorded) = ledger();
+        let pane = Uuid::now_v7();
+        let before = SystemTime::now();
+        let (id, rx) = offered(&asks, pane);
+        let open = asks.open();
+        assert_eq!(open.len(), 1, "{open:?}");
+        assert_eq!((open[0].0, open[0].1.as_str()), (pane, id.as_str()));
+        assert!(open[0].2 >= before, "held at a wall-clock time before the hold");
+        let hook = a_hook_waiting_on(rx);
+        asks.answer(pane, &id, "allow", "iPhone").await.unwrap();
+        hook.await.unwrap();
+        assert_eq!(asks.open(), vec![], "a settled ask is still listed");
+    }
+
+    /// One pane holds one ask, so the newer one is what's open.
+    #[tokio::test]
+    async fn a_newer_ask_on_the_same_terminal_replaces_the_older_in_open() {
+        let (asks, _recorded) = ledger();
+        let pane = Uuid::now_v7();
+        let (_older, _older_rx) = offered(&asks, pane);
+        let (newer, _newer_rx) = offered(&asks, pane);
+        let ids: Vec<_> = asks.open().into_iter().map(|(t, id, _)| (t, id)).collect();
+        assert_eq!(ids, vec![(pane, newer)]);
     }
 
     /// The surfaces read a `Permission` as pending until a `Resolved` for it
