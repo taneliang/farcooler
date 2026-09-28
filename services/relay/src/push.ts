@@ -252,6 +252,10 @@ export interface ActivityState {
   /// field name. It is **runner** in every word a person reads.
   label: string
   machine: string
+  /// The headlining agent's workspace, by name, so the card can say "Billing ·
+  /// claude". Absent when the agent is in none, or its runner is older than
+  /// the field. See migration 0011.
+  workspace?: string
   status: 'working' | 'blocked' | 'done'
   detail: string
   /// When the LEADER's turn began, in Unix milliseconds, so the card can run
@@ -350,6 +354,10 @@ export interface ActivityRow {
   terminal: string
   label: string
   machine: string
+  /// The workspace this agent works in, by name — "Billing" of "Billing ·
+  /// claude". Absent for an agent in none and from a runner older than the
+  /// field, which the card draws as the bare label it always drew.
+  workspace?: string
   status: string
   detail: string
   /// The numbers to the right of the name. Absent where the runner has measured

@@ -16,6 +16,7 @@ import worker, {
   ALERT_TITLE_BUDGET,
   STATE_BUDGET,
   TRACE_ANCHOR_SLACK_S,
+  WORKSPACE_BUDGET,
   cut,
   traceAnchor,
 } from '../src/index'
@@ -3604,6 +3605,10 @@ describe('/v1/notify and Live Activities', () => {
       terminal,
       status: 'blocked',
       label: 'claude-code-opus-5-x000',
+      // The widest workspace the relay keeps, in the units the cap is in.
+      workspace: '請'.repeat(40),
+      // And the widest count, which rides on the header rather than a row.
+      needsYou: 0xffffffff,
       startedAt: 1_755_000_000_000,
       insertions: 999999,
       deletions: 999999,
@@ -3642,6 +3647,10 @@ describe('/v1/notify and Live Activities', () => {
       // The cut drops whole rows and never truncates one. Half a question on a
       // lock screen is worse than a row that was not drawn.
       for (const row of state.rows) expect(row.detail).toBe(SAID)
+      // And the workspace, at its full budget, so the rows being measured are
+      // as wide as a row can be.
+      for (const row of state.rows) expect(bytes(row.workspace)).toBe(WORKSPACE_BUDGET + 2)
+      expect(state.needsYou).toBe(0xffffffff)
       // And every row carries the anchor it was sent, at the seven digits the
       // payload arithmetic prices. A bound that refused it would leave these
       // rows 22 bytes short of what this test claims to measure.
@@ -3984,6 +3993,72 @@ describe('/v1/notify and Live Activities', () => {
       await ready()
       const response = await post('/v1/notify', { kind: 'decision', task: 'bil-7', needsYou: 1 }, 'mine')
       expect(response.status).toBe(400)
+    })
+
+    it('names the workspace on each row and on the headline', async () => {
+      // "Billing · claude" rather than "claude": the card's rows are agents,
+      // and an agent is only findable by the workspace it works in. The runner
+      // sends the name; the relay keeps it on the agent's row and carries it
+      // to the card. A row with none carries no key at all.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post(
+        '/v1/notify',
+        { title: 'Billing · claude needs you', terminal: 'term-1', status: 'blocked', label: 'claude', workspace: 'Billing' },
+        'mine',
+      )
+      await post('/v1/notify', { title: 'codex', terminal: 'term-2', status: 'working', label: 'codex' }, 'mine')
+
+      const card = lastCard(calls).body.aps['content-state']
+      expect(card.workspace).toBe('Billing')
+      expect(card.rows[0].workspace).toBe('Billing')
+      expect('workspace' in card.rows[1]).toBe(false)
+    })
+
+    it('forgets a workspace the agent has left', async () => {
+      // Overwritten, never carried forward like the counts are. A notice with
+      // no workspace is a runner saying this agent is in none, not a runner that
+      // measured nothing this tick.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post(
+        '/v1/notify',
+        { title: 'claude needs you', terminal: 'term-1', status: 'blocked', workspace: 'Billing' },
+        'mine',
+      )
+      await post('/v1/notify', { title: 'claude needs you', terminal: 'term-1', status: 'blocked' }, 'mine')
+      // Another agent speaks, so the first one's row is read back from the
+      // table rather than from the notice that just wrote it — and this one's
+      // own workspace must not stand in for the headline's.
+      await post(
+        '/v1/notify',
+        { title: 'codex', terminal: 'term-2', status: 'working', label: 'codex', workspace: 'Payments' },
+        'mine',
+      )
+
+      const card = lastCard(calls).body.aps['content-state']
+      expect(card.terminal).toBe('term-1')
+      expect('workspace' in card).toBe(false)
+      expect('workspace' in card.rows[0]).toBe(false)
+      expect(card.rows[1].workspace).toBe('Payments')
+    })
+
+    it('cuts a workspace to its budget, never mid-character', async () => {
+      // The name is the runner's and ships separately from this worker, and
+      // every byte of it is spent on each row of a 4KB card.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post(
+        '/v1/notify',
+        { title: 'claude needs you', terminal: 'term-1', status: 'blocked', workspace: '請'.repeat(40) },
+        'mine',
+      )
+
+      const card = lastCard(calls).body.aps['content-state']
+      expect(card.rows[0].workspace).toBe('請'.repeat(WORKSPACE_BUDGET / 3))
     })
 
     it('never takes a count that is not a count', async () => {

@@ -1397,8 +1397,19 @@ const ROW_QUIET_AFTER_MS = 60 * 60 * 1000
 /// five-minute bucket and that index is seven digits until 2065 — making the
 /// worst row 421, and `(4096 - 689) / 421` is still 8.
 ///
+/// The workspace (migration 0011) adds `,"workspace":"…"` at up to
+/// `WORKSPACE_BUDGET` bytes — 63 in all — to each row and to the headline, and
+/// the header's `,"needsYou":4294967295` is 22 more on the fixed part. That is
+/// a worst row of 484 over a fixed part of 774, and `(4096 - 774) / 484` is 6.
+///
 /// `STATE_BUDGET` is what enforces the measurement rather than trusting it.
 const ROWS_SHOWN = 4
+
+/// The most of a workspace's name a row keeps, in bytes.
+///
+/// Sixteen characters of the widest script, and far more than a sidebar shows
+/// of an ASCII name. Exported because it is payload arithmetic — see above.
+export const WORKSPACE_BUDGET = 48
 
 /// The most an encoded content state may reach, in bytes.
 ///
@@ -1490,11 +1501,12 @@ export function cut(text: string, bytes: number): string {
 /// held. `+142 −37` becoming `+147 −37` waits.
 const COALESCE_MS = 10 * 1000
 
-/// One agent's row, as the relay stores it. See migration 0008.
+/// One agent's row, as the relay stores it. See migrations 0008 and 0011.
 interface AgentRow {
   terminal: string
   label: string | null
   machine: string | null
+  workspace: string | null
   status: string | null
   detail: string | null
   insertions: number | null
@@ -1584,8 +1596,8 @@ async function readFleet(env: Env, account: string, now: number): Promise<Roster
     .run()
 
   const rows = await env.DB.prepare(
-    `SELECT terminal, label, machine, status, detail, insertions, deletions, commits,
-            trace, trace_anchor, started_at, status_since, updated_at
+    `SELECT terminal, label, machine, workspace, status, detail, insertions, deletions,
+            commits, trace, trace_anchor, started_at, status_since, updated_at
      FROM live_activities WHERE account_id = ?`,
   )
     .bind(account)
@@ -1663,6 +1675,9 @@ async function rememberAgent(
     terminal,
     label: state.label,
     machine,
+    // Overwritten, never carried forward: absent is a runner saying this agent
+    // is in no workspace. See migration 0011.
+    workspace: state.workspace ?? null,
     status,
     detail: state.detail,
     insertions: numeric(body.insertions) ?? prior?.insertions ?? null,
@@ -1681,13 +1696,14 @@ async function rememberAgent(
   await env.DB.prepare(
     `INSERT INTO live_activities
        (id, account_id, terminal, update_token, environment, updated_at,
-        label, machine, status, detail, insertions, deletions, commits, trace,
+        label, machine, workspace, status, detail, insertions, deletions, commits, trace,
         trace_anchor, started_at, status_since)
-     VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (account_id, terminal)
      DO UPDATE SET updated_at = excluded.updated_at,
                    label = excluded.label,
                    machine = excluded.machine,
+                   workspace = excluded.workspace,
                    status = excluded.status,
                    detail = excluded.detail,
                    insertions = COALESCE(excluded.insertions, live_activities.insertions),
@@ -1713,6 +1729,7 @@ async function rememberAgent(
       mine.updated_at,
       mine.label,
       mine.machine,
+      mine.workspace,
       mine.status,
       mine.detail,
       // The count this notice measured, not the one carried forward: `COALESCE`
@@ -1730,6 +1747,16 @@ async function rememberAgent(
     )
     .run()
   return mine
+}
+
+/// A workspace name the daemon actually sent, cut to `WORKSPACE_BUDGET`, or
+/// NULL.
+///
+/// Cut here rather than trusted, for the reason every length in the card's
+/// arithmetic is: the name is the runner's and is spent again on every row of
+/// a 4KB card. An empty name is no name.
+function workspace(value: unknown): string | null {
+  return typeof value === 'string' && value ? cut(value, WORKSPACE_BUDGET) || null : null
 }
 
 /// A trace the daemon actually sent, or NULL.
@@ -1919,6 +1946,7 @@ function withFleet(state: ActivityState, fleet: Fleet): ActivityState {
       terminal: row.terminal,
       label: row.label ?? '',
       machine: row.machine ?? '',
+      ...(row.workspace ? { workspace: row.workspace } : {}),
       status: row.status ?? '',
       detail: row.detail ?? '',
       ...(row.insertions !== null ? { insertions: row.insertions } : {}),
@@ -1976,6 +2004,7 @@ async function pushActivity(
     // the person has already read.
     label: body.label || body.title,
     machine: daemon.label,
+    ...(workspace(body.workspace) ? { workspace: workspace(body.workspace)! } : {}),
     status,
     // The daemon's own words when it has any. When it has none, a blocked card
     // still needs to say what it is waiting for — "Needs You" alone does not —
@@ -2039,6 +2068,8 @@ async function pushActivity(
     state.terminal = headline.terminal
     state.label = headline.label ?? ''
     state.machine = headline.machine ?? ''
+    if (headline.workspace) state.workspace = headline.workspace
+    else delete state.workspace
     state.status = (headline.status ?? status) as ActivityState['status']
     state.detail = headline.detail ?? ''
     state.startedAt = headline.started_at ?? undefined
@@ -2301,6 +2332,7 @@ async function refreshCard(env: Env, account: string): Promise<void> {
     terminal: headline.terminal,
     label: headline.label ?? '',
     machine: headline.machine ?? '',
+    ...(headline.workspace ? { workspace: headline.workspace } : {}),
     status: headline.status as ActivityState['status'],
     detail: headline.detail ?? '',
     startedAt: headline.started_at ?? undefined,

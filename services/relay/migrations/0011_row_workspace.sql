@@ -1,0 +1,12 @@
+-- The workspace each agent's row belongs to, by name, so the card can say
+-- "Billing · claude" rather than "claude".
+--
+-- Additive only, same as 0002 through 0010 and for the same reason: the previous
+-- worker is still serving requests while a deploy rolls out, and a runner older
+-- than this column never sends `workspace`. NULL is what such a row has, and
+-- the card draws it exactly as every card did before.
+--
+-- Overwritten on every notice rather than coalesced like the counts in 0008. A
+-- notice with no workspace is the runner saying this agent is in none, which
+-- is a statement, not a tick that measured nothing. See `rememberAgent`.
+ALTER TABLE live_activities ADD COLUMN workspace TEXT;
