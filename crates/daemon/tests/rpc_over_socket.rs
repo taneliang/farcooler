@@ -4166,8 +4166,8 @@ async fn a_workspace_refusal_says_which_and_says_it_in_words() {
 }
 
 /// A worktree made for a workspace is claimed by it, its terminal does that
-/// workspace's work, and an assignment moves the worktree but not whose work
-/// the terminal is doing.
+/// workspace's work, and an assignment moves the worktree and its agents
+/// together, so no agent is left working for the old owner.
 #[tokio::test]
 async fn a_worktree_made_for_a_workspace_is_its_until_assigned_away() {
     let h = start(Scope::HostAdmin).await;
@@ -4220,11 +4220,13 @@ async fn a_worktree_made_for_a_workspace_is_its_until_assigned_away() {
         panic!("wrong result")
     };
     assert_eq!(assigned.workspace_id.as_ref(), Some(&main.id));
-    assert_eq!(
-        assigned.foreign_writer_workspace_ids,
-        vec![billing.id.clone()],
-        "Billing's agent is still working in a worktree Main now owns"
+    assert!(
+        assigned.foreign_writer_workspace_ids.is_empty(),
+        "Billing's agent went with the worktree: {:?}",
+        assigned.foreign_writer_workspace_ids
     );
+    let moved = terminals(&mut client).await.into_iter().find(|t| t.id == terminal.id).expect("the agent");
+    assert_eq!(moved.workspace_id.as_ref(), Some(&main.id), "the agent does Main's work now");
 
     let mut unspecified = request("terminal.set_role");
     unspecified.target_resource_id = Some(terminal.id.clone());
