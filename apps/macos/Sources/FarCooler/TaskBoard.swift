@@ -204,6 +204,7 @@ final class TaskBoardStore: ObservableObject {
     func open(_ row: TaskRow) async {
         opened = row
         detail = .empty
+        question = nil
         let (data, _) = await client.taskDetail(key: row.key, repository: repositoryID)
         guard let data, let read = try? TaskDetailModel.decode(data) else {
             trouble = "Far Cooler couldn’t read this task."
@@ -211,6 +212,7 @@ final class TaskBoardStore: ObservableObject {
         }
         trouble = nil
         detail = read
+        question = TaskQuestion.open(in: data)
         // The blocks arrive as ids; the board is what turns them into keys.
         opened = row.with(blocks: board.resolvingBlocks(read.blocks))
     }
@@ -233,6 +235,51 @@ final class TaskBoardStore: ObservableObject {
             return
         }
         await reload()
+    }
+
+    /// The open card's question, when its record has one still waiting:
+    /// what the card draws as Answer buttons. Read from the same `task show`
+    /// as `detail`.
+    @Published private(set) var question: TaskQuestion?
+
+    /// This runner, as the board's per-device choices are keyed: its target,
+    /// or `local` for this Mac.
+    var hostKey: String { client.target.isEmpty ? "local" : client.target }
+
+    /// Whether this board offers its writes: New Task…, and a question's
+    /// Answer buttons. `TaskBoardWrites.offered`'s rule over this runner's
+    /// build.
+    var offersWrites: Bool { TaskBoardWrites.offered(by: client.daemonBuild) }
+
+    /// File a task on this board: New Task…. True when it went on.
+    ///
+    /// Re-reads on the way back, as a move does, rather than drawing a card
+    /// this window made up: the runner gives it its key.
+    func createTask(title: String) async -> Bool {
+        if let refused = await client.createTask(
+            title: title, workspace: workspace.boardWorkspace, repository: repositoryID)
+        {
+            // The runner's words stay off the board; see `trouble`.
+            _ = refused
+            return false
+        }
+        await reload()
+        return true
+    }
+
+    /// Answer a task's question with `body`: an option's text, or what was
+    /// typed. True when it was written. The card is read again, so the
+    /// answer shows in its record and the buttons go.
+    func answer(_ row: TaskRow, with body: String) async -> Bool {
+        if let refused = await client.answerDecision(
+            key: row.key, body: body, repository: repositoryID)
+        {
+            _ = refused
+            return false
+        }
+        if opened?.id == row.id { await open(row) }
+        await reload()
+        return true
     }
 }
 
@@ -361,12 +408,34 @@ struct BoardAgents {
     }
 }
 
+/// Which of the board's writes this connection may make.
+///
+/// New Task… and a question's Answer buttons are Control-scope writes
+/// (`task.create`, `task.note`). A connection granted only Read sees the
+/// board without them, which is the rule Needs You follows too (spec §2.5).
+/// Anything but `read` offers them, `unspecified` included: that is what a
+/// runner newer than this build answers for a grant it has no word for, and
+/// what the Mac's own shell key reads as (`DaemonBuild.mayAdministerRunner`).
+enum TaskBoardWrites {
+    static func offered(by build: DaemonBuild?) -> Bool {
+        build?.grantedScope != "read"
+    }
+}
+
 /// The board itself, in the main area of the window.
 ///
 /// Not a sheet any more. A sheet sat over the agents it was orchestrating, so
 /// going to one closed the board and coming back meant opening it again; here
 /// it is a place in the sidebar like any worktree, and ⇧⌘B or a click on its
 /// row brings it back.
+///
+/// **Two forms, chosen by the board's own width** (owner decision 3, spec
+/// §5): a status-sectioned list when narrow and the kanban when wide,
+/// measured with a `GeometryReader` on the board and never read from the
+/// window, which the board shares with a sidebar and other columns. The
+/// header's toggle forces either, kept per device and per board. Every
+/// status is drawn in both: a collapsed "Backlog 0" in the list, and an
+/// empty column in the kanban.
 struct TaskBoardView: View {
     @ObservedObject var store: TaskBoardStore
     @ObservedObject var client: DaemonClient
@@ -374,6 +443,20 @@ struct TaskBoardView: View {
     /// Go to a pane working a task. The window's, because only the window can
     /// change what is selected.
     let onGoTo: (BoardPane) -> Void
+    /// Where the form and the collapsed sections are kept. The app's own
+    /// defaults, except in a test.
+    var defaults: UserDefaults = .standard
+
+    /// The toggle's choice for this board, read from `defaults` when the
+    /// board appears.
+    @State private var choice: BoardForm.Choice = .auto
+    /// The form last drawn, which is what the hysteresis keeps between 868
+    /// and 892 pt.
+    @State private var drawn: BoardForm?
+    /// The list's collapsed sections, read from `defaults` when the board
+    /// appears.
+    @State private var collapsed: Set<TaskStatus> = BoardForm.collapsedByDefault
+    @State private var newTaskOpen = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -388,18 +471,8 @@ struct TaskBoardView: View {
                         Button("Try Again") { Task { await store.reload() } }
                     }
                 }
-            } else if store.hasRead && store.board.rows.isEmpty
-                && store.board.unreadable.isEmpty
-            {
-                centered {
-                    VStack(spacing: 6) {
-                        Text("Nothing on this board yet.").font(.headline)
-                        Text("Put a task on it with farcooler task create.")
-                            .foregroundStyle(.secondary)
-                    }
-                }
             } else {
-                columns
+                forms
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -413,6 +486,12 @@ struct TaskBoardView: View {
         // store in the same place, and a `.task` with no id would never read
         // it — the board would sit on empty columns until the next event.
         .task(id: ObjectIdentifier(store)) { await store.readIfNeverRead() }
+        // This board's choices, read again whenever the view is handed
+        // another board.
+        .onChange(of: remembered, initial: true) { _, key in
+            choice = BoardForm.Choice.read(host: key.host, workspace: key.workspace, from: defaults)
+            collapsed = BoardForm.collapsed(host: key.host, workspace: key.workspace, from: defaults)
+        }
         // A card is open only while its board is on screen. A board that goes
         // away under an open card — its project removed, its runner gone, or
         // a command that selected something else — would otherwise leave the
@@ -421,8 +500,10 @@ struct TaskBoardView: View {
         // time the board is.
         .onDisappear { store.opened = nil }
         .sheet(item: $store.opened) { row in
-            TaskCard(
-                row: row, detail: store.detail, agents: agents.live(for: row),
+            TaskCardSheet(
+                row: row, detail: store.detail, question: store.question,
+                agents: agents.live(for: row), canAnswer: store.offersWrites,
+                onAnswer: { body in await store.answer(row, with: body) },
                 onGoTo: { pane in
                     store.opened = nil
                     onGoTo(pane)
@@ -431,9 +512,21 @@ struct TaskBoardView: View {
         }
     }
 
+    /// Which board's choices are on screen: the runner and the workspace.
+    private struct Remembered: Equatable {
+        var host: String
+        var workspace: String
+    }
+
+    private var remembered: Remembered {
+        Remembered(host: store.hostKey, workspace: store.workspace.id)
+    }
+
     private func centered<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         VStack { Spacer(); content(); Spacer() }.frame(maxWidth: .infinity)
     }
+
+    // MARK: - Header
 
     private var header: some View {
         HStack(spacing: 10) {
@@ -459,6 +552,22 @@ struct TaskBoardView: View {
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
                     .foregroundStyle(.secondary)
             }
+            if store.offersWrites {
+                Button {
+                    newTaskOpen = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .help("New Task…")
+                .accessibilityLabel("New Task…")
+                .accessibilityIdentifier("board-new-task")
+                .popover(isPresented: $newTaskOpen, arrowEdge: .bottom) {
+                    NewTaskForm(
+                        onCreate: { title in await store.createTask(title: title) },
+                        onClose: { newTaskOpen = false })
+                }
+            }
+            formToggle
             Button("Refresh") { Task { await store.reload() } }
         }
         .padding(.horizontal, 14)
@@ -466,17 +575,384 @@ struct TaskBoardView: View {
         .background(WorkspaceStyle.paneChrome)
     }
 
-    private var columns: some View {
-        ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: 12) {
-                ForEach(store.board.columns) { column in
-                    TaskColumnView(column: column, store: store, agents: agents, onGoTo: onGoTo)
-                }
-                if !store.board.unreadable.isEmpty {
-                    UnreadableColumnView(rows: store.board.unreadable)
+    /// `≡` List and `▦` Kanban. Clicking one forces it; clicking the one
+    /// forced goes back to Automatic, which is also in the control's menu.
+    /// The form on screen is always marked, and a forced one more strongly.
+    private var formToggle: some View {
+        HStack(spacing: 1) {
+            formButton(.list, symbol: "list.bullet", name: "List")
+            formButton(.kanban, symbol: "rectangle.split.3x1", name: "Kanban")
+        }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
+        .contextMenu {
+            Picker("Board Layout", selection: chosen) {
+                Text("Automatic").tag(BoardForm.Choice.auto)
+                Text("List").tag(BoardForm.Choice.list)
+                Text("Kanban").tag(BoardForm.Choice.kanban)
+            }
+            .pickerStyle(.inline)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("board-form-toggle")
+    }
+
+    private func formButton(_ form: BoardForm, symbol: String, name: String) -> some View {
+        let forced = choice.forced == form
+        let shown = drawn == form
+        return Button {
+            chosen.wrappedValue = choice.choosing(form)
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
+                .frame(width: 24, height: 18)
+                .foregroundStyle(forced ? Color.white : shown ? Color.primary : Color.secondary)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(
+                            forced
+                                ? Color.accentColor
+                                : shown ? Color.primary.opacity(0.1) : Color.clear))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(
+            forced
+                ? "Always \(name). Click again to choose by width."
+                : "Show as \(name == "List" ? "a list" : "a kanban")")
+        .accessibilityLabel(name)
+        .accessibilityValue(forced ? "Chosen" : shown ? "Shown" : "")
+    }
+
+    /// The toggle's choice, kept on this device as it changes.
+    private var chosen: Binding<BoardForm.Choice> {
+        Binding(
+            get: { choice },
+            set: { new in
+                choice = new
+                new.write(host: store.hostKey, workspace: store.workspace.id, in: defaults)
+            })
+    }
+
+    // MARK: - The two forms
+
+    /// The form for the board's own width, measured here.
+    private var forms: some View {
+        GeometryReader { geometry in
+            let form = BoardForm.resolve(
+                width: geometry.size.width, previous: drawn, forced: choice)
+            Group {
+                switch form {
+                case .list: list
+                case .kanban: kanban
                 }
             }
-            .padding(14)
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+            .onChange(of: form, initial: true) { _, new in drawn = new }
+            .preference(key: BoardFormPreference.self, value: form)
+        }
+    }
+
+    /// Whether the board has been read and has nothing on it at all.
+    private var isEmpty: Bool {
+        store.hasRead && store.board.rows.isEmpty && store.board.unreadable.isEmpty
+    }
+
+    /// Above either form on an empty board: what it is, and the way to put a
+    /// task on it. The form is still drawn under it, every status at 0.
+    private var emptyNote: some View {
+        HStack(spacing: 10) {
+            Text("Nothing on this board yet.")
+                .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
+            Spacer(minLength: 0)
+            if store.offersWrites {
+                Button("New Task…") { newTaskOpen = true }
+                    .accessibilityIdentifier("board-empty-new-task")
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(WorkspaceStyle.document))
+    }
+
+    private var list: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 6) {
+                if isEmpty { emptyNote.padding(.bottom, 6) }
+                ForEach(store.board.sections) { section in
+                    TaskListSection(
+                        section: section,
+                        expanded: BoardForm.isExpanded(section, collapsed: collapsed),
+                        onToggle: { toggle(section.status) },
+                        store: store, agents: agents, onGoTo: onGoTo)
+                }
+                if !store.board.unreadable.isEmpty {
+                    UnreadableColumnView(rows: store.board.unreadable, width: nil)
+                }
+            }
+            .padding(BoardForm.boardPadding)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("board-list")
+    }
+
+    /// Open or close one section, and keep it that way on this device.
+    private func toggle(_ status: TaskStatus) {
+        if collapsed.contains(status) {
+            collapsed.remove(status)
+        } else {
+            collapsed.insert(status)
+        }
+        BoardForm.setCollapsed(
+            collapsed, host: store.hostKey, workspace: store.workspace.id, in: defaults)
+    }
+
+    private var kanban: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if isEmpty {
+                emptyNote
+                    .padding([.horizontal, .top], BoardForm.boardPadding)
+            }
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: BoardForm.columnSpacing) {
+                    // `sections`, not `columns`: every status, whatever the
+                    // board was read with.
+                    ForEach(store.board.sections) { column in
+                        TaskColumnView(column: column, store: store, agents: agents, onGoTo: onGoTo)
+                    }
+                    if !store.board.unreadable.isEmpty {
+                        UnreadableColumnView(rows: store.board.unreadable, width: BoardForm.columnWidth)
+                    }
+                }
+                .padding(BoardForm.boardPadding)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("board-kanban")
+    }
+}
+
+/// The form a board is drawn in, published for whatever holds it: the
+/// window, which can say which form is on screen, and `BoardFormWiringTests`,
+/// which reads it from a board it can't see. Nil for a board not drawn yet.
+struct BoardFormPreference: PreferenceKey {
+    static let defaultValue: BoardForm? = nil
+    static func reduce(value: inout BoardForm?, nextValue: () -> BoardForm?) {
+        value = nextValue() ?? value
+    }
+}
+
+/// New Task…: a title, and the button that files it on this board.
+///
+/// Only the title, which is all `task create` needs and all a board card
+/// shows; the intent and acceptance are the orchestrator's to write, or the
+/// CLI's for anyone who wants them now.
+private struct NewTaskForm: View {
+    let onCreate: (String) async -> Bool
+    let onClose: () -> Void
+
+    @State private var title = ""
+    @State private var sending = false
+    @State private var failed = false
+
+    /// The CLI's limit on a title (`task create --title`).
+    private static let limit = 200
+
+    private var trimmed: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("New Task").font(.headline)
+            TextField("Title", text: $title)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 320)
+                .onSubmit(send)
+            if trimmed.count > Self.limit {
+                Text("A title can be at most \(Self.limit) characters.")
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                    .foregroundStyle(.secondary)
+            } else if failed {
+                Text("Far Cooler couldn’t put that task on the board. Try again.")
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                    .foregroundStyle(.secondary)
+            }
+            HStack {
+                if sending { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("Cancel", action: onClose).keyboardShortcut(.cancelAction)
+                Button("Add Task", action: send)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canSend)
+            }
+        }
+        .padding(14)
+    }
+
+    private var canSend: Bool { !sending && !trimmed.isEmpty && trimmed.count <= Self.limit }
+
+    private func send() {
+        guard canSend else { return }
+        sending = true
+        failed = false
+        let text = trimmed
+        Task {
+            let filed = await onCreate(text)
+            sending = false
+            if filed { onClose() } else { failed = true }
+        }
+    }
+}
+
+/// One status in the list form: its header, and its cards when open.
+///
+/// An empty status is a header reading "Backlog 0" that can't open, so the
+/// list says what isn't there as well as what is.
+private struct TaskListSection: View {
+    let section: TaskBoardColumn
+    let expanded: Bool
+    let onToggle: () -> Void
+    @ObservedObject var store: TaskBoardStore
+    let agents: BoardAgents
+    let onGoTo: (BoardPane) -> Void
+
+    /// Needs Decision is the one status waiting on the person reading, and
+    /// the only one drawn in the accent color, as in the kanban.
+    private var leads: Bool { section.status == .needsDecision }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button(action: onToggle) {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                        .foregroundStyle(.secondary)
+                        .opacity(BoardForm.canExpand(section) ? 1 : 0.35)
+                    Text(section.title)
+                        .font(WorkspaceStyle.sectionTitle)
+                        .foregroundStyle(
+                            section.count == 0
+                                ? Color.secondary : leads ? Color.accentColor : Color.primary)
+                    Text("\(section.count)")
+                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 3)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!BoardForm.canExpand(section))
+            .animation(Motion.snap, value: expanded)
+            .accessibilityLabel("\(section.title), \(section.count)")
+            .accessibilityValue(BoardForm.canExpand(section) ? (expanded ? "Expanded" : "Collapsed") : "")
+            .accessibilityIdentifier("board-section-\(section.id)")
+            if expanded {
+                VStack(spacing: 6) {
+                    ForEach(section.rows) { row in
+                        TaskListRow(
+                            row: row, prominent: leads, store: store,
+                            live: agents.live(for: row), presence: agents.presence(for: row),
+                            onGoTo: onGoTo)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One card in the list form, after the iPhone's row: its key, title, what
+/// it asks of you, how long it has sat, how much of its acceptance holds,
+/// and the way to its agent, which sits beside the words rather than under
+/// them, since a list row has the width.
+private struct TaskListRow: View {
+    let row: TaskRow
+    let prominent: Bool
+    @ObservedObject var store: TaskBoardStore
+    let live: [BoardPane]
+    let presence: TaskAgentPresence
+    let onGoTo: (BoardPane) -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(row.key)
+                        .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    BoardTick { now in
+                        if row.staleness(at: now) == .stale {
+                            Image(systemName: "clock.badge.exclamationmark")
+                                .foregroundStyle(.orange)
+                                .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                        }
+                    }
+                }
+                Text(row.title)
+                    .font(
+                        .system(
+                            size: WorkspaceStyle.PaneText.body,
+                            weight: prominent ? .semibold : .regular)
+                    )
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let call = row.callToAction {
+                    Text(call)
+                        .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
+                        .foregroundStyle(Color.accentColor)
+                }
+                HStack(spacing: 10) {
+                    CardTimeLines(
+                        row: row,
+                        staleSize: WorkspaceStyle.PaneText.secondary,
+                        timeSize: WorkspaceStyle.PaneText.minimum)
+                    if let progress = row.acceptanceProgress {
+                        AcceptanceProgressLabel(progress: progress)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            AgentPill(live: live, presence: presence, onGoTo: onGoTo)
+        }
+        .padding(9)
+        .background(RoundedRectangle(cornerRadius: 8).fill(WorkspaceStyle.paneChrome))
+        .overlay(
+            BoardTick { now in
+                let stale = row.staleness(at: now) == .stale
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(
+                        stale ? Color.orange.opacity(0.55) : WorkspaceStyle.hairline,
+                        lineWidth: stale ? 1 : 0.5)
+            }
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { Task { await store.open(row) } }
+        .contextMenu { TaskRowMenu(row: row, live: live, store: store, onGoTo: onGoTo) }
+        .accessibilityIdentifier("board-row-\(row.key)")
+    }
+}
+
+/// A card's context menu, the same in both forms: the way to its agent, and
+/// the moves the model offers.
+private struct TaskRowMenu: View {
+    let row: TaskRow
+    let live: [BoardPane]
+    @ObservedObject var store: TaskBoardStore
+    let onGoTo: (BoardPane) -> Void
+
+    var body: some View {
+        // Going somewhere writes nothing, so it is not a `BoardAction`:
+        // that list is for writes, and `rewritesTheRecord` walks it.
+        GoToAgentItems(live: live, onGoTo: onGoTo)
+        if !live.isEmpty { Divider() }
+        // Built from the model's list rather than written out here, which
+        // is what makes `nothingTheBoardOffersRewritesTheRecord` a guard
+        // over what actually ships. A new write goes in `TaskBoardModel`,
+        // beside the rule that checks it.
+        Section("Move To") {
+            ForEach(TaskBoardModel.moves(for: row)) { move in
+                Button(move.action.title) { Task { await store.move(row, to: move.status) } }
+            }
         }
     }
 }
@@ -499,7 +975,7 @@ private struct TaskColumnView: View {
                 Text(column.title)
                     .font(WorkspaceStyle.sectionTitle)
                     .foregroundStyle(leads ? Color.accentColor : Color.primary)
-                Text("\(column.rows.count)")
+                Text("\(column.count)")
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
                     .foregroundStyle(.secondary)
             }
@@ -514,8 +990,8 @@ private struct TaskColumnView: View {
                 }
             }
         }
-        .frame(width: 260)
-        .padding(10)
+        .frame(width: BoardForm.columnWidth)
+        .padding(BoardForm.columnPadding)
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(leads ? Color.accentColor.opacity(0.07) : WorkspaceStyle.document))
@@ -639,21 +1115,7 @@ struct TaskCardRow: View {
         )
         .contentShape(Rectangle())
         .onTapGesture { Task { await store.open(row) } }
-        .contextMenu {
-            // Going somewhere writes nothing, so it is not a `BoardAction`:
-            // that list is for writes, and `rewritesTheRecord` walks it.
-            GoToAgentItems(live: live, onGoTo: onGoTo)
-            if !live.isEmpty { Divider() }
-            // Built from the model's list rather than written out here, which
-            // is what makes `nothingTheBoardOffersRewritesTheRecord` a guard
-            // over what actually ships. A new write goes in `TaskBoardModel`,
-            // beside the rule that checks it.
-            Section("Move To") {
-                ForEach(TaskBoardModel.moves(for: row)) { move in
-                    Button(move.action.title) { Task { await store.move(row, to: move.status) } }
-                }
-            }
-        }
+        .contextMenu { TaskRowMenu(row: row, live: live, store: store, onGoTo: onGoTo) }
     }
 }
 
@@ -768,6 +1230,8 @@ private struct GoToAgentItems: View {
 /// makes work vanish from a board whose whole claim is that it shows the work.
 private struct UnreadableColumnView: View {
     let rows: [UnreadableTaskRow]
+    /// A kanban column's width, or nil for the list, where it spans the board.
+    let width: CGFloat?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -793,28 +1257,29 @@ private struct UnreadableColumnView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: 8).fill(WorkspaceStyle.paneChrome))
             }
-            Spacer()
+            if width != nil { Spacer() }
         }
-        .frame(width: 260)
-        .padding(10)
+        .frame(width: width, alignment: .leading)
+        .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
+        .padding(BoardForm.columnPadding)
         .background(RoundedRectangle(cornerRadius: 10).fill(WorkspaceStyle.document))
     }
 }
 
-/// One task, opened: what is understood now, and how it came to be understood.
+/// One task, opened, as a sheet over the board: its heading, and the card.
 ///
-/// The two halves are drawn as two halves on purpose. Above the divider is the
-/// mutable present; below it is the record, which is append-only and which
-/// this card offers nothing at all to change. There is no menu on a note here,
-/// and there must never be one — correcting the record is a NEW note carrying
-/// `supersedes`, which is `farcooler task note --supersedes`.
-private struct TaskCard: View {
+/// The sheet is the card's host until the task column replaces it (2D.1);
+/// what the card says is `TaskCard`, which the column will host instead.
+private struct TaskCardSheet: View {
     let row: TaskRow
     let detail: TaskDetailModel
+    let question: TaskQuestion?
     /// The panes working this task. Going to one closes the card first — the
     /// card is a sheet, and a sheet left up would sit over the pane you went
     /// to.
     let agents: [BoardPane]
+    let canAnswer: Bool
+    let onAnswer: (String) async -> Bool
     let onGoTo: (BoardPane) -> Void
     let onClose: () -> Void
 
@@ -843,17 +1308,78 @@ private struct TaskCard: View {
             .padding(14)
             Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    understanding
-                    Divider()
-                    record
-                }
+                TaskCard(
+                    row: row, detail: detail, question: question, canAnswer: canAnswer,
+                    onAnswer: onAnswer
+                )
                 .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .frame(minWidth: 560, minHeight: 480)
         .background(WorkspaceStyle.document)
+    }
+}
+
+/// One task's card: what is understood now, the question it's waiting on,
+/// and how it came to be understood.
+///
+/// The two halves are drawn as two halves on purpose. Above the divider is the
+/// mutable present; below it is the record, which is append-only and which
+/// this card offers nothing at all to change. There is no menu on a note here,
+/// and there must never be one — correcting the record is a NEW note carrying
+/// `supersedes`, which is `farcooler task note --supersedes`. Answering a
+/// question is a new note too (`task note --kind answer`), never an edit.
+///
+/// Internal for `TaskCardTests`, which draws it. The sheet hosts it today, and
+/// the task column will.
+struct TaskCard: View {
+    let row: TaskRow
+    let detail: TaskDetailModel
+    let question: TaskQuestion?
+    /// Whether this connection may answer: not on a read-scoped one. See
+    /// `TaskBoardWrites`.
+    let canAnswer: Bool
+    /// Send an answer; true when it was written.
+    let onAnswer: (String) async -> Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            understanding
+            if let offer = Self.offer(row: row, question: question, canAnswer: canAnswer) {
+                QuestionAnswers(offer: offer, onAnswer: onAnswer)
+                    .id(offer.question.id)
+            }
+            Divider()
+            record
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// What a card offers for its question, which is all `QuestionAnswers`
+    /// draws from.
+    struct Offer: Equatable {
+        var question: TaskQuestion
+        /// Options drawn as buttons, in the order they were offered.
+        var buttons: [String]
+        /// Options past the buttons, in a More menu.
+        var more: [String]
+        /// Answer…, for a question that offered no options.
+        var typed: Bool
+    }
+
+    /// The question a card shows and the answers it offers, or nil for none.
+    ///
+    /// - In Needs Decision only: a question still in the record of a task
+    ///   someone has since moved on is history, not a request.
+    /// - Three options at most as buttons, the rest in a menu; Answer… when
+    ///   there are none (spec §2.5).
+    /// - On a read-scoped connection, the question with nothing to press.
+    static func offer(row: TaskRow, question: TaskQuestion?, canAnswer: Bool) -> Offer? {
+        guard row.status == .needsDecision, let question else { return nil }
+        guard canAnswer else { return Offer(question: question, buttons: [], more: [], typed: false) }
+        return Offer(
+            question: question, buttons: question.buttons, more: question.overflow,
+            typed: question.options.isEmpty)
     }
 
     @ViewBuilder private var understanding: some View {
@@ -967,5 +1493,98 @@ private struct TaskCard: View {
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A question waiting on the person reading, and the ways to answer it:
+/// `TaskCard.offer`'s, drawn and nothing decided here.
+private struct QuestionAnswers: View {
+    let offer: TaskCard.Offer
+    let onAnswer: (String) async -> Bool
+
+    /// The answer on its way, which shows a spinner in place of the buttons.
+    @State private var sending: String?
+    @State private var failed = false
+    @State private var writing = false
+    @State private var typed = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Question")
+                .font(WorkspaceStyle.sectionTitle)
+                .foregroundStyle(Color.accentColor)
+            Text(offer.question.body)
+                .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
+                .textSelection(.enabled)
+            if sending != nil {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Answering…")
+                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                        .foregroundStyle(.secondary)
+                }
+            } else if offer.typed {
+                freeAnswer
+            } else if !offer.buttons.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(offer.buttons, id: \.self) { option in
+                        Button(option) { send(option) }
+                    }
+                    if !offer.more.isEmpty {
+                        Menu("More") {
+                            ForEach(offer.more, id: \.self) { option in
+                                Button(option) { send(option) }
+                            }
+                        }
+                        .fixedSize()
+                    }
+                }
+            }
+            if failed {
+                Text("Your answer wasn’t sent. Try again.")
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.07)))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("task-card-question")
+    }
+
+    @ViewBuilder private var freeAnswer: some View {
+        if writing {
+            HStack(spacing: 8) {
+                TextField("Your answer", text: $typed)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { sendTyped() }
+                Button("Send") { sendTyped() }
+                    .disabled(typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        } else {
+            Button("Answer…") { writing = true }
+        }
+    }
+
+    private func sendTyped() {
+        let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        send(text)
+    }
+
+    private func send(_ answer: String) {
+        guard sending == nil else { return }
+        sending = answer
+        failed = false
+        Task {
+            let written = await onAnswer(answer)
+            sending = nil
+            failed = !written
+            if written {
+                typed = ""
+                writing = false
+            }
+        }
     }
 }
