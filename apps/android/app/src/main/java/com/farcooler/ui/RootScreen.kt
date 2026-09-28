@@ -135,7 +135,7 @@ fun RootScreen(model: AppModel) {
                         },
                         onOpenBoard = { row ->
                             scope.launch { drawer.close() }
-                            model.navigate(Route.Board(row.hostId, row.key))
+                            model.openWorkspace(row.hostId, row.key, WorkspaceTab.BOARD)
                         },
                         onSettings = {
                             scope.launch { drawer.close() }
@@ -225,13 +225,20 @@ private fun Ground(model: AppModel, route: Route, visible: Boolean, onOpenDrawer
                 )
             }
 
-            is Route.Fleet -> FleetScreen(
-                model = model,
-                onSelect = { model.open(it) },
-                onOpenBoard = { model.navigate(Route.Board(it.hostId, it.key)) },
-                onOpenDrawer = onOpenDrawer,
-                onBack = { model.back() },
-            )
+            is Route.Workspace -> key(route.hostId, route.workspaceId) {
+                val live = model.fleet.connection(route.hostId)
+                if (live != null) {
+                    BoardScreen(
+                        connection = live,
+                        workspaceId = route.workspaceId,
+                        onOpenTask = {
+                            model.navigate(Route.BoardTask(route.hostId, route.workspaceId, it))
+                        },
+                        onJump = { model.openFromBoard(it) },
+                        onBack = { model.back() },
+                    )
+                }
+            }
 
             // The root, and the fallback for anything that has no ground of its
             // own. An overlay route reaching here would be a bug in
@@ -242,8 +249,8 @@ private fun Ground(model: AppModel, route: Route, visible: Boolean, onOpenDrawer
                 model = model,
                 onSelect = { model.open(it) },
                 onReviewChanges = { host, worktree -> model.openChanges(host, worktree) },
-                onOpenWorktrees = { model.navigate(Route.Fleet) },
-                onOpenBoard = { model.navigate(Route.Board(it.hostId, it.key)) },
+                onOpenWorktrees = onOpenDrawer,
+                onOpenBoard = { model.openWorkspace(it.hostId, it.key, WorkspaceTab.BOARD) },
                 onOpenDrawer = onOpenDrawer,
             )
         }
@@ -283,20 +290,16 @@ private fun OverlayScreen(model: AppModel, route: Route, connections: List<Conne
 
         is Route.Devices -> DevicesScreen(model, onBack = { model.back() })
 
-        is Route.Board -> {
-            val live = connections.firstOrNull { it.host.id == route.hostId }
-            if (live == null) {
-                model.back()
-            } else {
-                BoardScreen(
-                    connection = live,
-                    workspaceId = route.workspaceId,
-                    onOpenTask = { model.navigate(Route.BoardTask(route.hostId, route.workspaceId, it)) },
-                    onJump = { model.openFromBoard(it) },
-                    onBack = { model.back() },
-                )
-            }
-        }
+        is Route.Worktrees -> FleetScreen(
+            model = model,
+            onSelect = { model.open(it) },
+            onOpenBoard = { model.openWorkspace(it.hostId, it.key, WorkspaceTab.BOARD) },
+            onOpenDrawer = {},
+            onBack = { model.back() },
+        )
+
+        // Never installed: `Backstack.decodeStack` reads it as a workspace.
+        is Route.Board -> Unit
 
         is Route.BoardTask -> {
             val live = connections.firstOrNull { it.host.id == route.hostId }
@@ -315,7 +318,7 @@ private fun OverlayScreen(model: AppModel, route: Route, connections: List<Conne
 
         // The ground's routes never reach here; `Route.isOverlay` is the one
         // place that split is decided.
-        is Route.Onboarding, is Route.NeedsYou, is Route.Fleet, is Route.Terminal -> Unit
+        is Route.Onboarding, is Route.NeedsYou, is Route.Workspace, is Route.Terminal -> Unit
     }
 }
 

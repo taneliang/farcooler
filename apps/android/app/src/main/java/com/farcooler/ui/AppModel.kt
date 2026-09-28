@@ -328,6 +328,28 @@ class AppModel(
     }
 
     /**
+     * Open a workspace — a Needs You row, the drawer — on the tab it last
+     * showed on this phone, or on [tab] when the caller names one (an item
+     * about its board). Over the front door: see [Backstack.goToWorkspace].
+     */
+    fun openWorkspace(hostId: String, workspaceId: String, tab: WorkspaceTab? = null) {
+        val shown = tab
+            ?: WorkspaceTab.parse(settings.workspaceTab(hostId, workspaceId))
+            ?: WorkspaceTab.ORCHESTRATOR
+        settings.setLastWorkspace(hostId, workspaceId)
+        install(Backstack.goToWorkspace(_stack.value, Route.Workspace(hostId, workspaceId, shown)))
+    }
+
+    /**
+     * A workspace's tab row was tapped. The route's value changes and nothing
+     * else in the stack does, and the tab is remembered for that workspace.
+     */
+    fun selectTab(route: Route.Workspace, tab: WorkspaceTab) {
+        settings.setWorkspaceTab(route.hostId, route.workspaceId, tab.name)
+        install(Backstack.withTab(_stack.value, route, tab))
+    }
+
+    /**
      * Open the terminal a notification was about.
      *
      * By id alone, because that is all a notification carries and all it can
@@ -482,7 +504,9 @@ class AppModel(
 
         is Route.RunnerSettings -> hosts.hosts.value.any { it.id == route.hostId }
 
-        is Route.Board -> hosts.hosts.value.any { it.id == route.hostId }
+        is Route.Workspace -> hosts.hosts.value.any { it.id == route.hostId }
+
+        is Route.Worktrees -> hosts.hosts.value.any { it.id == route.hostId }
 
         is Route.BoardTask -> hosts.hosts.value.any { it.id == route.hostId }
 

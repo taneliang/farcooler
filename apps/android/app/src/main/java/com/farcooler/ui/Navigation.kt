@@ -9,7 +9,11 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNames
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 /**
  * Where the app is.
@@ -59,18 +63,50 @@ sealed interface Route {
     data object NeedsYou : Route
 
     /**
-     * The worktree list — every worktree on every runner, hidden ones
-     * included.
+     * One workspace, on one runner, showing one of its three tabs: its
+     * orchestrator, its board, or its worktrees (spec §6.2).
      *
-     * No longer the root. It is pushed from the front door's Worktrees row,
-     * and it is also what the navigation drawer holds, which is deliberate
-     * duplication rather than an oversight: the drawer is reachable by an edge
-     * swipe with no target to hit, and the row is reachable by reading. See
-     * `RootScreen`.
+     * The tab is in the route because a saved stack has to come back on the
+     * tab it was left on, and because an old saved [Board] maps onto this with
+     * [WorkspaceTab.BOARD]. It is NOT part of the screen's identity: `Ground`
+     * keys the screen on [hostId] and [workspaceId] alone, so tapping a tab
+     * replaces this route's value without rebuilding the screen under it — the
+     * orchestrator's pane keeps its session. See [AppModel.selectTab].
+     *
+     * On a runner without workspaces the id is the repository's, naming its
+     * one implicit workspace (`WorkspaceSummary.implicit`), as a board route
+     * always did.
+     *
+     * Ground, not an overlay: a task opened from its board is pushed over it,
+     * and an agent opened from that task over both, so Back walks from the
+     * agent to the task to the workspace.
      */
     @Serializable
-    @SerialName("fleet")
-    data object Fleet : Route
+    @SerialName("workspace")
+    data class Workspace(
+        val hostId: String,
+        val workspaceId: String,
+        val tab: WorkspaceTab = WorkspaceTab.ORCHESTRATOR,
+    ) : Route {
+        /** The same workspace, whatever tab it shows. */
+        fun sameWorkspace(other: Route): Boolean =
+            other is Workspace && other.hostId == hostId && other.workspaceId == workspaceId
+    }
+
+    /**
+     * One repository's worktrees that a workspace list row doesn't show: its
+     * Unclaimed worktrees, which no workspace owns, or its Hidden ones.
+     *
+     * Pushed from the row under that repository's workspaces, on Needs You
+     * and in the drawer.
+     */
+    @Serializable
+    @SerialName("worktrees")
+    data class Worktrees(
+        val hostId: String,
+        val repositoryId: String,
+        val hidden: Boolean = false,
+    ) : Route
 
     /**
      * One worktree, on one runner — and deliberately NOT which pane of it.
@@ -139,13 +175,11 @@ sealed interface Route {
     data class RunnerSettings(val hostId: String) : Route
 
     /**
-     * One workspace's task board, from its Board row on the front door — by
-     * workspace id, which on a runner without workspaces is the repository's
-     * own (`WorkspaceSummary.implicit`). Read
-     * and jump: an Agent button goes to [Terminal] through
-     * [AppModel.openFromBoard], which pushes it ON TOP of the board — so Back
-     * comes out of the pane onto the board it was chosen from (or the card),
-     * and only then the front door. See [Backstack.goToFromBoard].
+     * Deprecated. A workspace's task board, as a stack saved before the workspace screen
+     * wrote it. Never installed: [Backstack.decodeStack] reads it back as the
+     * workspace's Board tab ([Workspace] with [WorkspaceTab.BOARD]), since
+     * kotlinx.serialization has no alias for a discriminator. Kept only so
+     * that old stacks decode; delete it once no phone can hold one.
      */
     @Serializable
     @SerialName("board")
@@ -182,7 +216,8 @@ sealed interface Route {
     val isOverlay: Boolean
         get() = when (this) {
             is Settings, is RunnerSettings, is Authorize, is Join, is AddDevice, is Devices,
-            is Board, is BoardTask -> true
+            is Worktrees, is BoardTask -> true
+            is Board -> true
             // The three GROUND routes. A terminal is one of them and not an
             // overlay, even though it is now pushed onto the front door rather
             // than replacing it: `isOverlay` also decides whether the drawer's
@@ -190,9 +225,28 @@ sealed interface Route {
             // back gesture would take the fleet drawer away from the one screen
             // it is most used from. So back out of a terminal is the plain
             // handler in `RootScreen`, and predictive back stays where it
-            // already was.
-            is Onboarding, is NeedsYou, is Fleet, is Terminal -> false
+            // already was. A workspace is ground for the same reason: its
+            // Orchestrator tab is a pane.
+            is Onboarding, is NeedsYou, is Workspace, is Terminal -> false
         }
+}
+
+/**
+ * A workspace screen's three tabs, in the order the tab row draws them.
+ *
+ * The names on the wire are a saved stack's format: see
+ * `BackstackTest.theWireNamesAreTheOnesOnDisk`.
+ */
+@Serializable
+enum class WorkspaceTab(val title: String) {
+    @SerialName("orchestrator") ORCHESTRATOR("Orchestrator"),
+    @SerialName("board") BOARD("Board"),
+    @SerialName("worktrees") WORKTREES("Worktrees");
+
+    companion object {
+        /** A remembered tab's name, or null for none this build knows. */
+        fun parse(name: String?): WorkspaceTab? = entries.firstOrNull { it.name == name }
+    }
 }
 
 /**
@@ -297,7 +351,7 @@ object Backstack {
     /**
      * The root every degraded stack falls back to.
      *
-     * The front door, since phase 3. It was [Route.Fleet], which was correct
+     * The front door, since phase 3. It was the worktree list, which was correct
      * while the app landed on a terminal and used the worktree list as its
      * fallback; now the fallback and the front door are the same screen, and it
      * is the one screen in the app that needs nothing from any runner to be
@@ -319,12 +373,39 @@ object Backstack {
      * nothing at all, and starting from the root is the honest answer. The
      * alternative — recovering the routes before the unknown one — would be
      * guessing at what somebody meant from a format this app no longer speaks.
+     *
+     * **Two routes this build retired are read, not refused** (spec §9):
+     *
+     * - `fleet`, the worktree list, is dropped and the rest of the stack kept.
+     *   It was a place in the middle of a story — the list a worktree was
+     *   opened from — and the worktree above it is still where somebody was.
+     *   Only that one discriminator: any other unknown still costs the stack.
+     * - `board` comes back as its workspace's Board tab, which is where that
+     *   board lives now. kotlinx.serialization has no alias for a
+     *   discriminator, so it's decoded as the deprecated [Route.Board] and
+     *   mapped here.
      */
     fun decodeStack(saved: String?): List<Route>? {
         if (saved.isNullOrBlank()) return null
-        val decoded = runCatching { json.decodeFromString(stackFormat, saved) }
+        val entries = runCatching { json.parseToJsonElement(saved) as? JsonArray }
             .getOrNull() ?: return null
+        val decoded = mutableListOf<Route>()
+        for (entry in entries) {
+            val type = ((entry as? JsonObject)?.get("type") as? JsonPrimitive)?.contentOrNull
+            if (type == RETIRED_FLEET) continue
+            val route = runCatching { json.decodeFromJsonElement(Route.serializer(), entry) }
+                .getOrNull() ?: return null
+            decoded += migrated(route)
+        }
         return decoded.ifEmpty { null }
+    }
+
+    /** The discriminator the worktree list was saved under, before it retired. */
+    private const val RETIRED_FLEET = "fleet"
+
+    private fun migrated(route: Route): Route = when (route) {
+        is Route.Board -> Route.Workspace(route.hostId, route.workspaceId, WorkspaceTab.BOARD)
+        else -> route
     }
 
     /**
@@ -360,18 +441,46 @@ object Backstack {
     }
 
     /**
-     * [AppModel.openFromBoard]'s arithmetic: the pane goes ON TOP of the board
-     * (and the card, if one is open), so Back comes out of the pane onto the
-     * card, then the board, then the front door. [goTo] would close them
-     * first, because they are overlays, and Back would skip straight to the
-     * front door.
+     * [AppModel.openFromBoard]'s arithmetic: the pane goes ON TOP of the
+     * workspace and the task, so Back comes out of the pane onto the task,
+     * then the workspace, then the front door (spec §3.2, item 4). [goTo]
+     * would close the task first, because it's an overlay, and Back would skip
+     * straight to the workspace.
      *
      * A trailing terminal is still replaced rather than stacked, for [goTo]'s
-     * reason — though from a board there is none: the pane is a ground route,
-     * so while it is showing, the board is not.
+     * reason — though from a task there is none: the pane is a ground route,
+     * so while it is showing, the task is not.
      */
     fun goToFromBoard(stack: List<Route>, target: Route.Terminal): List<Route> =
         stack.dropLastWhile { it is Route.Terminal } + target
+
+    /**
+     * [AppModel.openWorkspace]'s arithmetic, from the drawer or a list row:
+     * close what is over the ground, take off a worktree or workspace that
+     * was there, and put [target] on what is left — the front door, as a
+     * rule. So Back from any workspace is the front door, however many were
+     * visited, which is iOS's depth: Needs You, then one workspace.
+     *
+     * Arriving at the workspace already underneath keeps it, on the tab
+     * [target] names.
+     */
+    fun goToWorkspace(stack: List<Route>, target: Route.Workspace): List<Route> {
+        val base = stack.dropLastWhile { it.isOverlay || it is Route.Terminal }
+        if (base.lastOrNull()?.let(target::sameWorkspace) == true) return base.dropLast(1) + target
+        return base.dropLastWhile { it is Route.Workspace } + target
+    }
+
+    /**
+     * [stack] with [workspace]'s route on [tab]: the last route naming that
+     * workspace, whatever tab it had, and nothing else. A tab tap moves no
+     * other navigation state, so the screen keyed on the workspace is not
+     * rebuilt; see [Route.Workspace].
+     */
+    fun withTab(stack: List<Route>, workspace: Route.Workspace, tab: WorkspaceTab): List<Route> {
+        val at = stack.indexOfLast(workspace::sameWorkspace)
+        if (at < 0) return stack
+        return stack.toMutableList().also { it[at] = (it[at] as Route.Workspace).copy(tab = tab) }
+    }
 
     /**
      * Cut the stack at the first route that no longer names anything.

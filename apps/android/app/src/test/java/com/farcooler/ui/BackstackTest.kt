@@ -42,10 +42,12 @@ class BackstackTest {
     @Test
     fun everyRouteSurvivesTheRoundTrip() {
         val stack = listOf(
-            Route.Fleet,
+            Route.NeedsYou,
+            Route.Workspace("host-a", "billing", WorkspaceTab.WORKTREES),
             Route.Terminal("host-a", "worktree-1"),
             Route.Settings,
             Route.RunnerSettings("host-b"),
+            Route.Worktrees("host-b", "repo", hidden = true),
         )
         assertEquals(stack, Backstack.decodeStack(Backstack.encodeStack(stack)))
 
@@ -54,7 +56,6 @@ class BackstackTest {
         for (route in listOf(
             Route.Onboarding,
             Route.NeedsYou,
-            Route.Fleet,
             Route.Settings,
             Route.Authorize,
             Route.Join,
@@ -84,8 +85,15 @@ class BackstackTest {
     @Test
     fun theWireNamesAreTheOnesOnDisk() {
         assertEquals(
-            """[{"type":"fleet"},{"type":"terminal","hostId":"h","workspaceId":"w"}]""",
-            Backstack.encodeStack(listOf(Route.Fleet, Route.Terminal("h", "w"))),
+            """[{"type":"needs-you"},{"type":"terminal","hostId":"h","workspaceId":"w"}]""",
+            Backstack.encodeStack(listOf(Route.NeedsYou, Route.Terminal("h", "w"))),
+        )
+        assertEquals(
+            """[{"type":"workspace","hostId":"h","workspaceId":"b","tab":"board"},""" +
+                """{"type":"worktrees","hostId":"h","repositoryId":"r","hidden":true}]""",
+            Backstack.encodeStack(
+                listOf(Route.Workspace("h", "b", WorkspaceTab.BOARD), Route.Worktrees("h", "r", hidden = true))
+            ),
         )
         assertEquals(
             """[{"type":"runner-settings","hostId":"h"}]""",
@@ -140,26 +148,59 @@ class BackstackTest {
     @Test
     fun anUnknownRouteCostsTheWholeStackAndNotTheApp() {
         assertNull(
+            Backstack.decodeStack("""[{"type":"needs-you"},{"type":"changes","workspaceId":"w"}]""")
+        )
+        // `fleet` is the one retired discriminator that is read, not refused.
+        assertNull(
             Backstack.decodeStack("""[{"type":"fleet"},{"type":"changes","workspaceId":"w"}]""")
         )
     }
 
     /**
-     * A board saved before workspaces, by repository, still decodes: that id
-     * is the repository's implicit workspace, which is the board it named.
-     * Written back under the new name.
+     * A board saved before the workspace screen comes back as that
+     * workspace's Board tab — including one saved before workspaces, by
+     * repository, whose id is the repository's implicit workspace. The card
+     * opened over it comes back over it.
      */
     @Test
-    fun aBoardSavedByRepositoryStillDecodes() {
-        val restored = Backstack.decodeStack(
-            """[{"type":"needs-you"},{"type":"board","hostId":"h","repositoryId":"r"},""" +
-                """{"type":"board-task","hostId":"h","repositoryId":"r","taskId":"t"}]"""
-        )
-        assertEquals(listOf(Backstack.ROOT, Route.Board("h", "r"), Route.BoardTask("h", "r", "t")), restored)
+    fun `an old saved Board route restores as the workspace's board tab`() {
         assertEquals(
-            """[{"type":"board","hostId":"h","workspaceId":"r"}]""",
-            Backstack.encodeStack(listOf(Route.Board("h", "r"))),
+            listOf(
+                Backstack.ROOT,
+                Route.Workspace("h", "billing", WorkspaceTab.BOARD),
+                Route.BoardTask("h", "billing", "t"),
+            ),
+            Backstack.decodeStack(
+                """[{"type":"needs-you"},{"type":"board","hostId":"h","workspaceId":"billing"},""" +
+                    """{"type":"board-task","hostId":"h","workspaceId":"billing","taskId":"t"}]"""
+            ),
         )
+        assertEquals(
+            listOf(Backstack.ROOT, Route.Workspace("h", "r", WorkspaceTab.BOARD), Route.BoardTask("h", "r", "t")),
+            Backstack.decodeStack(
+                """[{"type":"needs-you"},{"type":"board","hostId":"h","repositoryId":"r"},""" +
+                    """{"type":"board-task","hostId":"h","repositoryId":"r","taskId":"t"}]"""
+            ),
+        )
+    }
+
+    /**
+     * The worktree list retired (spec §6.2). A stack saved with it in the
+     * middle keeps everything else: the worktree opened from that list is
+     * still where somebody was. Only `fleet` is forgiven this way; see
+     * [anUnknownRouteCostsTheWholeStackAndNotTheApp].
+     */
+    @Test
+    fun `an old saved Fleet entry is dropped and the rest of the stack restores`() {
+        assertEquals(
+            listOf(Route.NeedsYou, Route.Terminal("h", "w"), Route.Settings),
+            Backstack.decodeStack(
+                """[{"type":"needs-you"},{"type":"fleet"},""" +
+                    """{"type":"terminal","hostId":"h","workspaceId":"w"},{"type":"settings"}]"""
+            ),
+        )
+        // A stack that was only the list has nothing left, which is nothing saved.
+        assertNull(Backstack.decodeStack("""[{"type":"fleet"}]"""))
     }
 
     /** A field added by a later build must not cost an older one its place. */
@@ -404,13 +445,13 @@ class BackstackTest {
     @Test
     fun aDeadRouteTakesEverythingAboveItWithIt() {
         val stack = listOf(
-            Route.Fleet,
+            Route.NeedsYou,
             Route.Terminal("h", "merged-away"),
             Route.Settings,
             Route.RunnerSettings("h"),
         )
         val kept = Backstack.truncate(stack) { it != Route.Terminal("h", "merged-away") }
-        assertEquals(listOf(Route.Fleet), kept)
+        assertEquals(listOf(Route.NeedsYou), kept)
     }
 
     /**
@@ -427,7 +468,7 @@ class BackstackTest {
     fun truncationIsNeverEmpty() {
         for (stack in listOf(
             emptyList(),
-            listOf(Route.Fleet),
+            listOf(Route.NeedsYou),
             listOf(Route.Terminal("h", "w"), Route.Devices),
         )) {
             assertTrue(Backstack.truncate(stack) { false }.isNotEmpty())
@@ -445,32 +486,23 @@ class BackstackTest {
     @Test
     fun aRouteOnARemovedRunnerDoesNotResolveOffAnother() {
         val live = setOf(Route.Terminal("host-b", "shared-id"))
-        val stack = listOf(Route.Fleet, Route.Terminal("host-a", "shared-id"))
-        assertEquals(listOf(Route.Fleet), Backstack.truncate(stack) { it !is Route.Terminal || it in live })
+        val stack = listOf(Route.NeedsYou, Route.Terminal("host-a", "shared-id"))
+        assertEquals(listOf(Route.NeedsYou), Backstack.truncate(stack) { it !is Route.Terminal || it in live })
     }
 
     /**
-     * The root is the front door, and it is a new discriminator on the wire.
+     * The root is the front door, and it is a discriminator on the wire.
      *
      * Asserted literally rather than round-tripped for the reason the class
      * comment gives: a round trip passes happily while both ends rename
      * together, and this string is read by whichever build is installed when
      * the process comes back.
-     *
-     * `fleet` is checked alongside it because it did NOT change meaning — it is
-     * still the worktree list, it is simply no longer the root — so a stack
-     * saved before this landed restores to the worktree list rather than being
-     * thrown away.
      */
     @Test
-    fun theRootIsTheFrontDoorAndTheFleetRouteStillDecodes() {
+    fun theRootIsTheFrontDoor() {
         assertEquals(Route.NeedsYou, Backstack.ROOT)
         assertTrue(
             Backstack.encodeStack(listOf(Route.NeedsYou)).contains("needs-you"),
-        )
-        assertEquals(
-            listOf(Route.Fleet, Route.Terminal("h", "w")),
-            Backstack.decodeStack("""[{"type":"fleet"},{"type":"terminal","hostId":"h","workspaceId":"w"}]"""),
         )
     }
 
@@ -481,7 +513,7 @@ class BackstackTest {
         for (route in listOf(
             Route.Onboarding,
             Route.NeedsYou,
-            Route.Fleet,
+            Route.Workspace("h", "b"),
             Route.Terminal("h", "w"),
         )) {
             assertTrue("$route should be ground", !route.isOverlay)
@@ -493,7 +525,7 @@ class BackstackTest {
             Route.Join,
             Route.AddDevice,
             Route.Devices,
-            Route.Board("h", "r"),
+            Route.Worktrees("h", "r"),
             Route.BoardTask("h", "r", "t"),
         )) {
             assertTrue("$route should be an overlay", route.isOverlay)
@@ -501,36 +533,56 @@ class BackstackTest {
     }
 
     /**
-     * **Jumping from a board to an agent keeps the board beneath the pane.**
+     * **Back from a task's agent returns to the task** (spec §3.2, item 4).
      *
-     * On the stack the app actually builds: the front door, the board row
-     * tapped (`navigate`), a card tapped (`navigate`), then the card's Agent
-     * button. Back is `dropLast(1)`, as `AppModel.back` does it. The pane must
-     * be on top with the card and the board under it, so Back comes out onto
-     * the card, then the board, then the front door. [Backstack.goTo] — the
-     * front door's own jump — closes the overlays first and fails this, which
-     * is the bug it guards: Back from the pane landed on the front door.
+     * On the stack the app actually builds: the front door, a workspace row
+     * (`openWorkspace`), a card on its Board tab (`navigate`), then the card's
+     * Agent row. Back is `dropLast(1)`, as `AppModel.back` does it. The pane
+     * must be on top with the task and the workspace under it, so Back comes
+     * out onto the task, then the workspace, then the front door.
+     * [Backstack.goTo] — the front door's own jump — closes the task first and
+     * fails this, which is the dead end iOS had: Back from the agent lost the
+     * task.
      */
     @Test
-    fun anAgentOpenedFromABoardComesBackToTheBoard() {
+    fun `back from a task's agent returns to the task`() {
         val pane = Route.Terminal("h", "w")
-        val card = listOf<Route>(Route.NeedsYou, Route.Board("h", "r"), Route.BoardTask("h", "r", "t"))
-        val opened = Backstack.goToFromBoard(card, pane)
-        assertEquals(card + pane, opened)
+        val workspace = Backstack.goToWorkspace(
+            listOf(Route.NeedsYou),
+            Route.Workspace("h", "b", WorkspaceTab.BOARD),
+        )
+        val task = workspace + Route.BoardTask("h", "b", "t")
+        val opened = Backstack.goToFromBoard(task, pane)
+        assertEquals(task + pane, opened)
         // What is drawn: the pane is the ground, with nothing over it.
         assertEquals(pane, opened.lastOrNull { !it.isOverlay })
         assertTrue(opened.takeLastWhile { it.isOverlay }.isEmpty())
         // Back, and Back again, and Back again.
-        assertEquals(card, opened.dropLast(1))
-        assertEquals(Route.Board("h", "r"), opened.dropLast(2).last())
+        assertEquals(Route.BoardTask("h", "b", "t"), opened.dropLast(1).last())
+        assertEquals(Route.Workspace("h", "b", WorkspaceTab.BOARD), opened.dropLast(2).last())
         assertEquals(Route.NeedsYou, opened.dropLast(3).last())
-
-        // Straight from the board, without opening a card.
-        val board = listOf<Route>(Route.NeedsYou, Route.Board("h", "r"))
-        assertEquals(board, Backstack.goToFromBoard(board, pane).dropLast(1))
 
         // And it survives the save and restore the activity puts it through.
         assertEquals(opened, Backstack.decodeStack(Backstack.encodeStack(opened)))
+    }
+
+    /**
+     * A workspace opened from the drawer replaces the one on screen, so Back
+     * from any workspace is the front door; and a tab tap changes that route's
+     * tab and nothing else in the stack.
+     */
+    @Test
+    fun aWorkspaceReplacesAWorkspaceAndATabTapMovesNothingElse() {
+        val billing = Route.Workspace("h", "billing", WorkspaceTab.ORCHESTRATOR)
+        val main = Route.Workspace("h", "main", WorkspaceTab.BOARD)
+        val inBilling = listOf(Route.NeedsYou, billing, Route.Terminal("h", "w"), Route.Settings)
+        assertEquals(listOf(Route.NeedsYou, main), Backstack.goToWorkspace(inBilling, main))
+
+        val onBoard = Backstack.withTab(listOf(Route.NeedsYou, billing, Route.BoardTask("h", "billing", "t")), billing, WorkspaceTab.BOARD)
+        assertEquals(
+            listOf(Route.NeedsYou, billing.copy(tab = WorkspaceTab.BOARD), Route.BoardTask("h", "billing", "t")),
+            onBoard,
+        )
     }
 
     /**

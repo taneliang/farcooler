@@ -154,7 +154,32 @@ class Settings(context: Context) {
         preferences.edit().putString(KEY_DERP_MAP, usable).apply()
     }
 
+    /**
+     * The tab a workspace last showed, on this phone: `workspace.tab.<runner>.<workspace>`
+     * (spec §6.1, "the segment is remembered per workspace"). Kept per device,
+     * as the board's form is on the Mac.
+     */
+    fun workspaceTab(hostId: String, workspaceId: String): String? =
+        preferences.getString("$KEY_WORKSPACE_TAB$hostId.$workspaceId", null)
+
+    fun setWorkspaceTab(hostId: String, workspaceId: String, tab: String) {
+        preferences.edit().putString("$KEY_WORKSPACE_TAB$hostId.$workspaceId", tab).apply()
+    }
+
+    /**
+     * The workspace last opened, as `runner/workspace`, or null: where the
+     * app opens when nothing needs you (ruling 4).
+     */
+    val lastWorkspace: String? get() = preferences.getString(KEY_LAST_WORKSPACE, null)
+
+    fun setLastWorkspace(hostId: String, workspaceId: String) {
+        preferences.edit().putString(KEY_LAST_WORKSPACE, "$hostId/$workspaceId").apply()
+    }
+
     companion object {
+        private const val KEY_WORKSPACE_TAB = "workspace.tab."
+        private const val KEY_LAST_WORKSPACE = "workspace.last"
+
         /**
          * Matches the size the Apple apps render at, so the same terminal on
          * the same runner is the same size wherever you look at it.
