@@ -337,8 +337,13 @@ impl AgentSupervisor {
     }
 
     /// The ask `terminal` is waiting on, if any: the last `Permission` in its
-    /// transcript with no later `Resolved` of the same id, as (id, options,
-    /// when it arrived).
+    /// transcript with no later `Resolved` of the same id and no turn ending
+    /// or session starting after it, as (id, options, when it arrived).
+    ///
+    /// Scoped to the turn and not to the agent's activity: a sibling
+    /// subagent's tool call, or the `Resolved` of a later ask, folds the pane
+    /// to Working while this ask still waits. A reconnecting shim clears the
+    /// ring, and a closed pane's ring goes with its row.
     ///
     /// Serves both sources of an answerable ask. A chat's permission lands
     /// here from its shim, and a claude TUI's held hook ask lands here through
@@ -351,16 +356,25 @@ impl AgentSupervisor {
         let (id, options) = {
             let recent = self.recent.lock().ok()?;
             let mut resolved = HashSet::new();
-            recent.get(&terminal)?.iter().rev().find_map(|s| match &s.event {
-                AgentEvent::Resolved { id, .. } => {
-                    resolved.insert(id.clone());
-                    None
+            let mut open = None;
+            for s in recent.get(&terminal)?.iter().rev() {
+                match &s.event {
+                    AgentEvent::Resolved { id, .. } => {
+                        resolved.insert(id.clone());
+                    }
+                    AgentEvent::Permission { id, options, .. } if !resolved.contains(id) => {
+                        open = Some((id.clone(), options.clone()));
+                        break;
+                    }
+                    // An ask lives no longer than its turn. A turn that ended,
+                    // cancelled or not, answered nothing, and a new session is
+                    // a new conversation; either way an ask from before it is
+                    // not waiting on anybody.
+                    AgentEvent::TurnEnded { .. } | AgentEvent::SessionStarted { .. } => break,
+                    _ => {}
                 }
-                AgentEvent::Permission { id, options, .. } if !resolved.contains(id) => {
-                    Some((id.clone(), options.clone()))
-                }
-                _ => None,
-            })?
+            }
+            open?
         };
         let at = self
             .asked_at
