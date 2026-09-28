@@ -121,3 +121,55 @@ pub fn now_millis() -> i64 {
         .unwrap()
         .as_millis() as i64
 }
+
+/// A chat pane's shim, as `farcooler agent-host` is to the daemon: the
+/// socket the supervisor listens on for `pane`, dialed.
+pub struct Shim {
+    lines: tokio::io::Lines<tokio::io::BufReader<tokio::net::unix::OwnedReadHalf>>,
+    write: tokio::net::unix::OwnedWriteHalf,
+}
+
+impl Shim {
+    pub async fn dial(h: &Harness, pane: Uuid) -> Shim {
+        use tokio::io::AsyncBufReadExt;
+        let root = h.service.root_dir().to_path_buf();
+        h.service.agents().ensure_listening(&root, pane);
+        let path = farcooler_daemon::agent_supervisor::socket_path(&root, pane);
+        for _ in 0..100 {
+            if let Ok(stream) = tokio::net::UnixStream::connect(&path).await {
+                let (read, write) = stream.into_split();
+                return Shim { lines: tokio::io::BufReader::new(read).lines(), write };
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("the supervisor never listened for {pane}");
+    }
+
+    /// Send events as the shim's agent produced them.
+    pub async fn says(&mut self, events: Vec<farcooler_agent::event::AgentEvent>) {
+        use tokio::io::AsyncWriteExt;
+        let events = events
+            .into_iter()
+            .enumerate()
+            .map(|(seq, event)| farcooler_agent::event::Sequenced { seq: seq as u64, event })
+            .collect();
+        let line = farcooler_agent::link::encode_line(&farcooler_agent::link::ShimMessage::Events { events }).unwrap();
+        self.write.write_all(line.as_bytes()).await.unwrap();
+    }
+
+    /// The next message the daemon sent this shim, past its `Subscribe`.
+    pub async fn heard(&mut self) -> farcooler_agent::link::DaemonMessage {
+        use farcooler_agent::link::DaemonMessage;
+        loop {
+            let line = tokio::time::timeout(std::time::Duration::from_secs(5), self.lines.next_line())
+                .await
+                .expect("the daemon said something")
+                .unwrap()
+                .expect("the socket is open");
+            let message: DaemonMessage = farcooler_agent::link::decode_line(&line).unwrap();
+            if !matches!(message, DaemonMessage::Subscribe { .. }) {
+                return message;
+            }
+        }
+    }
+}

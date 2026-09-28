@@ -210,7 +210,13 @@ fn terminal_signal(t: &models::Terminal, inputs: &Inputs, subject: Subject) -> O
         let held = if id.starts_with(crate::hook_asks::HOOK_ASK_PREFIX) {
             inputs.hook_asks.iter().find(|(terminal, held, _)| *terminal == t.id && held == id).map(|h| h.2)
         } else {
-            Some(*at)
+            // A chat's ask ends with a `Resolved` only when it is answered
+            // through `terminal.agent_answer`. One answered in the agent's own
+            // window, or a turn cancelled under it, leaves its `Permission`
+            // unresolved in the ring for the pane's life, and a reconnecting
+            // shim replays old ones. So it counts only while its agent is
+            // still Blocked, which a pending permission makes it.
+            observed.filter(|o| o.activity == AgentActivity::Blocked).map(|_| *at)
         };
         if let Some(since) = held {
             let question = options
@@ -859,6 +865,22 @@ mod tests {
         assert_eq!(before[0].id, format!("ask:{first}"));
         assert_eq!(after[0].id, format!("ask:{second}"));
         assert_eq!(after[0].ask_id.as_deref(), Some(second.as_str()));
+    }
+
+    /// A chat's `Permission` stays unresolved in the ring when it was answered
+    /// in the agent's own window, or its turn was cancelled, and a
+    /// reconnecting shim replays old ones. Once the agent is working again,
+    /// it is not an ask.
+    #[test]
+    fn a_chat_ask_counts_only_while_its_agent_is_blocked() {
+        let mut fleet = Fleet::new();
+        let pane = fleet.agent(None);
+        let option = PermissionOption { id: "allow".into(), name: "Allow touch x".into(), kind: "allow_once".into() };
+        fleet.inputs.permissions.insert(pane, ("chat-1".into(), vec![option], ago_time(MINUTE)));
+        fleet.observe(pane, AgentActivity::Blocked, MINUTE);
+        assert_eq!(kinds(&fleet.items()), [NeedsYouKind::Ask]);
+        fleet.observe(pane, AgentActivity::Working, 0);
+        assert_eq!(fleet.items(), vec![], "a chat ask its agent has moved past is still listed");
     }
 
     #[test]

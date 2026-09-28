@@ -110,3 +110,58 @@ async fn a_read_scoped_client_gets_the_redacted_shape() {
         assert_eq!((&item.detail, &item.ask_id, item.actions.len(), &item.worktree), (&None, &None, 0, &None), "{item:#?}");
     }
 }
+
+/// A chat's ask, answered through `terminal.agent_answer`, leaves the list.
+///
+/// No shim ever reports a `Resolved`, so the daemon records one when it hands
+/// the answer on; before it did, every answered chat ask stayed an ask item
+/// for the life of its pane. Nothing here records one by hand: the ask
+/// arrives from a shim, the answer goes back to it, and the agent is left
+/// Blocked, so only the answer can be what ends the item.
+#[tokio::test]
+async fn answering_a_chat_ask_takes_it_off_the_list() {
+    let h = start(Scope::Control).await;
+    let repo = a_repository(&h);
+    let pane = a_pane(&h, repo.worktree, None);
+    h.watcher
+        .observe_for_tests(
+            pane,
+            Observation { activity: AgentActivity::Blocked, state_since: now_millis(), command: "claude".into(), ..Observation::default() },
+        )
+        .await;
+    let mut shim = Shim::dial(&h, pane).await;
+    shim.says(vec![AgentEvent::Permission {
+        id: "chat-1".into(),
+        tool_call: "t1".into(),
+        options: vec![PermissionOption { id: "allow".into(), name: "Allow touch x".into(), kind: "allow_once".into() }],
+    }])
+    .await;
+    let mut link = connect(&h).await;
+    let mut listed = Vec::new();
+    for _ in 0..100 {
+        listed = needs_you(&mut link).await;
+        if !listed.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(listed.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["ask:chat-1"]);
+
+    let mut answer = request("terminal.agent_answer");
+    answer.payload = Some(farcooler_protocol::v1::request::Payload::AgentAnswer(farcooler_protocol::v1::AgentAnswer {
+        terminal_id: bytes::Bytes::copy_from_slice(pane.as_bytes()),
+        request_id: "chat-1".into(),
+        option_id: "allow".into(),
+    }));
+    // The reply re-reads the pane through tmux, which this harness may not
+    // have; that the shim heard the answer is what's asked about.
+    let _ = link.call(answer).await;
+    assert!(matches!(
+        shim.heard().await,
+        farcooler_agent::link::DaemonMessage::Answer { request_id, .. } if request_id == "chat-1"
+    ));
+    // The agent is still Blocked here, as no sample has run since: it may be
+    // a block now, and never an ask.
+    let after = needs_you(&mut link).await;
+    assert!(after.iter().all(|i| i.kind() != NeedsYouKind::Ask), "the answered ask is still listed: {after:#?}");
+}

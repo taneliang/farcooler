@@ -2130,8 +2130,18 @@ impl Rpc {
                     to_the_shim(
                         svc,
                         id,
-                        DaemonMessage::Answer { request_id: p.request_id, option_id: p.option_id },
+                        DaemonMessage::Answer { request_id: p.request_id.clone(), option_id: p.option_id.clone() },
                     )?;
+                    // No shim ever reports a `Resolved`: the hook path's
+                    // `settle` is the only producer. Recorded here, once the
+                    // answer reached the shim, so the ask leaves the
+                    // transcript's open asks and the needs-you list, and every
+                    // surface stops offering its buttons, as a hook ask's do.
+                    svc.agents().record(
+                        id,
+                        vec![farcooler_agent::event::AgentEvent::Resolved { id: p.request_id, chosen: p.option_id }],
+                        &|_, _| {},
+                    );
                 }
                 // The same call `terminal.seen` makes: answering is only
                 // reachable by having looked, so it ends `Done` the same way.

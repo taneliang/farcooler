@@ -907,17 +907,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn open_permission_is_none_once_its_resolved_arrives() {
-        let supervisor = AgentSupervisor::new();
-        let pane = Uuid::now_v7();
-        supervisor.record(pane, vec![ask("p1")], &|_, _| {});
-        let (id, options, _) = supervisor.open_permission(pane).expect("an unanswered ask is open");
-        assert_eq!(id, "p1");
-        assert_eq!(options.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(), ["allow", "deny"]);
-        supervisor.record(pane, vec![AgentEvent::Resolved { id: "p1".into(), chosen: "allow".into() }], &|_, _| {});
-        assert_eq!(supervisor.open_permission(pane).map(|o| o.0), None, "an answered ask stayed open");
-    }
+    // An answered chat ask leaving the open asks is tested through the real
+    // answer path, `terminal.agent_answer` over a socket with a shim on the
+    // other end: `answering_a_chat_ask_takes_it_off_the_list`.
 
     #[test]
     fn open_permission_returns_the_later_of_two_unresolved_asks() {
