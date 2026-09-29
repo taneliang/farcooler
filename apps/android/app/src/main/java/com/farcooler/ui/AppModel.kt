@@ -147,6 +147,9 @@ class AppModel(
      */
     private var launchDecided: Boolean = saved.get<Boolean>(LAUNCH) ?: false
 
+    /** When this model was made: what [LaunchRule.WINDOW_MS] counts from. */
+    private val launchedAt = System.currentTimeMillis()
+
     init {
         Identity.initialize(application)
         // Beside [Identity] and not lazily: both read the same preference file,
@@ -240,16 +243,29 @@ class AppModel(
      * nothing for long is a runner the front door already says is quiet.
      */
     private fun decideLaunch(readings: List<Pair<RunnerNeedsYou?, Connection.Phase>>) {
-        if (launchDecided || readings.isEmpty()) return
-        val settled = readings.all { (reading, phase) -> reading != null || phase is Connection.Phase.Failed }
-        if (!settled || readings.none { it.first != null }) return
+        if (launchDecided) return
+        val decision = LaunchRule.decide(
+            readings.map { (reading, phase) -> LaunchReading(reading?.items?.size, phase is Connection.Phase.Failed) },
+            System.currentTimeMillis() - launchedAt,
+        )
+        val waiting = when (decision) {
+            LaunchDecision.Wait -> return
+            LaunchDecision.Stay -> null
+            is LaunchDecision.Decide -> decision.waiting
+        }
         launchDecided = true
         saved[LAUNCH] = true
-        val waiting = readings.sumOf { it.first?.items?.size ?: 0 }
+        if (waiting == null) return
         val last = settings.lastWorkspace?.let { saved ->
             val host = saved.substringBefore('/')
             val workspace = saved.substringAfter('/', "")
-            if (workspace.isEmpty() || hosts.hosts.value.none { it.id == host }) null
+            val connection = fleet.connection(host)
+            // Only a workspace its runner still lists: a deleted one is not
+            // somewhere to open onto.
+            val present = connection != null && workspace.isNotEmpty() && WorkspacePresence.of(
+                workspace, connection.fleet.value, connection.repositories.value, answered = true,
+            ) is WorkspacePresence.Found
+            if (!present) null
             else Route.Workspace(
                 host,
                 workspace,
@@ -664,6 +680,9 @@ class AppModel(
         // stack is a blank screen with a back gesture that does nothing.
         val safe = next.ifEmpty { listOf(Backstack.ROOT) }
         if (safe == _stack.value) return
+        // Anywhere but the bare front door is somewhere somebody is — or was
+        // sent — and a launch decision arriving later must not move them.
+        if (safe != listOf(Backstack.ROOT)) launchDecided = true
         _stack.value = safe
         _route.value = safe.last()
         if (persist) saved[STACK] = Backstack.encodeStack(safe)

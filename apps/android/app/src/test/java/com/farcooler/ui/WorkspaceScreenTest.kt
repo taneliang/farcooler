@@ -153,6 +153,29 @@ class WorkspaceScreenTest {
         assertEquals(WorkspacePresence.Gone, WorkspacePresence.of("other", Fleet(), repos, answered = true))
     }
 
+    /**
+     * The launch waits until every runner has listed its items or failed —
+     * a runner still connecting could be the one with the decision — and
+     * then decides. A runner stuck reconnecting doesn't get to move the
+     * screen minutes later: past the window, the app stays where it is.
+     */
+    @Test
+    fun `the launch settles when every runner has answered or failed, and not late`() {
+        val listed = LaunchReading(items = 2, failed = false)
+        val quiet = LaunchReading(items = 0, failed = false)
+        val connecting = LaunchReading(items = null, failed = false)
+        val failed = LaunchReading(items = null, failed = true)
+        assertEquals(LaunchDecision.Wait, LaunchRule.decide(listOf(listed, connecting), 1_000))
+        assertEquals(LaunchDecision.Decide(2), LaunchRule.decide(listOf(listed, failed), 1_000))
+        assertEquals(LaunchDecision.Decide(0), LaunchRule.decide(listOf(quiet), 1_000))
+        // Every runner failed: nothing said, nothing decided.
+        assertEquals(LaunchDecision.Wait, LaunchRule.decide(listOf(failed), 1_000))
+        assertEquals(LaunchDecision.Wait, LaunchRule.decide(emptyList(), 1_000))
+        // The stuck runner answers at last, long after launch.
+        assertEquals(LaunchDecision.Stay, LaunchRule.decide(listOf(quiet), LaunchRule.WINDOW_MS + 1))
+        assertEquals(LaunchDecision.Decide(0), LaunchRule.decide(listOf(quiet), LaunchRule.WINDOW_MS))
+    }
+
     /** Ruling 4: nothing waiting, and the app opens on the last workspace, over Needs You. */
     @Test
     fun `with nothing waiting, launch pushes the last workspace over Needs You`() {
