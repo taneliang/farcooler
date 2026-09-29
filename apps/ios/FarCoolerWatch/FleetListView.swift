@@ -47,6 +47,9 @@ struct FleetListView<Client: FleetClient>: View {
     /// fleet a moment ago.
     @State private var schedule: [Date] = [.now]
     @State private var rows: [FleetSnapshot.Agent] = []
+    /// What needs you, first, in the app's order: `WatchList.items`, held for
+    /// `rows`' reason.
+    @State private var items: [NeedsYouItem] = []
 
     var body: some View {
         NavigationStack {
@@ -61,7 +64,9 @@ struct FleetListView<Client: FleetClient>: View {
         }
         .onChange(of: client.state.snapshot, initial: true) { _, snapshot in
             schedule = refreshes(for: snapshot, from: .now)
-            rows = snapshot?.ranked ?? []
+            let list = snapshot.map(WatchList.init)
+            rows = list?.agents ?? []
+            items = list?.items ?? []
         }
     }
 
@@ -96,45 +101,113 @@ struct FleetListView<Client: FleetClient>: View {
             // is still a fleet nobody can act on, and an old one with a link is
             // still live. That is `WatchState`'s whole rule.
             if unreachable { CachedBanner(capturedAt: snapshot.capturedAt) }
-            // The other half of "what needs me", and until now the app never
-            // mentioned it.
-            //
-            // The complication on the very same watch draws "3 to review" — see
-            // `WatchFleetWidget`'s `Rectangular` and `Circular` — and tapping a
-            // complication opens this screen, which had nothing whatsoever to
-            // say about reviews. A face that reports something the app it opens
-            // has never heard of reads as an app that is broken, and it costs
-            // somebody the one glance the complication was supposed to save
-            // them.
-            //
-            // It is a count and not a list, and it is not tappable, because
-            // there is nothing honest to open: `reviewsWaiting` is a number the
-            // host derived per WORKTREE and the snapshot deliberately carries
-            // no rows — see its comment, and see the review section of
-            // `docs/jobs-to-be-done.md`, which puts reviewing on a phone or a
-            // Mac and nowhere near a wrist. Reassure is the watch's job here;
-            // Review is not, and a row that promised otherwise would be worse
-            // than this one.
-            if let reviews = snapshot.needsReview, reviews > 0 {
-                ReviewRow(count: reviews)
-            }
-            // Only when a real capture came back with nothing, which on this
-            // surface is the only kind of capture there is. The widget's words,
-            // deliberately.
-            //
-            // Asked of `rows` rather than of `snapshot.agents` so that the two
-            // cannot disagree on the one frame `rows` is a snapshot behind —
-            // see its declaration. They hold the same agents; this is only
-            // about which of the two a single render reads.
-            if rows.isEmpty {
-                Text("No agents").font(.headline).foregroundStyle(.secondary)
-            }
-            ForEach(rows) { agent in
-                NavigationLink(value: WatchRoute.agent(terminal: agent.id)) {
-                    AgentRow(agent: agent, confidence: snapshot.confidence(in: agent, at: now))
+            // What needs you, before any agent (spec §7): the app's own list,
+            // in its order, and the same count the complication shows. Absent
+            // rather than empty for a phone that wrote none. See `WatchList`.
+            if !items.isEmpty {
+                Section("Needs You") {
+                    ForEach(items) { item in
+                        NeedsYouRow(item: item, action: WatchItemAction.of(item, in: snapshot))
+                    }
                 }
             }
+            Section {
+                agents(snapshot, at: now)
+            } header: {
+                // Named only when there's a section above to tell it from.
+                if !items.isEmpty { Text("Agents") }
+            }
             if let hedge = snapshot.hedge { PartialFooter(hedge: hedge) }
+        }
+    }
+
+    @ViewBuilder private func agents(_ snapshot: FleetSnapshot, at now: Date) -> some View {
+        // The other half of "what needs me", and until now the app never
+        // mentioned it.
+        //
+        // The complication on the very same watch draws "3 to review" — see
+        // `WatchFleetWidget`'s `Rectangular` and `Circular` — and tapping a
+        // complication opens this screen, which had nothing whatsoever to
+        // say about reviews. A face that reports something the app it opens
+        // has never heard of reads as an app that is broken, and it costs
+        // somebody the one glance the complication was supposed to save
+        // them.
+        //
+        // It is a count and not a list, and it is not tappable, because
+        // there is nothing honest to open: `reviewsWaiting` is a number the
+        // host derived per WORKTREE and the snapshot deliberately carries
+        // no rows — see its comment, and see the review section of
+        // `docs/jobs-to-be-done.md`, which puts reviewing on a phone or a
+        // Mac and nowhere near a wrist. Reassure is the watch's job here;
+        // Review is not, and a row that promised otherwise would be worse
+        // than this one.
+        if let reviews = snapshot.needsReview, reviews > 0 {
+            ReviewRow(count: reviews)
+        }
+        // Only when a real capture came back with nothing, which on this
+        // surface is the only kind of capture there is. The widget's words,
+        // deliberately.
+        //
+        // Asked of `rows` rather than of `snapshot.agents` so that the two
+        // cannot disagree on the one frame `rows` is a snapshot behind —
+        // see its declaration. They hold the same agents; this is only
+        // about which of the two a single render reads.
+        if rows.isEmpty {
+            Text("No agents").font(.headline).foregroundStyle(.secondary)
+        }
+        ForEach(rows) { agent in
+            NavigationLink(value: WatchRoute.agent(terminal: agent.id)) {
+                AgentRow(agent: agent, confidence: snapshot.confidence(in: agent, at: now))
+            }
+        }
+    }
+}
+
+/// One thing that needs you: its mark, its question, and where it is.
+///
+/// What a tap does is `WatchItemAction`'s, decided in AgentKit where a test can
+/// reach it: an ask with options opens its answers, a block opens its agent,
+/// and anything else says "Open on iPhone" and opens nothing. A decision is a
+/// board note and a review is read on a bigger screen (spec §7).
+///
+/// Not dimmed by age: every kind is latched, like `blocked`. It ends when a
+/// person acts, never on a clock.
+private struct NeedsYouRow: View {
+    let item: NeedsYouItem
+    let action: WatchItemAction
+
+    var body: some View {
+        switch action {
+        case .answer:
+            NavigationLink(value: WatchRoute.item(key: item.key)) { label(onPhone: false) }
+        case let .agent(terminal):
+            NavigationLink(value: WatchRoute.agent(terminal: terminal)) { label(onPhone: false) }
+        case .onPhone:
+            label(onPhone: true)
+        }
+    }
+
+    private func label(onPhone: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            GlanceMarkView(GlanceMark(status: item.watchStatus), size: .watchRow)
+                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.question)
+                    .font(.body.weight(.medium))
+                    .lineLimit(2)
+                if !item.watchPlace.isEmpty {
+                    Text(item.watchPlace)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if onPhone {
+                    Text("Open on iPhone")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 0)
         }
     }
 }
@@ -279,6 +352,10 @@ enum WatchRoute: Hashable {
     /// opens, so there is nothing to carry, and the snapshot it reads the
     /// agent's NAME out of has to be the current one.
     case transcript(terminal: String)
+    /// An ask to answer from Needs You, by `NeedsYouItem.key`. A key and not
+    /// the item, for `agent`'s reason: the screen re-reads it from the current
+    /// snapshot, so an ask answered elsewhere leaves the screen too.
+    case item(key: String)
 }
 
 extension View {
@@ -299,6 +376,8 @@ extension View {
                 PermissionView(client: client, terminal: terminal)
             case let .transcript(terminal):
                 TranscriptView(client: client, terminal: terminal)
+            case let .item(key):
+                NeedsYouItemView(client: client, key: key)
             }
         }
     }

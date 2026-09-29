@@ -57,3 +57,97 @@ public enum WatchState: Sendable, Equatable {
         return false
     }
 }
+
+// MARK: - What the list draws (ov-55 4C.2)
+
+/// The watch's list, in the order it draws it: what needs you, then the
+/// agents (spec §7).
+///
+/// Here rather than in the view for `WatchState`'s reason: the order is a rule
+/// a test has to be able to reach, and a watchOS target has no tests.
+///
+/// Both halves come off the snapshot as the phone wrote them. The items are in
+/// the app's merged rank order (`NeedsYou.merge`), and the agents in `ranked`,
+/// the order the list always had. An agent with an item stays in the agents
+/// too: the item is about what it's waiting on, the row is about the agent.
+public struct WatchList: Sendable, Equatable {
+    /// One row, of either kind.
+    public enum Row: Sendable, Equatable, Identifiable {
+        case item(NeedsYouItem)
+        case agent(FleetSnapshot.Agent)
+
+        public var id: String {
+            switch self {
+            case let .item(item): "item:\(item.key)"
+            case let .agent(agent): "agent:\(agent.id)"
+            }
+        }
+    }
+
+    /// Nothing, for a snapshot from a phone too old to write a list: the
+    /// section isn't drawn at all rather than drawn empty.
+    public let items: [NeedsYouItem]
+    public let agents: [FleetSnapshot.Agent]
+
+    public init(_ snapshot: FleetSnapshot) {
+        items = snapshot.needsYou ?? []
+        agents = snapshot.ranked
+    }
+
+    /// Every row, items first.
+    public var rows: [Row] { items.map(Row.item) + agents.map(Row.agent) }
+}
+
+/// What the watch can do about one item.
+public enum WatchItemAction: Sendable, Equatable {
+    /// Answer it here: the ask's own options, in its order. Each sends
+    /// `WatchRequest.answer`, the path a pane's own card takes.
+    case answer([NeedsYouAction])
+    /// Open the agent it's about, which the watch lists: a block the watch
+    /// can't answer, but whose agent it can show and prompt.
+    case agent(terminal: String)
+    /// Nothing the watch can do: a decision's options are a board note, and a
+    /// review is read on a bigger screen. The row says "Open on iPhone".
+    case onPhone
+
+    /// The one rule.
+    ///
+    /// **An ask answers here only with everything answering needs:** its
+    /// terminal, its ask id, and at least one option. Below Control scope a
+    /// runner sends none of the last two, and a button with nothing to send is
+    /// the Allow button that goes nowhere. `open` is never an answer.
+    public static func of(_ item: NeedsYouItem, in snapshot: FleetSnapshot) -> WatchItemAction {
+        let answers = item.actions.filter { !$0.isOpen }
+        if item.kind == .ask, item.terminal != nil, item.askID != nil, !answers.isEmpty {
+            return .answer(answers)
+        }
+        if item.kind == .ask || item.kind == .blocked, let terminal = item.terminal?.id,
+            snapshot.agents.contains(where: { $0.id == terminal })
+        {
+            return .agent(terminal: terminal)
+        }
+        return .onPhone
+    }
+}
+
+extension NeedsYouItem {
+    /// What to send for one of this ask's options, or nil when it has nothing
+    /// to send it with.
+    public func watchRequest(answering action: NeedsYouAction) -> WatchRequest? {
+        guard let terminal = terminal?.id, let askID, !action.isOpen else { return nil }
+        return .answer(terminal: terminal, request: askID, option: action.id)
+    }
+
+    /// Where it is, for the line under its question: "Billing · claude", or
+    /// "Billing · bil-7" for a task's item. The workspace leads, as it does on
+    /// every other surface; without one, the subject alone.
+    public var watchPlace: String {
+        let subject = task?.key ?? terminal?.label ?? ""
+        return [workspaceName, subject].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    /// The status word its mark is drawn from: amber for everything that
+    /// needs you, and a review's own mark for a review, as the widget draws
+    /// reviews.
+    public var watchStatus: String { kind == .review ? "done" : "blocked" }
+}

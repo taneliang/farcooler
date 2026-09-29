@@ -480,6 +480,8 @@ WATCH_SOURCES = [
     "AgentDetailView.swift",
     "ComposeView.swift",
     "PermissionView.swift",
+    # An ask answered from the Needs You section, off the item's own options.
+    "NeedsYouItemView.swift",
     "TranscriptView.swift",
 ]
 

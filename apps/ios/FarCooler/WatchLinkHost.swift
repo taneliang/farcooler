@@ -244,6 +244,10 @@ final class WatchLinkHost: NSObject {
             // no row, so without this the wrist waits out the thirty seconds
             // to learn the phone lost touch with it.
             || snapshot.hedge != lastSent?.hedge
+            // And what needs you, which moves without any agent moving: a
+            // decision answered on the Mac changes no row. Plain `!=` is right
+            // here, unlike for agents: nothing on an item churns per poll.
+            || snapshot.needsYou != lastSent?.needsYou
         guard changed || Date().timeIntervalSince(lastSentAt) >= Self.refreshInterval else {
             return
         }

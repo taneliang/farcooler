@@ -97,3 +97,102 @@ struct WatchStateTests {
         #expect(WatchState.nothing.snapshot == nil)
     }
 }
+
+/// The watch's Needs You section (ov-55 4C.2).
+struct WatchListTests {
+    private func agent(_ id: String, status: String, rank: UInt32) -> FleetSnapshot.Agent {
+        FleetSnapshot.Agent(
+            id: id, label: "claude", machine: "studio", status: status, glyph: "", headline: id,
+            line: "", feed: [], rank: rank, turnFailed: false, activityChangedAt: nil)
+    }
+
+    private let allow = NeedsYouAction(id: "allow", title: "Allow touch x", destructive: false, primary: true)
+    private let deny = NeedsYouAction(id: "deny", title: "Deny", destructive: true, primary: false)
+    private let open = NeedsYouAction(id: "open", title: "Open", destructive: false, primary: false)
+
+    private func terminal(_ id: String) -> NeedsYouTerminal {
+        NeedsYouTerminal(
+            id: id, worktreeID: nil, label: "claude", role: "agent", paneMode: "terminal",
+            chatCapable: true)
+    }
+
+    private func ask(actions: [NeedsYouAction], askID: String? = "hook-ask-1") -> NeedsYouItem {
+        NeedsYouItem(
+            id: "ask:hook-ask-1", kind: .ask, rank: 5, since: nil, workspaceName: "Billing",
+            terminal: terminal("t1"), question: "Allow touch x", askID: askID, actions: actions,
+            runner: "r1")
+    }
+
+    private func decision() -> NeedsYouItem {
+        NeedsYouItem(
+            id: "decision:7", kind: .decision, rank: 200_000_005, since: nil,
+            workspaceName: "Billing",
+            task: NeedsYouTask(id: "7", key: "bil-7", title: "Queue", status: "needs_decision"),
+            question: "Postgres or SQLite?",
+            actions: [NeedsYouAction(id: "Postgres", title: "Postgres", destructive: false, primary: false)],
+            runner: "r1")
+    }
+
+    /// Items first, then the agents in the order they always had, even when
+    /// an agent outranks every item.
+    ///
+    /// Mutation: `rows` as agents then items. Red.
+    @Test("The watch lists items before agents")
+    func theWatchListsItemsBeforeAgents() {
+        let snapshot = FleetSnapshot(
+            agents: [agent("t2", status: "working", rank: 0), agent("t1", status: "blocked", rank: 1)],
+            capturedAt: Date(), complete: true,
+            needsYou: [ask(actions: [allow, deny]), decision()])
+        let rows = WatchList(snapshot).rows
+        #expect(rows.map(\.id) == [
+            "item:r1\u{1F}ask:hook-ask-1", "item:r1\u{1F}decision:7", "agent:t2", "agent:t1",
+        ])
+    }
+
+    /// A snapshot from a phone that wrote no list has no items, and the
+    /// agents as before.
+    @Test func noListIsAgentsAsBefore() {
+        let snapshot = FleetSnapshot(
+            agents: [agent("t1", status: "blocked", rank: 1)], capturedAt: Date(), complete: true)
+        #expect(WatchList(snapshot).items.isEmpty)
+        #expect(WatchList(snapshot).rows.map(\.id) == ["agent:t1"])
+    }
+
+    /// The buttons are the ask's own options, in its order, and never `open`;
+    /// each sends `terminal.agent_answer` for that option.
+    ///
+    /// Mutation: `.answer` built from a fixed Allow and Deny. Red: the
+    /// titles differ.
+    @Test("An ask's buttons on the watch are the item's actions")
+    func anAsksButtonsOnTheWatchAreTheItemsActions() {
+        let item = ask(actions: [deny, allow, open])
+        let snapshot = FleetSnapshot(
+            agents: [agent("t1", status: "blocked", rank: 1)], capturedAt: Date(), complete: true,
+            needsYou: [item])
+        #expect(WatchItemAction.of(item, in: snapshot) == .answer([deny, allow]))
+        #expect(
+            item.watchRequest(answering: allow)
+                == .answer(terminal: "t1", request: "hook-ask-1", option: "allow"))
+        #expect(item.watchRequest(answering: open) == nil)
+    }
+
+    /// Below Control scope an ask comes with no id and no options, so it has
+    /// nothing to send: the watch opens its agent instead of drawing a button.
+    ///
+    /// Mutation: dropping the `askID` check. Red: `.answer`.
+    @Test func anAskWithNothingToSendOpensItsAgent() {
+        let item = ask(actions: [allow], askID: nil)
+        let snapshot = FleetSnapshot(
+            agents: [agent("t1", status: "blocked", rank: 1)], capturedAt: Date(), complete: true)
+        #expect(WatchItemAction.of(item, in: snapshot) == .agent(terminal: "t1"))
+        #expect(WatchItemAction.of(item, in: FleetSnapshot.empty) == .onPhone)
+    }
+
+    /// A decision's options are a board note, which the watch doesn't write.
+    ///
+    /// Mutation: `of` returning `.answer` for any item with actions. Red.
+    @Test func aDecisionIsOpenedOnThePhone() {
+        #expect(WatchItemAction.of(decision(), in: FleetSnapshot.empty) == .onPhone)
+        #expect(decision().watchPlace == "Billing · bil-7")
+    }
+}
