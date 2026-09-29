@@ -251,3 +251,14 @@ object LaunchRule {
         return LaunchDecision.Decide(readings.sumOf { it.items ?: 0 })
     }
 }
+
+/**
+ * What a workspace is called on a sheet made from its screen: its name, or
+ * for a runner without workspaces its repository's — the name its row and
+ * its screen use — rather than the implicit workspace's "Main".
+ */
+fun workspacePlace(workspace: WorkspaceSummary, repositories: List<Repository>): String =
+    if (!workspace.isImplicit) workspace.name
+    else repositories.firstOrNull { it.id == workspace.repository }
+        ?.let { it.displayName.ifEmpty { it.short } }?.takeIf { it.isNotBlank() }
+        ?: workspace.name

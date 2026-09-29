@@ -290,7 +290,7 @@ fun QuickTaskSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                workspace?.let { "New worktree in ${it.name}" } ?: "New worktree",
+                workspace?.let { "New worktree in ${workspacePlace(it, repositories)}" } ?: "New worktree",
                 style = MaterialTheme.typography.headlineSmall,
             )
 
@@ -581,7 +581,7 @@ fun NewWorktreeSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                workspace?.let { "Name a new worktree in ${it.name}" } ?: "Name a new worktree",
+                workspace?.let { "Name a new worktree in ${workspacePlace(it, repositories)}" } ?: "Name a new worktree",
                 style = MaterialTheme.typography.headlineSmall,
             )
 

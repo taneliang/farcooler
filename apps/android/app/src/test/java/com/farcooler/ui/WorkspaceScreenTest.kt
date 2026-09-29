@@ -176,6 +176,14 @@ class WorkspaceScreenTest {
         assertEquals(LaunchDecision.Decide(0), LaunchRule.decide(listOf(quiet), LaunchRule.WINDOW_MS))
     }
 
+    /** A sheet made on a runner without workspaces names the repository, as the row and the screen do, not "Main". */
+    @Test
+    fun `a sheet names an implicit workspace by its repository`() {
+        val repos = listOf(Repository(id = "repo", displayName = "overnight"))
+        assertEquals("overnight", workspacePlace(WorkspaceSummary.implicit("repo"), repos))
+        assertEquals("Billing", workspacePlace(WorkspaceSummary(id = "b", name = "Billing", repository = "repo"), repos))
+    }
+
     /** Ruling 4: nothing waiting, and the app opens on the last workspace, over Needs You. */
     @Test
     fun `with nothing waiting, launch pushes the last workspace over Needs You`() {
