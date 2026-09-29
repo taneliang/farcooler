@@ -145,6 +145,14 @@ struct ContentView: View {
     /// The detail's width, as the workspace view last measured it: which of
     /// a workspace's columns are on screen. Nil until one has been drawn.
     @State private var detailWidth: CGFloat?
+    /// The task a worktree was opened from with Open Worktree: where Back
+    /// goes. See `WorkspaceNavigation`.
+    @State private var trail: Selection?
+    /// Whether each task's card is expanded, by task id, once toggled.
+    @State private var cardExpanded: [String: Bool] = [:]
+    /// The task whose changes the keyboard is in: the Diff menu's
+    /// shortcuts are for the diff you clicked into.
+    @State private var changesFocus: String?
     /// When each workspace's orchestrator start began, by `host|workspace`:
     /// this app's, or one first seen starting. See `ConversationColumn.slowStart`.
     @State private var orchestratorStartedAt: [String: Date] = [:]
@@ -183,7 +191,9 @@ struct ContentView: View {
                     // feature, so the split would open a pane running a
                     // subcommand that runner has never heard of — a dead pane
                     // where a diff was asked for, with nothing saying why.
-                    if let ws = detailWorktree,
+                    // Only for a worktree opened whole: a task's column shows
+                    // its changes already, without a pane (spec R3).
+                    if let ws = detailWorktree, Self.shows(ws, selection),
                         store.client(for: ws)?.changesSupported != false
                     {
                         ToolbarItem(placement: .primaryAction) {
@@ -1711,9 +1721,13 @@ struct ContentView: View {
     {
         let key = "\(host)/\(workspace.id)"
         if let existing = boardStores[key], Self.keeps(existing, for: workspace, client: client) {
+            if existing.onChoose == nil {
+                existing.onChoose = { row in openTask(row.id, host: host, workspace: workspace.id) }
+            }
             return existing
         }
         let made = TaskBoardStore(client: client, workspace: workspace)
+        made.onChoose = { row in openTask(row.id, host: host, workspace: workspace.id) }
         // Outside the view update, because creating it IS a state change and
         // SwiftUI is reading that state right now. See `changesStore`.
         DispatchQueue.main.async { boardStores[key] = made }
@@ -2028,15 +2042,137 @@ struct ContentView: View {
     /// The third column: a task, or a worktree opened whole.
     @ViewBuilder
     private func thirdColumn(host: String, focus: Focus?, shown: ShownLayout?) -> some View {
-        if let shown {
-            tiled(shown, titled: false)
-        } else if case .worktree(let wt, _)? = focus, let ws = worktree(host: host, id: wt) {
-            worktreeDetail(ws)
-        } else {
-            ContentUnavailableView {
-                Label("No agent is working on this task.", systemImage: "person.crop.circle.badge.questionmark")
+        switch focus {
+        case .task(let id)?:
+            taskColumn(host: host, id: id, shown: shown)
+        case .worktree(let wt, _)?:
+            VStack(spacing: 0) {
+                OpenedWorktreeHeader(
+                    task: trailTask(host: host), worktree: worktree(host: host, id: wt)?.task ?? "Worktree",
+                    onBack: { goBack() })
+                Divider()
+                if let shown {
+                    tiled(shown, titled: false)
+                } else if let ws = worktree(host: host, id: wt) {
+                    worktreeDetail(ws)
+                } else {
+                    ContentUnavailableView("This worktree isn’t here anymore", systemImage: "folder")
+                }
             }
+        case nil:
+            EmptyView()
         }
+    }
+
+    /// The key of the task the opened worktree came from, while Back goes
+    /// there.
+    private func trailTask(host: String) -> String? {
+        guard case .workspace(_, _, .task(let id)?)? = WorkspaceNavigation.back(from: selection, trail: trail)
+        else { return nil }
+        let workspace = selection?.workspace.flatMap {
+            WorkspaceScreen.workspace($0, host: host, in: store.fleet, repositories: store.clients[host]?.repositories.map(\.id) ?? [])
+        }
+        return taskRow(host: host, workspace: workspace, id: id)?.key ?? "Task"
+    }
+
+    /// Back (⌃⌘←, the column's ✕, the breadcrumb): along the breadcrumb to
+    /// a task, else the third column closes.
+    private func goBack() {
+        if focusColumn {
+            focusColumn = false
+            return
+        }
+        guard let back = WorkspaceNavigation.back(from: selection, trail: trail) else { return }
+        if back == trail { trail = nil }
+        selection = back
+    }
+
+    /// A task's column (spec §4.4): its card, its agent and its changes.
+    @ViewBuilder
+    private func taskColumn(host: String, id: String, shown: ShownLayout?) -> some View {
+        let summary = selection?.workspace.flatMap {
+            WorkspaceScreen.workspace($0, host: host, in: store.fleet, repositories: store.clients[host]?.repositories.map(\.id) ?? [])
+        }
+        if let client = store.clients[host], let summary {
+            let board = boardStore(for: summary, client: client, host: host)
+            if let row = board.board.columns.flatMap(\.rows).first(where: { $0.id == id }) {
+                taskColumn(row: row, board: board, client: client, host: host, shown: shown)
+            } else if !board.hasRead {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .task(id: ObjectIdentifier(board)) { await board.readIfNeverRead() }
+            } else {
+                ContentUnavailableView {
+                    Label("This task isn’t on the board anymore", systemImage: "checklist")
+                } actions: {
+                    Button("Close") { goBack() }
+                }
+            }
+        } else {
+            ContentUnavailableView("This task isn’t here", systemImage: "checklist")
+        }
+    }
+
+    private func taskColumn(
+        row: TaskRow, board: TaskBoardStore, client: DaemonClient, host: String, shown: ShownLayout?
+    ) -> some View {
+        let agents = WorkspaceScreen.agents(of: row.id, host: host, in: store.fleet)
+        let chosen = WorkspaceScreen.agent(of: row.id, host: host, in: store.fleet, chosen: chosenAgents[row.id])
+        let worktreeID = TaskColumnModel.worktree(of: row, agent: chosen)
+        let lane = worktreeID.flatMap { worktree(host: host, id: $0) }
+        let agent = TaskColumnModel.agent(hasAgent: shown != nil, worktree: lane?.id)
+        let expanded = Binding(
+            get: { cardExpanded[row.id] ?? TaskColumnModel.startsExpanded(row.status) },
+            set: { cardExpanded[row.id] = $0 })
+        let openWorktree = {
+            guard let lane, let current = selection else { return }
+            let opened = WorkspaceNavigation.openWorktree(lane.id, from: current)
+            trail = opened.trail
+            selection = opened.next
+        }
+        return VStack(spacing: 0) {
+            TaskColumnHeader(
+                row: row, store: board, agents: agents, chosen: chosen, worktree: lane?.id, expanded: expanded,
+                onChooseAgent: { pane in chosenAgents[row.id] = pane.terminal.id },
+                onOpenWorktree: openWorktree,
+                onClose: { goBack() })
+            if expanded.wrappedValue {
+                Divider()
+                ScrollView {
+                    TaskCard(
+                        row: board.opened?.id == row.id ? board.opened ?? row : row, detail: board.detail,
+                        question: board.question, canAnswer: board.offersWrites,
+                        onAnswer: { body in await board.answer(row, with: body) },
+                        draft: TaskCard.Draft(read: { board.draft(for: $0) }, write: { board.setDraft($1, for: $0) }))
+                    .padding(12)
+                }
+                .frame(maxHeight: 280)
+                .background(WorkspaceStyle.document)
+            }
+            Divider()
+            TaskColumnSplit(
+                status: row.status, showsChanges: lane != nil && client.changesSupported != false,
+                agent: {
+                    if let shown {
+                        tiled(shown, titled: false)
+                    } else {
+                        TaskColumnNoAgent(agent: agent, onOpenWorktree: openWorktree)
+                    }
+                },
+                changes: {
+                    if let lane {
+                        // Today's Changes view, reused as it is (ruling 6):
+                        // drawn here without a tmux pane, so nothing resizes
+                        // the agent's window for other clients.
+                        ChangesPane(
+                            changes: changesStore(for: lane, client: client), isFocused: changesFocus == row.id,
+                            agents: lane.reviewAgentTargets())
+                        .simultaneousGesture(TapGesture().onEnded { changesFocus = row.id })
+                    }
+                })
+        }
+        // The card's record and question, read for the task on screen.
+        .task(id: row.id) { await board.open(row) }
     }
 
     /// A worktree with no layout yet: its card of terminals.
@@ -2706,6 +2842,7 @@ struct ContentView: View {
     /// the key pane moves. A pane on no column of this view goes to where it
     /// lives, as `land(on:)` does.
     private func focus(_ pane: PaneRef) {
+        changesFocus = nil
         guard let worktree = worktree(host: pane.host, id: pane.worktree) else { return }
         if Self.shows(worktree, selection) {
             let next = Self.opening(worktree, terminal: pane.terminal, in: store.fleet)
@@ -2723,6 +2860,12 @@ struct ContentView: View {
             return
         }
         keyPane = pane
+    }
+
+    /// Open a task in its workspace's task column.
+    private func openTask(_ id: String, host: String, workspace: String) {
+        trail = nil
+        selection = .workspace(host: host, workspace: workspace, focus: .task(id))
     }
 
     /// Open a Needs You item where spec §2.5 says it lands.

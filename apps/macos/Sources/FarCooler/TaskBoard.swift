@@ -35,6 +35,14 @@ final class TaskBoardStore: ObservableObject {
     @Published private(set) var detail: TaskDetailModel = .empty
     /// The card that is open, or nil for the board alone.
     @Published var opened: TaskRow?
+    /// What choosing a card does: the window opens it in the workspace's
+    /// task column. Nil opens it here, which is all a test needs.
+    var onChoose: ((TaskRow) -> Void)?
+
+    /// A card was clicked: open it where the window puts tasks.
+    func choose(_ row: TaskRow) {
+        if let onChoose { onChoose(row) } else { Task { await open(row) } }
+    }
     /// Whether a read has ever come back.
     ///
     /// Separate from "the board is empty", which is a real and different
@@ -561,26 +569,6 @@ struct TaskBoardView: View {
             choice = BoardForm.Choice.read(host: key.host, workspace: key.workspace, from: defaults)
             collapsed = BoardForm.collapsed(host: key.host, workspace: key.workspace, from: defaults)
         }
-        // A card is open only while its board is on screen. A board that goes
-        // away under an open card — its project removed, its runner gone, or
-        // a command that selected something else — would otherwise leave the
-        // card set on a store the sidebar row still holds: re-read with a
-        // `task show` on every event nobody sees, and back on screen the next
-        // time the board is.
-        .onDisappear { store.opened = nil }
-        .sheet(item: $store.opened) { row in
-            TaskCardSheet(
-                row: row, detail: store.detail, question: store.question,
-                agents: agents.live(for: row), canAnswer: store.offersWrites,
-                onAnswer: { body in await store.answer(row, with: body) },
-                draft: TaskCard.Draft(
-                    read: { store.draft(for: $0) }, write: { store.setDraft($1, for: $0) }),
-                onGoTo: { pane in
-                    store.opened = nil
-                    onGoTo(pane)
-                },
-                onClose: { store.opened = nil })
-        }
     }
 
     /// Which board's choices are on screen: the runner and the workspace.
@@ -1003,7 +991,7 @@ private struct TaskListRow: View {
             }
         )
         .contentShape(Rectangle())
-        .onTapGesture { Task { await store.open(row) } }
+        .onTapGesture { store.choose(row) }
         .contextMenu { TaskRowMenu(row: row, live: live, store: store, onGoTo: onGoTo) }
         .accessibilityIdentifier("board-row-\(row.key)")
     }
@@ -1191,7 +1179,7 @@ struct TaskCardRow: View {
             }
         )
         .contentShape(Rectangle())
-        .onTapGesture { Task { await store.open(row) } }
+        .onTapGesture { store.choose(row) }
         .contextMenu { TaskRowMenu(row: row, live: live, store: store, onGoTo: onGoTo) }
     }
 }
@@ -1343,61 +1331,6 @@ private struct UnreadableColumnView: View {
     }
 }
 
-/// One task, opened, as a sheet over the board: its heading, and the card.
-///
-/// The sheet is the card's host until the task column replaces it (2D.1);
-/// what the card says is `TaskCard`, which the column will host instead.
-private struct TaskCardSheet: View {
-    let row: TaskRow
-    let detail: TaskDetailModel
-    let question: TaskQuestion?
-    /// The panes working this task. Going to one closes the card first — the
-    /// card is a sheet, and a sheet left up would sit over the pane you went
-    /// to.
-    let agents: [BoardPane]
-    let canAnswer: Bool
-    let onAnswer: (String) async -> Bool
-    let draft: TaskCard.Draft
-    let onGoTo: (BoardPane) -> Void
-    let onClose: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(row.key)
-                    .font(.system(size: WorkspaceStyle.PaneText.title, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                Text(row.title).font(.headline)
-                Spacer()
-                Text(row.status.title)
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
-                    .foregroundStyle(.secondary)
-                if agents.count == 1, let pane = agents.first {
-                    Button("Go to Agent") { onGoTo(pane) }
-                        .help("Go to \(pane.title)")
-                } else if !agents.isEmpty {
-                    Menu("Go to Agent") {
-                        GoToAgentItems(live: agents, onGoTo: onGoTo)
-                    }
-                    .fixedSize()
-                }
-                Button("Done", action: onClose).keyboardShortcut(.defaultAction)
-            }
-            .padding(14)
-            Divider()
-            ScrollView {
-                TaskCard(
-                    row: row, detail: detail, question: question, canAnswer: canAnswer,
-                    onAnswer: onAnswer, draft: draft
-                )
-                .padding(14)
-            }
-        }
-        .frame(minWidth: 560, minHeight: 480)
-        .background(WorkspaceStyle.document)
-    }
-}
-
 /// One task's card: what is understood now, the question it's waiting on,
 /// and how it came to be understood.
 ///
@@ -1408,8 +1341,7 @@ private struct TaskCardSheet: View {
 /// `supersedes`, which is `farcooler task note --supersedes`. Answering a
 /// question is a new note too (`task note --kind answer`), never an edit.
 ///
-/// Internal for `TaskCardTests`, which draws it. The sheet hosts it today, and
-/// the task column will.
+/// Internal for `TaskCardTests`, which draws it. The task column hosts it.
 struct TaskCard: View {
     let row: TaskRow
     let detail: TaskDetailModel
