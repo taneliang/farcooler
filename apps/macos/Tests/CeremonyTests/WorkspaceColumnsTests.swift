@@ -108,4 +108,30 @@ struct WorkspaceColumnsTests {
             #expect(seen.arrangement == expected)
         }
     }
+
+    /// On screen means drawn: a conversation collapsed to its rail, left out
+    /// beside a task alone, or behind Board in the one-column form isn't,
+    /// so it isn't marked seen or watched and the keyboard doesn't act on
+    /// it. Nothing is, before the detail has been measured.
+    @Test("A railed or hidden conversation isn't on screen")
+    func aRailedOrHiddenConversationIsntOnScreen() {
+        let worktree = Worktree(
+            id: "w", short: "w", task: "w", branch: "b", repository: nil, host: "", path: "/tmp/w",
+            state: "active", terminals: [])
+        func layout(_ column: ShownLayout.Column, _ id: String) -> ShownLayout {
+            let group = PaneGroup(id: id, name: "", active: true, columns: 80, rows: 24, layout: id, panes: [])
+            return ShownLayout(column: column, worktree: worktree, group: group, groups: [group])
+        }
+        let shown = [layout(.conversation, "@1"), layout(.task, "@2")]
+        func columns(_ arrangement: WorkspaceColumns.Arrangement?, _ pick: WorkspacePick = .orchestrator) -> [ShownLayout.Column] {
+            WorkspaceScreen.visible(shown, arrangement: arrangement, pick: pick).map(\.column)
+        }
+        #expect(columns(.all) == [.conversation, .task])
+        #expect(columns(.railed) == [.task])
+        #expect(columns(.taskAlone) == [.task])
+        #expect(columns(.two) == [.conversation])
+        #expect(columns(.one, .orchestrator) == [.conversation])
+        #expect(columns(.one, .board) == [])
+        #expect(columns(nil) == [])
+    }
 }

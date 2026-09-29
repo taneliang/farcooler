@@ -34,6 +34,7 @@ struct WorkspaceView<Conversation: View, Rail: View, Board: View, Third: View>: 
             columns(arrangement)
                 .frame(width: proxy.size.width, height: proxy.size.height)
                 .preference(key: WorkspaceArrangementPreference.self, value: arrangement)
+                .preference(key: WorkspaceWidthPreference.self, value: proxy.size.width)
         }
     }
 
@@ -112,6 +113,15 @@ enum WorkspacePick: String, CaseIterable, Identifiable {
 struct WorkspaceArrangementPreference: PreferenceKey {
     static let defaultValue: WorkspaceColumns.Arrangement? = nil
     static func reduce(value: inout WorkspaceColumns.Arrangement?, nextValue: () -> WorkspaceColumns.Arrangement?) {
+        value = nextValue() ?? value
+    }
+}
+
+/// The detail's width as a `WorkspaceView` measured it: what the window reads
+/// to say which of a workspace's columns are on screen.
+struct WorkspaceWidthPreference: PreferenceKey {
+    static let defaultValue: CGFloat? = nil
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
         value = nextValue() ?? value
     }
 }

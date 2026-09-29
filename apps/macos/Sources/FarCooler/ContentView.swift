@@ -142,6 +142,9 @@ struct ContentView: View {
     @State private var workspacePicks: [String: WorkspacePick] = [:]
     /// Focus Column (⌃⌘↩): the third column widened over the other two.
     @State private var focusColumn = false
+    /// The detail's width, as the workspace view last measured it: which of
+    /// a workspace's columns are on screen. Nil until one has been drawn.
+    @State private var detailWidth: CGFloat?
     /// When each workspace's orchestrator start began, by `host|workspace`:
     /// this app's, or one first seen starting. See `ConversationColumn.slowStart`.
     @State private var orchestratorStartedAt: [String: Date] = [:]
@@ -279,6 +282,11 @@ struct ContentView: View {
             settleLaunch()
         }
         .onChange(of: store.needsYou) { _, _ in settleLaunch() }
+        // A column that comes on screen, or goes, as the detail is resized
+        // or a pick changes: what's seen and watched follows it.
+        .onChange(of: detailWidth) { _, _ in markVisibleSeen() }
+        .onChange(of: workspacePicks) { _, _ in markVisibleSeen() }
+        .onChange(of: focusColumn) { _, _ in markVisibleSeen() }
         .onChange(of: store.needsYouSettled) { _, _ in settleLaunch() }
         .onChange(of: selection) { _, now in
             if let saved = SelectionMemory.encode(now) { lastSelection = saved }
@@ -1805,13 +1813,23 @@ struct ContentView: View {
         return made
     }
 
-    /// Every layout the detail draws for `selection`. See `WorkspaceScreen`.
+    /// Every layout the detail draws for `selection`: `WorkspaceScreen`'s,
+    /// and of a workspace's, only the columns its width draws.
     private func shownLayouts(for selection: Selection?) -> [ShownLayout] {
-        WorkspaceScreen.shown(
+        let all = WorkspaceScreen.shown(
             selection, in: store.fleet,
             layouts: { host, worktree in store.clients[host]?.layouts[worktree] },
             repositories: { host in store.clients[host]?.repositories.map(\.id) ?? [] },
             chosen: { chosenAgents[$0] })
+        guard case .workspace(let host, let id, let focus)? = selection else { return all }
+        let summary = WorkspaceScreen.workspace(
+            id, host: host, in: store.fleet, repositories: store.clients[host]?.repositories.map(\.id) ?? [])
+        let arrangement = detailWidth.map { width in
+            WorkspaceColumns.layout(
+                width: width, taskOpen: focus != nil, cell: TerminalMetrics.cell(preferences.terminalFont()).width,
+                hasConversation: summary.map { !$0.isImplicit } ?? false, focused: focusColumn)
+        }
+        return WorkspaceScreen.visible(all, arrangement: arrangement, pick: workspacePicks["\(host)|\(id)"] ?? .orchestrator)
     }
 
     /// What the detail draws now.
@@ -1864,6 +1882,11 @@ struct ContentView: View {
             board: { boardColumn(host: host, id: id) },
             third: { thirdColumn(host: host, focus: focus, shown: layouts.last { $0.column != .conversation }) }
         )
+        .onPreferenceChange(WorkspaceWidthPreference.self) { width in
+            MainActor.assumeIsolated {
+                if let width, width != detailWidth { detailWidth = width }
+            }
+        }
         .modifier(WindowTitle(title: workspaceTitle(host: host, workspace: summary, focus: focus).title,
                               subtitle: workspaceTitle(host: host, workspace: summary, focus: focus).subtitle))
     }

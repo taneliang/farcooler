@@ -158,6 +158,29 @@ enum WorkspaceScreen {
         }
     }
 
+    /// Of `shown`, the layouts a workspace actually draws in `arrangement`:
+    /// the conversation only in a column of its own, and in the one-column
+    /// form only while Orchestrator is picked; the third column only when
+    /// it's drawn. Nothing while the detail hasn't been measured yet
+    /// (`arrangement` nil).
+    ///
+    /// What "on screen" means for seen marks, the watching claim and the
+    /// keyboard: a railed or hidden orchestrator marked seen would lose the
+    /// notification it was about to send, for a pane nobody can see.
+    static func visible(
+        _ shown: [ShownLayout], arrangement: WorkspaceColumns.Arrangement?, pick: WorkspacePick
+    ) -> [ShownLayout] {
+        guard let arrangement else { return [] }
+        return shown.filter { layout in
+            switch layout.column {
+            case .conversation:
+                return arrangement.conversation == .column && (!arrangement.switcher || pick == .orchestrator)
+            case .task, .worktree:
+                return arrangement.task
+            }
+        }
+    }
+
     /// The pane the keyboard acts on: `key`, the pane last clicked or
     /// focused, while it's on screen; else the third column's focused pane,
     /// else the conversation's.
