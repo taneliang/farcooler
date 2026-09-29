@@ -666,6 +666,10 @@ jobs:
   baseline-ios:
     name: Record the wire baseline (iOS shipped)
     needs: ios
+    # Main only. Canary can be dispatched from any branch, and that branch's
+    # proto is not what main owes compatibility to; scripts/canary-baseline.sh
+    # refuses such a commit too.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -683,6 +687,7 @@ jobs:
   baseline-macos:
     name: Record the wire baseline (macOS shipped)
     needs: macos
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -49,13 +49,23 @@ for attempt in 1 2 3; do
   git fetch --quiet --no-tags origin main
   git checkout --quiet --detach FETCH_HEAD
 
+  # Only a commit on main. Canary can be dispatched from any branch, and a
+  # branch's proto recorded here would be compared against fields main may
+  # never get — and, since no later main commit descends from it, would stop
+  # the baseline advancing for good. canary.yml gates on the ref as well; this
+  # is the lock that holds if that gate is ever lost.
+  if ! git merge-base --is-ancestor "$shipped" HEAD; then
+    echo "::warning::$shipped is not on main, so it is not recorded as the canary wire baseline"
+    exit 0
+  fi
+
   if [ -f "$baseline" ]; then
     recorded="$(sed -n '1s#^// Shipped by Canary at \([0-9a-f]\{40\}\)\..*#\1#p' "$baseline")"
     # A recorded commit this checkout cannot find (history rewritten) cannot be
     # compared, so it does not block; one it can find must be an ancestor.
     if [ -n "$recorded" ] && git cat-file -e "$recorded^{commit}" 2>/dev/null \
       && ! git merge-base --is-ancestor "$recorded" "$shipped"; then
-      echo "canary baseline records $recorded, which $shipped does not descend from; leaving it"
+      echo "::warning::the canary wire baseline records $recorded, which $shipped does not descend from, so it was not advanced"
       exit 0
     fi
     # Staged or not is beside the point here: the file is compared directly,
@@ -78,6 +88,8 @@ What the Canary channel now owes compatibility to: the proto of the commit
 Canary just shipped. Recorded by canary.yml rather than derived from git
 history — see scripts/proto-lint.py for why the file exists."
 
+  # Never forced. A rejected push means main moved; forcing would erase
+  # whatever moved it.
   if git push --quiet origin HEAD:main; then
     echo "canary baseline recorded from $shipped"
     exit 0

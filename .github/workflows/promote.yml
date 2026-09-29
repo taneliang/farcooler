@@ -171,21 +171,35 @@ jobs:
           # The proto from the tag itself, which the checkout above (depth 1,
           # main only) does not have.
           git fetch --no-tags --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
-          mkdir -p proto/baseline
-          git show "$TAG:proto/farcooler.proto" > "$BASELINE"
-          # Staged, then compared: `git diff` ignores untracked files, so the
-          # FIRST baseline for a channel always looked unchanged and was never
-          # committed.
-          git add "$BASELINE"
-          if git diff --cached --quiet; then
-            echo "baseline unchanged"
-            exit 0
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: ${{ inputs.channel }} wire baseline at ${{ needs.tag.outputs.tag }}
+          # Three tries, each from a freshly fetched main, because main moves
+          # during the release build — and Canary now commits its own baseline
+          # there after every ship. A push refused as non-fast-forward starts
+          # over on top of the new main. Never forced: forcing would erase
+          # whatever moved it.
+          for attempt in 1 2 3; do
+            git fetch --no-tags --depth=1 origin main
+            git checkout --quiet --detach FETCH_HEAD
+            mkdir -p proto/baseline
+            git show "$TAG:proto/farcooler.proto" > "$BASELINE"
+            # Staged, then compared: `git diff` ignores untracked files, so the
+            # FIRST baseline for a channel always looked unchanged and was never
+            # committed.
+            git add "$BASELINE"
+            if git diff --cached --quiet; then
+              echo "baseline unchanged"
+              exit 0
+            fi
+            git commit -m "chore: ${{ inputs.channel }} wire baseline at ${{ needs.tag.outputs.tag }}
 
           What this channel now owes compatibility to. Recorded by the promotion
           that shipped it rather than derived from git history — see
           scripts/proto-lint.py for why the file exists."
-          git push origin main
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "::warning::push of the ${{ inputs.channel }} baseline was rejected (attempt $attempt); retrying from the new main"
+          done
+          echo "::error::could not push the ${{ inputs.channel }} baseline after three attempts" >&2
+          exit 1

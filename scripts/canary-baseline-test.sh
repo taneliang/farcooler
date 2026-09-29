@@ -77,6 +77,8 @@ before="$(commits)"
 out="$(record "$b")"
 check "a re-run of an older commit does not move it backwards" "message Foo { string gamma = 1; }" "$(baseline_proto)"
 check "and commits nothing" "$before" "$(commits)"
+case "$out" in *"::warning::"*"not advanced"*) got=warned ;; *) got="$out" ;; esac
+check "and warns that it did not advance" warned "$got"
 
 # A push that loses a race retries from the new main. The job's clone is taken,
 # then a human push lands before the script runs; its fetch sees the new main.
@@ -97,6 +99,51 @@ chmod +x "$hook"
 record "$f" >/dev/null 2>&1 || true
 rm -f "$hook"
 check "a rejected push is retried" "message Foo { string zeta = 1; }" "$(baseline_proto)"
+
+# A commit dispatched from a branch is not recorded, and says why. Recorded, it
+# would be a header no later main commit descends from, and the baseline would
+# stop advancing for good.
+git_q -C "$dev" checkout --quiet -b feature
+printf 'message Foo { string eta = 1; }\n' > "$dev/proto/farcooler.proto"
+git_q -C "$dev" commit --quiet -am eta
+g="$(git -C "$dev" rev-parse HEAD)"
+git_q -C "$dev" push --quiet origin feature
+git_q -C "$dev" checkout --quiet main
+before="$(commits)"
+out="$(record "$g" 2>&1)"
+check "a commit not on main is not recorded" "message Foo { string zeta = 1; }" "$(baseline_proto)"
+check "and commits nothing" "$before" "$(commits)"
+case "$out" in *"::warning::"*"not on main"*) got=warned ;; *) got="$out" ;; esac
+check "and warns" warned "$got"
+h="$(land theta 9)"
+record "$h" >/dev/null
+check "and main still advances after it" "message Foo { string theta = 1; }" "$(baseline_proto)"
+
+# A push that loses a race is never forced over the winner. A `git` shim lands
+# a commit on main after the script's fetch and just before its first push, so
+# the push is refused as non-fast-forward — unless it is forced, which would
+# erase the commit that landed.
+i="$(land iota 10)"
+real_git="$(command -v git)"
+mkdir -p "$scratch/shim"
+cat > "$scratch/shim/git" <<SHIM
+#!/bin/bash
+if [ "\$1" = push ] && [ ! -e "$scratch/raced" ]; then
+  touch "$scratch/raced"
+  printf 'x\n' > "$dev/raced"
+  "$real_git" -C "$dev" -c user.name=t -c user.email=t@t add raced
+  "$real_git" -C "$dev" -c user.name=t -c user.email=t@t commit --quiet -m raced
+  "$real_git" -C "$dev" push --quiet origin HEAD:main
+fi
+exec "$real_git" "\$@"
+SHIM
+chmod +x "$scratch/shim/git"
+rm -rf "$scratch/ci"
+git clone --quiet "$scratch/origin.git" "$scratch/ci" 2>/dev/null
+(cd "$scratch/ci" && PATH="$scratch/shim:$PATH" "$SCRIPT" "$i") >/dev/null 2>&1 || true
+check "the race was staged" yes "$([ -e "$scratch/raced" ] && echo yes || echo no)"
+check "a push that lost a race keeps the winner" x "$(git -C "$scratch/origin.git" show main:raced 2>/dev/null)"
+check "and still records" "message Foo { string iota = 1; }" "$(baseline_proto)"
 
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
