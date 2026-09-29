@@ -153,6 +153,9 @@ struct ContentView: View {
     /// The task whose changes the keyboard is in: the Diff menu's
     /// shortcuts are for the diff you clicked into.
     @State private var changesFocus: String?
+    /// Which workspaces' Worktrees disclosures are open, as
+    /// `SidebarEntry.openKey`s, one a line. Empty by default (spec §9).
+    @AppStorage("sidebar.openWorktrees") private var openWorktrees = ""
     /// When each workspace's orchestrator start began, by `host|workspace`:
     /// this app's, or one first seen starting. See `ConversationColumn.slowStart`.
     @State private var orchestratorStartedAt: [String: Date] = [:]
@@ -653,7 +656,32 @@ struct ContentView: View {
     /// after it and any transient `@State` (row hovering) followed the index
     /// instead of following the row it belonged to.
     private var sidebarEntries: [SidebarEntry] {
-        Self.sidebarRows(fleet: store.fleet, query: query, silentHosts: silentHosts)
+        Self.sidebarRows(fleet: store.fleet, query: query, silentHosts: silentHosts, open: isOpen)
+    }
+
+    /// Whether a workspace's Worktrees disclosure is open: as it was left
+    /// (`sidebar.openWorktrees`), or because the selection is inside it.
+    private func isOpen(_ key: String) -> Bool {
+        if openWorktreesSet.contains(key) { return true }
+        guard case .workspace(let host, let id, .worktree?)? = selection else { return false }
+        return key == SidebarEntry.openKey(host: host, workspace: id)
+    }
+
+    private var openWorktreesSet: Set<String> {
+        Set(openWorktrees.split(separator: "\n").map(String.init))
+    }
+
+    private func toggleWorktrees(_ key: String) {
+        var set = openWorktreesSet
+        if set.contains(key) { set.remove(key) } else { set.insert(key) }
+        openWorktrees = set.sorted().joined(separator: "\n")
+    }
+
+    /// Show Board: the workspace, with its board on screen, in the
+    /// one-column form too.
+    private func showBoard(host: String, workspace: String) {
+        workspacePicks["\(host)|\(workspace)"] = .board
+        selection = .workspace(host: host, workspace: workspace, focus: nil)
     }
 
     /// A project header's repository, on its way to `RemoveRepositorySheet`.
@@ -931,60 +959,15 @@ struct ContentView: View {
         return place(a) == place(b)
     }
 
-    /// A workspace's board row, above its worktrees — or nothing, for a
-    /// runner that has no board or a repository it hasn't listed.
-    ///
-    /// Gated on `tasks`, the capability a board needs: on an older runner the
-    /// row would be a dead link under every repository. Shown whenever the
-    /// runner has it, even for an empty board, because the row is also how
-    /// anybody finds out there is a board at all.
-    @ViewBuilder
-    private func boardRow(_ entry: SidebarEntry) -> some View {
-        if let workspace = entry.workspace,
-            let repo = repository(host: entry.host, id: entry.repositoryID, project: entry.project),
-            let client = store.clients[entry.host],
-            client.daemonBuild?.can("tasks") == true
-        {
-            // An implicit board's id is its repository's, which a CLI too
-            // old to send `repository_id` left to be found by name.
-            let board = workspace.isImplicit ? WorkspaceSummary.implicit(repository: repo.id) : workspace
-            BoardRow(
-                store: boardStore(for: board, client: client, host: entry.host),
-                client: client,
-                agents: boardAgents(host: entry.host, client: client),
-                isSelected: selection?.host == entry.host && selection?.workspace == board.id,
-                onSelect: { selection = .workspace(host: entry.host, workspace: board.id, focus: nil) })
-        }
-    }
-
-    /// A workspace's orchestrator row. Selecting it selects the orchestrator's
-    /// pane, in the checkout it runs in; clicking an empty one offers to
-    /// start one.
-    private func orchestratorRow(_ entry: SidebarEntry) -> some View {
-        let pane = entry.orchestrator
-        let workspace = entry.workspace
-        let target = workspace.map { Selection.workspace(host: entry.host, workspace: $0.id, focus: nil) }
-        return OrchestratorRow(
-            pane: pane, isSelected: false,
-            onSelect: { if let target { selection = target } },
-            isStarting: workspace.map { startingOrchestrators.isStarting($0, host: entry.host) } ?? false,
-            onStart: workspace.flatMap { workspace in
-                store.refusal(for: entry.host) == nil
-                    ? { harness in startOrchestrator(workspace, host: entry.host, harness: harness, replace: false) }
-                    : nil
-            })
-    }
-
     /// A workspace header's menu: its board, its orchestrator, its charter.
     private func workspaceActions(_ entry: SidebarEntry) -> WorkspaceHeaderActions? {
         guard let workspace = entry.workspace, !workspace.isImplicit else { return nil }
         let host = entry.host
         return WorkspaceHeaderActions(
-            // The Board row's own gate — see `boardRow`.
-            hasBoard: store.clients[host]?.daemonBuild?.can("tasks") == true,
+            hasBoard: true,
             hasOrchestrator: entry.orchestrator != nil,
             charter: CharterAccess.of(workspace, host: host),
-            onShowBoard: { selection = .workspace(host: host, workspace: workspace.id, focus: nil) },
+            onShowBoard: { showBoard(host: host, workspace: workspace.id) },
             onStart: { harness, replace in
                 switch OrchestratorRequest(harness: harness, replace: replace) {
                 case .confirmReplace(let harness):
@@ -1078,13 +1061,24 @@ struct ContentView: View {
         case _ where preferences.isProjectCollapsed(key):
             EmptyView()
         case .workspace(let name):
-            WorkspaceHeader(
-                name: name, workspace: entry.workspace?.id ?? "",
-                actions: usable ? workspaceActions(entry) : nil)
-        case .board:
-            boardRow(entry)
-        case .orchestrator:
-            orchestratorRow(entry)
+            if let workspace = entry.workspace {
+                WorkspaceRow(
+                    name: name, workspace: workspace.id, taskPrefix: workspace.taskPrefix,
+                    seat: entry.orchestrator, implicit: workspace.isImplicit,
+                    count: WorkspaceCounts.count(for: workspace, host: entry.host, in: store.needsYou),
+                    unread: ConversationColumn.unread(entry.orchestrator),
+                    isSelected: selection?.host == entry.host && selection?.workspace == workspace.id
+                        && selection?.focus == nil,
+                    onSelect: { selection = .workspace(host: entry.host, workspace: workspace.id, focus: nil) },
+                    actions: usable ? workspaceActions(entry) : nil)
+            }
+        case .worktrees(let count):
+            if let workspace = entry.workspace {
+                let key = SidebarEntry.openKey(host: entry.host, workspace: workspace.id)
+                WorktreesDisclosure(
+                    count: count, isOpen: isOpen(key),
+                    onToggle: { toggleWorktrees(key) })
+            }
         case .worktree:
             if let worktree = entry.worktree { worktreeRow(worktree, usable: usable) }
         case .unclaimed:
@@ -1193,6 +1187,10 @@ struct ContentView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
+                        NeedsYouRow(
+                            count: store.needsYou.count, isSelected: selection == .needsYou,
+                            onSelect: { selection = .needsYou })
+                            .padding(.bottom, 6)
                         ForEach(entries) { entry in sidebarRow(entry) }
                     }
                     .padding(.bottom, 10)
@@ -1219,7 +1217,7 @@ struct ContentView: View {
         // Declared in exactly one place. A second declaration on the
         // `NavigationSplitView`'s sidebar closure made which width the column
         // settled on nondeterministic, and the window drifted with it.
-        .navigationSplitViewColumnWidth(min: 268, ideal: 320, max: 440)
+        .navigationSplitViewColumnWidth(min: 220, ideal: 248, max: 360)
     }
 
     /// Search, because worktrees are unbounded.
@@ -1233,7 +1231,7 @@ struct ContentView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
-            TextField("Search worktrees and agents", text: $query)
+            TextField("Search workspaces and agents", text: $query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12.5))
                 .focused($searchFocused)
@@ -1266,18 +1264,6 @@ struct ContentView: View {
         .padding(.bottom, 6)
     }
 
-    /// Everything waiting on you, across every project and every runner.
-    ///
-    /// The one number the app exists to produce, and it deliberately spans
-    /// hosts: an agent blocked on a runner in another room is exactly as
-    /// urgent as one on this desk.
-    private var attentionWaiting: [Status] {
-        // Items, not terminals: a decision is one, and a finished agent
-        // isn't. Every item is something waiting on an answer, so each is
-        // drawn in the blocked amber.
-        store.needsYou.map { _ in Status.blocked }
-    }
-
     private var sidebarHeader: some View {
         SidebarRow {
             HStack(spacing: 8) {
@@ -1293,21 +1279,6 @@ struct ContentView: View {
 
             Spacer()
 
-            // With the actions, not beside the title. It is a button — it jumps
-            // to the next agent waiting — and sitting it against the runner
-            // name read as part of the name, which is the one thing it is not.
-            if !attentionWaiting.isEmpty {
-                // A dot and a number, not a filled capsule. A solid block of
-                // color in the header shouts louder than the row it points at,
-                // which leaves it pointing at itself.
-                Button {
-                    AppCommand.nextAttention.post()
-                } label: {
-                    AttentionBadge(waiting: attentionWaiting)
-                }
-                .buttonStyle(.plain)
-                .help("\(attentionWaiting.count) waiting on you — click to jump there")
-            }
             // A menu rather than a button, because "add a repository" has to be
             // reachable at all times. It used to live only in the empty state,
             // so once you had one worktree there was no way to add a second
@@ -2405,18 +2376,18 @@ struct ContentView: View {
 
     // MARK: - Commands
 
-    /// Every terminal in the fleet, in the order the sidebar shows them.
-    ///
-    /// One definition, so ⌘1 and a click select the same thing and ⌘] walks the
-    /// list a user can actually see. Grouped by workspace, that is no longer
-    /// the runner's order — see `ContentView.terminalOrder(_:)`. Every
-    /// terminal, whatever the search: stepping never walked only the hits.
-    private var allTerminals: [Terminal] { Self.stepOrder(store.fleet) }
+    /// The terminals of the view on screen, in the order they're drawn:
+    /// what ⌘] and ⌘[, ⌥⌘↓ and ⌥⌘↑ and ⌘1… step through (spec §4.9). The
+    /// sidebar no longer lists terminals, so stepping through all of them
+    /// would walk a list nobody can see.
+    private var allTerminals: [PaneRef] { Self.stepOrder(shown) }
 
-    /// `allTerminals` for a fleet: the sidebar's rows, unsearched, walked by
-    /// `terminalOrder`.
-    static func stepOrder(_ fleet: Fleet) -> [Terminal] {
-        terminalOrder(sidebarRows(fleet: fleet))
+    /// `allTerminals` for what's shown: column by column, each layout's
+    /// panes in tmux's order.
+    static func stepOrder(_ shown: [ShownLayout]) -> [PaneRef] {
+        shown.flatMap { layout in
+            layout.group.terminals.map { PaneRef(host: layout.host, worktree: layout.worktree.id, terminal: $0) }
+        }
     }
 
     /// The pane the keyboard acts on, with its worktree and terminal. See
@@ -3287,10 +3258,10 @@ struct ContentView: View {
     private func step(by offset: Int) {
         let ordered = allTerminals
         guard !ordered.isEmpty else { return }
-        let current = ordered.firstIndex { $0.id == selectedTerminal?.terminal.id } ?? 0
+        let current = ordered.firstIndex { $0 == selectedPane } ?? 0
         // Wraps, because a list you can walk off the end of makes you look.
         let next = (current + offset + ordered.count) % ordered.count
-        select(ordered[next])
+        step(to: ordered[next])
     }
 
     /// Move the selection off a terminal, or a worktree, that has gone.
@@ -3402,15 +3373,16 @@ struct ContentView: View {
     private func selectTerminal(at index: Int) {
         let ordered = allTerminals
         guard index >= 0, index < ordered.count else { return }
-        select(ordered[index])
+        step(to: ordered[index])
     }
 
-    private func select(_ terminal: Terminal) {
-        guard
-            let worktree = store.fleet.worktrees
-                .first(where: { $0.terminals.contains(where: { $0.id == terminal.id }) })
+    /// Put the keyboard in a pane on screen, and tmux's focus with it.
+    private func step(to pane: PaneRef) {
+        focus(pane)
+        guard let worktree = worktree(host: pane.host, id: pane.worktree),
+            let rect = store.client(for: worktree)?.group(holding: pane.terminal, in: pane.worktree)?.pane(pane.terminal)
         else { return }
-        land(on: PaneRef(host: worktree.host ?? "", worktree: worktree.id, terminal: terminal.id))
+        Task { await act(on: worktree) { c in await c.focusPane(rect.short, in: worktree) } }
     }
 
 }

@@ -212,3 +212,17 @@ extension ContentView {
         }
     }
 }
+
+/// A workspace's needs-you count, for its sidebar row.
+enum WorkspaceCounts {
+    /// Its items: those counted under it on its runner. A repository's
+    /// implicit workspace, on a runner without `workstreams`, counts its
+    /// repository's items with no workspace.
+    static func count(for workspace: WorkspaceSummary, host: String, in items: [NeedsYouItem]) -> Int {
+        items.filter { item in
+            guard item.runner == host else { return false }
+            if workspace.isImplicit { return item.workspaceID == nil && item.repositoryID == workspace.id }
+            return item.workspaceID == workspace.id
+        }.count
+    }
+}

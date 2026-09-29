@@ -1,9 +1,10 @@
 import AgentKit
 import Foundation
 
-// The sidebar's shape: repository, then workspace, then that workspace's
-// board, orchestrator and worktrees, with the worktrees no workspace owns in
-// one collapsed Unclaimed group per repository.
+// The sidebar's shape (spec §4.5): Needs You at the top, then each
+// repository's workspaces, one row each, with a workspace's worktrees one
+// click down under its Worktrees disclosure, and the worktrees no workspace
+// owns in one collapsed Unclaimed group per repository.
 //
 // Worked out here, as values, and drawn by `ContentView.sidebar` from them.
 // Which workspace owns which worktree, and in what order workspaces come, is
@@ -17,13 +18,13 @@ struct SidebarEntry: Identifiable {
     enum Kind: Equatable {
         /// A repository's header — or a silent runner's, with no project.
         case repository
-        /// A workspace's header, by its name. Drawn even when Main is the
-        /// only one, so the model is visible before the first split.
+        /// A workspace, by its name: a place you select, with its
+        /// orchestrator's status and its needs-you count. On a runner
+        /// without workspaces, the repository's implicit one.
         case workspace(String)
-        case board
-        /// The workspace's orchestrator, or the row saying it has none.
-        case orchestrator
-        /// A worktree, by its id.
+        /// A workspace's Worktrees disclosure, with how many it holds.
+        case worktrees(count: Int)
+        /// A worktree inside an open Worktrees disclosure, by its id.
         case worktree(String)
         /// The repository's worktrees no workspace owns, collapsed.
         case unclaimed(count: Int)
@@ -38,21 +39,18 @@ struct SidebarEntry: Identifiable {
     let project: String
     /// The repository's uuid, or nil from a CLI too old to send one.
     let repositoryID: String?
-    /// The workspace a workspace, board or orchestrator row is for. An
-    /// implicit one on a runner without workspaces.
+    /// The workspace a workspace row, its disclosure or a worktree inside it
+    /// is for. An implicit one on a runner without workspaces.
     var workspace: WorkspaceSummary?
     /// The worktree a worktree row draws, without its orchestrators.
     var worktree: Worktree?
-    /// The orchestrator, and the worktree it runs in, which is where
-    /// selecting it goes. Nil on an orchestrator row with none running; on a
-    /// workspace header, the same seat, for its menu.
+    /// The workspace's orchestrator, and the worktree it runs in: its seat.
+    /// Nil with none running.
     var orchestrator: BoardPane?
-    /// A repository header's shown worktrees, or an Unclaimed or Hidden
-    /// group's.
+    /// A repository header's shown worktrees, or a Worktrees disclosure's,
+    /// or an Unclaimed or Hidden group's.
     var worktrees: [Worktree] = []
-    /// How many steps in from the repository's header this row is drawn:
-    /// 1 for everything under a repository that has workspaces, so the
-    /// workspace level reads as one; 0 for the layout from before them.
+    /// How many steps in from the repository's header this row is drawn.
     var depth = 0
 
     /// Which repository this row is under, on which runner: by uuid where the
@@ -64,12 +62,23 @@ struct SidebarEntry: Identifiable {
     /// sidebar reopens differently after an update.
     var collapseKey: String { "\(host)\u{1}\(project)" }
 
+    /// What a workspace's Worktrees disclosure is remembered open by, in
+    /// `sidebar.openWorktrees`.
+    static func openKey(host: String, workspace: String) -> String { "\(host)\u{1}\(workspace)" }
+
+    /// A workspace row's menu, from ov-60's: Show Board, Start or Replace
+    /// Orchestrator, Show Charter. None for a repository's implicit
+    /// workspace, which has no orchestrator or charter.
+    var menu: [WorkspaceMenu.Item] {
+        guard case .workspace = kind, let workspace, !workspace.isImplicit else { return [] }
+        return WorkspaceMenu.items(hasBoard: true, hasOrchestrator: orchestrator != nil)
+    }
+
     var id: String {
         switch kind {
         case .repository: return group
         case .workspace: return "\(group)\u{1}workspace\u{1}\(workspace?.id ?? "")"
-        case .board: return "\(group)\u{1}board\u{1}\(workspace?.id ?? "")"
-        case .orchestrator: return "\(group)\u{1}orchestrator\u{1}\(workspace?.id ?? "")"
+        case .worktrees: return "\(group)\u{1}worktrees\u{1}\(workspace?.id ?? "")"
         case .worktree(let id): return "\(group)\u{1}worktree\u{1}\(id)"
         case .unclaimed: return "\(group)\u{1}unclaimed"
         case .hidden: return "\(group)\u{1}hidden"
@@ -82,20 +91,20 @@ extension ContentView {
     /// and every runner's workspaces.
     ///
     /// - Grouped by runner, then repository: two runners can have a
-    ///   project of the same name, and they are not the same project. The
-    ///   host is only displayed when there is more than one runner.
-    /// - Worktrees matching `query` only, and orchestrators matching it. A
-    ///   worktree is matched as its row draws it, without the orchestrators
-    ///   drawn in their own rows: typing an orchestrator's name finds its
-    ///   row, not the checkout it runs in. While searching, a workspace with
-    ///   no match is left out, and so is a repository: a header with nothing
-    ///   under it would look like a hit.
+    ///   project of the same name, and they are not the same project.
+    /// - A repository lists its workspaces, never its worktrees: those are
+    ///   under each workspace's Worktrees, drawn only while it's `open`
+    ///   (keyed by `SidebarEntry.openKey`), and under Unclaimed and Hidden.
     /// - A runner without workspaces (`fleet.runnerWorkspaces` has no key for
-    ///   it) keeps the layout from before them: repository, board, worktrees.
+    ///   it) has one implicit workspace per repository.
+    /// - With a `query`, a workspace is listed when its name, its
+    ///   orchestrator or one of its worktrees matches, and its Worktrees
+    ///   open on the matches. A repository with no match is left out: a
+    ///   header with nothing under it would look like a hit.
     /// - `silentHosts` are runners that have contributed nothing yet; each
     ///   gets a header, as before.
     static func sidebarRows(
-        fleet: Fleet, query: String = "", silentHosts: [String] = []
+        fleet: Fleet, query: String = "", silentHosts: [String] = [], open: (String) -> Bool = { _ in false }
     ) -> [SidebarEntry] {
         struct Group {
             let host: String
@@ -119,15 +128,11 @@ extension ContentView {
         var rows: [SidebarEntry] = []
         for key in order {
             guard let group = groups[key] else { continue }
-            let entries = repositoryRows(group.host, group.project, group.repositoryID, group.worktrees, fleet, query)
+            let entries = repositoryRows(
+                group.host, group.project, group.repositoryID, group.worktrees, fleet, query, open)
             // Only a header: nothing in this repository matched the search.
             if entries.count > 1 { rows += entries }
         }
-        // A runner that has never connected has no rows of its own, and
-        // without this it would simply be missing — leaving you to wonder
-        // where it went rather than seeing that it needs attention. Skipped
-        // while searching: a runner with nothing on it can never match a
-        // query, and a header appearing only here would look like a hit.
         if query.isEmpty {
             for host in silentHosts {
                 rows.append(SidebarEntry(kind: .repository, host: host, project: "", repositoryID: nil))
@@ -136,166 +141,117 @@ extension ContentView {
         return rows
     }
 
-    /// Every terminal in `rows`, in the order they are drawn: an
-    /// orchestrator in its own row under its workspace, each worktree's
-    /// terminals in turn, then Unclaimed's and Hidden's, collapsed or not.
-    ///
-    /// What ⌘] and ⌘[, ⌥⌘↓ and ⌥⌘↑, ⌘1… and the attention cycle walk, so
-    /// stepping goes down the list a user can see rather than jumping about
-    /// in the runner's order, which the grouping no longer draws.
-    static func terminalOrder(_ rows: [SidebarEntry]) -> [Terminal] {
-        var seen: Set<String> = []
-        var out: [Terminal] = []
-        func add(_ terminals: [Terminal]) {
-            for terminal in terminals where seen.insert(terminal.id).inserted { out.append(terminal) }
-        }
-        for row in rows {
-            switch row.kind {
-            case .orchestrator: add(row.orchestrator.map { [$0.terminal] } ?? [])
-            case .worktree: add(row.worktree?.terminals ?? [])
-            case .unclaimed, .hidden: add(row.worktrees.flatMap(\.terminals))
-            case .repository, .workspace, .board: continue
-            }
-        }
-        return out
-    }
-
-    /// One repository's rows: its header, each workspace's, then Unclaimed
-    /// and Hidden.
+    /// One repository's rows: its header, each workspace's row and, open or
+    /// not, its Worktrees, then Unclaimed and Hidden.
     private static func repositoryRows(
         _ host: String, _ project: String, _ repositoryID: String?, _ all: [Worktree],
-        _ fleet: Fleet, _ query: String
+        _ fleet: Fleet, _ query: String, _ open: (String) -> Bool
     ) -> [SidebarEntry] {
-        // The runner's order, and nothing else. This used to partition the
-        // main checkout to the top, which was stable and was still the app
-        // deciding: with rows draggable, a rule here silently outranks the
-        // one the person dragging just expressed, and the card they moved
-        // springs back with nothing to explain why. The runner's rank starts
-        // out as exactly what that partition produced — main checkout first,
-        // then by worktree path — see migration 0009.
+        // The runner's order, and nothing else: with rows draggable, a rule
+        // here would silently outrank the one the person dragging expressed.
         func entry(_ kind: SidebarEntry.Kind) -> SidebarEntry {
             SidebarEntry(kind: kind, host: host, project: project, repositoryID: repositoryID)
         }
         let listed = fleet.runnerWorkspaces[host]
-        let workspaces =
-            project == "Ungrouped"
-            ? [] : (listed ?? []).filter { $0.repository != nil && $0.repository == repositoryID }
+        let workspaces: [WorkspaceSummary] = {
+            guard project != "Ungrouped" else { return [] }
+            guard let listed else { return repositoryID.map { [.implicit(repository: $0)] } ?? [] }
+            return listed.filter { $0.repository != nil && $0.repository == repositoryID }
+        }()
 
-        // The orchestrators drawn in their own rows, by terminal id: these,
-        // and only these, are left out of the worktree rows, so each is drawn
-        // exactly once — and an orchestrator-role terminal no row shows (a
-        // stopped one the runner no longer seats) stays where it is. Found
-        // before the search, which matches each worktree as it is drawn.
+        // The orchestrators seated in their workspaces' rows, by terminal
+        // id: these, and only these, are left out of the worktree rows, so
+        // each is drawn exactly once — and an orchestrator-role terminal no
+        // workspace seats (a stopped one) stays where it is.
         var seats: [String: BoardPane] = [:]
         for workspace in workspaces where !workspace.isImplicit {
-            seats[workspace.id] = Self.orchestrator(of: workspace, host: host, in: fleet)
+            seats[workspace.id] = WorkspaceScreen.orchestrator(of: workspace, host: host, in: fleet)
         }
         let drawn = Set(seats.values.map(\.terminal.id))
+        let searching = !query.isEmpty
         let matched = all.filter { $0.without(drawn).matches(query) }
         let shown = matched.filter { !$0.isHidden }
         let hidden = matched.filter(\.isHidden)
 
         var header = entry(.repository)
-        header.worktrees = shown
+        header.worktrees = all.filter { !$0.isHidden }
         var rows = [header]
-        var body: [SidebarEntry] = []
-        var unclaimedIDs: [String] = []
         let byID = Dictionary(shown.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
-        if project == "Ungrouped" {
-            // No repository, so no board and no workspaces: the rows alone.
-            for worktree in shown { body.append(entry(.worktree(worktree.id))) }
+        if workspaces.isEmpty {
+            // No repository, so no workspaces: its worktrees, loose.
+            if !shown.isEmpty {
+                var loose = entry(.unclaimed(count: shown.count))
+                loose.worktrees = shown.map { $0.without(drawn) }
+                loose.depth = 1
+                rows.append(loose)
+            }
         } else {
+            // Every worktree the workspace owns, matched or not, so a
+            // workspace whose name matches still lists its worktrees.
+            let everyone = all.filter { !$0.isHidden }
+            // A repository's implicit workspace, on a runner without
+            // workspaces, owns every worktree in it.
             let grouped = WorkspaceGrouping.group(
                 repository: repositoryID ?? "", workspaces: workspaces,
-                worktrees: shown.map { (id: $0.id, workspace: $0.workspace) },
+                worktrees: everyone.map { (id: $0.id, workspace: listed == nil ? repositoryID : $0.workspace) },
                 orchestrators: [:])
+            let owned = Dictionary(everyone.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
             for group in grouped.workspaces {
                 let workspace = group.workspace
                 let seat = seats[workspace.id]
-                let seatMatches = seat.map { Self.matches($0.terminal, query) } ?? false
-                if !query.isEmpty && group.worktrees.isEmpty && !seatMatches { continue }
-                if !workspace.isImplicit {
-                    var title = entry(.workspace(workspace.name))
-                    title.workspace = workspace
-                    // For its menu, which offers Replace rather than Start
-                    // while one runs.
-                    title.orchestrator = seat
-                    body.append(title)
+                let nameMatches = searching && workspace.name.lowercased().contains(query.lowercased())
+                let seatMatches = searching && (seat.map { Self.matches($0.terminal, query) } ?? false)
+                let hits = group.worktrees.filter { byID[$0] != nil }
+                if searching && hits.isEmpty && !nameMatches && !seatMatches { continue }
+                var row = entry(.workspace(workspace.isImplicit ? "Main" : workspace.name))
+                row.workspace = workspace
+                row.orchestrator = seat
+                row.depth = 1
+                rows.append(row)
+
+                // Its worktrees: all of them, or while searching, the hits
+                // (all of them for a workspace found by its name).
+                let listedIDs = searching && !nameMatches ? hits : group.worktrees
+                let worktrees = listedIDs.compactMap { owned[$0]?.without(drawn) }
+                guard !worktrees.isEmpty else { continue }
+                var disclosure = entry(.worktrees(count: worktrees.count))
+                disclosure.workspace = workspace
+                disclosure.worktrees = worktrees
+                disclosure.depth = 2
+                rows.append(disclosure)
+                let isOpen = open(SidebarEntry.openKey(host: host, workspace: workspace.id)) || (searching && !hits.isEmpty)
+                guard isOpen else { continue }
+                for worktree in worktrees {
+                    var line = entry(.worktree(worktree.id))
+                    line.workspace = workspace
+                    line.worktree = worktree
+                    line.depth = 2
+                    rows.append(line)
                 }
-                var board = entry(.board)
-                board.workspace = workspace
-                body.append(board)
-                if !workspace.isImplicit {
-                    var conductor = entry(.orchestrator)
-                    conductor.workspace = workspace
-                    conductor.orchestrator = seat
-                    body.append(conductor)
-                }
-                for id in group.worktrees where byID[id] != nil { body.append(entry(.worktree(id))) }
             }
-            unclaimedIDs = grouped.unclaimed
-        }
-        // Filled in once every orchestrator row is known: Billing's may run
-        // in a checkout Main's rows drew above it.
-        let depth = body.contains { if case .workspace = $0.kind { true } else { false } } ? 1 : 0
-        for var row in body {
-            if case .worktree(let id) = row.kind { row.worktree = byID[id]?.without(drawn) }
-            row.depth = depth
-            rows.append(row)
-        }
-        if !unclaimedIDs.isEmpty {
-            var unclaimed = entry(.unclaimed(count: unclaimedIDs.count))
-            unclaimed.worktrees = unclaimedIDs.compactMap { byID[$0]?.without(drawn) }
-            unclaimed.depth = depth
-            rows.append(unclaimed)
+            let unclaimed = grouped.unclaimed.compactMap { byID[$0]?.without(drawn) }
+            if !unclaimed.isEmpty {
+                var group = entry(.unclaimed(count: unclaimed.count))
+                group.worktrees = unclaimed
+                group.depth = 1
+                rows.append(group)
+            }
         }
         if !hidden.isEmpty {
             var group = entry(.hidden(count: hidden.count))
             group.worktrees = hidden.map { $0.without(drawn) }
-            group.depth = depth
+            group.depth = 1
             rows.append(group)
         }
         return rows
     }
 
-    /// Whether an orchestrator row is a hit for `query`: by what its pane is
+    /// Whether an orchestrator is a hit for `query`: by what its pane is
     /// called, as a terminal in a worktree row is (`Worktree.matches`).
     private static func matches(_ terminal: Terminal, _ query: String) -> Bool {
         query.isEmpty || terminal.label.lowercased().contains(query.lowercased())
-    }
-
-    /// Who `workspace`'s orchestrator row shows: the runner's live seat,
-    /// `WorkspaceSummary.orchestrator`, first. Only when the runner names
-    /// none is a terminal taken by its role, and then only a live one — a
-    /// workspace can hold a stopped orchestrator beside the one that
-    /// replaced it, and the row must never show the stopped one over it.
-    private static func orchestrator(
-        of workspace: WorkspaceSummary, host: String, in fleet: Fleet
-    ) -> BoardPane? {
-        if let seat = workspace.orchestrator, let pane = pane(seat, host: host, in: fleet) {
-            return pane
-        }
-        for worktree in fleet.worktrees where (worktree.host ?? "") == host {
-            if let live = worktree.terminals.first(where: {
-                $0.isOrchestrator && $0.workspace == workspace.id
-                    && [.running, .starting].contains(StateKind.parse($0.state))
-            }) {
-                return BoardPane(terminal: live, worktree: worktree)
-            }
-        }
-        return nil
-    }
-
-    /// A terminal on `host`, with the worktree it is in.
-    private static func pane(_ terminal: String, host: String, in fleet: Fleet) -> BoardPane? {
-        for worktree in fleet.worktrees where (worktree.host ?? "") == host {
-            if let found = worktree.terminals.first(where: { $0.id == terminal }) {
-                return BoardPane(terminal: found, worktree: worktree)
-            }
-        }
-        return nil
     }
 
     /// The orchestrators the runner lists in `worktree`, by their role:

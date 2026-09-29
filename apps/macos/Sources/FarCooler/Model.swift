@@ -924,6 +924,15 @@ enum StateKind {
 /// A terminal as the board reads it. Both rules are AgentKit's —
 /// `TaskAgentLink.isWorking`, and `TaskAgentLink.runsAgent` for what "runs an
 /// agent" means — so this app and the phone agree about the same pane.
+extension Worktree {
+    /// Its open tasks' keys, in the runner's order.
+    var taskKeys: [String] { (openTasks ?? []).map(\.key) }
+
+    /// What its sidebar row says: its name, then its open tasks' keys,
+    /// "fc-3-webhooks · bil-9" (spec §3.2).
+    var rowTitle: String { ([task] + taskKeys).joined(separator: " · ") }
+}
+
 /// A pane as `TaskLink` asks about it: its own task, and whether it leads a
 /// workspace. Both are already here; this only says so.
 extension Terminal: TaskLinkPane {}

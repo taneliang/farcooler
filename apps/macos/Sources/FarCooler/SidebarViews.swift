@@ -203,12 +203,14 @@ struct WorktreeSection: View {
             .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(worktree.task)
+                // With its open tasks' keys, "fc-3-webhooks · bil-9", so a
+                // row says which task it's for without a board read.
+                Text(worktree.rowTitle)
                     .font(WorkspaceStyle.sidebarPrimary)
                     .lineLimit(1)
 
                 HStack(spacing: 5) {
-                    Text(worktree.isMainCheckout ? "Primary checkout" : worktree.branch)
+                    Text(worktree.isMainCheckout ? "Main checkout" : worktree.branch)
                         .font(WorkspaceStyle.sidebarMetadata)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -1266,73 +1268,157 @@ struct HiddenWorktrees: View {
     }
 }
 
-/// A workspace's board, as the first row under its header.
+/// A workspace in the sidebar: a place you select, which shows its
+/// orchestrator's conversation beside its board (spec §4.5).
 ///
-/// Above the worktrees because the board is about all of them: a task sits on
-/// one workspace's board whichever worktree an agent takes it into. Drawn
-/// like a worktree row — one line, the same band, the same selection pill —
-/// because it is a place you go, not a section label.
-///
-/// Two counts, and neither at zero. The amber one is the Needs Decision
-/// column: amber means one thing across these apps, something is waiting on
-/// you, and a question on the board is exactly that. The quiet one is how many
-/// tasks have an agent on them right now, which answers "is this board
-/// moving" without asking for anything.
-struct BoardRow: View {
-    @ObservedObject var store: TaskBoardStore
-    /// Observed for its board generations: the row holds its board open, so it
-    /// is what re-reads when the runner says this workspace's board moved.
-    @ObservedObject var client: DaemonClient
-    let agents: BoardAgents
+/// The orchestrator's status glyph, or a dashed circle with none; an unread
+/// dot for a finished turn nobody has seen (ruling 10); and the workspace's
+/// needs-you count in amber. The task prefix is in the tooltip. It keeps
+/// ov-60's menu and is still where a dragged worktree is dropped to move it.
+struct WorkspaceRow: View {
+    let name: String
+    /// The workspace's id: what a worktree dropped here is assigned to.
+    let workspace: String
+    let taskPrefix: String
+    /// Its seated orchestrator, or nil for none. `implicit` draws no glyph:
+    /// a runner without workspaces has no orchestrators.
+    let seat: BoardPane?
+    let implicit: Bool
+    let count: Int
+    let unread: Bool
+    let isSelected: Bool
+    let onSelect: () -> Void
+    /// What the context menu does, or nil for no menu.
+    let actions: WorkspaceHeaderActions?
+
+    @ObservedObject private var drag = WorktreeDrag.shared
+    @State private var hovering = false
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.controlActiveState) private var controlActiveState
+    private var windowActive: Bool { controlActiveState == .key }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 0) {
+            Group {
+                if implicit {
+                    Image(systemName: "square.stack.3d.up")
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                } else if let seat {
+                    StatusGlyph(status: seat.terminal.status)
+                } else {
+                    Image(systemName: "circle.dashed")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                        .help("No orchestrator")
+                }
+            }
+            .frame(width: SidebarGrid.gutter, height: 16, alignment: .leading)
+
+            Text(name)
+                .font(WorkspaceStyle.sidebarPrimary)
+                .lineLimit(1)
+            if unread {
+                Circle()
+                    .fill(Color.accentColor)
+                    .frame(width: 5, height: 5)
+                    .padding(.leading, 5)
+                    .help("The orchestrator finished a turn you haven’t seen")
+                    .accessibilityLabel("Unread")
+            }
+            Spacer(minLength: 6)
+            if count > 0 {
+                Text("\(count)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(GlancePalette.amber(scheme))
+                    .help(count == 1 ? "1 thing needs you here" : "\(count) things need you here")
+                    .accessibilityLabel(count == 1 ? "1 needs you" : "\(count) need you")
+            }
+        }
+        .padding(.vertical, SidebarGrid.rowVerticalPadding)
+        .padding(.horizontal, SidebarGrid.edge - SidebarGrid.highlightInset)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(
+                    drag.workspaceLanding == workspace
+                        ? Color.accentColor.opacity(0.2)
+                        : isSelected
+                            ? WorkspaceStyle.navigatorSelection(active: windowActive)
+                            : (hovering ? Color.primary.opacity(0.045) : .clear))
+        )
+        .padding(.horizontal, SidebarGrid.highlightInset)
+        .animation(Motion.snap, value: hovering)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
+        .onHover { hovering = $0 }
+        .onDrop(of: [.text], delegate: WorkspaceDropTarget(workspace: workspace))
+        .contextMenu {
+            if let actions { WorkspaceMenuItems(actions: actions) }
+        }
+        .help(taskPrefix.isEmpty ? name : "\(name) · tasks are \(taskPrefix)-")
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction(named: "Open", onSelect)
+    }
+}
+
+/// A workspace's Worktrees disclosure: its worktrees, one click down.
+struct WorktreesDisclosure: View {
+    let count: Int
+    let isOpen: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        SidebarRow {
+            Button(action: onToggle) {
+                HStack(spacing: SidebarGrid.gap) {
+                    Image(systemName: isOpen ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: SidebarGrid.gutter - SidebarGrid.gap, alignment: .leading)
+                    Text("Worktrees")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Text("\(count)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isOpen ? "Hide Worktrees" : "Show Worktrees")
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+/// The sidebar's first row: everything waiting on you, from every
+/// workspace.
+struct NeedsYouRow: View {
+    let count: Int
     let isSelected: Bool
     let onSelect: () -> Void
 
     @State private var hovering = false
     @Environment(\.colorScheme) private var scheme
-    /// See `WorkspaceStyle.navigatorSelection(active:)`.
     @Environment(\.controlActiveState) private var controlActiveState
-    private var windowActive: Bool { controlActiveState == .key }
-
-    private var decisions: Int { store.board.waitingOnYou }
-    private var working: Int { agents.tasksWithAgents(on: store.board) }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 0) {
-            Image(systemName: "checklist")
+        HStack(spacing: 0) {
+            Image(systemName: count > 0 ? "tray.full" : "tray")
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(count > 0 ? GlancePalette.amber(scheme) : .secondary)
                 .frame(width: SidebarGrid.gutter, height: 16, alignment: .leading)
-
-            Text("Board")
-                .font(WorkspaceStyle.sidebarPrimary)
-                .lineLimit(1)
-
+            Text("Needs You").font(WorkspaceStyle.sidebarPrimary)
             Spacer(minLength: 6)
-
-            HStack(spacing: 8) {
-                if let help = TaskBoardModel.agentsHelp(working) {
-                    HStack(spacing: 3) {
-                        Image(systemName: "sparkle")
-                            .font(.system(size: 8.5, weight: .medium))
-                        Text("\(working)")
-                            .font(.system(size: 11))
-                            .monospacedDigit()
-                    }
-                    .foregroundStyle(.tertiary)
-                    .help(help)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(help)
-                }
-                if let help = TaskBoardModel.decisionsHelp(decisions) {
-                    Text("\(decisions)")
-                        .font(.system(size: 11, weight: .semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(GlancePalette.amber(scheme))
-                        .help(help)
-                        .accessibilityLabel(help)
-                }
+            if count > 0 {
+                Text("\(count)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(GlancePalette.amber(scheme))
             }
-            .padding(.leading, SidebarGrid.cellGap)
         }
         .padding(.vertical, SidebarGrid.rowVerticalPadding)
         .padding(.horizontal, SidebarGrid.edge - SidebarGrid.highlightInset)
@@ -1340,83 +1426,15 @@ struct BoardRow: View {
             RoundedRectangle(cornerRadius: 6)
                 .fill(
                     isSelected
-                        ? WorkspaceStyle.navigatorSelection(active: windowActive)
-                        : (hovering ? Color.primary.opacity(0.045) : .clear))
-        )
+                        ? WorkspaceStyle.navigatorSelection(active: controlActiveState == .key)
+                        : (hovering ? Color.primary.opacity(0.045) : .clear)))
         .padding(.horizontal, SidebarGrid.highlightInset)
-        .animation(Motion.snap, value: hovering)
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .onHover { hovering = $0 }
         .accessibilityElement(children: .combine)
-        // Selected said as well as drawn: VoiceOver has no other way to know
-        // which row the window is showing.
+        .accessibilityLabel(count == 1 ? "Needs You, 1 item" : "Needs You, \(count) items")
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-        // Read here as well as by the board, because the counts are the
-        // row's and the board is usually not on screen. Only this
-        // workspace's `task` events, and reconnections, wake it — see
-        // `boardGeneration(for:)`. Keyed on the store for the reason
-        // `TaskBoardView`'s first read is: a replacement store is read.
-        .task(id: ObjectIdentifier(store)) { await store.readIfNeverRead() }
-        .task(id: client.boardGeneration(for: store.workspace)) { await store.reloadIfMoved() }
-    }
-}
-
-/// A workspace's name, heading its board, its orchestrator and its worktrees.
-///
-/// Drawn even when Main is the only workspace, and Main like any other, so
-/// the shape is visible before anybody splits a repository in two. A label
-/// and not a place: it is not selectable. Its context menu reaches the
-/// workspace's board, orchestrator and charter (`WorkspaceMenu`); making,
-/// moving and splitting workspaces is the CLI's in this release.
-struct WorkspaceHeader: View {
-    let name: String
-    /// The workspace's id: what a worktree dropped here is assigned to.
-    let workspace: String
-    /// What the context menu does, or nil for no menu: a runner that can't
-    /// be reached right now.
-    let actions: WorkspaceHeaderActions?
-    /// The one drag in flight, for lighting this header while a worktree is
-    /// over it. See `WorktreeSection.drag`.
-    @ObservedObject private var drag = WorktreeDrag.shared
-
-    init(name: String, workspace: String, actions: WorkspaceHeaderActions? = nil) {
-        self.name = name
-        self.workspace = workspace
-        self.actions = actions
-    }
-
-    var body: some View {
-        SidebarRow {
-            HStack(spacing: 0) {
-                Image(systemName: "square.stack.3d.up")
-                    .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(.tertiary)
-                    .frame(width: SidebarGrid.gutter, alignment: .leading)
-                Text(name)
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .padding(.top, 2)
-            .padding(.bottom, 1)
-        }
-        // Lit whole while a worktree would move here, as a Finder folder is:
-        // this drop files the worktree in the workspace, it doesn't place it
-        // between two rows, so no insertion line.
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color.accentColor.opacity(drag.workspaceLanding == workspace ? 0.2 : 0))
-                .padding(.horizontal, SidebarGrid.highlightInset)
-        )
-        .onDrop(of: [.text], delegate: WorkspaceDropTarget(workspace: workspace))
-        .contextMenu {
-            if let actions { WorkspaceMenuItems(actions: actions) }
-        }
-        .padding(.top, 4)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -1473,124 +1491,6 @@ private struct WorkspaceMenuItems: View {
                 }
             }
         }
-    }
-}
-
-/// A workspace's orchestrator: the agent that runs its board.
-///
-/// Its own row because it belongs to the workspace, not to the checkout it
-/// happens to run in — which is where the runner lists it, and why the
-/// worktree rows leave it out. "No orchestrator", dimmed, when none is
-/// running, rather than no row: an empty seat is worth seeing — and clicking
-/// it offers to fill it, with a choice of harness.
-struct OrchestratorRow: View {
-    /// The orchestrator and the worktree it runs in, or nil for none.
-    let pane: BoardPane?
-    let isSelected: Bool
-    let onSelect: () -> Void
-    /// Whether a start this app asked for hasn't been answered yet.
-    var isStarting = false
-    /// Start one, for an empty seat. Nil offers nothing: a runner that
-    /// can't be reached right now.
-    var onStart: ((OrchestratorHarness) -> Void)? = nil
-
-    @State private var hovering = false
-    /// Where the click's harness menu pops. See `SidebarMenuButton`.
-    @State private var anchor = MenuAnchor()
-    /// Whether clicking this row offers a start.
-    private var offersStart: Bool { pane == nil && onStart != nil && !isStarting }
-    @Environment(\.controlActiveState) private var controlActiveState
-    private var windowActive: Bool { controlActiveState == .key }
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 0) {
-            Group {
-                if let pane {
-                    StatusGlyph(status: pane.terminal.status)
-                } else {
-                    Image(systemName: "circle.dashed")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .frame(width: SidebarGrid.gutter, height: 16, alignment: .leading)
-
-            if let pane {
-                Text("Orchestrator")
-                    .font(WorkspaceStyle.sidebarPrimary)
-                    .lineLimit(1)
-                // Which harness, in the word the rest of the sidebar uses
-                // for it: `claude`, `codex`, `cursor`.
-                Text(Terminal.name(of: pane.terminal.preset))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .padding(.leading, SidebarGrid.gap)
-            } else {
-                Text(isStarting ? "Starting Orchestrator…" : "No orchestrator")
-                    .font(WorkspaceStyle.sidebarPrimary)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, SidebarGrid.rowVerticalPadding)
-        .padding(.horizontal, SidebarGrid.edge - SidebarGrid.highlightInset)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(
-                    isSelected
-                        ? WorkspaceStyle.navigatorSelection(active: windowActive)
-                        : (hovering && (pane != nil || offersStart)
-                            ? Color.primary.opacity(0.045) : .clear))
-        )
-        .padding(.horizontal, SidebarGrid.highlightInset)
-        .animation(Motion.snap, value: hovering)
-        .contentShape(Rectangle())
-        .background(MenuAnchorView(anchor: anchor))
-        .onTapGesture {
-            if pane != nil {
-                onSelect()
-            } else if offersStart {
-                offerStart()
-            }
-        }
-        .onHover { hovering = $0 }
-        .contextMenu {
-            if offersStart, let onStart {
-                Section(WorkspaceMenu.Item.startOrchestrator.title) {
-                    ForEach(OrchestratorHarness.allCases) { harness in
-                        Button(harness.title) { onStart(harness) }
-                    }
-                }
-            }
-        }
-        .help(offersStart ? "Start an orchestrator to run this workspace’s board" : "")
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(
-            pane == nil
-                ? (offersStart ? .isButton : [])
-                : (isSelected ? [.isButton, .isSelected] : .isButton))
-        // What VoiceOver's press does, which a tap gesture isn't.
-        .accessibilityAction {
-            if pane != nil {
-                onSelect()
-            } else if offersStart {
-                offerStart()
-            }
-        }
-    }
-
-    /// The harness menu, below the row: Start Orchestrator, then Claude,
-    /// Codex and Cursor.
-    private func offerStart() {
-        guard let onStart else { return }
-        SidebarMenuItem.popUp(
-            OrchestratorHarness.allCases.map { harness in
-                SidebarMenuItem(title: harness.title) { onStart(harness) }
-            },
-            header: WorkspaceMenu.Item.startOrchestrator.title,
-            under: anchor)
     }
 }
 
