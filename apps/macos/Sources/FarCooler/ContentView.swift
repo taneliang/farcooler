@@ -153,6 +153,8 @@ struct ContentView: View {
     /// The task whose changes the keyboard is in: the Diff menu's
     /// shortcuts are for the diff you clicked into.
     @State private var changesFocus: String?
+    /// Whether the one-time workspaces tip is up. See `WorkspacesTip`.
+    @State private var showWorkspacesTip = WorkspacesTip.shouldShow()
     /// Which workspaces' Worktrees disclosures are open, as
     /// `SidebarEntry.openKey`s, one a line. Empty by default (spec §9).
     @AppStorage("sidebar.openWorktrees") private var openWorktrees = ""
@@ -1232,6 +1234,17 @@ struct ContentView: View {
             statusBar
         }
         .background(WorkspaceStyle.sidebar)
+        // Once, on the first launch after workspaces became places.
+        .overlay(alignment: .bottom) {
+            if showWorkspacesTip {
+                WorkspacesTipView {
+                    WorkspacesTip.dismiss()
+                    showWorkspacesTip = false
+                }
+                .padding(.bottom, 28)
+                .transition(.opacity)
+            }
+        }
         // A finished drag, published by the row that took the drop. The row
         // says only that a card landed on another card's top or bottom edge;
         // what that MEANS needs the whole project group, which is here.
