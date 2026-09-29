@@ -21,6 +21,7 @@ version.sh already carries a comment about shallow clones failing silently.
 
     ./scripts/proto-lint.py                 # against the preview baseline
     ./scripts/proto-lint.py --channel stable
+    ./scripts/proto-lint.py --channel canary
     ./scripts/proto-lint.py --self-test     # the lint's own tests
 
 The two channels here are the two that ship: `promote.yml` writes
@@ -31,6 +32,13 @@ the promotion workflow never wrote, and every run found no baseline and passed
 saying nothing had shipped. A guard that cannot fire, in the one place the
 repository has no second opinion: a wire break is invisible until an app in the
 field decodes it.
+
+Canary is the third, and ships more than the other two together: every push to
+main reaches the owner's phones and Macs, so a field renumbered between two
+pushes is a Canary phone and a newer Canary daemon disagreeing with no error.
+`canary.yml` writes `proto/baseline/canary.proto` after each successful ship,
+through scripts/canary-baseline.sh, with a first comment line naming the commit
+it came from. The parser strips comments, so that line is invisible here.
 
 Before a first release the baseline is absent and this exits 0 saying so:
 nothing has shipped, so nothing is owed compatibility.
@@ -44,6 +52,15 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PROTO = ROOT / "proto" / "farcooler.proto"
+
+# Each channel with a baseline, and the workflow that writes it. The self-test
+# checks each workflow still names its channel, so a rename cannot again leave
+# this asking for a file nothing writes.
+CHANNELS = {
+    "preview": ".github/workflows/promote.yml",
+    "stable": ".github/workflows/promote.yml",
+    "canary": ".github/workflows/canary.yml",
+}
 
 # One declaration or brace, found ANYWHERE in the text rather than at the start
 # of a line: `message AgentCancel { bytes terminal_id = 1; }` puts the opening,
@@ -382,6 +399,20 @@ def self_test():
     if "compatible" in verdict or "nothing was compared" not in verdict:
         failures.append(f"with no baseline the verdict must say nothing was compared: {verdict!r}")
 
+    # Every channel asked for here is one a workflow writes. `beta` and
+    # `release` were asked for long after nothing wrote them, and passed.
+    writers = {
+        "preview": lambda text: re.search(r"options:\s*\[[^\]]*\bpreview\b", text),
+        "stable": lambda text: re.search(r"options:\s*\[[^\]]*\bstable\b", text),
+        "canary": lambda text: "scripts/canary-baseline.sh" in text,
+    }
+    for channel, workflow in CHANNELS.items():
+        count += 1
+        path = ROOT / workflow
+        text = path.read_text() if path.exists() else ""
+        if channel not in writers or not writers[channel](text):
+            failures.append(f"nothing in {workflow} writes the {channel} baseline")
+
     for f in failures:
         print(f"FAIL: {f}", file=sys.stderr)
     print(f"{count - len(failures)} passed, {len(failures)} failed")
@@ -390,7 +421,7 @@ def self_test():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--channel", default="preview", choices=["preview", "stable"])
+    ap.add_argument("--channel", default="preview", choices=sorted(CHANNELS))
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
 

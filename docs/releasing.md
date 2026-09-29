@@ -518,11 +518,15 @@ believes it asked for something it did not get — silently. Naming the capabili
 in `Request.required_capabilities` turns that into a refusal.
 
 `./scripts/proto-lint.py` enforces the first rule against
-`proto/baseline/<channel>.proto`, which the promotion workflow commits. How long
-a field is frozen depends on the channel: **permanent** once it ships in a
-stable release, **one preview** in preview — that is where the protocol's shape is still
-being discovered, and carrying every exploratory field to 1.0 is worse than a
-tester having to update. Canary and local freeze nothing.
+`proto/baseline/<channel>.proto`, which the promotion workflow commits for
+preview and stable, and the Canary workflow commits for canary after every
+successful ship. How long a field is frozen depends on the channel: **permanent**
+once it ships in a stable release, **one preview** in preview — that is where the
+protocol's shape is still being discovered, and carrying every exploratory field
+to 1.0 is worse than a tester having to update. In canary a field is frozen
+**from the moment a Canary build carrying it ships**, because that build is on
+the owner's phones within the hour and the next push's daemon has to decode it.
+Local freezes nothing.
 
 ## CI
 

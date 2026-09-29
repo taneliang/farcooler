@@ -23,7 +23,14 @@ on:
     # The relay has its own workflow and its own cadence, so a relay-only commit
     # should not spend twenty minutes of macOS runner time shipping an identical
     # app to TestFlight.
-    paths-ignore: ['services/relay/**', 'docs/**', '**/*.md']
+    #
+    # proto/baseline/ too, though the baseline jobs below should never need it:
+    # they push with the default GITHUB_TOKEN, and GitHub raises no workflow
+    # event for that push, so their commit re-triggers neither this workflow
+    # nor CI. This is the second lock on that loop, for the day someone swaps
+    # the token for an app token or a PAT, which DO trigger workflows. It only
+    # skips a push that touches nothing else.
+    paths-ignore: ['services/relay/**', 'docs/**', '**/*.md', 'proto/baseline/**']
   workflow_dispatch:
 
 # One canary at a time, and the newest wins. Two pushes a minute apart would
@@ -625,3 +632,63 @@ jobs:
         with:
           name: canary-macos
           path: '*.dmg'
+
+  # The wire this channel now owes compatibility to, as
+  # proto/baseline/canary.proto, which ci.yml lints every commit against.
+  # Canary is on the owner's phones and Macs within the hour, so a field
+  # renumbered on main is a Canary phone and a newer Canary daemon silently
+  # decoding the same bytes as different things — unless this file exists.
+  #
+  # WHICH SHIP COUNTS: either. The phone (TestFlight) and the Mac app with its
+  # bundled daemons (the dmg) are both clients in the field, so the moment
+  # EITHER ships, this commit's proto is owed compatibility. Waiting for both
+  # would record nothing whenever one fails — the upload limit fails the iOS
+  # job while the Mac one ships.
+  #
+  # TWO JOBS, not one that `needs` both: `cancel-in-progress` above cancels this
+  # run when the next push lands, and a single job would wait for the slower
+  # ship — the Mac job, behind the Linux build — so an iOS build that uploaded
+  # would lose its record to any push in that window. Each of these starts
+  # the moment its own ship succeeds. Both recording the same commit is
+  # harmless: the second finds the baseline unchanged.
+  #
+  # Their own jobs, rather than a step at the end of the shipping jobs, so that
+  # `contents: write` is held by twenty lines of shell and not by jobs that run
+  # a build and third-party actions. The repository's default token is
+  # read-only, so without this block the push is refused.
+  #
+  # NO LOOP: the push uses the default GITHUB_TOKEN, which triggers no
+  # workflow, and paths-ignore above skips proto/baseline/ besides. NO RACE:
+  # one Canary run at a time (the concurrency group above), the script retries
+  # a push that loses to another, and it never moves the baseline to a commit
+  # that is not a descendant of the one recorded — which is what a re-run of an
+  # old run would otherwise do. See scripts/canary-baseline.sh.
+  baseline-ios:
+    name: Record the wire baseline (iOS shipped)
+    needs: ios
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Main, where the baseline is committed, with full history so the script
+      # can tell whether this commit descends from the one recorded. The proto
+      # itself comes from github.sha — the commit that shipped — not from main,
+      # which has moved on during the build.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - run: scripts/canary-baseline.sh "${{ github.sha }}"
+
+  baseline-macos:
+    name: Record the wire baseline (macOS shipped)
+    needs: macos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - run: scripts/canary-baseline.sh "${{ github.sha }}"
