@@ -95,6 +95,13 @@ enum FleetSnapshotWriter {
         let now = Date()
         let agents = fleet.worktrees.flatMap(\.terminals).compactMap { terminal in
             snapshotAgent(terminal, machine: machine, at: now)
+        }.map { agent in
+            // The runner's id, which the Needs You items carry, so a push about
+            // this agent can name its runner the way the app does. See
+            // `FleetSnapshot.Agent.runner`.
+            var agent = agent
+            agent.runner = runner
+            return agent
         }
         // THIS runner's projection, which used to be the whole file.
         //

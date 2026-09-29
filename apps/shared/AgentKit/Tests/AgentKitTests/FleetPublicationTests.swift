@@ -633,3 +633,51 @@ struct FleetPublicationNeedsYouTests {
         #expect(emptied)
     }
 }
+
+/// Per runner, as the relay counts (ov-55 4C fix round 1).
+struct FleetPublicationPerRunnerTests {
+    private let now = Date(timeIntervalSince1970: 1_000_000)
+
+    private func agent(_ id: String, status: String) -> FleetSnapshot.Agent {
+        FleetSnapshot.Agent(
+            id: id, label: id, machine: "m", status: status, glyph: "", headline: "",
+            line: "", feed: [], rank: 7, turnFailed: false, activityChangedAt: nil)
+    }
+
+    /// A runner whose list isn't in yet adds its blocked agents, not zero,
+    /// while another runner's list is counted.
+    ///
+    /// Mutation: `merged` without the derived fallback. Red: 1, not 2.
+    @Test func aRunnerWithoutAListAddsItsBlockedAgents() {
+        var publication = FleetPublication()
+        publication.record(
+            runner: "a", snapshot: FleetSnapshot(agents: [], capturedAt: now, complete: true))
+        publication.record(
+            runner: "b",
+            snapshot: FleetSnapshot(
+                agents: [agent("t1", status: "blocked"), agent("t2", status: "working")],
+                capturedAt: now, complete: true))
+        publication.record(needsYou: [
+            "a": [NeedsYouItem(id: "decision:1", kind: .decision, rank: 200_000_000, since: nil, question: "?")]
+        ])
+        let merged = publication.merged(at: now)
+        #expect(merged.needingYou == 2)
+        let derived = merged.needsYou?.first { $0.isDerived }
+        #expect(derived?.terminal?.id == "t1")
+        #expect(derived?.runner == "b")
+    }
+
+    /// A runner that sent an empty list adds nothing, whatever its agents'
+    /// status words: the list is its answer.
+    ///
+    /// Mutation: the fallback applied to an empty list too. Red: 1, not 0.
+    @Test func aRunnerWhoseListIsEmptyAddsNothing() {
+        var publication = FleetPublication()
+        publication.record(
+            runner: "b",
+            snapshot: FleetSnapshot(
+                agents: [agent("t1", status: "blocked")], capturedAt: now, complete: true))
+        publication.record(needsYou: ["b": []])
+        #expect(publication.merged(at: now).needingYou == 0)
+    }
+}

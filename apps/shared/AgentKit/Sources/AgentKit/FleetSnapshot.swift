@@ -196,13 +196,23 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         /// `merging(_:at:)` carries nil: that agent was just heard about.
         public var runnerAnswering: Bool?
 
+        /// The runner's id (`Runner.id`), which is what a Needs You item's
+        /// `runner` holds. `machine` is its label, for people.
+        ///
+        /// **The fourth field nothing on the wire supplies**, stamped by
+        /// `FleetSnapshotWriter` for the reason the other three are: the daemon
+        /// doesn't know what a phone calls it. Nil from a push, which comes
+        /// through the relay with a label only, and in a snapshot written
+        /// before this; `merging` carries the stored agent's across.
+        public var runner: String?
+
         public init(
             id: String, label: String, machine: String, status: String,
             glyph: String, headline: String, line: String, feed: [String],
             rank: UInt32, turnFailed: Bool, activityChangedAt: Date?,
             observedAt: Date? = nil,
             planDone: UInt32? = nil, planTotal: UInt32? = nil,
-            trace: Data? = nil, runnerAnswering: Bool? = nil
+            trace: Data? = nil, runnerAnswering: Bool? = nil, runner: String? = nil
         ) {
             self.id = id
             self.label = label
@@ -220,6 +230,7 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
             self.planTotal = planTotal
             self.trace = trace
             self.runnerAnswering = runnerAnswering
+            self.runner = runner
         }
 
         /// Whether this status stays true as the snapshot ages.
@@ -415,12 +426,12 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     /// Each item keeps its `runner` and `isDerived` across the file, which the
     /// wire's decoder doesn't: see `StoredItem`.
     public var needsYou: [NeedsYouItem]? {
-        get { storedNeedsYou?.map(\.item) }
-        set { storedNeedsYou = newValue?.map(StoredItem.init) }
+        get { storedNeedsYou?.items.map(\.item) }
+        set { storedNeedsYou = newValue.map { StoredItems($0.map(StoredItem.init)) } }
     }
 
     /// `needsYou` as the file holds it.
-    private var storedNeedsYou: [StoredItem]?
+    private var storedNeedsYou: StoredItems?
 
     /// The keys on disk. Listed only so `storedNeedsYou` is written as
     /// `needsYou`; every other key is its property's name, as it was when this
@@ -443,7 +454,7 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         self.fleetTrace = fleetTrace
         self.fleetTraceAnchor = fleetTraceAnchor
         self.lostRunners = lostRunners
-        self.storedNeedsYou = needsYou?.map(StoredItem.init)
+        self.storedNeedsYou = needsYou.map { StoredItems($0.map(StoredItem.init)) }
     }
 
     /// Why a surface can't present these as the whole fleet, or nil when it
@@ -895,6 +906,11 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         // And heard from, whatever the app last knew of its runner's link: the
         // news came through the relay, which that link has nothing to do with.
         incoming.runnerAnswering = nil
+        // The runner's id, from the agent as the app last wrote it: a push
+        // names its runner by label only.
+        if incoming.runner == nil {
+            incoming.runner = agents.first { $0.id == incoming.id }?.runner
+        }
 
         var merged = agents
         if let index = merged.firstIndex(where: { $0.id == incoming.id }) {
@@ -947,12 +963,37 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
             blockedQuestion: agent.line, workspaceID: nil, repositoryID: nil)
         kept += NeedsYou.derived(fromTerminals: [pane]).map { item in
             var item = item
-            item.runner = agent.machine
+            // The runner's id, as the app's items carry it, so the key and the
+            // merge's tie-break stay in one namespace. The label only when the
+            // agent reached this snapshot by push alone.
+            item.runner = agent.runner ?? agent.machine
             return item
         }
         // `NeedsYou.merge`'s order, which is the order the app wrote.
         return kept.sorted { a, b in
             (a.rank, a.runner, a.itemID) < (b.rank, b.runner, b.itemID)
+        }
+    }
+
+    /// A runner's items when it has no list of its own: its blocked agents,
+    /// as `NeedsYou.derived` builds an older runner's, marked `isDerived`.
+    /// The relay counts a runner with no count the same way
+    /// (`composeFleet` in `services/relay/src/index.ts`).
+    static func derivedItems(from agents: [Agent], runner: String) -> [NeedsYouItem] {
+        NeedsYou.derived(
+            fromTerminals: agents.map { agent in
+                NeedsYou.OlderPane(
+                    terminal: NeedsYouTerminal(
+                        id: agent.id, worktreeID: nil, label: agent.label, role: nil,
+                        paneMode: "terminal", chatCapable: false),
+                    activity: agent.status, rank: agent.rank,
+                    activitySince: agent.activityChangedAt, blockedQuestion: agent.line,
+                    workspaceID: nil, repositoryID: nil)
+            }
+        ).map { item in
+            var item = item
+            item.runner = runner
+            return item
         }
     }
 
@@ -1036,6 +1077,39 @@ extension FleetSnapshot {
 // MARK: - Needs You, as the file holds it
 
 extension FleetSnapshot {
+    /// The list, decoded one item at a time: an item that won't decode (from
+    /// a later build, say, on a watch a version behind its phone) is dropped,
+    /// and the rest of the list and the whole snapshot survive.
+    struct StoredItems: Codable, Sendable, Equatable {
+        var items: [StoredItem]
+
+        init(_ items: [StoredItem]) { self.items = items }
+
+        init(from decoder: Decoder) throws {
+            var list = try decoder.unkeyedContainer()
+            var items: [StoredItem] = []
+            while !list.isAtEnd {
+                if let item = try? list.decode(StoredItem.self) {
+                    items.append(item)
+                } else {
+                    // Step over it: a failed decode doesn't advance.
+                    _ = try? list.decode(Skipped.self)
+                }
+            }
+            self.items = items
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var list = encoder.unkeyedContainer()
+            try list.encode(contentsOf: items)
+        }
+
+        /// Anything at all, to move past an element that isn't an item.
+        private struct Skipped: Decodable {
+            init(from decoder: Decoder) throws {}
+        }
+    }
+
     /// One `NeedsYouItem` in the snapshot file.
     ///
     /// **Its own shape rather than the wire's**, for two reasons. The wire's

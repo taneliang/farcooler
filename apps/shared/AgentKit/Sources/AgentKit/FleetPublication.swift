@@ -246,8 +246,19 @@ public struct FleetPublication {
             lostRunners: lost.isEmpty ? nil : lost,
             // Only the runners still being polled, for `agents`' reason: a
             // retired runner's asks must not stay on a lock screen forever.
+            //
+            // Per runner, as the relay counts: a runner with a list adds its
+            // items, and one without (connected, its list not read yet, or the
+            // read failed) adds its blocked agents rather than nothing, as
+            // derived items. Otherwise the widget would read lower than the
+            // Live Activity whenever one runner had answered and another not.
             needsYou: needsYouByRunner.map { lists in
-                NeedsYou.merge(lists.filter { live?.contains($0.key) ?? true })
+                var all = lists.filter { live?.contains($0.key) ?? true }
+                for runner in order where all[runner] == nil {
+                    guard let agents = byRunner[runner]?.snapshot.agents else { continue }
+                    all[runner] = FleetSnapshot.derivedItems(from: agents, runner: runner)
+                }
+                return NeedsYou.merge(all)
             })
     }
 }

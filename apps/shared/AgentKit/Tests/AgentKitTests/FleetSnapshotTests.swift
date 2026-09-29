@@ -1049,4 +1049,40 @@ struct WidgetRowsTests {
         #expect(row.line == "Billing · Blocked · " + String(repeating: "x", count: 39) + "…")
         #expect(WidgetItemRow(item(.review, question: "Ready for review")).status == "done")
     }
+
+    /// One stored item a later build wrote in a shape this one can't read
+    /// costs that item, not the snapshot.
+    ///
+    /// Mutation: `StoredItems` decoding the array strictly. Red: the decode
+    /// throws.
+    @Test func oneUnreadableItemIsDroppedAndTheSnapshotSurvives() throws {
+        let json = """
+        {"agents":[],"capturedAt":1000000,"complete":true,
+        "needsYou":[
+          {"id":"x:1","kind":"ask","rank":5,"question":"?","terminal":{"id":7}},
+          {"id":"decision:2","kind":"decision","rank":6,"question":"Which?"}]}
+        """
+        let snapshot = try JSONDecoder().decode(FleetSnapshot.self, from: Data(json.utf8))
+        #expect(snapshot.needsYou?.map(\.itemID) == ["decision:2"])
+    }
+
+    /// A pushed block takes the runner's id from the agent the app wrote, as
+    /// the app's items carry it, not the label.
+    ///
+    /// Mutation: the derived item's runner from `agent.machine`. Red.
+    @Test func aPushedBlockNamesItsRunnerByID() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        func pane(_ status: String) -> FleetSnapshot.Agent {
+            FleetSnapshot.Agent(
+                id: "t1", label: "claude", machine: "studio", status: status, glyph: "",
+                headline: "", line: "", feed: [], rank: 3, turnFailed: false,
+                activityChangedAt: nil)
+        }
+        var written = pane("working")
+        written.runner = "runner-uuid"
+        let snapshot = FleetSnapshot(agents: [written], capturedAt: now, complete: true, needsYou: [])
+        let merged = snapshot.merging(pane("blocked"), at: now)
+        #expect(merged.needsYou?.first?.runner == "runner-uuid")
+        #expect(merged.agents.first?.runner == "runner-uuid")
+    }
 }
