@@ -215,6 +215,16 @@ struct Notification<'a> {
     /// `needs_you` key reaches the relay as `undefined`.
     #[serde(rename = "needsYou", skip_serializing_if = "Option::is_none")]
     needs_you: Option<u32>,
+    /// This runner's install id, its `install-id` file: the one name that is
+    /// stable across re-pairing and distinct per runner, where the label the
+    /// app pairs under is "This Mac" on every Mac. The relay keys this runner's
+    /// needs-you count by it (migration 0013), so a re-pair replaces the old
+    /// token's count and two Macs never share one.
+    ///
+    /// An opaque UUIDv7 that names no person, path or host. A relay older than
+    /// the field ignores it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    install: Option<&'a str>,
     /// What this runner is running, so the devices screen can show which of
     /// someone's runners is behind without them going to each one to look.
     ///
@@ -342,6 +352,9 @@ pub struct Outgoing<'a> {
     pub task: Option<&'a str>,
     pub workspace: Option<&'a str>,
     pub needs_you: Option<u32>,
+    /// This runner's install id. See `Notification::install`. Stamped by the
+    /// watcher's `deliver` on every notice, so no caller can forget it.
+    pub install: Option<&'a str>,
     pub started_at: Option<i64>,
     /// What this agent's row on the card draws beside its name. See
     /// `Notification::insertions` for why absent is not zero, and
@@ -382,10 +395,13 @@ fn wire_anchor(trace: &[u8], anchor: Option<i64>) -> Option<i64> {
 /// - A decision carries its kind, task, workspace, title, subtitle and count,
 ///   and no terminal, status, label or `failed`.
 /// - A count carries its kind and the count, and nothing else.
+///
+/// Every kind carries the runner's install id when the caller has one.
 fn wire_body<'a>(o: &Outgoing<'a>) -> Option<Notification<'a>> {
     let shared = Notification {
         kind: o.kind,
         needs_you: o.needs_you,
+        install: o.install,
         version: farcooler_protocol::BUILD,
         ..Notification::default()
     };
@@ -728,6 +744,26 @@ mod tests {
         assert_eq!(decision["task"], "bil-7");
         assert_eq!(decision["kind"], "decision");
         assert_eq!(decision["title"], "Billing · bil-7 needs a decision");
+    }
+
+    /// Every kind names the runner by its install id, so the relay can tell
+    /// two Macs both labeled "This Mac" apart, and a re-paired runner from a
+    /// second one. Absent when the caller has none, never `""`.
+    #[test]
+    fn every_kind_carries_the_install_id() {
+        for outgoing in [
+            Outgoing { terminal: Some("term-1"), install: Some("0199-abc"), ..Outgoing::default() },
+            Outgoing { kind: Some("decision"), title: "bil-7", install: Some("0199-abc"), ..Outgoing::default() },
+            Outgoing { kind: Some("count"), needs_you: Some(1), install: Some("0199-abc"), ..Outgoing::default() },
+        ] {
+            let sent = serde_json::to_value(wire_body(&outgoing).unwrap()).unwrap();
+            assert_eq!(sent["install"], "0199-abc", "{sent}");
+        }
+        let bare = serde_json::to_value(
+            wire_body(&Outgoing { kind: Some("count"), needs_you: Some(1), ..Outgoing::default() }).unwrap(),
+        )
+        .unwrap();
+        assert!(bare.get("install").is_none(), "{bare}");
     }
 
     /// And an agent notice that names no pane is not sent at all.

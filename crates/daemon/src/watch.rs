@@ -2828,6 +2828,8 @@ impl Watcher {
                         task: None,
                         workspace: workspace.as_deref(),
                         needs_you,
+                        // Stamped by `deliver`.
+                        install: None,
                         started_at: notice.started_at,
                         insertions: stats.insertions,
                         deletions: stats.deletions,
@@ -3451,7 +3453,13 @@ impl Watcher {
 
     /// Send `outgoing` if paired; `true` once it has landed. A test's tap
     /// with no pairing counts as landed.
+    ///
+    /// Every notice goes out naming this runner by its install id, here and
+    /// not at each caller, so none can forget it: the relay keys its needs-you
+    /// count by it, since the label the app pairs under is "This Mac" on every
+    /// Mac and a re-pair is a new token for the same runner.
     async fn deliver(&self, pairing: Option<crate::push::Pairing>, outgoing: crate::push::Outgoing<'_>) -> bool {
+        let outgoing = crate::push::Outgoing { install: Some(self.service.install_id()), ..outgoing };
         match pairing {
             Some(pairing) => crate::push::notify(&self.push, &pairing, outgoing).await,
             None => true,
@@ -8335,6 +8343,56 @@ mod needs_you_push_tests {
         watcher.announce_needs_you();
         let again = next(&mut taps).await.expect("the same count, since the first never landed");
         assert_eq!(again.needs_you, Some(1));
+    }
+
+    /// What reaches the relay names this runner by its install id, whichever
+    /// token it holds: that is how the relay keys its count per runner rather
+    /// than per label, since every Mac pairs as "This Mac".
+    #[tokio::test]
+    async fn a_notice_names_the_runner_by_its_install_id() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (_dir, svc, _, pane) = a_runner().await;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        crate::push::Pairing { relay: format!("http://{}", listener.local_addr().unwrap()), token: "t".into() }
+            .save_in(svc.root_dir())
+            .unwrap();
+        let relay = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut seen = Vec::new();
+            let mut buf = [0u8; 4096];
+            // Headers, then as many body bytes as they promise.
+            loop {
+                let n = socket.read(&mut buf).await.unwrap();
+                seen.extend_from_slice(&buf[..n]);
+                let text = String::from_utf8_lossy(&seen).to_string();
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let length = text[..end]
+                        .lines()
+                        .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap()))
+                        .unwrap_or(0);
+                    if seen.len() >= end + 4 + length {
+                        socket.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}").await.unwrap();
+                        return serde_json::from_slice::<serde_json::Value>(&seen[end + 4..end + 4 + length]).unwrap();
+                    }
+                }
+                if n == 0 {
+                    panic!("the relay's socket closed before a whole request");
+                }
+            }
+        });
+        let watcher = Watcher::new(svc.clone());
+        watcher
+            .observe_for_tests(pane, crate::needs_you::Observation {
+                activity: AgentActivity::Blocked,
+                state_since: now_millis(),
+                command: "claude".into(),
+                ..Default::default()
+            })
+            .await;
+        watcher.announce_needs_you();
+        let body = tokio::time::timeout(std::time::Duration::from_secs(30), relay).await.unwrap().unwrap();
+        assert_eq!(body["kind"], "count", "{body}");
+        assert_eq!(body["install"], svc.install_id(), "{body}");
     }
 
     #[tokio::test]
