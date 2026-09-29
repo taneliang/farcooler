@@ -141,8 +141,11 @@ struct AgentActivityWidget: Widget {
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(context.state.label)
-                            .font(.headline)
+                        Text(
+                            AgentCardLayout.named(
+                                context.state.label, in: context.state.workspace)
+                        )
+                        .font(.headline)
                         let body = context.state.detail
                         if !body.isEmpty {
                             Text(body)
@@ -681,12 +684,17 @@ private struct LeaderRow: View {
         }
     }
 
-    /// "claude · studio", or just the name when the runner is not known.
+    /// "Billing · claude" when the agent is in a workspace, as the rows name
+    /// theirs (`AgentCardLayout.named`); otherwise "claude · studio", or just
+    /// the name when the runner is not known.
     ///
     /// A card started by a build older than the fleet restructure carries
     /// neither — see `ContentState.init(from:)` — so the separator has to be
     /// conditional or the card leads with a bare "·".
     private var runnerSuffixed: String {
+        if !state.workspace.isEmpty, !state.label.isEmpty {
+            return AgentCardLayout.named(state.label, in: state.workspace)
+        }
         guard !state.machine.isEmpty else { return state.label }
         guard !state.label.isEmpty else { return state.machine }
         return "\(state.label) · \(state.machine)"

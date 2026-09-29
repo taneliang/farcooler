@@ -549,3 +549,84 @@ private let cardNow = Date(timeIntervalSince1970: 1_755_000_000)
     #expect(hedgedWorking.qualified)
     #expect(hedgedWorking.dimsLine, "hedged, nobody blocked: dimmed")
 }
+
+// MARK: - Needs You and workspaces (ov-55 4C.3)
+
+/// The header's number is the relay's `needsYou` when it sends one: the item
+/// count, decisions included, which is the app's number. Without it, the
+/// blocked agents, as every card before this. The rings stay per agent tier.
+///
+/// Mutation: the title clause counting `state.blocked`. Red: "2 need you",
+/// not "5 need you".
+@Test("The header counts needsYou when the relay sends it, else blocked")
+func theHeaderCountsNeedsYouWhenTheRelaySendsItElseBlocked() throws {
+    let counted = try decode(
+        """
+        {"status":"blocked","detail":"","blocked":2,"review":0,"working":1,"more":0,
+         "needsYou":5,
+         "rows":[{"terminal":"a","label":"claude","status":"blocked","detail":""}]}
+        """)
+    let layout = try #require(AgentCardLayout(state: counted, now: cardNow, stale: false))
+    #expect(counted.needsYou == 5)
+    #expect(layout.title == "5 need you")
+    #expect(layout.counts == "1 in flight")
+
+    let older = try #require(AgentCardLayout(state: try decode(fleetPush()), now: cardNow, stale: false))
+    #expect(try decode(fleetPush()).needsYou == -1)
+    #expect(older.title == "2 need you")
+}
+
+/// A decision with no agent blocked is still amber: the header says it needs
+/// you, and the mark says what the header says.
+///
+/// Mutation: `tier` reading `state.blocked`. Red: the working mark.
+@Test func aDecisionAloneMakesTheHeaderAmber() throws {
+    let decision = try decode(
+        """
+        {"status":"working","detail":"","blocked":0,"review":0,"working":1,"more":0,
+         "needsYou":1,
+         "rows":[{"terminal":"a","label":"claude","status":"working","detail":""}]}
+        """)
+    let layout = try #require(AgentCardLayout(state: decision, now: cardNow, stale: false))
+    #expect(layout.title == "1 needs you")
+    #expect(layout.mark == GlanceMark(attention: .needsYou, core: .atAPrompt))
+}
+
+/// A row leads with its workspace, "Billing · claude", as every surface names
+/// an agent now; a row with none is the bare name, never " · claude".
+///
+/// Mutation: `name(of:)` ignoring `workspace`. Red: "claude".
+@Test("A row names its workspace")
+func aRowNamesItsWorkspace() throws {
+    let state = try decode(
+        """
+        {"status":"blocked","detail":"","blocked":1,"review":0,"working":1,"more":0,
+         "workspace":"Billing",
+         "rows":[
+           {"terminal":"a","label":"claude","workspace":"Billing","status":"blocked","detail":""},
+           {"terminal":"b","label":"codex","status":"working","detail":""}]}
+        """)
+    let layout = try #require(AgentCardLayout(state: state, now: cardNow, stale: false))
+    #expect(layout.rows.map(\.name) == ["Billing · claude", "codex"])
+    #expect(state.workspace == "Billing")
+    #expect(AgentCardLayout.named(state.label, in: state.workspace) == "")
+    #expect(AgentCardLayout.named("claude", in: "Billing") == "Billing · claude")
+}
+
+/// The new fields survive the round trip ActivityKit makes on every persisted
+/// card, and an absent count stays absent rather than becoming a number.
+///
+/// Mutation: `encode` writing `needsYou` unconditionally. Red: -1 comes back
+/// as an answer, and the older card's header would read it.
+@Test func needsYouAndWorkspaceRoundTripAndAbsenceStaysAbsent() throws {
+    let state = AgentCardState(
+        label: "claude", workspace: "Billing", status: "blocked", detail: "",
+        blocked: 1, review: 0, working: 0, needsYou: 3,
+        rows: [AgentCardRow(terminal: "a", label: "claude", workspace: "Billing")])
+    let back = try JSONDecoder().decode(AgentCardState.self, from: JSONEncoder().encode(state))
+    #expect(back == state)
+    let silent = AgentCardState(status: "working", detail: "")
+    let json = String(decoding: try JSONEncoder().encode(silent), as: UTF8.self)
+    #expect(!json.contains("needsYou"))
+    #expect(!json.contains("workspace"))
+}

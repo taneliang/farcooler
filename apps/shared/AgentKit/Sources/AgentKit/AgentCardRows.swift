@@ -63,6 +63,10 @@ public struct AgentCardRow: Codable, Hashable, Sendable, Identifiable {
     public var terminal: String
     public var label: String
     public var machine: String
+    /// The workspace this agent works in, by name: "Billing" of "Billing ·
+    /// claude". Empty for an agent in none and from a relay or runner older
+    /// than the field, and the row then draws the bare name.
+    public var workspace: String
     /// `working`, `blocked` or `done`. A String for `AgentCardState.status`'s
     /// reason: the daemon and the relay are not Swift, and a word none of them
     /// knew about must cost one row's ring rather than the card.
@@ -110,6 +114,7 @@ public struct AgentCardRow: Codable, Hashable, Sendable, Identifiable {
         terminal: String = "",
         label: String = "",
         machine: String = "",
+        workspace: String = "",
         status: String = "",
         detail: String = "",
         insertions: Int? = nil,
@@ -123,6 +128,7 @@ public struct AgentCardRow: Codable, Hashable, Sendable, Identifiable {
         self.terminal = terminal
         self.label = label
         self.machine = machine
+        self.workspace = workspace
         self.status = status
         self.detail = detail
         self.insertions = insertions
@@ -135,7 +141,7 @@ public struct AgentCardRow: Codable, Hashable, Sendable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case terminal, label, machine, status, detail
+        case terminal, label, machine, workspace, status, detail
         case insertions, deletions, commits, startedAt, updatedAt, trace, traceAnchor
     }
 
@@ -150,6 +156,7 @@ public struct AgentCardRow: Codable, Hashable, Sendable, Identifiable {
         terminal = text(.terminal)
         label = text(.label)
         machine = text(.machine)
+        workspace = text(.workspace)
         status = text(.status)
         detail = text(.detail)
         insertions = number(.insertions)
@@ -180,6 +187,7 @@ public struct AgentCardRow: Codable, Hashable, Sendable, Identifiable {
         try container.encode(terminal, forKey: .terminal)
         try container.encode(label, forKey: .label)
         try container.encode(machine, forKey: .machine)
+        if !workspace.isEmpty { try container.encode(workspace, forKey: .workspace) }
         try container.encode(status, forKey: .status)
         try container.encode(detail, forKey: .detail)
         try container.encodeIfPresent(insertions, forKey: .insertions)
@@ -254,9 +262,10 @@ public struct AgentCardLayout: Sendable, Equatable {
         /// trace beside it never carries amber or blue, because history is not
         /// urgent.
         public let mark: GlanceMark
-        /// The agent's name. Its runner is deliberately not on the line: the
-        /// design gives the row a name and a detail, and the width it would
-        /// take belongs to the trace.
+        /// The agent's name, after its workspace's: "Billing · claude". Its
+        /// runner is deliberately not on the line: the design gives the row a
+        /// name and a detail, and the width it would take belongs to the
+        /// trace.
         public let name: String
         public let detail: String
         /// `+142 −37`, or nil where the runner measured nothing.
@@ -394,9 +403,14 @@ public struct AgentCardLayout: Sendable, Equatable {
         // The header's clauses, in the order the fleet is urgent in. An empty
         // tier is dropped rather than written as zero: "0 need you" is worse
         // than silence on a lock screen.
+        //
+        // The first counts what needs you, which is the relay's `needsYou`
+        // when any runner sent one and the blocked agents otherwise: the one
+        // number the app, the widget and the watch show (`headerCount`).
         var clauses: [String] = []
-        if state.blocked > 0 {
-            clauses.append("\(state.blocked) need\(state.blocked == 1 ? "s" : "") you")
+        let needing = state.headerCount
+        if needing > 0 {
+            clauses.append("\(needing) need\(needing == 1 ? "s" : "") you")
         }
         if state.review > 0 { clauses.append("\(state.review) to review") }
         if state.working > 0 && !stale { clauses.append("\(state.working) in flight") }
@@ -491,16 +505,23 @@ public struct AgentCardLayout: Sendable, Equatable {
         return trace.rebucketed(to: axis)
     }
 
-    /// What to call this agent.
+    /// What to call this agent: "Billing · claude", its workspace leading, as
+    /// every surface names an agent now (spec §7).
     ///
     /// The runner, then the terminal, when the daemon sent no name. A blank line
     /// where a name goes is the one thing worse than an ugly one, and a card
     /// started by an older build carries neither — see `AgentCardRow.init(from:)`,
-    /// which defaults every string rather than throwing.
+    /// which defaults every string rather than throwing. No workspace is the
+    /// bare name, never a leading " · ".
     static func name(of row: AgentCardRow) -> String {
-        if !row.label.isEmpty { return row.label }
-        if !row.machine.isEmpty { return row.machine }
-        return row.terminal
+        let name = !row.label.isEmpty ? row.label : !row.machine.isEmpty ? row.machine : row.terminal
+        return named(name, in: row.workspace)
+    }
+
+    /// `name` after its workspace's, or alone when there's none. The card's
+    /// headline and the Island name the leader the same way.
+    public static func named(_ name: String, in workspace: String) -> String {
+        workspace.isEmpty || name.isEmpty ? name : "\(workspace) · \(name)"
     }
 
     /// `+142 −37`, or nil.
@@ -548,8 +569,11 @@ public struct AgentCardLayout: Sendable, Equatable {
     /// borrowing the enum would put that confusion in a type that is about to be
     /// read by three other surfaces. The word goes through the one status→mark
     /// switch instead.
+    ///
+    /// Blocked is the header's count, `headerCount`: a decision waiting with no
+    /// agent blocked is still amber, because the header says it needs you.
     static func tier(_ state: AgentCardState) -> String {
-        if state.blocked > 0 { return "blocked" }
+        if state.headerCount > 0 { return "blocked" }
         if state.review > 0 { return "done" }
         return "working"
     }

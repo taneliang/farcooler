@@ -80,6 +80,11 @@ public struct AgentCardState: Codable, Hashable, Sendable {
     /// down.
     public var machine: String
 
+    /// The leading agent's workspace, by name, so the card says "Billing ·
+    /// claude". Empty for an agent in none, and from a relay or runner older
+    /// than the field: the card then draws the bare name it always drew.
+    public var workspace: String
+
     /// `working`, `blocked`, or `done`.
     ///
     /// A String rather than an enum, deliberately. The daemon and the
@@ -191,6 +196,22 @@ public struct AgentCardState: Codable, Hashable, Sendable {
     /// with silence.
     public var more: Int
 
+    /// How many things need a person across the account: each runner's own
+    /// Needs You count where it sent one, and its blocked agents where it
+    /// didn't (`ActivityState.needsYou` in `push.ts`). Items, not agents: a
+    /// decision is one, and has no agent.
+    ///
+    /// `-1` for "the relay did not say", on `blocked`'s terms: absent until
+    /// some runner on the account sends a count, and on every card an older
+    /// relay started. The header then counts `blocked`, as it always did. See
+    /// `headerCount`.
+    public var needsYou: Int
+
+    /// The number the header leads with: `needsYou` when the relay sent it,
+    /// else `blocked` (spec §7). The same number the app's Needs You row, the
+    /// widget and the watch show, once every runner counts.
+    public var headerCount: Int { needsYou >= 0 ? needsYou : blocked }
+
     /// One line per agent, in the order the card draws them.
     ///
     /// Blocked first, then to-review, then working; within a tier the
@@ -238,6 +259,7 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         terminal: String = "",
         label: String = "",
         machine: String = "",
+        workspace: String = "",
         status: String,
         detail: String,
         startedAt: Date? = nil,
@@ -248,11 +270,13 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         deletions: Int? = nil,
         commits: Int? = nil,
         more: Int = -1,
+        needsYou: Int = -1,
         rows: [AgentCardRow] = []
     ) {
         self.terminal = terminal
         self.label = label
         self.machine = machine
+        self.workspace = workspace
         self.status = status
         self.detail = detail
         self.startedAt = startedAt
@@ -263,13 +287,14 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         self.deletions = deletions
         self.commits = commits
         self.more = more
+        self.needsYou = needsYou
         self.rows = rows
     }
 
     private enum CodingKeys: String, CodingKey {
-        case terminal, label, machine, status, detail, startedAt
+        case terminal, label, machine, workspace, status, detail, startedAt
         case blocked, review, working, insertions, deletions, commits
-        case more, rows
+        case more, needsYou, rows
     }
 
     /// Hand-written for two reasons, and neither is the timestamp alone.
@@ -306,6 +331,7 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         terminal = (try? container.decodeIfPresent(String.self, forKey: .terminal)) ?? ""
         label = (try? container.decodeIfPresent(String.self, forKey: .label)) ?? ""
         machine = (try? container.decodeIfPresent(String.self, forKey: .machine)) ?? ""
+        workspace = (try? container.decodeIfPresent(String.self, forKey: .workspace)) ?? ""
         status = (try? container.decodeIfPresent(String.self, forKey: .status)) ?? ""
         detail = (try? container.decodeIfPresent(String.self, forKey: .detail)) ?? ""
         // The seconds-or-milliseconds rule is `AgentCardClock`, which is where
@@ -326,6 +352,7 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         review = count(.review)
         working = count(.working)
         more = count(.more)
+        needsYou = count(.needsYou)
         insertions = (try? container.decodeIfPresent(Int.self, forKey: .insertions)) ?? nil
         deletions = (try? container.decodeIfPresent(Int.self, forKey: .deletions)) ?? nil
         commits = (try? container.decodeIfPresent(Int.self, forKey: .commits)) ?? nil
@@ -348,6 +375,7 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         try container.encode(terminal, forKey: .terminal)
         try container.encode(label, forKey: .label)
         try container.encode(machine, forKey: .machine)
+        if !workspace.isEmpty { try container.encode(workspace, forKey: .workspace) }
         try container.encode(status, forKey: .status)
         try container.encode(detail, forKey: .detail)
         try container.encodeIfPresent(AgentCardClock.number(startedAt), forKey: .startedAt)
@@ -363,6 +391,8 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         // On the same terms, and separately: `more` has its own absent value and
         // a persisted `-1` would read back as an answer on the next decode.
         if more >= 0 { try container.encode(more, forKey: .more) }
+        // And `needsYou`, on the same terms again.
+        if needsYou >= 0 { try container.encode(needsYou, forKey: .needsYou) }
         try container.encodeIfPresent(insertions, forKey: .insertions)
         try container.encodeIfPresent(deletions, forKey: .deletions)
         try container.encodeIfPresent(commits, forKey: .commits)
