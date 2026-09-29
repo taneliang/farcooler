@@ -85,3 +85,66 @@ public struct PermissionAnswering: Equatable, Sendable {
             ).sentence)
     }
 }
+
+// MARK: - A lock-screen tap on a closed hook ask (ov-57)
+
+/// The sentences a card says when a hook ask is closed.
+///
+/// **Provisional (ov-57), D4**, and in one place so the owner's answer is a
+/// change here and nowhere else. The T0 contract's C5 table.
+public enum ClosedAskWording {
+    /// The hold is over, or the verdict never reached the hook: the dialog may
+    /// still be up at the keyboard.
+    public static let tooLate = "Too late here. Answer it in the terminal."
+    /// Refused as no longer held while the hold was still running: another
+    /// device won.
+    public static let answeredElsewhere = "Answered on another device."
+    /// Refused as no longer held, with no hold end to tell the two causes
+    /// apart by.
+    public static let eitherCause = "Answered elsewhere, or it timed out."
+}
+
+extension GlanceAnswer {
+    /// How a closed ask settles, and what the card says about it.
+    public struct Closing: Equatable, Sendable {
+        public let outcome: Outcome
+        public let message: String
+    }
+
+    /// A tap refused on the phone, before any connection, because the hold is
+    /// over at `now`; nil when the tap may go out. Nothing is sent, and the
+    /// buttons stay off: there is nothing left to answer from here.
+    ///
+    /// No `until` (an ask the app filed, not the card) is never refused here;
+    /// the daemon decides.
+    public static func refusedHere(until: Date?, now: Date) -> Closing? {
+        guard let until, now >= until else { return nil }
+        return Closing(outcome: .over, message: ClosedAskWording.tooLate)
+    }
+
+    /// The runner's refusal of an answer to a HOOK ask, read as the ask being
+    /// closed; nil for any other refusal, which keeps its existing reading.
+    ///
+    /// The daemon refuses both `not_held` (answered, withdrawn, or the hold ran
+    /// out) and `not_delivered` (the verdict never reached the hook) with the
+    /// word `resource-conflict`, and says which in the message
+    /// (`crates/daemon/src/rpc.rs`, `terminal.agent_answer`). Both are `.over`.
+    /// Which sentence depends on the cause and, for `not_held`, on whether the
+    /// hold had run out when the tap was made.
+    public static func closing(
+        request: String, word: String?, message: String, until: Date?, now: Date
+    ) -> Closing? {
+        guard request.hasPrefix(CardAsk.idPrefix),
+            word == RunnerRefusal.resourceConflict.rawValue
+        else { return nil }
+        let sentence: String
+        if message.contains("not_delivered") {
+            sentence = ClosedAskWording.tooLate
+        } else if let until {
+            sentence = now >= until ? ClosedAskWording.tooLate : ClosedAskWording.answeredElsewhere
+        } else {
+            sentence = ClosedAskWording.eitherCause
+        }
+        return Closing(outcome: .over, message: sentence)
+    }
+}

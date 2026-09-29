@@ -293,6 +293,38 @@ struct GlancePermissionsTests {
         #expect(next?.permission(for: "t1")?.request == "r1")
     }
 
+    /// A tap on a hook ask the runner no longer holds settles as `.over`, and
+    /// the buttons stay off: a second tap could only be refused again.
+    ///
+    /// Mutation: `.over` handing the buttons back. Red: a second claim.
+    @Test func aNotHeldHookAskIsOverAndKeepsTheButtonsOff() {
+        let now = Date(timeIntervalSince1970: 2000)
+        let over = claimable
+            .claiming(terminal: "t1", request: "r1", option: "a", optionName: "Allow", at: now)?
+            .settling(
+                terminal: "t1", request: "r1", outcome: .over,
+                message: "Answered on another device.", at: now)
+        #expect(over?.answer(for: "t1")?.refusesAnotherTap == true)
+        #expect(
+            over?.claiming(terminal: "t1", request: "r1", option: "b", optionName: "Deny", at: now)
+                == nil)
+    }
+
+    /// A read that still shows the ask after it was refused as over must not
+    /// file it again and put the buttons back.
+    ///
+    /// Mutation: `.over` handing the buttons back. Red: the ask is refiled.
+    @Test func anOverAnswerIsNotRefiledAsPending() {
+        let now = Date(timeIntervalSince1970: 2000)
+        let over = claimable
+            .claiming(terminal: "t1", request: "r1", option: "a", optionName: "Allow", at: now)?
+            .settling(
+                terminal: "t1", request: "r1", outcome: .over,
+                message: "Too late here. Answer it in the terminal.", at: now)
+            .clearingPermission(for: "t1")
+        #expect(over?.filing(permission([option("a", "Yes", "allow_once")]), for: "t1") == nil)
+    }
+
     /// Neither list may grow for the life of an install. The file is read on a
     /// render path.
     @Test func neitherListGrowsWithoutBound() {

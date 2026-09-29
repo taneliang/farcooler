@@ -279,6 +279,12 @@ public struct GlanceAnswer: Codable, Sendable, Equatable {
         /// It failed before anything was handed over, so trying again costs
         /// nothing. The buttons come back.
         case nothingSent
+        /// The ask is closed: another device answered it, its hold ran out, or
+        /// the verdict never reached the hook. A tap could only be refused
+        /// again, so the buttons stay off, and the sentence says to answer at
+        /// the keyboard where that's still possible (ov-57). See
+        /// `GlanceAnswer.closing` and `GlanceAnswer.refusedHere`.
+        case over
     }
 
     public let terminal: String
@@ -325,7 +331,8 @@ public struct GlanceAnswer: Codable, Sendable, Equatable {
     }
 
     /// Whether the buttons stay off. Everything except the case that
-    /// established nothing was written.
+    /// established nothing was written; `.over` included, because a closed ask
+    /// refuses every answer.
     public var refusesAnotherTap: Bool { outcome != .nothingSent }
 }
 
