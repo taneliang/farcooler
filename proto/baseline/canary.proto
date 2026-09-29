@@ -1,0 +1,3145 @@
+// Shipped by Canary at 8b6ecdebf67f2308e06ba8406b53fcf03425fdbb. Written by canary.yml; see scripts/proto-lint.py.
+syntax = "proto3";
+
+package farcooler.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// ---------------------------------------------------------------------------
+// Wire envelope
+//
+// Concurrency, lease, and idempotency metadata are canonical ONLY here. Business
+// payloads never repeat the target ID, target version, or lease generation. The
+// generic dispatcher validates these preconditions before invoking domain logic.
+// ---------------------------------------------------------------------------
+
+message WireEnvelope {
+  uint32 protocol_version = 1;
+  bytes message_id = 2; // UUIDv7, 16 bytes
+
+  oneof body {
+    ClientHello client_hello = 10;
+    ServerHello server_hello = 11;
+    Request request = 12;
+    Response response = 13;
+    Event event = 14;
+    SnapshotChunk snapshot_chunk = 15;
+    TerminalFrame terminal_frame = 16;
+  }
+}
+
+message ClientHello {
+  repeated uint32 supported_protocol_versions = 1;
+  string client_name = 2;
+  string client_version = 3;
+}
+
+message ServerHello {
+  uint32 selected_protocol_version = 1;
+  string daemon_version = 2;
+  uint32 max_control_envelope_bytes = 3;
+  uint32 max_terminal_payload_bytes = 4;
+  Scope granted_scope = 5;
+  // What this daemon can do, by name.
+  //
+  // The mechanism that lets an app and a daemon drift. `protocol_version` is
+  // reserved for a framing break that additivity cannot express and is expected
+  // never to move; everything a client must know exists, it asks for HERE, by
+  // name, rather than by comparing version strings.
+  //
+  // In the handshake rather than behind `daemon.version`, so every client has
+  // the answer before its first request at no extra round trip.
+  repeated string capabilities = 6;
+}
+
+message Request {
+  bytes request_id = 1;
+  string method = 2;
+
+  // Generic envelope preconditions. A mutation of an existing resource targets
+  // that resource; a create mutation targets and versions its PARENT.
+  optional bytes target_resource_id = 3;
+  optional uint64 expected_resource_version = 4;
+  optional uint64 expected_lease_generation = 5;
+  optional string idempotency_key = 6;
+  // Capabilities this request needs the daemon to have.
+  //
+  // Another generic precondition, checked in the same dispatcher and for the
+  // same reason as the four above: a daemon that lacks one refuses with
+  // CAPABILITY_UNSUPPORTED before any domain logic runs.
+  //
+  // It exists for the case negotiation alone cannot catch. A new FIELD on an
+  // existing payload is dropped by an older daemon as an unknown proto3 field,
+  // which means it does the old thing while the client believes it asked for
+  // the new one — silently, with no error and nothing in a log. A client that
+  // fills in such a field names the capability it belongs to here, and the
+  // refusal becomes loud.
+  //
+  // On the envelope rather than checked at each call site because there are
+  // some thirty of those, and a check that can be forgotten at any one of them
+  // leaves the silence exactly where it was.
+  repeated string required_capabilities = 7;
+
+  oneof payload {
+    Empty empty = 20;
+    RepositoryRootAdd repository_root_add = 21;
+    RepositoryRegister repository_register = 22;
+    WorktreeCreate worktree_create = 23;
+    TerminalCreate terminal_create = 24;
+    TerminalResize terminal_resize = 25;
+    TerminalStop terminal_stop = 26;
+    TypedConfirmation typed_confirmation = 27;
+    // Attach to one terminal's live bytes, on the connection this arrives on.
+    //
+    // `terminal.attach`, and the reason it is a wire method rather than the
+    // second SSH exec it used to be. This tag was retired once, with the note
+    // "streaming a terminal is a second SSH exec of `farcoolerd --stream <id>`,
+    // not a wire method". That was true when it was written and stopped being
+    // true when enrollment started forcing a command: every key `crates/fence`
+    // enrolls carries
+    // `restrict,command="~/.local/bin/farcoolerd --stdio --client … --scope …"`,
+    // and a forced command is OpenSSH discarding whatever the client asked to
+    // run — which `crates/daemon/tests/a_real_sshd_forces_the_scope.rs` pins as
+    // a security property. So the second exec landed on a `--stdio` relay, which
+    // is a protocol server and says nothing until it is spoken to: the channel
+    // opened, the client read success, and no byte ever arrived. Every enrolled
+    // phone and every Android device sat on the capture-polling fallback, which
+    // carries no scrollback (`crates/tmux/src/windows.rs`), so those panes could
+    // not scroll — and retried the doomed attach forever against sshd's
+    // ten-session ceiling.
+    //
+    // Speaking the protocol on the second channel is what ends that, because
+    // `--stdio` is the one command BOTH key types run: a forced-command key has
+    // sshd substitute it, and a plain key matches it in `main.rs` before
+    // `--stream`. The client stops depending on which line it holds — the
+    // difference that made this bug invisible on the Mac, which enrolls a plain
+    // shell key beside its restricted one, and in every loopback test.
+    //
+    // Still a SECOND `--stdio` session rather than events on the control
+    // connection: `Client::call` reads frames until it sees its own response, so
+    // a scrollback replay carried there would sit in front of every fleet
+    // refresh. `farcooler events` already streams over ssh this way.
+    //
+    // `--stream` is not replaced. It is what the Mac's CLI uses and the only
+    // path a plain-key client has on a runner too old to advertise
+    // `terminal_stream`; a client that does not see that capability keeps
+    // exec'ing it, and keeps the poll fallback behind it.
+    TerminalAttach terminal_attach = 28;
+    LayoutUpdate layout_update = 29;
+    // 30 was WorktreeImport. Worktrees are adopted by the daemon's reconciler
+    // now, so there is nothing for a client to import. The tag is retired
+    // rather than reused.
+    TerminalWrite terminal_write = 31;
+    TerminalScreenRequest terminal_screen_request = 32;
+    SetPaneMode set_pane_mode = 33;
+    AgentSubscribe agent_subscribe = 34;
+    AgentPrompt agent_prompt = 35;
+    AgentAnswer agent_answer = 36;
+    AgentSetMode agent_set_mode = 37;
+    AgentCancel agent_cancel = 38;
+    WorktreeFileSearch worktree_file_search = 39;
+    AgentSetModel agent_set_model = 40;
+    AgentSetConfig agent_set_config = 41;
+    AgentEditQueued agent_edit_queued = 42;
+    AgentCancelQueued agent_cancel_queued = 43;
+    AgentSteerQueued agent_steer_queued = 44;
+    Adapter adapter = 45;
+    // Machine settings. `HostSettings` doubles as the write payload for the one
+    // scalar it carries, and `Theme` is the same message the read returns —
+    // there is nothing an upsert needs that a read does not already describe.
+    HostSettings host_settings = 46;
+    Theme theme = 47;
+    TerminalFilePut terminal_file_put = 48;
+    ChangeSetRequest change_set_request = 49;
+    CommitFilesRequest commit_files_request = 50;
+    FileDiffRequest file_diff_request = 51;
+    ChangesSetBase changes_set_base = 52;
+    ChangesMarkRead changes_mark_read = 59;
+    StackGet stack_get = 62;
+    StackSetParent stack_set_parent = 63;
+    PrRefresh pr_refresh = 64;
+    ChangesInboxRequest changes_inbox = 65;
+    ClientEnroll client_enroll = 66;
+    ClientRevoke client_revoke = 67;
+    TerminalsWatched terminals_watched = 68;
+    ClientSetNodeKey client_set_node_key = 69;
+    WorktreeReorder worktree_reorder = 70;
+    // The board. Reads first, then the writes; see the section at the foot of
+    // this file for why there is no payload here that edits a note.
+    TaskListRequest task_list = 71;
+    TaskGetRequest task_get = 72;
+    TaskCreate task_create = 73;
+    TaskUpdate task_update = 74;
+    TaskSetStatus task_set_status = 75;
+    TaskNoteAppend task_note_append = 76;
+    TaskBlockSet task_block_set = 77;
+    TaskSearchRequest task_search = 78;
+    TaskGetByKeyRequest task_get_by_key = 79;
+    // Workspaces: workstreams that own a board and, once claimed, worktrees.
+    // Every one of these is behind the `workstreams` capability.
+    // `workspace.list` and `workspace.delete` carry `Empty` and name what they
+    // act on in `target_resource_id`.
+    WorkspaceCreate workspace_create = 80;
+    WorkspaceRename workspace_rename = 81;
+    WorkspaceSetPrefix workspace_set_prefix = 82;
+    TaskMove task_move = 83;
+    WorktreeAssign worktree_assign = 84;
+    TerminalSetRole terminal_set_role = 85;
+    WorkspaceStartOrchestrator workspace_start_orchestrator = 86;
+  }
+}
+
+message Response {
+  bytes request_id = 1;
+  oneof outcome {
+    Result result = 2;
+    Error error = 3;
+  }
+}
+
+message Error {
+  ErrorCode code = 1;
+  bool retryable = 2;
+  string message = 3; // redacted: never a path, terminal byte, command, or session id
+  // WHICH argument the runner refused, when the code alone does not say.
+  //
+  // `INVALID_ARGUMENT` covers a cycle, a blocker that names no task, a bad
+  // actor and a title two hundred characters too long, and until this field
+  // existed all four arrived as the bare word `invalid-argument`. A client had
+  // no way to tell them apart, so it had to guess which producer fired from
+  // the call it had just made -- and a wrong guess is a confident, wrong
+  // sentence in front of somebody.
+  //
+  // **Switch on it; never print it.** Same rule as `code`: the runner sends a
+  // word, the app owns the sentence. This is the runner's OWN vocabulary --
+  // mostly field names (`title`, `actor`, `blocked_by`), occasionally a phrase
+  // written for a daemon log -- so a client maps the words it knows and falls
+  // back to its own wording for anything else. It carries no caller data: every
+  // value is a literal in the runner's source.
+  //
+  // Empty where the code is the whole answer, which is most of them.
+  string what = 4;
+}
+
+message Result {
+  oneof value {
+    Host host = 1;
+    RepositoryRoot repository_root = 2;
+    RepositoryRootList repository_root_list = 3;
+    Repository repository = 4;
+    RepositoryList repository_list = 5;
+    Worktree worktree = 6;
+    WorktreeList worktree_list = 7;
+    Terminal terminal = 8;
+    TerminalList terminal_list = 9;
+    Operation operation = 10;
+    DaemonVersion daemon_version = 11;
+    TerminalAttachResult terminal_attach = 12;
+    BranchList branch_list = 13;
+    PaneGroupList pane_group_list = 14;
+    DiscoveredWorktreeList discovered_worktree_list = 15;
+    TerminalScreen terminal_screen = 16;
+    AgentEventBatch agent_event_batch = 17;
+    WorktreeFileList worktree_file_list = 18;
+    // "It worked and there is nothing to describe" — `daemon.shutdown`, whose
+    // whole result is that the daemon is going away. Echoing any resource back
+    // would be describing a process that is about to stop existing.
+    Empty empty = 19;
+    ThemeList theme_list = 20;
+    AdapterList adapter_list = 21;
+    AdapterTestResult adapter_test_result = 22;
+    TerminalFilePutResult terminal_file_put = 23;
+    ChangeSet change_set = 24;
+    FileChangeList file_change_list = 25;
+    FileDiff file_diff = 26;
+    StackLinkList stack_link_list = 32;
+    ChangesInbox changes_inbox = 33;
+    ClientList client_list = 34;
+    ClientEnrollResult client_enroll = 35;
+    ClientSetNodeKeyResult client_set_node_key = 36;
+    // The board. `task.note` answers with the note it appended rather than
+    // with the task, because the note carries the id a later `supersedes` has
+    // to name.
+    Task task = 37;
+    TaskList task_list = 38;
+    TaskDetail task_detail = 39;
+    TaskNote task_note = 40;
+    TaskBlockList task_block_list = 41;
+    TaskNoteHitList task_note_hit_list = 42;
+    Workspace workspace = 43;
+    WorkspaceList workspace_list = 44;
+    // `needs_you.list`: this runner's items, in rank order. Behind the
+    // `needs_you` capability.
+    NeedsYouList needs_you_list = 45;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Agent channel
+//
+// A sequence number counts EVENTS, not bytes. Unlike a terminal stream these
+// have record boundaries, so a cursor can name one.
+// ---------------------------------------------------------------------------
+
+message SetPaneMode {
+  bytes terminal_id = 1;
+  PaneMode pane_mode = 2;
+  // Switching to TERMINAL while a turn is in flight discards work that
+  // `claude --resume` cannot reattach to, so it is refused unless the user has
+  // been told and said yes.
+  bool force = 3;
+}
+
+message AgentSubscribe {
+  bytes terminal_id = 1;
+  uint64 from_seq = 2;
+  // The run of the stream this cursor belongs to.
+  //
+  // A shim numbers events by position in its own ring and every pane-mode
+  // toggle starts a new shim counting from zero, so a cursor alone cannot say
+  // which stream it means. Send back what the last batch reported; a mismatch
+  // returns the whole transcript instead of a slice.
+  uint64 epoch = 3;
+}
+
+message ImageBlock {
+  string mime_type = 1;
+  bytes data = 2;
+}
+
+message AgentPromptBlock {
+  oneof content {
+    string text = 1;
+    // A worktree-relative path from an @-mention.
+    string file_mention = 2;
+    ImageBlock image = 3;
+  }
+}
+
+message AgentPrompt {
+  bytes terminal_id = 1;
+  repeated AgentPromptBlock blocks = 2;
+}
+
+message AgentAnswer {
+  bytes terminal_id = 1;
+  // Carried back exactly as the adapter sent it. Inventing an id here would
+  // make the answer unroutable and hang the agent on its own question.
+  string request_id = 2;
+  string option_id = 3;
+}
+
+message AgentSetMode {
+  bytes terminal_id = 1;
+  string agent_mode = 2;
+}
+
+message AgentSetModel {
+  bytes terminal_id = 1;
+  string model = 2;
+}
+
+// Change one of the agent's advertised selectors, generically. Mode, model,
+// subagent and whatever an adapter adds next all travel this one way.
+message AgentSetConfig {
+  bytes terminal_id = 1;
+  string config_id = 2;
+  string value = 3;
+}
+
+// Rewrite or withdraw a prompt that is waiting for the current turn to end.
+//
+// Only possible because Far Cooler holds the queue itself: a prompt handed to
+// the adapter is gone, and one still here is still the user's to change.
+message AgentEditQueued {
+  bytes terminal_id = 1;
+  string queued_id = 2;
+  string text = 3;
+}
+
+message AgentCancelQueued {
+  bytes terminal_id = 1;
+  string queued_id = 2;
+}
+
+// Send a queued prompt into the turn already running, rather than waiting for
+// it to end. The adapter accepts prompts mid-turn (`promptQueueing`), and the
+// agent picks them up between tool calls — which is what makes a correction
+// worth sending at all.
+message AgentSteerQueued {
+  bytes terminal_id = 1;
+  string queued_id = 2;
+}
+
+message AgentCancel { bytes terminal_id = 1; }
+
+message WorktreeFileSearch {
+  bytes worktree_id = 1;
+  string query = 2;
+  uint32 limit = 3;
+}
+
+message WorktreeFileList { repeated string paths = 1; }
+
+// Why part of a transcript is missing.
+//
+// Rendered as a visible break, never silently omitted. A derived transcript is
+// only permissible in this product because it can say where it is incomplete —
+// the same contract as a lost terminal.
+enum AgentGapReason {
+  AGENT_GAP_REASON_UNSPECIFIED = 0;
+  // The ring dropped events the subscriber had not read.
+  AGENT_GAP_REASON_RING_TRIMMED = 1;
+  // Reconnected, but the agent cannot replay its own history.
+  AGENT_GAP_REASON_LOAD_UNSUPPORTED = 2;
+  // An update arrived that this adapter could not interpret.
+  AGENT_GAP_REASON_UNPARSED = 3;
+}
+
+message AgentEventFrame {
+  uint64 seq = 1;
+  // The normalized event, as JSON.
+  //
+  // JSON rather than a generated message, and deliberately: the shape is
+  // `farcooler_agent::event::AgentEvent`, which is the single Rust definition
+  // both apps decode. Restating that union in protobuf would create a second
+  // definition to keep in step, and the two would disagree the first time an
+  // adapter grew a variant.
+  string payload_json = 2;
+}
+
+message AgentEventBatch {
+  bytes terminal_id = 1;
+  repeated AgentEventFrame events = 2;
+  // The run these events belong to. A client that gets back an epoch other
+  // than the one it asked with is holding a transcript of a stream that no
+  // longer exists, and should replace it with this batch rather than append.
+  uint64 epoch = 3;
+}
+
+message Event {
+  bytes event_id = 1;
+  uint64 sequence = 2;
+  oneof payload {
+    Host host_changed = 10;
+    RepositoryRoot repository_root_changed = 11;
+    Repository repository_changed = 12;
+    Worktree worktree_changed = 13;
+    Terminal terminal_changed = 14;
+    Operation operation_changed = 15;
+    // A worktree's whole set of groups, not a diff.
+    //
+    // Layout is edited from three places at once — the app, the CLI, and an
+    // agent driving the CLI — so a client that missed an event has to converge
+    // on the next one rather than apply a delta to a state it may not hold.
+    PaneGroupList layout_changed = 16;
+    // New events for one terminal's agent session, in seq order. A client that
+    // missed some asks for them by cursor rather than reconstructing.
+    AgentEventBatch agent_events = 17;
+    // The set of worktrees changed — re-read.
+    //
+    // Reconciliation can both create and delete worktree rows in the same
+    // pass, and a deletion has no resource to carry: there is no `Worktree`
+    // left to describe. This fires once per reconcile pass that changed
+    // anything, not once per worktree, so a client re-reads the fleet rather
+    // than trying to apply it as a delta.
+    Empty fleet_changed = 18;
+    // A worktree's change set moved: a commit landed, an agent wrote a file,
+    // a branch was checked out. Carries the worktree so a client knows which
+    // one to re-read; the set itself is fetched, because most clients are not
+    // looking at it and a lockfile regeneration would otherwise fan out
+    // thousands of file records to everyone.
+    ChangeSetChanged change_set_changed = 19;
+    // A repository's stack was re-read: `gh` answered, or failed to.
+    //
+    // Carries the whole list rather than an id, like `layout_changed` and
+    // unlike `change_set_changed`. A stack is a handful of links and a PR
+    // status each — bounded by the length of somebody's branch chain, not by
+    // the size of a diff — so there is nothing here worth a second round trip,
+    // and the client that asked is the one holding a row it cannot fill.
+    //
+    // Emitted when `stack.get` finds a repository whose PR cache has never
+    // been filled and fills it in the background. The read itself never waits
+    // on `gh`: it answers from cache at local speed and this arrives a moment
+    // later. See `review_ops::fill_prs_in_background`.
+    StackLinkList stack_changed = 21;
+    // Live bytes from a terminal this connection attached to.
+    //
+    // The only arm in this oneof addressed to ONE connection rather than
+    // broadcast to every one of them. A pane's output is not fleet news: it is
+    // the answer to this session's `terminal.attach`, it arrives in whatever
+    // volume the program writes, and a client that never attached has no
+    // emulator to feed it to. So the daemon pushes these down the attaching
+    // connection alone — see `Handler::pushes` in `crates/transport` — while
+    // everything else here rides the broadcast every connection subscribes to.
+    //
+    // `TerminalFrame` rather than a message of its own, because it is already
+    // the frame this stream was designed around: the terminal, the epoch, a run
+    // of bytes at a byte offset, and a `Gap` for the day a runner can resume an
+    // attachment and finds it cannot cover one. Only `output` and `gap` are
+    // ever sent this way — the input and resize arms are a client talking, and
+    // an `Event` is only ever the daemon.
+    TerminalFrame terminal_frame = 20;
+    // A task's row changed: status, title, intent, acceptance, or the note
+    // log behind it. Carries the id and its repository, like
+    // `change_set_changed` carries a worktree, so a client knows which board
+    // to re-read; the task itself is fetched rather than attached, for the
+    // same reason.
+    //
+    // Carries the actor too, which nothing else in this oneof does. The wake
+    // loop this event feeds is not in this plan, but a manager that writes a
+    // task and is then told the task changed will answer its own write and
+    // never settle — a manager that has to remember not to answer itself will
+    // one day forget, so the filter belongs on the wire rather than in the
+    // manager. It has to be here from the start: adding it later means every
+    // client that already decodes this event has to be taught a new field
+    // before the loop can be trusted.
+    TaskChanged task_changed = 22;
+    // This connection fell behind the daemon's event stream and some events
+    // addressed to it were dropped: re-read whatever you hold.
+    //
+    // Sent in place of what was lost, to the one connection that lost it.
+    // Every event here is a "re-read" notice that is harmless to lose as long
+    // as the client learns it missed SOMETHING; without this the daemon
+    // dropped them with nothing but a line in its own log, and a phone's
+    // boards, read only on their own news, stayed where they were.
+    Empty events_missed = 23;
+    // Something a person has to act on appeared, changed or went away:
+    // re-read `needs_you.list`. Empty, like `fleet_changed`, because the list
+    // is ranked as a whole and a delta would have to re-rank anyway.
+    // Debounced on the runner: at most one per 250 ms, on the trailing edge.
+    Empty needs_you_changed = 24;
+  }
+}
+
+message SnapshotChunk {
+  oneof kind {
+    SnapshotBegin begin = 1;
+    SnapshotEnd end = 2;
+    Event resource = 3;
+  }
+}
+
+message SnapshotBegin {
+  bytes snapshot_id = 1;
+  google.protobuf.Timestamp generated_at = 2;
+}
+
+message SnapshotEnd {
+  bytes snapshot_id = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Terminal channel
+//
+// A sequence number is a uint64 BYTE OFFSET from the first byte of the current
+// terminal epoch. Frame boundaries carry no protocol meaning.
+// ---------------------------------------------------------------------------
+
+message TerminalFrame {
+  bytes terminal_id = 1;
+  uint64 epoch = 2;
+
+  oneof kind {
+    TerminalOutput output = 10;
+    TerminalInput input = 11;
+    TerminalInputAck input_ack = 12;
+    TerminalResizeFrame resize = 13;
+    FlowAck flow_ack = 14;
+    Gap gap = 15;
+  }
+}
+
+message TerminalOutput {
+  uint64 start_sequence = 1; // byte offset of the first payload byte
+  bytes payload = 2;
+}
+
+message TerminalInput {
+  uint64 lease_generation = 1;
+  uint64 client_input_id = 2;
+  bytes payload = 3;
+}
+
+message TerminalInputAck {
+  uint64 client_input_id = 1;
+}
+
+message TerminalResizeFrame {
+  uint32 columns = 1;
+  uint32 rows = 2;
+  uint64 view_activity_id = 3;
+}
+
+message FlowAck {
+  uint64 acked_sequence = 1; // one past the highest contiguous byte applied
+}
+
+message Gap {
+  uint64 resumed_at_sequence = 1;
+  optional uint64 lost_bytes = 2; // exact when the epoch matches; absent otherwise
+  GapReason reason = 3;
+}
+
+enum GapReason {
+  GAP_REASON_UNSPECIFIED = 0;
+  GAP_REASON_REPLAY_EVICTED = 1;
+  GAP_REASON_EPOCH_CHANGED = 2;
+  GAP_REASON_CLIENT_TOO_SLOW = 3;
+  GAP_REASON_RUNTIME_LOST = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Resources
+// ---------------------------------------------------------------------------
+
+enum Scope {
+  SCOPE_UNSPECIFIED = 0;
+  SCOPE_READ = 1;
+  SCOPE_CONTROL = 2;
+  SCOPE_HOST_ADMIN = 3;
+}
+
+// Settings this machine's config.toml decides, as opposed to facts about it.
+//
+// Its own message rather than scalars hung off `Host`, so it can grow by a
+// field: a machine settings editor adds to this, and a bare scalar would need a
+// migration where a nested message needs a tag. Kept distinguishable from the
+// live facts beside it — `self_health`, `live_terminal_count` — for the same
+// reason the two are worth separating at all: one is what the machine IS, the
+// other is what somebody chose.
+message HostSettings {
+  // Prepended to a branch name derived from a task description. Empty opts out
+  // entirely; the daemon's own default when config.toml says nothing is
+  // `feat/`, so an absent message and an empty string mean different things.
+  //
+  // Applied by the CLIENT, not by the daemon, because the task composer shows
+  // you the branch it is about to create — a prefix added daemon-side would
+  // make that preview a lie. The daemon still validates the finished name.
+  string branch_prefix = 1;
+}
+
+message Host {
+  bytes id = 1;
+  uint64 resource_version = 2;
+  string platform = 3;
+  string daemon_version = 4;
+  uint32 protocol_version = 5;
+  SelfHealth self_health = 6;
+  repeated string self_health_reasons = 7;
+  uint64 replay_bytes_retained = 8; // observability for the per-terminal replay cost
+  // Live tagged panes the daemon can currently see. A client must not count
+  // these itself: a remote one has no tmux to look at, and a local one that
+  // looked would be a second authority on the same question.
+  uint32 live_terminal_count = 9;
+  // Rides on this message rather than a call of its own, because every client
+  // already makes this one and the prefix is needed on the path that creates a
+  // worktree — a second round trip there would be a round trip spent asking
+  // for a string.
+  HostSettings settings = 10;
+  // This runner's stable identity, as text, for a device that has to record
+  // which runner it enrolled on.
+  //
+  // The same value `id` carries in bytes — derived from the install id, which
+  // is persistent, lives in the runtime directory and is per `FARCOOLER_HOME`,
+  // so three engineers on one machine have three. Deliberately not a second
+  // identifier: two names for one runner is two names that can disagree. Text
+  // rather than bytes because it is stored and compared by clients that keep it
+  // in a settings file, and it is a name rather than a secret — it is already
+  // visible as the tmux socket name and in worktree owner markers.
+  string runner_id = 11;
+  // The program every agent launch on this runner runs instead of the real
+  // agent, from `FARCOOLER_STAND_IN_AGENT` in the daemon's environment. Empty
+  // when agents launch as themselves, which is every shipped install.
+  //
+  // On the wire because a value leaked out of a test or a demo is otherwise
+  // invisible: every agent silently runs `sleep` or `false`, and the only
+  // sign was one line in the daemon's own log. A client shows it.
+  string stand_in_agent = 12;
+}
+
+enum SelfHealth {
+  SELF_HEALTH_UNSPECIFIED = 0;
+  SELF_HEALTH_HEALTHY = 1;
+  SELF_HEALTH_DEGRADED = 2;
+}
+
+message RepositoryRoot {
+  bytes id = 1;
+  uint64 resource_version = 2;
+  bytes host_id = 3;
+  string path_token = 4;
+  optional string display_path = 5; // host_admin only
+  google.protobuf.Timestamp created_at = 6;
+  uint32 repository_count = 7;
+}
+
+message RepositoryRootList { repeated RepositoryRoot items = 1; }
+
+message Repository {
+  bytes id = 1;
+  uint64 resource_version = 2;
+  bytes host_id = 3;
+  bytes repository_root_id = 4;
+  string display_name = 5;
+  optional string canonical_git_dir = 6; // host_admin only
+  string remote_summary = 7;
+}
+
+message RepositoryList { repeated Repository items = 1; }
+
+// A color scheme this host defines, from `[themes.<name>]` in config.toml.
+//
+// Sent as packed 0x00RRGGBB integers rather than as the "#rrggbb" strings the
+// file is written in: the client hands these straight to the VT core, and
+// re-parsing hex on three platforms is three chances to disagree about a
+// color the daemon has already read correctly.
+message Theme {
+  string name = 1;
+  // Whether the app's own surfaces go dark. Carried rather than derived from
+  // the background, so a theme author picking a mid-grey ground decides which
+  // way the chrome goes instead of a luminance threshold deciding for them.
+  bool dark = 2;
+  uint32 background = 3;
+  uint32 foreground = 4;
+  uint32 cursor = 5;
+  // Exactly 16: ANSI 0-7 then 8-15. Anything else is dropped by the daemon
+  // before it reaches here.
+  repeated uint32 ansi = 6;
+}
+
+message ThemeList { repeated Theme items = 1; }
+
+// One `[adapters.<name>]` table, plus where this one came from.
+//
+// Carried whole rather than as a diff against the built-in, because the editor
+// has to be able to show what an override actually says — including a
+// deliberately emptied array, which a diff could not distinguish from "unset".
+message Adapter {
+  string preset = 1;
+  string program = 2;
+  repeated string args = 3;
+  map<string, string> env = 4;
+  // Detection, as opposed to launch. Wrong values here do not fail loudly: they
+  // stop an agent being recognized, which surfaces as "chat mode broke" from
+  // somewhere else entirely. `adapter.test` cannot check these — it proves the
+  // adapter starts and answers over the `backend` below, which is not always
+  // ACP — so a client must not imply that it does.
+  repeated string commands = 5;
+  repeated string identity = 6;
+  repeated string blocked = 7;
+  repeated string working = 8;
+  AdapterOrigin origin = 9;
+  // Which protocol Far Cooler speaks to this agent.
+  //
+  // On the wire because `adapter.test` needs it: without it the daemon has to
+  // assume, and a Test button that confidently exercises ACP for an adapter
+  // configured as native reports a working adapter for a protocol that was
+  // never spoken to. Unspecified means ACP, so a client built before this
+  // field keeps the behavior it had.
+  AdapterBackend backend = 10;
+}
+
+// Which protocol Far Cooler speaks to an agent.
+//
+// `NATIVE` means the agent's own protocol — `codex app-server`, or the Claude
+// CLI's stream-json control protocol — rather than an ACP adapter wrapping it.
+// Not every preset has one: `cursor` and `opencode` are ACP-only, and an
+// adapter a user added in config.toml is always ACP.
+enum AdapterBackend {
+  ADAPTER_BACKEND_UNSPECIFIED = 0;
+  ADAPTER_BACKEND_ACP = 1;
+  ADAPTER_BACKEND_NATIVE = 2;
+}
+
+enum AdapterOrigin {
+  ADAPTER_ORIGIN_UNSPECIFIED = 0;
+  // Compiled into the daemon, with no table in config.toml.
+  ADAPTER_ORIGIN_BUILT_IN = 1;
+  // A table shadowing a built-in of the same name. Deleting it restores the
+  // shipped one, which is what "revert to default" means.
+  ADAPTER_ORIGIN_OVERRIDE = 2;
+  // A table naming an agent Far Cooler does not ship.
+  ADAPTER_ORIGIN_USER = 3;
+}
+
+message AdapterList { repeated Adapter items = 1; }
+
+// What an adapter said when asked to identify itself.
+message AdapterTestResult {
+  bool ok = 1;
+  // The agent and version it reported, when it answered. Some adapters answer
+  // correctly without naming themselves, so this may describe the protocol
+  // version instead — an answer either way.
+  string reported = 2;
+  // Why it did not answer, when it did not. Phrased for a form field: never a
+  // raw Rust error, never a stack.
+  string failure = 3;
+}
+
+message Worktree {
+  bytes id = 1;
+  uint64 resource_version = 2;
+  bytes repository_id = 3;
+  string task_name = 4;
+  string branch = 5;
+  string worktree_path_token = 6;
+  optional string worktree_path = 7; // host_admin only
+  WorktreeState state = 8;
+  // Whether this worktree IS the repository's own checkout, from `git
+  // worktree list`. Recognized this way rather than by task name, which a
+  // linked worktree in a directory called `main` would defeat — and what
+  // it guards is whether a client offers to delete the directory you work in.
+  bool is_main_checkout = 9;
+  // Where this worktree sits in the list, ranked across the whole runner.
+  //
+  // The list already arrives in this order, so a client that renders what it
+  // is given needs nothing here. It is on the wire for the client that does
+  // not: `worktree_changed` carries one worktree, and applying that as a
+  // delta means knowing where the row goes without re-reading the fleet.
+  //
+  // Decided at creation — a new worktree takes the end — and after that only
+  // by `worktree.reorder`. Never by activity, attention or recency: a card
+  // that moves on its own is a card nobody can reach for without reading the
+  // whole list again.
+  //
+  // A daemon that predates this sends nothing, which decodes as 0 for every
+  // worktree. That is why a client must tie-break rather than trust it alone,
+  // and why `workspace_order` is a capability it can ask about first.
+  uint32 ordinal = 10;
+  // The workspace that owns this worktree. Absent means unclaimed, and a
+  // client draws it in its repository's "Unclaimed" group. Also absent from a
+  // runner without the `workstreams` capability, which has no workspaces.
+  optional bytes workspace_id = 11;
+  // Which signal made the claim: `explicit`, `hook`, `process` or `migration`.
+  // A machine word, never a sentence, so a wrong claim can be traced to
+  // whatever made it. Absent while unclaimed.
+  optional string claim_source = 12;
+  // Workspaces other than the owner whose terminals are working in this
+  // worktree: the two-writers hazard, reported rather than resolved. A
+  // claim never moves because of it; `worktree.assign` is how ownership
+  // moves. Orchestrators are left out, because a harness may require one to
+  // run in a worktree another workspace owns. Empty while unclaimed.
+  repeated bytes foreign_writer_workspace_ids = 13;
+  // The tasks whose lane is this worktree and which are neither Done nor
+  // Cancelled, so a row can name its task without a board read. Not `tasks`:
+  // the CLI's worktree JSON already has `task`, the worktree's own name.
+  // Empty from a runner without the `needs_you` capability.
+  repeated TaskRef open_tasks = 14;
+}
+
+message WorktreeList { repeated Worktree items = 1; }
+
+enum WorktreeState {
+  WORKTREE_STATE_UNSPECIFIED = 0;
+  WORKTREE_STATE_CREATING = 1;
+  WORKTREE_STATE_READY = 2;
+  WORKTREE_STATE_ACTIVE = 3;
+  WORKTREE_STATE_ERROR = 4;
+  // Tag 5 was ARCHIVED. Same state, one word: archiving never touched git and
+  // neither does hiding, so having both meant users guessing which one deleted
+  // files. Reusing the tag is correct here and only here — it is a rename, not
+  // a new meaning wearing an old number.
+  WORKTREE_STATE_HIDDEN = 5;
+  // git no longer lists this worktree, but the row carries terminals worth
+  // keeping. A row with nothing in it is deleted instead, never shown.
+  WORKTREE_STATE_WORKTREE_MISSING = 6;
+}
+
+// `intent` is durable. `state` is DERIVED at read time and never stored.
+// Clients render `state` and must never compute it themselves.
+message Terminal {
+  bytes id = 1;
+  uint64 resource_version = 2;
+  uint64 lease_generation = 3;
+  bytes worktree_id = 4;
+  string title = 5;
+  string command_preset = 6;
+  TerminalIntent intent = 7;
+  TerminalState state = 8;
+  optional ExitStatus exit_status = 9;
+  optional bytes writer_client_id = 10;
+  uint32 columns = 11;
+  uint32 rows = 12;
+  optional bytes size_controller_client_id = 13;
+  uint64 epoch = 14;
+
+  // What the AGENT is doing, as distinct from whether its process is alive.
+  // Derived from the terminal's screen by the daemon, never by a client: a
+  // remote client has no screen to look at, and two clients that each decided
+  // for themselves could disagree about the same terminal.
+  AgentActivity activity = 15;
+  // When `activity` last changed. A client shows "working for 4m" from this
+  // rather than timing it locally, which would restart on every reconnect.
+  optional google.protobuf.Timestamp activity_changed_at = 16;
+  // What is RUNNING in the pane right now, as tmux reports it.
+  //
+  // Distinct from `command_preset`, which is only what the terminal was
+  // launched as. Terminals are created as plain shells and the user types
+  // `claude` into them, so the preset stops being true after the first
+  // command; only this says what is actually there.
+  string current_command = 17;
+
+  // What this terminal's pane is HOSTING: a TUI, or a headless ACP agent.
+  //
+  // Durable intent, not runtime state. Distinct from the VT modes a terminal
+  // reports and from `agent_mode` below — three unrelated things in one pane
+  // would otherwise all be called mode.
+  PaneMode pane_mode = 18;
+
+  // The ACP session this terminal is for.
+  //
+  // Intent in the same sense as the branch: it says what this terminal is FOR.
+  // It outlives every pane that ever hosts it, which is what makes toggling
+  // `pane_mode` land on the same conversation rather than a new one. The
+  // conversation itself is never stored anywhere.
+  optional string agent_session_id = 19;
+
+  // The ACP mode the agent is in, and the ones it offers. Both empty in
+  // TERMINAL pane mode, where there is no agent to ask.
+  optional string agent_mode = 20;
+  repeated string available_agent_modes = 21;
+
+  // Whether this terminal can be rendered as a native chat.
+  //
+  // Derived on the host, because it takes a screen read to answer: an agent
+  // renames its own process, so what is running can only be identified by
+  // looking. A client that guessed would offer the switch for a Codex pane,
+  // which has no adapter — and the pane would come back as a different agent.
+  bool chat_capable = 22;
+
+  // When the USER'S REQUEST started, as distinct from when the label last
+  // changed.
+  //
+  // `activity_changed_at` restarts whenever the classifier changes its mind, so
+  // approving a permission prompt walks Working -> Blocked -> Working and turns
+  // "working 12m" into "working 2s". This one is set when an idle agent starts
+  // working and is HELD across Blocked, because saying yes to a tool call does
+  // not begin a new turn. Cleared when the turn ends.
+  //
+  // Both are sent because they answer different questions: how long this task
+  // has been running, and how long it has been stuck.
+  optional google.protobuf.Timestamp turn_started_at = 23;
+
+  // What the agent is asking, when it is blocked and legible.
+  //
+  // Credential-shaped text is stripped before this is set: it is put in front
+  // of people on lock screens, and a shell command is where tokens live.
+  optional string blocked_question = 24;
+
+  // The last few things the agent SAID, oldest first, at most three.
+  //
+  // A transcript, and only a transcript: the agent's own prose, verbatim, with
+  // no verb in front of it. What it DID is not here — a tool call is where the
+  // agent IS rather than what it told you, and it goes to `line` instead. This
+  // field used to carry both, prefixed with the tool's own lowercased name,
+  // which is how a lock screen came to read `taskupdate` and `says Done.`
+  //
+  // Finished lines, not structured steps. Credential-shaped text is stripped
+  // and each line is already cut to the width of a row, both on the host and
+  // for the same reason `blocked_question` is redacted there: this reaches a
+  // phone's lock screen, and a Mac, a phone and a watch must not each decide
+  // where the ellipsis goes. See `farcooler_core::feed`.
+  //
+  // Kept after the turn ends rather than cleared. "What did it do while I was
+  // away" is exactly when the summary is worth most.
+  repeated string feed = 25;
+
+  // The compact-rendering ladder: what a Mac, a phone and a watch would each
+  // show of this terminal, decided ONCE here rather than composed by every
+  // client. Each rung is a strict narrowing of the one below it -- whatever
+  // `headline` says is derivable from `line`, and `glyph` from both -- so a
+  // Dynamic Island showing one rung and a sidebar showing another can never
+  // disagree about the same pane. See `farcooler_core::feed`.
+
+  // The state, and nothing else, in one character: `?` blocked, `●` working
+  // or running, `✓` done or ok, `✗` failed, `·` idle. A watch complication, an
+  // Island's minimal presentation.
+  string glyph = 26;
+  // The state plus just enough to say whose, at most ~18 characters:
+  // `codex needs you`, `claude 4m`, `cargo test failed`. An Island's compact
+  // presentation, a notification's title. Never the blocked question itself
+  // -- this budget cannot hold one; see `line`.
+  string headline = 27;
+  // THE SIGNAL LINE: where this pane is, at most ~40 characters. A lock
+  // screen, a sidebar row. Strictly prioritized, first match wins:
+  //
+  //   1. the question, for a blocked agent -- the single most actionable
+  //      string on any compact surface, and it outranks a task count because
+  //      only one of the two needs a person;
+  //   2. the agent's position in its own task list: `3/7 · Designing test
+  //      matrix`, plus a subagent count when any are running;
+  //   3. what it is doing right now: `Writing fruit.txt`;
+  //   4. a non-agent command's outcome.
+  //
+  // Composed on the host, in the agent's own words where it has any. See
+  // `farcooler_core::feed::signal`.
+  string line = 28;
+  // Where this terminal sorts in a fleet view. SMALLER sorts FIRST: blocked
+  // outranks done outranks working, and within a tier the OLDEST first -- the
+  // pane that has been stuck longest is the one costing the most. Computed
+  // here, beside `activity`, so an Island showing one agent and a sidebar
+  // showing twelve agree about which one that is.
+  uint32 rank = 29;
+
+  // Whether the turn the agent just finished DIED rather than completed.
+  //
+  // Read from the agent's own session log — cursor writes `turn_ended` with
+  // `status: "error"` — and carried beside `activity` rather than folded into
+  // it, because "the turn failed" is a fact about the turn that just ended and
+  // not a state the agent is in. A client that only had `activity` reported a
+  // dead turn as `done`, glyph `✓` and all, which is the most expensive lie
+  // this ladder can tell: the whole point of a fleet at a glance is knowing
+  // which panes need you.
+  //
+  // A turn the USER cancelled is not this. Escape is a decision somebody made
+  // on purpose, and alarming about it teaches people to ignore the alarm.
+  bool turn_failed = 30;
+
+  // The agents this pane's agent spawned and has not finished with, named by
+  // the 3-5 word description it spawned them with: `Auditing the redaction
+  // rules`.
+  //
+  // Running only. A background spawn's tool result comes back at LAUNCH
+  // carrying `async_launched`, seconds after the call, while the agent keeps
+  // going for another hour -- a third of the spawns measured on this machine
+  // -- so only `completed` takes one off this list. Reading a launch as an
+  // ending would empty it the instant it filled.
+  //
+  // Agent-authored text, so it is redacted and cut to a row's width on the
+  // host exactly as `feed` and `blocked_question` are: a description is a
+  // string the agent chose and can carry a path as easily as a tool argument.
+  //
+  // The COUNT of these also appears on `line`, because a watch face has room
+  // for one line and not for a list. The names are here for the surfaces that
+  // have room for them.
+  repeated string subagents = 31;
+
+  // The last thing the agent said, from its OPENING, for a notification.
+  //
+  // Not the last entry of `feed`, and it exists because it cannot be one. A
+  // feed entry is a wrapped LINE, so the last of them is the last forty
+  // characters of the window — the end of the message for narration, and the
+  // end of the message's head for an answer. Quoting it is what put `batches
+  // to avoid N+1 shits.` on a lock screen about a turn that had ended `More
+  // shit. An industrial quantity of shit, shipped in carefully authorized
+  // batches to avoid N+1 shits.`
+  //
+  // The whole message, redacted on the host on exactly the terms `feed` is,
+  // and cut from its start to about 120 characters — roughly the two lines an
+  // iOS banner shows, less the worktree name every notifier writes in front
+  // of it. See `farcooler_core::feed::SAID_WIDTH`.
+  //
+  // Sent for narration too, not only for a turn's closing answer. A
+  // notification reports something already OVER, and an agent that stops
+  // mid-narration has still stopped — there is no conclusion coming for the
+  // client to wait for.
+  //
+  // Optional and additive: a client too old to read it keeps quoting the
+  // feed's last line, and a daemon too old to send it leaves the field absent
+  // rather than empty, which a client can tell apart from an agent that said
+  // nothing at all.
+  optional string said = 32;
+
+  // How far along the agent is in its OWN task list, as two numbers.
+  //
+  // The same position `line` already states as `3/7`, carried as the counts it
+  // was composed from. Not because a client could not read that string --
+  // because it must not. `line` is a COMPOSED rung: the question outranks the
+  // task count, so a blocked agent's `line` is the question and carries no
+  // numbers at all, and an agent with no list carries `Writing fruit.txt`. A
+  // client that scraped `3/7` out of prose would be a second derivation of a
+  // fact this file exists to derive once, and it would be wrong in exactly the
+  // cases that matter most.
+  //
+  // Both or neither, and both are OPTIONAL. Absent means the host has nothing
+  // to say about a task list -- a daemon too old to send these, a pane with no
+  // session log, an agent that never wrote one, or an agent whose format does
+  // not record one at all (see below). Absent is NOT zero: `0/7` is an agent
+  // that has written seven tasks and finished none, which is a real and
+  // different thing from an agent with no list, and a surface that drew a bar
+  // for the second would be inventing a denominator nobody supplied.
+  //
+  // `plan_total` is never sent as 0. `feed::signal` already refuses to compose
+  // a position out of an empty list, and sending `0/0` here would hand every
+  // client a division it has to guard.
+  //
+  // **It can GROW mid-run, and it can shrink.** An agent adds tasks to its own
+  // list as it discovers work, so `2/5` becoming `2/9` is the honest answer and
+  // not a glitch -- a surface that animates this must not read a rising
+  // denominator as progress running backward. It shrinks too: a `deleted` task
+  // counts toward neither half, so an agent that drops a task it decided
+  // against goes from `3/7` to `3/6`. See `Signals::plan` in the daemon.
+  //
+  // **Not every agent can say this**, and that is a property of the agent's own
+  // log rather than of this field. Counted on one machine in August 2026:
+  // claude writes a task list in 563 of 985 session files, and its
+  // `TaskCreate`/`TaskUpdate`/`TodoWrite` lines are what the daemon's fold is
+  // built from. Codex writes `update_plan` in 1 of 350 rollouts, and in that
+  // one it is JavaScript source inside an `exec` call's `input` string rather
+  // than a structured field -- so `session_log::codex` parses none of it and
+  // there is nothing here to send. Cursor writes nothing task-shaped at all.
+  // A client therefore sees these fields on some agents and not others, which
+  // is the same distribution `line` already has: rung 2 for a pane with a list,
+  // rung 3 for a pane without.
+  optional uint32 plan_done = 33;
+  optional uint32 plan_total = 34;
+
+  // Thirteen buckets of what this terminal has been doing: lines of code
+  // touched, lines of output, and commits. The activity trace of the glance
+  // spec's §04, which every widget, Live Activity and watch accessory draws.
+  //
+  // **Bytes rather than three `repeated uint32` fields, and that is a memory
+  // decision, not a wire one.** The consumer that decides it is the iOS widget:
+  // `FleetWidget` holds a whole fleet snapshot per timeline entry, up to 13
+  // entries, in an extension with a hard memory ceiling — so the arithmetic is
+  // buckets x series x agents x entries, on the DECODED size. Three repeated
+  // fields decode into three Swift arrays per agent: for 12 agents over 13
+  // timeline entries that is 44,928 bytes across 468 separate heap objects.
+  // One `Data` of 66 bytes is 17,472 across 156. See `farcooler_core::trace`
+  // for the layout and the full table.
+  //
+  // **The buckets are absolute wall-clock, never relative to now.** Two polls
+  // landing inside one bucket produce identical bytes here, which is what
+  // makes `agentsSayTheSame(as:)` able to skip a Bluetooth write to the watch.
+  // A window measured backwards from the moment of the poll would change these
+  // bytes every three seconds forever. Do not "improve" this into a sliding
+  // window.
+  //
+  // Empty when the terminal has done nothing the trace can see, rather than 66
+  // zero bytes: a fleet at rest costs nothing.
+  //
+  // Byte 0 is `version << 4 | width`, where width is 0 for five-minute buckets,
+  // 1 for thirty-minute and 2 for two-hour. A client that does not recognize
+  // the version must draw an empty trace rather than read the rest.
+  //
+  // **What each channel actually is**, so nobody reads more into a bar than is
+  // there. None of the three is an accounting figure; the spec draws this 12pt
+  // wide, scales it per row per half, and never prints it as a number.
+  //
+  // - Lower half, output: how far this pane's screen scrolled, sampled once a
+  //  second by the daemon. Screen-aware, so a TUI repainting in place counts
+  //  nothing — but it saturates at the pane's height between two samples, so a
+  //  build firehose is a solid bar rather than a taller one.
+  // - Upper half, code: the GROWTH of the worktree's `insertions + deletions`
+  //  against its base, split evenly among the panes the daemon saw working
+  //  while it grew. A worktree is shared, and neither git nor the daemon can
+  //  say which pane wrote a line — so with one agent in a worktree this is
+  //  exact, and with three each row carries a third of the truth. Growth only:
+  //  a line written and then written back nets to nothing, so a busy agent
+  //  rewriting its own work is under-reported, never over-reported.
+  // - Axis, commits: HEAD moves that were commits, dated from the worktree's
+  //  reflog. Per WORKTREE, so every row of one worktree shows the same marks
+  //  — which is the true statement, since a commit belongs to the worktree and
+  //  not to a pane. A repository with reflogs disabled shows none.
+  bytes activity_trace = 35;
+  // Where `activity_trace`'s newest bucket sits on the absolute grid: its
+  // index, `unix_seconds.div_euclid(width)` at the width byte 0 declares. The
+  // thirteen buckets are then indices `anchor - 12` through `anchor`, oldest
+  // first, and bucket `k` is `[k * width, (k + 1) * width)` in Unix seconds.
+  // See `farcooler_core::trace::Trace::anchor`.
+  //
+  // **The trace is a shape and this is where it is.** The 66 bytes say how
+  // much, never when, so a client drawing several traces on one axis — the
+  // lock screen card's rows — could only pack a finer trace from the newest
+  // end, a column too new at worst, and could not tell two traces encoded
+  // minutes apart from two encoded together. With this it places every
+  // bucket exactly.
+  //
+  // A field of its own rather than bytes in the encoding, deliberately: that
+  // would be an `ENCODING_VERSION` bump, and an old client must draw nothing
+  // for a version it does not know. Here an old client ignores the field and
+  // draws what it always drew.
+  //
+  // Absent exactly when `activity_trace` is empty, and from a daemon older
+  // than this field — in which case a client packs from the newest end, as
+  // before. Changes only when a bucket boundary is crossed, like the bytes.
+  optional int64 activity_trace_anchor = 38;
+
+  // Why this pane is in agent mode with no agent in it.
+  //
+  // A STABLE MACHINE WORD, never a sentence: `no-adapter`,
+  // `not-authenticated`, `adapter-silent`, `adapter-failed`. THE APP OWNS THE
+  // SENTENCE — a client renders one of its own per word, and a raw Rust error
+  // string must never reach a screen. See `AgentFailure` in
+  // `farcooler-agent-core`, which is where the list is defined and where a new
+  // word costs a new sentence in every app.
+  //
+  // Absent means nothing has said this pane failed, which for a pane still
+  // starting up looks the same — so a client draws its spinner until either
+  // this arrives or the transcript does.
+  //
+  // **The pane stays in AGENT pane mode.** This does not flip `pane_mode`, and
+  // a client must not flip it either: an automatic fallback to a terminal
+  // respawns the pane under whatever the user was in the middle of typing. The
+  // switch back is offered as an action they choose.
+  //
+  // Empty for a client reading an older daemon, which is the same as a pane
+  // that has not failed — and the state before this field existed, where the
+  // three ways an adapter can fail to start were all rendered as an endless
+  // spinner.
+  optional string agent_failure = 36;
+  // The board task this terminal was opened for (`terminal.create`'s
+  // `task_key`, resolved), by id. Absent for a terminal opened for no task,
+  // and from a daemon older than the `terminal_task` capability. What
+  // `farcooler task dispatch` reads to refuse a second agent on a task whose
+  // first is still running.
+  optional bytes task_id = 37;
+  // Whose work this terminal is doing, which is not always the owner of the
+  // worktree it runs in (`worktree_id`): a Codex orchestrator for one
+  // workspace may run in the main checkout another owns. Absent for a terminal
+  // in an unclaimed worktree, and from a runner without `workstreams`.
+  optional bytes workspace_id = 39;
+  // UNSPECIFIED from a runner without `workstreams`.
+  TerminalRole role = 40;
+}
+
+// What a terminal is for. At most one live orchestrator per workspace.
+enum TerminalRole {
+  TERMINAL_ROLE_UNSPECIFIED = 0;
+  TERMINAL_ROLE_SHELL = 1;
+  TERMINAL_ROLE_AGENT = 2;
+  TERMINAL_ROLE_ORCHESTRATOR = 3;
+}
+
+// What a pane is hosting.
+//
+// UNSPECIFIED is never sent by the daemon: a client that cannot tell which
+// mode a pane is in would not know which surface to draw.
+enum PaneMode {
+  PANE_MODE_UNSPECIFIED = 0;
+  // A TUI. The default, the product's terminal-first promise, and the mode
+  // that works with no ACP adapter installed.
+  PANE_MODE_TERMINAL = 1;
+  PANE_MODE_AGENT = 2;
+  // What this worktree changed, rendered as a diff.
+  //
+  // A pane rather than a panel the client arranges for itself. The app had a
+  // second layout engine for exactly one view — a tree of tiles beside tmux's
+  // tree of panes — and the two could not agree about anything: the diff could
+  // not be zoomed, dragged onto another pane, broken out into its own window
+  // or reached by `⌃B` arrow keys, because every one of those is tmux's and
+  // the diff was not in it. It is now, and so is all of that, for free.
+  //
+  // Unlike the two above, this mode is not toggled onto an existing pane: it is
+  // what a pane created with the `changes` preset IS, for its whole life. There
+  // is no TUI underneath to switch back to.
+  PANE_MODE_CHANGES = 3;
+}
+
+// The four states a coding agent is in, plus the two non-answers.
+//
+// DONE is not a state of the process — it is IDLE that the user has not seen
+// yet. That is what makes it the thing worth notifying about, and what makes it
+// clear itself when someone looks.
+enum AgentActivity {
+  AGENT_ACTIVITY_UNSPECIFIED = 0;
+  // Not an agent at all: a plain shell. Distinct from UNKNOWN, which means we
+  // could not tell.
+  AGENT_ACTIVITY_NONE = 1;
+  AGENT_ACTIVITY_IDLE = 2;
+  AGENT_ACTIVITY_WORKING = 3;
+  // Waiting on the user: a permission prompt, a question, a confirmation.
+  AGENT_ACTIVITY_BLOCKED = 4;
+  AGENT_ACTIVITY_DONE = 5;
+  // An agent is present but its screen matched nothing we recognize. Reported
+  // honestly rather than guessed at, the same as a lost terminal.
+  AGENT_ACTIVITY_UNKNOWN = 6;
+}
+
+message TerminalList {
+  repeated Terminal items = 1;
+
+  // Every terminal's trace added together, at one width for the whole fleet.
+  //
+  // Summed here rather than by the client because the rows do not share a
+  // width: each snaps to the shortest window holding its own activity, per the
+  // spec, so adding bucket 4 of a five-minute row to bucket 4 of a two-hour row
+  // would add two different spans of time. The daemon holds every ring and can
+  // pick one width for all of them; a client holding only the rendered rows
+  // cannot.
+  //
+  // Same encoding as `Terminal.activity_trace`, and empty on the same terms.
+  // Legitimate as a sum because it stays within a channel: code with code,
+  // output with output. Never sum the two halves together.
+  bytes fleet_trace = 2;
+  // Where `fleet_trace`'s newest bucket sits on the absolute grid, exactly as
+  // `Terminal.activity_trace_anchor` is for a terminal's trace: its index,
+  // `unix_seconds.div_euclid(width)` at the width byte 0 declares, read at the
+  // same moment as the bytes.
+  //
+  // For the one client that adds fleet traces together: a phone polling
+  // several runners sums theirs onto one axis for the Dynamic Island, and each
+  // runner encoded its own at its own moment. Without this it packs each from
+  // its newest end, a column too new at worst.
+  //
+  // Absent exactly when `fleet_trace` is empty, and from a daemon older than
+  // this field. No encoding version bump, for `activity_trace_anchor`'s reason.
+  optional int64 fleet_trace_anchor = 3;
+}
+
+enum TerminalIntent {
+  TERMINAL_INTENT_UNSPECIFIED = 0;
+  TERMINAL_INTENT_RUNNING = 1; // the user wants this terminal alive
+  TERMINAL_INTENT_STOPPED = 2; // deliberate stop or observed exit
+  TERMINAL_INTENT_FAILED = 3;  // creation never established a live runtime
+}
+
+enum TerminalState {
+  TERMINAL_STATE_UNSPECIFIED = 0;
+  TERMINAL_STATE_STARTING = 1;
+  TERMINAL_STATE_RUNNING = 2;
+  TERMINAL_STATE_EXITED = 3;
+  TERMINAL_STATE_ERROR = 4;
+  TERMINAL_STATE_LOST = 5;
+  // We could not look, so we are not saying.
+  //
+  // Distinct from LOST, which is a finding: the live inventory was read and
+  // nothing in it proves this terminal is alive. UNKNOWN is the absence of a
+  // reading — tmux did not answer in time, usually because one pane's blocked
+  // write has the single-threaded server stalled. Reporting that as LOST says
+  // every terminal on the machine died, when what happened is that nobody got
+  // to ask them.
+  //
+  // Like LOST it never claims a terminal is running, so the derivation rule is
+  // unweakened. Unlike LOST it is not grounds for dismissing a terminal.
+  TERMINAL_STATE_UNKNOWN = 6;
+}
+
+message ExitStatus {
+  optional int32 code = 1;
+  optional int32 signal = 2;
+}
+
+// A layout: terminals shown together, as tmux has arranged them.
+//
+// A tmux WINDOW is a layout and a tmux PANE is a terminal. Far Cooler stores none
+// of this and computes none of it — tmux has had split trees, five named
+// layouts, resizable dividers, zoom and pane movement between windows for twenty
+// years, and it is already the authority for what is running. Keeping a second
+// tree in the daemon meant a third copy of the geometry in every client that
+// drew it, which is three chances to disagree about where a pane is.
+//
+// Nothing here is durable, and that is right: panes are processes, and if the
+// server they live in dies there is no arrangement left to restore them into.
+message PaneGroup {
+  // The tmux window id, `@7`. Stable for the window's life, which is exactly as
+  // long as the layout exists.
+  string id = 1;
+  bytes worktree_id = 2;
+  string name = 3;
+  bool active = 4;
+  // The window's size in cells. A client scales these to pixels with its own
+  // cell metrics; it never decides the arrangement.
+  uint32 columns = 5;
+  uint32 rows = 6;
+  repeated PaneRect panes = 7;
+  // tmux's own layout description, carried opaquely.
+  //
+  // Never parsed here. It is tmux's format, tmux is the only thing that has to
+  // understand it, and a parser in Far Cooler would be a copy of tmux's tree free
+  // to drift from it. Handed straight back to `select-layout` to restore an
+  // arrangement.
+  string layout = 8;
+}
+
+// Where one terminal sits inside its layout, in cells, as tmux placed it.
+message PaneRect {
+  bytes terminal_id = 1;
+  uint32 left = 2;
+  uint32 top = 3;
+  uint32 columns = 4;
+  uint32 rows = 5;
+  // Holds the keyboard. tmux's active pane, so it cannot disagree with where
+  // typing actually goes.
+  bool focused = 6;
+  bool zoomed = 7;
+}
+
+// Ordered by window index, which is what `layout group select 2` counts.
+message PaneGroupList {
+  bytes worktree_id = 1;
+  repeated PaneGroup items = 2;
+}
+
+// tmux's five, by tmux's names.
+enum LayoutPreset {
+  LAYOUT_PRESET_UNSPECIFIED = 0;
+  LAYOUT_PRESET_EVEN_HORIZONTAL = 1; // side by side, one row
+  LAYOUT_PRESET_EVEN_VERTICAL = 2;   // stacked, one column
+  LAYOUT_PRESET_MAIN_VERTICAL = 3;   // one big pane left, rest stacked right
+  LAYOUT_PRESET_MAIN_HORIZONTAL = 4; // one big pane top, rest in a row below
+  LAYOUT_PRESET_TILED = 5;           // grid
+}
+
+// Which edge of a pane something was dropped on.
+//
+// The whole vocabulary of an arbitrary split, and it maps onto tmux exactly:
+// left and right are `-h`, top and bottom are `-v`, and left and top add `-b`.
+enum SplitSide {
+  SPLIT_SIDE_UNSPECIFIED = 0;
+  SPLIT_SIDE_LEFT = 1;
+  SPLIT_SIDE_RIGHT = 2;
+  SPLIT_SIDE_TOP = 3;
+  SPLIT_SIDE_BOTTOM = 4;
+}
+
+message Operation {
+  bytes id = 1;
+  uint64 resource_version = 2;
+  string kind = 3;
+  bytes resource_id = 4;
+  OperationState state = 5;
+  bool cancellable = 6;
+  optional ErrorCode error_code = 7;
+  uint64 log_cursor = 8;
+}
+
+enum OperationState {
+  OPERATION_STATE_UNSPECIFIED = 0;
+  OPERATION_STATE_QUEUED = 1;
+  OPERATION_STATE_RUNNING = 2;
+  OPERATION_STATE_SUCCEEDED = 3;
+  OPERATION_STATE_FAILED = 4;
+  OPERATION_STATE_CANCELING = 5;
+  OPERATION_STATE_CANCELED = 6;
+}
+
+message DaemonVersion {
+  string daemon_version = 1;
+  repeated uint32 protocol_versions = 2;
+  repeated string capabilities = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Business payloads (no target ids, no expected_* fields)
+// ---------------------------------------------------------------------------
+
+message Empty {}
+
+message TypedConfirmation { string typed_confirmation = 1; }
+
+message RepositoryRootAdd {
+  string absolute_path = 1;
+  string typed_confirmation = 2;
+}
+
+message RepositoryRegister { string relative_path = 1; }
+
+// The order somebody dragged these worktrees into.
+//
+// The whole visible order, not a "move this one to index N". A client draws a
+// list it has already filtered — hidden worktrees are out, and a grouped
+// sidebar sends one group — so an index means nothing without saying what it
+// is an index into. Sending the sequence says exactly what is on screen, and
+// the runner permutes those cards among the ranks they already hold; anything
+// not named keeps the rank it had.
+//
+// Idempotent: sending the order a runner is already in changes nothing, which
+// is what makes a retry after a dropped connection safe.
+message WorktreeReorder {
+  // Every worktree in the list being reordered, first on screen first. Ids
+  // rather than ordinals, because the client is naming cards it can see and
+  // has no business inventing rank numbers.
+  repeated bytes worktree_ids = 1;
+}
+
+message WorktreeCreate {
+  string task_name = 1;
+  string branch = 2;
+  string base_revision = 3;
+  // What to run in the terminal this worktree opens with, or empty for no
+  // terminal at all.
+  //
+  // A worktree with nothing running in it is a directory, so a client that just
+  // made one almost always wants a shell in it — which is what the review that
+  // prompted this asked for. Done here rather than as a second call from each
+  // client because it is a product rule, and a rule implemented three times is
+  // a rule three clients can disagree about.
+  //
+  // Tag 4, previously `cli_preset`, which nothing ever read — so the wire is
+  // unchanged and the name now says what it does. Empty is the compatible
+  // default: every caller that passed `String::new()` keeps its behavior, and
+  // it is what a caller about to create its own agent terminal passes.
+  string terminal_preset = 4;
+  // Adopt `branch` instead of creating it.
+  //
+  // Work arrives on a branch as often as it starts on one — pushed from
+  // another machine, handed over by a colleague, or produced by a cloud agent.
+  // A branch that exists only on a remote gets a local tracking branch.
+  bool adopt_existing = 5;
+  // Only ever a NEW branch, cut from the base: refused with `BRANCH_EXISTS`
+  // when a local branch or any remote already carries the name.
+  //
+  // Without it, a name that exists only on one remote is checked out from
+  // there when the base is `HEAD` — right for `worktree create feat` typed
+  // by someone who knows the branch, and wrong for a client that made the
+  // name up for a new task: the task would start on somebody's commits
+  // with no word said. A client can check the branch list first, but a
+  // `git fetch` between that read and this create brings the name in
+  // anyway. Set, the daemon never takes a remote branch as the start point:
+  // the branch is cut from the base's resolved commit, so a name fetched at
+  // any moment still gets a new branch, never a checkout. Ignored with
+  // `adopt_existing`, which is the opposite request.
+  //
+  // Gated by the `workspace_fork_only` capability, and a client that sets it
+  // names that capability in `Request.required_capabilities`: an older
+  // daemon drops an unknown field and would check the branch out anyway.
+  bool fork_only = 6;
+  // The workspace to claim the new worktree for, explicitly. It must be in
+  // the target repository. Absent leaves the worktree unclaimed, for the
+  // runner's other signals to decide.
+  //
+  // Gated by the `workstreams` capability, named in
+  // `Request.required_capabilities` by a client that sets it: an older daemon
+  // drops the field and makes an unclaimed worktree without a word.
+  optional bytes workspace_id = 7;
+}
+
+message Branch {
+  string name = 1;
+  bool local = 2;
+  optional string remote = 3;
+  // Already checked out in another worktree. git refuses a second checkout, so
+  // a client must be able to show this before someone picks it.
+  bool checked_out = 4;
+  google.protobuf.Timestamp updated_at = 5;
+  string subject = 6;
+}
+
+message BranchList { repeated Branch items = 1; }
+
+// A worktree git has that Far Cooler has not adopted yet.
+//
+// People arrive with a repository they have used for months and several
+// worktrees already checked out. Until Far Cooler can see those it only knows
+// about work it started itself, which means re-creating by hand what you already
+// have — a bad first hour with a tool whose whole point is saving you time.
+message DiscoveredWorktree {
+  // Present, not optional, and deliberately.
+  //
+  // Every other path in this protocol is redacted below host_admin and stood in
+  // for by a token derived from the resource's id — a hash of the path would be
+  // a fixed function of the secret being withheld, so a client could confirm a
+  // guess. A worktree that is not registered HAS no id to derive one from, and
+  // inventing an ephemeral one would make the daemon remember something between
+  // two requests for no gain. So the method requires host_admin instead, and
+  // anyone who can call it can already see paths.
+  string path = 1;
+  // Absent for a detached HEAD, rather than filled in with a guess.
+  optional string branch = 3;
+  string head = 4;
+  // Suggested worktree name: the directory's own, which is what whoever made
+  // the worktree already chose to call this work.
+  string suggested_name = 5;
+  // git holds a lock on it. Importable, but worth saying.
+  bool locked = 6;
+}
+
+message DiscoveredWorktreeList { repeated DiscoveredWorktree items = 1; }
+
+message TerminalCreate {
+  string title = 1;
+  string command_preset = 2;
+  // Put the new terminal straight into the worktree's active group.
+  //
+  // What `prefix %` means: you are looking at a layout and you want another
+  // pane in it. Nothing tiles by default, so this is the one path that adds to
+  // a group without being asked twice, and it does nothing when there is no
+  // group to add to.
+  bool join_active_group = 3;
+  // The agent's first message, handed to it as its launch argument.
+  //
+  // claude, codex and cursor each take an initial prompt as a positional
+  // argument; any other preset ignores this. On this launch only: a restart
+  // never sends it again. Unset or empty is an ordinary launch.
+  //
+  // Gated by the `launch_prompt` capability, and a client that fills it in
+  // names that capability in `Request.required_capabilities`: an older daemon
+  // drops an unknown field and would open the agent with an empty composer
+  // while the client believed the task had been sent.
+  optional string prompt = 4;
+  // The board task this terminal is opened to work, by its key (`fc-12`).
+  //
+  // Resolved on the worktree's own repository's board, and refused as
+  // `task_key` when it isn't there. The terminal records the task, an agent
+  // pane exports it as FARCOOLER_TASK on this launch and every relaunch, and
+  // its first message becomes a fixed opening prompt that points it at the
+  // task (with `prompt`, if set, after it). What `farcooler task dispatch`
+  // sends. Unset or empty is an ordinary launch.
+  //
+  // Gated by the `terminal_task` capability, named in
+  // `Request.required_capabilities` by a client that fills it in: an older
+  // daemon drops the field and would open a pane that knows no task, while
+  // the client moved the task into progress.
+  optional string task_key = 5;
+}
+
+message TerminalResize {
+  uint32 columns = 1;
+  uint32 rows = 2;
+  uint64 view_activity_id = 3;
+}
+
+message TerminalStop {
+  bool force = 1;
+  optional string typed_confirmation = 2;
+}
+
+// The terminals a client has in front of a person RIGHT NOW, and the whole set
+// of them.
+//
+// A claim about attention, not about state, and the only one in this protocol:
+// everything else a client sends asks the runner to do something or to describe
+// something, where this says "I can see these, so do not interrupt me about
+// them". What it buys is the notification nobody wants — an agent answering a
+// question you are sitting there reading, arriving on your wrist a second later
+// — and `crates/daemon/src/watch.rs`'s `attention` is where it is spent. See
+// `terminal.seen`, which is the same judgement made one beat too late: it runs
+// on the NEXT poll, up to three seconds after the turn ended, by which point
+// the push has already gone.
+//
+// The WHOLE set on every call, replacing whatever this client said last, rather
+// than a watch/unwatch pair. Two verbs would need the daemon to reconstruct a
+// client's set from a stream of edits it may have missed the middle of — and
+// the one thing this must never do is get stuck holding a claim nobody made,
+// because a claim that cannot be withdrawn is a terminal that never notifies
+// again. An empty list is therefore a real and important message: "I am looking
+// at nothing", which is what an app sends as it goes to the background.
+//
+// Several ids because a Mac window shows a whole tiled layout at once, and a
+// pane tiled beside the focused one is as much on screen as the focused one —
+// the same set `ContentView.visibleTerminals` already marks seen, for the same
+// reason.
+//
+// A claim is only good for `WATCHED_TTL_MS`, so a client that crashes, is
+// suspended, or loses its link stops suppressing on its own. Nothing here has
+// to be cleaned up by the thing that went away.
+message TerminalsWatched {
+  repeated bytes terminal_ids = 1;
+}
+
+// A pane's visible screen, escapes and all.
+//
+// For clients that cannot reach tmux themselves, which is every remote one: the
+// CLI and the Mac app read screens straight from tmux because they are on the
+// host, and a phone over ssh has no such option. Without this the phone can list
+// terminals and act on them but never show one, which is most of what it is for
+// at 3am.
+//
+// Escape sequences are preserved rather than stripped. The client has the same
+// emulator the daemon does, so what travels is what tmux would have sent and the
+// phone renders color, cursor position and all — a plain-text capture would
+// arrive already flattened and could never be anything but grey.
+message TerminalScreen {
+  // Empty when `unchanged` is set, so an idle pane costs a few bytes instead of
+  // a few kilobytes on every poll.
+  bytes contents = 1;
+  uint32 columns = 2;
+  uint32 rows = 3;
+  uint32 cursor_column = 4;
+  uint32 cursor_row = 5;
+  // A cheap identity for this screen. Hand it back on the next request and the
+  // host will say `unchanged` rather than resend a screen you already hold.
+  //
+  // A phone polls a terminal several times a second and most of those screens
+  // are identical — an agent thinking, a shell at a prompt. Sending the whole
+  // capture each time is bandwidth spent to learn nothing, and on a phone that
+  // is battery.
+  uint64 revision = 6;
+  bool unchanged = 7;
+  // The escape sequences that put a fresh emulator into the modes the pane's
+  // program is actually in — alternate screen, mouse tracking and its
+  // encoding, application cursor keys, wrap, caret visibility.
+  //
+  // A capture is contents; modes are not contents. They were set once, by
+  // sequences the program emitted long before any client attached, so a client
+  // that builds an emulator from a capture is wrong about all of them. The
+  // stream's replay states them too, but a client cannot depend on that: a
+  // stream that ends and reattaches rebuilds the emulator, and whichever
+  // replay carried the modes may have gone into one that was then discarded.
+  // Sent with the screen, they arrive with the state they describe.
+  string modes = 8;
+  // The pane's retained scrollback, as bytes ready to feed to an emulator ABOVE
+  // the screen in `contents`.
+  //
+  // Empty unless `TerminalScreenRequest.history_lines` asked for it. Empty even
+  // then when the pane is on the alternate screen — which has no history of its
+  // own, so tmux answers that question with a copy of the visible screen, and a
+  // copy of a full-screen program sitting above itself is worse than nothing —
+  // and empty when the pane has simply not scrolled yet.
+  //
+  // Ready to feed, not a raw capture: the bare LFs `capture-pane` emits have
+  // already been turned into CRLF pairs, so a client does not get a staircase,
+  // and the last line already ends in a reset so that the clear a client writes
+  // next does not paint the whole screen in whatever color the history happened
+  // to end mid-way through. The clear is the client's to write, between this
+  // and `contents`, because erasing the display is exactly what scrolls these
+  // lines into the emulator's own history instead of leaving them on screen.
+  //
+  // Sent even when `unchanged` is set. A client asks for history because it has
+  // none, and "your screen has not moved" is not an answer to that question.
+  bytes history = 9;
+}
+
+// Exact bytes for a pane's input.
+//
+// Bytes, not text: a key is not always a character. Arrows, Ctrl-C and a
+// bracketed paste are all byte sequences, and anything that re-encoded them on
+// the way would have to know the terminal's mode to get them right.
+message TerminalWrite {
+  bytes payload = 1;
+}
+
+// One chunk of a file on its way to a terminal.
+//
+// Chunked because it has to be: `MAX_CONTROL_ENVELOPE_BYTES` caps a control
+// envelope at 1 MiB, so a file is never one frame. It would be wrong even if it
+// fit — this shares a connection with live terminal output, and a single huge
+// envelope stalls every pane on it while it is written.
+//
+// Any file, not only an image. The scope is `CONTROL`, the same as
+// `terminal.write` — a client that can type into a shell can already create any
+// file it likes — so restricting the type protected nothing. What it did cost
+// was the reason people reach for this: dropping a PDF, a log or a CSV on a
+// pane so the agent in it can read the thing being discussed.
+message TerminalFilePut {
+  bytes terminal_id = 1;
+  // Client-generated, and what names the partial file. Two pastes into the same
+  // pane must not be able to append to each other's bytes.
+  bytes transfer_id = 2;
+  // What the sender believes it is sending. Advisory: it picks an extension
+  // only when `name` carries none and the bytes are not a recognizable image.
+  string mime = 3;
+  // Known before the first chunk, so an oversize send is refused immediately
+  // rather than after the upload the sender already waited through.
+  uint64 total_size = 4;
+  // Must equal the bytes already stored. A retry that matches is a no-op; a
+  // mismatch fails the transfer rather than writing at a guessed position.
+  uint64 offset = 5;
+  bytes chunk = 6;
+  // What the sender called it, if it had a name. Sanitized hard on the far
+  // side — it becomes a filename on someone else's machine — but worth keeping:
+  // `quarterly-report.pdf` in a prompt says what it is, and
+  // `2026-08-09-114812Z.bin` says nothing at all.
+  string name = 7;
+}
+
+message TerminalFilePutResult {
+  uint64 stored = 1;
+  // Final chunk only: the absolute path on the host, already typed into the
+  // terminal. Quoted in the terminal when it contains a space; bare here.
+  optional string path = 2;
+}
+
+// Ask for a screen, saying which one you already have.
+message TerminalScreenRequest {
+  // The `revision` from the last screen received. Zero means "send it whatever".
+  uint64 known_revision = 1;
+  // How many lines of scrollback to send above the screen, newest first. Zero
+  // means none, which is what an ordinary poll asks for.
+  //
+  // Asked for rather than sent with every screen because it costs a second
+  // `capture-pane` on the runner and a second capture on the wire, and a client
+  // showing a pane polls it several times a second. So a client asks once per
+  // pane — when it opens one — and polls with zero from then on, at exactly the
+  // cost a poll has always had.
+  //
+  // Bounded, and by the client, because the whole answer rides in one control
+  // envelope: a pane sitting on tmux's full history limit is megabytes of
+  // colored capture, and the client is the only side that knows how many lines
+  // it can actually use.
+  uint32 history_lines = 2;
+}
+
+// Start this connection's live view of one terminal. The terminal is named by
+// `Request.target_resource_id`, the way `terminal.screen` names it.
+//
+// The answer is a `TerminalAttachResult` and then a run of
+// `Event.terminal_frame` frames on this same connection: first the replay —
+// the pane's modes, its scrollback, a clear, its visible screen and its cursor,
+// in that order — and then every byte the program writes, for as long as the
+// connection lives. Detaching is closing the connection; there is no second
+// method for it, because the only client that attaches gives the attachment a
+// session of its own.
+//
+// One attachment per connection. A second `terminal.attach` replaces the first
+// rather than adding to it: two panes' bytes interleaved on one connection
+// would be two streams a client has to demultiplex for no gain, when opening a
+// second connection costs one ssh channel and keeps them apart.
+message TerminalAttach {
+  // Where this client stopped reading, if it is coming back to a stream it
+  // already had. `resume_token` says which stream that was.
+  //
+  // NOT YET SERVED. Resuming means the runner retained the bytes written while
+  // nobody was attached, and it retains nothing: the pane's fanout ends a few
+  // seconds after its last watcher leaves, which is exactly the moment a
+  // reconnecting client would want to resume across. A runner that cannot
+  // resume says so by answering with an empty `resume_token` and
+  // `oldest_sequence` equal to `next_sequence`, and sends a full replay — which
+  // is correct, just more expensive. The fields are here rather than added
+  // later because the shape a resume needs was worked out with them, and
+  // because a client that starts sending them today gets the replay it would
+  // have got anyway.
+  optional uint64 last_acked_sequence = 1;
+  optional string resume_token = 2;
+}
+
+// One payload for every layout mutation; the METHOD says which.
+message LayoutUpdate {
+  // The layout to act on, as a tmux window id. Empty means the worktree's
+  // active one, which is what a person or an agent means by "here" almost every
+  // time. That's chosen among the worktree's own windows, never an
+  // orchestrator's: every orchestrator's window is among the main checkout's
+  // layouts, and is reached only by naming it here.
+  string group_id = 1;
+  optional LayoutPreset preset = 2;
+  repeated bytes terminals = 3;
+  optional bytes focus = 4;
+  optional bytes zoom = 5;
+  bool unzoom = 6;
+  string name = 7;
+  // Relative movement: -1 and +1 are the whole vocabulary.
+  optional int32 step = 8;
+  // Absolute pane, one-based, the way `prefix 1` reads.
+  optional uint32 pane = 9;
+  // For a split or a drop: which edge of `target`.
+  SplitSide side = 10;
+  // The pane being split or dropped onto. Empty means the focused one, in the
+  // layout `group_id` names, or in the active one.
+  optional bytes target = 11;
+  // What to run in a pane this call creates.
+  string command_preset = 12;
+  // Cells to move a divider by, signed.
+  optional int32 resize = 13;
+  // The window's size in cells, so tmux lays out for the viewport actually on
+  // screen rather than for whatever the last client asked for.
+  optional uint32 columns = 14;
+  optional uint32 rows = 15;
+}
+
+// The attachment exists; bytes follow as `Event.terminal_output`.
+message TerminalAttachResult {
+  // The run these bytes belong to. A restarted pane is a new epoch, so a client
+  // that reattaches and gets a different one is holding a picture of a program
+  // that no longer exists and must replace rather than append.
+  uint64 epoch = 1;
+  // Where this attachment's numbering starts, and the oldest offset the runner
+  // could still hand back. Equal to each other means "nothing is retained for
+  // you": the replay that follows is the whole of what there is, and a
+  // `last_acked_sequence` from a previous attachment could not have been
+  // honored. Both are zero today, because no runner retains bytes for an
+  // absent client — see `TerminalAttach.last_acked_sequence`.
+  uint64 next_sequence = 2;
+  uint64 oldest_sequence = 3;
+  // The pane's size right now, so a client can build its emulator at the shape
+  // the replay was captured at rather than at the shape it last asked for.
+  uint32 columns = 4;
+  uint32 rows = 5;
+  // Empty when this runner cannot resume an attachment, which is every runner
+  // today. A client stores it and hands it back; an empty one means the next
+  // attach starts over.
+  string resume_token = 6;
+}
+
+// ---------------------------------------------------------------------------
+// Stable error codes. `core` owns one domain error enum exhaustively matched
+// onto these; there is no catch-all arm.
+// ---------------------------------------------------------------------------
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_AUTH_REQUIRED = 1;
+  ERROR_CODE_SCOPE_DENIED = 2;
+  ERROR_CODE_VERSION_INCOMPATIBLE = 3;
+  ERROR_CODE_HOST_OFFLINE = 4;
+  ERROR_CODE_REPOSITORY_LOCKED = 5;
+  ERROR_CODE_BRANCH_EXISTS = 6;
+  ERROR_CODE_WORKTREE_EXISTS = 7;
+  ERROR_CODE_DIRTY_WORKTREE = 8;
+  ERROR_CODE_RUNNING_PROCESSES = 9;
+  ERROR_CODE_OUTPUT_GAP = 10;
+  ERROR_CODE_CLIENT_TOO_SLOW = 11;
+  ERROR_CODE_OPERATION_FAILED = 12;
+  ERROR_CODE_RESOURCE_CONFLICT = 13;
+  ERROR_CODE_NOT_FOUND = 14;
+  ERROR_CODE_INVALID_ARGUMENT = 15;
+  ERROR_CODE_IDEMPOTENCY_MISMATCH = 16;
+  ERROR_CODE_TMUX_UNAVAILABLE = 17;
+  ERROR_CODE_PATH_NOT_ALLOWED = 18;
+  ERROR_CODE_CONFIRMATION_REQUIRED = 19;
+  // Worktrees still exist under the resource being removed. Distinct from
+  // RUNNING_PROCESSES: nothing is running, but records would be orphaned.
+  ERROR_CODE_WORKTREES_EXIST = 20;
+  // Distinct from PATH_NOT_ALLOWED: that one means "not covered by any
+  // root you've allowlisted yet, allowlist it"; this one means "this exact
+  // location — a whole home directory or a system path — will never be
+  // allowlistable, pick something narrower inside it instead."
+  ERROR_CODE_SENSITIVE_ROOT = 21;
+  // Review. Six failures the review surface can produce that no existing code
+  // describes; each one has a sentence a person reads, and none of them ever
+  // carries a raw Rust error.
+  //
+  // "Can't find the branch this work is based on. Pick a base to compare against."
+  ERROR_CODE_BASE_UNRESOLVABLE = 22;
+  // "This file is too big to show." Offers Load More where paging helps.
+  ERROR_CODE_DIFF_TOO_LARGE = 23;
+  // "This is a merge commit. Far Cooler shows merges by their first parent."
+  // Also binary and submodule entries: there is no text diff to render.
+  ERROR_CODE_DIFF_UNSUPPORTED = 24;
+  // "Can't reach GitHub right now." PR state reads unknown; nothing blocks.
+  ERROR_CODE_PR_STATE_UNAVAILABLE = 25;
+  // "That's too big to attach. Images up to 4 MB, 4 per comment."
+  ERROR_CODE_ATTACHMENT_LIMIT = 26;
+  // "Far Cooler can't tell whether the agent got this." Offers Send Again.
+  ERROR_CODE_DISPATCH_UNKNOWN = 27;
+  // This machine's Far Cooler is too old for what was asked.
+  //
+  // Distinct from NOT_FOUND, which it used to arrive as. "No such worktree"
+  // and "this machine cannot do this yet" call for opposite responses from a
+  // client, and a newer app could not tell them apart — so it could neither
+  // degrade nor say anything useful.
+  //
+  // Never retryable: no amount of retrying updates the other side.
+  ERROR_CODE_CAPABILITY_UNSUPPORTED = 28;
+  // "This chat isn't connected yet." The pane is in agent mode but no shim
+  // holds the socket, so a prompt sent now would reach nobody.
+  //
+  // Retryable, and that is the point of it being its own code rather than
+  // OPERATION_FAILED: the usual cause is a chat that has been opened and whose
+  // shim has not finished dialing, which resolves in about a second. A client
+  // that knows this is what happened can offer Send Again rather than a
+  // shrug — and, more importantly, can say ANYTHING, where before the words
+  // the person typed were dropped on the floor with a success reply.
+  ERROR_CODE_AGENT_NOT_CONNECTED = 29;
+}
+
+// ---------------------------------------------------------------------------
+// Review
+//
+// What a branch changed, the comments a reviewer wrote about it, and where
+// those comments still point.
+//
+// Everything here that returns FILE CONTENT sits at `control`, not `read`. See
+// `required_scope` in the daemon: `read` is the scope handed to something that
+// should only see the shape of the fleet, and a diff is source code. `read`
+// still gets counts, +/- and PR state, which is metadata about work rather than
+// the work — enough to triage a fleet from a phone without being able to read it.
+// ---------------------------------------------------------------------------
+
+// Which comparison a client is asking about.
+message ChangeSetSelector {
+  oneof kind {
+    // The worktree's own branch against its base.
+    Empty worktree = 1;
+    // Any branch, against the worktree base or against its stack parent.
+    BranchAgainst branch = 2;
+  }
+}
+
+message BranchAgainst {
+  string branch = 1;
+  // True selects the branch's stack parent instead of the worktree base. One
+  // field rather than two selector types, because the only thing that differs
+  // between them is which side of the comparison the base comes from.
+  bool against_parent = 2;
+}
+
+message ChangeSetRequest {
+  bytes worktree_id = 1;
+  ChangeSetSelector selector = 2;
+  // Bypass the cache. The Refresh affordance: no watcher is perfect and the
+  // user must always have a way to be certain.
+  bool fresh = 3;
+}
+
+message ChangeSetChanged {
+  bytes worktree_id = 1;
+  uint64 version = 2;
+}
+
+message TaskChanged {
+  bytes task_id = 1;
+  bytes repository_id = 2;
+  // `user`, `manager`, or `agent:<uuid>` — the daemon's `Actor::Display`
+  // impl, verbatim. A wire word rather than a kind-plus-optional-id for the
+  // same reason the store column is: two fields are two things that can
+  // disagree, and nothing would stop a `manager` row from also carrying a
+  // terminal.
+  string actor = 3;
+  // The board the task is on now, so a board view re-reads only when its own
+  // board moved. Absent from a runner without the `workstreams` capability,
+  // which a client reads as "any board in this repository may have moved".
+  optional bytes workspace_id = 4;
+  // The board it just left, set only when `task.move` moved it. A move
+  // changes two boards and this one event names both, so the board a task
+  // left re-reads too, not only the board it arrived on.
+  optional bytes from_workspace_id = 5;
+}
+
+// Where a base came from, because a guessed one silently produces a wrong diff
+// and the user is the only one who can spot it.
+enum BaseSource {
+  BASE_SOURCE_UNSPECIFIED = 0;
+  // The user pinned it.
+  BASE_SOURCE_RECORDED = 1;
+  BASE_SOURCE_UPSTREAM = 2;
+  // Nothing knew, so a local `main` or `master` was used. The only one the UI
+  // labels as a guess, because it is the only one that can silently be wrong.
+  BASE_SOURCE_GUESSED = 3;
+  // The branch has a pull request, and GitHub says what it is based on. Exact,
+  // and the only source that is right for a STACKED branch, whose base is its
+  // parent slice rather than the repository default.
+  BASE_SOURCE_PR_BASE = 4;
+  // The repository's own default branch, from `gh` or from `origin/HEAD`.
+  BASE_SOURCE_DEFAULT_BRANCH = 5;
+}
+
+enum FileStatus {
+  FILE_STATUS_UNSPECIFIED = 0;
+  FILE_STATUS_ADDED = 1;
+  FILE_STATUS_MODIFIED = 2;
+  FILE_STATUS_DELETED = 3;
+  FILE_STATUS_RENAMED = 4;
+  FILE_STATUS_COPIED = 5;
+  FILE_STATUS_TYPE_CHANGED = 6;
+  FILE_STATUS_UNTRACKED = 7;
+  FILE_STATUS_CONFLICTED = 8;
+}
+
+message FileChange {
+  // Worktree-RELATIVE. Not a host path, so it needs no `host_admin` gate — the
+  // same reasoning `WorktreeFileList` already relies on.
+  string path = 1;
+  FileStatus status = 2;
+  optional string old_path = 3;
+  uint32 insertions = 4;
+  uint32 deletions = 5;
+  // git reported `-` for both counts, which is how it says "not text". Distinct
+  // from 0/0, which is a real empty change.
+  bool binary = 6;
+  bool submodule = 7;
+}
+
+message FileChangeList { repeated FileChange items = 1; }
+
+message ChangeCommit {
+  string sha = 1;
+  string subject = 2;
+  string body = 3;
+  string author = 4;
+  int64 timestamp = 5;
+  uint32 files_changed = 6;
+  uint32 insertions = 7;
+  uint32 deletions = 8;
+}
+
+message WorkingTree {
+  // `staged` is the index against HEAD and `unstaged` is the worktree against
+  // the index — the two comparisons DiffSelector draws, so a group's counts and
+  // the patch opened from it are the same diff. A client after the uncommitted
+  // total adds the two; see `change_set::apply_uncommitted_counts` for why
+  // neither field carries `git diff HEAD` instead.
+  repeated FileChange staged = 1;
+  repeated FileChange unstaged = 2;
+  repeated string untracked = 3;
+  repeated string conflicted = 4;
+  // The same untracked files as field 3, carrying the line counts a path alone
+  // cannot: a file an agent has just written is the most interesting thing in an
+  // uncommitted change set, and it counted for nothing until this field existed.
+  // Field 3 stays because the wire is additive-only — an app in the field
+  // decodes it — and both are written from one list in the daemon.
+  repeated FileChange untracked_files = 5;
+}
+
+message ChangeSet {
+  bytes worktree_id = 1;
+  // Advances on every recompute. Not a resource_version: nothing here is
+  // stored, so there is no row to version — this is a cache generation.
+  uint64 version = 2;
+  string branch = 3;
+  string base_ref = 4;
+  BaseSource base_source = 5;
+  // The resolved merge base, shown because a wrong base is invisible otherwise.
+  string base_commit = 6;
+  string head_commit = 7;
+  repeated ChangeCommit commits = 8;
+  WorkingTree working_tree = 9;
+  // Per-file COUNTS for the whole branch. Never patch text: a branch that
+  // regenerated a lockfile touches thousands of files, and a phone must not
+  // receive that to draw a badge.
+  repeated FileChange files = 10;
+  uint32 insertions = 11;
+  uint32 deletions = 12;
+  string worktree_digest = 13;
+  int64 computed_at = 14;
+}
+
+message CommitFilesRequest {
+  bytes worktree_id = 1;
+  string sha = 2;
+}
+
+message DiffSelector {
+  oneof kind {
+    // The whole branch: merge base to HEAD.
+    Empty range = 1;
+    // One commit against its FIRST parent. Never `git show`, which prints a
+    // combined diff for a merge that an ordinary parser reads as nonsense.
+    string commit = 2;
+    // Index against HEAD.
+    Empty staged = 3;
+    // Worktree against index.
+    Empty unstaged = 4;
+    // Worktree against HEAD: everything uncommitted, staged or not.
+    //
+    // The one a person means by "what have I not committed yet", and the one an
+    // agent's work lands in. `unstaged` alone answered that question wrongly the
+    // moment anything was staged — a file added to the index vanished from its
+    // own diff, which reads as work undone rather than work staged.
+    Empty local = 5;
+  }
+}
+
+message FileDiffRequest {
+  bytes worktree_id = 1;
+  DiffSelector selector = 2;
+  string path = 3;
+  // Paging cursor, for a file whose diff exceeded a cap.
+  uint32 from_hunk = 4;
+  // Lines of unchanged context around each hunk. Zero means git's own default,
+  // which is three.
+  //
+  // What "expand this collapsed section" is made of: a diff is a set of hunks
+  // with the unchanged lines between them left out, and the only way to see
+  // those lines is to ask git for a diff that includes them. A client asks for
+  // a number large enough to swallow the gap it wants to open and shows the
+  // part it asked about.
+  uint32 context = 5;
+}
+
+enum DiffLineKind {
+  DIFF_LINE_KIND_UNSPECIFIED = 0;
+  DIFF_LINE_KIND_CONTEXT = 1;
+  DIFF_LINE_KIND_ADDED = 2;
+  DIFF_LINE_KIND_REMOVED = 3;
+}
+
+message DiffLine {
+  DiffLineKind kind = 1;
+  // Absent on the side the line does not exist on.
+  optional uint32 old_no = 2;
+  optional uint32 new_no = 3;
+  string text = 4;
+  // The file had no trailing newline here. Carried rather than normalized: a
+  // diff that drops it shows a real one-line change as no change at all.
+  bool no_newline = 5;
+}
+
+message Hunk {
+  // Position in THIS response, and the selection key. Meaningless outside it.
+  uint32 index = 1;
+  string header = 2;
+  uint32 old_start = 3;
+  uint32 old_lines = 4;
+  uint32 new_start = 5;
+  uint32 new_lines = 6;
+  repeated DiffLine lines = 7;
+  // Hash of the path and the CHANGED lines only.
+  //
+  // Not an identity: the same edit can legitimately appear twice in one file,
+  // and anything resolving an anchor must treat a second match as ambiguity
+  // rather than picking one. Context is excluded so that editing the code above
+  // a hunk does not move every comment attached below it.
+  string fingerprint = 8;
+}
+
+enum Truncation {
+  TRUNCATION_UNSPECIFIED = 0;
+  TRUNCATION_LINE_CAP = 1;
+  TRUNCATION_HUNK_CAP = 2;
+  TRUNCATION_BYTE_CAP = 3;
+  TRUNCATION_TIMEOUT = 4;
+}
+
+// Why a file has no hunks, when the reason is not "nothing changed".
+//
+// Present so a client renders the reason. An empty hunk list on its own reads
+// as "unchanged", which for a binary file or an unreadable patch is a lie.
+enum DiffUnsupported {
+  DIFF_UNSUPPORTED_UNSPECIFIED = 0;
+  DIFF_UNSUPPORTED_BINARY = 1;
+  DIFF_UNSUPPORTED_SUBMODULE = 2;
+  DIFF_UNSUPPORTED_COMBINED_DIFF = 3;
+  DIFF_UNSUPPORTED_MALFORMED = 4;
+}
+
+message FileDiff {
+  string path = 1;
+  repeated Hunk hunks = 2;
+  optional Truncation truncated = 3;
+  optional uint32 next_hunk = 4;
+  optional DiffUnsupported unsupported = 5;
+  // The commit had more than one parent and this is its first-parent view.
+  bool first_parent_of_merge = 6;
+  uint64 change_set_version = 7;
+}
+
+// ---------------------------------------------------------------------------
+// The buffer
+// ---------------------------------------------------------------------------
+
+message ChangesSetBase {
+  bytes worktree_id = 1;
+  string base_ref = 2;
+}
+
+message ChangesMarkRead {
+  bytes worktree_id = 1;
+  string branch = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Attachments
+//
+// Bytes live BESIDE the database, keyed by hash, for the reason `push.rs` keeps
+// the relay token out of it: a database copied for support or debugging should
+// not carry a screenshot of whatever was on screen when somebody wrote a
+// comment. Content addressing also deduplicates the same screenshot attached to
+// several entries.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Stacks and PR state
+// ---------------------------------------------------------------------------
+
+// Where a branch's parent came from. A guess is labeled, because a wrong parent
+// produces a wrong diff and looks like a real one.
+enum ParentSource {
+  PARENT_SOURCE_UNSPECIFIED = 0;
+  PARENT_SOURCE_RECORDED = 1;
+  PARENT_SOURCE_UPSTREAM = 2;
+  PARENT_SOURCE_PR_BASE = 3;
+  PARENT_SOURCE_GUESSED = 4;
+}
+
+enum PrState {
+  PR_STATE_UNSPECIFIED = 0;
+  PR_STATE_UNKNOWN = 1;
+  PR_STATE_OPEN = 2;
+  PR_STATE_DRAFT = 3;
+  PR_STATE_MERGED = 4;
+  PR_STATE_CLOSED = 5;
+}
+
+enum CheckState {
+  CHECK_STATE_UNSPECIFIED = 0;
+  CHECK_STATE_UNKNOWN = 1;
+  CHECK_STATE_PASSING = 2;
+  CHECK_STATE_FAILING = 3;
+  CHECK_STATE_PENDING = 4;
+}
+
+enum ReviewDecision {
+  REVIEW_DECISION_UNSPECIFIED = 0;
+  REVIEW_DECISION_UNKNOWN = 1;
+  REVIEW_DECISION_APPROVED = 2;
+  REVIEW_DECISION_CHANGES_REQUESTED = 3;
+  REVIEW_DECISION_REVIEW_REQUIRED = 4;
+}
+
+message PrStatus {
+  uint32 number = 1;
+  string url = 2;
+  PrState state = 3;
+  CheckState checks = 4;
+  ReviewDecision review_decision = 5;
+  // The PR head as GitHub last saw it. Under a squash merge this is the ONLY
+  // way to establish that nothing local is unmerged: the branch's commits never
+  // appear in main with those SHAs, so ancestry can never prove it.
+  string head_oid = 6;
+  optional int64 merged_at = 7;
+  int64 fetched_at = 8;
+  bool stale = 9;
+}
+
+message StackLink {
+  string branch = 1;
+  string parent_branch = 2;
+  ParentSource parent_source = 3;
+  string head_commit = 4;
+  uint32 ahead = 5;
+  uint32 behind = 6;
+  optional PrStatus pr = 7;
+}
+
+message StackLinkList {
+  bytes repository_id = 1;
+  repeated StackLink items = 2;
+  // The parent chain formed a loop. Reported rather than followed, and the
+  // links returned are the ones walked before it was noticed.
+  bool cycle_detected = 3;
+  // Whether `gh` answered at all for this read.
+  //
+  // Without this a client cannot tell "GitHub says there is no PR for this
+  // branch" from "we could not ask" — both arrive as an absent `pr` on every
+  // link. The daemon can always tell the two apart, and the difference decides
+  // whether offering to CREATE a pull request is helpful or is confidently
+  // wrong about a PR that already exists behind a logged-out `gh`.
+  //
+  // On the list rather than on each link on purpose: the fact reported is "did
+  // the subprocess answer", which is a property of the whole read, not of one
+  // branch. False means show neither PR state nor an offer to create one.
+  bool pr_known = 4;
+  // The repository's page on GitHub, e.g. `https://github.com/o/r`, as `gh`
+  // reports it. Empty when `gh` has not answered for this repository yet.
+  //
+  // From `gh repo view --json url`, which the daemon already runs and already
+  // caches per repository, rather than from parsing a git remote by hand — the
+  // parse is wrong for GitHub Enterprise hosts and the call is free.
+  //
+  // A client builds the compare link for a branch with no PR from this plus the
+  // base and head refs it already holds.
+  string repo_url = 5;
+}
+
+message StackGet {
+  bytes repository_id = 1;
+  string branch = 2;
+}
+
+message StackSetParent {
+  bytes repository_id = 1;
+  string branch = 2;
+  string parent_branch = 3;
+}
+
+message PrRefresh { bytes repository_id = 1; }
+
+// ---------------------------------------------------------------------------
+// The fleet inbox
+// ---------------------------------------------------------------------------
+
+message ChangesInboxRequest {}
+
+message InboxWorktree {
+  bytes worktree_id = 1;
+  string task_name = 2;
+  string branch = 3;
+  // The change set moved since this worktree was last marked reviewed. Derived
+  // from the cheap two-syscall gate, never from a fleet-wide `git status`.
+  bool changed_since_reviewed = 8;
+  uint32 insertions = 9;
+  uint32 deletions = 10;
+}
+
+message ChangesInbox {
+  repeated InboxWorktree items = 1;
+  // Entries in scopes this client cannot see, as an opaque count.
+  //
+  // Included rather than omitted: a triage surface that silently hides half the
+  // fleet is worse than one that says it is not showing you everything.
+  uint32 elsewhere = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Device enrollment
+//
+// Which devices may log in to this runner, and the two calls that change that.
+// The runner's own `~/.ssh/authorized_keys` is the authority: no enrollment
+// recorded anywhere else can disagree with the file, so everything here is read
+// back out of it rather than out of a database.
+// ---------------------------------------------------------------------------
+
+// One line inside this runner's fence.
+//
+// Including a line Far Cooler did not write. Dropping those would mean the next
+// enrollment deleted a key somebody added by hand, so they are carried through
+// and reported — see `foreign`.
+message EnrolledClient {
+  // The device, as the forced command on the line names it — or, when
+  // `shell_access` is set, as the comment Far Cooler wrote there does. Empty for
+  // a foreign line: nothing names a device there.
+  //
+  // A Mac has TWO lines under one client id, one of each kind. That is the
+  // point: they are the same device, and revoking it removes both.
+  string client_id = 1;
+  // `SHA256:…`, as `ssh-keygen -lf` prints it. Empty only when the line held no
+  // key this build could parse at all.
+  string fingerprint = 2;
+  // The key's comment, which for Far Cooler's own lines is the name it chose.
+  string label = 3;
+  // What this device may do, as the forced command says. UNSPECIFIED for a
+  // foreign line, for one of ours whose scope word this build does not have —
+  // which grants nothing, because the daemon serving it refuses the word too —
+  // and for a `shell_access` line, which carries no scope and hands out no Far
+  // Cooler grant at all.
+  Scope scope = 4;
+  // Which local account's `authorized_keys` this line was read from.
+  //
+  // Not in the line: nothing in `authorized_keys` names the account it grants,
+  // the file's LOCATION is what does. Filled in by the daemon that opened it.
+  string account = 5;
+  // Milliseconds since the epoch, or 0 for unknown — which is the ordinary
+  // answer. `authorized_keys` records no time, and the file is the authority,
+  // so only the reply to an enrollment that just happened can fill this in.
+  int64 enrolled_at = 6;
+  // Far Cooler did not write this line. It is inside the fence and is left
+  // exactly as it was found; it is reported so a person can see it is there.
+  bool foreign = 7;
+  // This is the device's PLAIN line — Key B, the key Zed, git and Terminal use.
+  //
+  // Far Cooler wrote it and manages it: it is inside the fence, this call
+  // reports it, and `client.revoke` removes it. Never true for a foreign line,
+  // which Far Cooler did not write and never touches.
+  //
+  // A client shows the two as separate rows — "Far Cooler access" and "shell
+  // access" — because they are removed together and mean different things: this
+  // one is an ordinary SSH key with a shell behind it, so removing it takes the
+  // device's ssh, git and Zed access to this runner away entirely, not only its
+  // access to Far Cooler.
+  bool shell_access = 8;
+}
+
+message ClientList { repeated EnrolledClient items = 1; }
+
+// Add a device's key to this runner's fence.
+//
+// There is deliberately NO field here for options, a forced command, or a key to
+// be written as it arrived. A request chooses between two SHAPES the daemon
+// renders — see `shell_access` — and carries no bytes that reach the file except
+// the key material, re-encoded. That is the guard rail, and it is the half of it
+// worth keeping: a field that carried options could be refused, and a flag that
+// can be refused can be un-refused by one line in a dispatch arm.
+//
+// **An earlier version of this message refused a plain line altogether**, on a
+// rule stated as "only a shell can grant a shell". That rule was never a
+// security boundary and the design says so out loud: a device holding `control`
+// drives a terminal, and a terminal can append to `authorized_keys` by itself.
+// It was a guard rail against a MISTAKE — and a guard rail that also blocked the
+// key Zed, git and Terminal need was blocking most of the value of onboarding a
+// Mac, while the shell key got added by hand or by a script and then belonged to
+// nobody. See "What `control` really means" and "A Mac needs two keys" in
+// `docs/superpowers/specs/2026-08-16-device-onboarding-design.md`.
+message ClientEnroll {
+  // One OpenSSH public key line, ed25519, as the device generated it. Nothing
+  // of it survives into the file except the key material, re-encoded.
+  string public_key = 1;
+  // A name for humans. The comment written to the file is derived from it and
+  // suffixed with the fingerprint, never used verbatim.
+  string label = 2;
+  // The device this line will name. Refused if it would not survive being
+  // written into a forced command, or into the comment of a plain line.
+  //
+  // A Mac sends the SAME id for both of its keys. Two lines under one id is the
+  // intended shape here — one restricted, one plain — and it is what lets one
+  // `client.revoke` remove both.
+  string client_id = 3;
+  // Refused when UNSPECIFIED. An unscoped line already means host_admin to
+  // sshd, so guessing would turn a field somebody forgot into the whole runner.
+  //
+  // Must be HOST_ADMIN when `shell_access` is set: a plain line is a shell on
+  // that account, which is every power the account has, so a request asking for
+  // one while saying `read` or `control` does not agree with itself. Nothing is
+  // written into a plain line from this field — there is nowhere to put it — it
+  // is the request saying what it knows it is asking for.
+  Scope scope = 4;
+  // Write a PLAIN, unrestricted line instead of a restricted one: Key B.
+  //
+  // A forced command is what makes a device's identity server-asserted, and it
+  // is also what leaves sshd with no shell to offer — so
+  // `apps/macos/Sources/FarCooler/Editors.swift` opening a worktree as
+  // `ssh://{host}{path}` gets the daemon where Zed wanted a shell. A Mac
+  // therefore enrolls twice, once with this false and once with it true. A phone
+  // enrolls once, with it false: there is no Zed on a phone.
+  //
+  // The line is still rendered by the daemon, from the key's own key data, with
+  // a comment the daemon chose — ed25519 only, CR/LF refused, the received
+  // comment discarded. It goes inside the fence like any other, so it is
+  // MANAGED: `client.list` reports it with `shell_access` set and
+  // `client.revoke` removes it along with the device's restricted line.
+  //
+  // Default false, which is the restricted line — so a client built before this
+  // field existed asks for exactly what it always asked for.
+  bool shell_access = 5;
+  // The device's tailcat node PUBLIC key: 43 characters of unpadded base64-URL,
+  // exactly as the ceremony offer carried it. Empty for a device that has none,
+  // which is a device that enrolls as direct and asks this runner for nothing.
+  //
+  // This is the one field here that is a key rather than a shape, and it is
+  // still not bytes that reach the file as they arrived: `fence::render` decodes
+  // it, refuses anything `usable_node_key` would refuse, and writes it into the
+  // forced command it built. A restricted line is the only place it can go —
+  // a plain line has no options field — so a request carrying one beside
+  // `shell_access` is refused rather than quietly dropped. A Mac therefore sends
+  // it on its Key A call and not on its Key B call.
+  //
+  // Default empty, which is what a client built before this field existed
+  // sends, and what every device that cannot join a tunnel sends today.
+  string node_key = 6;
+}
+
+message ClientEnrollResult {
+  // What is enrolled now — which, when `already_enrolled` is set, is the grant
+  // that was already there rather than the one that was asked for.
+  EnrolledClient client = 1;
+  // This key, or this client id, was already in the fence and nothing was
+  // written.
+  //
+  // Not an error: it is the ordinary outcome of enrolling a Mac on itself,
+  // whose own shell key is usually already in that file, and of a ceremony
+  // offered a runner the device can already reach. A failure would send a
+  // person looking for a problem that does not exist; a second line for one key
+  // would leave the daemon unable to say which of them a session used.
+  //
+  // A key already present as the OTHER shape reports this too, and `client`'s
+  // `shell_access` is how a caller sees which shape it got. One key means one
+  // line: sshd matches a key against the file and takes the first line that
+  // matches, so the same key written both plain and restricted would make "does
+  // this device get a shell" a question about line order in a text file. A Mac's
+  // two keys are two different keys, which is why it has two.
+  bool already_enrolled = 2;
+  // This runner's tunnel token, for a device that was just admitted to it.
+  //
+  // Empty unless the request carried a node key this runner's fence now holds
+  // for that device AND this runner has a tunnel to hand back — so empty is the
+  // ordinary answer for a directly reachable runner, for a device that offered
+  // no key, and for a runner whose tunnel would not start. The same value
+  // `ClientSetNodeKeyResult.conn_blob` carries, produced by the same code.
+  //
+  // Not a secret in the sense a private key is: the token names a relay and a
+  // node, and dialing it gets nowhere without a node key this runner admits.
+  // The granting device puts it in the ceremony reply as `Reach::Tailcat`,
+  // which is the one path by which a paired device learns it.
+  //
+  // A pairing that could not be given a tunnel still succeeds and still answers
+  // with `client`: a person who paired a phone against a runner they can reach
+  // directly has lost nothing, and one whose pairing failed outright has lost
+  // the device.
+  string conn_blob = 3;
+}
+
+// Remove a device's lines from this runner's fence.
+//
+// By client id, which is what the forced command carries — and what Far Cooler
+// writes into the comment of a plain line, for exactly this reason. A line Far
+// Cooler did not write has no client id and so cannot be named here —
+// deliberately: this call must not be able to delete a key somebody added by
+// hand.
+//
+// **EVERY line under that id goes**, which for a Mac is both of its keys, in one
+// write. That is what makes the removal copy true: the Mac loses SSH access to
+// this runner entirely, not only its access to Far Cooler. Two calls could half
+// fail and leave a device that is gone from the app and still holds a shell.
+//
+// It does not close a shell that is already open — nothing on a runner can, and
+// that shell can put both lines back. See `enrollment::revoke`.
+message ClientRevoke { string client_id = 1; }
+
+// A device tells its runner which node key to admit to the tunnel.
+//
+// The runner writes onto the CALLER's line, identified by the connection's own
+// client id, and ignores any device named here. That is what makes this safe
+// without a ceremony as far as LINES go: a device cannot put a key on another
+// device's line, cannot widen its own scope, and cannot alter the forced
+// command or the `restrict` that gate it.
+//
+// **What the runner cannot check is that the caller holds the private half of
+// the key it sends.** The allowlist is a union over lines and tailcat admits by
+// node key rather than by line, so an enrolled device may send a key belonging
+// to a machine that is not enrolled at all: the runner writes it, `allow_add`
+// admits it to the live server, and that third machine can then dial the tunnel
+// and open a TCP connection to `127.0.0.1:<sshPort>`. sshd still authenticates
+// it, so what is extended is network reachability rather than a login — but
+// network reachability is exactly what the tunnel exists to gate.
+//
+// A proof of possession is not the fix, and should not be proposed as one. The
+// risk is delegation rather than impersonation: a device that wants to admit a
+// machine controls that machine, and can produce whatever proof is asked for.
+// There is a mechanical block as well — a node key is a Tailscale
+// `key.NodePublic`, a clamped X25519 ECDH key, which nothing can sign with.
+// What bounds this is revocation, which takes the line and its node key out of
+// the allowlist in one write.
+//
+// This is the migration path. A fleet enrolled before the tunnel existed has
+// lines with no node key, and `crates/daemon/src/allowlist.rs` reads such a
+// runner as admitting nobody — which is the only safe reading, since tailcat
+// treats an empty allowlist as "admit everyone". Without this call, every one
+// of those devices would have to be re-enrolled by hand to gain a route it is
+// already entitled to.
+message ClientSetNodeKey {
+  // Ignored. Present so a log of the request shows what the caller believed;
+  // the line written is always the connection's own.
+  string client_id = 1;
+  // 43 characters of unpadded base64: one X25519 public key. Refused if it
+  // could not survive being written into a forced command.
+  string node_key = 2;
+}
+
+message ClientSetNodeKeyResult {
+  // This runner's tailcat token, so the caller can reach it through the tunnel
+  // from now on. Empty when this runner serves no tunnel.
+  //
+  // Empty is ordinary rather than a failure: the first device to register a
+  // key on a migrating runner writes the line that makes an allowlist possible,
+  // and the runner starts serving on its next boot. The line is written either
+  // way — this field only says whether there is a token to dial yet.
+  string conn_blob = 1;
+}
+
+// ---------------------------------------------------------------------------
+// The board
+//
+// The split this whole surface rests on, and the reason there is no route here
+// that edits a note: a `Task` is what is understood NOW and every field of it
+// may be revised through `task.update`, while a `TaskNote` is the record of how
+// that understanding was reached and no field of any note may ever change.
+// Correcting the record is `task.note` again, carrying `supersedes`. The store
+// enforces it too — `task_notes` has a `BEFORE UPDATE` trigger that refuses
+// unconditionally — so an edit route would fail at runtime rather than at
+// review. See `crates/store/src/tasks.rs`.
+// ---------------------------------------------------------------------------
+
+// Where a task sits, in the order work moves through the board.
+//
+// UNSPECIFIED is refused wherever it is a VALUE — `task.set_status` will not
+// take it — for the reason `PaneMode` gives: defaulting an unreadable status to
+// `BACKLOG` would quietly move a finished task back onto the board. Where it is
+// a FILTER, on `TaskListRequest`, it means "every status", which is the store's
+// own `Option<TaskStatus>` and not a default standing in for a real value.
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  TASK_STATUS_BACKLOG = 1;
+  TASK_STATUS_TODO = 2;
+  // Waiting on a person. A QUESTION note puts a task here and the ANSWER takes
+  // it back out.
+  TASK_STATUS_NEEDS_DECISION = 3;
+  TASK_STATUS_IN_PROGRESS = 4;
+  TASK_STATUS_IN_REVIEW = 5;
+  TASK_STATUS_DONE = 6;
+  TASK_STATUS_CANCELLED = 7;
+}
+
+// What a note is. Same vocabulary as the stored column, so a note on a screen
+// reads as the row it came from.
+//
+// UNSPECIFIED follows the same rule `TaskStatus` states: refused as a value on
+// `task.note`, and "every kind" as a filter on `task.get` and `task.search`.
+//
+// STATUS_CHANGE and CREATED are written only by the transactions that move or
+// make a task, and `task.note` refuses both — a caller appending a
+// STATUS_CHANGE whose `from` and `to` no move ever produced would be writing a
+// lie into a log whose whole claim is that a move is recorded rather than
+// inferred.
+enum TaskNoteKind {
+  TASK_NOTE_KIND_UNSPECIFIED = 0;
+  TASK_NOTE_KIND_DECISION = 1;
+  TASK_NOTE_KIND_FINDING = 2;
+  TASK_NOTE_KIND_QUESTION = 3;
+  TASK_NOTE_KIND_ANSWER = 4;
+  TASK_NOTE_KIND_PROGRESS = 5;
+  TASK_NOTE_KIND_COMMENT = 6;
+  TASK_NOTE_KIND_STATUS_CHANGE = 7;
+  TASK_NOTE_KIND_CREATED = 8;
+}
+
+// One checkable thing, and whether it holds.
+message TaskAcceptanceItem {
+  bytes id = 1;
+  string text = 2;
+  bool met = 3;
+}
+
+// Current understanding, and nothing about how it was reached.
+message Task {
+  bytes id = 1;
+  uint64 resource_version = 2;
+  bytes repository_id = 3;
+  // Short and typeable, for a person and for a prompt: `fc-42`. Per
+  // repository, and derived once at registration — never from the
+  // repository's current name, so a rename does not strand a key.
+  string key = 4;
+  string title = 5;
+  TaskStatus status = 6;
+  // Unix milliseconds, from when the status last changed. The board's most
+  // important column is "how long has this been sitting like this".
+  int64 status_since = 7;
+  string intent = 8;
+  repeated TaskAcceptanceItem acceptance = 9;
+  repeated string constraints = 10;
+  // The lane this task is using, when it has one. A task exists in the backlog
+  // long before any worktree does.
+  optional bytes worktree_id = 11;
+  repeated string labels = 12;
+  // Unix milliseconds, from when the task was filed. Zero from a runner older
+  // than this field, which a client reads as "not said" rather than 1970.
+  int64 created_at = 13;
+  // Unix milliseconds, from the last time anything on the card changed: a
+  // status move, a note, or a revision that actually changed a field. Equal to
+  // `created_at` for a card nothing has happened to since it was filed, which
+  // is how a client tells "Added" from "Updated". Zero from an older runner,
+  // as above. Blocks do not move it: a block is about another card.
+  int64 updated_at = 14;
+  // The board this task is on: a workspace in `repository_id`. Always set by
+  // a runner with the `workstreams` capability; empty from an older one.
+  // `task.move` changes it, and the key stays the same.
+  bytes workspace_id = 15;
+}
+
+message TaskList { repeated Task items = 1; }
+
+// One entry in the record. Never edited, here or anywhere.
+message TaskNote {
+  bytes id = 1;
+  bytes task_id = 2;
+  TaskNoteKind kind = 3;
+  // `user`, `manager`, or `agent:<uuid>` — the daemon's `Actor::Display` impl,
+  // verbatim, the same word `TaskChanged.actor` carries. One string rather
+  // than a kind plus a nullable id, because two fields are two things that can
+  // disagree.
+  string actor = 4;
+  // Unix milliseconds.
+  int64 at = 5;
+  string body = 6;
+  // Kind-specific structure as a JSON object: a decision's rejected
+  // alternatives, a question's options, a status change's `from` and `to`.
+  //
+  // A JSON string on the wire rather than proto fields, for the reason the
+  // column is JSON: adding a kind must stay a line of Rust rather than a
+  // migration AND a protocol change. Empty means no structure; anything that
+  // is not a JSON object is refused rather than stored.
+  string extra_json = 7;
+  // The note this replaces, when a later understanding replaced an earlier
+  // one. Both stay readable forever.
+  optional bytes supersedes = 8;
+}
+
+// One note matched by `task.search`, plus whether something has since
+// superseded it.
+//
+// `supersedes` only ever points backward, so a note cannot say of itself that
+// it was retracted. This flag is the forward fact, and it is true the moment
+// ANY note names this one — including one whose own body would never have
+// matched the query. What it cannot hand back is the retracting note's text; a
+// caller that needs the current word follows `task_id` to `task.get`.
+message TaskNoteHit {
+  TaskNote note = 1;
+  bool superseded = 2;
+}
+
+message TaskNoteHitList { repeated TaskNoteHit items = 1; }
+
+// One thing a task is waiting on, and why.
+message TaskBlock {
+  bytes task_id = 1;
+  bytes blocked_by = 2;
+  string reason = 3;
+}
+
+message TaskBlockList { repeated TaskBlock items = 1; }
+
+// A task with its record and what it waits on, in one read.
+//
+// One round trip rather than three, because every reader of a task — a person
+// opening a card, an agent picking work up — wants all three, and the notes are
+// the half that says why the row reads as it does.
+message TaskDetail {
+  Task task = 1;
+  repeated TaskNote notes = 2;
+  repeated TaskBlock blocks = 3;
+}
+
+message TaskListRequest {
+  bytes repository_id = 1;
+  // UNSPECIFIED means every status. See `TaskStatus`.
+  TaskStatus status = 2;
+  // When set and non-zero, answer with the tasks nothing has moved on for
+  // longer than this instead: no move, note or edit, measured from
+  // `Task.updated_at`, the clock the boards' "Hasn't moved" uses. This is the
+  // staleness view, whose whole point is a task a manager assumed was in
+  // flight that stopped. Only
+  // IN_PROGRESS and IN_REVIEW are listed, the statuses where an agent is meant
+  // to be working and the rule every board draws: BACKLOG and TODO are not
+  // expected to move, NEEDS_DECISION waits on the owner, and DONE and
+  // CANCELLED have stopped for good.
+  optional uint64 stale_after_millis = 3;
+  // One board: the tasks on this workspace. `repository_id` may then be
+  // empty; if it is set, the workspace must be in it. Absent lists every
+  // board in `repository_id`, each task naming its own in `Task.workspace_id`.
+  //
+  // Gated by the `workstreams` capability, named in
+  // `Request.required_capabilities` by a client that sets it: an older daemon
+  // drops the field and answers with the whole repository.
+  optional bytes workspace_id = 4;
+}
+
+message TaskGetRequest {
+  bytes task_id = 1;
+  // UNSPECIFIED means every kind. Narrowing is what makes the split pay:
+  // DECISION alone answers "why is it like this" without a wall of progress
+  // chatter.
+  TaskNoteKind note_kind = 2;
+}
+
+// Resolve the key a person types -- `fc-42` -- to the task it names.
+//
+// The board's ergonomics are the feature, and a key was costing a client every
+// row of every board to resolve. `task.list` was the only way to turn `fc-42`
+// into an id, so a CLI resolved one by listing every registered repository and
+// reading each board's full rows -- intent, acceptance, constraints, labels --
+// to compare one short string. `farcooler task block` did it twice, once for
+// each end of the edge.
+//
+// Answers with a `TaskList` rather than one `Task`. A runner that has always
+// worked cannot mint the same key twice -- a key is `<prefix>-<n>` and the
+// prefix is uniquely indexed per runner -- but a repository that missed its
+// prefix at registration issues `-1`, `-2` with no prefix at all, and two of
+// those name the same key. The list is what lets a caller REFUSE an ambiguous
+// answer instead of picking from it, which is the failure found days later.
+//
+// Case-insensitive on `key`, because `FC-42` is the same ticket as `fc-42` to
+// everyone but a database.
+message TaskGetByKeyRequest {
+  // Which board. EMPTY means every board this runner has, which is what a
+  // client asking on behalf of somebody who did not name one wants: one round
+  // trip either way.
+  bytes repository_id = 1;
+  string key = 2;
+}
+
+// `actor` on every write below is the same word `TaskNote.actor` carries.
+// Empty means `user`: a call arriving with nobody named is a person at a
+// client, which is what `user` means, while `manager` and `agent:<uuid>` are
+// claims that have to be made out loud. A non-empty word that does not parse
+// is refused rather than quietly read as `user`, so a typo in an agent's uuid
+// cannot file its work under a person.
+message TaskCreate {
+  bytes repository_id = 1;
+  string title = 2;
+  string intent = 3;
+  repeated TaskAcceptanceItem acceptance = 4;
+  repeated string constraints = 5;
+  repeated string labels = 6;
+  optional bytes worktree_id = 7;
+  string actor = 8;
+  // The board to file it on. `repository_id` may then be empty; if it is set,
+  // the workspace must be in it. Absent files it on the repository's Main, so
+  // a caller that predates workspaces still lands somewhere sane.
+  //
+  // Gated by the `workstreams` capability, named in
+  // `Request.required_capabilities` by a client that sets it: an older daemon
+  // drops the field and files the task on the repository's only board.
+  optional bytes workspace_id = 9;
+}
+
+// Revise what is currently understood. The mutable half of the design.
+//
+// Every field is sent every time and replaces what was there: this is a whole
+// revision, not a patch, and a client that sends only what it changed would
+// blank the rest. Read the task, edit, send it back — which is what
+// `expected_version` is for.
+message TaskUpdate {
+  bytes task_id = 1;
+  // The `resource_version` the caller read. A mismatch is refused rather than
+  // merged: two clients revising the same fields must not both believe they
+  // won.
+  //
+  // In the payload rather than the envelope's `expected_resource_version`,
+  // which no method in this daemon reads yet — one source for a precondition
+  // beats two that can disagree.
+  uint64 expected_version = 2;
+  string title = 3;
+  string intent = 4;
+  repeated TaskAcceptanceItem acceptance = 5;
+  repeated string constraints = 6;
+  repeated string labels = 7;
+  optional bytes worktree_id = 8;
+  string actor = 9;
+}
+
+// Move a task. Deliberately not part of `task.update`: a status settable there
+// would be a status that could move without the log noticing, and the move and
+// its STATUS_CHANGE note are one transaction in the store.
+message TaskSetStatus {
+  bytes task_id = 1;
+  TaskStatus status = 2;
+  string actor = 3;
+}
+
+// Append one entry to a task's record. There is no counterpart that changes an
+// entry already there, and there must never be one.
+message TaskNoteAppend {
+  bytes task_id = 1;
+  TaskNoteKind kind = 2;
+  string body = 3;
+  // A JSON object, or empty. See `TaskNote.extra_json`.
+  string extra_json = 4;
+  // Correcting the record: the note this one replaces. It must be on the same
+  // task and of the same kind — a note correcting another task's history reads
+  // as a correction and is not one.
+  optional bytes supersedes = 5;
+  string actor = 6;
+}
+
+// Record that a task cannot proceed until another does, or clear that edge.
+//
+// One route for both directions rather than two, because a block is one edge
+// with two states: a separate `task.unblock` would be a second row in the
+// scope table governing the same fact, and the two could be gated differently.
+// A cycle is refused — a deadlock nobody resolves presents as a queue that
+// quietly stopped moving rather than as an error.
+//
+// Both halves are idempotent, so either is safe to retry. `task_blocks` is
+// keyed on the pair: writing an edge that is already there takes the new
+// `reason` rather than refusing, and clearing one that was never there
+// succeeds. Correcting a `reason` is therefore one call, the same call that
+// wrote it.
+//
+// This changed: writing an edge used to come back `resource-conflict` when
+// the pair was already blocked. A block is current understanding of what a
+// task waits on, not a record of what was once believed, so it is revisable
+// in place; the append-only rule applies to `TaskNoteAppend`, where a
+// correction supersedes rather than replaces.
+message TaskBlockSet {
+  bytes task_id = 1;
+  bytes blocked_by = 2;
+  // Why the task has to wait. Three states, not two, which is the whole
+  // reason this field carries presence: absent leaves whatever reason is on
+  // the edge standing, `""` clears it, and any other value replaces it.
+  //
+  // "Correct this reason" and "re-assert this block" are different intents,
+  // and while this was a plain `string` the second one destroyed the first
+  // one's words — a re-block carrying no reason wrote an empty one over
+  // whatever was there. Presence is what lets a caller say nothing about the
+  // reason rather than being forced to say something about it.
+  //
+  // Adding `optional` does not break the wire. A present value encodes
+  // exactly as the plain `string` did, so an old daemon reads a new client;
+  // and a proto3 `string` was never sent at all when it was empty, so an old
+  // client that passed `""` for "no reason given" already put no bytes on the
+  // wire and is read here as absent — which is now the safe answer rather
+  // than the destructive one. The one thing an old client can no longer do is
+  // CLEAR a reason, because it has no way to distinguish the two.
+  optional string reason = 3;
+  // Remove the edge instead of writing it. Clearing one that was never there
+  // is not an error: the state afterward is the same either way.
+  bool clear = 4;
+  string actor = 5;
+}
+
+// Every note in a repository whose body contains `query` literally.
+//
+// The read for "why did we do it this way", asked months later about a task
+// nobody remembers the key of — the case the split between tasks and notes
+// exists for. `query` is matched literally: `%` and `_` in it are characters,
+// not wildcards.
+message TaskSearchRequest {
+  bytes repository_id = 1;
+  string query = 2;
+  // UNSPECIFIED means every kind.
+  TaskNoteKind kind = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Workspaces
+//
+// A workspace is a workstream: a name, a task prefix, a board, at most one
+// live orchestrator, and the worktrees it owns. Every repository has one
+// called Main, made when the repository is registered and never deleted.
+//
+// Every method here is behind the `workstreams` capability. The older
+// `workspaces` capability value means worktrees and is frozen; see
+// `capability::WORKSTREAMS` in `crates/protocol`.
+//
+// A refusal is INVALID_ARGUMENT with `Error.what` naming it, and
+// `Error.message` is a sentence a client can say as it is:
+//
+//   `task_prefix`          a prefix is a letter, then up to seven letters or digits
+//   `task_prefix_taken`    another workspace on this runner holds that prefix
+//   `name`                 a workspace needs a name
+//   `main_workspace`       Main can't be deleted
+//   `workspace_not_empty`  tasks, worktrees or terminals still belong to it
+//   `other_repository`     the workspace is in another repository
+//   `orchestrator_taken`   the workspace already has a live orchestrator
+//   `workspace`            the terminal belongs to no workspace
+//   `role`                 no role was named
+//   `task_ids`             `task.move` named no task
+//
+// A stale `expected_version` is RESOURCE_CONFLICT; a workspace, task,
+// worktree or terminal that isn't there is NOT_FOUND.
+// ---------------------------------------------------------------------------
+
+message Workspace {
+  bytes id = 1;
+  uint64 resource_version = 2;
+  bytes repository_id = 3;
+  string name = 4;
+  // What new keys on this board start with: `bil` in `bil-3`. Unique on the
+  // runner, ignoring case. Changing it changes only keys issued afterwards.
+  string task_prefix = 5;
+  bool is_main = 6;
+  // Order within the repository. Main is 0.
+  uint32 ordinal = 7;
+  // The live orchestrator, when there is one.
+  optional bytes orchestrator_terminal_id = 8;
+  // The workspace's home on the runner, and the charter in it. Paths, so
+  // host_admin only, like `Worktree.worktree_path`; absent for any other
+  // scope. The home is keyed by id, so a rename never moves it.
+  optional string home = 9;
+  optional string charter_path = 10;
+}
+
+message WorkspaceList { repeated Workspace items = 1; }
+
+// `workspace.create`. `target_resource_id` is the repository.
+message WorkspaceCreate {
+  string name = 1;
+  string task_prefix = 2;
+}
+
+// `workspace.rename`. `target_resource_id` is the workspace.
+message WorkspaceRename {
+  string name = 1;
+  // The `resource_version` the caller read. Absent renames whatever is there.
+  optional uint64 expected_version = 2;
+}
+
+// `workspace.set_prefix`. `target_resource_id` is the workspace. Keys already
+// issued keep resolving; only new tasks take the new prefix.
+message WorkspaceSetPrefix {
+  string task_prefix = 1;
+  // As in `WorkspaceRename`.
+  optional uint64 expected_version = 2;
+}
+
+// `task.move`: put tasks on another board in the same repository. All or
+// nothing. Each task keeps its key and gets a note saying where it went. A
+// task already on that board is left alone.
+message TaskMove {
+  repeated bytes task_ids = 1;
+  bytes workspace_id = 2;
+  // As on every board write. Empty means `user`.
+  string actor = 3;
+}
+
+// `worktree.assign`: give a worktree to a workspace, whoever owned it. The
+// one way a claim moves. The worktree's agent terminals move with it; its
+// orchestrator and shells don't. `target_resource_id` is the worktree.
+message WorktreeAssign { bytes workspace_id = 1; }
+
+// `terminal.set_role`. `target_resource_id` is the terminal.
+message TerminalSetRole { TerminalRole role = 1; }
+
+// `workspace.start_orchestrator`: open the workspace's orchestrator, a pane
+// with role ORCHESTRATOR in the repository's main checkout, launched from
+// the recipe for its harness. `target_resource_id` is the workspace. Answers
+// with the new `Terminal`.
+message WorkspaceStartOrchestrator {
+  // `claude`, `codex` or `cursor`, optionally `:<model>` as in a preset.
+  string harness = 1;
+  // A workspace with a live orchestrator refuses a second
+  // (`orchestrator_taken`); with this set, the live one is stopped first.
+  bool replace = 2;
+  // The key of a task on this workspace's board whose handoff note the new
+  // orchestrator reads first (`--read`), named in its first message. Empty
+  // for none. A key that isn't on this workspace's board is refused
+  // (`handoff_task`) before anything is stopped or started.
+  string handoff_task = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Needs you
+//
+// `needs_you.list` (Read scope, empty payload, the `needs_you` capability):
+// everything on this runner a person has to act on, one item per subject,
+// ranked. Each runner computes its own list; a client merges runners by rank.
+//
+// Below Control scope an item carries its `id`, `kind`, `also`, `rank`,
+// `since`, workspace, task and terminal, and nothing else: `question` is a
+// fixed sentence for its kind, and `detail`, `ask_id`, `actions` and the
+// worktree are left out, because an ask's option names carry the raw command
+// or file path.
+// ---------------------------------------------------------------------------
+
+// What an item is, in rank order: an ask outranks a block outranks a
+// decision outranks a review.
+enum NeedsYouKind {
+  NEEDS_YOU_KIND_UNSPECIFIED = 0;
+  // An agent waiting on a permission that has an id and options, so it can
+  // be answered away from its terminal.
+  NEEDS_YOU_KIND_ASK = 1;
+  // An agent that is blocked with no answerable ask, or whose last turn
+  // failed.
+  NEEDS_YOU_KIND_BLOCKED = 2;
+  // A task in Needs Decision whose latest question has no later answer.
+  NEEDS_YOU_KIND_DECISION = 3;
+  // A task in In Review.
+  NEEDS_YOU_KIND_REVIEW = 4;
+}
+
+message NeedsYouItem {
+  // Stable across reads: `ask:<ask id>`, `blocked:<terminal>`,
+  // `decision:<task>` or `review:<task>`.
+  string id = 1;
+  NeedsYouKind kind = 2;
+  // The subject's other, less urgent signals.
+  repeated NeedsYouKind also = 3;
+  // SMALLER sorts FIRST, on `Terminal.rank`'s scale: a tier per kind, then
+  // the oldest first. A duration, not a clock reading, so two runners' items
+  // merge by rank without comparing clocks.
+  uint32 rank = 4;
+  google.protobuf.Timestamp since = 5;
+  // Empty for none, as `Task.workspace_id` is.
+  bytes workspace_id = 6;
+  string workspace_name = 7;
+  bytes repository_id = 8;
+  optional TaskRef task = 9;
+  optional TerminalRef terminal = 10;
+  // Control scope only.
+  optional WorktreeRef worktree = 11;
+  // One row wide: the ask's allow option, `blocked_question`, the QUESTION
+  // note, or "Ready for review". A fixed sentence per kind below Control.
+  string question = 12;
+  // An ask's command; a review's "+18 −40". Control scope only.
+  optional string detail = 13;
+  // What `terminal.agent_answer` takes. Control scope only.
+  optional string ask_id = 14;
+  // Control scope only.
+  repeated NeedsYouAction actions = 15;
+}
+
+message NeedsYouAction {
+  // An ask option id (`allow`, `deny`), a decision option's text, or
+  // `open`/`seen`.
+  string id = 1;
+  // "Allow", "Deny", or the option as written.
+  string title = 2;
+  bool destructive = 3;
+  bool primary = 4;
+}
+
+message TaskRef {
+  bytes id = 1;
+  string key = 2;
+  string title = 3;
+  TaskStatus status = 4;
+}
+
+message TerminalRef {
+  bytes id = 1;
+  bytes worktree_id = 2;
+  string label = 3;
+  TerminalRole role = 4;
+  PaneMode pane_mode = 5;
+  bool chat_capable = 6;
+}
+
+message WorktreeRef {
+  bytes id = 1;
+  string name = 2;
+  string branch = 3;
+  uint32 insertions = 4;
+  uint32 deletions = 5;
+}
+
+message NeedsYouList { repeated NeedsYouItem items = 1; }
