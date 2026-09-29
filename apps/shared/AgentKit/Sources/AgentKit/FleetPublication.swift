@@ -48,6 +48,10 @@ import Foundation
 /// - **`reviewsWaiting`** sums the runners that answered and ignores the ones
 ///   that did not. Nil only when nobody answered at all, because nil means "not
 ///   told" and one modern runner reporting 3 is being told something.
+/// - **`needsYou`** is `NeedsYou.merge` over the lists the app's store holds,
+///   by runner, for the live runners that have one. Nil until the store has
+///   handed over any list at all, so a surface goes on counting blocked agents
+///   until the app has something better to say. See `record(needsYou:)`.
 /// - **A runner that isn't answering** keeps its rows, marked
 ///   `runnerAnswering == false`, so no surface counts them as working. See
 ///   `keeping(runners:answering:)`.
@@ -78,8 +82,28 @@ public struct FleetPublication {
     /// Nil rather than "all of them" so that a publication nobody has told
     /// about liveness behaves exactly as one runner's writer always did.
     private var live: Set<String>?
+    /// Each runner's Needs You list, by runner id, as the app's store last
+    /// handed them over. Nil before it has.
+    private var needsYouByRunner: [String: [NeedsYouItem]]?
 
     public init() {}
+
+    /// Record every runner's Needs You list at once: the app's store holds
+    /// them all, so it hands over the whole dictionary, keyed by the runner
+    /// ids `record(runner:snapshot:named:)` uses. A runner with no entry
+    /// hasn't answered yet, and contributes nothing rather than zero.
+    ///
+    /// - Returns: whether anything changed, so the caller writes the file and
+    ///   wakes the widgets and the watch only when there's news. The store
+    ///   republishes on every change any connection makes, several times a
+    ///   second while an agent works; see `KeptMembership` for what writing
+    ///   on each of those cost.
+    @discardableResult
+    public mutating func record(needsYou lists: [String: [NeedsYouItem]]) -> Bool {
+        guard lists != needsYouByRunner else { return false }
+        needsYouByRunner = lists
+        return true
+    }
 
     /// Record what one runner just polled, and what to call it.
     ///
@@ -219,7 +243,12 @@ public struct FleetPublication {
             reviewsWaiting: counted.isEmpty ? nil : counted.reduce(0, +),
             fleetTrace: fleet?.trace.encoded,
             fleetTraceAnchor: fleet?.anchor,
-            lostRunners: lost.isEmpty ? nil : lost)
+            lostRunners: lost.isEmpty ? nil : lost,
+            // Only the runners still being polled, for `agents`' reason: a
+            // retired runner's asks must not stay on a lock screen forever.
+            needsYou: needsYouByRunner.map { lists in
+                NeedsYou.merge(lists.filter { live?.contains($0.key) ?? true })
+            })
     }
 }
 

@@ -401,9 +401,40 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     /// Stamped by `FleetPublication.merged(at:)` and carried by `merging`.
     public var lostRunners: [String]?
 
+    /// Everything that needs a person, across every runner, by rank: the app's
+    /// Needs You list as it last read it (spec §7). Nil when the app wrote no
+    /// list, which is a snapshot from a build before this and one written
+    /// before any runner answered; `needingYou` then counts blocked agents, as
+    /// it always did.
+    ///
+    /// Copied, never recomputed, like every field above: the daemon decides
+    /// what an item is, and the app only merges its runners by rank
+    /// (`NeedsYou.merge`). A surface that re-derived items from `agents` would
+    /// count differently from the app it opens.
+    ///
+    /// Each item keeps its `runner` and `isDerived` across the file, which the
+    /// wire's decoder doesn't: see `StoredItem`.
+    public var needsYou: [NeedsYouItem]? {
+        get { storedNeedsYou?.map(\.item) }
+        set { storedNeedsYou = newValue?.map(StoredItem.init) }
+    }
+
+    /// `needsYou` as the file holds it.
+    private var storedNeedsYou: [StoredItem]?
+
+    /// The keys on disk. Listed only so `storedNeedsYou` is written as
+    /// `needsYou`; every other key is its property's name, as it was when this
+    /// was synthesized.
+    private enum CodingKeys: String, CodingKey {
+        case agents, capturedAt, complete, reviewsWaiting, fleetTrace, fleetTraceAnchor
+        case lostRunners
+        case storedNeedsYou = "needsYou"
+    }
+
     public init(
         agents: [Agent], capturedAt: Date, complete: Bool, reviewsWaiting: Int? = nil,
-        fleetTrace: Data? = nil, fleetTraceAnchor: Int? = nil, lostRunners: [String]? = nil
+        fleetTrace: Data? = nil, fleetTraceAnchor: Int? = nil, lostRunners: [String]? = nil,
+        needsYou: [NeedsYouItem]? = nil
     ) {
         self.agents = agents
         self.capturedAt = capturedAt
@@ -412,6 +443,7 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         self.fleetTrace = fleetTrace
         self.fleetTraceAnchor = fleetTraceAnchor
         self.lostRunners = lostRunners
+        self.storedNeedsYou = needsYou?.map(StoredItem.init)
     }
 
     /// Why a surface can't present these as the whole fleet, or nil when it
@@ -666,8 +698,16 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         agents.sorted { ($0.rank, $0.id) < ($1.rank, $1.id) }
     }
 
-    /// How many agents are waiting on a person. The number a small widget shows.
-    public var needingYou: Int { agents.filter { $0.status == "blocked" }.count }
+    /// How many things are waiting on a person. The number a small widget, a
+    /// complication and the watch show.
+    ///
+    /// **The item count when the app wrote one** (spec §2.2): asks, blocked
+    /// agents, decisions and reviews, one per subject, which is the number the
+    /// app's own Needs You row shows. A snapshot without `needsYou` counts
+    /// blocked agents, as every build before it did.
+    public var needingYou: Int {
+        needsYou?.count ?? agents.filter { $0.status == "blocked" }.count
+    }
 
     /// How many worktrees are waiting to be looked at, or nil when this
     /// snapshot cannot say.
@@ -755,8 +795,13 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
             }
         }
 
-        /// The same fact under a number that is already drawn large: "agents
-        /// need you", "worktrees to review", "agents working".
+        /// The same fact under a number that is already drawn large: "need
+        /// you", "worktrees to review", "agents working".
+        ///
+        /// **No noun for `blocked`**, because what it counts is items (see
+        /// `needingYou`): an ask, a blocked agent, a decision or a review, and
+        /// a decision has no agent. "3 agents need you" over two decisions and
+        /// an ask would send somebody looking for three agents.
         ///
         /// **Worktrees**, not agents, for `review`. The two counts are counts of
         /// different things — `changes.inbox` answers per worktree — and a
@@ -764,7 +809,7 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         /// "3 to review" look like five agents.
         public var caption: String {
             switch self {
-            case let .blocked(n): n == 1 ? "agent needs you" : "agents need you"
+            case let .blocked(n): n == 1 ? "needs you" : "need you"
             case let .review(n): n == 1 ? "worktree to review" : "worktrees to review"
             case let .working(n): n == 1 ? "agent working" : "agents working"
             }
@@ -871,7 +916,44 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
             fleetTrace: fleetTrace, fleetTraceAnchor: fleetTraceAnchor,
             // Carried: a push comes through the relay and says nothing about
             // whether the phone's link to that runner is back.
-            lostRunners: lostRunners)
+            lostRunners: lostRunners,
+            needsYou: needsYou.map { Self.items($0, folding: incoming) })
+    }
+
+    /// The items, with what one pushed agent says about its own terminal.
+    ///
+    /// **Only the agent's own kinds, and only about that terminal.** A push
+    /// says an agent blocked or stopped being blocked; it says nothing about
+    /// decisions or reviews, which stay as the app last read them. So an agent
+    /// that blocked while the app was closed counts at once, as it did before
+    /// the count was items: it becomes a blocked item, marked `isDerived` and
+    /// built the way `NeedsYou.derived` builds an older runner's. An item
+    /// already about that terminal (its ask, say) is left alone, so the count
+    /// doesn't double. And an ask or a block for an agent now working or done
+    /// goes, since an agent holds an ask only while it's blocked: the push is
+    /// newer news about that terminal than the app's read.
+    static func items(_ items: [NeedsYouItem], folding agent: Agent) -> [NeedsYouItem] {
+        let blocked = agent.status == "blocked"
+        var kept = items.filter { item in
+            blocked || item.terminal?.id != agent.id || !(item.kind == .ask || item.kind == .blocked)
+        }
+        guard blocked, !kept.contains(where: { $0.terminal?.id == agent.id })
+        else { return kept }
+        let pane = NeedsYou.OlderPane(
+            terminal: NeedsYouTerminal(
+                id: agent.id, worktreeID: nil, label: agent.label, role: nil,
+                paneMode: "terminal", chatCapable: false),
+            activity: agent.status, rank: agent.rank, activitySince: agent.activityChangedAt,
+            blockedQuestion: agent.line, workspaceID: nil, repositoryID: nil)
+        kept += NeedsYou.derived(fromTerminals: [pane]).map { item in
+            var item = item
+            item.runner = agent.machine
+            return item
+        }
+        // `NeedsYou.merge`'s order, which is the order the app wrote.
+        return kept.sorted { a, b in
+            (a.rank, a.runner, a.itemID) < (b.rank, b.runner, b.itemID)
+        }
     }
 
     /// Whether two fleets say the same thing about the same agents, in the same
@@ -886,6 +968,138 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     public func agentsSayTheSame(as other: FleetSnapshot?) -> Bool {
         guard let other, agents.count == other.agents.count else { return false }
         return zip(agents, other.agents).allSatisfy { $0.saysTheSame(as: $1) }
+    }
+}
+
+// MARK: - Needs You, as the file holds it
+
+extension FleetSnapshot {
+    /// One `NeedsYouItem` in the snapshot file.
+    ///
+    /// **Its own shape rather than the wire's**, for two reasons. The wire's
+    /// types only decode (`NeedsYou.swift` is the client core's JSON, read
+    /// once), and the wire has no `runner` or `isDerived`, which the app sets
+    /// after decoding and which a surface needs: the watch answers an ask on
+    /// the item's runner, and a derived item is one the runner didn't send.
+    /// Every key is optional where the wire's is, and a kind this build
+    /// doesn't know reads as `unknown`, as it does off the wire.
+    struct StoredItem: Codable, Sendable, Equatable {
+        struct Task: Codable, Sendable, Equatable {
+            var id: String, key: String, title: String, status: String
+        }
+        struct Terminal: Codable, Sendable, Equatable {
+            var id: String
+            var worktreeID: String?
+            var label: String
+            var role: String?
+            var paneMode: String
+            var chatCapable: Bool
+        }
+        struct Worktree: Codable, Sendable, Equatable {
+            var id: String, name: String, branch: String
+            var insertions: UInt32, deletions: UInt32
+        }
+        struct Action: Codable, Sendable, Equatable {
+            var id: String, title: String, destructive: Bool, primary: Bool
+        }
+
+        var id: String
+        var kind: String
+        var also: [String]
+        var rank: UInt32
+        var since: Date?
+        var workspaceID: String?
+        var workspaceName: String
+        var repositoryID: String?
+        var task: Task?
+        var terminal: Terminal?
+        var worktree: Worktree?
+        var question: String
+        var detail: String?
+        var askID: String?
+        var actions: [Action]
+        var runner: String
+        var derived: Bool
+
+        init(_ item: NeedsYouItem) {
+            id = item.itemID
+            kind = item.kind.rawValue
+            also = item.also.map(\.rawValue)
+            rank = item.rank
+            since = item.since
+            workspaceID = item.workspaceID
+            workspaceName = item.workspaceName
+            repositoryID = item.repositoryID
+            task = item.task.map { Task(id: $0.id, key: $0.key, title: $0.title, status: $0.status) }
+            terminal = item.terminal.map {
+                Terminal(
+                    id: $0.id, worktreeID: $0.worktreeID, label: $0.label, role: $0.role,
+                    paneMode: $0.paneMode, chatCapable: $0.chatCapable)
+            }
+            worktree = item.worktree.map {
+                Worktree(
+                    id: $0.id, name: $0.name, branch: $0.branch, insertions: $0.insertions,
+                    deletions: $0.deletions)
+            }
+            question = item.question
+            detail = item.detail
+            askID = item.askID
+            actions = item.actions.map {
+                Action(id: $0.id, title: $0.title, destructive: $0.destructive, primary: $0.primary)
+            }
+            runner = item.runner
+            derived = item.isDerived
+        }
+
+        var item: NeedsYouItem {
+            NeedsYouItem(
+                id: id,
+                kind: NeedsYouKind(rawValue: kind) ?? .unknown,
+                also: also.map { NeedsYouKind(rawValue: $0) ?? .unknown },
+                rank: rank, since: since, workspaceID: workspaceID, workspaceName: workspaceName,
+                repositoryID: repositoryID,
+                task: task.map { NeedsYouTask(id: $0.id, key: $0.key, title: $0.title, status: $0.status) },
+                terminal: terminal.map {
+                    NeedsYouTerminal(
+                        id: $0.id, worktreeID: $0.worktreeID, label: $0.label, role: $0.role,
+                        paneMode: $0.paneMode, chatCapable: $0.chatCapable)
+                },
+                worktree: worktree.map {
+                    NeedsYouWorktree(
+                        id: $0.id, name: $0.name, branch: $0.branch, insertions: $0.insertions,
+                        deletions: $0.deletions)
+                },
+                question: question, detail: detail, askID: askID,
+                actions: actions.map {
+                    NeedsYouAction(
+                        id: $0.id, title: $0.title, destructive: $0.destructive, primary: $0.primary)
+                },
+                runner: runner, isDerived: derived)
+        }
+
+        // Lenient where a later build might leave something out, for the
+        // reason every field on `FleetSnapshot` is optional: one item that
+        // won't decode must not take the whole file down.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id)
+            kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? ""
+            also = try c.decodeIfPresent([String].self, forKey: .also) ?? []
+            rank = try c.decodeIfPresent(UInt32.self, forKey: .rank) ?? .max
+            since = try c.decodeIfPresent(Date.self, forKey: .since)
+            workspaceID = try c.decodeIfPresent(String.self, forKey: .workspaceID)
+            workspaceName = try c.decodeIfPresent(String.self, forKey: .workspaceName) ?? ""
+            repositoryID = try c.decodeIfPresent(String.self, forKey: .repositoryID)
+            task = try c.decodeIfPresent(Task.self, forKey: .task)
+            terminal = try c.decodeIfPresent(Terminal.self, forKey: .terminal)
+            worktree = try c.decodeIfPresent(Worktree.self, forKey: .worktree)
+            question = try c.decodeIfPresent(String.self, forKey: .question) ?? ""
+            detail = try c.decodeIfPresent(String.self, forKey: .detail)
+            askID = try c.decodeIfPresent(String.self, forKey: .askID)
+            actions = try c.decodeIfPresent([Action].self, forKey: .actions) ?? []
+            runner = try c.decodeIfPresent(String.self, forKey: .runner) ?? ""
+            derived = try c.decodeIfPresent(Bool.self, forKey: .derived) ?? false
+        }
     }
 }
 

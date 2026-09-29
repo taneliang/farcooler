@@ -746,17 +746,18 @@ struct FleetSnapshotTests {
     /// lock screen, and a surface that cannot conjugate reads as broken.
     @Test func oneOfSomethingIsSaidInTheSingular() {
         #expect(FleetSnapshot.Glance.blocked(1).phrase == "1 needs you")
-        #expect(FleetSnapshot.Glance.blocked(1).caption == "agent needs you")
+        #expect(FleetSnapshot.Glance.blocked(1).caption == "needs you")
         #expect(FleetSnapshot.Glance.review(1).caption == "worktree to review")
         #expect(FleetSnapshot.Glance.working(1).caption == "agent working")
     }
 
-    /// Reviews are counted in WORKTREES and blocked agents in agents, because
+    /// Reviews are counted in WORKTREES and what needs you in items, because
     /// they are counts of different things — `changes.inbox` answers per
-    /// worktree. A caption that called both of them agents would make "2 need
-    /// you" and "3 to review" look like five agents.
+    /// worktree, and an item can be a decision with no agent. A caption that
+    /// called both of them agents would make "2 need you" and "3 to review"
+    /// look like five agents.
     @Test func theTwoCountsAreCountsOfDifferentThings() {
-        #expect(FleetSnapshot.Glance.blocked(2).caption == "agents need you")
+        #expect(FleetSnapshot.Glance.blocked(2).caption == "need you")
         #expect(FleetSnapshot.Glance.review(3).caption == "worktrees to review")
         #expect(FleetSnapshot.Glance.working(4).caption == "agents working")
     }
@@ -844,5 +845,162 @@ struct FleetSnapshotTests {
         let merged = snapshot.merging(lost, at: now)
         #expect(merged.agents.first?.runnerAnswering == nil)
         #expect(merged.glance(at: now) == .working(1))
+    }
+
+    // MARK: - Needs You (ov-55 4C.1)
+
+    private func item(
+        _ id: String, _ kind: NeedsYouKind, rank: UInt32, terminal: String? = nil,
+        runner: String = "r1"
+    ) -> NeedsYouItem {
+        NeedsYouItem(
+            id: id, kind: kind, rank: rank, since: nil, workspaceName: "Billing",
+            terminal: terminal.map {
+                NeedsYouTerminal(
+                    id: $0, worktreeID: nil, label: "claude", role: "agent",
+                    paneMode: "terminal", chatCapable: true)
+            },
+            question: "Allow touch x", askID: kind == .ask ? "hook-ask-1" : nil,
+            actions: kind == .ask
+                ? [NeedsYouAction(id: "allow", title: "Allow touch x", destructive: false, primary: true),
+                   NeedsYouAction(id: "deny", title: "Deny", destructive: true, primary: false)]
+                : [],
+            runner: runner)
+    }
+
+    /// Every snapshot on disk today, and every one an older build writes. It
+    /// must decode, say it holds no list, and count blocked agents exactly as
+    /// before.
+    ///
+    /// Mutation: `storedNeedsYou` non-optional. Red: the decode throws on the
+    /// missing key.
+    @Test("A snapshot without needsYou decodes as before")
+    func aSnapshotWithoutNeedsYouDecodesAsBefore() throws {
+        let json = """
+        {"agents":[{"id":"t1","label":"claude","machine":"orchard",
+        "status":"blocked","glyph":"?","headline":"claude","line":"x",
+        "feed":[],"rank":0,"turnFailed":false}],
+        "capturedAt":1000000,"complete":true}
+        """
+        let snapshot = try JSONDecoder().decode(FleetSnapshot.self, from: Data(json.utf8))
+        #expect(snapshot.needsYou == nil)
+        #expect(snapshot.needingYou == 1)
+        #expect(snapshot.glance(at: Date()) == .blocked(1))
+    }
+
+    /// The widget, the complication and the watch show the app's number: the
+    /// items, not the blocked agents. Here one agent is blocked on an ask, and
+    /// a decision and a review have no agent at all.
+    ///
+    /// Mutation: `needingYou` counting blocked agents whatever `needsYou`
+    /// says. Red: 1, not 3.
+    @Test("The widget's count is the item count")
+    func theWidgetsCountIsTheItemCount() {
+        let snapshot = FleetSnapshot(
+            agents: [agent("t1", status: "blocked"), agent("t2", status: "working")],
+            capturedAt: Date(), complete: true,
+            needsYou: [
+                item("ask:1", .ask, rank: 5, terminal: "t1"),
+                item("decision:7", .decision, rank: 200_000_005),
+                item("review:8", .review, rank: 300_000_005),
+            ])
+        #expect(snapshot.needingYou == 3)
+        #expect(snapshot.glance(at: Date()) == .blocked(3))
+    }
+
+    /// An empty list is an answer: nothing needs you, whatever an agent's
+    /// status word says. Only nil falls back to counting agents.
+    ///
+    /// Mutation: `needingYou` falling back when the list is empty. Red: 1.
+    @Test func anEmptyListIsAnAnswerNotAFallback() {
+        let snapshot = FleetSnapshot(
+            agents: [agent("t1", status: "blocked")], capturedAt: Date(), complete: true,
+            needsYou: [])
+        #expect(snapshot.needingYou == 0)
+    }
+
+    /// The file keeps what the wire doesn't carry: which runner an item came
+    /// from, and whether the app derived it. Written the way `SnapshotStore`
+    /// writes, seconds since 1970.
+    ///
+    /// Mutation: `StoredItem.init(_:)` dropping `runner`. Red: "" back.
+    @Test func anItemRoundTripsWithItsRunnerAndWhetherItWasDerived() throws {
+        var derived = item("blocked:t2", .blocked, rank: 100_000_001, terminal: "t2", runner: "r2")
+        derived.isDerived = true
+        derived.since = Date(timeIntervalSince1970: 1_789_999_940)
+        let snapshot = FleetSnapshot(
+            agents: [], capturedAt: Date(timeIntervalSince1970: 1_000_000), complete: true,
+            needsYou: [item("ask:1", .ask, rank: 5, terminal: "t1"), derived])
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        let back = try decoder.decode(FleetSnapshot.self, from: encoder.encode(snapshot))
+        #expect(back == snapshot)
+        #expect(back.needsYou?.map(\.runner) == ["r1", "r2"])
+        #expect(back.needsYou?.last?.isDerived == true)
+        #expect(back.needsYou?.first?.actions.map(\.id) == ["allow", "deny"])
+    }
+
+    /// A kind a later build writes reads as unknown rather than failing the
+    /// file: the rule the wire's decoder keeps, kept on disk.
+    @Test func anUnknownKindInTheFileReadsAsUnknown() throws {
+        let json = """
+        {"agents":[],"capturedAt":1000000,"complete":true,
+        "needsYou":[{"id":"x:1","kind":"summons","also":[],"rank":5,
+        "workspaceName":"","question":"?","actions":[],"runner":"r1","derived":false}]}
+        """
+        let snapshot = try JSONDecoder().decode(FleetSnapshot.self, from: Data(json.utf8))
+        #expect(snapshot.needsYou?.first?.kind == .unknown)
+        #expect(snapshot.needingYou == 1)
+    }
+
+    /// A push about an agent that blocked while the app was closed counts at
+    /// once, as it did before the count was items.
+    ///
+    /// Mutation: `merging` carrying `needsYou` unchanged. Red: 1, not 2.
+    @Test func aPushedBlockCountsBeforeTheAppReadsItsList() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let snapshot = FleetSnapshot(
+            agents: [agent("t1", status: "working")], capturedAt: now, complete: true,
+            needsYou: [item("decision:7", .decision, rank: 200_000_005)])
+        let merged = snapshot.merging(agent("t1", status: "blocked", rank: 30), at: now)
+        #expect(merged.needingYou == 2)
+        #expect(merged.needsYou?.map(\.kind) == [.blocked, .decision])
+        #expect(merged.needsYou?.first?.isDerived == true)
+    }
+
+    /// An agent already counted by its ask isn't counted twice for blocking.
+    ///
+    /// Mutation: the guard on an item already about the terminal. Red: 2.
+    @Test func aPushedBlockOnAnAgentWithAnAskCountsOnce() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let snapshot = FleetSnapshot(
+            agents: [agent("t1", status: "blocked")], capturedAt: now, complete: true,
+            needsYou: [item("ask:1", .ask, rank: 5, terminal: "t1")])
+        #expect(snapshot.merging(agent("t1", status: "blocked"), at: now).needingYou == 1)
+    }
+
+    /// An agent that's working again holds no ask and isn't blocked, so its
+    /// items go; a decision about its task stays.
+    ///
+    /// Mutation: the filter keeping every item. Red: 2, not 1.
+    @Test func aPushedAgentWorkingAgainTakesItsAskAway() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let snapshot = FleetSnapshot(
+            agents: [agent("t1", status: "blocked")], capturedAt: now, complete: true,
+            needsYou: [
+                item("ask:1", .ask, rank: 5, terminal: "t1"),
+                item("decision:7", .decision, rank: 200_000_005),
+            ])
+        let merged = snapshot.merging(agent("t1", status: "working"), at: now)
+        #expect(merged.needsYou?.map(\.itemID) == ["decision:7"])
+    }
+
+    /// No list stays no list: a push can't make one out of one agent.
+    @Test func aPushIntoASnapshotWithNoListLeavesNoList() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let snapshot = FleetSnapshot(agents: [], capturedAt: now, complete: true)
+        #expect(snapshot.merging(agent("t1", status: "blocked"), at: now).needsYou == nil)
     }
 }

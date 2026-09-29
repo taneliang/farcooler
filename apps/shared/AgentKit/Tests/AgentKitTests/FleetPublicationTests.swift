@@ -571,3 +571,65 @@ struct FleetTraceSumTests {
     let added = kept.moved(runners: ["a", "b"], answering: [])
     #expect(added, "a runner added is")
 }
+
+/// The Needs You lists in the merge (ov-55 4C.1).
+struct FleetPublicationNeedsYouTests {
+    private let now = Date(timeIntervalSince1970: 1_000_000)
+
+    private func item(_ id: String, rank: UInt32) -> NeedsYouItem {
+        NeedsYouItem(id: id, kind: .decision, rank: rank, since: nil, question: "?")
+    }
+
+    private var fleet: FleetSnapshot { FleetSnapshot(agents: [], capturedAt: now, complete: true) }
+
+    /// Nothing handed over is nil, so a surface goes on counting agents.
+    @Test func noListsIsNoList() {
+        var publication = FleetPublication()
+        publication.record(runner: "a", snapshot: fleet)
+        #expect(publication.merged(at: now).needsYou == nil)
+    }
+
+    /// Every runner's list, merged by rank, each item carrying its runner.
+    ///
+    /// Mutation: `merged` concatenating the lists in dictionary order. Red:
+    /// the order is the hash's, not the rank's.
+    @Test func theListsMergeByRank() {
+        var publication = FleetPublication()
+        publication.record(runner: "a", snapshot: fleet)
+        publication.record(runner: "b", snapshot: fleet)
+        publication.record(needsYou: [
+            "a": [item("decision:1", rank: 30), item("decision:2", rank: 50)],
+            "b": [item("decision:3", rank: 40)],
+        ])
+        let merged = publication.merged(at: now).needsYou
+        #expect(merged?.map(\.itemID) == ["decision:1", "decision:3", "decision:2"])
+        #expect(merged?.map(\.runner) == ["a", "b", "a"])
+    }
+
+    /// A retired runner's items go with its agents.
+    ///
+    /// Mutation: `merged` without the `live` filter. Red: two items.
+    @Test func aRetiredRunnersItemsGo() {
+        var publication = FleetPublication()
+        publication.record(runner: "a", snapshot: fleet)
+        publication.record(runner: "b", snapshot: fleet)
+        publication.record(needsYou: ["a": [item("decision:1", rank: 30)], "b": [item("decision:3", rank: 40)]])
+        publication.keeping(runners: ["a"])
+        #expect(publication.merged(at: now).needsYou?.map(\.itemID) == ["decision:1"])
+    }
+
+    /// The same lists again are no news, so the writer doesn't wake every
+    /// widget on each of the store's publishes.
+    ///
+    /// Mutation: `record(needsYou:)` returning true always. Red.
+    @Test func theSameListsAgainAreNoNews() {
+        var publication = FleetPublication()
+        let lists = ["a": [item("decision:1", rank: 30)]]
+        let first = publication.record(needsYou: lists)
+        let again = publication.record(needsYou: lists)
+        let emptied = publication.record(needsYou: [:])
+        #expect(first)
+        #expect(!again)
+        #expect(emptied)
+    }
+}

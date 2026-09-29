@@ -517,6 +517,8 @@ WATCH_AGENTKIT_SOURCES = [
     # alone — the phone has no use for it.
     "WatchState.swift",
     "FleetSnapshot.swift",
+    # The items `FleetSnapshot.needsYou` holds, which the watch lists first.
+    "NeedsYou.swift",
     "SnapshotStore.swift",
     # The color, the mark and the type scale, which the watch app's own detail
     # header draws at
@@ -578,6 +580,8 @@ WATCH_WIDGET_SOURCES = ["WatchFleetWidget.swift"]
 # `glanceTint` on the wrist. There already was one.
 WATCH_WIDGET_AGENTKIT_SOURCES = [
     "FleetSnapshot.swift",
+    # The items `FleetSnapshot.needsYou` holds, which the complication counts.
+    "NeedsYou.swift",
     "SnapshotStore.swift",
     "GlancePalette.swift",
     "GlanceMark.swift",
@@ -749,6 +753,9 @@ activity_build_ids = {
         "AgentCardRows.swift",
         "GlanceCard.swift",
         "FleetSnapshot.swift",
+        # The items `FleetSnapshot.needsYou` holds. Every target that compiles
+        # `FleetSnapshot.swift` compiles this beside it; it's plain Foundation.
+        "NeedsYou.swift",
         "SnapshotStore.swift",
         # The card's buttons. `AnswerPermissionIntent` is what a button is wired
         # to and `GlancePermissions` is where its labels come from — the
@@ -773,7 +780,7 @@ activity_build_ids = {
 # this extension can write a snapshot the widget will understand.
 notify_build_ids = {
     name: oid("notify-build/" + name)
-    for name in NOTIFY_SOURCES + ["FleetSnapshot.swift", "SnapshotStore.swift"]
+    for name in NOTIFY_SOURCES + ["FleetSnapshot.swift", "NeedsYou.swift", "SnapshotStore.swift"]
 }
 
 # A fourth set, on exactly the reasoning above. `FleetSnapshot.swift` and

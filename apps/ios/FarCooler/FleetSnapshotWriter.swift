@@ -117,6 +117,21 @@ enum FleetSnapshotWriter {
         publish(at: now)
     }
 
+    /// Every runner's Needs You list, from the app's store, by runner id
+    /// (`FleetStore.needsYouByRunner`), so the widgets, the complication and
+    /// the watch count what the app's own Needs You row counts (spec §7).
+    ///
+    /// Written only when a list moved (`FleetPublication.record(needsYou:)`):
+    /// the store calls this on every publish, and a publish that wrote the
+    /// file and woke every widget each time is what `KeptMembership` exists
+    /// to prevent. A decision answered moves no agent, so without this the
+    /// lock screen would wait for the next poll to drop it.
+    @MainActor
+    static func write(needsYou lists: [String: [NeedsYouItem]]) {
+        guard publication.record(needsYou: lists), !publication.isEmpty else { return }
+        publish(at: Date())
+    }
+
     /// Assemble the merge and hand it to everything that renders from it.
     ///
     /// One projection and three consumers — the file, the widgets and the watch
