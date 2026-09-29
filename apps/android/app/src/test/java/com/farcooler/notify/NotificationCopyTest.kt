@@ -227,6 +227,20 @@ class NotificationCopyTest {
     }
 
     /**
+     * Each decision is posted under its own id and request code. They have no
+     * terminal, and `"".hashCode()` is 0 for all of them, so under
+     * `FLAG_UPDATE_CURRENT` a second decision took over the first one's tap.
+     */
+    @Test
+    fun `two decisions are posted apart`() {
+        val a = NotificationCopy.postedAs("", "bil-7", "Billing · bil-7 needs a decision")
+        val b = NotificationCopy.postedAs("", "bil-8", "Billing · bil-8 needs a decision")
+        assertTrue(a != b)
+        assertTrue(a != 0 && b != 0)
+        assertEquals("t-1".hashCode(), NotificationCopy.postedAs("t-1", null, "claude needs you"))
+    }
+
+    /**
      * A task entering Needs Decision alerts (ruling 3). Its notice has no
      * `status`, only `kind: "decision"`, so a channel chosen from `status`
      * alone put it on the quiet channel. The relay's `androidChannel` reads

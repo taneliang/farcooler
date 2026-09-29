@@ -11,6 +11,8 @@ import com.farcooler.data.RunnerStore
 import com.farcooler.data.Identity
 import com.farcooler.data.Settings
 import com.farcooler.model.NeedsYouItem
+import com.farcooler.model.DecisionLink
+import com.farcooler.model.DecisionSource
 import com.farcooler.model.RunnerNeedsYou
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.combine
@@ -184,7 +186,10 @@ class AppModel(
                     if (list.isEmpty()) flowOf(emptyList())
                     else combine(list.map { c -> c.needsYou.combine(c.phase) { reading, phase -> reading to phase } }) { it.toList() }
                 }
-                .collect { readings -> decideLaunch(readings) }
+                .collect { readings ->
+                    resolvePendingTask()
+                    decideLaunch(readings)
+                }
         }
 
         account.afterSignIn = { viewModelScope.launch { push.sendIfPossible() } }
@@ -224,6 +229,7 @@ class AppModel(
         // A notification tap outranks the front door: somebody who tapped
         // "claude needs you" asked for that pane by name.
         resolvePendingTerminal()
+        resolvePendingTask()
         if (_landed.value) return
         land(if (hosts.hosts.value.isEmpty()) Route.Onboarding else Backstack.ROOT)
     }
@@ -456,6 +462,34 @@ class AppModel(
     }
 
     private var pendingTerminal: String? = null
+
+    /**
+     * Open the task a decision push was about, by its key: over its
+     * workspace's Board tab, so Back walks to the board and then Needs You.
+     * Held until a runner that knows the key has answered, as a terminal is.
+     */
+    fun openByTaskKey(key: String) {
+        pendingTask = key
+        // Somebody asked for this by name; a launch decision must not move them.
+        launchDecided = true
+        saved[LAUNCH] = true
+        resolvePendingTask()
+    }
+
+    private var pendingTask: String? = null
+
+    private fun resolvePendingTask() {
+        val key = pendingTask ?: return
+        val sources = fleet.active.value.map {
+            DecisionSource(it.host.id, it.needsYou.value, it.boards.value)
+        }
+        val target = DecisionLink.find(key, sources) ?: return
+        pendingTask = null
+        _landed.value = true
+        saved[LANDED] = true
+        val workspace = boardIdOf(target.hostId, target.workspaceId, target.repositoryId)
+        install(Backstack.chain(target.hostId, workspace, target.taskId, pane = null))
+    }
 
     private fun resolvePendingTerminal() {
         val wanted = pendingTerminal ?: return

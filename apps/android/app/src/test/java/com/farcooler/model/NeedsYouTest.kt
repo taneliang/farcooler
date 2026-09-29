@@ -308,6 +308,32 @@ class NeedsYouTest {
         assertEquals("Couldn’t send that answer. Try again.", NeedsYouAnswer.refusal(null, "claude"))
     }
 
+    // ---- a decision push's tap ----
+
+    /**
+     * A decision push names its task by key and no runner: the tap finds it
+     * on whichever runner has it — its needs-you item first, which knows its
+     * workspace, then any board read so far.
+     */
+    @Test
+    fun `a decision push opens its task on the runner that has it`() {
+        val decision = item("decision:t7", "decision", 300_000_000, workspaceId = "ws-b", repositoryId = "repo")
+            .copy(task = TaskRef(id = "t7", key = "bil-7"))
+        val sources = listOf(
+            DecisionSource("studio", RunnerNeedsYou(emptyList()), emptyMap()),
+            DecisionSource("box", RunnerNeedsYou(listOf(decision)), emptyMap()),
+        )
+        assertEquals(DecisionTarget("box", "ws-b", "repo", "t7"), DecisionLink.find("bil-7", sources))
+
+        // Answered since, so not an item: its card on a board read still is.
+        val board = TaskBoard(listOf(TaskBoardColumn(TaskStatus.NEEDS_DECISION, listOf(TaskRow("t7", "bil-7", "x", TaskStatus.NEEDS_DECISION, 0L)))))
+        val onBoard = listOf(DecisionSource("box", RunnerNeedsYou(emptyList()), mapOf("ws-b" to board)))
+        assertEquals(DecisionTarget("box", "ws-b", null, "t7"), DecisionLink.find("bil-7", onBoard))
+
+        assertNull(DecisionLink.find("bil-8", sources))
+        assertNull(DecisionLink.find("", sources))
+    }
+
     // ---- fixtures ----
 
     private fun runner(

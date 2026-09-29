@@ -83,5 +83,10 @@ class MainActivity : ComponentActivity() {
         val terminal = intent.getStringExtra(Notifier.EXTRA_TERMINAL)
             ?: intent.getStringExtra(Notifier.PUSH_EXTRA_TERMINAL)
         terminal?.let { model.openByTerminalId(it) }
+        // A decision push names its task by key, and no terminal: the same
+        // key on both paths (see [Notifier.PUSH_EXTRA_TASK]).
+        if (terminal == null && intent.getStringExtra(Notifier.PUSH_EXTRA_KIND) == Notifier.KIND_DECISION) {
+            intent.getStringExtra(Notifier.PUSH_EXTRA_TASK)?.let { model.openByTaskKey(it) }
+        }
     }
 }

@@ -225,5 +225,15 @@ class Notifier(private val context: Context, private val settings: Settings) {
          * notice carries no `status`, since it's about a task and not a pane.
          */
         const val PUSH_EXTRA_KIND = "kind"
+
+        /**
+         * A decision push's `data.task`: the task's key (`bil-7`). The same
+         * spelling on both paths, since Firebase copies `data` into the tray
+         * card's launch intent verbatim.
+         */
+        const val PUSH_EXTRA_TASK = "task"
+
+        /** [PUSH_EXTRA_KIND]'s value on a decision push. */
+        const val KIND_DECISION = "decision"
     }
 }

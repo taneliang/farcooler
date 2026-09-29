@@ -314,3 +314,44 @@ sealed interface WorktreeScope {
             get() = if (hidden) "Nothing is hidden." else "Every worktree here belongs to a workspace."
     }
 }
+
+/** Where a decision push's tap goes: a task, on a runner, on a workspace's board. */
+data class DecisionTarget(
+    val hostId: String,
+    /** The board it's on: a workspace's id, or on a runner without workspaces null with [repositoryId]. */
+    val workspaceId: String?,
+    val repositoryId: String?,
+    val taskId: String,
+)
+
+/** One runner, as a decision push's task key is looked up on it. */
+data class DecisionSource(
+    val hostId: String,
+    val reading: RunnerNeedsYou?,
+    /** Its boards as last read, by workspace id. */
+    val boards: Map<String, TaskBoard>,
+)
+
+object DecisionLink {
+    /**
+     * The task a decision push names, by its key (`bil-7`, the relay's
+     * `data.task`) — which carries no runner, so every runner is searched, in
+     * order. Its needs-you item first, which knows its workspace; then any
+     * board read so far that holds a card with that key. Null until one does.
+     */
+    fun find(key: String, sources: List<DecisionSource>): DecisionTarget? {
+        if (key.isBlank()) return null
+        for (source in sources) {
+            val item = source.reading?.items?.firstOrNull { it.task?.key == key } ?: continue
+            val task = item.task ?: continue
+            return DecisionTarget(source.hostId, item.workspaceId, item.repositoryId, task.id)
+        }
+        for (source in sources) {
+            for ((workspace, board) in source.boards) {
+                val row = board.rows.firstOrNull { it.key == key } ?: continue
+                return DecisionTarget(source.hostId, workspace, null, row.id)
+            }
+        }
+        return null
+    }
+}

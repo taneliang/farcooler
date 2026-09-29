@@ -113,6 +113,19 @@ object NotificationCopy {
         }
 
     /**
+     * The request code and notification id a pushed notice is posted under:
+     * its terminal, else — a decision, which has none — its task, else its
+     * title. Distinct per subject, so a second decision's card doesn't
+     * overwrite the first one's extras under `FLAG_UPDATE_CURRENT`, which a
+     * shared `"".hashCode()` of 0 did.
+     */
+    fun postedAs(terminal: String?, task: String?, title: String): Int = when {
+        !terminal.isNullOrEmpty() -> terminal.hashCode()
+        !task.isNullOrEmpty() -> "task:$task".hashCode()
+        else -> title.hashCode()
+    }
+
+    /**
      * Which channel a PUSHED notice belongs on, by the daemon's own word for
      * what it is announcing.
      *

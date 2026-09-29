@@ -83,13 +83,21 @@ class FarCoolerMessagingService : FirebaseMessagingService() {
             data[Notifier.PUSH_EXTRA_KIND],
         )
 
+        // A decision names a task and no terminal: the tap opens its card.
+        val kind = data[Notifier.PUSH_EXTRA_KIND]
+        val task = data[Notifier.PUSH_EXTRA_TASK]?.takeIf { kind == Notifier.KIND_DECISION }
+        val postedAs = NotificationCopy.postedAs(terminal, task, title)
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             if (terminal.isNotEmpty()) putExtra(Notifier.EXTRA_TERMINAL, terminal)
+            if (task != null) {
+                putExtra(Notifier.PUSH_EXTRA_KIND, kind)
+                putExtra(Notifier.PUSH_EXTRA_TASK, task)
+            }
         }
         val pending = PendingIntent.getActivity(
             this,
-            terminal.hashCode(),
+            postedAs,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -106,13 +114,13 @@ class FarCoolerMessagingService : FirebaseMessagingService() {
             // Keyed by terminal, so the app's own banner about the same pane
             // replaces this one rather than sitting beside it when the phone is
             // picked up and the fleet is polled again.
-            .setGroup(terminal.ifEmpty { "farcooler" })
+            .setGroup(terminal.ifEmpty { task?.let { "task:$it" } ?: "farcooler" })
             .setContentIntent(pending)
             .build()
 
         runCatching {
             NotificationManagerCompat.from(this)
-                .notify(terminal.ifEmpty { title }.hashCode(), notification)
+                .notify(postedAs, notification)
         }
     }
 
