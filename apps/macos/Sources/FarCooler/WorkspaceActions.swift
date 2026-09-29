@@ -1,12 +1,12 @@
 import AgentKit
 import Foundation
 
-// What a workspace offers from the sidebar: its header's menu, starting its
-// orchestrator from the "No orchestrator" row, and opening its charter.
+// What a workspace offers: its sidebar row's menu, starting its
+// orchestrator from the conversation column, and opening its charter.
 //
-// Worked out here as values, and drawn by `WorkspaceHeader` and
-// `WorkspaceRow` and the conversation column, so the rules are the ones
-// `WorkspaceActionsTests` pins.
+// Worked out here as values, and drawn by `WorkspaceRow` and the
+// conversation column, so the rules are the ones `WorkspaceActionsTests`
+// pins.
 
 /// What a workspace header's menu offers, in order.
 enum WorkspaceMenu {
