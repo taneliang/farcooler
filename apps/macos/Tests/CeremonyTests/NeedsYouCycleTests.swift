@@ -56,41 +56,54 @@ struct NeedsYouCycleTests {
     /// task's column in its workspace.
     @Test("⌃⌘N reaches a decision")
     func controlCommandNReachesADecision() {
-        let fleet = Fleet(runtimeHealthy: true, livePanes: 0, worktrees: [], branchPrefix: nil)
+        // A blocked agent is in the fleet too; under the old walk over
+        // terminals it was the only stop, and the decision was never reached.
+        var blocked = Terminal(id: "blocked", short: "blocked", title: "", preset: "codex", state: "running", epoch: 0)
+        blocked.activity = "blocked"
+        let lane = Worktree(
+            id: "w-1", short: "w1", task: "lane", branch: "b", repository: "overnight", host: "",
+            path: "/tmp/lane", state: "active", terminals: [blocked], repositoryID: Self.repo)
+        let fleet = Fleet(runtimeHealthy: true, livePanes: 0, worktrees: [lane], branchPrefix: nil)
         let decision = Self.item("decision:t-7", .decision, rank: 300, task: "t-7")
-        let items = NeedsYou.merge(["": [decision]])
-        let next = NeedsYouNavigation.next(after: nil, in: items)
-        #expect(next?.itemID == "decision:t-7")
-        #expect(
-            next.flatMap { NeedsYouNavigation.landing(for: $0, in: fleet) }
-                == .workspace(host: "", workspace: Self.billing, focus: .task("t-7")))
-        // And round again, from the one it opened.
         let review = Self.item("review:t-8", .review, rank: 400, task: "t-8")
-        let two = NeedsYou.merge(["": [review, decision]])
-        #expect(NeedsYouNavigation.next(after: two[0].key, in: two)?.itemID == "review:t-8")
-        #expect(NeedsYouNavigation.next(after: two[1].key, in: two)?.itemID == "decision:t-7")
+        let items = NeedsYou.merge(["": [review, decision]])
+
+        let first = NeedsYouNavigation.step(lastOpened: nil, items: items, fleet: fleet, showing: nil)
+        #expect(first?.item.itemID == "decision:t-7")
+        #expect(first?.landing == .workspace(host: "", workspace: Self.billing, focus: .task("t-7")))
+        // On from the one it opened, while the window still shows it.
+        let second = NeedsYouNavigation.step(
+            lastOpened: first?.item.key, items: items, fleet: fleet, showing: first?.landing)
+        #expect(second?.item.itemID == "review:t-8")
+        // And from the top once you've gone somewhere else.
+        let elsewhere = NeedsYouNavigation.step(
+            lastOpened: first?.item.key, items: items, fleet: fleet,
+            showing: .looseWorktree(host: "", worktree: "w-1", terminal: nil))
+        #expect(elsewhere?.item.itemID == "decision:t-7")
     }
 
     /// A finished agent wanted attention under the old rule (`done` did),
-    /// and ⌃⌘N stopped at it. It's not an item (ruling 1): an older runner's
-    /// derived list has its blocked agent and not its finished one, and the
-    /// walk goes straight to the block.
+    /// and ⌃⌘N stopped at it. It's not an item (ruling 1): with nothing else
+    /// waiting, ⌃⌘N opens nothing, and with a block elsewhere it goes there.
     @Test("⌃⌘N skips a finished agent")
     func controlCommandNSkipsAFinishedAgent() {
         var done = Terminal(id: "done", short: "done", title: "", preset: "claude", state: "running", epoch: 0)
         done.activity = "done"
-        var blocked = Terminal(id: "blocked", short: "blocked", title: "", preset: "codex", state: "running", epoch: 0)
-        blocked.activity = "blocked"
         #expect(done.agent.wantsAttention, "the old rule stopped here")
         let lane = Worktree(
             id: "w-1", short: "w1", task: "lane", branch: "b", repository: "overnight", host: "",
-            path: "/tmp/lane", state: "active", terminals: [done, blocked], repositoryID: Self.repo)
-        let items = NeedsYou.merge(["": NeedsYou.derived(fromTerminals: DaemonClient.olderPanes(in: [lane]))])
-        #expect(items.map(\.itemID) == ["blocked:blocked"])
+            path: "/tmp/lane", state: "active", terminals: [done], repositoryID: Self.repo)
         let fleet = Fleet(runtimeHealthy: true, livePanes: 0, worktrees: [lane], branchPrefix: nil)
-        let next = NeedsYouNavigation.next(after: nil, in: items)
-        #expect(
-            next.flatMap { NeedsYouNavigation.landing(for: $0, in: fleet) }
-                == .workspace(host: "", workspace: Self.repo, focus: .worktree("w-1", terminal: "blocked")))
+        // The Mac's own derivation, for a runner too old to send a list.
+        let derived = NeedsYou.merge(["": NeedsYou.derived(fromTerminals: DaemonClient.olderPanes(in: [lane]))])
+        #expect(derived.isEmpty)
+        #expect(NeedsYouNavigation.step(lastOpened: nil, items: derived, fleet: fleet, showing: nil) == nil)
+
+        let decision = Self.item("decision:t-7", .decision, rank: 300, task: "t-7")
+        let items = NeedsYou.merge(["": [decision]])
+        let opened = NeedsYouNavigation.step(lastOpened: nil, items: items, fleet: fleet, showing: nil)
+        #expect(opened?.item.itemID == "decision:t-7")
+        #expect(opened?.landing != .looseWorktree(host: "", worktree: "w-1", terminal: "done"))
+        #expect(opened?.landing != .workspace(host: "", workspace: Self.repo, focus: .worktree("w-1", terminal: "done")))
     }
 }

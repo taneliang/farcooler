@@ -61,4 +61,18 @@ enum NeedsYouNavigation {
         guard let current, let at = items.firstIndex(where: { $0.key == current }) else { return items.first }
         return items[(at + 1) % items.count]
     }
+
+    /// What ⌃⌘N does, whole: the item it opens and where, given every item
+    /// in rank order, the item it last opened (`lastOpened`, a key) and what
+    /// the window shows now. It goes on from the last one while the window
+    /// still shows it, and starts from the top once you've gone elsewhere.
+    /// Nil with nothing waiting: a finished agent is never an item, so
+    /// nothing is opened for one.
+    static func step(
+        lastOpened: String?, items: [NeedsYouItem], fleet: Fleet, showing selection: Selection?
+    ) -> (item: NeedsYouItem, landing: Selection?)? {
+        let current = lastOpened.flatMap { key in items.first { $0.key == key } }
+            .flatMap { landing(for: $0, in: fleet) == selection ? $0.key : nil }
+        return next(after: current, in: items).map { ($0, landing(for: $0, in: fleet)) }
+    }
 }

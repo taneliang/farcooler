@@ -2788,10 +2788,11 @@ struct ContentView: View {
             // between the app being useful and being a list. Walked from the
             // item last opened while the window still shows it, else from the
             // top.
-            let items = store.needsYou
-            let current = lastAttention.flatMap { key in items.first { $0.key == key } }
-                .flatMap { NeedsYouNavigation.landing(for: $0, in: store.fleet) == selection ? $0.key : nil }
-            if let next = NeedsYouNavigation.next(after: current, in: items) { open(next) }
+            if let next = NeedsYouNavigation.step(
+                lastOpened: lastAttention, items: store.needsYou, fleet: store.fleet, showing: selection)
+            {
+                open(next.item)
+            }
 
         case .newWorktree:
             // Only reachable with a project registered; the panel has nothing
