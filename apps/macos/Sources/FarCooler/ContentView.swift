@@ -142,6 +142,9 @@ struct ContentView: View {
     @State private var workspacePicks: [String: WorkspacePick] = [:]
     /// Focus Column (⌃⌘↩): the third column widened over the other two.
     @State private var focusColumn = false
+    /// When each workspace's orchestrator start began, by `host|workspace`:
+    /// this app's, or one first seen starting. See `ConversationColumn.slowStart`.
+    @State private var orchestratorStartedAt: [String: Date] = [:]
 
     /// What confirming a pane-mode switch would do, and to which pane.
     struct PaneModeConfirmation: Identifiable {
@@ -991,6 +994,7 @@ struct ContentView: View {
         }
         guard let client = store.clients[host] else { return }
         guard startingOrchestrators.begin(workspace, host: host) else { return }
+        orchestratorStartedAt["\(host)|\(workspace.id)"] = Date()
         Task {
             let refused = await client.startOrchestrator(workspace, harness: harness, replace: replace)
             startingOrchestrators.end(workspace, host: host)
@@ -1888,15 +1892,80 @@ struct ContentView: View {
     }
 
     /// The conversation column: the orchestrator, drawn as selecting its
-    /// row drew it. See `ConversationColumn` for the states around it.
+    /// row drew it, under its header, or the state around one (spec §8).
+    /// See `ConversationColumn`.
     @ViewBuilder
     private func conversationColumn(host: String, workspace: WorkspaceSummary?, shown: ShownLayout?) -> some View {
-        if let shown {
-            tiled(shown, titled: false)
+        if let workspace {
+            let seat = WorkspaceScreen.orchestrator(of: workspace, host: host, in: store.fleet)
+            let key = "\(host)|\(workspace.id)"
+            let canAct = store.refusal(for: host) == nil
+            VStack(spacing: 0) {
+                ConversationHeader(
+                    seat: seat, charter: CharterAccess.of(workspace, host: host), canAct: canAct,
+                    onReplace: { harness in
+                        orchestratorReplacement = OrchestratorReplacement(host: host, workspace: workspace, harness: harness)
+                    },
+                    onShowCharter: { url in
+                        if !NSWorkspace.shared.open(url) {
+                            errorBanner = "Couldn’t open \(workspace.name)’s charter. It may have been moved or deleted."
+                        }
+                    },
+                    onTogglePaneMode: {
+                        if let seat { Task { await togglePaneMode(seat.terminal, in: seat.worktree) } }
+                    },
+                    onRestart: {
+                        if let seat { Task { await run(.restart, on: seat.terminal, in: seat.worktree) } }
+                    })
+                Divider()
+                TimelineView(.periodic(from: .now, by: 5)) { context in
+                    let state = ConversationColumn.state(
+                        seat: seat, isStarting: startingOrchestrators.isStarting(workspace, host: host),
+                        startedAt: orchestratorStartedAt[key], now: context.date)
+                    conversationBody(
+                        state: state, offers: ConversationColumn.offers(state, canAct: canAct),
+                        shown: shown, seat: seat, workspace: workspace, host: host)
+                }
+            }
+            // A start first seen here is timed from here; a live one clears it.
+            .task(id: seat.map { "\($0.terminal.id)|\($0.terminal.state)" } ?? "") {
+                let starting = seat.map { StateKind.parse($0.terminal.state) == .starting } ?? false
+                if starting, orchestratorStartedAt[key] == nil { orchestratorStartedAt[key] = Date() }
+                if let seat, StateKind.parse(seat.terminal.state) == .running { orchestratorStartedAt[key] = nil }
+            }
         } else {
             ContentUnavailableView {
-                Label("No orchestrator", systemImage: "circle.dashed")
+                Label("This workspace isn’t here", systemImage: "square.stack.3d.up")
+            } description: {
+                Text(missingBoardSentence(host: host))
             }
+        }
+    }
+
+    @ViewBuilder
+    private func conversationBody(
+        state: ConversationColumn.State, offers: [ConversationColumn.Offer], shown: ShownLayout?,
+        seat: BoardPane?, workspace: WorkspaceSummary, host: String
+    ) -> some View {
+        let placeholder = ConversationPlaceholder(
+            state: state, offers: offers,
+            onStart: { harness in startOrchestrator(workspace, host: host, harness: harness, replace: false) },
+            onRestart: { if let seat { Task { await run(.restart, on: seat.terminal, in: seat.worktree) } } },
+            onReplace: {
+                let harness = seat.flatMap { OrchestratorHarness(rawValue: Terminal.name(of: $0.terminal.preset)) } ?? .claude
+                orchestratorReplacement = OrchestratorReplacement(host: host, workspace: workspace, harness: harness)
+            })
+        switch state {
+        case .live:
+            if let shown { tiled(shown, titled: false) } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
+        case .lost:
+            // Its last screen, dimmed, under what can be done about it.
+            ZStack {
+                if let shown { tiled(shown, titled: false).opacity(0.35).allowsHitTesting(false) }
+                placeholder.background(.regularMaterial.opacity(shown == nil ? 0 : 1))
+            }
+        case .none, .starting:
+            placeholder
         }
     }
 
@@ -1912,6 +1981,13 @@ struct ContentView: View {
                     StatusGlyph(status: seat.terminal.status)
                 } else {
                     Image(systemName: "circle.dashed").foregroundStyle(.tertiary)
+                }
+                // Its needs-you dot: something in this workspace is waiting,
+                // or the orchestrator finished a turn nobody has seen.
+                if let workspace,
+                    store.needsYou.count(in: workspace.id) > 0 || ConversationColumn.unread(seat)
+                {
+                    Circle().fill(Color.orange).frame(width: 6, height: 6)
                 }
                 Spacer()
             }
