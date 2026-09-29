@@ -291,6 +291,26 @@ struct WorktreeCallsTests {
         #expect(old.needsYouFromOlderRunner)
     }
 
+    /// A reconnection clears the runner's build until `status` answers
+    /// again, and a runner whose build isn't known yet used to be read as an
+    /// older one: every decision and ask swapped for the derived list for a
+    /// round trip. The last list stands through the gap, and through a
+    /// `status` read that fails.
+    @Test("A reconnection keeps the last Needs You list until the build is read")
+    func aReconnectionKeepsTheLastNeedsYouList() async {
+        let recorder = Recorder()
+        recorder.capabilities = ["workspaces", "terminals", "needs_you"]
+        let reader = client(recorder)
+        await reader.refreshNeedsYou()
+        #expect(reader.needsYouItems.map(\.itemID) == ["decision:t-9"])
+        recorder.capabilities = nil
+        await reader.refresh()
+        #expect(reader.daemonBuild == nil, "the reconnection didn't clear the build")
+        #expect(reader.needsYouItems.map(\.itemID) == ["decision:t-9"])
+        #expect(!reader.needsYouFromOlderRunner)
+        reader.stopEvents()
+    }
+
     /// An ask's Allow and Deny send `terminal agent-answer` with the ask's own
     /// ids, exactly as the runner sent them. A refusal is told apart by its
     /// `what:` word: someone else answered, or the agent didn't take it.

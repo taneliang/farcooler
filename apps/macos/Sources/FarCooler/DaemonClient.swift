@@ -904,6 +904,7 @@ final class DaemonClient: ObservableObject {
             // than capabilities: worktrees and terminals, nothing else.
             // `reportWatching`'s gate was therefore closed on every Mac.
             capabilities: Set(body["capabilities"] as? [String] ?? []))
+        servedNeedsYou = daemonBuild?.can("needs_you") == true
     }
 
     /// Replace the daemon on this runner with the build this app ships.
@@ -1186,8 +1187,14 @@ final class DaemonClient: ObservableObject {
 
     /// Whether this runner computes its own list (`needs_you`). A runner not
     /// yet asked counts as not, so its blocked agents still show while the
-    /// first `status` read is in flight.
-    var servesNeedsYou: Bool { daemonBuild?.can("needs_you") == true }
+    /// first `status` read is in flight. Between a reconnection and its
+    /// `status` read, what the last build said: a reconnect clears the
+    /// build, and reading that gap as an older runner swapped every decision
+    /// and ask for the derived list for one round trip, then back.
+    var servesNeedsYou: Bool { daemonBuild.map { $0.can("needs_you") } ?? servedNeedsYou }
+
+    /// What the last build this client read said about `needs_you`.
+    private var servedNeedsYou = false
 
     /// Whether this runner is known to be too old to send decisions and
     /// asks: its section says `NeedsYou.olderRunnerNote`. Not while its build
