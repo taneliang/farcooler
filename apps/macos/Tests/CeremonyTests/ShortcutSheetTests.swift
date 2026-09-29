@@ -69,7 +69,7 @@ struct ShortcutSheetTests {
     ///   window (Settings, About) Close Terminal is disabled, the chord goes
     ///   on to File ▸ Close, and that window closes. Before that gate, ⌘W in
     ///   Settings stopped and removed the terminal behind it.
-    /// - ⌘F is Find Worktree or Agent, in the View menu, which comes after
+    /// - ⌘F is Find Workspace, Task or Agent, in the View menu, which comes after
     ///   Edit. So ⌘F reaches Find Worktree whenever Edit ▸ Find is disabled,
     ///   which is whenever the focused view offers no find: a terminal, the
     ///   sidebar, a diff. A text view that does offer find (the adapter

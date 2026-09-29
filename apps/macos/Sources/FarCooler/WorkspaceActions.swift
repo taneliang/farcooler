@@ -5,7 +5,8 @@ import Foundation
 // orchestrator from the "No orchestrator" row, and opening its charter.
 //
 // Worked out here as values, and drawn by `WorkspaceHeader` and
-// `OrchestratorRow`, so the rules are the ones `WorkspaceActionsTests` pins.
+// `WorkspaceRow` and the conversation column, so the rules are the ones
+// `WorkspaceActionsTests` pins.
 
 /// What a workspace header's menu offers, in order.
 enum WorkspaceMenu {
