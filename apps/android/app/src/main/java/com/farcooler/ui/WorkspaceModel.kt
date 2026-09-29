@@ -1,6 +1,9 @@
 package com.farcooler.ui
 
+import com.farcooler.model.Fleet
+import com.farcooler.model.Repository
 import com.farcooler.model.StateKind
+import com.farcooler.model.WorkspaceSummary
 import com.farcooler.model.TaskBoard
 import com.farcooler.model.TaskRow
 import com.farcooler.model.TaskStatus
@@ -174,5 +177,34 @@ fun seatActions(seat: OrchestratorSeat, mayControl: Boolean): Set<SeatAction> {
         is OrchestratorSeat.Starting -> if (seat.slow) setOf(SeatAction.REPLACE) else emptySet()
         is OrchestratorSeat.Lost -> setOf(SeatAction.RESTART, SeatAction.REPLACE)
         is OrchestratorSeat.Live -> setOf(SeatAction.REPLACE)
+    }
+}
+
+/** Whether a workspace route still names a workspace on its runner. */
+sealed interface WorkspacePresence {
+    data class Found(val workspace: WorkspaceSummary) : WorkspacePresence
+
+    /** The runner hasn't said yet: its fleet or its repositories are still to come. */
+    data object Loading : WorkspacePresence
+
+    /** The runner has answered and has no such workspace: deleted, or a stale saved stack. */
+    data object Gone : WorkspacePresence
+
+    companion object {
+        /**
+         * [id] on a runner whose fleet is [fleet], once it's [answered] on
+         * this link. On a runner without workspaces the id is a repository's,
+         * its implicit workspace. A repository's id on a runner that now has
+         * workspaces — a board saved before they existed — is its Main.
+         * Never invented: an unknown id is Gone, not a workspace called Main.
+         */
+        fun of(id: String, fleet: Fleet, repositories: List<Repository>, answered: Boolean): WorkspacePresence {
+            val workspaces = fleet.workspaces
+            workspaces?.firstOrNull { it.id == id }?.let { return Found(it) }
+            workspaces?.firstOrNull { it.isMain && it.repository == id }?.let { return Found(it) }
+            if (workspaces == null && repositories.any { it.id == id }) return Found(WorkspaceSummary.implicit(id))
+            if (!answered || (workspaces == null && repositories.isEmpty())) return Loading
+            return Gone
+        }
     }
 }

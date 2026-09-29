@@ -1,10 +1,13 @@
 package com.farcooler.ui
 
+import com.farcooler.model.Fleet
+import com.farcooler.model.Repository
 import com.farcooler.model.TaskBoard
 import com.farcooler.model.TaskBoardColumn
 import com.farcooler.model.TaskRow
 import com.farcooler.model.TaskStatus
 import com.farcooler.model.Terminal
+import com.farcooler.model.WorkspaceSummary
 import com.farcooler.model.Worktree
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -127,6 +130,27 @@ class WorkspaceScreenTest {
             "This runner couldn’t start an orchestrator for Billing. That’s a problem in the app, not in anything you did.",
             orchestratorRefusal("invalid-argument", "harness", "Billing", replace = false),
         )
+    }
+
+    /**
+     * A route whose workspace was deleted — or a stale saved stack — is Gone
+     * once the runner has answered, not a screen called "Main" with an empty
+     * board. Before it answers, it's Loading.
+     */
+    @Test
+    fun `a workspace that no longer exists is gone, not Main`() {
+        val billing = WorkspaceSummary(id = "ws-b", name = "Billing", repository = "repo")
+        val main = WorkspaceSummary(id = "ws-m", name = "Main", isMain = true, repository = "repo")
+        val fleet = Fleet(workspaces = listOf(main, billing))
+        val repos = listOf(Repository(id = "repo"))
+        assertEquals(WorkspacePresence.Found(billing), WorkspacePresence.of("ws-b", fleet, repos, answered = true))
+        assertEquals(WorkspacePresence.Gone, WorkspacePresence.of("ws-deleted", fleet, repos, answered = true))
+        assertEquals(WorkspacePresence.Loading, WorkspacePresence.of("ws-deleted", Fleet(), emptyList(), answered = false))
+        // A board saved by repository, before workspaces: its Main.
+        assertEquals(WorkspacePresence.Found(main), WorkspacePresence.of("repo", fleet, repos, answered = true))
+        // A runner without workspaces: the repository's implicit one, and an unknown id is gone.
+        assertEquals(WorkspacePresence.Found(WorkspaceSummary.implicit("repo")), WorkspacePresence.of("repo", Fleet(), repos, answered = true))
+        assertEquals(WorkspacePresence.Gone, WorkspacePresence.of("other", Fleet(), repos, answered = true))
     }
 
     /** Ruling 4: nothing waiting, and the app opens on the last workspace, over Needs You. */

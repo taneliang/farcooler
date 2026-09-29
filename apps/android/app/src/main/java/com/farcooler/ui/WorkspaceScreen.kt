@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.core.CoreException
+import com.farcooler.model.RunnerLink
 import com.farcooler.model.WorktreeScope
 import com.farcooler.net.Connection
 import com.farcooler.net.TerminalRef
@@ -90,8 +91,11 @@ fun WorkspaceScreen(
     val foreground by model.foreground.collectAsState()
     val scope = rememberCoroutineScope()
 
-    val workspace = remember(route.workspaceId, fleet.workspaces, repositories) {
-        connection.board(route.workspaceId)
+    val link by connection.link.collectAsStateWithLifecycle()
+    val presence = WorkspacePresence.of(route.workspaceId, fleet, repositories, link == RunnerLink.ANSWERING)
+    val workspace = (presence as? WorkspacePresence.Found)?.workspace ?: run {
+        WorkspaceMissing(presence, connection.host.displayLabel, onBack)
+        return
     }
     val repositoryName = repositories.firstOrNull { it.id == workspace.repository }
         ?.let { it.displayName.ifEmpty { it.short } }
@@ -252,6 +256,45 @@ fun WorkspaceScreen(
                     onSelect = { model.open(it) },
                     modifier = Modifier.fillMaxSize(),
                 )
+            }
+        }
+    }
+}
+
+/**
+ * A workspace route with no workspace behind it: a spinner while the runner
+ * hasn't said, or — once it has — the plain fact, with the way back.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun WorkspaceMissing(presence: WorkspacePresence, runner: String, onBack: () -> Unit) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Workspace") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+            )
+        }
+    ) { padding ->
+        Column(
+            Modifier.fillMaxSize().padding(padding).padding(32.dp).testTag("workspace-missing"),
+            verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            if (presence is WorkspacePresence.Gone) {
+                Text("This workspace is gone", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "It isn’t on $runner anymore.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            } else {
+                CircularProgressIndicator()
             }
         }
     }
