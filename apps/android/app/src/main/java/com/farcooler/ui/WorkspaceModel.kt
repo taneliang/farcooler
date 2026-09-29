@@ -140,24 +140,39 @@ enum class OrchestratorHarness(val wire: String, val title: String) {
 
 /**
  * Why an orchestrator didn't start, in this app's words: the Mac's
- * `orchestratorRefusal` (ov-60), read from the runner's word and, where it
- * named one, its `what`. Never the runner's own sentence.
+ * `orchestratorRefusal` (ov-60), read from the runner's word and the `what`
+ * it names — `orchestrator_taken` or `orchestrator_home` on an
+ * `invalid-argument` (`service.rs`). Never the runner's own sentence, and
+ * never a match on it.
  */
-fun orchestratorRefusal(word: String?, what: String?, message: String?, name: String, replace: Boolean): String {
-    val said = message.orEmpty().lowercase()
-    return when {
-        what == "orchestrator_taken" || (word == "invalid-argument" && "already has an orchestrator" in said) ->
-            "$name already has an orchestrator. Choose Replace to start a new one."
-        what == "orchestrator_home" || (word == "invalid-argument" && "folder" in said) ->
-            "The runner couldn’t make $name’s folder, so no orchestrator started."
-        word == "not-found" -> "$name isn’t on this runner anymore."
-        word == "capability-unsupported" ->
-            "This runner’s Far Cooler is too old to start an orchestrator. Update it there, then try again."
-        word == "scope-denied" -> "This runner lets Far Cooler see its workspaces but not change them."
-        word == "resource-conflict" -> "$name changed while its orchestrator was starting. Try again."
-        word != null ->
-            "This runner couldn’t start an orchestrator for $name. That’s a problem in the app, not in anything you did."
-        replace -> "Couldn’t replace $name’s orchestrator. Check that the runner is reachable, then try again."
-        else -> "Couldn’t start an orchestrator for $name. Check that the runner is reachable, then try again."
+fun orchestratorRefusal(word: String?, what: String?, name: String, replace: Boolean): String = when {
+    what == "orchestrator_taken" -> "$name already has an orchestrator. Choose Replace to start a new one."
+    what == "orchestrator_home" -> "The runner couldn’t make $name’s folder, so no orchestrator started."
+    word == "not-found" -> "$name isn’t on this runner anymore."
+    word == "capability-unsupported" ->
+        "This runner’s Far Cooler is too old to start an orchestrator. Update it there, then try again."
+    word == "scope-denied" -> "This runner lets Far Cooler see its workspaces but not change them."
+    word == "resource-conflict" -> "$name changed while its orchestrator was starting. Try again."
+    word != null ->
+        "This runner couldn’t start an orchestrator for $name. That’s a problem in the app, not in anything you did."
+    replace -> "Couldn’t replace $name’s orchestrator. Check that the runner is reachable, then try again."
+    else -> "Couldn’t start an orchestrator for $name. Check that the runner is reachable, then try again."
+}
+
+/** What the Orchestrator tab offers besides its pane. */
+enum class SeatAction { START, RESTART, REPLACE }
+
+/**
+ * The buttons [seat] shows. None of them for a reader below Control scope, or
+ * on a runner without workspaces ([mayControl] false): the runner would
+ * refuse every one.
+ */
+fun seatActions(seat: OrchestratorSeat, mayControl: Boolean): Set<SeatAction> {
+    if (!mayControl) return emptySet()
+    return when (seat) {
+        is OrchestratorSeat.Empty -> if (seat.canStart) setOf(SeatAction.START) else emptySet()
+        is OrchestratorSeat.Starting -> if (seat.slow) setOf(SeatAction.REPLACE) else emptySet()
+        is OrchestratorSeat.Lost -> setOf(SeatAction.RESTART, SeatAction.REPLACE)
+        is OrchestratorSeat.Live -> setOf(SeatAction.REPLACE)
     }
 }

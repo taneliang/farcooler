@@ -138,7 +138,7 @@ fun WorkspaceScreen(
                 e.rethrowIfCancellation()
                 startedAt = null
                 val core = e as? CoreException
-                refusal = orchestratorRefusal(core?.word, core?.what, e.message, name, replace)
+                refusal = orchestratorRefusal(core?.word, core?.what, name, replace)
             }
         }
     }
@@ -233,6 +233,7 @@ fun WorkspaceScreen(
                 WorkspaceTab.ORCHESTRATOR -> if (live == null) {
                     OrchestratorEmpty(
                         seat = seat,
+                        actions = seatActions(seat, mayControl && !workspace.isImplicit),
                         refusal = refusal,
                         onStart = { start(it, replace = false) },
                         onReplace = { start(it, replace = true) },
@@ -293,7 +294,7 @@ private fun OrchestratorActions(
                     onOpenWorktree(TerminalRef(connection.host.id, live.worktreeId, terminal.id))
                 },
             )
-            if (mayControl) {
+            if (SeatAction.REPLACE in seatActions(seat, mayControl)) {
                 DropdownMenuItem(
                     text = { Text("Replace…") },
                     onClick = {
@@ -314,6 +315,7 @@ private fun OrchestratorActions(
 @Composable
 private fun OrchestratorEmpty(
     seat: OrchestratorSeat,
+    actions: Set<SeatAction>,
     refusal: String?,
     onStart: (OrchestratorHarness) -> Unit,
     onReplace: (OrchestratorHarness) -> Unit,
@@ -334,7 +336,7 @@ private fun OrchestratorEmpty(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
-                if (seat.canStart) {
+                if (SeatAction.START in actions) {
                     var picking by remember { mutableStateOf(false) }
                     Box {
                         Button(onClick = { picking = true }, modifier = Modifier.testTag("start-orchestrator")) {
@@ -353,7 +355,7 @@ private fun OrchestratorEmpty(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    ReplaceButton(onReplace)
+                    if (SeatAction.REPLACE in actions) ReplaceButton(onReplace)
                 }
             }
             is OrchestratorSeat.Lost -> {
@@ -364,8 +366,8 @@ private fun OrchestratorEmpty(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
-                Button(onClick = { onRestart(seat.terminal) }) { Text("Restart") }
-                ReplaceButton(onReplace)
+                if (SeatAction.RESTART in actions) Button(onClick = { onRestart(seat.terminal) }) { Text("Restart") }
+                if (SeatAction.REPLACE in actions) ReplaceButton(onReplace)
             }
             is OrchestratorSeat.Live -> Unit
         }

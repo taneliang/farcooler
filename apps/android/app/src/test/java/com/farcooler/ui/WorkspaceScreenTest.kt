@@ -95,6 +95,40 @@ class WorkspaceScreenTest {
         assertEquals(OrchestratorSeat.Starting(slow = true), OrchestratorSeat.of("o", emptyList(), null, 0, true))
     }
 
+    /**
+     * A reader below Control scope sees the seat's state and no button the
+     * runner would refuse: not Restart, not Replace…, not Start.
+     */
+    @Test
+    fun `a read-scoped phone is offered no orchestrator actions`() {
+        val lost = OrchestratorSeat.Lost(Terminal(id = "o", state = "lost"), "main")
+        assertEquals(setOf(SeatAction.RESTART, SeatAction.REPLACE), seatActions(lost, mayControl = true))
+        assertEquals(emptySet<SeatAction>(), seatActions(lost, mayControl = false))
+        assertEquals(emptySet<SeatAction>(), seatActions(OrchestratorSeat.Starting(slow = true), mayControl = false))
+        assertEquals(emptySet<SeatAction>(), seatActions(OrchestratorSeat.Empty(canStart = true), mayControl = false))
+        assertEquals(setOf(SeatAction.REPLACE), seatActions(OrchestratorSeat.Starting(slow = true), mayControl = true))
+    }
+
+    /**
+     * A refusal is read from the runner's `what`, never from its prose: a
+     * sentence that happens to mention a folder is not a missing folder.
+     */
+    @Test
+    fun `an orchestrator refusal reads the runner's word, not its sentence`() {
+        assertEquals(
+            "Billing already has an orchestrator. Choose Replace to start a new one.",
+            orchestratorRefusal("invalid-argument", "orchestrator_taken", "Billing", replace = false),
+        )
+        assertEquals(
+            "The runner couldn’t make Billing’s folder, so no orchestrator started.",
+            orchestratorRefusal("invalid-argument", "orchestrator_home", "Billing", replace = false),
+        )
+        assertEquals(
+            "This runner couldn’t start an orchestrator for Billing. That’s a problem in the app, not in anything you did.",
+            orchestratorRefusal("invalid-argument", "harness", "Billing", replace = false),
+        )
+    }
+
     /** Ruling 4: nothing waiting, and the app opens on the last workspace, over Needs You. */
     @Test
     fun `with nothing waiting, launch pushes the last workspace over Needs You`() {
