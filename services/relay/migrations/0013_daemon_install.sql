@@ -1,0 +1,17 @@
+-- Which runner install each paired token belongs to: the daemon's own
+-- `install-id`, a UUIDv7 kept in its runtime directory.
+--
+-- Additive only, same as 0002 through 0012: the previous worker is still
+-- serving requests while a deploy rolls out, and it never writes this column.
+--
+-- **Why a label is not enough.** The Mac app pairs every local runner as
+-- "This Mac", so two Macs on one account share a label, and a runner paired
+-- again is a second token under the same one. The needs-you count (0010) is
+-- per runner, and keying it by label meant pairing a second Mac superseded the
+-- first one's count, and a re-paired runner's blocked row was counted beside
+-- the new token's count. A runner that sends its install id is keyed by it:
+-- tokens with one install id are one runner, and its newest count stands.
+--
+-- NULL is a daemon too old to send it, and is keyed as before, by its own
+-- token and its label. See `readFleet` and `covered`.
+ALTER TABLE daemons ADD COLUMN install_id TEXT;

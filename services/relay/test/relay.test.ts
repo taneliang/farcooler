@@ -4080,6 +4080,128 @@ describe('/v1/notify and Live Activities', () => {
       expect(start.body.aps['content-state'].needsYou).toBe(6)
     })
 
+    // MARK: Runners by install id (migration 0013)
+    //
+    // Every Mac pairs its own runner as "This Mac", so a label names a kind of
+    // machine and not one runner. A runner that sends its install id is keyed
+    // by it; one too old to send it is keyed as it always was.
+
+    /// A signed-in phone with a push-to-start token, and a way to pair runners
+    /// through the route the app uses.
+    async function pairing() {
+      const calls = watchFetch()
+      await register('user_1', { liveActivityStartToken: 'start-token' })
+      await running('term-1')
+      const session = await sessionFor('user_1')
+      const issue = async (label: string, fields: Record<string, unknown> = {}) =>
+        (await (await post('/v1/daemons', { label, ...fields }, session)).json<{ token: string }>()).token
+      return { calls, issue }
+    }
+
+    it('keys a runner that sends its install id apart from one that does not, under one label', async () => {
+      // A new runner and an old one, both "This Mac". The old one sends no
+      // count, so its blocked agents are counted as rows — including a row
+      // from before 0012 that names it by label alone. The new runner's count
+      // under the same label must not swallow that row.
+      const { calls, issue } = await pairing()
+      const fresh = await issue('This Mac')
+      const old = await issue('This Mac')
+      await env.DB.prepare(
+        `INSERT INTO live_activities
+           (id, account_id, terminal, update_token, environment, updated_at,
+            label, machine, status, detail, status_since)
+         VALUES (?, 'user_1', 'term-old', '', NULL, ?, 'claude', 'This Mac', 'blocked', '', ?)`,
+      )
+        .bind(crypto.randomUUID(), Date.now(), Date.now())
+        .run()
+      await post('/v1/notify', { title: 'claude needs you', terminal: 'term-2', status: 'blocked' }, old)
+
+      await post(
+        '/v1/notify',
+        { title: 'claude needs you', terminal: 'term-1', status: 'blocked', needsYou: 1, install: 'install-a' },
+        fresh,
+      )
+
+      // 1 from the new runner, and the old runner's two blocked agents.
+      expect(lastCard(calls).body.aps['content-state'].needsYou).toBe(3)
+      const stamped = await env.DB.prepare(`SELECT install_id FROM daemons WHERE token_hash = ?`)
+        .bind(await sha256(fresh))
+        .first<any>()
+      expect(stamped?.install_id).toBe('install-a')
+    })
+
+    it('replaces, never adds, when a runner with a blocked agent is paired again', async () => {
+      // The runner's old token wrote the blocked row, and its new token's
+      // count already includes that agent. Both are one install, so the row
+      // is covered by the new count. Another Mac under the same label keeps
+      // its own count through the re-pair.
+      const { calls, issue } = await pairing()
+      const first = await issue('This Mac')
+      const otherMac = await issue('This Mac')
+      await post('/v1/notify', { kind: 'count', needsYou: 2, install: 'install-b' }, otherMac)
+      await post(
+        '/v1/notify',
+        { title: 'claude needs you', terminal: 'term-1', status: 'blocked', needsYou: 1, install: 'install-a' },
+        first,
+      )
+
+      const again = await issue('This Mac')
+      await post('/v1/notify', { kind: 'count', needsYou: 1, install: 'install-a' }, again)
+
+      expect(lastCard(calls).body.aps['content-state'].needsYou).toBe(3)
+      const counted = await env.DB.prepare(
+        `SELECT COUNT(*) AS n FROM daemons WHERE install_id = 'install-a' AND needs_you IS NOT NULL`,
+      ).first<{ n: number }>()
+      expect(counted?.n).toBe(1)
+    })
+
+    it('counts two Macs both labeled "This Mac" as two runners', async () => {
+      // Pairing the second Mac is not re-pairing the first.
+      const { calls, issue } = await pairing()
+      const a = await issue('This Mac')
+      await post('/v1/notify', { kind: 'count', needsYou: 3, install: 'install-a' }, a)
+      const b = await issue('This Mac')
+      await post(
+        '/v1/notify',
+        { title: 'claude needs you', terminal: 'term-1', status: 'blocked', needsYou: 2, install: 'install-b' },
+        b,
+      )
+
+      expect(lastCard(calls).body.aps['content-state'].needsYou).toBe(5)
+    })
+
+    it('takes an install id at pairing, and keeps the old count until the new token speaks', async () => {
+      // A pairing that names its install is that runner, whatever its label:
+      // until the new token sends a count, the old token's is still the truth.
+      const { calls, issue } = await pairing()
+      const first = await issue('studio.local', { install: 'install-a' })
+      await post('/v1/notify', { kind: 'count', needsYou: 3, install: 'install-a' }, first)
+      const again = await issue('This Mac', { install: 'install-a' })
+      const row = await env.DB.prepare(`SELECT install_id FROM daemons WHERE token_hash = ?`)
+        .bind(await sha256(again))
+        .first<any>()
+      expect(row?.install_id).toBe('install-a')
+
+      await post('/v1/notify', { title: 'claude needs you', terminal: 'term-1', status: 'blocked' }, again)
+      // The old count covers this runner's agent; no count of its own yet.
+      expect(lastCard(calls).body.aps['content-state'].needsYou).toBe(3)
+
+      await post('/v1/notify', { kind: 'count', needsYou: 1, install: 'install-a' }, again)
+      expect(lastCard(calls).body.aps['content-state'].needsYou).toBe(1)
+    })
+
+    it('ignores an install id that is not a short string', async () => {
+      // Kept as a legacy runner, never refused: the daemon ships separately.
+      const { issue } = await pairing()
+      const token = await issue('This Mac')
+      for (const install of [42, '', 'x'.repeat(200), null, {}]) {
+        const response = await post('/v1/notify', { kind: 'count', needsYou: 1, install }, token)
+        expect(response.status).toBe(200)
+      }
+      const row = await env.DB.prepare(`SELECT install_id FROM daemons`).first<any>()
+      expect(row?.install_id).toBeNull()
+    })
+
     it('moves the card to a new headline, and remembers it, when rows have gone quiet', async () => {
       // A refresh draws the same headline an agent notice would, so the
       // card's remembered leader has to follow it: the dismissal rule reads

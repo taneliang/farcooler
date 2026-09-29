@@ -783,26 +783,33 @@ async function pairDaemon(request: Request, env: Env): Promise<Response> {
   const account = await requireAccount(request, env)
   if (account instanceof Response) return account
 
-  const body = await request.json<{ label?: string }>()
+  const body = await request.json<{ label?: string; install?: unknown }>()
   const token = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '')
 
   const now = Date.now()
   const label = body.label ?? 'Machine'
-  // A new pairing under a label this account already has is that runner being
-  // paired again, and the runner keeps one token — so the old row's count is
+  // Optional, and nothing sends it yet: the app pairs, and the runner's install
+  // id reaches this relay on its notices. A pairing that does name one is that
+  // runner, and needs no supersede here — `readFleet` keys counts by install,
+  // so the old token's count stands until the new token sends its own.
+  const install = installId(body.install)
+  // A pairing with no install id, under a label this account already has, is
+  // taken to be that runner being paired again: the old row's count is
   // superseded rather than summed beside the new one's for a day. Only the
-  // count: the old row itself is the person's to revoke, and it still lists.
-  // Two runners that genuinely share a label lose nothing lasting either, since
-  // the other one's next notice writes its count straight back.
+  // count, and only on rows no install id has claimed. A row that has one is
+  // keyed by it, and is some other runner that happens to share the label —
+  // every Mac pairs as "This Mac". Its count is left alone.
+  if (install === null) {
+    await env.DB.prepare(
+      `UPDATE daemons SET needs_you = NULL, needs_you_at = NULL
+       WHERE account_id = ? AND label = ? AND install_id IS NULL`,
+    )
+      .bind(account, label)
+      .run()
+  }
   await env.DB.prepare(
-    `UPDATE daemons SET needs_you = NULL, needs_you_at = NULL
-     WHERE account_id = ? AND label = ?`,
-  )
-    .bind(account, label)
-    .run()
-  await env.DB.prepare(
-    `INSERT INTO daemons (id, account_id, token_hash, label, created_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO daemons (id, account_id, token_hash, label, created_at, expires_at, install_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       crypto.randomUUID(),
@@ -811,11 +818,22 @@ async function pairDaemon(request: Request, env: Env): Promise<Response> {
       label,
       now,
       now + TOKEN_LIFETIME_MS,
+      install,
     )
     .run()
 
   await record(env.METRICS, env.ANALYTICS_SALT, 'daemon_paired', account)
   return json({ token })
+}
+
+/// A runner's install id as a body carries it, or NULL for none.
+///
+/// The daemon's `install-id` is a UUIDv7. Anything that is not a short token
+/// of letters, digits and dashes is treated as absent — the runner is keyed as
+/// one too old to send it — rather than refused: the daemon ships separately,
+/// and a 400 here would cost it every notice.
+function installId(value: unknown): string | null {
+  return typeof value === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(value) ? value : null
 }
 
 /// How long a machine may notify before it must be paired again.
@@ -947,6 +965,11 @@ interface Notification {
   /// The workspace the notice's agent or task belongs to, by name, or absent.
   /// The alert's title already leads with it; this is for the card's rows.
   workspace?: string
+  /// The runner's install id: its `install-id` file, stable across re-pairing
+  /// and distinct per runner even when every Mac is labeled "This Mac". Keys
+  /// this token's needs-you count; see migration 0013. Absent from a daemon
+  /// older than it, which is keyed by token and label as before.
+  install?: string
 }
 
 interface Device {
@@ -1032,10 +1055,32 @@ async function notify(request: Request, env: Env): Promise<Response> {
   // count — a runner older than the rollup, or a value that is not a count —
   // leaves the last one where it was.
   const needsYou = numeric(body.needsYou)
+  // Which runner this token is, stamped before the count so the count is read
+  // as that runner's. Written only when it changes, which is once per token.
+  const install = installId(body.install)
+  if (install !== null) {
+    await env.DB.prepare(
+      `UPDATE daemons SET install_id = ? WHERE id = ? AND install_id IS NOT ?`,
+    )
+      .bind(install, daemon.id, install)
+      .run()
+  }
   if (needsYou !== null) {
     await env.DB.prepare(`UPDATE daemons SET needs_you = ?, needs_you_at = ? WHERE id = ?`)
       .bind(needsYou, Date.now(), daemon.id)
       .run()
+    // Re-pairing replaces, never adds. Every other token of this install is
+    // this runner under an older pairing, and this count is its whole truth
+    // now. `readFleet` already keeps only the newest per install; this stops
+    // the table holding a count nobody will read.
+    if (install !== null) {
+      await env.DB.prepare(
+        `UPDATE daemons SET needs_you = NULL, needs_you_at = NULL
+         WHERE account_id = ? AND install_id = ? AND id != ?`,
+      )
+        .bind(daemon.account_id, install, daemon.id)
+        .run()
+    }
   }
 
   const devices = await env.DB.prepare(
@@ -1618,25 +1663,81 @@ async function readFleet(env: Env, account: string, now: number): Promise<Roster
   )
     .bind(account)
     .all<AgentRow>()
-  // The machines that have a count. None at all is what tells "nobody said"
-  // from "everybody said 0": the first is NULL and the card is exactly the card
-  // it was before counts existed; the second is a real 0.
-  const counted = await env.DB.prepare(
-    `SELECT id, label, needs_you FROM daemons
-     WHERE account_id = ? AND needs_you IS NOT NULL`,
+  // Every machine on the account, with its count if it has one. All of them
+  // and not only the counting ones: a row names the token that wrote it, and
+  // attributing it to a runner needs that token's install id whether or not
+  // the token has a count.
+  const paired = await env.DB.prepare(
+    `SELECT id, label, install_id, needs_you, needs_you_at, last_seen_at FROM daemons
+     WHERE account_id = ?`,
   )
     .bind(account)
-    .all<{ id: string; label: string; needs_you: number }>()
-  const machines = counted.results ?? []
+    .all<Machine>()
+  return { rows: rows.results ?? [], counts: countsOf(paired.results ?? [], now) }
+}
+
+/// One `daemons` row, as `readFleet` reads it.
+interface Machine {
+  id: string
+  label: string
+  install_id: string | null
+  needs_you: number | null
+  needs_you_at: number | null
+  last_seen_at: number | null
+}
+
+/// The runner a token belongs to: its install id where it sent one, and the
+/// token itself where it did not.
+function runnerOf(machine: Machine): string {
+  return machine.install_id !== null ? `install:${machine.install_id}` : `daemon:${machine.id}`
+}
+
+/// The fresh counts, one per RUNNER, and what they cover.
+///
+/// Tokens of one install are one runner paired more than once, and only the
+/// newest count among them stands: re-pairing replaces, never adds. A token
+/// with no install id is its own runner, as every token was before 0013.
+///
+/// None at all is what tells "nobody said" from "everybody said 0": the first
+/// is NULL and the card is exactly the card it was before counts existed; the
+/// second is a real 0.
+function countsOf(machines: Machine[], now: number): Counts | null {
+  const newest = new Map<string, Machine>()
+  for (const machine of machines) {
+    if (machine.needs_you === null) continue
+    const runner = runnerOf(machine)
+    const held = newest.get(runner)
+    if (!held || (machine.needs_you_at ?? 0) > (held.needs_you_at ?? 0)) newest.set(runner, machine)
+  }
+  if (newest.size === 0) return null
+
+  const counting = new Set(newest.keys())
+  const runners = new Map(machines.map(machine => [machine.id, runnerOf(machine)]))
+  // A row from before 0012 names its runner only by label, and every Mac is
+  // "This Mac". So a label covers such a row only when EVERY runner that could
+  // have written it is counting: each one under that label that has spoken
+  // inside `ROW_RETENTION_MS`, which is as old as a row can be. One runner
+  // that is not counting and could be the writer, and the row counts — a
+  // blocked agent counted twice for a while beats one hidden.
+  const writers = new Map<string, Set<string>>()
+  for (const machine of machines) {
+    const spoke = machine.needs_you !== null ||
+      (machine.last_seen_at !== null && now - machine.last_seen_at < ROW_RETENTION_MS)
+    if (!spoke) continue
+    const under = writers.get(machine.label) ?? new Set<string>()
+    under.add(runnerOf(machine))
+    writers.set(machine.label, under)
+  }
+  const labels = new Set<string>()
+  for (const [label, under] of writers) {
+    if ([...under].every(runner => counting.has(runner))) labels.add(label)
+  }
+
   return {
-    rows: rows.results ?? [],
-    counts: machines.length === 0
-      ? null
-      : {
-          total: machines.reduce((sum, machine) => sum + machine.needs_you, 0),
-          daemons: new Set(machines.map(machine => machine.id)),
-          labels: new Set(machines.map(machine => machine.label)),
-        },
+    total: [...newest.values()].reduce((sum, machine) => sum + machine.needs_you!, 0),
+    runners,
+    counting,
+    labels,
   }
 }
 
@@ -1649,13 +1750,16 @@ interface Roster {
 
 /// The machines on an account that sent a fresh count, and their sum.
 ///
-/// `daemons` and `labels` say which rows those counts already cover: a
+/// `counting` and `labels` say which rows those counts already cover: a
 /// counting runner has counted its own blocked agents, so its rows must not
-/// be counted again. `labels` is for a row from before migration 0012, which
-/// names its runner only by label.
+/// be counted again. A row names the token that wrote it, and `runners` maps
+/// that token to its runner, so a row written under an older pairing of a
+/// runner is covered by the newer pairing's count. `labels` is for a row from
+/// before migration 0012, which names its runner only by label.
 interface Counts {
   total: number
-  daemons: Set<string>
+  runners: Map<string, string>
+  counting: Set<string>
   labels: Set<string>
 }
 
@@ -1947,12 +2051,13 @@ function composeFleet(rows: AgentRow[], counts: Counts | null, now: number): Fle
 
 /// Whether a row's runner has already counted it, in its own `needsYou`.
 ///
-/// By the row's daemon when the row names one, and by its runner label when it
-/// predates migration 0012 and does not.
+/// By the runner of the row's daemon when the row names one — its install id
+/// where that token sent one (migration 0013), else the token itself — and by
+/// its runner label when it predates migration 0012 and does not.
 function covered(row: AgentRow, counts: Counts): boolean {
-  return row.daemon_id !== null
-    ? counts.daemons.has(row.daemon_id)
-    : counts.labels.has(row.machine ?? '')
+  if (row.daemon_id === null) return counts.labels.has(row.machine ?? '')
+  const runner = counts.runners.get(row.daemon_id) ?? `daemon:${row.daemon_id}`
+  return counts.counting.has(runner)
 }
 
 /// The header, in the words the lock screen shows: `2 need you · 3 in flight`.
