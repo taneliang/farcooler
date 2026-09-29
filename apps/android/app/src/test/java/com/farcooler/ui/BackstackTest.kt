@@ -567,6 +567,35 @@ class BackstackTest {
     }
 
     /**
+     * A notification tap or a Needs You row lands with the workspace under it
+     * (spec §6.1, "Deep links"): the front door, the workspace, the task when
+     * the pane has one, then the agent. An orchestrator is its workspace's
+     * Orchestrator tab; an unclaimed pane goes straight on the front door.
+     */
+    @Test
+    fun `a notification tap lands with the workspace under it`() {
+        val pane = Route.Terminal("h", "w")
+        assertEquals(
+            listOf(Route.NeedsYou, Route.Workspace("h", "b", WorkspaceTab.BOARD), Route.BoardTask("h", "b", "t"), pane),
+            Backstack.chain("h", "b", "t", pane),
+        )
+        assertEquals(
+            listOf(Route.NeedsYou, Route.Workspace("h", "b", WorkspaceTab.WORKTREES), pane),
+            Backstack.chain("h", "b", null, pane),
+        )
+        assertEquals(
+            listOf(Route.NeedsYou, Route.Workspace("h", "b", WorkspaceTab.ORCHESTRATOR)),
+            Backstack.chain("h", "b", null, pane, orchestrator = true),
+        )
+        // A decision or a review: the task, over its board, and no pane.
+        assertEquals(
+            listOf(Route.NeedsYou, Route.Workspace("h", "b", WorkspaceTab.BOARD), Route.BoardTask("h", "b", "t")),
+            Backstack.chain("h", "b", "t", null),
+        )
+        assertEquals(listOf(Route.NeedsYou, pane), Backstack.chain("h", null, "t", pane))
+    }
+
+    /**
      * A workspace opened from the drawer replaces the one on screen, so Back
      * from any workspace is the front door; and a tab tap changes that route's
      * tab and nothing else in the stack.
