@@ -281,6 +281,15 @@ export interface ActivityState {
   /// card whose turn clock could not be read should show no timer rather than
   /// a wrong one.
   startedAt?: number
+  /// The HEADLINE's open hook ask, so the card can draw Allow and Deny and a
+  /// tap can answer it while the app is suspended. Absent when the headline is
+  /// not blocked, holds no ask, or its hold has run out. Never on a row.
+  ///
+  /// `id` is what `terminal.agent_answer` echoes back, `tool` is claude's tool
+  /// name ("Bash") when it passed the vocabulary, and `until` is when the
+  /// runner's hold ends, in Unix milliseconds. No option name and no command
+  /// line: for Bash, the option name IS the command line. See migration 0014.
+  ask?: CardAsk
 
   /// How many agents are in each tier, for the header: `2 need you / 3 to
   /// review · 3 in flight`.
@@ -342,6 +351,14 @@ export interface ActivityState {
   /// `STATE_BUDGET` is the one that cannot be argued with; see both in
   /// `index.ts`.
   rows?: ActivityRow[]
+}
+
+/// A hook ask as the card carries it. The same object a daemon notice carries
+/// as `ask`, validated by `askOf` in `index.ts`.
+export interface CardAsk {
+  id: string
+  tool?: string
+  until: number
 }
 
 /// One agent's line on the card.

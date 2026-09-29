@@ -24,6 +24,7 @@ import {
   type Activity,
   type ActivityRow,
   type ActivityState,
+  type CardAsk,
   type Environment,
 } from './push'
 
@@ -977,6 +978,13 @@ interface Notification {
   /// this token's needs-you count; see migration 0013. Absent from a daemon
   /// older than it, which is keyed by token and label as before.
   install?: string
+  /// The terminal's open hook ask: `{ id, tool?, until }`, the opaque
+  /// `hook-ask-` id, claude's tool name and the hold's end in Unix ms. On a
+  /// `blocked` agent notice, and on a `kind: "ask"` notice, which says the
+  /// ask changed while the agent stayed blocked. Absent means no ask is open.
+  /// Never an option name or a command line. Validated by `askOf`; anything
+  /// that fails is no ask, never a 400. See migration 0014.
+  ask?: unknown
 }
 
 interface Device {
@@ -1166,6 +1174,11 @@ async function notify(request: Request, env: Env): Promise<Response> {
   try {
     if (kind === undefined) {
       await pushActivity(env, daemon, body, devices.results ?? [])
+    } else if (kind === 'ask') {
+      // The card moves only when this runner's own blocked row took the
+      // change, or when the notice brought a count, which moves the header.
+      const moved = await rememberAsk(env, daemon, install, body)
+      if (moved || needsYou !== null) await refreshCard(env, daemon.account_id)
     } else {
       await refreshCard(env, daemon.account_id)
     }
@@ -1585,6 +1598,11 @@ interface AgentRow {
   started_at: number | null
   status_since: number | null
   updated_at: number
+  /// The row's open hook ask, all three or none; only ever on a blocked row.
+  /// See migration 0014.
+  ask_id: string | null
+  ask_tool: string | null
+  ask_until: number | null
 }
 
 /// Which tier a row sorts into. Lower is more urgent.
@@ -1662,10 +1680,20 @@ async function readFleet(env: Env, account: string, now: number): Promise<Roster
   )
     .bind(account, now - ROW_RETENTION_MS)
     .run()
+  // An ask whose hold has ended is over whether or not the runner said so:
+  // the daemon refuses it as `not_held` from then on. Nulled here so it
+  // reaches no card, even if the `kind: "ask"` clear was lost.
+  await env.DB.prepare(
+    `UPDATE live_activities SET ask_id = NULL, ask_tool = NULL, ask_until = NULL
+     WHERE account_id = ? AND ask_until < ?`,
+  )
+    .bind(account, now)
+    .run()
 
   const rows = await env.DB.prepare(
     `SELECT terminal, label, machine, daemon_id, workspace, status, detail, insertions, deletions,
-            commits, trace, trace_anchor, started_at, status_since, updated_at
+            commits, trace, trace_anchor, started_at, status_since, updated_at,
+            ask_id, ask_tool, ask_until
      FROM live_activities WHERE account_id = ?`,
   )
     .bind(account)
@@ -1840,14 +1868,17 @@ async function rememberAgent(
     // Only when the tier actually moves. See above.
     status_since: prior && prior.status === status ? (prior.status_since ?? now) : now,
     updated_at: now,
+    // Overwritten, never carried forward: a blocked notice with no ask says
+    // none is open now, and any other status has none. See migration 0014.
+    ...askColumns(status === 'blocked' ? askOf(body.ask) : null),
   }
 
   await env.DB.prepare(
     `INSERT INTO live_activities
        (id, account_id, terminal, update_token, environment, updated_at,
         label, machine, daemon_id, workspace, status, detail, insertions, deletions,
-        commits, trace, trace_anchor, started_at, status_since)
-     VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        commits, trace, trace_anchor, started_at, status_since, ask_id, ask_tool, ask_until)
+     VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (account_id, terminal)
      DO UPDATE SET updated_at = excluded.updated_at,
                    label = excluded.label,
@@ -1864,7 +1895,10 @@ async function rememberAgent(
                                        THEN live_activities.trace_anchor
                                        ELSE excluded.trace_anchor END,
                    started_at = excluded.started_at,
-                   status_since = excluded.status_since`,
+                   status_since = excluded.status_since,
+                   ask_id = excluded.ask_id,
+                   ask_tool = excluded.ask_tool,
+                   ask_until = excluded.ask_until`,
   )
     .bind(
       crypto.randomUUID(),
@@ -1895,9 +1929,89 @@ async function rememberAgent(
       traceAnchor(body.traceAnchor, now),
       mine.started_at,
       mine.status_since,
+      mine.ask_id,
+      mine.ask_tool,
+      mine.ask_until,
     )
     .run()
   return mine
+}
+
+/// A hook ask the daemon actually sent, or NULL.
+///
+/// `id` must be `hook-ask-` and then letters, digits and dashes, 64 bytes at
+/// most; `until` a positive integer. Failing either is no ask at all. `tool`
+/// is a word from claude's tool vocabulary or it is dropped, keeping the ask:
+/// the buttons work without it. Checked rather than trusted because each one
+/// lands on a lock screen and in a 4KB payload, and because a malformed field
+/// here must never let content — a command line — ride along.
+function askOf(value: unknown): CardAsk | null {
+  if (typeof value !== 'object' || value === null) return null
+  const { id, tool, until } = value as Record<string, unknown>
+  if (typeof id !== 'string' || !/^hook-ask-[0-9A-Za-z-]{1,55}$/.test(id)) return null
+  if (typeof until !== 'number' || !Number.isSafeInteger(until) || until <= 0) return null
+  return typeof tool === 'string' && /^[A-Za-z0-9_.:-]{1,64}$/.test(tool)
+    ? { id, tool, until }
+    : { id, until }
+}
+
+/// An ask as the three columns it is stored in, all NULL for none.
+function askColumns(
+  ask: CardAsk | null,
+): { ask_id: string | null; ask_tool: string | null; ask_until: number | null } {
+  return {
+    ask_id: ask?.id ?? null,
+    ask_tool: ask?.tool ?? null,
+    ask_until: ask?.until ?? null,
+  }
+}
+
+/// The ask a row puts on the card, if it is blocked and its hold is not over.
+function askOnCard(row: AgentRow, now: number): CardAsk | undefined {
+  if (row.status !== 'blocked' || row.ask_id === null || row.ask_until === null) return undefined
+  if (row.ask_until <= now) return undefined
+  return row.ask_tool !== null
+    ? { id: row.ask_id, tool: row.ask_tool, until: row.ask_until }
+    : { id: row.ask_id, until: row.ask_until }
+}
+
+/// Write what a `kind: "ask"` notice says onto its row, and say whether a row
+/// took it.
+///
+/// Only a row that is still blocked, and only one the sender's own runner
+/// wrote: the token that sent it, or any token of the same install once it
+/// has sent its id. A row from before migration 0012 names no token and is
+/// never matched. With no such row nothing is written — the notice is late,
+/// or about an agent the card has moved past — and the next blocked notice
+/// carries the ask anyway.
+async function rememberAsk(
+  env: Env,
+  daemon: { id: string; account_id: string },
+  install: string | null,
+  body: Notification,
+): Promise<boolean> {
+  const terminal = typeof body.terminal === 'string' ? body.terminal : ''
+  if (!terminal) return false
+  const ask = askColumns(askOf(body.ask))
+  const result = await env.DB.prepare(
+    `UPDATE live_activities SET ask_id = ?, ask_tool = ?, ask_until = ?
+     WHERE account_id = ? AND terminal = ? AND status = 'blocked'
+       AND daemon_id IN (SELECT id FROM daemons WHERE account_id = ?
+                         AND (id = ? OR (? IS NOT NULL AND install_id = ?)))`,
+  )
+    .bind(
+      ask.ask_id,
+      ask.ask_tool,
+      ask.ask_until,
+      daemon.account_id,
+      terminal,
+      daemon.account_id,
+      daemon.id,
+      install,
+      install,
+    )
+    .run()
+  return (result.meta?.changes ?? 0) > 0
 }
 
 /// A workspace name the daemon actually sent, cut to `WORKSPACE_BUDGET`, or
@@ -2246,6 +2360,10 @@ async function pushActivity(
     state.detail = headline.detail ?? ''
     state.startedAt = headline.started_at ?? undefined
   }
+  // The headline's own ask, whichever row that is. Set before `withFleet` so
+  // the byte budget prices it: it can cost the card a row, never the card.
+  const ask = askOnCard(headline, now)
+  if (ask) state.ask = ask
   withFleet(state, fleet)
 
   // What separates the tiers is the alert, not whether a push goes out at all.
@@ -2518,6 +2636,9 @@ async function refreshCard(env: Env, account: string): Promise<void> {
     detail: headline.detail ?? '',
     startedAt: headline.started_at ?? undefined,
   }
+  // Before `withFleet`, as in `pushActivity`.
+  const ask = askOnCard(headline, now)
+  if (ask) state.ask = ask
   withFleet(state, fleet)
 
   await deliverActivity(env, account, running.update_token, running.environment, {

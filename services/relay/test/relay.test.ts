@@ -3710,6 +3710,285 @@ describe('/v1/notify and Live Activities', () => {
       const worstAlert = ALERT_TITLE_BUDGET + ALERT_BODY_BUDGET + bytes({ title: '', body: '' })
       expect(STATE_BUDGET + worstAlert + envelope).toBeLessThanOrEqual(4096)
     })
+
+    it('a state with an ask stays inside STATE_BUDGET and the payload', async () => {
+      // The headline's ask is set on the state BEFORE the rows are added, so
+      // the row-by-row budget check prices it: the widest ask the relay keeps
+      // can cost the card a row, never the card.
+      const calls = watchFetch()
+      const ask = {
+        id: 'hook-ask-' + '0'.repeat(55),
+        tool: 'mcp__' + 'x'.repeat(59),
+        until: Date.now() + 60_000,
+      }
+      const starts = await startWithFleet(calls, 8, (terminal: string) => ({ ...maximal(terminal), ask }))
+      expect(starts.length).toBe(1)
+      const state = starts[0].body.aps['content-state']
+      expect(state.ask).toEqual(ask)
+      expect(state.rows.length).toBeGreaterThan(0)
+      expect(bytes(state)).toBeLessThanOrEqual(STATE_BUDGET)
+      expect(bytes(starts[0].body)).toBeLessThan(4096)
+    })
+  })
+
+  // MARK: Asks on the card (ov-57)
+
+  /// The headline's hook ask, carried so the lock screen can answer it while
+  /// the app is suspended. Only an opaque id, a tool name and the hold's end:
+  /// never an option name or a command line. See migration 0014.
+  describe('asks on the card', () => {
+    const ASK = { id: 'hook-ask-0199a1b2-7c3d-7e4f-8a9b-0c1d2e3f4a5b', tool: 'Bash', until: 0 }
+    /// A fresh ask whose hold ends a minute from now.
+    const ask = (fields: Record<string, unknown> = {}) => ({ ...ASK, until: Date.now() + 60_000, ...fields })
+
+    function lastCard(calls: Call[]) {
+      const activities = pushes(calls).filter(call => call.body.aps?.event)
+      return activities[activities.length - 1]
+    }
+
+    async function askColumns(terminal = 'term-1') {
+      return await env.DB.prepare(
+        `SELECT ask_id, ask_tool, ask_until FROM live_activities WHERE terminal = ?`,
+      )
+        .bind(terminal)
+        .first<{ ask_id: string | null; ask_tool: string | null; ask_until: number | null }>()
+    }
+
+    const NONE = { ask_id: null, ask_tool: null, ask_until: null }
+
+    async function blocked(token: string, fields: Record<string, unknown> = {}) {
+      return await post(
+        '/v1/notify',
+        { title: 'claude needs you', terminal: 'term-1', status: 'blocked', ...fields },
+        token,
+      )
+    }
+
+    it("stores a blocked notice's ask on its row", async () => {
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      const sent = ask()
+      await blocked('mine', { ask: sent })
+
+      expect(await askColumns()).toEqual({ ask_id: sent.id, ask_tool: 'Bash', ask_until: sent.until })
+      expect(lastCard(calls).body.aps['content-state'].ask).toEqual(sent)
+    })
+
+    it('clears the ask when the row leaves blocked', async () => {
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await blocked('mine', { ask: ask() })
+      // A working notice that still carries an ask is a daemon bug; the relay
+      // stores an ask on a blocked row only.
+      await post(
+        '/v1/notify',
+        { title: 'claude', terminal: 'term-1', status: 'working', ask: ask() },
+        'mine',
+      )
+
+      expect(await askColumns()).toEqual(NONE)
+      expect(lastCard(calls).body.aps['content-state'].ask).toBeUndefined()
+    })
+
+    it('clears the ask when a blocked notice carries none', async () => {
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await blocked('mine', { ask: ask() })
+      await blocked('mine')
+
+      expect(await askColumns()).toEqual(NONE)
+      expect(lastCard(calls).body.aps['content-state'].ask).toBeUndefined()
+    })
+
+    it('drops an ask id without the hook-ask- prefix', async () => {
+      // And every other ask that breaks its rule: treated as absent, never
+      // refused, because the daemon ships separately.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      for (const spoiled of [
+        ask({ id: 'perm-0199a1b2' }),
+        ask({ id: 'hook-ask-' + '0'.repeat(56) }),
+        ask({ id: 'hook-ask-rm -rf /' }),
+        ask({ id: 42 }),
+        ask({ until: -1 }),
+        ask({ until: '1790551063000' }),
+        ask({ until: 1.5 }),
+        { id: ASK.id, tool: 'Bash' },
+        'hook-ask-0199',
+        null,
+      ]) {
+        const response = await blocked('mine', { ask: spoiled })
+        expect(response.status).toBe(200)
+        expect(await askColumns()).toEqual(NONE)
+        expect(lastCard(calls).body.aps['content-state'].ask).toBeUndefined()
+      }
+    })
+
+    it('keeps the ask but drops a tool outside the vocabulary', async () => {
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      for (const tool of ['rm -rf /', 'x'.repeat(65), '', 7]) {
+        const sent = ask({ tool })
+        await blocked('mine', { ask: sent })
+        expect(await askColumns()).toEqual({ ask_id: sent.id, ask_tool: null, ask_until: sent.until })
+        expect(lastCard(calls).body.aps['content-state'].ask).toEqual({ id: sent.id, until: sent.until })
+      }
+    })
+
+    it('an ask notice updates the card silently', async () => {
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await blocked('mine')
+      const before = pushes(calls).length
+
+      const sent = ask()
+      const response = await post('/v1/notify', { kind: 'ask', terminal: 'term-1', ask: sent }, 'mine')
+      expect(response.status).toBe(200)
+      expect(await askColumns()).toEqual({ ask_id: sent.id, ask_tool: 'Bash', ask_until: sent.until })
+
+      const after = pushes(calls).slice(before)
+      expect(after.length).toBe(1)
+      expect(after[0].headers['apns-push-type']).toBe('liveactivity')
+      expect(after[0].body.aps.event).toBe('update')
+      expect(after[0].body.aps.alert).toBeUndefined()
+      expect(after[0].body.aps['content-state'].ask).toEqual(sent)
+
+      // And the hold running out takes it off again, just as quietly.
+      await post('/v1/notify', { kind: 'ask', terminal: 'term-1' }, 'mine')
+      expect(await askColumns()).toEqual(NONE)
+      const cleared = pushes(calls).slice(before + 1)
+      expect(cleared.length).toBe(1)
+      expect(cleared[0].body.aps.alert).toBeUndefined()
+      expect(cleared[0].body.aps['content-state'].ask).toBeUndefined()
+    })
+
+    it('an ask notice for a row that is not blocked changes nothing', async () => {
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
+      const before = pushes(calls).length
+
+      const response = await post('/v1/notify', { kind: 'ask', terminal: 'term-1', ask: ask() }, 'mine')
+      expect(response.status).toBe(200)
+      expect(await askColumns()).toEqual(NONE)
+      // Nor for a terminal the relay holds no row for, or none at all.
+      await post('/v1/notify', { kind: 'ask', terminal: 'term-9', ask: ask() }, 'mine')
+      await post('/v1/notify', { kind: 'ask', ask: ask() }, 'mine')
+      expect(await roster('user_1')).toEqual(['term-1'])
+      expect(pushes(calls).length).toBe(before)
+    })
+
+    it('an ask notice from another runner changes nothing', async () => {
+      // One account, two runners: a runner may only speak for its own rows,
+      // whether the other is keyed by install id or by its token alone.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await pair('user_1', 'other')
+      await pair('user_1', 'third')
+      await blocked('mine', { install: 'install-a' })
+      const before = pushes(calls).length
+
+      await post(
+        '/v1/notify',
+        { kind: 'ask', terminal: 'term-1', ask: ask(), install: 'install-b' },
+        'other',
+      )
+      await post('/v1/notify', { kind: 'ask', terminal: 'term-1', ask: ask() }, 'third')
+      expect(await askColumns()).toEqual(NONE)
+      expect(pushes(calls).length).toBe(before)
+
+      // Nor may one clear another's ask.
+      const sent = ask()
+      await blocked('mine', { install: 'install-a', ask: sent })
+      await post('/v1/notify', { kind: 'ask', terminal: 'term-1', install: 'install-b' }, 'other')
+      await post('/v1/notify', { kind: 'ask', terminal: 'term-1' }, 'third')
+      expect(await askColumns()).toEqual({ ask_id: sent.id, ask_tool: 'Bash', ask_until: sent.until })
+    })
+
+    it('an ask notice from a re-paired token of the same install applies', async () => {
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await pair('user_1', 'again')
+      await blocked('mine', { install: 'install-a' })
+
+      const sent = ask()
+      await post(
+        '/v1/notify',
+        { kind: 'ask', terminal: 'term-1', ask: sent, install: 'install-a' },
+        'again',
+      )
+      expect(await askColumns()).toEqual({ ask_id: sent.id, ask_tool: 'Bash', ask_until: sent.until })
+      expect(lastCard(calls).body.aps['content-state'].ask).toEqual(sent)
+    })
+
+    it('an expired ask is not put on the state and is nulled on read', async () => {
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await blocked('mine', { ask: ask() })
+      await env.DB.prepare(`UPDATE live_activities SET ask_until = ?`).bind(Date.now() - 1).run()
+
+      await post('/v1/notify', { kind: 'count', needsYou: 1 }, 'mine')
+      expect(lastCard(calls).body.aps['content-state'].ask).toBeUndefined()
+      expect(await askColumns()).toEqual(NONE)
+
+      // And one that arrives already over never reaches the card.
+      await blocked('mine', { ask: ask({ until: Date.now() - 1 }) })
+      expect(lastCard(calls).body.aps['content-state'].ask).toBeUndefined()
+    })
+
+    it("the headline carries its own row's ask", async () => {
+      const calls = watchFetch()
+      await ready()
+      const sent = ask()
+      await blocked('mine', { ask: sent })
+
+      const start = pushes(calls).filter(call => call.body.aps?.event === 'start')
+      expect(start.length).toBe(1)
+      expect(start[0].body.aps['content-state'].terminal).toBe('term-1')
+      expect(start[0].body.aps['content-state'].ask).toEqual(sent)
+      // The card's own state only: a row never carries an ask.
+      for (const each of start[0].body.aps['content-state'].rows) expect(each.ask).toBeUndefined()
+    })
+
+    it('an ask moves with the headline', async () => {
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      const first = ask()
+      await blocked('mine', { ask: first })
+      // Another agent's notice leaves term-1 on top, and its ask with it.
+      await post(
+        '/v1/notify',
+        { title: 'codex', terminal: 'term-2', status: 'working', label: 'codex' },
+        'mine',
+      )
+      let state = lastCard(calls).body.aps['content-state']
+      expect(state.terminal).toBe('term-1')
+      expect(state.ask).toEqual(first)
+
+      // A second blocked agent waits behind the first, and so does its ask.
+      const second = ask({ id: 'hook-ask-0199a1b2-0000-7000-8000-000000000002', tool: 'Edit' })
+      await blocked('mine', { terminal: 'term-2', label: 'codex', ask: second })
+      state = lastCard(calls).body.aps['content-state']
+      expect(state.terminal).toBe('term-1')
+      expect(state.ask).toEqual(first)
+
+      // The first is answered, and the headline takes the second's ask.
+      await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
+      state = lastCard(calls).body.aps['content-state']
+      expect(state.terminal).toBe('term-2')
+      expect(state.ask).toEqual(second)
+    })
   })
 
   // MARK: The needs-you count
@@ -4393,6 +4672,28 @@ describe('/v1/notify and Live Activities', () => {
 /// callers all feed a payload whose size is what gets asserted — so the one
 /// property the function exists for, that what comes back is the beginning of
 /// what went in and is still decodable UTF-8, was guarded by nothing.
+describe('migration 0014', () => {
+  it('applies after 0013 and only adds nullable columns', async () => {
+    const migrations = (env as any).TEST_MIGRATIONS as { name: string; queries: string[] }[]
+    const names = migrations.map(each => each.name)
+    expect(names.indexOf('0014_row_ask.sql')).toBe(names.indexOf('0013_daemon_install.sql') + 1)
+    const statements = migrations.find(each => each.name === '0014_row_ask.sql')!.queries
+      .map(query => query.replace(/--.*$/gm, '').trim())
+      .filter(query => query)
+    expect(statements.map(query => query.replace(/\s+/g, ' ').replace(/;$/, ''))).toEqual([
+      'ALTER TABLE live_activities ADD COLUMN ask_id TEXT',
+      'ALTER TABLE live_activities ADD COLUMN ask_tool TEXT',
+      'ALTER TABLE live_activities ADD COLUMN ask_until INTEGER',
+    ])
+    const columns = await env.DB.prepare(`PRAGMA table_info(live_activities)`).all<any>()
+    for (const name of ['ask_id', 'ask_tool', 'ask_until']) {
+      const column = columns.results.find((each: any) => each.name === name)
+      expect(column?.notnull).toBe(0)
+      expect(column?.dflt_value).toBeNull()
+    }
+  })
+})
+
 describe('cutting a line to a byte budget', () => {
   /// Three bytes each in UTF-8, and one UTF-16 unit each. A budget that is not a
   /// multiple of three therefore cannot be spent exactly, which is the case a
