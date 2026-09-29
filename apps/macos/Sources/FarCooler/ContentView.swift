@@ -138,6 +138,10 @@ struct ContentView: View {
     /// The Needs You item ⌃⌘N last opened, by its key: where the next
     /// press goes on from, while the window is still showing it.
     @State private var lastAttention: String?
+    /// Which column a workspace's one-column form shows, by `host|workspace`.
+    @State private var workspacePicks: [String: WorkspacePick] = [:]
+    /// Focus Column (⌃⌘↩): the third column widened over the other two.
+    @State private var focusColumn = false
 
     /// What confirming a pane-mode switch would do, and to which pane.
     struct PaneModeConfirmation: Identifiable {
@@ -1828,16 +1832,110 @@ struct ContentView: View {
             }
 
         case .workspace(let host, let id, let focus):
-            if focus != nil, let front = shown.last(where: { $0.column != .conversation }) {
-                tiled(front)
-            } else if case .worktree(let wt, _)? = focus, let ws = worktree(host: host, id: wt) {
-                worktreeDetail(ws)
-            } else {
-                boardColumn(host: host, id: id)
-            }
+            workspaceDetail(host: host, id: id, focus: focus)
 
         case nil:
             placeholder
+        }
+    }
+
+    /// A workspace's columns: its conversation, its board, and what's open.
+    private func workspaceDetail(host: String, id: String, focus: Focus?) -> some View {
+        let summary = WorkspaceScreen.workspace(
+            id, host: host, in: store.fleet, repositories: store.clients[host]?.repositories.map(\.id) ?? [])
+        let layouts = shown
+        let key = "\(host)|\(id)"
+        return WorkspaceView(
+            taskOpen: focus != nil,
+            hasConversation: summary.map { !$0.isImplicit } ?? false,
+            cell: TerminalMetrics.cell(preferences.terminalFont()).width,
+            focused: focusColumn,
+            pick: Binding(
+                get: { workspacePicks[key] ?? .orchestrator }, set: { workspacePicks[key] = $0 }),
+            conversation: {
+                conversationColumn(host: host, workspace: summary, shown: layouts.first { $0.column == .conversation })
+            },
+            rail: { conversationRail(host: host, workspace: summary) },
+            board: { boardColumn(host: host, id: id) },
+            third: { thirdColumn(host: host, focus: focus, shown: layouts.last { $0.column != .conversation }) }
+        )
+        .modifier(WindowTitle(title: workspaceTitle(host: host, workspace: summary, focus: focus).title,
+                              subtitle: workspaceTitle(host: host, workspace: summary, focus: focus).subtitle))
+    }
+
+    /// The window's title in a workspace (spec §4.9): the workspace, with
+    /// "repository · runner" beneath it; a task's key and title with a task
+    /// open, and "workspace · repository" beneath.
+    private func workspaceTitle(host: String, workspace: WorkspaceSummary?, focus: Focus?)
+        -> (title: String, subtitle: String)
+    {
+        let repository = workspace.flatMap { w in
+            store.clients[host]?.repositories.first { $0.id == (w.repository ?? w.id) }?.displayName
+        } ?? ""
+        let name = workspace.map { $0.isImplicit ? repository : $0.name } ?? "Workspace"
+        if case .task(let id)? = focus, let row = taskRow(host: host, workspace: workspace, id: id) {
+            let under = workspace?.isImplicit == true ? [repository] : [name, repository]
+            return ("\(row.key) \(row.title)", under.filter { !$0.isEmpty }.joined(separator: " · "))
+        }
+        return (name, [repository, host].filter { !$0.isEmpty }.joined(separator: " · "))
+    }
+
+    /// A task on a workspace's board, as the board last read it.
+    private func taskRow(host: String, workspace: WorkspaceSummary?, id: String) -> TaskRow? {
+        guard let workspace, let client = store.clients[host] else { return nil }
+        return boardStore(for: workspace, client: client, host: host).board.columns
+            .flatMap(\.rows).first { $0.id == id }
+    }
+
+    /// The conversation column: the orchestrator, drawn as selecting its
+    /// row drew it. See `ConversationColumn` for the states around it.
+    @ViewBuilder
+    private func conversationColumn(host: String, workspace: WorkspaceSummary?, shown: ShownLayout?) -> some View {
+        if let shown {
+            tiled(shown, titled: false)
+        } else {
+            ContentUnavailableView {
+                Label("No orchestrator", systemImage: "circle.dashed")
+            }
+        }
+    }
+
+    /// The conversation collapsed beside an open task: its status, and a
+    /// click that closes the task column.
+    private func conversationRail(host: String, workspace: WorkspaceSummary?) -> some View {
+        let seat = workspace.flatMap { WorkspaceScreen.orchestrator(of: $0, host: host, in: store.fleet) }
+        return Button {
+            selection = selection?.closed
+        } label: {
+            VStack {
+                if let seat {
+                    StatusGlyph(status: seat.terminal.status)
+                } else {
+                    Image(systemName: "circle.dashed").foregroundStyle(.tertiary)
+                }
+                Spacer()
+            }
+            .padding(.top, 12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(WorkspaceStyle.canvas)
+        .help("Show the orchestrator")
+        .accessibilityLabel("Show the orchestrator")
+    }
+
+    /// The third column: a task, or a worktree opened whole.
+    @ViewBuilder
+    private func thirdColumn(host: String, focus: Focus?, shown: ShownLayout?) -> some View {
+        if let shown {
+            tiled(shown, titled: false)
+        } else if case .worktree(let wt, _)? = focus, let ws = worktree(host: host, id: wt) {
+            worktreeDetail(ws)
+        } else {
+            ContentUnavailableView {
+                Label("No agent is working on this task.", systemImage: "person.crop.circle.badge.questionmark")
+            }
         }
     }
 
@@ -1869,11 +1967,6 @@ struct ContentView: View {
                 agents: boardAgents(host: host, client: client),
                 onGoTo: { pane in go(to: pane) }
             )
-            // The workspace, and the repository it is in beneath it; the
-            // repository alone on a runner without workspaces, as before.
-            .navigationTitle(workspace.isImplicit ? repository.displayName : workspace.name)
-            .navigationSubtitle(
-                workspace.isImplicit ? "Board" : "\(repository.displayName) · Board")
         } else {
             // Said, rather than the generic "Select a worktree": this
             // was a board, and the reader should know where it went.
@@ -1893,17 +1986,17 @@ struct ContentView: View {
     /// handler was fixed in one copy and not the other, so dropping a pane
     /// behaved differently depending on which sidebar row you had clicked last.
     @ViewBuilder
-    private func tiled(_ shown: ShownLayout) -> some View {
+    private func tiled(_ shown: ShownLayout, titled: Bool = true) -> some View {
         let ws = shown.worktree
         if let client = store.client(for: ws) {
-            tiled(shown, client: client, frame: Self.frame(of: shown, in: store.fleet))
+            tiled(shown, client: client, frame: Self.frame(of: shown, in: store.fleet), titled: titled)
         } else {
             placeholder
         }
     }
 
     private func tiled(
-        _ shown: ShownLayout, client: DaemonClient, frame: (title: String, subtitle: String)
+        _ shown: ShownLayout, client: DaemonClient, frame: (title: String, subtitle: String), titled: Bool
     ) -> some View {
         let ws = shown.worktree
         return TileView(
@@ -1950,7 +2043,8 @@ struct ContentView: View {
             onSearchFiles: { query in await store.client(for: ws)?.searchFiles(in: ws, query: query) ?? [] },
             onSwitchPaneMode: { terminal in Task { await togglePaneMode(terminal, in: ws) } },
             title: frame.title,
-            subtitle: frame.subtitle
+            subtitle: frame.subtitle,
+            setsTitle: titled
         )
     }
 

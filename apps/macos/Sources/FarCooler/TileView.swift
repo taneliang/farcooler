@@ -85,6 +85,9 @@ struct TileView: View {
     /// orchestrator's pane, its workspace's. See `ContentView.frame(of:in:)`.
     let title: String
     let subtitle: String
+    /// Whether this view names the window. Not in a workspace, which shows
+    /// two of these at once and titles the window itself.
+    var setsTitle = true
 
     @ObservedObject private var prefix = PrefixMode.shared
     @ObservedObject private var preferences = Preferences.shared
@@ -146,8 +149,7 @@ struct TileView: View {
         .onAppear { prefix.tiledPanes = group?.panes.count ?? 0 }
         .onChange(of: group?.panes.count ?? 0) { _, count in prefix.tiledPanes = count }
         .onDisappear { prefix.tiledPanes = 0 }
-        .navigationTitle(title)
-        .navigationSubtitle(subtitle)
+        .modifier(WindowTitle(title: setsTitle ? title : nil, subtitle: subtitle))
     }
 
     /// Zoom gets the tiny bit of energy `.smooth` deliberately lacks.
@@ -818,5 +820,19 @@ private struct PaneDropTarget: DropDelegate {
         guard let moving else { return false }
         onDrop(moving, side)
         return true
+    }
+}
+
+/// A window title and subtitle, or neither.
+struct WindowTitle: ViewModifier {
+    let title: String?
+    let subtitle: String
+
+    func body(content: Content) -> some View {
+        if let title {
+            content.navigationTitle(title).navigationSubtitle(subtitle)
+        } else {
+            content
+        }
     }
 }
