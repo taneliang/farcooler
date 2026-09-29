@@ -26,8 +26,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use farcooler_agent::event::AgentEvent;
-use farcooler_agent_hooks::wire::Decision;
-use tokio::sync::oneshot;
+use farcooler_agent_hooks::wire::{Decision, LONGEST_HOLD};
+use tokio::sync::{oneshot, watch};
 use uuid::Uuid;
 
 use crate::hook_ingress::EventSink;
@@ -80,6 +80,13 @@ struct Held {
     /// Beside `since` rather than instead of it: the hold's own timing wants a
     /// clock that never jumps.
     at: SystemTime,
+    /// claude's `tool_name`, as the hook's payload gave it, for the lock
+    /// screen's "Bash · Billing". Unchecked here; `push::WireAsk` decides
+    /// what may cross the relay.
+    tool: Option<String>,
+    /// When the hold ends, by the wall clock: `at + hold`. `at` is stamped
+    /// before the hold's own timer starts, so the real end is never earlier.
+    until: SystemTime,
     seen_dialog: bool,
     absent_samples: u8,
     /// Whether its `Permission` was recorded. Only an offered ask is owed a
@@ -88,29 +95,67 @@ struct Held {
     reply: oneshot::Sender<Settled>,
 }
 
+/// The ask open on one terminal, as a notice carries it (ov-57 T0 C1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenAsk {
+    pub id: String,
+    pub tool: Option<String>,
+    /// When the daemon stops holding it, by the wall clock.
+    pub until: SystemTime,
+}
+
 pub struct HookAsks {
     held: Mutex<HashMap<Uuid, Held>>,
     /// `HookIngress`'s sink, shared, so a `Resolved` lands in the same ring as
     /// the `Permission` it ends. `None` until `listen` has installed it.
     sink: Arc<Mutex<Option<EventSink>>>,
+    /// Bumped whenever the set of open (offered) asks changes: an offer, or
+    /// the end of an offered ask. The watcher subscribes, so a pane that stays
+    /// blocked can tell the relay its ask came or went (`kind:"ask"`).
+    changes: watch::Sender<u64>,
 }
 
 impl HookAsks {
     pub fn new(sink: Arc<Mutex<Option<EventSink>>>) -> Self {
-        Self { held: Mutex::new(HashMap::new()), sink }
+        Self { held: Mutex::new(HashMap::new()), sink, changes: watch::Sender::new(0) }
     }
 
-    /// Hold a new ask on `terminal`, superseding any older one there.
+    /// Told whenever an ask is offered or an offered ask ends. What changed
+    /// is not said; `open_on` is the answer.
+    pub fn subscribe(&self) -> watch::Receiver<u64> {
+        self.changes.subscribe()
+    }
+
+    fn changed(&self) {
+        self.changes.send_modify(|n| *n = n.wrapping_add(1));
+    }
+
+    /// `hold_for` with no tool and the longest hold, for tests and callers
+    /// that know neither.
+    pub fn hold(&self, terminal: Uuid) -> (String, oneshot::Receiver<Settled>) {
+        self.hold_for(terminal, None, LONGEST_HOLD)
+    }
+
+    /// Hold a new ask on `terminal`, superseding any older one there, for
+    /// `hold`: the ingress's own timer, which is what makes `until` true.
     ///
     /// Returns the ask's id, which a device echoes back, and the channel its
     /// ending arrives on.
-    pub fn hold(&self, terminal: Uuid) -> (String, oneshot::Receiver<Settled>) {
+    pub fn hold_for(
+        &self,
+        terminal: Uuid,
+        tool: Option<&str>,
+        hold: Duration,
+    ) -> (String, oneshot::Receiver<Settled>) {
         let id = format!("{HOOK_ASK_PREFIX}{}", Uuid::now_v7());
         let (reply, rx) = oneshot::channel();
+        let at = SystemTime::now();
         let held = Held {
             id: id.clone(),
             since: Instant::now(),
-            at: SystemTime::now(),
+            at,
+            tool: tool.map(str::to_string),
+            until: at + hold,
             seen_dialog: false,
             absent_samples: 0,
             offered: false,
@@ -119,8 +164,12 @@ impl HookAsks {
         let sink = self.sink();
         let mut asks = self.lock();
         if let Some(older) = asks.insert(terminal, held) {
+            let was_open = older.offered;
             let settled = Settled { decision: None, ack: None };
             end(terminal, older, settled, "", true, "superseded", sink.as_ref());
+            if was_open {
+                self.changed();
+            }
         }
         (id, rx)
     }
@@ -146,6 +195,7 @@ impl HookAsks {
         if let Some(sink) = sink {
             sink(terminal, vec![permission]);
         }
+        self.changed();
         true
     }
 
@@ -237,6 +287,15 @@ impl HookAsks {
             .collect()
     }
 
+    /// The ask held and offered on `terminal`, if there is one: the same
+    /// filter as `open`, with what a notice carries.
+    pub fn open_on(&self, terminal: Uuid) -> Option<OpenAsk> {
+        self.lock()
+            .get(&terminal)
+            .filter(|ask| ask.offered)
+            .map(|ask| OpenAsk { id: ask.id.clone(), tool: ask.tool.clone(), until: ask.until })
+    }
+
     /// Whether an ask is held on `terminal`. For tests and for logs.
     pub fn is_holding(&self, terminal: Uuid) -> bool {
         self.lock().contains_key(&terminal)
@@ -265,7 +324,11 @@ impl HookAsks {
             return false;
         }
         let Some(held) = asks.remove(&terminal) else { return false };
+        let was_open = held.offered;
         end(terminal, held, settled, chosen, record, why, sink.as_ref());
+        if was_open {
+            self.changed();
+        }
         true
     }
 
@@ -392,6 +455,47 @@ mod tests {
         asks.answer(pane, &id, "allow", "iPhone").await.unwrap();
         hook.await.unwrap();
         assert_eq!(asks.open(), vec![], "a settled ask is still listed");
+    }
+
+    /// What a notice carries about an open ask: its tool, and when its hold
+    /// ends, which is `at + hold` (ov-57 T0 C1). Not open until offered.
+    #[tokio::test]
+    async fn open_reports_tool_and_hold_end() {
+        let (asks, _recorded) = ledger();
+        let pane = Uuid::now_v7();
+        let hold = Duration::from_secs(60);
+        let (id, _rx) = asks.hold_for(pane, Some("Bash"), hold);
+        assert_eq!(asks.open_on(pane), None, "held but not offered is not open");
+        assert!(asks.offer(pane, &id, a_permission(&id)));
+        let open = asks.open_on(pane).expect("an offered ask is open");
+        let at = asks.open()[0].2;
+        assert_eq!(open.id, id);
+        assert_eq!(open.tool.as_deref(), Some("Bash"));
+        assert_eq!(open.until, at + hold, "the hold ends `hold` after it began");
+        assert_eq!(asks.open_on(Uuid::now_v7()), None, "another pane has none");
+        asks.withdraw(pane, &id);
+        assert_eq!(asks.open_on(pane), None, "an ended ask is not open");
+    }
+
+    /// The watcher hears every change to what is open: an offer, and an
+    /// offered ask ending. Not a hold that nobody was offered.
+    #[tokio::test]
+    async fn offers_and_endings_are_announced() {
+        let (asks, _recorded) = ledger();
+        let mut changes = asks.subscribe();
+        let pane = Uuid::now_v7();
+        let (quiet, _rx) = asks.hold(pane);
+        asks.withdraw(pane, &quiet);
+        assert!(!changes.has_changed().unwrap(), "nothing was open, so nothing changed");
+        let (id, _rx) = offered(&asks, pane);
+        assert!(changes.has_changed().unwrap(), "an offer is a change");
+        changes.borrow_and_update();
+        let (_newer, _newer_rx) = asks.hold(pane);
+        assert!(changes.has_changed().unwrap(), "a superseded offer is a change");
+        changes.borrow_and_update();
+        asks.turn_boundary(pane);
+        assert!(!changes.has_changed().unwrap(), "the newer one was never offered");
+        let _ = id;
     }
 
     /// One pane holds one ask, so the newer one is what's open.

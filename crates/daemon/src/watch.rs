@@ -493,6 +493,8 @@ pub(crate) struct Tapped {
     pub task: Option<String>,
     pub workspace: Option<String>,
     pub needs_you: Option<u32>,
+    /// The id of the ask the notice carried, if any.
+    pub ask: Option<String>,
 }
 
 /// How often a live card may be refreshed while an agent stays in one tier.
@@ -771,6 +773,14 @@ pub struct Watcher {
     /// The needs-you count the relay was last told, by any notice. A count
     /// notice repeating it is not sent.
     last_count: std::sync::Mutex<Option<u32>>,
+    /// Per terminal whose last notice that LANDED was `blocked`, the id of the
+    /// ask the relay was last told for it (`None` for "none open"). A
+    /// terminal absent here gets no `kind:"ask"` notice at all. See
+    /// `sync_asks`; ov-57 T0 C2.2.
+    asks_told: std::sync::Mutex<HashMap<Uuid, Option<String>>>,
+    /// Held across one pass of `sync_asks`, so two passes can't both decide
+    /// the same ask is news.
+    ask_sync: tokio::sync::Mutex<()>,
     /// Where a test reads the notices this watcher sends. `None` in a daemon.
     taps: std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<Tapped>>>,
     /// How many times a count was gathered, so a test can see an unpaired
@@ -2632,6 +2642,18 @@ impl Watcher {
                 watcher.announce_needs_you();
             }
         });
+        // A held ask offered or ended while its pane stays blocked is a
+        // silent card update (`kind:"ask"`), not a second alert.
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            let mut changes = watcher.service.hooks().asks().subscribe();
+            let weak = Arc::downgrade(&watcher);
+            runtime.spawn(async move {
+                while changes.changed().await.is_ok() {
+                    let Some(watcher) = weak.upgrade() else { return };
+                    watcher.sync_asks(None).await;
+                }
+            });
+        }
         watcher
     }
 
@@ -2640,6 +2662,8 @@ impl Watcher {
             me: me.clone(),
             count_pending: std::sync::atomic::AtomicBool::new(false),
             last_count: std::sync::Mutex::new(None),
+            asks_told: std::sync::Mutex::new(HashMap::new()),
+            ask_sync: tokio::sync::Mutex::new(()),
             taps: std::sync::Mutex::new(None),
             #[cfg(test)]
             counts_gathered: std::sync::atomic::AtomicUsize::new(0),
@@ -2806,6 +2830,10 @@ impl Watcher {
             // assembly, and noted as told once it lands so no count notice
             // repeats it.
             let needs_you = watcher.needs_you_count().await;
+            // Read at sending, as the count is: a blocked notice carries the
+            // ask open on its pane, and no other notice carries one.
+            let blocked = notice.status == "blocked";
+            let ask = if blocked { watcher.open_ask(terminal) } else { None };
             watcher.tap(Tapped {
                 kind: None,
                 title: notice.title.clone(),
@@ -2813,6 +2841,7 @@ impl Watcher {
                 task: None,
                 workspace: workspace.clone(),
                 needs_you,
+                ask: ask.as_ref().map(|a| a.id().to_string()),
             });
             let landed = watcher
                 .deliver(
@@ -2836,13 +2865,92 @@ impl Watcher {
                         commits: stats.commits,
                         trace: &stats.trace,
                         trace_anchor: stats.trace_anchor,
+                        ask: ask.as_ref(),
                     },
                 )
                 .await;
             if landed && let Some(count) = needs_you {
                 watcher.told(count);
             }
+            if landed {
+                watcher.landed_status(terminal, blocked, ask.as_ref()).await;
+            }
         });
+    }
+
+    /// The ask open on `terminal`, as the relay may be told it.
+    fn open_ask(&self, terminal: Uuid) -> Option<crate::push::WireAsk> {
+        self.service.hooks().asks().open_on(terminal).as_ref().and_then(crate::push::WireAsk::of)
+    }
+
+    /// An agent notice about `terminal` landed. A `blocked` one starts its
+    /// ask being followed, from the ask it carried, and catches up at once on
+    /// an ask offered while it was in flight. Any other clears it: nothing is
+    /// sent about an ask on a pane the relay doesn't hold as blocked.
+    async fn landed_status(&self, terminal: Uuid, blocked: bool, ask: Option<&crate::push::WireAsk>) {
+        {
+            let _one = self.ask_sync.lock().await;
+            let mut told = self.asks_told.lock().unwrap_or_else(|e| e.into_inner());
+            if blocked {
+                told.insert(terminal, ask.map(|a| a.id().to_string()));
+            } else {
+                told.remove(&terminal);
+            }
+        }
+        if blocked {
+            self.sync_asks(Some(terminal)).await;
+        }
+    }
+
+    /// Tell the relay, silently, about each blocked pane whose open ask is not
+    /// the one it was last told: `kind:"ask"`, with the ask, or with no `ask`
+    /// for "none open now" (ov-57 T0 C2.2). Every pane when `only` is `None`.
+    ///
+    /// Recorded as told only once it lands, as the count is, so a push that
+    /// failed is tried again at the next change.
+    async fn sync_asks(&self, only: Option<Uuid>) {
+        let _one = self.ask_sync.lock().await;
+        let told: Vec<(Uuid, Option<String>)> = {
+            let told = self.asks_told.lock().unwrap_or_else(|e| e.into_inner());
+            told.iter()
+                .filter(|(t, _)| only.is_none_or(|only| only == **t))
+                .map(|(t, id)| (*t, id.clone()))
+                .collect()
+        };
+        for (terminal, last) in told {
+            let ask = self.open_ask(terminal);
+            if ask.as_ref().map(crate::push::WireAsk::id) == last.as_deref() {
+                continue;
+            }
+            let Some(pairing) = self.audience() else { return };
+            let needs_you = self.needs_you_count().await;
+            self.tap(Tapped {
+                kind: Some("ask"),
+                title: String::new(),
+                terminal: Some(terminal),
+                task: None,
+                workspace: None,
+                needs_you,
+                ask: ask.as_ref().map(|a| a.id().to_string()),
+            });
+            let id = terminal.to_string();
+            let outgoing = crate::push::Outgoing {
+                kind: Some("ask"),
+                terminal: Some(&id),
+                needs_you,
+                ask: ask.as_ref(),
+                ..Default::default()
+            };
+            if !self.deliver(pairing, outgoing).await {
+                continue;
+            }
+            if let Some(entry) = self.asks_told.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&terminal) {
+                *entry = ask.as_ref().map(|a| a.id().to_string());
+            }
+            if let Some(count) = needs_you {
+                self.told(count);
+            }
+        }
     }
 
     /// Ask the relay to take down cards this runner can no longer account for,
@@ -3497,6 +3605,7 @@ impl Watcher {
                 task: None,
                 workspace: None,
                 needs_you: Some(count),
+                ask: None,
             });
             let outgoing = crate::push::Outgoing { kind: Some("count"), needs_you: Some(count), ..Default::default() };
             if watcher.deliver(pairing, outgoing).await {
@@ -3533,6 +3642,7 @@ impl Watcher {
                 task: Some(key.clone()),
                 workspace: workspace.clone(),
                 needs_you: count,
+                ask: None,
             });
             let outgoing = crate::push::Outgoing {
                 kind: Some("decision"),
@@ -4353,6 +4463,8 @@ impl Watcher {
             // that came back would otherwise resume reading a log at the byte
             // the terminal it replaced had reached.
             self.logs.lock().unwrap_or_else(|e| e.into_inner()).retain(|id, _| ids.contains(id));
+            // And its ask is no longer followed: its card is being retired.
+            self.asks_told.lock().unwrap_or_else(|e| e.into_inner()).retain(|id, _| ids.contains(id));
             // A closed pane takes its items with it: its ask (`HookAsks::forget`
             // records no `Resolved`, and the supervisor's ring goes with the
             // row) and its block. Nothing else would say the list moved.
@@ -8421,5 +8533,149 @@ mod needs_you_push_tests {
         assert_eq!(sent.needs_you, Some(listed.len() as u32));
         assert_eq!(sent.needs_you, Some(3), "a block, a decision and a review; one pane");
         assert_eq!(sent.title, "Main · claude needs you");
+    }
+
+    // -- ov-57: the held ask on a blocked pane's card --
+
+    /// The next `kind:"ask"` notice, skipping the count notices a change to
+    /// the needs-you list also sends.
+    async fn next_ask(taps: &mut tokio::sync::mpsc::UnboundedReceiver<Tapped>) -> Option<Tapped> {
+        loop {
+            let tapped = next(taps).await?;
+            if tapped.kind == Some("ask") {
+                return Some(tapped);
+            }
+        }
+    }
+
+    /// The next agent notice (no kind).
+    async fn next_agent(taps: &mut tokio::sync::mpsc::UnboundedReceiver<Tapped>) -> Option<Tapped> {
+        loop {
+            let tapped = next(taps).await?;
+            if tapped.kind.is_none() {
+                return Some(tapped);
+            }
+        }
+    }
+
+    /// Wait until the last landed notice about `pane` has been noted: blocked
+    /// (`true`) or not.
+    async fn noted(watcher: &Watcher, pane: Uuid, blocked: bool) {
+        for _ in 0..500 {
+            if watcher.asks_told.lock().unwrap().contains_key(&pane) == blocked {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("the landed notice was never noted as blocked={blocked}");
+    }
+
+    fn working() -> Quoted<'static> {
+        Quoted { worktree: "", question: Some("Reading files"), said: None }
+    }
+
+    /// A blocked pane, as the watcher has told the relay about it.
+    async fn a_blocked_pane() -> (crate::test_support::ScratchDir, Arc<Service>, Uuid, Arc<Watcher>, tokio::sync::mpsc::UnboundedReceiver<Tapped>) {
+        let (dir, svc, _, pane) = a_runner().await;
+        let watcher = Watcher::new(svc.clone());
+        let taps = watcher.tap_notices();
+        watcher
+            .observe_for_tests(pane, crate::needs_you::Observation {
+                activity: AgentActivity::Blocked,
+                state_since: now_millis(),
+                command: "claude".into(),
+                ..Default::default()
+            })
+            .await;
+        (dir, svc, pane, watcher, taps)
+    }
+
+    /// The ask is usually offered before the blocked notice goes out, and
+    /// rides on it. When it comes after, one silent `kind:"ask"` carries it,
+    /// and only one.
+    #[tokio::test]
+    async fn an_ask_offered_after_blocked_is_sent_once() {
+        let (_dir, svc, pane, watcher, mut taps) = a_blocked_pane().await;
+        tokio::time::pause();
+        watcher.push_if_paired(pane, AgentActivity::Blocked, "claude", blocked(), false, None);
+        let sent = next_agent(&mut taps).await.expect("the blocked notice");
+        assert_eq!(sent.ask, None, "nothing was offered yet");
+        noted(&watcher, pane, true).await;
+
+        let asks = svc.hooks().asks().clone();
+        let (id, _rx) = asks.hold_for(pane, Some("Bash"), std::time::Duration::from_secs(60));
+        assert!(asks.offer(pane, &id, ask(&id)));
+        let told = next_ask(&mut taps).await.expect("the offer is told");
+        assert_eq!((told.terminal, told.ask.as_deref()), (Some(pane), Some(id.as_str())));
+        assert_eq!(told.title, "", "an ask notice is silent: no title to alert with");
+        watcher.sync_asks(None).await;
+        assert_eq!(next_ask(&mut taps).await, None, "once");
+    }
+
+    /// claude's dialog outlives the 60 s hold. When the hold runs out, the
+    /// card is told the ask is gone, silently, and the pane stays blocked.
+    #[tokio::test]
+    async fn a_hold_that_runs_out_sends_an_ask_clear_without_an_alert() {
+        let (_dir, svc, pane, watcher, mut taps) = a_blocked_pane().await;
+        let asks = svc.hooks().asks().clone();
+        let (id, _rx) = asks.hold_for(pane, Some("Bash"), std::time::Duration::from_secs(60));
+        assert!(asks.offer(pane, &id, ask(&id)));
+        tokio::time::pause();
+        watcher.push_if_paired(pane, AgentActivity::Blocked, "claude", blocked(), false, None);
+        let sent = next_agent(&mut taps).await.expect("the blocked notice");
+        assert_eq!(sent.ask.as_deref(), Some(id.as_str()), "the blocked notice carries its ask");
+        noted(&watcher, pane, true).await;
+
+        // What `serve` does when its hold's timer fires.
+        asks.withdraw(pane, &id);
+        let cleared = next_ask(&mut taps).await.expect("the hold running out is told");
+        assert_eq!((cleared.kind, cleared.terminal, cleared.ask), (Some("ask"), Some(pane), None));
+        assert_eq!(cleared.title, "", "never an alert");
+        let rest: Vec<_> = std::iter::from_fn(|| taps.try_recv().ok()).collect();
+        assert!(rest.iter().all(|t| t.kind.is_some()), "no second agent notice buzzes: {rest:?}");
+        assert_eq!(next_ask(&mut taps).await, None, "and only once");
+    }
+
+    /// The relay already has the ask the blocked notice carried, so a change
+    /// elsewhere, or a second look, sends nothing about this pane.
+    #[tokio::test]
+    async fn an_ask_is_not_resent_unchanged() {
+        let (_dir, svc, pane, watcher, mut taps) = a_blocked_pane().await;
+        let asks = svc.hooks().asks().clone();
+        let (id, _rx) = asks.hold(pane);
+        assert!(asks.offer(pane, &id, ask(&id)));
+        tokio::time::pause();
+        watcher.push_if_paired(pane, AgentActivity::Blocked, "claude", blocked(), false, None);
+        assert_eq!(next_agent(&mut taps).await.expect("blocked").ask.as_deref(), Some(id.as_str()));
+        noted(&watcher, pane, true).await;
+
+        // Another pane's ask moves the ledger; this pane's has not moved.
+        let other = Uuid::now_v7();
+        let (elsewhere, _other_rx) = asks.hold(other);
+        assert!(asks.offer(other, &elsewhere, ask(&elsewhere)));
+        watcher.sync_asks(None).await;
+        watcher.sync_asks(Some(pane)).await;
+        assert_eq!(next_ask(&mut taps).await, None, "nothing changed on this pane");
+    }
+
+    /// Once the relay is told the pane is working, its ask is not followed:
+    /// the card isn't blocked, so there is nothing to answer on it.
+    #[tokio::test]
+    async fn no_ask_notice_follows_a_working_notice() {
+        let (_dir, svc, pane, watcher, mut taps) = a_blocked_pane().await;
+        tokio::time::pause();
+        watcher.push_if_paired(pane, AgentActivity::Blocked, "claude", blocked(), false, None);
+        next_agent(&mut taps).await.expect("blocked");
+        noted(&watcher, pane, true).await;
+        watcher.push_if_paired(pane, AgentActivity::Working, "claude", working(), false, None);
+        let sent = next_agent(&mut taps).await.expect("working");
+        assert_eq!(sent.ask, None);
+        noted(&watcher, pane, false).await;
+
+        let asks = svc.hooks().asks().clone();
+        let (id, _rx) = asks.hold(pane);
+        assert!(asks.offer(pane, &id, ask(&id)));
+        asks.withdraw(pane, &id);
+        assert_eq!(next_ask(&mut taps).await, None, "no ask notice for a pane that is working");
     }
 }

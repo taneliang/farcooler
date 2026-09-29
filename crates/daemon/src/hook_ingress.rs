@@ -897,7 +897,10 @@ impl HookIngress {
         mut reader: BufReader<OwnedReadHalf>,
         mut write: OwnedWriteHalf,
     ) -> std::io::Result<()> {
-        let (id, mut settled) = self.asks.hold(terminal);
+        // The tool's name rides on the lock screen's card ("Bash · Billing");
+        // `push::WireAsk` decides whether it may.
+        let tool = hook.payload["tool_name"].as_str();
+        let (id, mut settled) = self.asks.hold_for(terminal, tool, self.hold);
         if let Err(e) = write_reply(&mut write, &Reply::hold(self.hold)).await {
             // The hook missed its deadline and has gone. Nobody was offered
             // this ask, so it ends with nothing to take back.
@@ -1225,6 +1228,23 @@ mod tests {
             "the hook heard nothing while the claim check waited: {heard:?}"
         );
         assert!(reply.contains("hold_ms"), "{reply:?}");
+
+        // And the ask it holds names claude's tool and ends when the hold
+        // does, which is what the lock screen's card is sent (ov-57).
+        let mut open = None;
+        for _ in 0..200 {
+            open = ingress.asks().open_on(term.id);
+            if open.is_some() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let open = open.expect("the ask was offered");
+        assert_eq!(open.tool.as_deref(), Some("Bash"));
+        let left = open.until.duration_since(std::time::SystemTime::now()).expect("not over yet");
+        assert!(left <= farcooler_agent_hooks::wire::LONGEST_HOLD, "{left:?}");
+        assert!(left > farcooler_agent_hooks::wire::LONGEST_HOLD / 2, "{left:?}");
+        drop(stream);
     }
 
     fn ingress_for_test() -> HookIngress {

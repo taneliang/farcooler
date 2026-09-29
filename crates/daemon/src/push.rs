@@ -116,17 +116,24 @@ impl Pairing {
 /// where `blocked` and `done` cross perhaps twice between them. So the relay
 /// sees a slow drip of an agent's headline rather than two lines and silence.
 ///
-/// A wider exposure than it was, and still not a leak, because nothing is
-/// kept: `/v1/notify` persists a `version` and nothing else off this body,
+/// A wider exposure than it was, and bounded by what is kept, which is a
+/// card's worth per pane for 24 hours: `/v1/notify` stores the runner's
+/// `version`, and on each pane's roster row (`live_activities`) the columns
+/// of migrations 0008 (`label`, `machine`, `status`, `detail`, the three
+/// counts and `trace`, with its `started_at` and `status_since`), 0011
+/// (`workspace`) and 0014 (the open ask's `ask_id`, `ask_tool` and
+/// `ask_until`). The relay deletes a row 24 hours after it last moved, and
+/// clears the ask columns as soon as the ask ends or its hold runs out.
 /// `install_cards` holds delivery metadata, and the worker refuses to log a
-/// body at all. The rule has not been relaxed — the relay is a delivery
-/// service, and a payload it does not keep is a payload it cannot leak — but
-/// it has to be stated about what actually crosses.
+/// body at all. The relay is a delivery service; what it keeps is the card it
+/// has to redraw, and no more.
 #[derive(Debug, Default, serde::Serialize)]
 struct Notification<'a> {
     /// What this notice is: absent for an agent notice, `"decision"` for a
     /// task entering Needs Decision, `"count"` for the runner's needs-you
-    /// count moving with nothing else to say. Spec §7.
+    /// count moving with nothing else to say, `"ask"` for a blocked pane's
+    /// held ask being offered or ending with the pane still blocked. Spec §7;
+    /// ov-57's T0 contract, C2.
     ///
     /// Absent rather than `"agent"` on an agent notice, so a relay older than
     /// the field reads every agent notice exactly as it always did.
@@ -225,6 +232,16 @@ struct Notification<'a> {
     /// the field ignores it.
     #[serde(skip_serializing_if = "Option::is_none")]
     install: Option<&'a str>,
+    /// The claude permission ask held open on this pane, so the lock screen's
+    /// card can answer it with the app suspended (ov-57 T0 C1, C2).
+    ///
+    /// Only on a `blocked` agent notice and on a `kind:"ask"` notice. Absent
+    /// means "no ask open now", on both; never `null`. It carries the ask's
+    /// id, claude's tool name and when the hold ends, and never an option
+    /// name, `tool_input` or a command line: for Bash the allow option's name
+    /// IS the command line.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ask: Option<&'a WireAsk>,
     /// What this runner is running, so the devices screen can show which of
     /// someone's runners is behind without them going to each one to look.
     ///
@@ -325,6 +342,54 @@ struct Notification<'a> {
     trace_anchor: Option<i64>,
 }
 
+/// What `hook-ask-` is followed by: a UUID, hyphenated, or anything the
+/// relay would take. The relay's rule is `^hook-ask-[0-9A-Za-z-]{1,55}$`.
+const ASK_ID_TAIL_MAX: usize = 55;
+
+/// claude's `tool_name`, or no tool. MCP names (`mcp__server__tool`) run
+/// long, hence 64. The relay's rule is `^[A-Za-z0-9_.:-]{1,64}$`.
+const ASK_TOOL_MAX: usize = 64;
+
+/// A held ask as the relay is told it (ov-57 T0 C1): its id, the tool, and
+/// when the hold ends, in Unix milliseconds by this runner's clock.
+///
+/// Built only through `WireAsk::new`, which applies the contract's bounds, so
+/// no body can carry an ask the relay would refuse or a tool it would drop.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct WireAsk {
+    id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool: Option<String>,
+    until: i64,
+}
+
+impl WireAsk {
+    /// The ask as it may cross, or `None` when its id or its end fails the
+    /// contract's rule. A tool that fails its rule costs the tool, not the
+    /// ask.
+    pub fn new(id: &str, tool: Option<&str>, until: std::time::SystemTime) -> Option<Self> {
+        let tail = id.strip_prefix(crate::hook_asks::HOOK_ASK_PREFIX)?;
+        let tail_ok = (1..=ASK_ID_TAIL_MAX).contains(&tail.len())
+            && tail.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+        let until = until.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis();
+        let until = i64::try_from(until).ok().filter(|ms| *ms > 0)?;
+        let tool = tool.filter(|t| {
+            (1..=ASK_TOOL_MAX).contains(&t.len())
+                && t.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.:-".contains(&b))
+        });
+        tail_ok.then(|| Self { id: id.to_string(), tool: tool.map(str::to_string), until })
+    }
+
+    /// The open ask on a pane, as it may cross.
+    pub fn of(open: &crate::hook_asks::OpenAsk) -> Option<Self> {
+        Self::new(&open.id, open.tool.as_deref(), open.until)
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+}
+
 /// What one call to `notify` is about.
 ///
 /// A struct rather than seven positional arguments, and for the same reason
@@ -338,8 +403,9 @@ struct Notification<'a> {
 /// notification would be paying for a copy nothing keeps.
 #[derive(Default)]
 pub struct Outgoing<'a> {
-    /// `None` for an agent notice, else `"decision"` or `"count"`. See
-    /// `Notification::kind` for what each carries; `wire_body` is what enforces it.
+    /// `None` for an agent notice, else `"decision"`, `"count"` or `"ask"`.
+    /// See `Notification::kind` for what each carries; `wire_body` is what
+    /// enforces it.
     pub kind: Option<&'a str>,
     pub title: &'a str,
     pub subtitle: &'a str,
@@ -355,6 +421,9 @@ pub struct Outgoing<'a> {
     /// This runner's install id. See `Notification::install`. Stamped by the
     /// watcher's `deliver` on every notice, so no caller can forget it.
     pub install: Option<&'a str>,
+    /// The pane's open ask. Sent on a `blocked` agent notice and on
+    /// `kind:"ask"`, and dropped from every other. See `Notification::ask`.
+    pub ask: Option<&'a WireAsk>,
     pub started_at: Option<i64>,
     /// What this agent's row on the card draws beside its name. See
     /// `Notification::insertions` for why absent is not zero, and
@@ -395,6 +464,9 @@ fn wire_anchor(trace: &[u8], anchor: Option<i64>) -> Option<i64> {
 /// - A decision carries its kind, task, workspace, title, subtitle and count,
 ///   and no terminal, status, label or `failed`.
 /// - A count carries its kind and the count, and nothing else.
+/// - An ask carries its kind, terminal, count and the ask, or no `ask` key when
+///   none is open. `None` if it names no terminal.
+/// - The ask rides on a `blocked` agent notice, and on nothing else.
 ///
 /// Every kind carries the runner's install id when the caller has one.
 fn wire_body<'a>(o: &Outgoing<'a>) -> Option<Notification<'a>> {
@@ -420,8 +492,10 @@ fn wire_body<'a>(o: &Outgoing<'a>) -> Option<Notification<'a>> {
             commits: o.commits,
             trace: wire_trace(o.trace),
             trace_anchor: wire_anchor(o.trace, o.trace_anchor),
+            ask: o.ask.filter(|_| o.status == "blocked"),
             ..shared
         },
+        Some("ask") => Notification { terminal: Some(o.terminal?), ask: o.ask, ..shared },
         Some("decision") => Notification {
             title: Some(o.title),
             subtitle: Some(o.subtitle),
@@ -440,7 +514,7 @@ fn wire_body<'a>(o: &Outgoing<'a>) -> Option<Notification<'a>> {
 /// future notification missed as well, plus the fleet.
 pub async fn notify(client: &reqwest::Client, pairing: &Pairing, notice: Outgoing<'_>) -> bool {
     let Some(body) = wire_body(&notice) else {
-        tracing::warn!(kind = ?notice.kind, "an agent notice named no terminal, and was not sent");
+        tracing::warn!(kind = ?notice.kind, "a notice about a pane named no terminal, and was not sent");
         return false;
     };
     let url = format!("{}/v1/notify", pairing.relay.trim_end_matches('/'));
@@ -764,6 +838,126 @@ mod tests {
         )
         .unwrap();
         assert!(bare.get("install").is_none(), "{bare}");
+    }
+
+    /// An ask as the contract spells it: 45 bytes of id, a tool, and `until`
+    /// in milliseconds.
+    fn an_ask() -> WireAsk {
+        let until = std::time::UNIX_EPOCH + std::time::Duration::from_millis(1_790_551_063_000);
+        WireAsk::new("hook-ask-0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b", Some("Bash"), until).expect("a valid ask")
+    }
+
+    fn agent_body(status: &str, ask: &WireAsk) -> serde_json::Value {
+        serde_json::to_value(
+            wire_body(&Outgoing {
+                title: "claude needs you",
+                status,
+                label: "claude",
+                terminal: Some("term-1"),
+                ask: Some(ask),
+                ..Outgoing::default()
+            })
+            .unwrap(),
+        )
+        .unwrap()
+    }
+
+    /// A blocked notice carries the ask open on its pane, so the card can
+    /// answer it with the app suspended (ov-57 C2.1).
+    #[test]
+    fn a_blocked_notice_carries_its_ask() {
+        let sent = agent_body("blocked", &an_ask());
+        assert_eq!(
+            sent["ask"],
+            serde_json::json!({
+                "id": "hook-ask-0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b",
+                "tool": "Bash",
+                "until": 1_790_551_063_000_i64,
+            }),
+            "{sent}"
+        );
+        assert!(sent["ask"]["until"].is_i64(), "milliseconds, as a number: {sent}");
+    }
+
+    /// Only `blocked` carries an ask, whatever the caller handed in.
+    #[test]
+    fn a_working_notice_never_carries_an_ask() {
+        for status in ["working", "done"] {
+            let sent = agent_body(status, &an_ask());
+            assert!(sent.get("ask").is_none(), "{status}: {sent}");
+        }
+    }
+
+    /// A `kind:"ask"` notice names its pane, and says "none open now" by
+    /// having no `ask` key at all, never `"ask": null`.
+    #[test]
+    fn an_ask_notice_carries_terminal_and_omits_an_absent_ask() {
+        let ask = an_ask();
+        let told = serde_json::to_value(
+            wire_body(&Outgoing {
+                kind: Some("ask"),
+                title: "never sent",
+                status: "blocked",
+                terminal: Some("term-1"),
+                needs_you: Some(1),
+                ask: Some(&ask),
+                ..Outgoing::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let mut keys: Vec<_> = told.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, ["ask", "kind", "needsYou", "terminal", "version"], "{told}");
+        assert_eq!(told["ask"]["id"], ask.id());
+
+        let none = serde_json::to_value(
+            wire_body(&Outgoing { kind: Some("ask"), terminal: Some("term-1"), ..Outgoing::default() }).unwrap(),
+        )
+        .unwrap();
+        assert!(none.get("ask").is_none(), "absent, never null: {none}");
+        assert_eq!(none["terminal"], "term-1");
+        assert!(
+            wire_body(&Outgoing { kind: Some("ask"), ask: Some(&ask), ..Outgoing::default() }).is_none(),
+            "an ask notice about no pane is not a body"
+        );
+    }
+
+    /// With ov-61: an ask notice names the runner as every kind does.
+    #[test]
+    fn an_ask_notice_carries_the_install_id() {
+        let sent = serde_json::to_value(
+            wire_body(&Outgoing {
+                kind: Some("ask"),
+                terminal: Some("term-1"),
+                install: Some("0199-abc"),
+                ..Outgoing::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(sent["install"], "0199-abc", "{sent}");
+    }
+
+    /// The contract's bounds, applied before anything crosses: a bad id or
+    /// end costs the ask, a bad tool costs only the tool.
+    #[test]
+    fn an_ask_crosses_only_inside_its_bounds() {
+        let until = std::time::UNIX_EPOCH + std::time::Duration::from_millis(1_790_551_063_000);
+        let id = "hook-ask-0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b";
+        assert!(WireAsk::new("chat-1", None, until).is_none(), "not a hook ask");
+        assert!(WireAsk::new("hook-ask-", None, until).is_none(), "no tail");
+        assert!(WireAsk::new(&format!("hook-ask-{}", "a".repeat(56)), None, until).is_none(), "65 bytes");
+        assert!(WireAsk::new(&format!("hook-ask-{}", "a".repeat(55)), None, until).is_some(), "64 bytes");
+        assert!(WireAsk::new("hook-ask-a b", None, until).is_none(), "a space");
+        assert!(WireAsk::new(id, None, std::time::UNIX_EPOCH).is_none(), "an end of zero");
+        for bad in ["", "Bash ls", "rm -rf /;", &"x".repeat(65)] {
+            let ask = WireAsk::new(id, Some(bad), until).expect("a bad tool keeps the ask");
+            assert_eq!(ask.tool, None, "{bad:?}");
+        }
+        for good in ["Bash", "mcp__github__create_issue", "a.b:c-d_e", &"x".repeat(64)] {
+            assert_eq!(WireAsk::new(id, Some(good), until).unwrap().tool.as_deref(), Some(good));
+        }
     }
 
     /// And an agent notice that names no pane is not sent at all.
