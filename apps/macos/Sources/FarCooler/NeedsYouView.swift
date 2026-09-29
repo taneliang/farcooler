@@ -1,0 +1,265 @@
+import AgentKit
+import SwiftUI
+
+// Needs You on the Mac (spec §4.6): every item from every workspace, in rank
+// order, answerable in place.
+//
+// What each row offers, and what a refusal says, are values here
+// (`NeedsYouRowModel`), so `NeedsYouViewTests` pins them; the view draws them.
+
+enum NeedsYouRowModel {
+    /// One button on a row.
+    enum Button: Equatable, Hashable {
+        /// One of an ask's own options, sent with `terminal agent-answer`.
+        case ask(option: String, title: String, destructive: Bool, primary: Bool)
+        /// One of a decision's options, sent as the answer.
+        case decide(String)
+        /// A decision with no options: a field for the answer.
+        case answerTyped
+        /// Open the task's column with its changes. Never an approval: the
+        /// charter says who lands work (ruling 2).
+        case review
+        /// Go where the item is, sending nothing.
+        case open
+    }
+
+    /// The most options drawn as buttons; the rest go in a More menu.
+    static let visibleOptions = 3
+
+    /// What `item` offers: its buttons, and a decision's options past the
+    /// third. A connection that can't act (below Control, where the runner
+    /// sends no actions) gets Open alone, as the board does.
+    static func buttons(for item: NeedsYouItem, canAct: Bool) -> (buttons: [Button], more: [Button]) {
+        let actionable = item.actions.filter { !$0.isOpen }
+        guard canAct else { return ([.open], []) }
+        switch item.kind {
+        case .ask:
+            guard !actionable.isEmpty, item.askID != nil else { return ([.open], []) }
+            return (actionable.map { .ask(option: $0.id, title: $0.title, destructive: $0.destructive, primary: $0.primary) }, [])
+        case .decision:
+            guard item.task != nil else { return ([.open], []) }
+            let options = actionable.map { Button.decide($0.title) }
+            if options.isEmpty { return ([.answerTyped], []) }
+            return (Array(options.prefix(visibleOptions)), Array(options.dropFirst(visibleOptions)))
+        case .review:
+            return ([.review], [])
+        case .blocked, .unknown:
+            return ([.open], [])
+        }
+    }
+
+    /// Where a row is while it's being answered.
+    enum Answering: Equatable {
+        case idle
+        /// A button has sent; its spinner shows in place.
+        case sending
+        /// The runner refused: the item stays, with this line.
+        case refused(String)
+    }
+
+    /// The line an ask keeps when its answer is refused (spec §2.5), naming
+    /// its agent.
+    static func refused(_ refusal: DaemonClient.AskRefusal, item: NeedsYouItem) -> Answering {
+        .refused(refusal.sentence(agent: item.terminal?.label))
+    }
+
+    /// The line a decision keeps when its answer wasn't written.
+    static let decisionRefused = Answering.refused("Couldn’t send that answer. Try again.")
+
+    /// What a row says it's about: the task's key, else the agent.
+    static func subject(_ item: NeedsYouItem) -> String {
+        if let task = item.task { return "\(task.key) \(task.title)" }
+        if let terminal = item.terminal { return terminal.isOrchestrator ? "Orchestrator" : terminal.label }
+        return ""
+    }
+}
+
+/// The Needs You list, in the detail.
+struct NeedsYouView: View {
+    let items: [NeedsYouItem]
+    /// Runners too old to send decisions and asks, by name: each gets its
+    /// line (`NeedsYou.olderRunnerNote`).
+    let olderRunners: [String]
+    let canAct: (NeedsYouItem) -> Bool
+    var onOpen: (NeedsYouItem) -> Void
+    var onAnswerAsk: (NeedsYouItem, String) async -> DaemonClient.AskRefusal?
+    var onDecide: (NeedsYouItem, String) async -> Bool
+
+    var body: some View {
+        Group {
+            if items.isEmpty {
+                ContentUnavailableView {
+                    Label("Nothing needs you", systemImage: "tray")
+                } description: {
+                    Text("Asks, decisions and reviews from every workspace show up here.")
+                }
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(items) { item in
+                            NeedsYouItemRow(
+                                item: item, canAct: canAct(item), onOpen: { onOpen(item) },
+                                onAnswerAsk: { await onAnswerAsk(item, $0) },
+                                onDecide: { await onDecide(item, $0) })
+                                .transition(.opacity.combined(with: .move(edge: .leading)))
+                        }
+                    }
+                    .animation(.snappy(duration: 0.22), value: items.map(\.key))
+                    .padding(16)
+                    .frame(maxWidth: 720)
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if !olderRunners.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(olderRunners, id: \.self) { runner in
+                        Text(NeedsYou.olderRunnerNote(runner: runner.isEmpty ? "this Mac" : runner))
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(10)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(WorkspaceStyle.canvas)
+        .navigationTitle("Needs You")
+        .navigationSubtitle(items.isEmpty ? "" : (items.count == 1 ? "1 item" : "\(items.count) items"))
+    }
+}
+
+/// One item: its workspace, its question, what it's about, and its
+/// buttons.
+struct NeedsYouItemRow: View {
+    let item: NeedsYouItem
+    let canAct: Bool
+    var onOpen: () -> Void
+    var onAnswerAsk: (String) async -> DaemonClient.AskRefusal?
+    var onDecide: (String) async -> Bool
+
+    @State private var answering: NeedsYouRowModel.Answering = .idle
+    @State private var typing = false
+    @State private var typed = ""
+
+    var body: some View {
+        let offered = NeedsYouRowModel.buttons(for: item, canAct: canAct)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(item.workspaceName.isEmpty ? "Unclaimed" : item.workspaceName)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .textCase(.uppercase)
+                    .foregroundStyle(.secondary)
+                Text(NeedsYouRowModel.subject(item))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if let since = item.since {
+                    Text(since, style: .relative)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            Text(item.question)
+                .font(.system(size: 13, weight: .medium))
+                .lineLimit(2)
+            if let detail = item.detail, !detail.isEmpty {
+                Text(detail)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+            }
+            HStack(spacing: 6) {
+                Spacer(minLength: 0)
+                if answering == .sending {
+                    ProgressView().controlSize(.small)
+                } else {
+                    ForEach(offered.buttons, id: \.self) { button($0) }
+                    if !offered.more.isEmpty {
+                        Menu("More") {
+                            ForEach(offered.more, id: \.self) { choice in
+                                if case .decide(let option) = choice {
+                                    SwiftUI.Button(option) { decide(option) }
+                                }
+                            }
+                        }
+                        .fixedSize()
+                    }
+                }
+            }
+            if typing {
+                HStack {
+                    TextField("Your answer", text: $typed)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { sendTyped() }
+                    SwiftUI.Button("Send") { sendTyped() }
+                        .disabled(typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            if case .refused(let line) = answering {
+                Text(line)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(WorkspaceStyle.document))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.08)))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onOpen)
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private func button(_ button: NeedsYouRowModel.Button) -> some View {
+        switch button {
+        case .ask(let option, let title, let destructive, let primary):
+            if primary {
+                SwiftUI.Button(title) { answer(option) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+            } else {
+                SwiftUI.Button(title, role: destructive ? .destructive : nil) { answer(option) }
+                    .controlSize(.small)
+            }
+        case .decide(let option):
+            SwiftUI.Button(option) { decide(option) }.controlSize(.small)
+        case .answerTyped:
+            SwiftUI.Button("Answer…") { typing = true }.controlSize(.small)
+        case .review:
+            SwiftUI.Button("Review", action: onOpen).controlSize(.small)
+        case .open:
+            SwiftUI.Button("Open", action: onOpen).controlSize(.small)
+        }
+    }
+
+    private func answer(_ option: String) {
+        answering = .sending
+        Task {
+            if let refusal = await onAnswerAsk(option) {
+                answering = NeedsYouRowModel.refused(refusal, item: item)
+            } else {
+                // It leaves on the next `needs_you_changed`; until then it
+                // keeps its spinner rather than offering the same answer again.
+                answering = .sending
+            }
+        }
+    }
+
+    private func decide(_ body: String) {
+        answering = .sending
+        Task {
+            answering = await onDecide(body) ? .sending : NeedsYouRowModel.decisionRefused
+            if answering == .sending { typing = false }
+        }
+    }
+
+    private func sendTyped() {
+        let body = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return }
+        decide(body)
+    }
+}

@@ -1833,11 +1833,26 @@ struct ContentView: View {
     private var detail: some View {
         switch selection {
         case .needsYou:
-            ContentUnavailableView {
-                Label("Needs You", systemImage: "tray")
-            } description: {
-                Text(store.needsYou.isEmpty ? "Nothing needs you." : "\(store.needsYou.count) waiting on you.")
-            }
+            NeedsYouView(
+                items: store.needsYou,
+                olderRunners: store.hosts.filter { store.clients[$0]?.needsYouFromOlderRunner == true },
+                canAct: { item in
+                    store.refusal(for: item.runner) == nil
+                        && TaskBoardWrites.offered(by: store.clients[item.runner]?.daemonBuild)
+                },
+                onOpen: { open($0) },
+                onAnswerAsk: { item, option in
+                    guard let client = store.clients[item.runner], let terminal = item.terminal,
+                        let ask = item.askID
+                    else { return .failed }
+                    return await client.answerAsk(terminal: terminal.id, request: ask, option: option)
+                },
+                onDecide: { item, body in
+                    guard let client = store.clients[item.runner], let task = item.task,
+                        let repository = item.repositoryID
+                    else { return false }
+                    return await client.answerDecision(key: task.key, body: body, repository: repository) == nil
+                })
 
         case .looseWorktree(let host, let id, _):
             if let front = shown.last {
