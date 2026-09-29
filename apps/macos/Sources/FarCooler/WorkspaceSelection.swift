@@ -110,7 +110,7 @@ enum WorkspaceSelection {
     /// - any other terminal, or a worktree, is that worktree under its owner,
     ///   or a loose worktree when no workspace owns it.
     ///
-    /// Nil when what it named isn't in the fleet any more.
+    /// Nil when its worktree isn't in the fleet any more.
     static func mapping(old: LegacySelection, in fleet: Fleet) -> Selection? {
         switch old {
         case .board(let host, let workspace):
@@ -119,10 +119,11 @@ enum WorkspaceSelection {
             guard let worktree = worktree(host: host, id: id, in: fleet) else { return nil }
             return landing(in: worktree, terminal: nil, fleet: fleet)
         case .terminal(let host, let id, let terminal):
-            guard let worktree = worktree(host: host, id: id, in: fleet),
-                worktree.terminals.contains(where: { $0.id == terminal })
-            else { return nil }
-            return landing(in: worktree, terminal: terminal, fleet: fleet)
+            guard let worktree = worktree(host: host, id: id, in: fleet) else { return nil }
+            // A terminal that has closed since leaves its worktree, which is
+            // still somewhere to go back to.
+            let live = worktree.terminals.contains(where: { $0.id == terminal })
+            return landing(in: worktree, terminal: live ? terminal : nil, fleet: fleet)
         }
     }
 
@@ -179,7 +180,7 @@ enum WorkspaceSelection {
 extension ContentView {
     /// What of `worktree` a selection shows, for its sidebar row: the
     /// worktree whole (`.some(nil)`), one of its terminals, or nothing.
-    static func selected(in worktree: Worktree, by selection: Selection?) -> String?? {
+    nonisolated static func selected(in worktree: Worktree, by selection: Selection?) -> String?? {
         let host = worktree.host ?? ""
         switch selection {
         case .looseWorktree(host, worktree.id, let terminal),
@@ -193,7 +194,7 @@ extension ContentView {
     /// Where choosing `worktree`, or a terminal in it, from its row goes: the
     /// third column of the workspace that owns it, or the worktree alone when
     /// none does. Never a task's column: the row was the worktree's.
-    static func opening(_ worktree: Worktree, terminal: String?, in fleet: Fleet) -> Selection {
+    nonisolated static func opening(_ worktree: Worktree, terminal: String?, in fleet: Fleet) -> Selection {
         let host = worktree.host ?? ""
         guard let owner = WorkspaceSelection.owner(of: worktree, in: fleet) else {
             return .looseWorktree(host: host, worktree: worktree.id, terminal: terminal)
@@ -202,7 +203,7 @@ extension ContentView {
     }
 
     /// The worktree a selection opens whole, with no pane named in it.
-    static func openedWhole(_ selection: Selection?) -> (host: String, worktree: String)? {
+    nonisolated static func openedWhole(_ selection: Selection?) -> (host: String, worktree: String)? {
         switch selection {
         case .looseWorktree(let host, let id, nil), .workspace(let host, _, .worktree(let id, nil)):
             return (host, id)

@@ -562,7 +562,8 @@ struct ContentView: View {
                     let without = store.fleet.worktrees.filter {
                         !(($0.host ?? "") == (ws.host ?? "") && $0.id == ws.id)
                     }
-                    let next = Self.healed(selection, in: without, was: [ws])
+                    let next = Self.healed(
+                        selection, in: without, was: [ws], workspaces: store.fleet.runnerWorkspaces)
                     if next != selection { selection = next }
                 }
                 return result
@@ -3138,7 +3139,8 @@ struct ContentView: View {
     /// rule itself. `previous` is the fleet before the change, which is the only
     /// place a removed worktree's repository can still be read.
     private func healSelection(previous: [Worktree] = []) {
-        let next = Self.healed(selection, in: store.fleet.worktrees, was: previous)
+        let next = Self.healed(
+            selection, in: store.fleet.worktrees, was: previous, workspaces: store.fleet.runnerWorkspaces)
         if next != selection { selection = next }
     }
 
@@ -3160,7 +3162,8 @@ struct ContentView: View {
     ///   which is often another runner's, and it left a selected worktree's
     ///   id in place after the worktree was gone.
     nonisolated static func healed(
-        _ selection: Selection?, in worktrees: [Worktree], was previous: [Worktree] = []
+        _ selection: Selection?, in worktrees: [Worktree], was previous: [Worktree] = [],
+        workspaces: [String: [WorkspaceSummary]] = [:]
     ) -> Selection? {
         let host: String
         let worktreeID: String
@@ -3191,7 +3194,7 @@ struct ContentView: View {
             // Gone: a workspace's column closes, back to the workspace; a
             // loose worktree lands on a sibling on its runner.
             if case .workspace(let h, let id, _)? = selection { return .workspace(host: h, workspace: id, focus: nil) }
-            return sibling(of: worktreeID, host: host, in: worktrees, was: previous)
+            return sibling(of: worktreeID, host: host, in: worktrees, was: previous, workspaces: workspaces)
         }
         guard let terminalID, !worktree.terminals.contains(where: { $0.id == terminalID })
         else {
@@ -3212,7 +3215,7 @@ struct ContentView: View {
     /// moving you somewhere you never asked to go.
     nonisolated static func sibling(
         of worktreeID: String, host: String, in worktrees: [Worktree],
-        was previous: [Worktree]
+        was previous: [Worktree], workspaces: [String: [WorkspaceSummary]] = [:]
     ) -> Selection? {
         let repository = previous.first {
             ($0.host ?? "") == host && $0.id == worktreeID
@@ -3223,7 +3226,11 @@ struct ContentView: View {
             shown.first(where: { repository != nil && $0.repository == repository })
             ?? shown.first
             ?? sameRunner.first
-        return next.map { .looseWorktree(host: host, worktree: $0.id, terminal: nil) }
+        // Opened as its row would open it: under the workspace that owns it,
+        // and loose only when none does.
+        var fleet = Fleet(runtimeHealthy: true, livePanes: 0, worktrees: worktrees, branchPrefix: nil)
+        fleet.runnerWorkspaces = workspaces
+        return next.map { opening($0, terminal: nil, in: fleet) }
     }
 
     private func selectTerminal(at index: Int) {

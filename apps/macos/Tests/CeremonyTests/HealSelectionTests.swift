@@ -1,3 +1,4 @@
+import AgentKit
 import Foundation
 import Testing
 
@@ -181,5 +182,21 @@ struct HealSelectionTests {
         let task: Selection = .workspace(host: "", workspace: "ws", focus: .task("t-9"))
         #expect(ContentView.healed(task, in: fleet) == task)
         #expect(ContentView.healed(.needsYou, in: fleet) == .needsYou)
+    }
+
+    /// A loose worktree removed lands on a sibling as its row would open it:
+    /// under the workspace that owns it, never as a loose worktree a
+    /// workspace claims.
+    @Test("A removed loose worktree lands on a claimed sibling under its owner")
+    func aRemovedLooseWorktreeLandsOnAClaimedSiblingUnderItsOwner() {
+        var claimed = Self.worktree("same-repo", host: nil, repository: "app", [])
+        claimed.workspace = "ws-main"
+        claimed.repositoryID = "r-app"
+        let workspaces = ["": [WorkspaceSummary(id: "ws-main", name: "Main", taskPrefix: "fc", isMain: true, ordinal: 0, repository: "r-app")]]
+        #expect(
+            ContentView.healed(
+                .looseWorktree(host: "", worktree: "gone", terminal: nil), in: [claimed],
+                was: [claimed, Self.removed], workspaces: workspaces)
+                == .workspace(host: "", workspace: "ws-main", focus: .worktree("same-repo", terminal: nil)))
     }
 }

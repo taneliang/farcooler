@@ -117,6 +117,10 @@ struct WorkspaceSelectionTests {
                 == .workspace(host: "", workspace: Self.billing, focus: .worktree("scratch", terminal: nil)))
         #expect(
             WorkspaceSelection.mapping(old: .terminal(host: "", worktree: "gone", terminal: "t"), in: fleet) == nil)
+        // A saved terminal that has since closed keeps its worktree.
+        #expect(
+            WorkspaceSelection.mapping(old: .terminal(host: "", worktree: "scratch", terminal: "closed"), in: fleet)
+                == .workspace(host: "", workspace: Self.billing, focus: .worktree("scratch", terminal: nil)))
     }
 
     /// And one whose owner the runner no longer lists, likewise.
