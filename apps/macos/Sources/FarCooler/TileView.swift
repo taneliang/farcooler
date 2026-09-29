@@ -143,12 +143,10 @@ struct TileView: View {
         }
         .paneCanvas()
         .prefixHint()
-        // Told from here, because this is the only place that knows a layout is
-        // actually on screen. It gates the prefix-less ⌃hjkl bindings: while a
-        // single pane is showing, ⌃L has to still clear it.
-        .onAppear { prefix.tiledPanes = group?.panes.count ?? 0 }
-        .onChange(of: group?.panes.count ?? 0) { _, count in prefix.tiledPanes = count }
-        .onDisappear { prefix.tiledPanes = 0 }
+        // `PrefixMode.tiledPanes` is set by the window, not here: with a
+        // workspace's conversation and a task's agent both on screen, two of
+        // these views are showing, and the one the keyboard is in is the one
+        // that counts. See `WorkspaceScreen.tiledPanes`.
         .modifier(WindowTitle(title: setsTitle ? title : nil, subtitle: subtitle))
     }
 

@@ -158,6 +158,17 @@ enum WorkspaceScreen {
         }
     }
 
+    /// How many panes the layout holding `key` shows: what gates the
+    /// prefix-less ⌃H ⌃J ⌃K ⌃L (`PrefixMode.tiledPanes`). The layout the
+    /// keyboard is in, not whichever terminal view appeared last: beside a
+    /// one-pane conversation, a task's three-pane agent layout traverses, and
+    /// the other way round, ⌃L in the conversation still clears its screen.
+    /// None with no key pane.
+    static func tiledPanes(_ key: PaneRef?, in shown: [ShownLayout]) -> Int {
+        guard let key, let layout = shown.first(where: { $0.contains(key) }) else { return 0 }
+        return layout.group.panes.count
+    }
+
     /// Of `shown`, the layouts a workspace actually draws in `arrangement`:
     /// the conversation only in a column of its own, and in the one-column
     /// form only while Orchestrator is picked; the third column only when

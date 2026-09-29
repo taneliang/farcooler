@@ -297,6 +297,11 @@ struct ContentView: View {
             settleLaunch()
         }
         .onChange(of: store.needsYou) { _, _ in settleLaunch() }
+        // ⌃HJKL traverse the layout the keyboard is in, and pass through to
+        // a lone pane's program. See `WorkspaceScreen.tiledPanes`.
+        .onChange(of: WorkspaceScreen.tiledPanes(selectedPane, in: shown), initial: true) { _, count in
+            PrefixMode.shared.tiledPanes = count
+        }
         // A column that comes on screen, or goes, as the detail is resized
         // or a pick changes: what's seen and watched follows it.
         .onChange(of: detailWidth) { _, _ in markVisibleSeen() }

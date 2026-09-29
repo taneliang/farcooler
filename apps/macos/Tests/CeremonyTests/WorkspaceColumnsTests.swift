@@ -134,4 +134,28 @@ struct WorkspaceColumnsTests {
         #expect(columns(.one, .board) == [])
         #expect(columns(nil) == [])
     }
+
+    /// ⌃H ⌃J ⌃K ⌃L traverse only while the layout the keyboard is in has
+    /// somewhere to go. With a one-pane conversation beside a three-pane
+    /// task, the count follows the key pane's column, not whichever terminal
+    /// view appeared last.
+    @Test("Pane keys follow the column the keyboard is in")
+    func paneKeysFollowTheColumnTheKeyboardIsIn() {
+        let worktree = Worktree(
+            id: "w", short: "w", task: "w", branch: "b", repository: nil, host: "", path: "/tmp/w",
+            state: "active", terminals: [])
+        func layout(_ column: ShownLayout.Column, _ id: String, _ panes: [String]) -> ShownLayout {
+            let rects = panes.map {
+                PaneRect(id: $0, short: $0, title: nil, left: 0, top: 0, columns: 80, rows: 24, focused: false, zoomed: false)
+            }
+            let group = PaneGroup(id: id, name: "", active: true, columns: 80, rows: 24, layout: id, panes: rects)
+            return ShownLayout(column: column, worktree: worktree, group: group, groups: [group])
+        }
+        let shown = [layout(.conversation, "@1", ["conductor"]), layout(.task, "@2", ["a", "b", "c"])]
+        func key(_ terminal: String) -> PaneRef { PaneRef(host: "", worktree: "w", terminal: terminal) }
+        #expect(WorkspaceScreen.tiledPanes(key("conductor"), in: shown) == 1)
+        #expect(WorkspaceScreen.tiledPanes(key("b"), in: shown) == 3)
+        #expect(WorkspaceScreen.tiledPanes(key("gone"), in: shown) == 0)
+        #expect(WorkspaceScreen.tiledPanes(nil, in: shown) == 0)
+    }
 }
