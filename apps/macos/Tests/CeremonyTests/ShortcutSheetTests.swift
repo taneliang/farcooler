@@ -177,4 +177,28 @@ struct ShortcutSheetTests {
         let missing = Self.scraped(Self.commands).spelled.filter { !Self.listed.contains($0) }
         #expect(missing.isEmpty, "in the menu bar and not in the ⌘/ sheet: \(missing)")
     }
+
+    /// One chord, one menu item. Two items on one chord reach whichever the
+    /// menu bar finds first, and which that is changes with what's enabled.
+    /// It would have caught Back on ⌘[ (Previous Terminal) or Focus Column on
+    /// ⇧⌘↩ (Zoom Pane), which is why they're on ⌃⌘← and ⌃⌘↩.
+    @Test("No two menu bar items share a chord")
+    func noTwoMenuBarItemsShareAChord() {
+        let spelled = Self.scraped(Self.commands).spelled
+        let counts = Dictionary(spelled.map { ($0, 1) }, uniquingKeysWith: +)
+        let shared = counts.filter { $0.value > 1 }.keys.sorted()
+        #expect(shared.isEmpty, "chords bound twice: \(shared)")
+        #expect(spelled.contains("⌃⌘←") && spelled.contains("⌃⌘↩") && spelled.contains("⌥⌘1"))
+    }
+
+    /// "Repository" and "workspace" replaced "project" (spec §1): not in the
+    /// ⌘/ sheet, and not in a menu item's title.
+    @Test("No shortcut copy says project")
+    func noShortcutCopySaysProject() {
+        let sheet = Shortcut.groups.flatMap { [$0.0] + $0.1.flatMap { [$0.keys, $0.action] } }
+        #expect(!sheet.contains { $0.lowercased().contains("project") }, "\(sheet.filter { $0.lowercased().contains("project") })")
+        let titles = Self.commands.split(separator: "\n")
+            .filter { $0.contains("Button(\"") || $0.contains("CommandMenu(\"") || $0.contains("Menu(\"") }
+        #expect(!titles.contains { $0.lowercased().contains("project") }, "\(titles.filter { $0.lowercased().contains("project") })")
+    }
 }

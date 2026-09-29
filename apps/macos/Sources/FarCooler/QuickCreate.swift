@@ -157,7 +157,7 @@ struct QuickCreate: View {
         guard !description.isEmpty else { return nil }
         if !hasWords { return "Add a word to say what you want done." }
         if let problem = TaskPrompt.problem(description) { return problem }
-        if chosen == nil { return "Pick a project for the new worktree." }
+        if chosen == nil { return "Pick a repository for the new worktree." }
         return nil
     }
 

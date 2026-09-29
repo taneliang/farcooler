@@ -456,6 +456,8 @@ struct ContentView: View {
                         .onTapGesture { showPalette = false }
                     CommandPalette(
                         worktrees: store.fleet.worktrees,
+                        workspaces: paletteWorkspaces,
+                        tasks: paletteTasks,
                         current: selectedPane,
                         screen: { short in await screen(forTerminalShort: short) },
                         onRun: { perform($0) },
@@ -682,6 +684,29 @@ struct ContentView: View {
     private func showBoard(host: String, workspace: String) {
         workspacePicks["\(host)|\(workspace)"] = .board
         selection = .workspace(host: host, workspace: workspace, focus: nil)
+    }
+
+    /// Every workspace in the sidebar, for the palette.
+    private var paletteWorkspaces: [PaletteWorkspace] {
+        Self.sidebarRows(fleet: store.fleet).compactMap { row in
+            guard case .workspace(let name) = row.kind, let workspace = row.workspace else { return nil }
+            return PaletteWorkspace(
+                host: row.host, id: workspace.id, name: name, repository: row.project,
+                hasOrchestrator: row.orchestrator != nil)
+        }
+    }
+
+    /// Every task on a board this window has read, for the palette.
+    private var paletteTasks: [PaletteTask] {
+        boardStores.values.flatMap { board -> [PaletteTask] in
+            let host = board.client.target
+            let name = board.title
+            return board.board.columns.flatMap(\.rows).map {
+                PaletteTask(
+                    host: host, workspace: board.workspace.id, workspaceName: name, id: $0.id, key: $0.key,
+                    title: $0.title, status: $0.status)
+            }
+        }
     }
 
     /// A project header's repository, on its way to `RemoveRepositorySheet`.
@@ -1027,7 +1052,7 @@ struct ContentView: View {
             return "The runner this board was on isn’t in Far Cooler anymore."
         }
         guard client.state == .connected, client.repositoriesListed else {
-            return "Far Cooler is still loading this runner’s projects."
+            return "Far Cooler is still loading this runner’s repositories."
         }
         return "This board isn’t on its runner anymore. Choose another board in the sidebar."
     }
@@ -2857,6 +2882,37 @@ struct ContentView: View {
         keyPane = pane
     }
 
+    /// ⌥⌘1, ⌥⌘2, ⌥⌘3: the conversation, the board or the task column,
+    /// brought on screen and given the keyboard.
+    private func focusWorkspaceColumn(_ command: AppCommand) {
+        guard case .workspace(let host, let id, let focus)? = selection else { return }
+        let key = "\(host)|\(id)"
+        switch command {
+        case .focusConversation:
+            workspacePicks[key] = .orchestrator
+            focusColumn = false
+            if focus != nil, let width = detailWidth,
+                WorkspaceColumns.layout(width: width, taskOpen: true, cell: TerminalMetrics.cell(preferences.terminalFont()).width).conversation != .column
+            {
+                // The conversation only shows beside a task when there's room:
+                // go back to it.
+                selection = selection?.closed
+            }
+            if let pane = Self.stepOrder(shownLayouts(for: selection).filter { $0.column == .conversation }).first {
+                keyPane = pane
+            }
+        case .focusBoard:
+            workspacePicks[key] = .board
+            focusColumn = false
+        case .focusTask:
+            if let pane = shown.last(where: { $0.column != .conversation }).map({ Self.stepOrder([$0]) })?.first {
+                keyPane = pane
+            }
+        default:
+            break
+        }
+    }
+
     /// Open a task in its workspace's task column.
     private func openTask(_ id: String, host: String, workspace: String) {
         trail = nil
@@ -2983,8 +3039,13 @@ struct ContentView: View {
             } else {
                 // Never a guess between several. The rows are in the sidebar
                 // for exactly this case.
-                errorBanner = "Select a worktree first, or choose a project’s Board in the sidebar."
+                errorBanner = "Select a workspace first."
             }
+        case .back: goBack()
+        case .focusColumn:
+            if selection?.focus != nil { focusColumn.toggle() }
+        case .focusConversation, .focusBoard, .focusTask:
+            focusWorkspaceColumn(command)
         case .openInEditor: openInPreferredEditor()
         case .reload: Task { for client in store.clients.values { await client.refresh() } }
         case .showShortcuts: showShortcuts = true
@@ -3041,7 +3102,13 @@ struct ContentView: View {
             }
             newTerminal(in: worktree)
 
-        case .newTask(let described):
+        case .openWorkspace(let host, let id):
+            selection = .workspace(host: host, workspace: id, focus: nil)
+
+        case .openTask(let host, let workspace, let id):
+            openTask(id, host: host, workspace: workspace)
+
+        case .newWorktree(let described):
             if store.repositories.isEmpty {
                 showAddRepository = true
                 return

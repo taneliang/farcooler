@@ -25,6 +25,9 @@ import SwiftUI
 /// they have finished having it. Ranking, not routing.
 struct CommandPalette: View {
     let worktrees: [Worktree]
+    /// Every workspace, and the tasks on boards already read.
+    var workspaces: [PaletteWorkspace] = []
+    var tasks: [PaletteTask] = []
     /// What the window is looking at, used for two small things: which tile the
     /// highlight avoids starting on, and where a new terminal goes when the
     /// query matched no worktree.
@@ -75,7 +78,7 @@ struct CommandPalette: View {
             ? PaletteIndex.recent(in: worktrees)
             : PaletteIndex.matching(
                 query, in: worktrees, current: currentWorktree,
-                currentTerminal: selectedTerminalRecord)
+                currentTerminal: selectedTerminalRecord, workspaces: workspaces, tasks: tasks)
     }
 
     /// The `Terminal` record behind `currentTerminal`, so the palette can

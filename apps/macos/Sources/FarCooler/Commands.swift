@@ -31,6 +31,14 @@ enum AppCommand: String {
     case diffPreviousCommit
     case diffFirstCommit
     case diffMarkRead
+    /// Back along a workspace: from an opened worktree to its task, from a
+    /// task to the workspace (spec §4.9).
+    case back
+    /// Widen the third column over the other two, or put them back.
+    case focusColumn
+    case focusConversation
+    case focusBoard
+    case focusTask
 
     static let notification = Notification.Name("farcooler.command")
 
@@ -298,10 +306,27 @@ struct FarCoolerCommands: Commands {
                     .keyboardShortcut("p", modifiers: .command)
                 // Search is navigation here, not a nicety: worktrees are unbounded
                 // and typing is the fastest way to any of them, on any runner.
-                Button("Find Worktree or Agent") { AppCommand.search.post() }
+                Button("Find Workspace, Task or Agent") { AppCommand.search.post() }
                     .keyboardShortcut("f", modifiers: .command)
                 Button("Reload Fleet") { AppCommand.reload.post() }
                     .keyboardShortcut("0", modifiers: .command)
+            }
+
+            // A workspace's columns. ⌃⌘ and ⌥⌘ because the usual chords are
+            // taken: ⌘[ is Previous Terminal, ⇧⌘↩ is Zoom Pane, and ⌘digits
+            // are the terminals (spec §4.9).
+            CommandMenu("Workspace") {
+                Button("Back") { AppCommand.back.post() }
+                    .keyboardShortcut(.leftArrow, modifiers: [.command, .control])
+                Button("Focus Column") { AppCommand.focusColumn.post() }
+                    .keyboardShortcut(.return, modifiers: [.command, .control])
+                Divider()
+                Button("Orchestrator") { AppCommand.focusConversation.post() }
+                    .keyboardShortcut("1", modifiers: [.command, .option])
+                Button("Board") { AppCommand.focusBoard.post() }
+                    .keyboardShortcut("2", modifiers: [.command, .option])
+                Button("Task") { AppCommand.focusTask.post() }
+                    .keyboardShortcut("3", modifiers: [.command, .option])
             }
 
             CommandGroup(replacing: .help) {

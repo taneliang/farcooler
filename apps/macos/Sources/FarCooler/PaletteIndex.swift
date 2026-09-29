@@ -1,3 +1,4 @@
+import AgentKit
 import Foundation
 
 /// What running a palette row does.
@@ -11,9 +12,15 @@ enum PaletteAction: Hashable {
     case openTerminal(worktree: String, terminal: String)
     case openWorktree(String)
     case newTerminal(worktree: String)
-    /// Carries what was typed, because in this panel the query IS the task
-    /// description far more often than it is a search for one.
-    case newTask(String)
+    /// Carries what was typed, because in this panel the query IS the
+    /// description far more often than it is a search for one. Its title is
+    /// "New Worktree…": it makes a worktree and files no task.
+    case newWorktree(String)
+    /// A workspace: its conversation beside its board. Its orchestrator's
+    /// row lands here too.
+    case openWorkspace(host: String, id: String)
+    /// A task, in its workspace's task column.
+    case openTask(host: String, workspace: String, id: String)
     /// Terminal ⟷ chat, for one specific pane. The palette is one of the two
     /// places the plan names for this toggle — the other is `⌃B a` — because
     /// the pane itself grew no button for it.
@@ -131,10 +138,47 @@ enum PaletteIndex {
     /// an obvious place to go, and offering it there beats offering nothing.
     static func matching(
         _ query: String, in worktrees: [Worktree], current: String? = nil,
-        currentTerminal: Terminal? = nil, limit: Int = 20
+        currentTerminal: Terminal? = nil, workspaces: [PaletteWorkspace] = [], tasks: [PaletteTask] = [],
+        limit: Int = 20
     ) -> [PaletteEntry] {
         var scored: [(entry: PaletteEntry, score: Int)] = []
         var bestWorktree: (worktree: Worktree, score: Int)?
+
+        // Workspaces first among equals, and each kept on its own: a
+        // workspace with no matching worktree is still found by its name.
+        for place in workspaces {
+            if let score = Fuzzy.score(place.name, query) {
+                scored.append((
+                    PaletteEntry(
+                        id: "workspace:\(place.host)|\(place.id)", action: .openWorkspace(host: place.host, id: place.id),
+                        title: place.name, detail: "Workspace · \(place.repository)",
+                        symbol: "square.stack.3d.up", kind: "workspace"),
+                    score))
+            }
+            if place.hasOrchestrator,
+                let score = ["\(place.name) Orchestrator", "Orchestrator"].compactMap({ Fuzzy.score($0, query) }).max()
+            {
+                scored.append((
+                    PaletteEntry(
+                        id: "orchestrator:\(place.host)|\(place.id)",
+                        action: .openWorkspace(host: place.host, id: place.id),
+                        title: "\(place.name) Orchestrator", detail: "Orchestrator · \(place.repository)",
+                        symbol: "person.wave.2", kind: "orchestrator"),
+                    score))
+            }
+        }
+        // Tasks from the boards already read, by key and by title.
+        for task in tasks {
+            guard let score = [task.key, task.title, "\(task.key) \(task.title)"].compactMap({ Fuzzy.score($0, query) }).max()
+            else { continue }
+            scored.append((
+                PaletteEntry(
+                    id: "task:\(task.host)|\(task.id)",
+                    action: .openTask(host: task.host, workspace: task.workspace, id: task.id),
+                    title: "\(task.key) \(task.title)", detail: "\(task.workspaceName) · \(task.status.title)",
+                    symbol: "checklist", kind: "task"),
+                score))
+        }
 
         for worktree in worktrees {
             let fields = [worktree.task, worktree.branch, worktree.repository ?? ""]
@@ -211,7 +255,7 @@ enum PaletteIndex {
         actions.append(
             PaletteEntry(
                 id: "new-task",
-                action: .newTask(described),
+                action: .newWorktree(described),
                 title: described.isEmpty ? "New Worktree…" : "New Worktree “\(described)”",
                 detail: "Describe it and go",
                 symbol: "sparkle",
@@ -301,4 +345,25 @@ enum Fuzzy {
         total -= min(haystack.count / 8, 6)
         return total
     }
+}
+
+/// A workspace, as the palette finds it.
+struct PaletteWorkspace: Equatable {
+    var host: String
+    var id: String
+    var name: String
+    /// Its repository's display name.
+    var repository: String
+    var hasOrchestrator: Bool
+}
+
+/// A task on a board this window has read, as the palette finds it.
+struct PaletteTask: Equatable {
+    var host: String
+    var workspace: String
+    var workspaceName: String
+    var id: String
+    var key: String
+    var title: String
+    var status: TaskStatus
 }
