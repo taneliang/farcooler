@@ -1080,6 +1080,13 @@ async function notify(request: Request, env: Env): Promise<Response> {
       .bind(install, daemon.id, install)
       .run()
   }
+  // What this token last said, read before it is overwritten, so an ask
+  // notice can tell a count that moved from one told again. See below.
+  const told = kind === 'ask' && needsYou !== null
+    ? (await env.DB.prepare(`SELECT needs_you FROM daemons WHERE id = ?`)
+        .bind(daemon.id)
+        .first<{ needs_you: number | null }>())?.needs_you ?? null
+    : null
   if (needsYou !== null) {
     await env.DB.prepare(`UPDATE daemons SET needs_you = ?, needs_you_at = ? WHERE id = ?`)
       .bind(needsYou, Date.now(), daemon.id)
@@ -1175,10 +1182,16 @@ async function notify(request: Request, env: Env): Promise<Response> {
     if (kind === undefined) {
       await pushActivity(env, daemon, body, devices.results ?? [])
     } else if (kind === 'ask') {
-      // The card moves only when this runner's own blocked row took the
-      // change, or when the notice brought a count, which moves the header.
-      const moved = await rememberAsk(env, daemon, install, body)
-      if (moved || needsYou !== null) await refreshCard(env, daemon.account_id)
+      // The card moves only when the notice changed what it shows: the
+      // header's count, or the headline's own ask. Every refresh is a
+      // priority-10 push drawn from the budget the alerts depend on, and the
+      // daemon stamps a count on every notice, told again or not.
+      const changed = await rememberAsk(env, daemon, install, body)
+      const counted = needsYou !== null && needsYou !== told
+      if (counted || changed !== null) {
+        await refreshCard(env, daemon.account_id, headline =>
+          counted || headline.terminal === changed)
+      }
     } else {
       await refreshCard(env, daemon.account_id)
     }
@@ -1975,8 +1988,8 @@ function askOnCard(row: AgentRow, now: number): CardAsk | undefined {
     : { id: row.ask_id, until: row.ask_until }
 }
 
-/// Write what a `kind: "ask"` notice says onto its row, and say whether a row
-/// took it.
+/// Write what a `kind: "ask"` notice says onto its row, and answer the
+/// terminal whose ask actually changed, or NULL when none did.
 ///
 /// Only a row that is still blocked, and only one the sender's own runner
 /// wrote: the token that sent it, or any token of the same install once it
@@ -1989,15 +2002,16 @@ async function rememberAsk(
   daemon: { id: string; account_id: string },
   install: string | null,
   body: Notification,
-): Promise<boolean> {
+): Promise<string | null> {
   const terminal = typeof body.terminal === 'string' ? body.terminal : ''
-  if (!terminal) return false
+  if (!terminal) return null
   const ask = askColumns(askOf(body.ask))
   const result = await env.DB.prepare(
     `UPDATE live_activities SET ask_id = ?, ask_tool = ?, ask_until = ?
      WHERE account_id = ? AND terminal = ? AND status = 'blocked'
        AND daemon_id IN (SELECT id FROM daemons WHERE account_id = ?
-                         AND (id = ? OR (? IS NOT NULL AND install_id = ?)))`,
+                         AND (id = ? OR (? IS NOT NULL AND install_id = ?)))
+       AND (ask_id IS NOT ? OR ask_tool IS NOT ? OR ask_until IS NOT ?)`,
   )
     .bind(
       ask.ask_id,
@@ -2009,9 +2023,12 @@ async function rememberAsk(
       daemon.id,
       install,
       install,
+      ask.ask_id,
+      ask.ask_tool,
+      ask.ask_until,
     )
     .run()
-  return (result.meta?.changes ?? 0) > 0
+  return (result.meta?.changes ?? 0) > 0 ? terminal : null
 }
 
 /// A workspace name the daemon actually sent, cut to `WORKSPACE_BUDGET`, or
@@ -2601,7 +2618,14 @@ function startAlert(fleet: Fleet, body: Notification): { title: string; body: st
 /// running. It moves a card the relay can address, and otherwise does nothing.
 /// It is not held by `COALESCE_MS` either: the count is the card's headline
 /// number, and the runner already debounces the notices that carry it.
-async function refreshCard(env: Env, account: string): Promise<void> {
+///
+/// `worth`, when given, is asked of the headline before anything is pushed,
+/// so a caller whose change may not reach the card can skip the push.
+async function refreshCard(
+  env: Env,
+  account: string,
+  worth?: (headline: AgentRow) => boolean,
+): Promise<void> {
   const running = await env.DB.prepare(
     `SELECT update_token, environment, leader_terminal, leader_status, updated_at
      FROM install_cards WHERE account_id = ?`,
@@ -2626,6 +2650,7 @@ async function refreshCard(env: Env, account: string): Promise<void> {
   // or take it down.
   const headline = fleet.shown[0] ?? fleet.all[0]
   if (!headline) return
+  if (worth && !worth(headline)) return
 
   const state: ActivityState = {
     terminal: headline.terminal,

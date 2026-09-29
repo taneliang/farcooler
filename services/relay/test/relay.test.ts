@@ -3989,6 +3989,61 @@ describe('/v1/notify and Live Activities', () => {
       expect(state.terminal).toBe('term-2')
       expect(state.ask).toEqual(second)
     })
+
+    it('an ask notice that matches no row still moves a count that changed', async () => {
+      // The count rides on the ask notice, and the daemon does not send it
+      // again, so a count that moved has to reach the header from here.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working', needsYou: 1 }, 'mine')
+      const before = pushes(calls).length
+
+      await post('/v1/notify', { kind: 'ask', terminal: 'term-9', ask: ask(), needsYou: 2 }, 'mine')
+      const after = pushes(calls).slice(before)
+      expect(after.length).toBe(1)
+      expect(after[0].body.aps.alert).toBeUndefined()
+      expect(after[0].body.aps['content-state'].needsYou).toBe(2)
+    })
+
+    it('an ask notice that changes neither the count nor the headline ask pushes nothing', async () => {
+      // Each refresh is a priority-10 push out of the budget the alerts need.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      const first = ask()
+      await blocked('mine', { ask: first, needsYou: 2 })
+      await blocked('mine', { terminal: 'term-2', label: 'codex', needsYou: 2 })
+      const before = pushes(calls).length
+
+      // No row, same count.
+      await post('/v1/notify', { kind: 'ask', terminal: 'term-9', ask: ask(), needsYou: 2 }, 'mine')
+      // The headline's ask, told again unchanged.
+      await post('/v1/notify', { kind: 'ask', terminal: 'term-1', ask: first, needsYou: 2 }, 'mine')
+      // A row under the headline takes an ask: stored, but the card does not show it.
+      const second = ask({ id: 'hook-ask-0199a1b2-0000-7000-8000-000000000002' })
+      await post('/v1/notify', { kind: 'ask', terminal: 'term-2', ask: second, needsYou: 2 }, 'mine')
+      expect(pushes(calls).length).toBe(before)
+      expect(await askColumns('term-2')).toEqual({ ask_id: second.id, ask_tool: 'Bash', ask_until: second.until })
+    })
+
+    it('never stores or sends a command that rides along on an ask', async () => {
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      const spoiled = { ...ask(), command: 'rm -rf /tmp/secret', options: [{ name: 'Allow rm -rf /tmp/secret' }] }
+      await blocked('mine', { ask: spoiled })
+      await post('/v1/notify', { kind: 'ask', terminal: 'term-1', ask: { ...spoiled, id: 'hook-ask-0199-2' } }, 'mine')
+
+      const stored = await env.DB.prepare(`SELECT * FROM live_activities`).all<any>()
+      expect(JSON.stringify(stored.results)).not.toContain('secret')
+      const sent = pushes(calls)
+      expect(sent.length).toBeGreaterThan(1)
+      for (const each of sent) expect(JSON.stringify(each.body)).not.toContain('secret')
+      expect(lastCard(calls).body.aps['content-state'].ask).toEqual({
+        id: 'hook-ask-0199-2', tool: 'Bash', until: spoiled.until,
+      })
+    })
   })
 
   // MARK: The needs-you count
