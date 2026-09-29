@@ -196,3 +196,16 @@ struct WatchListTests {
         #expect(decision().watchPlace == "Billing · bil-7")
     }
 }
+
+/// Derived items are hedged on the watch (ov-55 4C fix round 1).
+struct WatchDerivedTests {
+    /// Mutation: `watchHedge` always nil. Red.
+    @Test func aDerivedItemIsHedgedOnTheWatchAndASentOneIsNot() {
+        var item = NeedsYouItem(
+            id: "blocked:t1", kind: .blocked, rank: 100_000_001, since: nil,
+            question: "claude needs you", runner: "r1")
+        #expect(item.watchHedge == nil)
+        item.isDerived = true
+        #expect(item.watchHedge == "Older runner: update it to see asks and decisions.")
+    }
+}

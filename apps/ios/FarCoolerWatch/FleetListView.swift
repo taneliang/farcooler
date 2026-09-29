@@ -191,6 +191,7 @@ private struct NeedsYouRow: View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             GlanceMarkView(GlanceMark(status: item.watchStatus), size: .watchRow)
                 .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                .opacity(item.isDerived ? 0.6 : 1)
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.question)
                     .font(.body.weight(.medium))
@@ -205,6 +206,14 @@ private struct NeedsYouRow: View {
                     Text("Open on iPhone")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                }
+                // A derived item is a guess from an older runner's fleet, and
+                // says so. See `NeedsYouItem.watchHedge`.
+                if let hedge = item.watchHedge {
+                    Text(hedge)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
                 }
             }
             Spacer(minLength: 0)

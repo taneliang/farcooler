@@ -146,6 +146,15 @@ extension NeedsYouItem {
         return [workspaceName, subject].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
+    /// The hedge under an item the app derived from a runner too old to send
+    /// its own list (spec §2.6), or nil for one the runner sent. It's a
+    /// blocked agent the app saw, and the runner may have asks and decisions
+    /// it can't say: the watch names the runner no further, since it holds
+    /// the runner's id and not its name.
+    public var watchHedge: String? {
+        isDerived ? "Older runner: update it to see asks and decisions." : nil
+    }
+
     /// The status word its mark is drawn from: amber for everything that
     /// needs you, and a review's own mark for a review, as the widget draws
     /// reviews.
