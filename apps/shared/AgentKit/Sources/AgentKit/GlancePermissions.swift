@@ -441,6 +441,102 @@ extension GlancePermission {
     }
 }
 
+// MARK: - Buttons from the card's own ask (ov-57)
+
+/// The words a card draws for a hook ask it answers from its own content state.
+///
+/// **Provisional (ov-57), D3**, and kept in one place so the owner's answer is a
+/// one-line change. The T0 contract's C5: the locked card shows the tool and the
+/// workspace, never the command, and the two buttons read exactly "Allow" and
+/// "Deny". A store option name is never drawn beside a card ask, because for
+/// Bash it IS the command line (`permission_options` in agent-core).
+public enum CardAskWording {
+    public static let allow = "Allow"
+    public static let deny = "Deny"
+
+    /// "Bash · Billing", or whichever of the two there is; nil for neither.
+    /// What the ask block draws in place of `detail`.
+    public static func caption(tool: String?, workspace: String) -> String? {
+        let parts = [tool ?? "", workspace].filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+extension GlancePermission {
+    /// The permission a card ask stands for, with the options every hook ask
+    /// offers: `allow`/`allow_once` and `deny`/`reject_once`
+    /// (`crates/agent-core/src/permission.rs`). The ids are what
+    /// `terminal.agent_answer` takes; the names are `CardAskWording`'s.
+    ///
+    /// `observedAt` is when the card was read, which is all a phone that never
+    /// saw the ask can say about it.
+    public static func fromCard(terminal: String, ask: CardAsk, at: Date) -> GlancePermission {
+        GlancePermission(
+            terminal: terminal, request: ask.id,
+            options: [
+                GlancePermissionOption(id: "allow", name: CardAskWording.allow, kind: "allow_once"),
+                GlancePermissionOption(id: "deny", name: CardAskWording.deny, kind: "reject_once"),
+            ],
+            observedAt: at)
+    }
+}
+
+/// Where a card's buttons come from: the app's record of the ask, or the ask the
+/// relay put on the card.
+///
+/// **Why the card needs its own source.** `GlancePermissionStore` is written
+/// only by the running app, so an ask that arose while the app was suspended
+/// was in no file, and the card had no buttons. The relay now carries the
+/// headline's hook ask on the content state (the T0 contract's C4), and an
+/// ActivityKit push reaches the card without waking the app, so the card can
+/// answer from what it was sent.
+///
+/// Pure and here rather than in the widget, where CI compiles it and never runs
+/// it.
+public enum CardAskSource {
+    /// What the card's leader may be answered with at `now`, or nil for no
+    /// buttons.
+    ///
+    ///   - No buttons unless the push says the leader is blocked, and the card
+    ///     names it.
+    ///   - With a card ask: none once its hold is over. Otherwise the store's
+    ///     record when it is about this very ask, for its option ids, drawn in
+    ///     the card's words; else the card's ask alone.
+    ///   - With no card ask (a relay or runner older than the field, or an ask
+    ///     the daemon does not hold, such as a chat pane's): the store's record,
+    ///     as filed, exactly as before.
+    public static func permission(
+        store: GlancePermissions, state: AgentCardState, now: Date
+    ) -> GlancePermission? {
+        guard state.status == "blocked", !state.terminal.isEmpty else { return nil }
+        let filed = store.permission(for: state.terminal)
+        guard let ask = state.ask else { return filed }
+        guard !ask.isOver(at: now) else { return nil }
+        if let filed, filed.request == ask.id, let worded = inCardWords(filed) {
+            return worded
+        }
+        return .fromCard(terminal: state.terminal, ask: ask, at: now)
+    }
+
+    /// The store's record with its plain yes and its no renamed to the card's
+    /// words, and nothing else; nil when it lacks either.
+    private static func inCardWords(_ filed: GlancePermission) -> GlancePermission? {
+        guard let yes = filed.plainYes,
+            let no = filed.options.first(where: GlancePermission.rejects)
+        else { return nil }
+        let renamed = filed.options.compactMap { option -> GlancePermissionOption? in
+            switch option.id {
+            case yes.id: GlancePermissionOption(id: option.id, name: CardAskWording.allow, kind: option.kind)
+            case no.id: GlancePermissionOption(id: option.id, name: CardAskWording.deny, kind: option.kind)
+            default: nil
+            }
+        }
+        return GlancePermission(
+            terminal: filed.terminal, request: filed.request, options: renamed,
+            observedAt: filed.observedAt)
+    }
+}
+
 /// Where the glance permissions live, and the only code that reads or writes
 /// them.
 ///

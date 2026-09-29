@@ -362,6 +362,123 @@ struct GlancePermissionsTests {
         #expect(GlancePermissionStore.read(fromContainer: dir).permission(for: "t1") == nil)
     }
 
+    // MARK: - Buttons from the card's own ask (ov-57, T0 contract C5)
+
+    private let until = Date(timeIntervalSince1970: 1_790_551_063)
+    private var before: Date { until.addingTimeInterval(-30) }
+
+    private func card(
+        status: String = "blocked", terminal: String = "t1", workspace: String = "Billing",
+        ask: CardAsk? = CardAsk(id: "hook-ask-1", tool: "Bash", until: Date(timeIntervalSince1970: 1_790_551_063))
+    ) -> AgentCardState {
+        AgentCardState(
+            terminal: terminal, label: "claude", workspace: workspace, status: status,
+            detail: "Run this command?", ask: ask)
+    }
+
+    /// What the store holds for a Bash ask the app saw: the allow's name IS the
+    /// command line (`permission_options` in agent-core).
+    private func storeRecord(request: String = "hook-ask-1") -> GlancePermissions {
+        GlancePermissions(pending: [
+            GlancePermission(
+                terminal: "t1", request: request,
+                options: [
+                    option("allow-from-store", "Allow touch x", "allow_once"),
+                    option("deny-from-store", "Deny", "reject_once"),
+                ],
+                observedAt: Date(timeIntervalSince1970: 1000))
+        ])
+    }
+
+    /// A suspended app never saw the ask, so the store is empty and the card's
+    /// ask alone gives the buttons: exactly "Allow" and "Deny", and the ids the
+    /// daemon's hook ask takes.
+    ///
+    /// Mutation: `CardAskSource` ignoring `state.ask`. Red: nil.
+    @Test func aCardAskGivesAllowAndDenyWithNoCommand() {
+        let permission = CardAskSource.permission(store: .empty, state: card(), now: before)
+        #expect(permission?.terminal == "t1")
+        #expect(permission?.request == "hook-ask-1")
+        #expect(permission?.options == [
+            option("allow", "Allow", "allow_once"), option("deny", "Deny", "reject_once"),
+        ])
+        #expect(permission?.plainYes?.id == "allow")
+        #expect(permission?.fit(lines: 3, columns: 40).shown.count == 2)
+    }
+
+    /// The app saw this very ask, so its record is the better source for the
+    /// option ids. The words are still the card's: a store name for Bash is the
+    /// command line, and the locked card never draws one.
+    ///
+    /// Mutation: the store record returned as filed. Red: "Allow touch x".
+    @Test func aStoreRecordForTheSameAskWinsButKeepsTheCardsWords() {
+        let permission = CardAskSource.permission(store: storeRecord(), state: card(), now: before)
+        #expect(permission?.request == "hook-ask-1")
+        #expect(permission?.options == [
+            option("allow-from-store", "Allow", "allow_once"),
+            option("deny-from-store", "Deny", "reject_once"),
+        ])
+        #expect(permission?.observedAt == Date(timeIntervalSince1970: 1000))
+    }
+
+    /// A record about an older ask on the same pane says nothing about this one.
+    ///
+    /// Mutation: the store record preferred whatever its request. Red: the old id.
+    @Test func aStoreRecordForAnotherAskLosesToTheCard() {
+        let permission = CardAskSource.permission(
+            store: storeRecord(request: "hook-ask-0"), state: card(), now: before)
+        #expect(permission?.request == "hook-ask-1")
+        #expect(permission?.options.map { $0.id } == ["allow", "deny"])
+    }
+
+    /// Past the hold, a tap could only be refused, so there are no buttons,
+    /// whichever source would have given them. At `until` exactly is past.
+    ///
+    /// Mutation: the `until` check removed. Red: buttons at and after `until`.
+    @Test func anExpiredCardAskGivesNoButtons() {
+        for now in [until, until.addingTimeInterval(1)] {
+            #expect(CardAskSource.permission(store: .empty, state: card(), now: now) == nil)
+            #expect(CardAskSource.permission(store: storeRecord(), state: card(), now: now) == nil)
+        }
+    }
+
+    /// The push is as fresh as the last thing that happened, and a leader it
+    /// says is working or done gets no buttons, whatever the ask or the store.
+    ///
+    /// Mutation: the status gate removed. Red: buttons on a working card.
+    @Test func aCardAskOnAWorkingLeaderGivesNoButtons() {
+        for status in ["working", "done", ""] {
+            #expect(
+                CardAskSource.permission(store: storeRecord(), state: card(status: status), now: before)
+                    == nil, "\(status)")
+        }
+        #expect(
+            CardAskSource.permission(store: storeRecord(), state: card(terminal: ""), now: before)
+                == nil)
+    }
+
+    /// A relay older than the ask sends none, and the card behaves as it did
+    /// before: the store's record, as filed.
+    ///
+    /// Mutation: no ask treated as no buttons. Red: nil.
+    @Test func aCardWithNoAskKeepsTheStoreRecord() {
+        let permission = CardAskSource.permission(
+            store: storeRecord(), state: card(ask: nil), now: before)
+        #expect(permission == storeRecord().permission(for: "t1"))
+        #expect(CardAskSource.permission(store: .empty, state: card(ask: nil), now: before) == nil)
+    }
+
+    /// The locked card's line: the tool and the workspace, whichever it has,
+    /// and never the command.
+    ///
+    /// Mutation: the workspace left out. Red: "Bash".
+    @Test func theLockedCaptionIsToolAndWorkspace() {
+        #expect(CardAskWording.caption(tool: "Bash", workspace: "Billing") == "Bash · Billing")
+        #expect(CardAskWording.caption(tool: "Bash", workspace: "") == "Bash")
+        #expect(CardAskWording.caption(tool: nil, workspace: "Billing") == "Billing")
+        #expect(CardAskWording.caption(tool: nil, workspace: "") == nil)
+    }
+
     /// An unreadable file says the same thing as an absent one — nothing is
     /// known — and a card with no buttons is the correct rendering of that.
     @Test func anUnreadableFileReadsAsEmpty() {
