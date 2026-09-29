@@ -161,6 +161,13 @@ object NotificationCopy {
         if (status == "blocked" || kind == "decision") Notifier.CHANNEL_BLOCKED else Notifier.CHANNEL_DONE
 
     /**
+     * [channelFor] over a push's `data` as [FarCoolerMessagingService] receives
+     * it, reading the keys under this app's names for the relay's.
+     */
+    fun channelForPush(data: Map<String, String>): String =
+        channelFor(data[Notifier.PUSH_EXTRA_STATUS], data[Notifier.PUSH_EXTRA_KIND])
+
+    /**
      * One notification body: which pane this is about, what there is to say
      * about it, and — only when it adds something — which runner it is on.
      *

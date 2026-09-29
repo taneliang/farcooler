@@ -241,21 +241,26 @@ class NotificationCopyTest {
     }
 
     /**
-     * A task entering Needs Decision alerts (ruling 3). Its notice has no
-     * `status`, only `kind: "decision"`, so a channel chosen from `status`
-     * alone put it on the quiet channel. The relay's `androidChannel` reads
-     * both, for the tray card.
+     * A task entering Needs Decision alerts (ruling 3). Its push's `data` is
+     * `{kind: "decision", task: "bil-7"}` with no `status` (the relay's
+     * `sendFcm`), so a channel read from `status` alone put it on the quiet
+     * channel. Driven through the same map the messaging service receives.
      */
     @Test
     fun `a decision push earns the high-importance channel`() {
-        assertEquals(Notifier.CHANNEL_BLOCKED, NotificationCopy.channelFor(null, "decision"))
-        assertEquals(Notifier.CHANNEL_DONE, NotificationCopy.channelFor(null, "count"))
-        assertEquals(Notifier.CHANNEL_DONE, NotificationCopy.channelFor("done", null))
-        val relay = repositoryFile("services/relay/src/push.ts")
-        assertTrue(
-            "The relay no longer sends data.kind; channelFor reads it to alert on a decision.",
-            relay.contains("...(payload.kind ? { kind: payload.kind } : {})"),
+        assertEquals(
+            Notifier.CHANNEL_BLOCKED,
+            NotificationCopy.channelForPush(mapOf("kind" to "decision", "task" to "bil-7")),
         )
+        assertEquals(
+            Notifier.CHANNEL_BLOCKED,
+            NotificationCopy.channelForPush(mapOf("terminal" to "t", "status" to "blocked")),
+        )
+        assertEquals(
+            Notifier.CHANNEL_DONE,
+            NotificationCopy.channelForPush(mapOf("terminal" to "t", "status" to "done")),
+        )
+        assertEquals(Notifier.CHANNEL_DONE, NotificationCopy.channelForPush(mapOf("kind" to "count")))
     }
 
     /**

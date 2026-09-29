@@ -23,11 +23,22 @@ class WorkspaceScreenTest {
     private fun task(id: String, status: TaskStatus, worktree: String? = null) =
         TaskRow(id, "bil-$id", "Task $id", status, 0L, worktreeId = worktree)
 
-    /** The tab row reads Orchestrator, Board, Worktrees — "Board", not the old row's "Main board". */
+    /**
+     * A stack saved on the Board tab — or an old board route, which becomes
+     * one — comes back with the tab row selecting the tab labeled "Board".
+     * Goes red if the saved word, the row's order or its labels drift apart.
+     */
     @Test
     fun `the board tab's title is Board`() {
-        assertEquals("Board", WorkspaceTab.BOARD.title)
-        assertEquals(listOf("Orchestrator", "Board", "Worktrees"), WorkspaceTab.entries.map { it.title })
+        for (saved in listOf(
+            """[{"type":"workspace","hostId":"h","workspaceId":"b","tab":"board"}]""",
+            """[{"type":"board","hostId":"h","workspaceId":"b"}]""",
+        )) {
+            val route = Backstack.decodeStack(saved)!!.single() as Route.Workspace
+            val (labels, selected) = WorkspaceTab.row(route.tab)
+            assertEquals("Board", labels[selected])
+        }
+        assertEquals(listOf("Orchestrator", "Board", "Worktrees"), WorkspaceTab.row(WorkspaceTab.BOARD).first)
     }
 
     /**

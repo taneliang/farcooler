@@ -201,12 +201,13 @@ fun WorkspaceScreen(
                         }
                     },
                 )
-                TabRow(selectedTabIndex = route.tab.ordinal) {
-                    WorkspaceTab.entries.forEach { tab ->
+                val (labels, selected) = WorkspaceTab.row(route.tab)
+                TabRow(selectedTabIndex = selected) {
+                    WorkspaceTab.entries.forEachIndexed { index, tab ->
                         Tab(
-                            selected = tab == route.tab,
+                            selected = index == selected,
                             onClick = { model.selectTab(route, tab) },
-                            text = { Text(tab.title) },
+                            text = { Text(labels[index]) },
                             modifier = Modifier.testTag("workspace-tab-${tab.name.lowercase()}"),
                         )
                     }

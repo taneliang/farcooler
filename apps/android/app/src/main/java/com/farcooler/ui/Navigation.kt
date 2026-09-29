@@ -246,6 +246,10 @@ enum class WorkspaceTab(val title: String) {
     companion object {
         /** A remembered tab's name, or null for none this build knows. */
         fun parse(name: String?): WorkspaceTab? = entries.firstOrNull { it.name == name }
+
+        /** What the tab row draws for [selected]: its labels, in order, and which is selected. */
+        fun row(selected: WorkspaceTab): Pair<List<String>, Int> =
+            entries.map { it.title } to entries.indexOf(selected)
     }
 }
 

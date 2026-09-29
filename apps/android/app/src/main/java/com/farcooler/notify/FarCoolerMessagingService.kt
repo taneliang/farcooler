@@ -78,10 +78,7 @@ class FarCoolerMessagingService : FirebaseMessagingService() {
         // What that commit could not fix here it fixed elsewhere — a phone
         // nobody is holding never reaches this line at all, and takes the
         // `android.notification.channel_id` the same commit added instead.
-        val channel = NotificationCopy.channelFor(
-            data[Notifier.PUSH_EXTRA_STATUS],
-            data[Notifier.PUSH_EXTRA_KIND],
-        )
+        val channel = NotificationCopy.channelForPush(data)
 
         // A decision names a task and no terminal: the tap opens its card.
         val kind = data[Notifier.PUSH_EXTRA_KIND]
