@@ -248,6 +248,15 @@ extension ContentView {
         return rows
     }
 
+    /// What Move to Workspace ▸ offers for `worktree`: exactly the
+    /// workspaces a drag of its row onto their rows would move it to
+    /// (`dropMeaning`), so the menu and the drag can't disagree.
+    static func moveTargets(for worktree: Worktree, in fleet: Fleet, assigns: Bool) -> [WorkspaceSummary] {
+        (fleet.runnerWorkspaces[worktree.host ?? ""] ?? []).filter {
+            dropMeaning(worktree, onto: .workspace($0.id), in: fleet, assigns: assigns) == .assign($0)
+        }
+    }
+
     /// Whether an orchestrator is a hit for `query`: by what its pane is
     /// called, as a terminal in a worktree row is (`Worktree.matches`).
     private static func matches(_ terminal: Terminal, _ query: String) -> Bool {

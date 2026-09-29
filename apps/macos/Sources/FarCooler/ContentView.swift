@@ -803,20 +803,7 @@ struct ContentView: View {
         case .reorder:
             if case .worktree(let target, let edge) = done.target { reorder(done.dragged, to: target, edge) }
         case .assign(let workspace):
-            Task {
-                // Refused first, as every write here is; see `act(on:_:)`.
-                if let why = store.refusal(for: dragged) {
-                    errorBanner = "Cannot do that: \(why)"
-                    return
-                }
-                guard let client = store.client(for: dragged) else { return }
-                // Nothing moves on screen until the runner says it has: a
-                // refused move leaves the row where it was, with the
-                // sentence, and doesn't reorder.
-                if let refused = await client.assignWorktree(dragged, to: workspace) {
-                    errorBanner = refused
-                    return
-                }
+            move(dragged, to: workspace) {
                 // Dropped between two of that workspace's rows: there, too.
                 // A failure now is said in our words: the move itself held.
                 if case .worktree(let target, let edge) = done.target {
@@ -825,6 +812,26 @@ struct ContentView: View {
                         failure: DaemonClient.movedButNotPlaced(dragged, to: workspace))
                 }
             }
+        }
+    }
+
+    /// Move a worktree to another workspace (`farcooler worktree assign`):
+    /// a drop on a workspace row, or Move to Workspace ▸.
+    private func move(_ worktree: Worktree, to workspace: WorkspaceSummary, then: @escaping () -> Void = {}) {
+        Task {
+            // Refused first, as every write here is; see `act(on:_:)`.
+            if let why = store.refusal(for: worktree) {
+                errorBanner = "Cannot do that: \(why)"
+                return
+            }
+            guard let client = store.client(for: worktree) else { return }
+            // Nothing moves on screen until the runner says it has: a
+            // refused move leaves the row where it was, with the sentence.
+            if let refused = await client.assignWorktree(worktree, to: workspace) {
+                errorBanner = refused
+                return
+            }
+            then()
         }
     }
 
@@ -1614,6 +1621,8 @@ struct ContentView: View {
             onEditorError: { editorError = $0 },
             usable: usable,
             reorderable: WorktreeDrag.offersDrag(usable: usable, runner: client?.daemonBuild),
+            moveTargets: Self.moveTargets(for: listed, in: store.fleet, assigns: Self.assigns(store)(listed)),
+            onMove: { target in move(listed, to: target) },
             changes: changesStatus(ws),
             countsWidth: countsWidth
         )

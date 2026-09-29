@@ -53,4 +53,42 @@ struct WorktreeDragGateTests {
     func anUnreachableRunnerOffersNone() {
         #expect(!WorktreeDrag.offersDrag(usable: false, runner: Self.current))
     }
+
+    /// Move to Workspace ▸ is the drag's menu equivalent (ruling 5), so it
+    /// offers a workspace exactly when dropping the row on that workspace's
+    /// row would move it there: never its own, never another repository's,
+    /// never for the main checkout, and nothing on a runner that can't
+    /// assign.
+    @MainActor
+    @Test("Move to Workspace offers exactly the targets the drag accepts")
+    func moveToWorkspaceOffersExactlyTheTargetsTheDragAccepts() {
+        let repo = "0198f2c0-0000-7000-8000-0000000000aa"
+        let other = "0198f2c0-0000-7000-8000-0000000000bb"
+        let workspaces = [
+            WorkspaceSummary(id: "ws-main", name: "Main", taskPrefix: "fc", isMain: true, ordinal: 0, repository: repo),
+            WorkspaceSummary(id: "ws-bil", name: "Billing", taskPrefix: "bil", isMain: false, ordinal: 1, repository: repo),
+            WorkspaceSummary(id: "ws-ops", name: "Ops", taskPrefix: "ops", isMain: false, ordinal: 2, repository: repo),
+            WorkspaceSummary(id: "ws-x", name: "Main", taskPrefix: "x", isMain: true, ordinal: 0, repository: other),
+        ]
+        func worktree(_ id: String, _ workspace: String?, main: Bool = false) -> Worktree {
+            var w = Worktree(
+                id: id, short: id, task: id, branch: "b", repository: "overnight", host: "", path: "/tmp/\(id)",
+                state: "active", terminals: [], repositoryID: repo, workspace: workspace)
+            w.is_main_checkout = main
+            return w
+        }
+        let all = [worktree("lane", "ws-bil"), worktree("stray", nil), worktree("checkout", "ws-main", main: true)]
+        var fleet = Fleet(runtimeHealthy: true, livePanes: 0, worktrees: all, branchPrefix: nil)
+        fleet.runnerWorkspaces[""] = workspaces
+        for w in all {
+            for assigns in [true, false] {
+                let accepted = workspaces.filter {
+                    ContentView.dropMeaning(w, onto: .workspace($0.id), in: fleet, assigns: assigns) != nil
+                }.map(\.id)
+                #expect(ContentView.moveTargets(for: w, in: fleet, assigns: assigns).map(\.id) == accepted, "\(w.id) \(assigns)")
+            }
+        }
+        #expect(ContentView.moveTargets(for: all[0], in: fleet, assigns: true).map(\.id) == ["ws-main", "ws-ops"])
+        #expect(ContentView.moveTargets(for: all[2], in: fleet, assigns: true).isEmpty)
+    }
 }

@@ -119,6 +119,12 @@ struct WorktreeSection: View {
     /// offers no drag.
     var reorderable: Bool = false
 
+    /// The workspaces Move to Workspace ▸ offers: exactly those a drag of
+    /// this row onto a workspace row would move it to. See
+    /// `ContentView.moveTargets`.
+    var moveTargets: [WorkspaceSummary] = []
+    var onMove: (WorkspaceSummary) -> Void = { _ in }
+
     /// Diff status for this worktree, when the fleet inbox has been read.
     ///
     /// Absent is a real state and shows nothing at all, rather than a confident
@@ -408,6 +414,15 @@ struct WorktreeSection: View {
         // than a drag that goes nowhere: a runner too old to keep an order
         // used to be handed a drag it answered with "unknown method", and the
         // row sprang back with nothing said. See `WorktreeDrag.offersDrag`.
+        // The drag's menu equivalent (ruling 5): a drag nobody has been
+        // told about needs somewhere to be discovered.
+        .contextMenu {
+            if !moveTargets.isEmpty, usable {
+                Menu("Move to Workspace") {
+                    ForEach(moveTargets) { target in Button(target.name) { onMove(target) } }
+                }
+            }
+        }
         .modifier(WorktreeDragSource(worktree: worktree.id, enabled: reorderable))
         .onDrop(
             of: [.text],
