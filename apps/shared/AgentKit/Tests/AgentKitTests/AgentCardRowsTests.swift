@@ -616,8 +616,8 @@ func aRowNamesItsWorkspace() throws {
 /// The new fields survive the round trip ActivityKit makes on every persisted
 /// card, and an absent count stays absent rather than becoming a number.
 ///
-/// Mutation: `encode` writing `needsYou` unconditionally. Red: -1 comes back
-/// as an answer, and the older card's header would read it.
+/// Mutation: `encode` writing `needsYou` unconditionally. Red: the persisted
+/// state carries a `needsYou` key the relay never sent.
 @Test func needsYouAndWorkspaceRoundTripAndAbsenceStaysAbsent() throws {
     let state = AgentCardState(
         label: "claude", workspace: "Billing", status: "blocked", detail: "",
@@ -629,4 +629,80 @@ func aRowNamesItsWorkspace() throws {
     let json = String(decoding: try JSONEncoder().encode(silent), as: UTF8.self)
     #expect(!json.contains("needsYou"))
     #expect(!json.contains("workspace"))
+}
+
+// MARK: - Fix round 1 (ov-55 4C)
+
+/// A relay that counted nothing needs you says 0, even with agents blocked:
+/// every runner sent a list and none had an item. Only an absent count falls
+/// back to `blocked`.
+///
+/// Mutation: `headerCount` reading `needsYou > 0 ? needsYou : blocked`. Red:
+/// "2 need you".
+@Test func aRelayCountOfZeroIsZeroWhateverIsBlocked() throws {
+    let state = try decode(
+        """
+        {"status":"working","detail":"","blocked":2,"review":0,"working":1,"more":0,
+         "needsYou":0,
+         "rows":[{"terminal":"a","label":"claude","status":"working","detail":""}]}
+        """)
+    #expect(state.headerCount == 0)
+    let layout = try #require(AgentCardLayout(state: state, now: cardNow, stale: false))
+    #expect(layout.title == "1 in flight")
+}
+
+/// The Island and the headline card count what the header counts. Two
+/// decisions and a blocked leader: three need you, and the tail names the two
+/// that aren't on the card, not the zero other blocked agents.
+///
+/// Mutation: `waiting` from `state.blocked`. Red: "+1 more working".
+@Test func theIslandsTailCountsWhatTheHeaderCounts() throws {
+    let state = try decode(
+        """
+        {"terminal":"a","status":"blocked","detail":"","blocked":1,"review":0,"working":1,
+         "more":0,"needsYou":3}
+        """)
+    let tail = FleetTail.current(for: state, snapshot: nil, now: cardNow, stale: false)
+    #expect(tail.blocked == 2)
+    #expect(tail.line == "+1 more · 2 need you")
+}
+
+/// With only a decision waiting and nobody else running, the Island still
+/// says so, rather than nothing.
+///
+/// Mutation: `line` returning nil whenever `others` is 0. Red.
+@Test func aDecisionAloneStillHasALineOnTheIsland() throws {
+    let state = try decode(
+        """
+        {"terminal":"a","status":"working","detail":"","blocked":0,"review":0,"working":1,
+         "more":0,"needsYou":1}
+        """)
+    let tail = FleetTail.current(for: state, snapshot: nil, now: cardNow, stale: false)
+    #expect(tail.line == "1 needs you")
+}
+
+/// The snapshot's branch counts its items, less the leader's own.
+///
+/// Mutation: that branch counting blocked agents. Red: 0, not 1.
+@Test func theSnapshotTailCountsItemsLessTheLeaders() {
+    let working = FleetSnapshot.Agent(
+        id: "b", label: "codex", machine: "studio", status: "working", glyph: "", headline: "",
+        line: "", feed: [], rank: 0, turnFailed: false, activityChangedAt: nil,
+        observedAt: cardNow)
+    let decision = NeedsYouItem(id: "decision:1", kind: .decision, rank: 5, since: nil, question: "?")
+    let snapshot = FleetSnapshot(
+        agents: [working], capturedAt: cardNow, complete: true, needsYou: [decision])
+    let state = AgentCardState(terminal: "a", status: "working", detail: "")
+    let tail = FleetTail.current(for: state, snapshot: snapshot, now: cardNow, stale: false)
+    #expect(tail.blocked == 1)
+}
+
+/// A long workspace is cut, never the agent's name.
+///
+/// Mutation: `named` without the cap. Red.
+@Test func aLongWorkspaceIsCutNotTheName() {
+    let long = String(repeating: "w", count: 48)
+    #expect(
+        AgentCardLayout.named("claude", in: long)
+            == String(repeating: "w", count: 15) + "… · claude")
 }

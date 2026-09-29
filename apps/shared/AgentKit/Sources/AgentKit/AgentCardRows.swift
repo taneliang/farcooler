@@ -520,9 +520,21 @@ public struct AgentCardLayout: Sendable, Equatable {
 
     /// `name` after its workspace's, or alone when there's none. The card's
     /// headline and the Island name the leader the same way.
+    ///
+    /// **The workspace is what gets cut, never the name.** Every line this
+    /// fills truncates at its tail, and a workspace near the relay's 48-byte cap
+    /// would push the agent's name, the part that tells two rows apart, off
+    /// the end. So the workspace is held to `workspaceWidth` characters here.
     public static func named(_ name: String, in workspace: String) -> String {
-        workspace.isEmpty || name.isEmpty ? name : "\(workspace) · \(name)"
+        guard !workspace.isEmpty, !name.isEmpty else { return name }
+        let shown =
+            workspace.count > workspaceWidth
+            ? String(workspace.prefix(workspaceWidth - 1)) + "…" : workspace
+        return "\(shown) · \(name)"
     }
+
+    /// How much of a workspace's name a card line spends before the agent's.
+    public static let workspaceWidth = 16
 
     /// `+142 −37`, or nil.
     ///
@@ -579,6 +591,11 @@ public struct AgentCardLayout: Sendable, Equatable {
     }
 
     /// One ring per agent, blocked first, capped at `ringsDrawn`.
+    ///
+    /// **Per agent, and so not per item.** The header counts items
+    /// (`headerCount`), and a decision has no agent to draw a ring for, so a
+    /// decision alone makes the header's mark amber with no amber ring beside
+    /// it. The rings are the agents; the header is what needs you.
     ///
     /// `withoutCore` on every one of them, and that is §03's own vocabulary
     /// rather than a shortcut: the core is the agent's side of the mark, the
@@ -715,7 +732,12 @@ public struct FleetTail: Equatable, Sendable {
             let others = max(0, state.blocked + state.working - onTheCard)
             // The headline is on the card, so it is not one of the OTHERS that
             // need somebody — which is what this half of the line says.
-            let waiting = max(0, state.blocked - (state.status == "blocked" ? 1 : 0))
+            //
+            // Counted from `headerCount`, the number the rows card's header
+            // leads with: the relay's `needsYou` when it sent one, which counts
+            // decisions and asks, else the blocked agents. A blocked leader is
+            // one of those items, so it comes off once either way.
+            let waiting = max(0, state.headerCount - (state.status == "blocked" ? 1 : 0))
             return FleetTail(
                 others: others,
                 blocked: waiting,
@@ -747,15 +769,24 @@ public struct FleetTail: Equatable, Sendable {
         let rest = snapshot.agents.filter {
             $0.id != leader && ($0.status == "working" || $0.status == "blocked")
         }
+        // What needs you, other than the leader, on the snapshot's own count
+        // (`needingYou`): its items when the app wrote a list, else its blocked
+        // agents. The leader's own item, if it has one, is on the card.
+        let waiting: Int
+        if let items = snapshot.needsYou {
+            waiting = items.filter { $0.terminal?.id != leader || leader.isEmpty }.count
+        } else {
+            waiting = rest.filter { $0.status == "blocked" }.count
+        }
         guard !rest.isEmpty else {
             return FleetTail(
-                others: 0, blocked: 0, qualified: stale,
+                others: 0, blocked: waiting, qualified: stale,
                 leaderTrace: leaderTrace, fleetTrace: snapshot.fleetTrace)
         }
 
         return FleetTail(
             others: rest.count,
-            blocked: rest.filter { $0.status == "blocked" }.count,
+            blocked: waiting,
             // Blocked is latched, so `confidence` only ever withdraws a
             // `working` claim — which is why the words below qualify the verb
             // and not the number. An incomplete snapshot is the other half, and
@@ -797,10 +828,15 @@ public struct FleetTail: Equatable, Sendable {
     /// leader is almost always the blocked one — a second agent blocking while
     /// the first is unanswered is the case where a person most needs to know the
     /// card is not the whole story.
+    ///
+    /// With nobody else running and something still waiting, a decision say,
+    /// the line is the waiting alone: "1 needs you". Nil there would be the
+    /// Island saying nothing needs you while the header says it does.
     public var line: String? {
-        guard others > 0 else { return nil }
+        let needs = "\(blocked) need\(blocked == 1 ? "s" : "") you"
+        guard others > 0 else { return blocked > 0 ? needs : nil }
         if blocked > 0 {
-            return "+\(others) more · \(blocked) need\(blocked == 1 ? "s" : "") you"
+            return "+\(others) more · \(needs)"
         }
         // "+6 more · +391 −112" when the relay counted the diff, which is what
         // the design asks the tail to say. It replaces the verb rather than
