@@ -4127,7 +4127,12 @@ describe('/v1/notify and Live Activities', () => {
       const stamped = await env.DB.prepare(`SELECT install_id FROM daemons WHERE token_hash = ?`)
         .bind(await sha256(fresh))
         .first<any>()
-      expect(stamped?.install_id).toBe('install-a')
+      // Stored as a per-account hash, never the raw id: a UUIDv7 carries its
+      // install time, and a raw id would link one runner across accounts.
+      expect(stamped?.install_id).toBe(await sha256('user_1:install-a'))
+      const raw = await env.DB.prepare(`SELECT COUNT(*) AS n FROM daemons WHERE install_id = 'install-a'`)
+        .first<{ n: number }>()
+      expect(raw?.n).toBe(0)
     })
 
     it('replaces, never adds, when a runner with a blocked agent is paired again', async () => {
@@ -4150,8 +4155,10 @@ describe('/v1/notify and Live Activities', () => {
 
       expect(lastCard(calls).body.aps['content-state'].needsYou).toBe(3)
       const counted = await env.DB.prepare(
-        `SELECT COUNT(*) AS n FROM daemons WHERE install_id = 'install-a' AND needs_you IS NOT NULL`,
-      ).first<{ n: number }>()
+        `SELECT COUNT(*) AS n FROM daemons WHERE install_id = ? AND needs_you IS NOT NULL`,
+      )
+        .bind(await sha256('user_1:install-a'))
+        .first<{ n: number }>()
       expect(counted?.n).toBe(1)
     })
 
@@ -4180,7 +4187,7 @@ describe('/v1/notify and Live Activities', () => {
       const row = await env.DB.prepare(`SELECT install_id FROM daemons WHERE token_hash = ?`)
         .bind(await sha256(again))
         .first<any>()
-      expect(row?.install_id).toBe('install-a')
+      expect(row?.install_id).toBe(await sha256('user_1:install-a'))
 
       await post('/v1/notify', { title: 'claude needs you', terminal: 'term-1', status: 'blocked' }, again)
       // The old count covers this runner's agent; no count of its own yet.
@@ -4188,6 +4195,46 @@ describe('/v1/notify and Live Activities', () => {
 
       await post('/v1/notify', { kind: 'count', needsYou: 1, install: 'install-a' }, again)
       expect(lastCard(calls).body.aps['content-state'].needsYou).toBe(1)
+    })
+
+    it('hashes one install id differently on two accounts', async () => {
+      // The relay must not be able to tell that two accounts' runners are one
+      // install: the key is per account.
+      watchFetch()
+      await pair('user_1', 'one')
+      await pair('user_2', 'two')
+      await post('/v1/notify', { kind: 'count', needsYou: 1, install: 'install-a' }, 'one')
+      await post('/v1/notify', { kind: 'count', needsYou: 1, install: 'install-a' }, 'two')
+      const keys = await env.DB.prepare(`SELECT install_id FROM daemons ORDER BY account_id`).all<any>()
+      expect(keys.results.map((r: any) => r.install_id)).toEqual([
+        await sha256('user_1:install-a'),
+        await sha256('user_2:install-a'),
+      ])
+    })
+
+    it("keeps only the newest count among one install's tokens", async () => {
+      // Two tokens of one install holding counts at once: a count the old
+      // worker wrote in a deploy window, or two notices racing. The newest is
+      // the runner's truth, whichever row the database hands back last, and
+      // the two are never summed.
+      const { calls, issue } = await pairing()
+      const newer = await issue('This Mac')
+      const older = await issue('This Mac')
+      const otherMac = await issue('This Mac')
+      await post('/v1/notify', { kind: 'count', needsYou: 4, install: 'install-a' }, older)
+      await post('/v1/notify', { kind: 'count', needsYou: 1, install: 'install-a' }, newer)
+      await env.DB.prepare(`UPDATE daemons SET needs_you = 4, needs_you_at = ? WHERE token_hash = ?`)
+        .bind(Date.now() - 60 * 1000, await sha256(older))
+        .run()
+
+      await post(
+        '/v1/notify',
+        { title: 'claude needs you', terminal: 'term-1', status: 'blocked', needsYou: 1, install: 'install-b' },
+        otherMac,
+      )
+
+      // 1 from each runner; never 4, and never 5.
+      expect(lastCard(calls).body.aps['content-state'].needsYou).toBe(2)
     })
 
     it('ignores an install id that is not a short string', async () => {

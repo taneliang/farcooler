@@ -792,7 +792,7 @@ async function pairDaemon(request: Request, env: Env): Promise<Response> {
   // id reaches this relay on its notices. A pairing that does name one is that
   // runner, and needs no supersede here — `readFleet` keys counts by install,
   // so the old token's count stands until the new token sends its own.
-  const install = installId(body.install)
+  const install = await installKey(account, body.install)
   // A pairing with no install id, under a label this account already has, is
   // taken to be that runner being paired again: the old row's count is
   // superseded rather than summed beside the new one's for a day. Only the
@@ -826,14 +826,21 @@ async function pairDaemon(request: Request, env: Env): Promise<Response> {
   return json({ token })
 }
 
-/// A runner's install id as a body carries it, or NULL for none.
+/// The key a runner's install id is stored and matched under, or NULL for
+/// none: `sha256(account + ":" + install)`, and never the id itself.
 ///
-/// The daemon's `install-id` is a UUIDv7. Anything that is not a short token
-/// of letters, digits and dashes is treated as absent — the runner is keyed as
-/// one too old to send it — rather than refused: the daemon ships separately,
-/// and a 400 here would cost it every notice.
-function installId(value: unknown): string | null {
-  return typeof value === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(value) ? value : null
+/// The daemon's `install-id` is a UUIDv7, which carries the moment the runner
+/// was installed, and the same id paired to two accounts would link them. The
+/// relay needs neither, only "these tokens are one runner on this account", so
+/// the raw value is hashed on receipt, per account, and nothing else is kept.
+///
+/// Anything that is not a short token of letters, digits and dashes is treated
+/// as absent — the runner is keyed as one too old to send it — rather than
+/// refused: the daemon ships separately, and a 400 here would cost it every
+/// notice.
+async function installKey(account: string, value: unknown): Promise<string | null> {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9-]{1,64}$/.test(value)) return null
+  return await sha256(`${account}:${value}`)
 }
 
 /// How long a machine may notify before it must be paired again.
@@ -1057,7 +1064,7 @@ async function notify(request: Request, env: Env): Promise<Response> {
   const needsYou = numeric(body.needsYou)
   // Which runner this token is, stamped before the count so the count is read
   // as that runner's. Written only when it changes, which is once per token.
-  const install = installId(body.install)
+  const install = await installKey(daemon.account_id, body.install)
   if (install !== null) {
     await env.DB.prepare(
       `UPDATE daemons SET install_id = ? WHERE id = ? AND install_id IS NOT ?`,

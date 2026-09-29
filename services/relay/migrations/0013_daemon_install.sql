@@ -1,5 +1,8 @@
--- Which runner install each paired token belongs to: the daemon's own
--- `install-id`, a UUIDv7 kept in its runtime directory.
+-- Which runner install each paired token belongs to, as a key derived from
+-- the daemon's own `install-id` (a UUIDv7 kept in its runtime directory):
+-- `sha256(account_id || ':' || install)`, hex. Never the raw id, which carries
+-- the runner's install time and would link one runner across accounts. The
+-- relay hashes it on receipt; see `installKey`.
 --
 -- Additive only, same as 0002 through 0012: the previous worker is still
 -- serving requests while a deploy rolls out, and it never writes this column.
