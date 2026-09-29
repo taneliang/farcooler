@@ -971,6 +971,68 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     }
 }
 
+// MARK: - The widget's rows (ov-55 4C.1, spec §7)
+
+/// One thing that needs you, as a widget row draws it.
+public struct WidgetItemRow: Sendable, Equatable, Identifiable {
+    public let id: String
+    /// "Billing · Decision · Postgres or SQLite?": the workspace when there is
+    /// one, the kind, and the question cut to `titleWidth`.
+    public let line: String
+    /// Whether the app derived this from an older runner's fleet rather than
+    /// the runner sending it. The row says so: "older runner", and a dimmed
+    /// mark, because it can't tell an ask from a block and knows nothing of
+    /// decisions.
+    public let hedged: Bool
+    /// The status word the row's mark is drawn from: a review's own mark,
+    /// amber for everything else.
+    public let status: String
+    /// The terminal a tap opens, when the item is about one.
+    public let terminal: String?
+
+    /// How much of the question fits after the workspace and the kind on a
+    /// medium tile's row.
+    public static let titleWidth = 40
+
+    public init(_ item: NeedsYouItem) {
+        id = item.key
+        let kind: String
+        switch item.kind {
+        case .ask: kind = "Ask"
+        case .blocked: kind = "Blocked"
+        case .decision: kind = "Decision"
+        case .review: kind = "Review"
+        case .unknown: kind = "Needs You"
+        }
+        let title = item.question.count > Self.titleWidth
+            ? String(item.question.prefix(Self.titleWidth - 1)) + "…" : item.question
+        line = [item.workspaceName, kind, title].filter { !$0.isEmpty }.joined(separator: " · ")
+        hedged = item.isDerived
+        status = item.kind == .review ? "done" : "blocked"
+        terminal = item.terminal?.id
+    }
+}
+
+extension FleetSnapshot {
+    /// What a widget's rows are.
+    public enum WidgetRows: Sendable, Equatable {
+        /// What needs you, in the app's order.
+        case items([WidgetItemRow])
+        /// The agents, most urgent first: every widget's rows before the list.
+        case agents([Agent])
+    }
+
+    /// The rows a widget draws (spec §7): the Needs You items when the app
+    /// wrote any, and otherwise the agents as before. Agents both when the
+    /// snapshot has no list (an older app or runner) and when the list is
+    /// empty: with nothing waiting, what the agents are doing is the thing
+    /// worth the rows.
+    public var widgetRows: WidgetRows {
+        if let items = needsYou, !items.isEmpty { return .items(items.map(WidgetItemRow.init)) }
+        return .agents(ranked)
+    }
+}
+
 // MARK: - Needs You, as the file holds it
 
 extension FleetSnapshot {

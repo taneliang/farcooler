@@ -137,7 +137,11 @@ struct FleetProvider: TimelineProvider {
 /// passes `/` through unchanged; the encoding covers the characters
 /// `URL(string:)` rejects, not path structure.)
 private func terminalURL(_ agent: FleetSnapshot.Agent) -> URL? {
-    let id = agent.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? agent.id
+    terminalURL(id: agent.id)
+}
+
+private func terminalURL(id raw: String) -> URL? {
+    let id = raw.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? raw
     return URL(string: "\(AppScheme.current)://terminal/\(id)")
 }
 
@@ -614,7 +618,10 @@ private struct RowsFleet: View {
             // Only when a real capture came back with nothing. Before the first
             // one, the footer says which of the two this is; "No agents" here
             // as well would answer the question wrongly in the larger type.
-            if entry.snapshot.agents.isEmpty, entry.hasSnapshot {
+            // And not over items, which are the rows when there are any.
+            if case let .agents(agents) = entry.snapshot.widgetRows, agents.isEmpty,
+                entry.hasSnapshot
+            {
                 Text("No agents").font(.headline).foregroundStyle(.secondary)
             }
             // Both counts, above the rows, whenever both have something to say.
@@ -630,17 +637,31 @@ private struct RowsFleet: View {
                     Spacer(minLength: 0)
                 }
             }
-            ForEach(entry.snapshot.ranked.prefix(limit)) { agent in
-                if let url = terminalURL(agent) {
-                    Link(destination: url) {
+            // What needs you when the app wrote a list with anything in it,
+            // and the agents otherwise (spec §7). See
+            // `FleetSnapshot.widgetRows`, where the choice is tested.
+            switch entry.snapshot.widgetRows {
+            case let .items(items):
+                ForEach(items.prefix(limit)) { item in
+                    if let terminal = item.terminal, let url = terminalURL(id: terminal) {
+                        Link(destination: url) { ItemLine(row: item) }
+                    } else {
+                        ItemLine(row: item)
+                    }
+                }
+            case let .agents(agents):
+                ForEach(agents.prefix(limit)) { agent in
+                    if let url = terminalURL(agent) {
+                        Link(destination: url) {
+                            AgentLine(
+                                agent: agent, snapshot: entry.snapshot, at: entry.date,
+                                showsTrace: true)
+                        }
+                    } else {
                         AgentLine(
                             agent: agent, snapshot: entry.snapshot, at: entry.date,
                             showsTrace: true)
                     }
-                } else {
-                    AgentLine(
-                        agent: agent, snapshot: entry.snapshot, at: entry.date,
-                        showsTrace: true)
                 }
             }
             // The large family's whole reason for being: three lines of what
@@ -656,6 +677,39 @@ private struct RowsFleet: View {
             StaleFooter(entry: entry)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// One thing that needs you: its mark and "Billing · Decision · the
+/// question", composed in `WidgetItemRow` where a test reads it.
+///
+/// Not dimmed by age: every kind is latched. A derived item, from a runner too
+/// old to send its own list, is hedged instead: a dimmed mark and "older
+/// runner" under it, since the app guessed it from a blocked agent.
+private struct ItemLine: View {
+    @Environment(\.colorScheme) private var scheme
+    let row: WidgetItemRow
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            GlanceMarkView(GlanceMark(status: row.status).withoutCore, size: .row)
+                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                .opacity(row.hedged ? 0.6 : 1)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(row.line)
+                    .glanceType(.rowName)
+                    // Stated, because a `Link` tints its label. See `AgentLine`.
+                    .foregroundStyle(GlancePalette.ink1(scheme))
+                    .lineLimit(1)
+                if row.hedged {
+                    Text("older runner")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
     }
 }
 

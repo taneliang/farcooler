@@ -1004,3 +1004,49 @@ struct FleetSnapshotTests {
         #expect(snapshot.merging(agent("t1", status: "blocked"), at: now).needsYou == nil)
     }
 }
+
+/// The widget's rows are the Needs You items, with the agents as the fallback.
+struct WidgetRowsTests {
+    private let agent = FleetSnapshot.Agent(
+        id: "t1", label: "claude", machine: "studio", status: "working", glyph: "", headline: "h",
+        line: "", feed: [], rank: 0, turnFailed: false, activityChangedAt: nil)
+
+    private func item(_ kind: NeedsYouKind, question: String, derived: Bool = false) -> NeedsYouItem {
+        NeedsYouItem(
+            id: "\(kind):1", kind: kind, rank: 1, since: nil, workspaceName: "Billing",
+            question: question, runner: "r1", isDerived: derived)
+    }
+
+    /// Mutation: `widgetRows` always `.agents(ranked)`. Red.
+    @Test("The widget's rows are the items when there are any")
+    func theWidgetsRowsAreTheItems() {
+        let snapshot = FleetSnapshot(
+            agents: [agent], capturedAt: Date(), complete: true,
+            needsYou: [item(.decision, question: "Postgres or SQLite for the queue?")])
+        guard case let .items(rows) = snapshot.widgetRows else {
+            Issue.record("agent rows over a list with an item")
+            return
+        }
+        #expect(rows.map(\.line) == ["Billing · Decision · Postgres or SQLite for the queue?"])
+        #expect(rows.first?.hedged == false)
+    }
+
+    /// Mutation: `widgetRows` returning `.items([])` for an empty list. Red.
+    @Test func anEmptyListOrNoListFallsBackToTheAgents() {
+        let none = FleetSnapshot(agents: [agent], capturedAt: Date(), complete: true)
+        let empty = FleetSnapshot(agents: [agent], capturedAt: Date(), complete: true, needsYou: [])
+        #expect(none.widgetRows == .agents([agent]))
+        #expect(empty.widgetRows == .agents([agent]))
+    }
+
+    /// A derived item is hedged, and a long question is cut to fit.
+    ///
+    /// Mutation: `hedged = false`. Red. And the cut removed. Red.
+    @Test func aDerivedItemIsHedgedAndALongQuestionIsCut() {
+        let row = WidgetItemRow(
+            item(.blocked, question: String(repeating: "x", count: 60), derived: true))
+        #expect(row.hedged)
+        #expect(row.line == "Billing · Blocked · " + String(repeating: "x", count: 39) + "…")
+        #expect(WidgetItemRow(item(.review, question: "Ready for review")).status == "done")
+    }
+}
