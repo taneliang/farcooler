@@ -247,6 +247,15 @@ public struct AgentCardState: Codable, Hashable, Sendable {
     public var deletions: Int?
     public var commits: Int?
 
+    /// The HEADLINE's open hook ask, when the runner has one: what a lock-screen
+    /// tap answers while the app is suspended and has never seen the ask
+    /// (ov-57). `nil` means no ask is open now, from a relay or runner older
+    /// than the field, and for any ask the wire got wrong. See `CardAsk`.
+    ///
+    /// The headline's only, never a row's: the card answers its leader and
+    /// nothing else (the T0 contract, C4).
+    public var ask: CardAsk?
+
     /// Whether the relay told this card anything about its fleet.
     ///
     /// The one guard every count below needs. A card started by a relay
@@ -271,7 +280,8 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         commits: Int? = nil,
         more: Int = -1,
         needsYou: Int = -1,
-        rows: [AgentCardRow] = []
+        rows: [AgentCardRow] = [],
+        ask: CardAsk? = nil
     ) {
         self.terminal = terminal
         self.label = label
@@ -289,12 +299,13 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         self.more = more
         self.needsYou = needsYou
         self.rows = rows
+        self.ask = ask
     }
 
     private enum CodingKeys: String, CodingKey {
         case terminal, label, machine, workspace, status, detail, startedAt
         case blocked, review, working, insertions, deletions, commits
-        case more, needsYou, rows
+        case more, needsYou, rows, ask
     }
 
     /// Hand-written for two reasons, and neither is the timestamp alone.
@@ -363,6 +374,10 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         // every field rather than throwing, so this arm is reached only for a
         // `rows` that is not an array at all.
         rows = ((try? container.decodeIfPresent([AgentCardRow].self, forKey: .rows)) ?? nil) ?? []
+        // An ask the wire got wrong is no ask, and never a card that throws:
+        // `CardAsk.init(from:)` throws for exactly the asks the contract says to
+        // treat as absent, and `try?` turns each of those into nil here.
+        ask = (try? container.decodeIfPresent(CardAsk.self, forKey: .ask)) ?? nil
     }
 
     /// The other half of the same decision, and it is not decorative
@@ -401,6 +416,97 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         // it was handed — which is what `AgentCardLayout.init?` reads to tell a
         // card that carries rows from one that never did.
         if !rows.isEmpty { try container.encode(rows, forKey: .rows) }
+        // Absent, never `null`: the contract's "absent means none" holds on the
+        // persisted card too.
+        try container.encodeIfPresent(ask, forKey: .ask)
+    }
+}
+
+/// One open hook ask, as the Live Activity's content state carries it:
+/// `{"id": "hook-ask-…", "tool": "Bash", "until": 1790551063000}`.
+///
+/// The T0 contract's C1, and its three rules live here and nowhere else on this
+/// side of the wire:
+///
+///   - `id` is what `terminal.agent_answer` echoes back. It matches
+///     `^hook-ask-[0-9A-Za-z-]{1,55}$`; anything else is no ask at all.
+///   - `tool` is claude's `tool_name`, a word from a fixed vocabulary and never
+///     content. It matches `^[A-Za-z0-9_.:-]{1,64}$`; anything else costs the
+///     tool and keeps the ask.
+///   - `until` is when the daemon's hold ends, Unix milliseconds on the
+///     runner's clock. It's conservative: the real end is at or after it, so a
+///     phone that refuses at `until` refuses early, never late.
+///
+/// **Never on the wire:** option names, `tool_input`, a command line. The
+/// buttons' words are this side's (`CardAskSource`), so there is nothing here a
+/// locked screen could leak.
+public struct CardAsk: Codable, Hashable, Sendable {
+    public var id: String
+    public var tool: String?
+    public var until: Date
+
+    public init(id: String, tool: String? = nil, until: Date) {
+        self.id = id
+        self.tool = tool
+        self.until = until
+    }
+
+    /// Whether the daemon's hold is over at `now`, so a tap can only be
+    /// refused. At `until` exactly counts as over: `until` is the earliest the
+    /// hold can end.
+    public func isOver(at now: Date) -> Bool { now >= until }
+
+    /// The prefix every hook ask's id carries, and the only asks the card
+    /// answers.
+    public static let idPrefix = "hook-ask-"
+
+    static func isValid(id: String) -> Bool {
+        guard id.hasPrefix(idPrefix) else { return false }
+        let tail = id.dropFirst(idPrefix.count)
+        return (1...55).contains(tail.count)
+            && tail.unicodeScalars.allSatisfy { $0.isASCIIAlphanumeric || $0 == "-" }
+    }
+
+    static func isValid(tool: String) -> Bool {
+        (1...64).contains(tool.utf8.count)
+            && tool.unicodeScalars.allSatisfy {
+                $0.isASCIIAlphanumeric || "_.:-".unicodeScalars.contains($0)
+            }
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, tool, until }
+
+    /// Throws for an ask the contract calls absent, which `AgentCardState`
+    /// turns into nil; a bad `tool` alone becomes nil and keeps the ask.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try container.decode(String.self, forKey: .id)
+        let number = try container.decode(Double.self, forKey: .until)
+        guard Self.isValid(id: id), number.isFinite,
+            let until = AgentCardClock.date(number)
+        else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .id, in: container, debugDescription: "Not an ask the card can answer.")
+        }
+        self.id = id
+        self.until = until
+        let tool = (try? container.decodeIfPresent(String.self, forKey: .tool)) ?? nil
+        self.tool = tool.flatMap { Self.isValid(tool: $0) ? $0 : nil }
+    }
+
+    /// `until` goes back as milliseconds, which is what the decoder reads, so
+    /// a persisted card's hold ends when it did.
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(tool, forKey: .tool)
+        try container.encode(AgentCardClock.number(until), forKey: .until)
+    }
+}
+
+extension Unicode.Scalar {
+    fileprivate var isASCIIAlphanumeric: Bool {
+        ("0"..."9").contains(self) || ("a"..."z").contains(self) || ("A"..."Z").contains(self)
     }
 }
 

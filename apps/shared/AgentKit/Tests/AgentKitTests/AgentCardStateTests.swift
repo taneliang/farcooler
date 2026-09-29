@@ -172,3 +172,109 @@ private func decode(_ json: String) throws -> AgentCardState {
     let keys = try JSONSerialization.jsonObject(with: JSONEncoder().encode(untold))
     #expect((keys as? [String: Any])?["blocked"] == nil)
 }
+
+// MARK: - The headline's ask (ov-57, T0 contract C1 and C4.2)
+
+/// A relay older than the ask sends no `ask` key, and the card is exactly the
+/// card it was: nothing else moves, and there is no ask.
+///
+/// Mutation: `ask` decoded to a placeholder rather than nil when absent.
+@Test func aStateWithoutAnAskDecodesAsBefore() throws {
+    let state = try decode(
+        """
+        {"terminal":"t","label":"claude","machine":"studio","workspace":"Billing",
+         "status":"blocked","detail":"Run this command?","blocked":1,"review":0,"working":0}
+        """)
+    #expect(state.ask == nil)
+    #expect(state.status == "blocked")
+    #expect(state.workspace == "Billing")
+    #expect(state.detail == "Run this command?")
+}
+
+/// The ask is the headline's, carried as the relay carries it: an id, maybe a
+/// tool, and when the daemon's hold ends in Unix milliseconds.
+///
+/// Mutation: `until` read as seconds. Red: a date 1000 times too far out.
+@Test func anAskDecodesItsIdToolAndHoldEnd() throws {
+    let state = try decode(
+        """
+        {"terminal":"t","status":"blocked","detail":"",
+         "ask":{"id":"hook-ask-0199a1b2-7c3d-7e4f-8a9b-0c1d2e3f4a5b","tool":"Bash",
+                "until":1790551063000}}
+        """)
+    #expect(state.ask?.id == "hook-ask-0199a1b2-7c3d-7e4f-8a9b-0c1d2e3f4a5b")
+    #expect(state.ask?.tool == "Bash")
+    #expect(state.ask?.until == Date(timeIntervalSince1970: 1_790_551_063))
+}
+
+/// Every way an ask can be wrong costs the ask, or only its tool, and never the
+/// card: an activity whose state throws is one nothing can end.
+///
+/// Mutation: `CardAsk.init(from:)` decoding strictly. Red: the decode throws.
+@Test func aMalformedAskCostsTheAskNotTheCard() throws {
+    let noAsk = [
+        #""ask":"hook-ask-1""#,  // not an object
+        #""ask":{"tool":"Bash","until":1790551063000}"#,  // no id
+        #""ask":{"id":"hook-ask-1","tool":"Bash"}"#,  // no until
+        #""ask":{"id":"ask-1","until":1790551063000}"#,  // not a hook ask
+        #""ask":{"id":"hook-ask-","until":1790551063000}"#,  // nothing after the prefix
+        #""ask":{"id":"hook-ask-a b","until":1790551063000}"#,  // outside the id's alphabet
+        "\"ask\":{\"id\":\"hook-ask-\(String(repeating: "a", count: 56))\",\"until\":1790551063000}",
+        #""ask":{"id":"hook-ask-1","until":0}"#,  // not a time
+        #""ask":{"id":"hook-ask-1","until":-5}"#,
+        #""ask":{"id":"hook-ask-1","until":"soon"}"#,
+        #""ask":null"#,
+    ]
+    for field in noAsk {
+        let state = try decode(#"{"terminal":"t","status":"blocked","detail":"Run?","#
+            + field + "}")
+        #expect(state.ask == nil, "\(field)")
+        #expect(state.terminal == "t" && state.detail == "Run?", "\(field)")
+    }
+
+    // A tool outside the vocabulary costs the tool and keeps the ask.
+    let badTools = [
+        #""tool":"rm -rf /""#, #""tool":"""#, #""tool":7"#,
+        "\"tool\":\"\(String(repeating: "a", count: 65))\"",
+    ]
+    for tool in badTools {
+        let state = try decode(
+            #"{"status":"blocked","detail":"","ask":{"id":"hook-ask-1","until":1790551063000,"#
+                + tool + "}}")
+        #expect(state.ask?.id == "hook-ask-1", "\(tool)")
+        #expect(state.ask?.tool == nil, "\(tool)")
+    }
+
+    // The widest legal values pass: a 55-character id tail and a 64-byte MCP tool.
+    let widest = try decode(
+        "{\"status\":\"blocked\",\"detail\":\"\",\"ask\":{\"id\":\"hook-ask-"
+            + String(repeating: "a", count: 55) + "\",\"tool\":\"mcp__"
+            + String(repeating: "b", count: 59) + "\",\"until\":1790551063000}}")
+    #expect(widest.ask?.id.count == 64)
+    #expect(widest.ask?.tool?.count == 64)
+}
+
+/// ActivityKit persists a card by encoding it, so the ask has to come back as
+/// it went in: `until` in milliseconds, and a missing tool still missing. A
+/// card with no ask writes no `ask` key, never `"ask": null`.
+///
+/// Mutation: `ask` left out of `encode(to:)`. Red: the round trip loses it.
+@Test func anAskRoundTripsThroughPersistence() throws {
+    let withTool = try decode(
+        #"{"terminal":"t","status":"blocked","detail":"","ask":{"id":"hook-ask-1","tool":"Edit","until":1790551063250}}"#)
+    let withoutTool = try decode(
+        #"{"terminal":"t","status":"blocked","detail":"","ask":{"id":"hook-ask-2","until":1790551063000}}"#)
+    let none = try decode(#"{"terminal":"t","status":"blocked","detail":""}"#)
+
+    for state in [withTool, withoutTool, none] {
+        let back = try JSONDecoder().decode(
+            AgentCardState.self, from: JSONEncoder().encode(state))
+        #expect(back == state)
+    }
+
+    let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(withTool))
+    let ask = (written as? [String: Any])?["ask"] as? [String: Any]
+    #expect((ask?["until"] as? NSNumber)?.int64Value == 1_790_551_063_250)
+    let bare = try JSONSerialization.jsonObject(with: JSONEncoder().encode(none))
+    #expect((bare as? [String: Any]).map { $0.keys.contains("ask") } == false)
+}
