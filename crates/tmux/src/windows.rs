@@ -369,7 +369,11 @@ impl TmuxServer {
         // window the way `resize-window` does, squeezing the edge again.
         let (columns, rows) = self.window_size(window_id).await?;
         let Some(scaled) = crate::layout::scale(layout, columns, rows) else { return Ok(()) };
-        self.expect(&["select-layout", "-t", window_id, &scaled], "select-layout a scaled layout").await?;
+        // Refused only if the panes changed between the read and now, and then
+        // the resize has still happened; the viewport is not an error for it.
+        if self.expect(&["select-layout", "-t", window_id, &scaled], "select-layout a scaled layout").await.is_err() {
+            return Ok(());
+        }
         if zoomed == "1" {
             self.expect(&["resize-pane", "-Z", "-t", window_id], "resize-pane -Z").await?;
         }
