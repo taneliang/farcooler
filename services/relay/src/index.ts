@@ -173,7 +173,11 @@ async function refreshSession(request: Request, env: Env): Promise<Response> {
 /// authority, as it is for the refresh token.
 async function logout(request: Request, env: Env): Promise<Response> {
   const body = await request.json<{ refreshToken?: unknown; pulseToken?: unknown }>()
-  const pulseToken = typeof body.pulseToken === 'string' && body.pulseToken ? body.pulseToken : null
+  // In the shape a phone makes one, as registration requires; anything else
+  // is no token.
+  const pulseToken = typeof body.pulseToken === 'string' && /^[0-9a-f]{64}$/.test(body.pulseToken)
+    ? body.pulseToken
+    : null
   if (pulseToken) {
     await env.DB.prepare(`UPDATE devices SET pulse_hash = NULL WHERE pulse_hash = ?`)
       .bind(await sha256(pulseToken))
@@ -1913,30 +1917,39 @@ interface Fleet {
 ///
 /// `live` is a token that is speaking in this very request: its runner is not
 /// quiet, whatever its last beat says. See `quietOf`.
+///
+/// `purge` false reads without the three writes, for the sweep's comparison
+/// (review m2): a card whose quiet runners haven't changed costs two reads
+/// every five minutes and no writes. A day-old row it reads there only
+/// decides whether to push; the push itself goes through `refreshCard`,
+/// which purges first.
 async function readFleet(
   env: Env,
   account: string,
   now: number,
   live?: string,
+  purge = true,
 ): Promise<Roster> {
-  await env.DB.prepare(`DELETE FROM live_activities WHERE account_id = ? AND updated_at < ?`)
-    .bind(account, now - ROW_RETENTION_MS)
-    .run()
-  await env.DB.prepare(
-    `UPDATE daemons SET needs_you = NULL, needs_you_at = NULL
-     WHERE account_id = ? AND needs_you_at < ?`,
-  )
-    .bind(account, now - ROW_RETENTION_MS)
-    .run()
-  // An ask whose hold has ended is over whether or not the runner said so:
-  // the daemon refuses it as `not_held` from then on. Nulled here so it
-  // reaches no card, even if the `kind: "ask"` clear was lost.
-  await env.DB.prepare(
-    `UPDATE live_activities SET ask_id = NULL, ask_tool = NULL, ask_until = NULL
-     WHERE account_id = ? AND ask_until < ?`,
-  )
-    .bind(account, now)
-    .run()
+  if (purge) {
+    await env.DB.prepare(`DELETE FROM live_activities WHERE account_id = ? AND updated_at < ?`)
+      .bind(account, now - ROW_RETENTION_MS)
+      .run()
+    await env.DB.prepare(
+      `UPDATE daemons SET needs_you = NULL, needs_you_at = NULL
+       WHERE account_id = ? AND needs_you_at < ?`,
+    )
+      .bind(account, now - ROW_RETENTION_MS)
+      .run()
+    // An ask whose hold has ended is over whether or not the runner said so:
+    // the daemon refuses it as `not_held` from then on. Nulled here so it
+    // reaches no card, even if the `kind: "ask"` clear was lost.
+    await env.DB.prepare(
+      `UPDATE live_activities SET ask_id = NULL, ask_tool = NULL, ask_until = NULL
+       WHERE account_id = ? AND ask_until < ?`,
+    )
+      .bind(account, now)
+      .run()
+  }
 
   const rows = await env.DB.prepare(
     `SELECT terminal, label, machine, daemon_id, workspace, status, detail, insertions, deletions,
@@ -3080,7 +3093,7 @@ export async function sweepQuiet(env: Env): Promise<void> {
     .all<{ account_id: string; quiet: string | null }>()
   for (const card of cards.results ?? []) {
     try {
-      const { quiet } = await readFleet(env, card.account_id, Date.now())
+      const { quiet } = await readFleet(env, card.account_id, Date.now(), undefined, false)
       if (JSON.stringify(quiet.names) === (card.quiet ?? '[]')) continue
       await refreshCard(env, card.account_id, undefined, true)
     } catch (error) {

@@ -6677,6 +6677,12 @@ describe('the runner heartbeat', () => {
     expect((await pulse(other)).status).toBe(200)
   })
 
+  it("reads a sign-out's pulse token only in the shape a phone makes one", async () => {
+    // 64 hex characters, as registration requires. Anything else is no
+    // token, and with no refresh token either, the request is refused.
+    expect((await post('/v1/auth/logout', { pulseToken: 'nope' })).status).toBe(400)
+  })
+
   it('forgets the pulse token at sign-out even with no refresh token to end', async () => {
     const token = await pulseToken('user_1')
     expect((await post('/v1/auth/logout', { pulseToken: token })).status).toBe(200)
@@ -6946,6 +6952,20 @@ describe('a runner that stops beating, on the card', () => {
     const before = pushes(calls).length
     await sweep()
     expect(updates(calls, before)).toEqual([])
+  })
+
+  it('changes nothing it has no push for: the sweep only reads', async () => {
+    // A day-old row is purged by the next notice or push, not by a sweep
+    // that finds nothing to say: five-minute writes for every card would be
+    // load for nothing (review m2).
+    watchFetch()
+    await card()
+    const dayAgo = Date.now() - 25 * 60 * 60 * 1000
+    await env.DB.prepare(`UPDATE live_activities SET updated_at = ? WHERE terminal = 'aria'`)
+      .bind(dayAgo)
+      .run()
+    await sweep()
+    expect(await roster('user_1')).toEqual(['aria'])
   })
 
   it('runs every five minutes, on all four relays', () => {
