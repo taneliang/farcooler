@@ -1785,18 +1785,18 @@ struct ContentView: View {
             reorderable: WorktreeDrag.offersDrag(usable: usable, runner: client?.daemonBuild),
             moveTargets: Self.moveTargets(for: listed, in: store.fleet, assigns: Self.assigns(store)(listed)),
             onMove: { target in move(listed, to: target) },
-            roleOffer: roleOffer(on: ws.host ?? ""),
+            roleOffer: roleOffer(in: listed),
             changes: changesStatus(ws),
             countsWidth: countsWidth
         )
     }
 
-    /// `OrchestratorAdoption.offer` on `host`, as the fleet has it when the
-    /// menu opens. Hoisted for `worktreeRow`'s type checker, as
+    /// `OrchestratorAdoption.offer` in `worktree`, as the fleet has it when
+    /// the menu opens. Hoisted for `worktreeRow`'s type checker, as
     /// `changesStatus` is.
-    private func roleOffer(on host: String) -> (Terminal) -> OrchestratorAdoption.Offer? {
+    private func roleOffer(in worktree: Worktree) -> (Terminal) -> OrchestratorAdoption.Offer? {
         let store = store
-        return { OrchestratorAdoption.offer(for: $0, host: host, in: store.fleet) }
+        return { OrchestratorAdoption.offer(for: $0, in: worktree, host: worktree.host ?? "", fleet: store.fleet) }
     }
 
     /// The diff column's width, for every row in the sidebar at once.
@@ -2669,7 +2669,7 @@ struct ContentView: View {
         let (refused, message) = await client.setRole(pane.terminal, to: OrchestratorAdoption.steppedDown(pane.terminal))
         if refused {
             errorBanner = OrchestratorAdoption.refusal(
-                message, terminal: pane.terminal.label, workspace: workspace?.name ?? "This workspace")
+                message, terminal: pane.terminal.label, workspace: workspace?.name ?? "The workspace")
         }
     }
 

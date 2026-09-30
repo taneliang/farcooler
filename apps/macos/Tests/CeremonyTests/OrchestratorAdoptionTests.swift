@@ -24,7 +24,7 @@ struct OrchestratorAdoptionTests {
     /// The owner's Main: claude run by hand in a shell, sleepnomore beside
     /// it, a stopped shell, and Billing's orchestrator.
     private static func fleet(seated: String? = nil, extra: [Terminal] = []) -> Fleet {
-        let checkout = Worktree(
+        var checkout = Worktree(
             id: "checkout", short: "co", task: "main", branch: "main", repository: "overnight", host: "",
             path: "/tmp/co", state: "active",
             terminals: [
@@ -33,6 +33,7 @@ struct OrchestratorAdoptionTests {
                 terminal("bill", preset: "claude", workspace: billing, role: "orchestrator"),
             ] + extra,
             repositoryID: repo, workspace: main)
+        checkout.is_main_checkout = true
         var fleet = Fleet(runtimeHealthy: true, livePanes: 0, worktrees: [checkout], branchPrefix: nil)
         fleet.runnerWorkspaces[""] = [
             WorkspaceSummary(id: main, name: "Main", taskPrefix: "fc", isMain: true, ordinal: 0, repository: repo, orchestrator: seated),
@@ -44,16 +45,26 @@ struct OrchestratorAdoptionTests {
     @Test("Running terminals of a listed workspace are offered, orchestrators step down")
     func whatIsOffered() {
         let fleet = Self.fleet()
-        let t = fleet.worktrees[0].terminals
-        #expect(OrchestratorAdoption.offer(for: t[0], host: "", in: fleet) == .use)
-        #expect(OrchestratorAdoption.offer(for: t[1], host: "", in: fleet) == .use)
-        #expect(OrchestratorAdoption.offer(for: t[2], host: "", in: fleet) == nil, "an exited terminal was offered")
-        #expect(OrchestratorAdoption.offer(for: t[3], host: "", in: fleet) == .stepDown)
+        let w = fleet.worktrees[0]
+        let t = w.terminals
+        #expect(OrchestratorAdoption.offer(for: t[0], in: w, host: "", fleet: fleet) == .use)
+        #expect(OrchestratorAdoption.offer(for: t[1], in: w, host: "", fleet: fleet) == .use)
+        #expect(OrchestratorAdoption.offer(for: t[2], in: w, host: "", fleet: fleet) == nil, "an exited terminal was offered")
+        #expect(OrchestratorAdoption.offer(for: t[3], in: w, host: "", fleet: fleet) == .stepDown)
         // No workspace, or a runner without workspaces: nothing to run.
-        #expect(OrchestratorAdoption.offer(for: Self.terminal("x", preset: "zsh", workspace: nil), host: "", in: fleet) == nil)
+        #expect(OrchestratorAdoption.offer(for: Self.terminal("x", preset: "zsh", workspace: nil), in: w, host: "", fleet: fleet) == nil)
         var old = fleet
         old.runnerWorkspaces[""] = nil
-        #expect(OrchestratorAdoption.offer(for: t[0], host: "", in: old) == nil)
+        #expect(OrchestratorAdoption.offer(for: t[0], in: w, host: "", fleet: old) == nil)
+
+        // A task's agent works its task, and a task worktree isn't where
+        // orchestrators run: neither is offered.
+        var agent = Self.terminal("a", preset: "claude")
+        agent.taskId = "t-1"
+        #expect(OrchestratorAdoption.offer(for: agent, in: w, host: "", fleet: fleet) == nil, "a task's agent was offered")
+        var lane = w
+        lane.is_main_checkout = false
+        #expect(OrchestratorAdoption.offer(for: t[0], in: lane, host: "", fleet: fleet) == nil, "a task worktree's terminal was offered")
 
         // The empty state lists Main's own running terminals, by the
         // runner's order, and not Billing's orchestrator.
@@ -73,9 +84,18 @@ struct OrchestratorAdoptionTests {
         let unseated = Self.fleet()
         #expect(OrchestratorAdoption.replacing(sleep, in: unseated.runnerWorkspaces[""]![0], host: "", fleet: unseated) == nil)
 
+        // A lost seat isn't replaced, or named as running: the runner
+        // vacates it itself.
+        var lost = fleet
+        lost.worktrees[0].terminals[0].state = "lost"
+        #expect(OrchestratorAdoption.replacing(sleep, in: main, host: "", fleet: lost) == nil)
+
         // It steps down to what it would have been made as.
         #expect(OrchestratorAdoption.steppedDown(fleet.worktrees[0].terminals[0]) == "agent")
         #expect(OrchestratorAdoption.steppedDown(fleet.worktrees[0].terminals[1]) == "shell")
+        var handoff = fleet.worktrees[0].terminals[0]
+        handoff.taskId = "t-1"
+        #expect(OrchestratorAdoption.steppedDown(handoff) == "shell", "a handoff's claude would join its task's column")
     }
 
     @Test("A refusal is a sentence")
@@ -88,6 +108,7 @@ struct OrchestratorAdoptionTests {
         let loose = "error: x\ncode: invalid-argument\nwhat: workspace"
         #expect(OrchestratorAdoption.refusal(loose, terminal: "claude", workspace: "Main") == "claude isn’t in a workspace, so it can’t be an orchestrator.")
         #expect(OrchestratorAdoption.refusal("code: not-found", terminal: "claude", workspace: "Main") == "claude isn’t on this runner anymore.")
+        #expect(OrchestratorAdoption.refusal("code: resource-conflict", terminal: "claude", workspace: "Main") == "Main changed while you were choosing. Try again.")
         #expect(OrchestratorAdoption.refusal(nil, terminal: "claude", workspace: "Main").hasPrefix("Couldn’t change what claude is."))
         for message in [taken, loose, "code: internal"] {
             let said = OrchestratorAdoption.refusal(message, terminal: "claude", workspace: "Main")

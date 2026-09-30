@@ -258,11 +258,15 @@ enum OrchestratorAdoption {
 
     /// What `terminal`'s menu offers, or nil for nothing: Stop Being
     /// Orchestrator on an orchestrator, and Use as Orchestrator on a running
-    /// terminal of a workspace its runner lists. Never on a changes pane,
-    /// which runs `farcooler` and not anything that could run a board.
-    static func offer(for terminal: Terminal, host: String, in fleet: Fleet) -> Offer? {
+    /// terminal of a workspace its runner lists, in the main checkout, where
+    /// orchestrators run. Never on a task's agent, which works its task, nor
+    /// on a changes pane, which runs `farcooler`. The runner itself asks
+    /// only for a workspace (`set_terminal_role_with`); the rest is this
+    /// app's, so the menu offers what the owner means by it.
+    static func offer(for terminal: Terminal, in worktree: Worktree, host: String, fleet: Fleet) -> Offer? {
         if terminal.isOrchestrator { return .stepDown }
-        guard !terminal.isChangesPane, StateKind.parse(terminal.state) == .running,
+        guard worktree.isMainCheckout, terminal.taskId == nil,
+            !terminal.isChangesPane, StateKind.parse(terminal.state) == .running,
             let id = terminal.workspace, let listed = fleet.runnerWorkspaces[host],
             let workspace = listed.first(where: { $0.id == id }), !workspace.isImplicit
         else { return nil }
@@ -275,25 +279,30 @@ enum OrchestratorAdoption {
     static func candidates(for workspace: WorkspaceSummary, host: String, in fleet: Fleet) -> [BoardPane] {
         fleet.worktrees.filter { ($0.host ?? "") == host }.flatMap { worktree in
             worktree.terminals
-                .filter { $0.workspace == workspace.id && offer(for: $0, host: host, in: fleet) == .use }
+                .filter { $0.workspace == workspace.id && offer(for: $0, in: worktree, host: host, fleet: fleet) == .use }
                 .map { BoardPane(terminal: $0, worktree: worktree) }
         }
     }
 
     /// The orchestrator `pane` would replace, which has to step down first
     /// and which the app names in a confirmation: `workspace`'s seat, unless
-    /// that's `pane` already. Nil with nobody to replace.
+    /// that's `pane` already. Nil with nobody to replace, and for a seat
+    /// that's lost or exited: the runner vacates that one itself, and "keeps
+    /// running" would be false of it.
     static func replacing(_ pane: BoardPane, in workspace: WorkspaceSummary, host: String, fleet: Fleet) -> BoardPane? {
         guard let seat = WorkspaceScreen.orchestrator(of: workspace, host: host, in: fleet),
-            seat.terminal.id != pane.terminal.id
+            seat.terminal.id != pane.terminal.id,
+            [.running, .starting].contains(StateKind.parse(seat.terminal.state))
         else { return nil }
         return seat
     }
 
     /// The role an orchestrator steps down to: `agent` while an agent runs
-    /// in it, `shell` otherwise, as it would have been made.
+    /// in it, `shell` otherwise, as it would have been made. `shell` too for
+    /// one carrying a task id, a handoff's: as an agent it would count as
+    /// working that task and turn up in its column.
     static func steppedDown(_ terminal: Terminal) -> String {
-        terminal.runsAgent ? "agent" : "shell"
+        terminal.runsAgent && terminal.taskId == nil ? "agent" : "shell"
     }
 
     /// Why a role wasn't set, by the `code:` and `what:` words on the CLI's
@@ -310,6 +319,8 @@ enum OrchestratorAdoption {
             return "This runner’s Far Cooler is too old to make a running terminal the orchestrator. Update it there, then try again."
         case ("scope-denied", _):
             return "This runner lets Far Cooler see its terminals but not change them."
+        case ("resource-conflict", _):
+            return "\(workspace) changed while you were choosing. Try again."
         case (.some, _):
             return "This runner couldn’t change what \(terminal) is. That’s a problem in the app, not in anything you did."
         case (nil, _):

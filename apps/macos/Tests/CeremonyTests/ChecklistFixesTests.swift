@@ -13,9 +13,15 @@ struct ChecklistFixesTests {
         #expect(SearchEscape.after(query: "") == ("", false))
     }
 
-    /// F2: a narrow board says it short, on one line.
+    /// F2: a narrow board says it short, on one line: a form that is
+    /// shorter than the sentence and still carries the count.
     @Test func theWaitingPillHasAShortForm() {
-        #expect(TaskBoardView.waitingShort(2) == "2 waiting")
+        for count in [1, 2, 12] {
+            let sentence = try! #require(TaskBoardModel.waitingSentence(count))
+            let short = TaskBoardView.waitingShort(count)
+            #expect(short.count < sentence.count, "the short form is no shorter: \(short)")
+            #expect(short.hasPrefix("\(count) "))
+        }
     }
 
     /// O7: a lost orchestrator's header names no "shell".
