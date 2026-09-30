@@ -127,18 +127,20 @@ extension GlanceAnswer {
     ///
     /// The daemon refuses both `not_held` (answered, withdrawn, or the hold ran
     /// out) and `not_delivered` (the verdict never reached the hook) with the
-    /// word `resource-conflict`, and says which in the message
-    /// (`crates/daemon/src/rpc.rs`, `terminal.agent_answer`). Both are `.over`.
+    /// word `resource-conflict`, and says which in `what`
+    /// (`crates/daemon/src/rpc.rs`, `terminal.agent_answer`; read with
+    /// `RunnerRefusal.what(inAnswerLine:)`). Both are `.over`. An absent
+    /// `what` is read as `not_held`.
     /// Which sentence depends on the cause and, for `not_held`, on whether the
     /// hold had run out when the tap was made.
     public static func closing(
-        request: String, word: String?, message: String, until: Date?, now: Date
+        request: String, word: String?, what: String?, until: Date?, now: Date
     ) -> Closing? {
         guard request.hasPrefix(CardAsk.idPrefix),
             word == RunnerRefusal.resourceConflict.rawValue
         else { return nil }
         let sentence: String
-        if message.contains("not_delivered") {
+        if what == "not_delivered" {
             sentence = ClosedAskWording.tooLate
         } else if let until {
             sentence = now >= until ? ClosedAskWording.tooLate : ClosedAskWording.answeredElsewhere

@@ -957,12 +957,13 @@ final class WatchLinkHost: NSObject {
                     .nothingSent,
                     "Your \(DeviceKind.current) couldn’t start its connection. Nothing was sent."
                 )
-            case let .rejected(refusal, word):
+            case let .rejected(_, word, what):
                 // A hook ask the runner no longer holds is over, not unsent:
-                // `not_held` or `not_delivered`, both `resource-conflict`.
+                // `not_held` or `not_delivered`, both `resource-conflict`, told
+                // apart by the runner's `what` and never by its prose.
                 // `.over` keeps the buttons off (ov-57, `GlanceAnswer.closing`).
                 if let closing = GlanceAnswer.closing(
-                    request: intent.request, word: word, message: refusal,
+                    request: intent.request, word: word, what: what,
                     until: intent.until, now: Date())
                 {
                     return (closing.outcome, closing.message)
@@ -1156,7 +1157,7 @@ final class WatchLinkHost: NSObject {
         // path not found" is a bug in this app rather than a pane that closed,
         // and the two are opposite things for a watch to say.
         if let core = error as? ClientCore.CoreError,
-            case let .rejected(_, word) = core,
+            case let .rejected(_, word, _) = core,
             word == RunnerRefusal.notFound.rawValue
         {
             return "That agent isn’t running anymore."

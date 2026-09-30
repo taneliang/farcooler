@@ -58,7 +58,12 @@ actor ClientCore {
         /// is produced, and the six screens below were reduced to matching
         /// substrings of a Rust `Display` string because nothing brought it
         /// across.
-        case rejected(String, word: String?)
+        ///
+        /// `what` is the case of the refusal the runner named, where it named
+        /// one: `not_held` or `not_delivered` for a hook ask's answer, which
+        /// share the word `resource-conflict`. Carried for the word's reason;
+        /// the prose never contains it (`crates/core/src/error.rs`).
+        case rejected(String, word: String?, what: String? = nil)
         /// The link is gone, as opposed to the request being refused.
         ///
         /// Answered by the core rather than worked out from the message here:
@@ -72,7 +77,7 @@ actor ClientCore {
         var errorDescription: String? {
             switch self {
             case .notStarted: return "The client core could not be started."
-            case .rejected(let message, _): return message
+            case .rejected(let message, _, _): return message
             case .disconnected(let message): return message
             case .malformed: return "The client core returned something unreadable."
             }
@@ -121,7 +126,7 @@ actor ClientCore {
     /// generic sentence for that particular screen lives, so the word has to
     /// travel without the sentence being chosen yet.
     static func refusalWord(of error: Error) -> String? {
-        guard let core = error as? CoreError, case let .rejected(_, word) = core else { return nil }
+        guard let core = error as? CoreError, case let .rejected(_, word, _) = core else { return nil }
         return word
     }
 
@@ -342,7 +347,8 @@ actor ClientCore {
                 } else {
                     continuation.resume(
                         throwing: CoreError.rejected(
-                            message, word: RunnerRefusal.word(inAnswerLine: object)))
+                            message, word: RunnerRefusal.word(inAnswerLine: object),
+                            what: RunnerRefusal.what(inAnswerLine: object)))
                 }
             }
         }

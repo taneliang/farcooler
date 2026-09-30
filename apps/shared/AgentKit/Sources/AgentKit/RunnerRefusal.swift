@@ -189,6 +189,15 @@ public enum RunnerRefusal: String, CaseIterable, Sendable {
         line["code"] as? String
     }
 
+    /// Which case of its refusal the runner named, off the same line:
+    /// `not_held` or `not_delivered` for a hook ask's answer. The daemon's
+    /// `what`, forwarded by `crates/client/src/ffi.rs`; absent where it named
+    /// none. Never recovered from the prose, which by rule never carries it
+    /// (`crates/core/src/error.rs`).
+    public static func what(inAnswerLine line: [String: Any]) -> String? {
+        line["what"] as? String
+    }
+
     /// A word this build has a sentence for, or nil for every other input —
     /// absent, empty, the generic, a code that cannot reach a phone, and a code
     /// from a runner newer than this build.

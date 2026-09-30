@@ -80,11 +80,18 @@ struct PermissionAnsweringTests {
     private static let before = until.addingTimeInterval(-10)
     private static let after = until.addingTimeInterval(10)
 
+    /// A refusal as the FFI's failure line carries it: the code, the daemon's
+    /// `what`, and prose that never contains the `what` (`error.rs`).
     private func closed(
-        _ message: String, request: String = "hook-ask-1", word: String? = "resource-conflict",
+        _ what: String?, request: String = "hook-ask-1", word: String? = "resource-conflict",
         until: Date? = until, now: Date
     ) -> GlanceAnswer.Closing? {
-        GlanceAnswer.closing(request: request, word: word, message: message, until: until, now: now)
+        var line: [String: Any] = ["error": "Someone already answered this."]
+        if let word { line["code"] = word }
+        if let what { line["what"] = what }
+        return GlanceAnswer.closing(
+            request: request, word: RunnerRefusal.word(inAnswerLine: line),
+            what: RunnerRefusal.what(inAnswerLine: line), until: until, now: now)
     }
 
     /// Two devices raced and the other won inside the hold: the ask is over,
@@ -109,16 +116,33 @@ struct PermissionAnsweringTests {
     }
 
     /// The verdict never reached the hook, so the dialog is still at the
-    /// keyboard, whenever the tap was.
+    /// keyboard, whenever the tap was. Fed the failure line exactly as the FFI
+    /// writes it: the cause is the `what` key, and the prose never names it.
     ///
-    /// Mutation: `not_delivered` read as `not_held`. Red: "Answered on another
-    /// device."
-    @Test func aNotDeliveredSaysTooLate() {
+    /// Mutation: the cause read from the prose rather than `what`. Red:
+    /// "Answered on another device." inside the hold.
+    @Test func aNotDeliveredLineSaysTooLate() throws {
+        let text = #"{"ok":false,"code":"resource-conflict","what":"not_delivered","error":"The answer didn't reach the agent. Try again."}"#
+        let line = try #require(
+            try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+        #expect(RunnerRefusal.what(inAnswerLine: line) == "not_delivered")
         for now in [Self.before, Self.after] {
-            let closing = closed("not_delivered", now: now)
+            let closing = GlanceAnswer.closing(
+                request: "hook-ask-1", word: RunnerRefusal.word(inAnswerLine: line),
+                what: RunnerRefusal.what(inAnswerLine: line), until: Self.until, now: now)
             #expect(closing?.outcome == .over)
             #expect(closing?.message == "Too late here. Answer it in the terminal.")
         }
+    }
+
+    /// A line with no `what` (a runner older than it) reads as `not_held`,
+    /// by the hold's end, as before.
+    ///
+    /// Mutation: an absent `what` read as `not_delivered`. Red: "Too late
+    /// here" inside the hold.
+    @Test func aLineWithNoWhatReadsAsNotHeld() {
+        #expect(RunnerRefusal.what(inAnswerLine: ["code": "resource-conflict"]) == nil)
+        #expect(closed(nil, now: Self.before)?.message == "Answered on another device.")
     }
 
     /// With no `until` to go by, the sentence claims neither cause.
