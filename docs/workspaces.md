@@ -1,27 +1,241 @@
 # Workspaces and worktrees
 
-Far Cooler used to call one worktree plus its branch a *workspace*. That thing
-is now called a *worktree*, and *workspace* is kept for something one level
-up: a line of work with its own board and its own orchestrator, which owns the
-worktrees its agents are using.
+A **workspace** is one line of work in a repository. It has its own board of
+tasks, its own charter (the rules for how that work gets done), and its own
+orchestrator: the lead agent you talk to about it. You keep one line of work,
+and one conversation, separate from the rest by giving it a workspace.
 
-Each word gets one job:
+A **worktree** is a directory git made, with its branch. Agents do their work in
+worktrees, and a workspace owns the worktrees its agents are using.
 
-> **workspace** — a workstream: its board, its charter, its orchestrator, and
-> the worktrees it owns. What a person creates to keep one line of work, and
-> one conversation, separate from the rest.
->
-> **worktree** — the directory git made and its branch, and everything done to
-> one: creating, removing, reviewing its diff, opening it in an editor, running
-> an agent in it.
+Every repository starts with one workspace, called Main. When a thread of work
+grows large enough to crowd out the rest, you split it off into a workspace of
+its own. A runner too old to know about workspaces still shows its repository's
+single board, with no conversation column and no orchestrator.
 
-Worktrees are here today. Workspaces arrive with workstreams, which are being
-built now: until they land there is no workspace command, no Main, and no
-orchestrator a runner records as one, and a repository's single board belongs
-to the repository. When they land, every repository gets one workspace, called
-Main, and others are split off from it when a thread of work grows large enough
-to crowd the rest. Worktrees are disposable: agents make and remove them
-freely, and each will belong to at most one workspace.
+## The words
+
+Six nouns, each with one meaning, on the Mac, the phones and the command line.
+
+- **Workspace**: a line of work, with its board, its charter, its orchestrator,
+  and the worktrees it owns.
+- **Orchestrator**: a workspace's lead agent. It reads the charter, puts work on
+  the board, dispatches agents, and asks you when it needs a decision. It
+  manages the work; it doesn't do it. A workspace has at most one.
+- **Board**: a workspace's tasks, by status: Backlog, To Do, In Progress, Needs
+  Decision, In Review, Done and Canceled.
+- **Task**: one card on a board, with a key such as `bil-9`.
+- **Agent**: a coding agent (Claude, Codex or Cursor) running in a terminal. A
+  terminal that runs a shell instead is just a terminal.
+- **Worktree**: a directory and its branch, and everything done to one:
+  creating it, removing it, reviewing its changes, opening it in an editor. The
+  repository's own checkout is its **main checkout**.
+
+A workspace owns worktrees; a worktree belongs to at most one workspace. A
+worktree no workspace owns is **Unclaimed**. Worktrees are disposable: the
+orchestrator makes one when it dispatches a task and removes it when the work
+lands.
+
+## What needs you
+
+**Needs You** is one list of everything waiting on you, from every workspace on
+every runner. It sits at the top of the Mac's sidebar and is the first screen on
+the phones. Each item names its workspace, and there are four kinds, most urgent
+first:
+
+- **An agent asking permission**, such as to run a command. Answer it in place
+  with **Allow** or **Deny**.
+- **A blocked agent** that needs you at its terminal. **Open** takes you there.
+- **A decision** the orchestrator has asked you for. Answer it in place with one
+  of its options, or with **Answer…** when it has none. Your answer goes on the
+  task, and the orchestrator picks it up from there.
+- **A task ready for review.** **Review** opens its changes. Needs You never
+  approves work for you: the charter says who lands it.
+
+An item leaves the list once it's answered. If you answer a permission ask that
+someone else already answered, the item keeps the line "Someone already
+answered this." under its buttons until the list catches up.
+
+The count beside Needs You is the number of items, and it's the same number the
+lock screen, the widget and the watch show. Each workspace row in the sidebar
+carries its own share of that count.
+
+Some things aren't items, on purpose. An agent that finished its turn keeps its
+checkmark and its notification, and a worktree with unread changes keeps its dot,
+but neither waits in Needs You. An orchestrator finishes every turn, so its
+finished turn is only an unread dot on its workspace.
+
+To walk the list without leaving the keyboard, press ⌃⌘N (Terminal ▸ Next
+Needing Attention) on the Mac. From a terminal, `farcooler needs-you` prints the
+same list.
+
+## A workspace, on the Mac
+
+The sidebar lists each repository's workspaces, with Needs You above them. A
+workspace row shows its name, its orchestrator's status (`◌` when it has none),
+and how many items need you. Its menu has **Show Board**, **Start
+Orchestrator** (or **Replace Orchestrator**) and **Show Charter**.
+
+Select a workspace to see its orchestrator's conversation beside its board.
+
+**Talking to the orchestrator.** The conversation is the orchestrator's own
+terminal, or a chat view when it's in chat mode. The `⋯` menu in the
+conversation's header switches with **Show as Chat** or **Show as Terminal**,
+and also has **Replace Orchestrator**, **Show Charter**, **Restart** and **Stop
+Being Orchestrator**. Tell it what you want done in plain words. It puts the work
+on the board, dispatches agents, and reports back from the board, not from
+memory. It writes down what it decides, so its work survives a restart. The
+first time you talk to a new orchestrator, it interviews you for the charter:
+how work gets from idea to landed, what done means, who reviews, what it may
+decide alone. You can edit the charter any time with **Show Charter**; the
+orchestrator rereads it whenever it picks the work back up.
+
+**The board** fits the space it has. When it's narrow, it's a list sectioned by
+status, with Needs Decision first. When it's wide, it's a kanban with a column
+per status. The toggle in the board's header forces either one, and choosing it
+again returns to automatic; the Mac remembers your choice per workspace. Every
+status is always shown, even an empty one: an empty status is a header with a
+0 in the list, and an empty column in the kanban. Done and Canceled start
+collapsed. The **+** button in the board's header (**New Task…**) files a task by
+hand. It's there when the runner lets this Mac write to the board.
+
+## Following a task to its changes
+
+Select a task to open it in a third column: its key and title, its status, the
+agent working on it, and that worktree's **Changes** beneath the agent. When the
+task is In Review, the changes take the larger share. The status menu in the
+header moves the task; expand the header (**Show the Card**) to read the whole
+card (what the task is for, what counts as done, and its notes) and, when it's
+waiting on a decision, to answer it.
+
+- **Open Worktree** shows the worktree itself, with all its terminals and
+  layouts. The breadcrumb at the top leads back to the task.
+- A task with no agent still reaches its worktree and changes, so a finished
+  task in review is one click from its diff.
+- Back (⌃⌘←, in the Workspace menu) closes the task column. Focus Column (⌃⌘↩)
+  widens it over the conversation and board for full-size terminal work; press
+  it again to bring them back.
+
+When the window is too narrow for all three columns, the conversation folds
+into a thin rail while a task is open (click the rail to close the task and
+bring the conversation back). Narrower still, the task column takes the whole
+view. With no task open in a narrow window, an **Orchestrator | Board** control
+in the header switches between the two.
+
+## Worktrees
+
+A worktree isn't a place of its own anymore; you reach it from what it's for.
+
+- **Under a task**, with **Open Worktree**.
+- **Under a workspace's Worktrees**, a disclosure on its sidebar row. It lists
+  every worktree the workspace owns, each with its task key and its line counts,
+  including ones with no task, such as a shell in a branch of your own.
+  Expanding a worktree lists its terminals.
+
+To move a worktree to another workspace, drag it onto that workspace's row, or
+Control-click it and choose **Move to Workspace**. From a terminal, use
+`farcooler worktree assign`. Worktrees no workspace owns are under Unclaimed,
+and hidden ones under Hidden.
+
+Nothing about a worktree itself changed: its terminals, layouts and tmux
+commands work as they always have, in whichever view has focus.
+
+## Starting an orchestrator
+
+A workspace with no orchestrator says so, with **Start Orchestrator**. Choose
+Claude, Codex or Cursor, and it starts working on its own: it reads the charter
+(or interviews you for one, if there isn't one yet) and then the board. You
+don't need to type anything to get it going. You can start one from the
+workspace's row in the sidebar, from its conversation column, or on either phone.
+
+If an orchestrator's terminal is lost, the conversation column says "The
+orchestrator stopped". **Restart** picks the conversation back up where it left
+off, and **Replace…** starts a new one. Replacing asks you to confirm first,
+because the orchestrator running now closes. From a terminal:
+
+```
+farcooler workspace start-orchestrator Billing --harness claude
+farcooler workspace start-orchestrator Billing --harness codex --replace
+```
+
+## Adopting an orchestrator you already started
+
+If you already have an agent running in a repository's main checkout, you don't
+have to start another. Make it the orchestrator:
+
+- **On the Mac**, Control-click its terminal in the sidebar and choose **Use as
+  Orchestrator**, or choose **Use a Running Terminal…** beside Start
+  Orchestrator in an empty conversation column. It's offered only for a running
+  terminal that belongs to a workspace and sits in the main checkout, never for
+  a task's agent.
+- **From a terminal**, run `farcooler terminal set-role <terminal>
+  orchestrator`. The same command takes `agent` and `shell`.
+
+A workspace has at most one orchestrator. If it already has one, the Mac asks
+whether to replace it: the old orchestrator keeps running as an ordinary
+terminal, and yours takes over the board. The command refuses instead, and you
+step the old one down first (**Stop Being Orchestrator**, or `set-role` with
+`agent` or `shell`).
+
+### One place for the orchestrator
+
+An orchestrator is shown only in its workspace's conversation column, not also
+as a terminal under a worktree. If another terminal shares the orchestrator's
+tmux window, the column says so ("`name` shares the orchestrator's window.") and
+offers **Move to Its Own Window**. That click gives the other terminal a window
+of its own, so the orchestrator keeps its window and focus. Nothing rearranges
+your windows unless you click it.
+
+## Splitting off a workspace
+
+When one thread of work is crowding out the rest, ask the orchestrator to split
+it off. It asks you for a name and a short task prefix (such as `bil`, so tasks
+read `bil-9`), then:
+
+1. creates the workspace, with a charter copied from Main's and edited down to
+   this line of work;
+2. moves the tasks, and the worktrees their agents work in;
+3. writes a handoff on one of the moved tasks: open questions, your preferences
+   for this work, what was tried and dropped;
+4. starts the new workspace's orchestrator, pointed at that handoff.
+
+The new orchestrator reads the handoff before anything else, so it starts with
+what the old conversation knew. From then on, that work belongs to the new
+workspace, and you talk to its orchestrator about it.
+
+The orchestrator points the new one at its handoff with `--read`:
+
+```
+farcooler workspace create --repo overnight --name Billing --prefix bil
+farcooler workspace start-orchestrator Billing --harness claude --read bil-3
+```
+
+## On the phone
+
+The iPhone and Android apps have the same shape as the Mac, in each platform's
+own style. They open on Needs You when something is waiting, and otherwise on
+the last workspace you had open, with Needs You still one Back away.
+
+Needs You lists the waiting items, answerable in place, and then your
+workspaces, grouped by runner and repository. A workspace has three views:
+
+- **Orchestrator**: its conversation, as a terminal or as chat. A workspace
+  without one offers **Start Orchestrator**.
+- **Board**: the board as a sectioned list. Select a task to see its card and
+  answer its decision, then go on to its **Agent**, its **Changes** or its
+  **Worktree**. Back always returns to the task, and then to the board.
+- **Worktrees**: the worktrees it owns, with their task keys. **New Worktree…**
+  here makes one that belongs to this workspace.
+
+A notification or widget that opens an agent lands on its workspace and task
+first, so Back walks up from the agent to the task to the workspace. (An
+orchestrator opens on its workspace's Orchestrator view, since it works no one
+task.) Notifications lead with the workspace's name: "Billing · claude needs
+you", "Billing Orchestrator needs you", or "Billing · bil-7 needs a decision"
+when the orchestrator asks you something.
+
+On the watch, Needs You comes first. Permission asks can be answered there;
+decisions and reviews say "Open on iPhone".
 
 ## Reading the rule off a sentence
 
@@ -50,14 +264,13 @@ about a line of work, its board, or the orchestrator driving it, the word is
 - `Already checked out in another worktree` — git's own constraint, in git's
   own words.
 
-**Workspace**, because the sentence is about a line of work. No string says
-this yet; these are the sentences that will, once workstreams land:
+**Workspace**, because the sentence is about a line of work:
 
-- The workspace's board, its charter, and its orchestrator — the things that
-  are one per workstream rather than one per directory.
-- Which worktrees a workspace owns, and which are unclaimed.
-- Splitting a thread of work off Main into a workspace of its own, so it gets
-  its own board and its own conversation.
+- `New Workspace…`, `Start Orchestrator`, `Show Charter`, `No orchestrator` — a
+  workspace's board, charter and orchestrator, which there's one of per line of
+  work rather than one per directory.
+- `Move to Workspace` and `Unclaimed` — which worktrees a workspace owns.
+- `Workspaces are now in the sidebar.` — the places you navigate.
 
 A sentence that teaches the relationship needs both words: a workspace owns
 worktrees; a worktree belongs to at most one workspace.
@@ -66,11 +279,14 @@ worktrees; a worktree belongs to at most one workspace.
 
 The CLI, the wire labels, and the code identifiers follow the same rule as the
 copy. There is one user, and every surface updates together, so there is no
-older script or older app to keep speaking the old words for. The command is
-`farcooler worktree create`, `list`, `adopt`, `branches`, `hide`, `unhide`,
-`reorder`, `remove`, and `file-search`; the wire methods are `worktree.*`; and
-the call that lists worktrees git has but Far Cooler has not adopted is
-`worktree.discover`.
+older script or older app to keep speaking the old words for.
+`farcooler worktree` creates, lists, adopts, hides, reorders, removes and
+assigns worktrees, and searches their files (`create`, `list`, `adopt`,
+`branches`, `hide`, `unhide`, `reorder`, `assign`, `remove`, `file-search`).
+`farcooler workspace` has `create`, `list`, `show`, `rename`, `set-prefix`,
+`delete` and `start-orchestrator`. `farcooler task` works a board. The wire
+methods for worktrees are `worktree.*`, and the call that lists worktrees git has
+but Far Cooler has not adopted is `worktree.discover`.
 
 Renames never reach the bytes. Protobuf puts field numbers on the wire, not
 names, and those numbers are frozen. A few values are also kept in their old
