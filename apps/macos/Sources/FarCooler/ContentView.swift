@@ -364,6 +364,16 @@ struct ContentView: View {
         ) { _ in
             markVisibleSeen()
         }
+        // This window minimized, brought back, covered or uncovered: what's
+        // in sight changed with no fleet event or selection change.
+        .onReceive(
+            NotificationCenter.default.publisher(for: NSWindow.didChangeOcclusionStateNotification)
+                .merge(with: NotificationCenter.default.publisher(for: NSWindow.didMiniaturizeNotification))
+                .merge(with: NotificationCenter.default.publisher(for: NSWindow.didDeminiaturizeNotification))
+        ) { note in
+            guard let window = note.object as? NSWindow, window === windowBox.window else { return }
+            markVisibleSeen()
+        }
         .onChange(of: selection) { old, new in
             // Cleared on every navigation, so a refusal or failure left behind
             // on one pane does not go on describing a pane the user is no
@@ -2816,6 +2826,13 @@ struct ContentView: View {
     private func markVisibleSeen() {
         guard NSApp.isActive else {
             Notifier.shared.setWatching([], window: windowID)
+            return
+        }
+        // Minimized, or wholly behind other windows: nothing here is on
+        // screen, whatever is selected, so it silences no banner and its
+        // runners are told so. Asked again when that changes (`body`).
+        guard WindowSight.inSight(windowBox.window) else {
+            WindowSight.leave(window: windowID, clients: Array(store.clients.values))
             return
         }
         // What `willPresent` asks: the panes on screen, the same set the

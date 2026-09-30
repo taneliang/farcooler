@@ -585,6 +585,38 @@ struct StartTaskTests {
         #expect(runner.watchingCalls.last == ["terminal", "watching"], "\(runner.watchingCalls)")
     }
 
+    /// A minimized window, or one wholly behind others, isn't in sight
+    /// (night review M5). Its panes stop silencing banners, and its runner is
+    /// told it shows nothing, so a phone push for them comes back.
+    @Test func aWindowOutOfSightClaimsNothing() async {
+        #expect(WindowSight.inSight(miniaturized: false, occlusion: .visible))
+        #expect(!WindowSight.inSight(miniaturized: true, occlusion: .visible))
+        #expect(!WindowSight.inSight(miniaturized: false, occlusion: []))
+        #expect(WindowSight.inSight(nil), "a window not yet placed answers as before")
+        let offscreen = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.borderless],
+            backing: .buffered, defer: false)
+        offscreen.isReleasedWhenClosed = false
+        #expect(!WindowSight.inSight(offscreen), "a window never ordered in is in nobody's sight")
+
+        // A runner with no panes of its own, so what other tests' windows
+        // show (`Notifier.shared`, one for the process) never rides along.
+        let runner = Runner(capabilities: ["workspaces", "terminals", "watching"])
+        let client = await client(runner)
+        client.presence = Self.present()
+        let window = UUID()
+        defer { Notifier.shared.closeWindow(window) }
+        Notifier.shared.setWatching(["t-sight"], window: window)
+        client.reportWatching(["t1"])
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(runner.watchingCalls.last == ["terminal", "watching", "t1"], "\(runner.watchingCalls)")
+
+        WindowSight.leave(window: window, clients: [client])
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(!Notifier.shared.watching.contains("t-sight"))
+        #expect(runner.watchingCalls.last == ["terminal", "watching"], "\(runner.watchingCalls)")
+    }
+
     /// Idle for a minute, the claim lapses; a touch of the mouse brings it
     /// back on the next tick — with no fleet event and no selection change,
     /// which is how people watch an agent in a long tool call.

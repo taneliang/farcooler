@@ -238,3 +238,30 @@ final class PushDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in PushRegistration.shared.unavailable(error) }
     }
 }
+
+/// Whether a main window's panes are in sight: the window isn't in the Dock
+/// and some of it is visible, not wholly behind other windows. A window out
+/// of sight shows nothing, so it neither silences a banner (`Notifier`) nor
+/// tells a runner it's watching (`DaemonClient.reportWatching`), whatever
+/// its selection says. Asked with the app active; an inactive app shows
+/// nothing already.
+@MainActor
+enum WindowSight {
+    static func inSight(miniaturized: Bool, occlusion: NSWindow.OcclusionState) -> Bool {
+        !miniaturized && occlusion.contains(.visible)
+    }
+
+    /// `window`'s answer. A window this view hasn't been placed in yet
+    /// answers as every window did before: in sight.
+    static func inSight(_ window: NSWindow?) -> Bool {
+        guard let window else { return true }
+        return inSight(miniaturized: window.isMiniaturized, occlusion: window.occlusionState)
+    }
+
+    /// `window` is out of sight: what it showed is shown no longer, and each
+    /// of its runners is told what the other windows still show.
+    static func leave(window: UUID, clients: [DaemonClient]) {
+        Notifier.shared.setWatching([], window: window)
+        for client in clients { client.reportWatching([]) }
+    }
+}
