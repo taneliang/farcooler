@@ -460,6 +460,18 @@ extension GlancePermission {
 public enum CardAskWording {
     public static let allow = "Allow"
     public static let deny = "Deny"
+    public static let allowAlways = "Always Allow"
+    public static let denyAlways = "Always Deny"
+
+    /// The fixed word for an option, by its kind, or nil for a kind with none.
+    /// Every button on the card is one of these four words and never an
+    /// agent's option name, which for a claude Bash ask is the command line.
+    public static func label(for option: GlancePermissionOption) -> String? {
+        let always = option.kind.lowercased().contains("always")
+        if GlancePermission.allows(option) { return always ? allowAlways : allow }
+        if GlancePermission.rejects(option) { return always ? denyAlways : deny }
+        return nil
+    }
 
     /// What a blocked agent's line says when there's no tool or workspace to
     /// name: never its `detail`, which is the screen's question and for a
@@ -540,12 +552,31 @@ public enum CardAskSource {
     ) -> GlancePermission? {
         guard state.status == "blocked", !state.terminal.isEmpty else { return nil }
         let filed = store.permission(for: state.terminal)
-        guard let ask = state.ask else { return filed }
+        // An ask only the app filed (the fleet poll's, ov-54): the agent's own
+        // options, in fixed words by kind, never its names.
+        guard let ask = state.ask else { return filed.map(inFixedWords) }
         guard !ask.isOver(at: now) else { return nil }
         if let filed, filed.request == ask.id, let worded = inCardWords(filed) {
             return worded
         }
         return .fromCard(terminal: state.terminal, ask: ask, at: now)
+    }
+
+    /// The store's record with each option named by `CardAskWording.label`,
+    /// in its order. An option with no fixed word, or whose word an earlier
+    /// option already took, is left off: two buttons reading the same word
+    /// would be a choice nobody could make. `CardLeaderAsk.withheld` counts
+    /// them.
+    static func inFixedWords(_ filed: GlancePermission) -> GlancePermission {
+        var taken: Set<String> = []
+        let named = filed.options.compactMap { option -> GlancePermissionOption? in
+            guard let label = CardAskWording.label(for: option), taken.insert(label).inserted
+            else { return nil }
+            return GlancePermissionOption(id: option.id, name: label, kind: option.kind)
+        }
+        return GlancePermission(
+            terminal: filed.terminal, request: filed.request, options: named,
+            observedAt: filed.observedAt)
     }
 
     /// The store's record with its plain yes and its no renamed to the card's
@@ -585,19 +616,24 @@ public struct CardLeaderAsk: Equatable, Sendable {
     /// When the card ask's hold ends, for the countdown and the intent's own
     /// local refusal. Nil with no card ask.
     public let until: Date?
+    /// How many of the agent's own options the card left off because they
+    /// have no fixed word (`CardAskSource.inFixedWords`), for the overflow
+    /// line to count.
+    public let withheld: Int
 
     public static let none = CardLeaderAsk(
         terminal: "", permission: nil, answer: nil, caption: nil, until: nil)
 
     public init(
         terminal: String, permission: GlancePermission?, answer: GlanceAnswer?,
-        caption: String?, until: Date?
+        caption: String?, until: Date?, withheld: Int = 0
     ) {
         self.terminal = terminal
         self.permission = permission
         self.answer = answer
         self.caption = caption
         self.until = until
+        self.withheld = withheld
     }
 
     public static func current(
@@ -613,11 +649,15 @@ public struct CardLeaderAsk: Equatable, Sendable {
         if let asked, let standing = answer, standing.request != asked { answer = nil }
         guard permission != nil || answer != nil else { return .none }
         let carded = permission != nil && permission?.request == state.ask?.id
+        let filed = store.permission(for: state.terminal)
+        let withheld =
+            !carded && state.ask == nil && filed != nil && filed?.request == permission?.request
+            ? (filed?.options.count ?? 0) - (permission?.options.count ?? 0) : 0
         return CardLeaderAsk(
             terminal: state.terminal, permission: permission, answer: answer,
             caption: carded
                 ? CardAskWording.caption(tool: state.ask?.tool, workspace: state.workspace) : nil,
-            until: carded ? state.ask?.until : nil)
+            until: carded ? state.ask?.until : nil, withheld: withheld)
     }
 
     /// Whether the card has anything to add under the leader.

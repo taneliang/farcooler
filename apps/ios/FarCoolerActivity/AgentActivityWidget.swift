@@ -442,11 +442,11 @@ private struct AnswerControls: View {
                             until: ask.until,
                             // The same derivation the phone and the watch run,
                             // so all three agree about which answer is the
-                            // plain yes. Emphasis only — every word on every
-                            // button is still the agent's.
+                            // plain yes. Emphasis only; every word on every
+                            // button is a fixed one (`CardAskWording.label`).
                             emphasized: option.id == permission.plainYes?.id)
                     }
-                    if let overflow = Self.overflow(fit) {
+                    if let overflow = Self.overflow(fit, withheld: ask.withheld) {
                         Text(overflow)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -463,8 +463,13 @@ private struct AnswerControls: View {
     /// from what they were shown, believing it was everything. So the count is
     /// on the card, and the way to the rest is the tap target the card already
     /// had.
-    private static func overflow(_ fit: GlanceOptionFit) -> String? {
-        guard fit.hidden > 0 else { return nil }
+    ///
+    /// `withheld` adds the options the card left off because they have no
+    /// fixed word: the card never draws an agent's own option name, which can
+    /// be the command line (ov-57).
+    private static func overflow(_ fit: GlanceOptionFit, withheld: Int) -> String? {
+        let hidden = fit.hidden + withheld
+        guard hidden > 0 else { return nil }
         if fit.shown.isEmpty {
             // Either the agent's answers are too long to put here without
             // shortening them, or its vocabulary offers nothing this build
@@ -472,7 +477,7 @@ private struct AnswerControls: View {
             // worth explaining on a lock screen.
             return "Tap the card to answer."
         }
-        return "Tap the card for \(fit.hidden) more answer\(fit.hidden == 1 ? "" : "s")."
+        return "Tap the card for \(hidden) more answer\(hidden == 1 ? "" : "s")."
     }
 }
 

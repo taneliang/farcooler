@@ -496,8 +496,53 @@ struct GlancePermissionsTests {
     @Test func aCardWithNoAskKeepsTheStoreRecord() {
         let permission = CardAskSource.permission(
             store: storeRecord(), state: card(ask: nil), now: before)
-        #expect(permission == storeRecord().permission(for: "t1"))
+        #expect(permission?.request == "hook-ask-1")
+        #expect(permission?.options.map { $0.id } == ["allow-from-store", "deny-from-store"])
         #expect(CardAskSource.permission(store: .empty, state: card(ask: nil), now: before) == nil)
+    }
+
+    /// An ask only the app filed (the fleet poll's, ov-54) is drawn in fixed
+    /// words by kind, never the agent's option names: for a claude Bash ask
+    /// the allow's name IS the command line. Ids and order are kept.
+    ///
+    /// Mutation: the filed record returned as filed. Red: "Allow touch x".
+    @Test func aStoreOnlyAskIsDrawnInFixedWords() {
+        let store = GlancePermissions(pending: [
+            permission(
+                [option("once", "Allow touch x", "allow_once"),
+                 option("always", "Always allow Bash(touch x)", "allow_always"),
+                 option("no", "No, and tell Claude what to do", "reject_once")],
+                request: "perm-7")
+        ])
+        let leader = CardLeaderAsk.current(store: store, state: card(ask: nil), now: before)
+        #expect(leader.permission?.options == [
+            option("once", "Allow", "allow_once"),
+            option("always", "Always Allow", "allow_always"),
+            option("no", "Deny", "reject_once"),
+        ])
+        #expect(leader.withheld == 0)
+    }
+
+    /// An option whose kind has no fixed word, or whose word an earlier option
+    /// already took, is left off the card and counted, so the card can say
+    /// there are more answers in the app.
+    ///
+    /// Mutation: an unknown kind drawn under its own name. Red: "Go on: rm -rf
+    /// build" on a button.
+    @Test func anOptionWithNoFixedWordIsWithheldAndCounted() {
+        let store = GlancePermissions(pending: [
+            permission(
+                [option("a", "Yes: rm -rf build", "allow_once"),
+                 option("b", "Go on: rm -rf build", "proceed"),
+                 option("c", "Yes for this file: rm -rf build", "allow_once"),
+                 option("d", "No", "reject_once")],
+                request: "perm-7")
+        ])
+        let leader = CardLeaderAsk.current(store: store, state: card(ask: nil), now: before)
+        #expect(leader.permission?.options.map { $0.name } == ["Allow", "Deny"])
+        #expect(leader.permission?.options.map { $0.id } == ["a", "d"])
+        #expect(leader.withheld == 2)
+        #expect(leader.permission?.options.allSatisfy { !$0.name.contains("rm") } == true)
     }
 
     /// The locked card's line: the tool and the workspace, whichever it has,
