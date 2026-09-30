@@ -1191,6 +1191,13 @@ message Terminal {
   optional bytes workspace_id = 39;
   // UNSPECIFIED from a runner without `workstreams`.
   TerminalRole role = 40;
+  // The terminal this one was split from, when a split made it: the app's
+  // split, its ⌃B % and ⌃B ", and `terminal.create` joining the active layout.
+  // Absent for a terminal opened in a window of its own, for one recorded
+  // before this existed, and from an older runner: all three are "not known
+  // to be a split", and a client treats them alike. May name a terminal that
+  // has since been removed. Set once, at creation.
+  optional bytes split_of = 41;
 }
 
 // What a terminal is for. At most one live orchestrator per workspace.

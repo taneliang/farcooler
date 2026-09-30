@@ -2226,6 +2226,13 @@ fn task_of(t: &Terminal) -> Option<String> {
     t.task_id.as_deref().and_then(|b| Uuid::from_slice(b).ok()).map(|u| u.to_string())
 }
 
+/// The terminal `t` was split from, as a uuid string, or nothing: a pane in
+/// a window of its own, one from before splits were recorded, and an older
+/// runner all say nothing. Never the nil uuid, for `task_of`'s reason.
+fn split_of(t: &Terminal) -> Option<String> {
+    t.split_of.as_deref().and_then(|b| Uuid::from_slice(b).ok()).map(|u| u.to_string())
+}
+
 fn now_millis() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -2471,7 +2478,8 @@ fn terminal_label(s: TerminalState) -> &'static str {
 /// from a runner without `workstreams`; `claim_source` is the machine word
 /// for what made the claim; `foreign_writers` names the other workspaces with
 /// a live terminal in it. On each terminal: `workspace`, whose work it is
-/// doing (not always the worktree's owner), and `role`. The CLI's `worktree
+/// doing (not always the worktree's owner), `role`, and `splitOf`, the pane
+/// a split made it beside (`split_of`). The CLI's `worktree
 /// list --json` spells all five the same way; see `workspaces_json`. The Mac
 /// draws an orchestrator once, as its workspace's own row, and leaves it out
 /// of the worktree it runs in.
@@ -2496,6 +2504,9 @@ fn with_workspaces(
         for (out, t) in rows.iter_mut().zip(mine) {
             out["workspace"] = json!(workspace_of(t.workspace_id.as_deref()));
             out["role"] = json!(role_word(t.role));
+            // Here rather than in the row's `json!`, which is at the macro's
+            // recursion limit. The CLI's two projections carry the same key.
+            out["splitOf"] = json!(split_of(t));
         }
     }
     row
@@ -2726,6 +2737,27 @@ mod tests {
         assert_eq!(super::task_of(&t), None, "empty bytes are not the nil uuid");
         t.task_id = Some(bytes::Bytes::from_static(b"short"));
         assert_eq!(super::task_of(&t), None);
+    }
+
+    /// A split names the pane it was split from, and anything else names
+    /// none: never the nil uuid.
+    #[test]
+    fn a_pane_names_what_it_was_split_from_or_nothing() {
+        let from = uuid::Uuid::now_v7();
+        let w = farcooler_protocol::v1::Worktree::default();
+        let pane = |split_of| farcooler_protocol::v1::Terminal { split_of, ..Default::default() };
+        let terminals = [
+            pane(Some(bytes::Bytes::copy_from_slice(from.as_bytes()))),
+            pane(None),
+            pane(Some(bytes::Bytes::new())),
+            pane(Some(bytes::Bytes::from_static(b"short"))),
+        ];
+        let row = serde_json::json!({ "terminals": [{}, {}, {}, {}] });
+        let row = super::with_workspaces(row, &w, &terminals, &[]);
+        assert_eq!(row["terminals"][0]["splitOf"], from.to_string(), "{row}");
+        for i in 1..4 {
+            assert_eq!(row["terminals"][i]["splitOf"], serde_json::json!(null), "{row}");
+        }
     }
 
     /// The fleet trace's anchor reaches the app as its own number, and never

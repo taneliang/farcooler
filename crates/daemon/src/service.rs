@@ -4160,7 +4160,10 @@ impl Service {
         self.claim_for_task(&ws, task)?;
         let (axis, before) = crate::layout::split_args(side);
 
-        let term = self.store.create_terminal_for_task(
+        // Recorded as split from `target`, which is what lets a client tell
+        // a pane somebody split beside the orchestrator on purpose from one
+        // that landed in its window another way (ov-73).
+        let term = self.store.create_split_terminal(
             worktree_id,
             title,
             command_preset,
@@ -4168,6 +4171,7 @@ impl Service {
             120,
             40,
             task,
+            target,
         )?;
         let term = self.mark_changes_pane(term, command_preset)?;
 
@@ -7061,6 +7065,29 @@ mod pane_workspace_tests {
 
         let command = pane_start_command(&svc, split.id).await;
         assert!(command.contains(&expected(&svc, &ws)), "{command}");
+    }
+
+    /// A split says what it was split from, on the record and on the wire,
+    /// so a client can tell a pane somebody split beside the orchestrator
+    /// from one that landed in its window another way (ov-73). A terminal
+    /// opened in a window of its own says nothing.
+    #[tokio::test]
+    async fn a_split_pane_names_the_pane_it_was_split_from() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let target = svc.create_terminal(ws.id, "one", "shell").await.expect("a pane to split");
+        let split = svc
+            .split_terminal(ws.id, target.id, farcooler_protocol::v1::SplitSide::Right, "two", "shell")
+            .await
+            .expect("split");
+        assert_eq!(split.split_of, Some(target.id));
+
+        let view = svc.worktree_view(&ws).await.expect("view");
+        let on_wire = |id: Uuid| {
+            let t = view.terminals.iter().find(|v| v.terminal.id == id).expect("listed");
+            crate::wire::terminal(t).split_of
+        };
+        assert_eq!(on_wire(split.id).as_deref(), Some(target.id.as_bytes().as_slice()));
+        assert_eq!(on_wire(target.id), None, "a window of its own names none");
     }
 
     #[tokio::test]

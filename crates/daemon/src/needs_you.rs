@@ -542,6 +542,7 @@ mod tests {
                 task_id: task,
                 workspace_id: None,
                 role,
+                split_of: None,
             });
             self.observe(id, AgentActivity::Working, 0);
             id

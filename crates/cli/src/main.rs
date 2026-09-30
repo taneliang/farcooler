@@ -3395,6 +3395,13 @@ fn task_of(t: &farcooler_protocol::v1::Terminal) -> Option<String> {
     t.task_id.as_deref().and_then(|b| Uuid::from_slice(b).ok()).map(|u| u.to_string())
 }
 
+/// The terminal `t` was split from, as a uuid string, or nothing: for a pane
+/// opened in a window of its own, one recorded before splits were, and a
+/// runner too old to say. Never the nil uuid, for `task_of`'s reason.
+fn split_of(t: &farcooler_protocol::v1::Terminal) -> Option<String> {
+    t.split_of.as_deref().and_then(|b| Uuid::from_slice(b).ok()).map(|u| u.to_string())
+}
+
 /// One row of `worktree list --json`: the object the Mac app decodes a
 /// worktree from.
 ///
@@ -3555,6 +3562,10 @@ fn worktree_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_js
         // the agent working it. The daemon has recorded it since
         // `terminal_task`; this is the hop that used to drop it.
         "taskId": task_of(t),
+        // The pane this one was split from, if a split made it: what keeps a
+        // pane somebody split beside the orchestrator out of its Move to Its
+        // Own Window notice. Null when not known to be a split.
+        "splitOf": split_of(t),
         "state": terminal_label(t.state()),
         "activity": activity_label(t.activity),
         "activitySince": activity_since(t),
@@ -3803,6 +3814,10 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         // the agent working it. The daemon has recorded it since
         // `terminal_task`; this is the hop that used to drop it.
         "taskId": task_of(t),
+        // The pane this one was split from, if a split made it: what keeps a
+        // pane somebody split beside the orchestrator out of its Move to Its
+        // Own Window notice. Null when not known to be a split.
+        "splitOf": split_of(t),
         "state": terminal_label(t.state()),
         "activity": activity_label(t.activity),
         "activitySince": activity_since(t),
@@ -5090,6 +5105,7 @@ mod tests {
             "taskId",
             "workspace",
             "role",
+            "splitOf",
         ] {
             assert!(event.contains(field), "{field} is in neither projection");
         }
@@ -5114,6 +5130,26 @@ mod tests {
         };
         assert_eq!(worktree_list_terminal_json(&t)["taskId"], task.to_string());
         assert_eq!(terminal_event_json(&t)["taskId"], task.to_string());
+    }
+
+    /// A split names the pane it was split from in both projections, and
+    /// anything else names none, never the nil uuid: the Mac reads this to
+    /// tell a pane somebody split beside the orchestrator from one that
+    /// landed in its window another way (ov-73).
+    #[test]
+    fn a_split_names_the_pane_it_was_split_from_in_both_projections() {
+        let from = uuid::Uuid::now_v7();
+        let t = farcooler_protocol::v1::Terminal {
+            split_of: Some(bytes::Bytes::copy_from_slice(from.as_bytes())),
+            ..Default::default()
+        };
+        assert_eq!(worktree_list_terminal_json(&t)["splitOf"], from.to_string());
+        assert_eq!(terminal_event_json(&t)["splitOf"], from.to_string());
+        for split_of in [None, Some(bytes::Bytes::new()), Some(bytes::Bytes::from_static(b"nope"))] {
+            let t = farcooler_protocol::v1::Terminal { split_of, ..Default::default() };
+            assert_eq!(worktree_list_terminal_json(&t)["splitOf"], serde_json::json!(null));
+            assert_eq!(terminal_event_json(&t)["splitOf"], serde_json::json!(null));
+        }
     }
 
     /// And a pane nobody dispatched names none, rather than the nil uuid.
