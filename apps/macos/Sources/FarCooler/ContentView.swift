@@ -4,6 +4,9 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var store = FleetStore()
+    /// This window's identity in `Notifier`'s per-window record of what is on
+    /// screen, so a second window adds to it rather than overwriting it.
+    @State private var windowID = UUID()
     @ObservedObject private var preferences = Preferences.shared
     @ObservedObject private var themes = Themes.shared
     @Environment(\.openSettings) private var openSettings
@@ -280,7 +283,13 @@ struct ContentView: View {
             settleLaunch()
         }
         .onDisappear {
-            for client in store.clients.values { client.stopEvents() }
+            // What this window showed is shown no longer; the runners are told
+            // what the remaining windows still show.
+            Notifier.shared.closeWindow(windowID)
+            for client in store.clients.values {
+                client.stopEvents()
+                client.reportWatching([])
+            }
             if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
             escapeMonitor = nil
         }
@@ -2811,12 +2820,12 @@ struct ContentView: View {
     /// answer is the point.
     private func markVisibleSeen() {
         guard NSApp.isActive else {
-            Notifier.shared.setWatching([])
+            Notifier.shared.setWatching([], window: windowID)
             return
         }
         // What `willPresent` asks: the panes on screen, the same set the
         // runners are told below.
-        Notifier.shared.setWatching(visibleTerminals.map(\.id))
+        Notifier.shared.setWatching(visibleTerminals.map(\.id), window: windowID)
         let client = selection?.host.flatMap { store.clients[$0] }
         // Full ids, not `short`: resolving an abbreviation costs the CLI a
         // fleet listing, and this runs on a clock. See the `Watching` command

@@ -20,13 +20,28 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     private override init() { super.init() }
 
-    /// The terminals this window has on screen while the app is active, as of
-    /// its last report. Whether anybody is there to see them is asked live.
-    private(set) var watching: Set<String> = []
+    /// The terminals each main window has on screen while the app is active,
+    /// as of that window's last report, keyed by a per-window identity.
+    ///
+    /// One set for the whole app was written by whichever window reported
+    /// last, so a banner was suppressed for a terminal that only the OTHER
+    /// window showed, or raised for one that was on screen there. Whether
+    /// anybody is there to see them is asked live.
+    private var watchingByWindow: [UUID: Set<String>] = [:]
 
-    /// Record what is on screen, for `willPresent`.
-    func setWatching(_ terminalIDs: [String]) {
-        watching = Set(terminalIDs)
+    /// What every window shows, together.
+    var watching: Set<String> { watchingByWindow.values.reduce(into: []) { $0.formUnion($1) } }
+
+    /// Record what one window has on screen, for `willPresent` and for the
+    /// claim each runner is told.
+    func setWatching(_ terminalIDs: [String], window: UUID) {
+        watchingByWindow[window] = Set(terminalIDs)
+    }
+
+    /// A window went away: what it showed is no longer shown by anybody on its
+    /// account.
+    func closeWindow(_ window: UUID) {
+        watchingByWindow[window] = nil
     }
 
     /// How to present a notification that arrives while the app is frontmost.

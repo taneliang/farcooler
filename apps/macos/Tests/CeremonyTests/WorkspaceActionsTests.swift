@@ -315,6 +315,30 @@ struct NotifierPresentationTests {
         #expect(Notifier.presentation(terminalID: "t2", watching: [], presence: here) == [.banner, .list, .sound])
     }
 
+    @Test("Two windows' visible sets union, and neither overwrites the other")
+    func twoWindowsUnion() {
+        let a = UUID(), b = UUID()
+        defer { Notifier.shared.closeWindow(a); Notifier.shared.closeWindow(b) }
+        Notifier.shared.setWatching(["ta1", "ta2"], window: a)
+        Notifier.shared.setWatching(["tb1"], window: b)
+        #expect(Notifier.shared.watching.isSuperset(of: ["ta1", "ta2", "tb1"]))
+        // The last writer no longer wins: a redraw of A leaves B's pane in.
+        Notifier.shared.setWatching(["ta2"], window: a)
+        #expect(Notifier.shared.watching.isSuperset(of: ["ta2", "tb1"]))
+        #expect(!Notifier.shared.watching.contains("ta1"))
+    }
+
+    @Test("Closing a window removes its terminals and only its terminals")
+    func closingAWindowDropsItsTerminals() {
+        let a = UUID(), b = UUID()
+        defer { Notifier.shared.closeWindow(a); Notifier.shared.closeWindow(b) }
+        Notifier.shared.setWatching(["cta"], window: a)
+        Notifier.shared.setWatching(["ctb"], window: b)
+        Notifier.shared.closeWindow(a)
+        #expect(!Notifier.shared.watching.contains("cta"))
+        #expect(Notifier.shared.watching.contains("ctb"))
+    }
+
     @Test("A pane on screen gets no banner, only the list entry")
     func silentForAPaneOnScreen() {
         #expect(Notifier.presentation(terminalID: "t1", watching: ["t1", "t3"], presence: Self.presence(idle: 1)) == [.list])

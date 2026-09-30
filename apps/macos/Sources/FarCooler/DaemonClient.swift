@@ -2551,7 +2551,16 @@ final class DaemonClient: ObservableObject {
     /// socket the CLI already keeps open — the same order as the
     /// `changes inbox` read this app already makes on the same clock while an
     /// agent works.
-    func reportWatching(_ terminals: [String]) {
+    ///
+    /// **Every main window, not the caller's alone.** The runner keeps one slot
+    /// for every local client (`watched` in `crates/daemon/src/watch.rs`, keyed
+    /// `"-"`), and each window has clients of its own, so a second window's
+    /// call replaced the first's and a pane only the first showed lost its
+    /// claim. What the other windows show (`Notifier.watching`, per window) is
+    /// added here, limited to the panes this runner has. Only the resignation
+    /// path leaves them out (`includingOtherWindows: false`): the claim goes
+    /// because the person did, and that is true of every window.
+    func reportWatching(_ terminals: [String], includingOtherWindows: Bool = true) {
         // Never an ssh attempt for a heartbeat to a runner that is not up: the
         // runner ages every claim out on its own (`WATCHED_TTL_MS`), so
         // nothing is owed to one that went away.
@@ -2563,7 +2572,13 @@ final class DaemonClient: ObservableObject {
         // renewal below fires on its own clock, long after the call that
         // armed it.
         let present = presence.isPresent
-        let claim = present ? terminals : []
+        var everyWindow = terminals
+        if includingOtherWindows {
+            let here = Set(fleet.worktrees.flatMap(\.terminals).map(\.id))
+            let own = Set(terminals)
+            everyWindow += Notifier.shared.watching.filter { here.contains($0) && !own.contains($0) }.sorted()
+        }
+        let claim = present ? everyWindow : []
 
         // Somebody is looking again, after nobody was: what finished on these
         // panes while they were gone is seen now. Before the capability check
@@ -2647,7 +2662,7 @@ final class DaemonClient: ObservableObject {
             .publisher(for: NSApplication.didResignActiveNotification)
             .merge(with: notifications.publisher(for: ScreenState.personLeft))
             .sink { [weak self] _ in
-                Task { @MainActor in self?.reportWatching([]) }
+                Task { @MainActor in self?.reportWatching([], includingOtherWindows: false) }
             }
         // Created now, so it has been listening since launch.
         _ = ScreenState.shared

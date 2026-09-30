@@ -564,6 +564,27 @@ struct StartTaskTests {
         #expect(!calls.contains { $0.contains("t1") }, "\(absent): \(calls)")
     }
 
+    /// The runner has one slot for every local client, so a second window's
+    /// client saying "I show t-new" must not take away what the first window
+    /// showed. What another window shows, on this runner, rides along.
+    @Test func aWindowClaimsWhatEveryOtherWindowShowsToo() async {
+        let runner = aFinishedAgent()
+        let client = await client(runner)
+        client.presence = Self.present()
+        let other = UUID()
+        defer { Notifier.shared.closeWindow(other) }
+        Notifier.shared.setWatching(["t-new"], window: other)
+        client.reportWatching([])
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(runner.watchingCalls == [["terminal", "watching", "t-new"]], "\(runner.watchingCalls)")
+
+        // Once that window closes, the next call drops it.
+        Notifier.shared.closeWindow(other)
+        client.reportWatching([])
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(runner.watchingCalls.last == ["terminal", "watching"], "\(runner.watchingCalls)")
+    }
+
     /// Idle for a minute, the claim lapses; a touch of the mouse brings it
     /// back on the next tick — with no fleet event and no selection change,
     /// which is how people watch an agent in a long tool call.
