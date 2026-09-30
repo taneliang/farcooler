@@ -1325,7 +1325,20 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
   // arrives costs a day of "lost touch" at most: the pulse drops a runner
   // silent for `ROW_RETENTION_MS`.
   if (body.withdrawn === true) {
-    await env.DB.prepare(`UPDATE daemons SET beat_every = NULL WHERE id = ?`).bind(daemon.id).run()
+    // Every pairing of this runner, not only the token that asked (ov-77).
+    // A runner paired twice leaves a stale row under its old token, still
+    // promising a beat and long silent; the pulse takes the newest beating row
+    // per install, so that one would win and read "lost touch" for a day. The
+    // runner is what the sender's row says it is (`install_id`, the account's
+    // hash of it), and never past the account: another account's runner can't
+    // share the hash, and this WHERE says so anyway.
+    await env.DB.prepare(
+      `UPDATE daemons SET beat_every = NULL
+       WHERE id = ?1 OR (account_id = ?2 AND install_id IS NOT NULL
+         AND install_id = (SELECT install_id FROM daemons WHERE id = ?1))`,
+    )
+      .bind(daemon.id, daemon.account_id)
+      .run()
     return json({ ok: true })
   }
 

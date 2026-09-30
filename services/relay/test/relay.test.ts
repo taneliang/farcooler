@@ -6623,6 +6623,33 @@ describe('the runner heartbeat', () => {
     expect(await runners(theirs)).toHaveLength(1)
   })
 
+  it("withdraws every pairing of the runner that asked, and only that runner's", async () => {
+    // A re-paired runner leaves its old token's row behind, still promising
+    // a beat and long silent. It must not outlive the withdrawal and read
+    // "lost touch" (ov-77). Same install on another account is not this
+    // runner.
+    const mine = await pulseToken('user_1')
+    const theirs = phoneToken()
+    await register('user_2', { pushToken: 'their-phone', pulseToken: theirs })
+    await pair('user_1', 'old')
+    await pair('user_1', 'new')
+    await pair('user_1', 'other')
+    await pair('user_2', 'elsewhere')
+    await post('/v1/heartbeat', { beatEvery: 300, install: 'runner-a' }, 'old')
+    await post('/v1/heartbeat', { beatEvery: 300, install: 'runner-a' }, 'new')
+    await post('/v1/heartbeat', { beatEvery: 300, install: 'runner-b' }, 'other')
+    await post('/v1/heartbeat', { beatEvery: 300, install: 'runner-a' }, 'elsewhere')
+    await env.DB.prepare(`UPDATE daemons SET last_seen_at = ? WHERE token_hash = ?`)
+      .bind(Date.now() - 3_600_000, await sha256('old'))
+      .run()
+    await post('/v1/heartbeat', { withdrawn: true }, 'new')
+
+    const answer = await runners(mine)
+    expect(answer).toHaveLength(1)
+    expect(answer[0].heardAgo).toBeLessThan(60_000)
+    expect(await runners(theirs)).toHaveLength(1)
+  })
+
   it('forgets a runner silent for a day, as it forgets its rows', async () => {
     const token = await pulseToken('user_1')
     await pair('user_1', 'mine')
