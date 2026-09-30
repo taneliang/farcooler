@@ -1,6 +1,7 @@
 import AppKit
 import AgentKit
 import Foundation
+import SwiftUI
 import Testing
 
 @testable import Far_Cooler
@@ -52,11 +53,11 @@ struct TaskColumnTests {
         #expect(TaskColumnModel.worktree(of: Self.row(.todo, worktree: ""), agent: nil) == nil)
     }
 
-    /// The task column draws the worktree's changes from its store, with no
-    /// tmux pane, so nothing resizes the agent's window for other clients
-    /// (ruling 6). The toolbar's Changes button in an opened worktree still
-    /// splits a pane, and the recorder sees it, which is what shows it could
-    /// see one.
+    /// The task column's changes, drawn as the column draws them
+    /// (`TaskColumnChanges`), read the worktree's changes and split no pane,
+    /// so nothing resizes the agent's window for other clients (ruling 6).
+    /// The toolbar's Changes button in an opened worktree still splits one,
+    /// and the recorder sees it, which is what shows it could see one.
     @Test("Opening a task's changes runs no split, and the toolbar's Changes button does")
     func openingATasksChangesRunsNoSplit() async {
         let worktree = Worktree(
@@ -66,8 +67,19 @@ struct TaskColumnTests {
         let client = DaemonClient(target: "", notifications: NotificationCenter())
         client.commandRunnerForTesting = { args in column.answer(args) }
         let store = ChangesStore(client: client, worktree: worktree)
-        await store.load()
-        #expect(!column.calls.isEmpty, "the changes were never read")
+        let host = NSHostingView(
+            rootView: TaskColumnChanges(changes: store, isFocused: false, agents: []).frame(width: 500, height: 400))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 400), styleMask: [.borderless], backing: .buffered,
+            defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        for _ in 0..<100 where !column.calls.contains(where: { $0.first == "changes" }) {
+            host.layoutSubtreeIfNeeded()
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        window.close()
+        #expect(column.calls.contains { $0.first == "changes" }, "the column never read its changes: \(column.calls)")
         #expect(!column.calls.contains { $0.starts(with: ["layout", "split"]) }, "\(column.calls)")
 
         let toolbar = WorktreeCallsTests.Recorder()
@@ -126,5 +138,22 @@ struct TaskColumnTests {
         #expect(!EscapeBack.goesBack(responder: plain, selection: workspace, focusColumn: false))
         #expect(!EscapeBack.goesBack(responder: plain, selection: .needsYou, focusColumn: false))
         #expect(EscapeBack.goesBack(responder: plain, selection: task, focusColumn: true))
+    }
+
+    /// The breadcrumb holds while the window is in the worktree Open
+    /// Worktree opened, whichever of its panes is selected, and goes when
+    /// anything else is chosen: another worktree from the disclosure
+    /// included, which Back would otherwise have taken to the task.
+    @Test("The breadcrumb goes when the opened worktree does")
+    func theBreadcrumbGoesWhenTheOpenedWorktreeDoes() {
+        let task = ContentView.Selection.workspace(host: "", workspace: "ws", focus: .task("t-9"))
+        let opened = ContentView.Selection.workspace(host: "", workspace: "ws", focus: .worktree("w-3", terminal: nil))
+        let pane = ContentView.Selection.workspace(host: "", workspace: "ws", focus: .worktree("w-3", terminal: "s"))
+        let other = ContentView.Selection.workspace(host: "", workspace: "ws", focus: .worktree("w-4", terminal: nil))
+        #expect(WorkspaceNavigation.keeps(trail: task, opened: "w-3", now: opened))
+        #expect(WorkspaceNavigation.keeps(trail: task, opened: "w-3", now: pane))
+        #expect(!WorkspaceNavigation.keeps(trail: task, opened: "w-3", now: other))
+        #expect(!WorkspaceNavigation.keeps(trail: task, opened: "w-3", now: task))
+        #expect(!WorkspaceNavigation.keeps(trail: task, opened: nil, now: opened))
     }
 }

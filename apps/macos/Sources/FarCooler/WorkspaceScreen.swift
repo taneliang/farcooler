@@ -139,6 +139,9 @@ enum WorkspaceScreen {
             var out: [ShownLayout] = []
             if let workspace = workspace(id, host: host, in: fleet, repositories: repositories(host)),
                 let seat = orchestrator(of: workspace, host: host, in: fleet),
+                // Starting, the column draws "Starting Orchestrator…", not
+                // the pane: nothing of it is on screen to be seen.
+                StateKind.parse(seat.terminal.state) != .starting,
                 let group = holding(seat)
             {
                 out.append(ShownLayout(column: .conversation, worktree: seat.worktree, group: group, groups: [group]))

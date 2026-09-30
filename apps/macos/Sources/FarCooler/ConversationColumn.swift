@@ -178,7 +178,7 @@ struct ConversationPlaceholder: View {
                     }
                     .fixedSize()
                 }
-                if offers.contains(.restart) { Button("Restart", action: onRestart).keyboardShortcut(.defaultAction) }
+                if offers.contains(.restart) { Button("Restart", action: onRestart) }
                 if offers.contains(.replace) { Button("Replace…", action: onReplace) }
             }
         }

@@ -1335,7 +1335,7 @@ struct WorkspaceRow: View {
                 .lineLimit(1)
             if unread {
                 Circle()
-                    .fill(Color.accentColor)
+                    .fill(GlancePalette.amber(scheme))
                     .frame(width: 5, height: 5)
                     .padding(.leading, 5)
                     .help("The orchestrator finished a turn you haven’t seen")

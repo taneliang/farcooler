@@ -36,6 +36,9 @@ struct NeedsYouCycleTests {
         #expect(worktree.openTasks?.map(\.key) == ["bil-9"])
         let shell = try #require(worktree.terminals.first)
         #expect(TaskLink.task(of: shell, in: worktree) == "t-9")
+        // Find finds a task by the worktree it's in, by key or title.
+        let byKey = worktree.matches("bil-9"), byTitle = worktree.matches("invoice"), neither = worktree.matches("stripe")
+        #expect(byKey && byTitle && !neither)
     }
 
     // MARK: - ⌃⌘N

@@ -129,7 +129,7 @@ struct TaskColumnHeader: View {
                 if worktree != nil {
                     Button("Open Worktree", action: onOpenWorktree)
                         .controlSize(.small)
-                        .help("Show this task's worktree and all its layouts")
+                        .help("Show this task’s worktree and all its layouts")
                 }
             }
             .padding(.top, 4)
@@ -179,9 +179,9 @@ struct TaskColumnSplit<Agent: View, Changes: View>: View {
             .padding(.vertical, 2.5)
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
-            .onHover { inside in
-                if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
-            }
+            // A pointer style rather than pushing and popping `NSCursor`,
+            // which a drag ending outside the divider left stuck.
+            .pointerStyle(.rowResize)
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .named("task.split"))
                     .onChanged { value in
@@ -234,6 +234,16 @@ enum WorkspaceNavigation {
         let next = Selection.workspace(host: host, workspace: id, focus: .worktree(worktree, terminal: nil))
         if case .task? = focus { return (next, selection) }
         return (next, nil)
+    }
+
+    /// Whether a breadcrumb back to `trail` still holds on `now`: while the
+    /// window is in the worktree Open Worktree opened from it (`opened`),
+    /// with any pane of it selected. Choosing anything else, another
+    /// worktree from the Worktrees disclosure included, drops it.
+    static func keeps(trail: Selection?, opened: String?, now: Selection?) -> Bool {
+        guard case .workspace(let host, let id, .task?)? = trail, let opened else { return false }
+        if case .workspace(host, id, .worktree(opened, _)?)? = now { return true }
+        return false
     }
 
     /// Where Back goes: along the breadcrumb to the task a worktree was
@@ -328,5 +338,22 @@ struct WindowReader: NSViewRepresentable {
             super.viewDidMoveToWindow()
             box?.window = window
         }
+    }
+}
+
+/// A task column's changes: today's Changes view, reused as it is (ruling
+/// 6), drawn here without a tmux pane, so nothing resizes the agent's window
+/// for other clients. It reads the worktree's changes from its store, and
+/// nothing it does splits a pane.
+struct TaskColumnChanges: View {
+    @ObservedObject var changes: ChangesStore
+    let isFocused: Bool
+    let agents: [ReviewAgentTarget]
+    /// The diff was clicked into: the Diff menu's keys are for it now.
+    var onFocus: () -> Void = {}
+
+    var body: some View {
+        ChangesPane(changes: changes, isFocused: isFocused, agents: agents)
+            .simultaneousGesture(TapGesture().onEnded { onFocus() })
     }
 }

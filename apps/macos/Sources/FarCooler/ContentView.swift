@@ -7,6 +7,7 @@ struct ContentView: View {
     @ObservedObject private var preferences = Preferences.shared
     @ObservedObject private var themes = Themes.shared
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.colorScheme) private var colorScheme
     @State private var selection: Selection?
     @State private var expanded: Set<String> = []
     /// Which projects have their hidden worktrees showing. Collapsed is the
@@ -148,6 +149,8 @@ struct ContentView: View {
     /// The task a worktree was opened from with Open Worktree: where Back
     /// goes. See `WorkspaceNavigation`.
     @State private var trail: Selection?
+    /// The worktree Open Worktree opened from `trail`.
+    @State private var trailWorktree: String?
     /// Whether each task's card is expanded, by task id, once toggled.
     @State private var cardExpanded: [String: Bool] = [:]
     /// The task whose changes the keyboard is in: the Diff menu's
@@ -362,6 +365,11 @@ struct ContentView: View {
             // view that was on screen, not the next one.
             focusColumn = false
             keyboardOnBoard = false
+            // The breadcrumb holds only while in the worktree it opened.
+            if trail != nil, !WorkspaceNavigation.keeps(trail: trail, opened: trailWorktree, now: new) {
+                trail = nil
+                trailWorktree = nil
+            }
 
             // Selecting a pane focuses it, which is also what switches to its
             // layout. Done here rather than in `detail`, because it is a write and
@@ -746,6 +754,13 @@ struct ContentView: View {
         }
     }
 
+    /// Whether a workspace's row is lit for what's open in it: with nothing
+    /// or a task open, yes; with a worktree open, its row in Worktrees is.
+    nonisolated static func highlightsWorkspace(_ focus: Focus?) -> Bool {
+        if case .worktree? = focus { return false }
+        return true
+    }
+
     /// Show Board: the workspace, with its board on screen, in the
     /// one-column form too.
     private func showBoard(host: String, workspace: String) {
@@ -1069,7 +1084,8 @@ struct ContentView: View {
         guard let workspace = entry.workspace, !workspace.isImplicit else { return nil }
         let host = entry.host
         return WorkspaceHeaderActions(
-            hasBoard: true,
+            // The board's own gate: a runner without `tasks` has none.
+            hasBoard: store.clients[host]?.daemonBuild.map { $0.can("tasks") } ?? true,
             hasOrchestrator: entry.orchestrator != nil,
             charter: CharterAccess.of(workspace, host: host),
             onShowBoard: { showBoard(host: host, workspace: workspace.id) },
@@ -1173,7 +1189,7 @@ struct ContentView: View {
                     count: WorkspaceCounts.count(for: workspace, host: entry.host, in: store.needsYou),
                     unread: ConversationColumn.unread(entry.orchestrator),
                     isSelected: selection?.host == entry.host && selection?.workspace == workspace.id
-                        && selection?.focus == nil,
+                        && Self.highlightsWorkspace(selection?.focus),
                     onSelect: { selection = .workspace(host: entry.host, workspace: workspace.id, focus: nil) },
                     actions: usable ? workspaceActions(entry) : nil)
             }
@@ -1349,7 +1365,7 @@ struct ContentView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
-            TextField("Search workspaces and agents", text: $query)
+            TextField("Find a workspace, task or agent", text: $query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12.5))
                 .focused($searchFocused)
@@ -2101,7 +2117,11 @@ struct ContentView: View {
             })
         switch state {
         case .live:
-            if let shown { tiled(shown, titled: false) } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
+            if let shown {
+                tiled(shown, titled: false)
+            } else if let seat {
+                bareTerminal(seat)
+            }
         case .lost:
             // Its last screen, dimmed, under what can be done about it.
             ZStack {
@@ -2131,7 +2151,7 @@ struct ContentView: View {
                 if let workspace,
                     store.needsYou.count(in: workspace.id) > 0 || ConversationColumn.unread(seat)
                 {
-                    Circle().fill(Color.orange).frame(width: 6, height: 6)
+                    Circle().fill(GlancePalette.amber(colorScheme)).frame(width: 6, height: 6)
                 }
                 Spacer()
             }
@@ -2226,7 +2246,7 @@ struct ContentView: View {
         let chosen = WorkspaceScreen.agent(of: row.id, host: host, in: store.fleet, chosen: chosenAgents[row.id])
         let worktreeID = TaskColumnModel.worktree(of: row, agent: chosen)
         let lane = worktreeID.flatMap { worktree(host: host, id: $0) }
-        let agent = TaskColumnModel.agent(hasAgent: shown != nil, worktree: lane?.id)
+        let agent = TaskColumnModel.agent(hasAgent: chosen != nil, worktree: lane?.id)
         let expanded = Binding(
             get: { cardExpanded[row.id] ?? TaskColumnModel.startsExpanded(row.status) },
             set: { cardExpanded[row.id] = $0 })
@@ -2234,6 +2254,7 @@ struct ContentView: View {
             guard let lane, let current = selection else { return }
             let opened = WorkspaceNavigation.openWorktree(lane.id, from: current)
             trail = opened.trail
+            trailWorktree = lane.id
             selection = opened.next
         }
         return VStack(spacing: 0) {
@@ -2261,19 +2282,18 @@ struct ContentView: View {
                 agent: {
                     if let shown {
                         tiled(shown, titled: false)
+                    } else if let chosen {
+                        // Working the task, and in no layout read yet.
+                        bareTerminal(chosen)
                     } else {
                         TaskColumnNoAgent(agent: agent, onOpenWorktree: openWorktree)
                     }
                 },
                 changes: {
                     if let lane {
-                        // Today's Changes view, reused as it is (ruling 6):
-                        // drawn here without a tmux pane, so nothing resizes
-                        // the agent's window for other clients.
-                        ChangesPane(
+                        TaskColumnChanges(
                             changes: changesStore(for: lane, client: client), isFocused: changesFocus == row.id,
-                            agents: lane.reviewAgentTargets())
-                        .simultaneousGesture(TapGesture().onEnded { changesFocus = row.id })
+                            agents: lane.reviewAgentTargets(), onFocus: { changesFocus = row.id })
                     }
                 })
         }
@@ -2295,10 +2315,45 @@ struct ContentView: View {
         )
     }
 
+    /// A pane drawn on its own, for the moment before its layout is read, or
+    /// a pane in no layout at all: "we haven't read the layouts yet" and
+    /// "it's in none" look the same from here, and showing the terminal is
+    /// the right answer to both.
+    private func bareTerminal(_ pane: BoardPane) -> some View {
+        let ws = pane.worktree
+        let term = pane.terminal
+        let client = store.client(for: ws)
+        return TerminalPane(
+            terminal: term,
+            worktree: ws,
+            binary: client?.cliPath,
+            environment: client?.cliEnvironment ?? [:],
+            hostArguments: client?.cliHostArguments ?? [],
+            linkGeneration: client?.linkGeneration ?? 0,
+            refusal: { store.refusal(for: ws) },
+            onGeometry: { cols, rows in
+                // Not through `act(on:_:)`: this is geometry, not a click.
+                await store.client(for: ws)?.resize(terminal: term.short, columns: cols, rows: rows)
+            },
+            onSearchFiles: { query in
+                await store.client(for: ws)?.searchFiles(in: ws, query: query) ?? []
+            },
+            onAction: { action in Task { await run(action, on: term, in: ws) } }
+        )
+    }
+
     /// A workspace's board, or a sentence saying where it went.
     @ViewBuilder
     private func boardColumn(host: String, id: String) -> some View {
-        if let client = store.clients[host], let workspace = board(host: host, id: id),
+        if let client = store.clients[host], client.daemonBuild.map({ !$0.can("tasks") }) == true {
+            // A runner too old for boards: said, rather than a board that
+            // can't be read.
+            ContentUnavailableView {
+                Label("No board on this runner", systemImage: "checklist")
+            } description: {
+                Text("This runner’s Far Cooler is too old for boards. Update it there to see this workspace’s tasks.")
+            }
+        } else if let client = store.clients[host], let workspace = board(host: host, id: id),
             let repository = client.repositories.first(where: {
                 $0.id == (workspace.repository ?? workspace.id)
             })
@@ -2393,9 +2448,9 @@ struct ContentView: View {
 
     private var placeholder: some View {
         ContentUnavailableView {
-            Label("Select a worktree", systemImage: "rectangle.split.3x1")
+            Label("Select a workspace", systemImage: "square.stack.3d.up")
         } description: {
-            Text("Each worktree is a directory and branch of its own.")
+            Text("A workspace shows its orchestrator beside its board.")
         } actions: {
             if !store.repositories.isEmpty {
                 Button("New Worktree…") {

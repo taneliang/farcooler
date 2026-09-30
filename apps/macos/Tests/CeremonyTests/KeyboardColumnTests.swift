@@ -74,4 +74,31 @@ struct KeyboardColumnTests {
         #expect(shown.map { WorkspaceScreen.hasKeyboard($0, key: shell, onBoard: true) } == [false, false])
         #expect(shown.map { WorkspaceScreen.hasKeyboard($0, key: nil, onBoard: false) } == [false, false])
     }
+
+    /// While it starts, the column draws "Starting Orchestrator…", not its
+    /// pane, so the pane isn't on screen: not marked seen, not watched.
+    @Test("A starting orchestrator isn't on screen")
+    func aStartingOrchestratorIsntOnScreen() {
+        var fleet = Self.fleet()
+        let workspace = ContentView.Selection.workspace(host: "", workspace: Self.main, focus: nil)
+        #expect(WorkspaceScreen.shown(workspace, in: fleet, layouts: { _, _ in Self.layouts() }).map(\.column) == [.conversation])
+        fleet.worktrees[0].terminals[0].state = "starting"
+        #expect(WorkspaceScreen.shown(workspace, in: fleet, layouts: { _, _ in Self.layouts() }).isEmpty)
+    }
+
+    /// A workspace's row stays lit with a task open in it; with one of its
+    /// worktrees open, that worktree's row is lit instead.
+    @Test("A workspace row stays lit with a task open")
+    func aWorkspaceRowStaysLitWithATaskOpen() {
+        // Bound first: inside `#expect`, a bare `.task(…)` doesn't reach
+        // `Focus.task`, and the expectation passed whatever the rule said.
+        let task: ContentView.Focus = .task("t-9")
+        let worktree: ContentView.Focus = .worktree("w", terminal: nil)
+        let lit = ContentView.highlightsWorkspace(nil)
+        let withTask = ContentView.highlightsWorkspace(task)
+        let withWorktree = ContentView.highlightsWorkspace(worktree)
+        #expect(lit)
+        #expect(withTask)
+        #expect(!withWorktree)
+    }
 }

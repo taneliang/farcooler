@@ -257,6 +257,11 @@ struct Worktree: Decodable, Identifiable, Hashable {
         if branch.lowercased().contains(q) { return true }
         if (repository ?? "").lowercased().contains(q) { return true }
         if (host ?? "").lowercased().contains(q) { return true }
+        // Its open tasks, by key and title: Find finds a task by the
+        // worktree it's in.
+        if (openTasks ?? []).contains(where: { $0.key.lowercased().contains(q) || $0.title.lowercased().contains(q) }) {
+            return true
+        }
         return terminals.contains {
             $0.label.lowercased().contains(q)
         }
