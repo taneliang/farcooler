@@ -1,3 +1,4 @@
+import AppKit
 import AgentKit
 import Foundation
 import Testing
@@ -106,5 +107,24 @@ struct TaskColumnTests {
         #expect(WorkspaceNavigation.back(from: opened.next, trail: nil) == .workspace(host: "", workspace: "ws", focus: nil))
         #expect(WorkspaceNavigation.back(from: task, trail: nil) == .workspace(host: "", workspace: "ws", focus: nil))
         #expect(WorkspaceNavigation.back(from: .workspace(host: "", workspace: "ws", focus: nil), trail: task) == nil)
+    }
+
+    /// Esc goes Back only with something to go back from, and never while a
+    /// terminal or a text field has the keyboard: a terminal needs its Esc,
+    /// and a field cancels with it.
+    @Test("Esc goes back only when no terminal or field has the keyboard")
+    func escGoesBackOnlyWhenNoTerminalOrFieldHasTheKeyboard() {
+        let task = ContentView.Selection.workspace(host: "", workspace: "ws", focus: .task("t-9"))
+        let plain = NSView()
+        #expect(EscapeBack.goesBack(responder: plain, selection: task, focusColumn: false))
+        #expect(EscapeBack.goesBack(responder: nil, selection: task, focusColumn: false))
+        #expect(!EscapeBack.goesBack(responder: TerminalRenderView(), selection: task, focusColumn: false))
+        #expect(!EscapeBack.goesBack(responder: NSTextView(), selection: task, focusColumn: false))
+        #expect(!EscapeBack.goesBack(responder: NSTextField(), selection: task, focusColumn: false))
+        // Nothing to go back from.
+        let workspace = ContentView.Selection.workspace(host: "", workspace: "ws", focus: nil)
+        #expect(!EscapeBack.goesBack(responder: plain, selection: workspace, focusColumn: false))
+        #expect(!EscapeBack.goesBack(responder: plain, selection: .needsYou, focusColumn: false))
+        #expect(EscapeBack.goesBack(responder: plain, selection: task, focusColumn: true))
     }
 }

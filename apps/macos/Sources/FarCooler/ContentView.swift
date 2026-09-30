@@ -155,6 +155,10 @@ struct ContentView: View {
     @State private var changesFocus: String?
     /// Whether the one-time workspaces tip is up. See `WorkspacesTip`.
     @State private var showWorkspacesTip = WorkspacesTip.shouldShow()
+    /// The key monitor that turns Esc into Back. See `EscapeBack`.
+    @State private var escapeMonitor: Any?
+    /// This window, for the Esc monitor, which hears every window's keys.
+    @State private var windowBox = WindowBox()
     /// New Workspace…, with the name typed into the palette, while its
     /// sheet is up.
     @State private var newWorkspaceName: NewWorkspaceName?
@@ -269,6 +273,23 @@ struct ContentView: View {
         }
         .onDisappear {
             for client in store.clients.values { client.stopEvents() }
+            if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
+            escapeMonitor = nil
+        }
+        // Esc goes Back when nothing that needs it has the keyboard, in this
+        // window, with no sheet or overlay up.
+        .background(WindowReader(box: windowBox))
+        .onAppear {
+            guard escapeMonitor == nil else { return }
+            escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                guard event.keyCode == 53, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
+                    let window = event.window, window === windowBox.window, window.attachedSheet == nil,
+                    !showPalette, !showQuickCreate,
+                    EscapeBack.goesBack(responder: window.firstResponder, selection: selection, focusColumn: focusColumn)
+                else { return event }
+                goBack()
+                return nil
+            }
         }
         // Recorded as it changes rather than on quit: an app that is force
         // quit, crashes, or is killed by a rebuild never gets a last word, and

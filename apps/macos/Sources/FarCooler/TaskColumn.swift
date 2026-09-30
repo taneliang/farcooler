@@ -283,3 +283,50 @@ struct OpenedWorktreeHeader: View {
         .background(WorkspaceStyle.canvas)
     }
 }
+
+/// Esc as Back (spec §4.9): only when no terminal, and nothing being typed
+/// into, has the keyboard, since a terminal needs its Esc and a field uses it
+/// to cancel.
+@MainActor
+enum EscapeBack {
+    /// Whether `responder` takes Esc for itself: a terminal, or any text
+    /// being edited (a composer, a field, the search box).
+    static func keepsEscape(_ responder: NSResponder?) -> Bool {
+        responder is TerminalRenderView || responder is NSText || responder is NSTextField
+    }
+
+    /// Whether an Esc in the main window goes back: something to go back
+    /// from (a third column, or Focus Column), and nobody else wanting it.
+    static func goesBack(responder: NSResponder?, selection: ContentView.Selection?, focusColumn: Bool) -> Bool {
+        guard !keepsEscape(responder) else { return false }
+        return focusColumn || selection?.focus != nil
+    }
+}
+
+/// Which window a view is in, kept weakly: what Esc as Back checks, so an
+/// Esc in Settings doesn't close a task in the window behind it.
+@MainActor
+final class WindowBox {
+    weak var window: NSWindow?
+}
+
+/// Tells a `WindowBox` the window it's drawn in.
+struct WindowReader: NSViewRepresentable {
+    let box: WindowBox
+
+    func makeNSView(context: Context) -> NSView {
+        let view = Reporter()
+        view.box = box
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class Reporter: NSView {
+        var box: WindowBox?
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            box?.window = window
+        }
+    }
+}
