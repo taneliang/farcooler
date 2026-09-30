@@ -227,6 +227,20 @@ enum WorkspaceScreen {
         return shown.contains(where: { $0.contains(pane) }) ? .some(selection) : nil
     }
 
+    /// The pane ⌥⌘1 or ⌥⌘3 gives the keyboard to in `layout`: the one tmux
+    /// has focused, which is the one its view draws focused and hands typed
+    /// keys to, else its first. Not simply its first: in a layout of two,
+    /// typing would go to the second while ⌘W closed the first.
+    static func columnPane(_ layout: ShownLayout) -> PaneRef? {
+        (layout.group.focused ?? layout.group.terminals.first).map {
+            PaneRef(host: layout.host, worktree: layout.worktree.id, terminal: $0)
+        }
+    }
+
+    /// Whether a bare terminal, drawn before its layout is read, takes the
+    /// keyboard: only with no tiled layout on screen to hold the key pane.
+    static func bareTakesKeyboard(_ shown: [ShownLayout]) -> Bool { shown.isEmpty }
+
     /// Whether a terminal view drawing `layout` has the keyboard: it holds
     /// the key pane, and the board hasn't been given it (⌥⌘2). Only that
     /// view's focused pane draws focused and takes typed keys, so what you

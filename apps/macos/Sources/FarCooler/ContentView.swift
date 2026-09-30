@@ -353,7 +353,7 @@ struct ContentView: View {
         ) { _ in
             markVisibleSeen()
         }
-        .onChange(of: selection) { _, new in
+        .onChange(of: selection) { old, new in
             // Cleared on every navigation, so a refusal or failure left behind
             // on one pane does not go on describing a pane the user is no
             // longer looking at. Selection is the one thing every navigation
@@ -363,7 +363,9 @@ struct ContentView: View {
             errorBanner = nil
             // Focus Column and a board holding the keyboard are about the
             // view that was on screen, not the next one.
-            focusColumn = false
+            // Focus Column stays while the same thing is open, whichever of
+            // its panes is selected.
+            if !WorkspaceSelection.samePlace(old, new) { focusColumn = false }
             keyboardOnBoard = false
             // The breadcrumb holds only while in the worktree it opened.
             if trail != nil, !WorkspaceNavigation.keeps(trail: trail, opened: trailWorktree, now: new) {
@@ -2178,7 +2180,7 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 OpenedWorktreeHeader(
                     task: trailTask(host: host), worktree: worktree(host: host, id: wt)?.task ?? "Worktree",
-                    onBack: { goBack() })
+                    onBack: { goBack(unfocusFirst: false) })
                 Divider()
                 if let shown {
                     tiled(shown, titled: false)
@@ -2206,10 +2208,13 @@ struct ContentView: View {
 
     /// Back (⌃⌘←, the column's ✕, the breadcrumb): along the breadcrumb to
     /// a task, else the third column closes.
-    private func goBack() {
+    ///
+    /// Esc and ⌃⌘← leave Focus Column first; the column's ✕ and breadcrumb
+    /// (`unfocusFirst` false) close it as they do anywhere else.
+    private func goBack(unfocusFirst: Bool = true) {
         if focusColumn {
             focusColumn = false
-            return
+            if unfocusFirst { return }
         }
         guard let back = WorkspaceNavigation.back(from: selection, trail: trail) else { return }
         if back == trail { trail = nil }
@@ -2234,7 +2239,7 @@ struct ContentView: View {
                 ContentUnavailableView {
                     Label("This task isn’t on the board anymore", systemImage: "checklist")
                 } actions: {
-                    Button("Close") { goBack() }
+                    Button("Close") { goBack(unfocusFirst: false) }
                 }
             }
         } else {
@@ -2265,7 +2270,7 @@ struct ContentView: View {
                 row: row, store: board, agents: agents, chosen: chosen, worktree: lane?.id, expanded: expanded,
                 onChooseAgent: { pane in chosenAgents[row.id] = pane.terminal.id },
                 onOpenWorktree: openWorktree,
-                onClose: { goBack() })
+                onClose: { goBack(unfocusFirst: false) })
             if expanded.wrappedValue {
                 Divider()
                 ScrollView {
@@ -2341,7 +2346,8 @@ struct ContentView: View {
             onSearchFiles: { query in
                 await store.client(for: ws)?.searchFiles(in: ws, query: query) ?? []
             },
-            onAction: { action in Task { await run(action, on: term, in: ws) } }
+            onAction: { action in Task { await run(action, on: term, in: ws) } },
+            hasKeyboard: WorkspaceScreen.bareTakesKeyboard(shown)
         )
     }
 
@@ -3034,9 +3040,10 @@ struct ContentView: View {
                 // go back to it.
                 selection = selection?.closed
             }
-            if let pane = Self.stepOrder(shownLayouts(for: selection).filter { $0.column == .conversation }).first {
-                keyPane = pane
-                keyboardOnBoard = false
+            if let pane = shownLayouts(for: selection).first(where: { $0.column == .conversation })
+                .flatMap(WorkspaceScreen.columnPane)
+            {
+                step(to: pane)
             }
         case .focusBoard:
             workspacePicks[key] = .board
@@ -3046,9 +3053,8 @@ struct ContentView: View {
             keyboardOnBoard = true
             windowBox.window?.makeFirstResponder(nil)
         case .focusTask:
-            if let pane = shown.last(where: { $0.column != .conversation }).map({ Self.stepOrder([$0]) })?.first {
-                keyPane = pane
-                keyboardOnBoard = false
+            if let pane = shown.last(where: { $0.column != .conversation }).flatMap(WorkspaceScreen.columnPane) {
+                step(to: pane)
             }
         default:
             break

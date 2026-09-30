@@ -72,6 +72,25 @@ extension ContentView {
     }
 }
 
+extension WorkspaceSelection {
+    /// Whether two selections open the same thing: the same workspace with
+    /// the same task or worktree open, or the same loose worktree, whichever
+    /// of its panes is named.
+    static func samePlace(_ a: ContentView.Selection?, _ b: ContentView.Selection?) -> Bool {
+        func place(_ s: ContentView.Selection?) -> ContentView.Selection? {
+            switch s {
+            case .workspace(let h, let w, .worktree(let wt, _)?):
+                return .workspace(host: h, workspace: w, focus: .worktree(wt, terminal: nil))
+            case .looseWorktree(let h, let wt, _):
+                return .looseWorktree(host: h, worktree: wt, terminal: nil)
+            default:
+                return s
+            }
+        }
+        return place(a) == place(b)
+    }
+}
+
 /// One pane, on one runner, in the worktree its runner lists it in.
 struct PaneRef: Hashable {
     var host: String

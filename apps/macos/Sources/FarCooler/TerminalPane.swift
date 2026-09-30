@@ -27,6 +27,10 @@ struct TerminalPane: View {
     let onGeometry: (Int, Int) async -> Void
     let onSearchFiles: (String) async -> [String]
     let onAction: (TerminalAction) -> Void
+    /// Whether this pane takes the keyboard when it appears. Not beside a
+    /// tiled column that holds the key pane: typed keys would go here while
+    /// ⌃B and ⌘W acted there.
+    var hasKeyboard = true
 
     /// Whether to draw a terminal here at all.
     ///
@@ -61,7 +65,7 @@ struct TerminalPane: View {
                     linkGeneration: linkGeneration,
                     refusal: refusal,
                     // One pane, so it always owns the keyboard.
-                    isFocused: true,
+                    isFocused: hasKeyboard,
                     searchFiles: onSearchFiles,
                     onResize: onGeometry
                 )
@@ -84,7 +88,7 @@ struct TerminalPane: View {
                     onResize: onGeometry,
                     fontRevision: preferences.revision,
                     // One pane, so it always owns the keyboard.
-                    isFocused: true
+                    isFocused: hasKeyboard
                 )
                 // Identity includes the PANE MODE, not just the terminal.
                 //

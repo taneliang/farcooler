@@ -101,4 +101,46 @@ struct KeyboardColumnTests {
         #expect(withTask)
         #expect(!withWorktree)
     }
+
+    /// ⌥⌘1 and ⌥⌘3 give the keyboard to the pane tmux has focused in that
+    /// column, which is the one its view draws focused and hands typed keys
+    /// to: in a two-pane layout whose second pane is focused, not the first,
+    /// or ⌘W would close one pane while typing went to the other.
+    @Test("⌥⌘3 keys the column's focused pane")
+    func optionCommandThreeKeysTheColumnsFocusedPane() {
+        let worktree = Worktree(
+            id: "w", short: "w", task: "w", branch: "b", repository: nil, host: "", path: "/tmp/w",
+            state: "active", terminals: [])
+        func rect(_ id: String, focused: Bool) -> PaneRect {
+            PaneRect(id: id, short: id, title: nil, left: 0, top: 0, columns: 40, rows: 24, focused: focused, zoomed: false)
+        }
+        let group = PaneGroup(
+            id: "@2", name: "", active: true, columns: 80, rows: 24, layout: "@2",
+            panes: [rect("a1", focused: false), rect("a2", focused: true)])
+        let layout = ShownLayout(column: .task, worktree: worktree, group: group, groups: [group])
+        let pane = WorkspaceScreen.columnPane(layout)
+        #expect(pane?.terminal == "a2")
+        let keyed = WorkspaceScreen.hasKeyboard(layout, key: pane, onBoard: false)
+        #expect(keyed)
+        // A bare terminal beside a tiled column doesn't take the keyboard.
+        let beside = WorkspaceScreen.bareTakesKeyboard([layout])
+        let alone = WorkspaceScreen.bareTakesKeyboard([])
+        #expect(!beside && alone)
+    }
+
+    /// Focus Column stays while the same thing is open: clicking between an
+    /// opened worktree's panes names another pane, which is no new place.
+    @Test("Focus Column survives a click between an opened worktree's panes")
+    func focusColumnSurvivesAClickBetweenPanes() {
+        let one = ContentView.Selection.workspace(host: "", workspace: "ws", focus: .worktree("w", terminal: "a"))
+        let two = ContentView.Selection.workspace(host: "", workspace: "ws", focus: .worktree("w", terminal: "b"))
+        let other = ContentView.Selection.workspace(host: "", workspace: "ws", focus: .worktree("v", terminal: "a"))
+        let task = ContentView.Selection.workspace(host: "", workspace: "ws", focus: .task("t"))
+        let same = WorkspaceSelection.samePlace(one, two)
+        let loose = WorkspaceSelection.samePlace(
+            .looseWorktree(host: "", worktree: "w", terminal: "a"), .looseWorktree(host: "", worktree: "w", terminal: nil))
+        let moved = WorkspaceSelection.samePlace(one, other)
+        let toTask = WorkspaceSelection.samePlace(one, task)
+        #expect(same && loose && !moved && !toTask)
+    }
 }
