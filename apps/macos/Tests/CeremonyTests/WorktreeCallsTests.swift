@@ -462,6 +462,11 @@ struct WorktreeCallsTests {
         _ = await self.client(making).createWorkspace(repository: "repo", name: "Ops", prefix: "")
         lines += making.calls.filter { $0.first == "workspace" }
 
+        // Use as Orchestrator and Stop Being Orchestrator (ov-63).
+        lines += ["orchestrator", "agent", "shell"].map {
+            DaemonClient.setRoleArguments(terminal: "5a7573bd", role: $0)
+        }
+
         // Needs You's read, and an ask's answer.
         let needs = Recorder()
         needs.capabilities = ["needs_you"]
