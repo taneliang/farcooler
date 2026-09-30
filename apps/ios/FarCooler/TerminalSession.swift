@@ -194,7 +194,24 @@ final class TerminalSession: ObservableObject {
     /// The re-attach that is waiting to happen, held so that an `open` from
     /// any other cause can cancel it rather than race it.
     private var streamRetry: Task<Void, Never>?
-    private var started = false
+    private var started = false {
+        didSet {
+            #if DEBUG
+            if started {
+                Self.running.insert(terminalID)
+            } else {
+                Self.running.remove(terminalID)
+            }
+            #endif
+        }
+    }
+
+    #if DEBUG
+    /// The terminals whose session is open, by id: watching, streaming and
+    /// polling. For a UI test to tell a pane that is mounted and stopped
+    /// from one still streaming (`phone-probe`).
+    static var running: Set<String> = []
+    #endif
 
     /// How often to ask the host how big this pane is now.
     ///

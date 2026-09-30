@@ -124,9 +124,9 @@ struct PhoneRoot: View {
     /// A tapped notification or card's terminal, held by `FleetView` until a
     /// runner's fleet has it. See `followLink`.
     @Binding var pendingTerminal: String?
-    /// A tapped decision push's task, by key, held until a runner has it.
-    /// See `followTask`.
-    @Binding var pendingTask: String?
+    /// A tapped decision push's task, held until a runner has it. See
+    /// `followTask`.
+    @Binding var pendingTask: DecisionPush?
 
     @StateObject private var navigator = PhoneNavigator()
 
@@ -148,8 +148,14 @@ struct PhoneRoot: View {
                 }
             }
             .environment(\.phoneNavigator, navigator)
+            #if DEBUG
+            .overlay(alignment: .topLeading) { PhoneProbeView() }
+            #endif
         }
         .environment(\.phoneNavigator, navigator)
+        #if DEBUG
+        .overlay(alignment: .topLeading) { PhoneProbeView().offset(y: 2) }
+        #endif
         .onAppear {
             followLink()
             decideLaunch()
@@ -239,28 +245,44 @@ struct PhoneRoot: View {
 
     /// A tapped decision push (ruling 3): its task, with its workspace under
     /// it, once a runner has it (`PhoneDecisionLink`). Tried as the runners
-    /// answer, and dropped after `PhoneLaunch.decideWithin`: a task nobody
-    /// has by then would be jumped to long after anybody tapped anything.
+    /// answer, and dropped, leaving Needs You, once every runner has said
+    /// what needs you and read its boards without it, or after a minute
+    /// (`PhoneDecisionLink.givesUp`): a cold launch on a slow network can
+    /// take most of that to reach anyone, and a task nobody has by then
+    /// would be jumped to long after anybody tapped anything.
     private func followTask() async {
         let began = Date()
-        while let key = pendingTask, !Task.isCancelled {
+        while let push = pendingTask, !Task.isCancelled {
             let sources = fleet.runners.map { runner in
                 PhoneDecisionLink.Source(
                     runner: runner.host.id.uuidString, items: runner.connection.needsYou,
                     boards: runner.connection.boards,
                     implicit: runner.connection.fleet.workspaces == nil)
             }
-            if let stack = PhoneDecisionLink.find(key: key, in: sources) {
+            if let stack = PhoneDecisionLink.find(push, in: sources) {
                 pendingTask = nil
                 navigator.go(stack)
                 return
             }
-            if Date().timeIntervalSince(began) >= PhoneLaunch.decideWithin {
+            if PhoneDecisionLink.givesUp(settled: settled, elapsed: Date().timeIntervalSince(began)) {
                 pendingTask = nil
                 return
             }
             try? await Task.sleep(for: .milliseconds(500))
         }
+    }
+
+    /// Whether every runner has said what needs you, or won't, and every
+    /// board of every runner answering has been read or failed: all there
+    /// is to look for a decision's task in.
+    private var settled: Bool {
+        PhoneLaunch.canDecide(fleet.needsYouReadings)
+            && fleet.runners.allSatisfy { runner in
+                let connection = runner.connection
+                return connection.boardList.allSatisfy {
+                    connection.boards[$0.id] != nil || connection.unreadBoards.contains($0.id)
+                }
+            }
     }
 
     /// A tapped notification, once a runner's fleet has its terminal: its
@@ -281,6 +303,40 @@ struct PhoneRoot: View {
         }
     }
 }
+
+#if DEBUG
+/// What a UI test can't see from the screen: which orchestrator panes are
+/// live (their session open, rather than mounted and stopped), which pane
+/// `Notifier` holds as being read, and how many screens the stack kept.
+@MainActor
+final class PhoneProbe {
+    static let shared = PhoneProbe()
+    /// Every orchestrator pane that has been mounted, by terminal.
+    var orchestrators: Set<String> = []
+}
+
+/// `phone-probe`: `live=<ids> watch=<id> kept=<n>`, sampled, since none of
+/// it is observable. On the stack and on a worktree's cover, so it's read
+/// wherever the test is.
+private struct PhoneProbeView: View {
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+            let live = PhoneProbe.shared.orchestrators.filter(TerminalSession.running.contains)
+                .sorted()
+            let kept = PhoneLaunch.decode(
+                UserDefaults.standard.data(forKey: PhoneLaunch.stackKey)).count
+            Rectangle()
+                .fill(Color.white.opacity(0.001))
+                .frame(width: 1, height: 1)
+                .accessibilityElement()
+                .accessibilityIdentifier("phone-probe")
+                .accessibilityValue(
+                    "live=\(live.joined(separator: ",")) "
+                        + "watch=\(Notifier.shared.visibleTerminal ?? "") kept=\(kept)")
+        }
+    }
+}
+#endif
 
 /// A screen whose runner this app has stopped talking to.
 private struct RunnerGone: View {

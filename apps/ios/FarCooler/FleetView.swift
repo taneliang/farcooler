@@ -51,7 +51,7 @@ struct FleetView: View {
 
     /// A tapped decision push's task, by its key, held for `PhoneRoot` to
     /// find on whichever runner has it (ruling 3).
-    @State private var pendingTask: String?
+    @State private var pendingTask: DecisionPush?
 
     /// Whether to offer a way off the spinner yet. See `waitedLongEnough`.
     @State private var stalled = false
@@ -172,8 +172,8 @@ struct FleetView: View {
                 case .terminal(let terminal):
                     pendingTerminal = terminal
                     dropUnknownTerminal()
-                case .task(let key):
-                    pendingTask = key
+                case .task(let push):
+                    pendingTask = push
                 }
             }
             .onChange(of: fleet.entries.count) { _, _ in dropUnknownTerminal() }

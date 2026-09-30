@@ -27,6 +27,11 @@ import SwiftUI
 //   -phone-keep-stack        reopen the stack the last launch kept, rather
 //                            than forgetting it
 //   -phone-saved-gone        the last launch kept a stack whose task is gone
+//   -phone-billing-led       Billing has its orchestrator from the start
+//
+// A Darwin notification from the test stands in for a notification tapped
+// while the app is open: `com.farcooler.harness.agent`, the blocked
+// agent's; `com.farcooler.harness.decision`, bil-7's.
 
 struct PhoneHarness: View {
     static var isRequested: Bool { CommandLine.arguments.contains("-phone-harness") }
@@ -35,7 +40,7 @@ struct PhoneHarness: View {
     @StateObject private var fleet: FleetStore
     @State private var runner: HarnessRunner
     @State private var pendingTerminal: String?
-    @State private var pendingTask: String?
+    @State private var pendingTask: DecisionPush?
     /// Whether the canned runner has been stood up: its fleet, its list and
     /// its boards. A UI test waits on this (`phone-harness-ready`) before
     /// anything else, rather than on a guess at how long a first launch
@@ -50,8 +55,11 @@ struct PhoneHarness: View {
             wrappedValue: FleetStore.standIn(on: connection, host: HarnessRunner.host))
         _pendingTerminal = State(
             initialValue: UserDefaults.standard.string(forKey: "deep-link"))
-        _pendingTask = State(initialValue: UserDefaults.standard.string(forKey: "push-task"))
+        _pendingTask = State(
+            initialValue: UserDefaults.standard.string(forKey: "push-task")
+                .map { DecisionPush(key: $0, runner: nil) })
         Self.forgetOnce()
+        _ = HarnessTaps.listening
     }
 
     /// What a previous launch left behind, cleared once per process: SwiftUI
@@ -90,6 +98,16 @@ struct PhoneHarness: View {
         )
             .overlay(alignment: .topLeading) { snapshotProbe }
             .overlay(alignment: .bottomLeading) { sentProbe }
+            // A notification tapped while the app is open: an agent's, by
+            // its terminal, as `FleetView` hands one over, or bil-7's
+            // decision, by its task. Posted by the UI test as a Darwin
+            // notification (`HarnessTaps`).
+            .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.agent)) { _ in
+                pendingTerminal = HarnessRunner.agent
+            }
+            .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.decision)) { _ in
+                pendingTask = DecisionPush(key: "bil-7", runner: nil)
+            }
             .overlay(alignment: .topTrailing) {
                 if ready {
                     Rectangle()
@@ -139,6 +157,28 @@ extension PhoneHarness {
     }
 }
 
+/// The two Darwin notifications a UI test posts across the process line,
+/// as ordinary notifications here.
+enum HarnessTaps {
+    static let agent = Notification.Name("com.farcooler.harness.agent")
+    static let decision = Notification.Name("com.farcooler.harness.decision")
+
+    /// Listen, once per process.
+    static let listening: Void = {
+        for name in [agent, decision] {
+            CFNotificationCenterAddObserver(
+                CFNotificationCenterGetDarwinNotifyCenter(), nil,
+                { _, _, name, _, _ in
+                    guard let raw = name?.rawValue as String? else { return }
+                    DispatchQueue.main.async {
+                        NotificationCenter.default.post(name: Notification.Name(raw), object: nil)
+                    }
+                },
+                name.rawValue as CFString, nil, .deliverImmediately)
+        }
+    }()
+}
+
 /// The canned runner: what it has, and how it answers.
 @MainActor
 final class HarnessRunner {
@@ -165,8 +205,9 @@ final class HarnessRunner {
     static let goneTask = "0198f2c0-0000-7000-8000-00000000e404"
 
     private let connection: Connection
-    /// Whether Billing has an orchestrator yet. It starts without one.
-    private var billingLed = false
+    /// Whether Billing has an orchestrator yet. It starts without one,
+    /// unless `-phone-billing-led`.
+    private var billingLed = CommandLine.arguments.contains("-phone-billing-led")
     /// The items still waiting, by id.
     private var waiting: [String]
     /// Every write the screens made, as `harness-sent` shows it:
@@ -333,6 +374,9 @@ final class HarnessRunner {
             guard title.unicodeScalars.count <= 200 else {
                 throw ClientCore.CoreError.rejected("title too long", word: "invalid-argument", what: "title")
             }
+            // As long as a runner on a slow link takes, so a second tap on
+            // Add Task has time to land while the first is out.
+            try? await Task.sleep(for: .seconds(1))
             if title == "Refuse me" {
                 throw ClientCore.CoreError.rejected("scope", word: "scope-denied")
             }

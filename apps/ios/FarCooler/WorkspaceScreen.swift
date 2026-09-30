@@ -81,7 +81,7 @@ struct WorkspaceScreen: View {
             // stream (`TerminalView`'s `isVisible`) and takes no touches.
             if WorkspaceSegment.offered(implicit: summary.isImplicit).contains(.orchestrator) {
                 let up = shown == .orchestrator
-                OrchestratorSegment(connection: connection, summary: summary, shown: up)
+                OrchestratorSegment(connection: connection, summary: summary, place: place, shown: up)
                     .opacity(up ? 1 : 0)
                     .allowsHitTesting(up)
                     .accessibilityHidden(!up)
@@ -187,6 +187,7 @@ private struct SegmentBar: View {
 private struct OrchestratorSegment: View {
     @ObservedObject var connection: Connection
     let summary: WorkspaceSummary
+    let place: PhoneWorkspace
     /// Whether it's the segment up, rather than mounted under another.
     let shown: Bool
 
@@ -253,7 +254,8 @@ private struct OrchestratorSegment: View {
                 starting(since: startedAt ?? Date())
             default:
                 OrchestratorPane(
-                    terminal: terminal, connection: connection, pastes: pastes, shown: shown)
+                    terminal: terminal, connection: connection, pastes: pastes, place: place,
+                    shown: shown)
                     .id(terminal.id)
             }
         } else if let startedAt {
@@ -349,15 +351,64 @@ private struct OrchestratorSegment: View {
 /// The orchestrator's own pane, full height: the same terminal and agent
 /// views a worktree's panes use, and the one pane being read while it's up.
 ///
+/// **Live only while it's up and nothing covers it** (ov-66 fix): its
+/// segment chosen, and its workspace the top of the stack, with no task
+/// pushed over it and no worktree covering it. Covered, it stays mounted,
+/// as ruled, and its session stops (`TerminalView`'s `isVisible`): a
+/// stream nobody can see is a phone's battery and data spent for nothing.
+///
 /// Being read is `TerminalView`'s to claim, as every pane's is: while
-/// `isVisible`, it tells `Notifier` and marks the pane seen. What that
-/// claim never does is give itself back when the pane is only hidden, so
-/// this does, when another segment comes up or the screen goes.
+/// `isVisible`, it tells `Notifier` and marks the pane seen, and it claims
+/// again when it comes back, which is what Back from a cover does. What
+/// that claim never does is give itself back when the pane is only hidden,
+/// so this does, whenever it stops being live, and when the screen goes.
 private struct OrchestratorPane: View {
     let terminal: Terminal
     @ObservedObject var connection: Connection
     @ObservedObject var pastes: ImagePasteQueue
+    let place: PhoneWorkspace
     let shown: Bool
+
+    @Environment(\.phoneNavigator) private var navigator
+
+    var body: some View {
+        if let navigator {
+            CoverReader(navigator: navigator, place: place) { covered in
+                pane(live: shown && !covered)
+            }
+        } else {
+            pane(live: shown)
+        }
+    }
+
+    private func pane(live: Bool) -> some View {
+        OrchestratorTerminal(
+            terminal: terminal, connection: connection, pastes: pastes, live: live)
+    }
+}
+
+/// Whether anything is over `place`'s screen on the phone's stack: a
+/// screen pushed over it, or a worktree covering the stack.
+///
+/// A view of its own so that only what it wraps watches the stack: the
+/// workspace screen and its segment control never re-render on a push
+/// (see `PhoneNavigator`).
+private struct CoverReader<Content: View>: View {
+    @ObservedObject var navigator: PhoneNavigator
+    let place: PhoneWorkspace
+    @ViewBuilder let content: (Bool) -> Content
+
+    var body: some View {
+        content(navigator.worktree != nil || navigator.path.last != .workspace(place))
+    }
+}
+
+/// The orchestrator's terminal, live or not.
+private struct OrchestratorTerminal: View {
+    let terminal: Terminal
+    @ObservedObject var connection: Connection
+    @ObservedObject var pastes: ImagePasteQueue
+    let live: Bool
 
     #if DEBUG
     /// Which mount of the pane this is, for a UI test to tell a pane kept
@@ -366,13 +417,16 @@ private struct OrchestratorPane: View {
     #endif
 
     var body: some View {
-        TerminalView(terminal: terminal, isVisible: shown, connection: connection, pastes: pastes)
+        TerminalView(terminal: terminal, isVisible: live, connection: connection, pastes: pastes)
             .background(TerminalPalette.background.ignoresSafeArea(edges: .bottom))
             .accessibilityIdentifier("orchestrator-pane")
-            .onChange(of: shown) { _, up in
-                if !up { Notifier.shared.release(terminal.id) }
+            .onChange(of: live) { _, now in
+                if !now { Notifier.shared.release(terminal.id) }
             }
             .onDisappear { Notifier.shared.release(terminal.id) }
+            #if DEBUG
+            .onAppear { PhoneProbe.shared.orchestrators.insert(terminal.id) }
+            #endif
             #if DEBUG
             .overlay(alignment: .topTrailing) {
                 Rectangle()

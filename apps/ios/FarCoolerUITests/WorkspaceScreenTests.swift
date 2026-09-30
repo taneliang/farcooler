@@ -113,6 +113,115 @@ final class WorkspaceScreenTests: XCTestCase {
         XCTAssertEqual(mount.value as? String, before, "the pane was built again")
     }
 
+    /// **A second tap on Add Task while the first is out files nothing
+    /// more.** The runner takes a second to answer; the button is gone
+    /// under the finger for that second, and one task is filed.
+    func testAddTaskTappedTwiceFilesOneTask() throws {
+        let app = launch()
+        openWorkspace(app, "Billing")
+        choose(app, "Board")
+        let add = app.buttons["new-task"]
+        XCTAssertTrue(add.waitForExistence(timeout: 10), "no New Task…")
+        add.tap()
+        let title = app.textFields["new-task-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5), "no New Task sheet")
+        title.tap()
+        title.typeText("Email the invoice")
+        // Where the button is now, fixed: after the first tap there's a
+        // spinner there instead, and the second tap lands on whatever is.
+        let frame = app.buttons["new-task-add"].frame
+        let spot = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: frame.midX, dy: frame.midY))
+        // Both touches in one gesture: two `tap()`s would wait out the
+        // first create between them, which is no test at all.
+        spot.doubleTap()
+        XCTAssertTrue(
+            element(app, "board-card-bil-20").waitForExistence(timeout: 10),
+            "the filed task isn't on the board")
+        // Past the second create's answer, had there been one.
+        Thread.sleep(forTimeInterval: 2)
+        XCTAssertEqual(
+            element(app, "harness-sent").value as? String, "task.create billing Email the invoice",
+            "Add Task filed more than once")
+        XCTAssertFalse(element(app, "board-card-bil-21").exists, "a second task was filed")
+    }
+
+    /// **Covered, the orchestrator stops; back on it, it's read again**
+    /// (ov-66 fix). A decision push over Billing's orchestrator pushes the
+    /// task: the pane stays mounted and stops streaming. Back is Billing's
+    /// orchestrator again, streaming and held as the pane being read.
+    func testTheOrchestratorPausesUnderATaskAndResumesOnBack() throws {
+        let app = launch(["-phone-billing-led"])
+        openWorkspace(app, "Billing")
+        let probe = phoneProbe(app)
+        XCTAssertTrue(wait(probe, "live=\(Self.billingOrchestrator) watch=\(Self.billingOrchestrator)"))
+
+        Self.notify("decision")
+        XCTAssertTrue(
+            element(app, "task-heading").waitForExistence(timeout: 10), "the push opened nothing")
+        XCTAssertTrue(wait(probe, "live= watch="), "still streaming under the task: \(probe.value ?? "")")
+
+        app.navigationBars.buttons["BackButton"].firstMatch.tap()
+        XCTAssertTrue(
+            wait(probe, "live=\(Self.billingOrchestrator) watch=\(Self.billingOrchestrator)"),
+            "not read again on Back: \(probe.value ?? "")")
+    }
+
+    /// **Under a worktree, the same**: an agent's notification covers the
+    /// stack with its worktree, the orchestrator stops, and two Backs (the
+    /// worktree, then its task) bring it back live and read.
+    func testTheOrchestratorPausesUnderAWorktreeAndResumesOnBack() throws {
+        let app = launch(["-phone-billing-led"])
+        openWorkspace(app, "Billing")
+        let probe = phoneProbe(app)
+        XCTAssertTrue(wait(probe, "live=\(Self.billingOrchestrator) watch=\(Self.billingOrchestrator)"))
+
+        Self.notify("agent")
+        let paneBack = app.buttons["worktree-back"].firstMatch
+        XCTAssertTrue(paneBack.waitForExistence(timeout: 10), "the agent's worktree did not open")
+        let covered = phoneProbe(app)
+        XCTAssertTrue(
+            wait(covered, "live= watch=\(Self.agent)"),
+            "still streaming under the worktree: \(covered.value ?? "")")
+
+        paneBack.tap()
+        XCTAssertTrue(element(app, "task-heading").waitForExistence(timeout: 10), "no task under it")
+        app.navigationBars.buttons["BackButton"].firstMatch.tap()
+        XCTAssertTrue(
+            wait(probe, "live=\(Self.billingOrchestrator) watch=\(Self.billingOrchestrator)"),
+            "not read again on Back: \(probe.value ?? "")")
+    }
+
+    private static let billingOrchestrator = "0198f2c0-0000-7000-8000-00000000d004"
+
+    /// A notification tapped while the app is open, as the harness takes
+    /// one: a Darwin notification, `com.farcooler.harness.<which>`. Not a
+    /// tap on a control, which never reached one laid over a terminal, and
+    /// not `XCUIApplication.open(_:)`, which relaunches the app.
+    private static func notify(_ which: String) {
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName("com.farcooler.harness.\(which)" as CFString), nil, nil, true)
+    }
+
+    private static let agent = "0198f2c0-0000-7000-8000-00000000d002"
+
+    private func phoneProbe(_ app: XCUIApplication) -> XCUIElement {
+        let probe = app.descendants(matching: .any).matching(identifier: "phone-probe").firstMatch
+        XCTAssertTrue(probe.waitForExistence(timeout: 10), "no phone probe")
+        return probe
+    }
+
+    /// Whether `probe` reads `live=… watch=…` as given, within ten seconds.
+    private func wait(_ probe: XCUIElement, _ prefix: String) -> Bool {
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
+            if (probe.value as? String ?? "").hasPrefix(prefix + " kept=") { return true }
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+        return false
+    }
+
     /// **New Task… files a task on the board** (ov-66, ruling 4): a title
     /// past 200 scalars says the Mac's line and can't be added, a refusal
     /// is a sentence that keeps the sheet up, and a filed task is on the
