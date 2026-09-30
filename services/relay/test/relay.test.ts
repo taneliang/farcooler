@@ -6380,3 +6380,191 @@ describe('topic and channel must agree', () => {
     })
   })
 })
+
+// MARK: - The runner heartbeat (ov-53)
+
+/// A runner beats, the relay remembers when, and a phone's widget asks.
+///
+/// The widget can't see the app's links while the app is suspended, so a
+/// runner that stopped hours ago read exactly like a live one. These are the
+/// three halves of telling them apart: the beat lands on the runner's row,
+/// the pulse token reads only its own account, and a runner too old to beat
+/// never reaches the answer — its silence means nothing.
+describe('the runner heartbeat', () => {
+  /// Register the way the iOS app does, asking for a pulse token.
+  async function pulseToken(account: string): Promise<string> {
+    watchFetch()
+    const response = await register(account, { pulse: true })
+    const body = await response.json<{ ok: boolean; pulseToken?: string }>()
+    expect(body.pulseToken).toMatch(/^[0-9a-f]{64}$/)
+    return body.pulseToken!
+  }
+
+  async function pulse(token?: string) {
+    return await post('/v1/pulse', {}, token)
+  }
+
+  it('records the beat on the runner, and how often it promised one', async () => {
+    await pair('user_1', 'mine')
+    const before = Date.now()
+    const response = await post('/v1/heartbeat', { beatEvery: 300, version: '0.9.0+abc' }, 'mine')
+    expect(response.status).toBe(200)
+    const row = await env.DB.prepare(`SELECT beat_every, last_seen_at, version FROM daemons`).first<{
+      beat_every: number
+      last_seen_at: number
+      version: string
+    }>()
+    expect(row?.beat_every).toBe(300)
+    expect(row?.last_seen_at).toBeGreaterThanOrEqual(before)
+    expect(row?.version).toBe('0.9.0+abc')
+  })
+
+  it('pushes nothing for a beat', async () => {
+    const calls = watchFetch()
+    await register('user_1')
+    await pair('user_1', 'mine')
+    await post('/v1/heartbeat', { beatEvery: 300 }, 'mine')
+    expect(pushes(calls)).toEqual([])
+  })
+
+  it('refuses a beat from a token nobody issued', async () => {
+    await pair('user_1', 'mine')
+    expect((await post('/v1/heartbeat', { beatEvery: 300 })).status).toBe(401)
+    expect((await post('/v1/heartbeat', { beatEvery: 300 }, 'guessed')).status).toBe(401)
+  })
+
+  it('clamps a promise it could not keep to one it can', async () => {
+    await pair('user_1', 'mine')
+    await post('/v1/heartbeat', { beatEvery: 1 }, 'mine')
+    expect(
+      (await env.DB.prepare(`SELECT beat_every FROM daemons`).first<{ beat_every: number }>())
+        ?.beat_every,
+    ).toBe(60)
+    await post('/v1/heartbeat', { beatEvery: 10 ** 9 }, 'mine')
+    expect(
+      (await env.DB.prepare(`SELECT beat_every FROM daemons`).first<{ beat_every: number }>())
+        ?.beat_every,
+    ).toBe(3600)
+  })
+
+  it('mints a pulse token only when asked, and keeps only its hash', async () => {
+    watchFetch()
+    const plain = await (await register('user_1')).json<{ pulseToken?: string }>()
+    expect(plain.pulseToken).toBeUndefined()
+
+    const token = await pulseToken('user_1')
+    const row = await env.DB.prepare(`SELECT pulse_hash FROM devices`).first<{ pulse_hash: string }>()
+    expect(row?.pulse_hash).toBe(await sha256(token))
+  })
+
+  it('keeps the pulse token through a registration that does not ask', async () => {
+    // The Mac and every older build register without `pulse`; a phone's
+    // widget must not lose its credential because the app re-registered
+    // for a new notification toggle from an older code path.
+    const token = await pulseToken('user_1')
+    await register('user_1')
+    expect((await pulse(token)).status).toBe(200)
+  })
+
+  it('replaces the pulse token at every registration that asks', async () => {
+    const first = await pulseToken('user_1')
+    const second = await pulseToken('user_1')
+    expect(second).not.toBe(first)
+    expect((await pulse(first)).status).toBe(401)
+    expect((await pulse(second)).status).toBe(200)
+  })
+
+  it('answers how long ago each beating runner was heard, and its promise', async () => {
+    const token = await pulseToken('user_1')
+    await pair('user_1', 'mine')
+    await post('/v1/heartbeat', { beatEvery: 300 }, 'mine')
+
+    const body = await (await pulse(token)).json<{
+      runners: { label: string; heardAgo: number; beatEvery: number }[]
+    }>()
+    expect(body.runners).toHaveLength(1)
+    expect(body.runners[0].label).toBe('Studio')
+    expect(body.runners[0].beatEvery).toBe(300)
+    expect(body.runners[0].heardAgo).toBeGreaterThanOrEqual(0)
+    expect(body.runners[0].heardAgo).toBeLessThan(60_000)
+  })
+
+  it('reports an age, so a runner silent for an hour reads as an hour', async () => {
+    const token = await pulseToken('user_1')
+    await pair('user_1', 'mine')
+    await post('/v1/heartbeat', { beatEvery: 300 }, 'mine')
+    await env.DB.prepare(`UPDATE daemons SET last_seen_at = ?`).bind(Date.now() - 3_600_000).run()
+
+    const body = await (await pulse(token)).json<{ runners: { heardAgo: number }[] }>()
+    expect(body.runners[0].heardAgo).toBeGreaterThanOrEqual(3_600_000)
+    expect(body.runners[0].heardAgo).toBeLessThan(3_660_000)
+  })
+
+  it('leaves out a runner too old to beat, so its silence means nothing', async () => {
+    const token = await pulseToken('user_1')
+    await pair('user_1', 'old')
+    await post('/v1/notify', { title: 'hi' }, 'old')
+
+    const body = await (await pulse(token)).json<{ runners: unknown[] }>()
+    expect(body.runners).toEqual([])
+  })
+
+  it('forgets a runner silent for a day, as it forgets its rows', async () => {
+    const token = await pulseToken('user_1')
+    await pair('user_1', 'mine')
+    await post('/v1/heartbeat', { beatEvery: 300 }, 'mine')
+    await env.DB.prepare(`UPDATE daemons SET last_seen_at = ?`)
+      .bind(Date.now() - 25 * 3_600_000)
+      .run()
+
+    const body = await (await pulse(token)).json<{ runners: unknown[] }>()
+    expect(body.runners).toEqual([])
+  })
+
+  it('counts one runner paired twice once, by its newest beat', async () => {
+    const token = await pulseToken('user_1')
+    await pair('user_1', 'first')
+    await pair('user_1', 'second')
+    await post('/v1/heartbeat', { beatEvery: 300, install: 'runner-a' }, 'first')
+    await post('/v1/heartbeat', { beatEvery: 300, install: 'runner-a' }, 'second')
+    const firstHash = await sha256('first')
+    await env.DB.prepare(`UPDATE daemons SET last_seen_at = ? WHERE token_hash = ?`)
+      .bind(Date.now() - 3_600_000, firstHash)
+      .run()
+
+    const body = await (await pulse(token)).json<{ runners: { heardAgo: number }[] }>()
+    expect(body.runners).toHaveLength(1)
+    expect(body.runners[0].heardAgo).toBeLessThan(60_000)
+  })
+
+  it("reads only its own account's runners", async () => {
+    const token = await pulseToken('user_1')
+    await pair('user_2', 'theirs')
+    await post('/v1/heartbeat', { beatEvery: 300 }, 'theirs')
+
+    const body = await (await pulse(token)).json<{ runners: unknown[] }>()
+    expect(body.runners).toEqual([])
+  })
+
+  it('refuses a caller with no pulse token, or a guessed one', async () => {
+    await pulseToken('user_1')
+    expect((await pulse()).status).toBe(401)
+    expect((await pulse('0'.repeat(64))).status).toBe(401)
+  })
+
+  it('refuses a session in place of a pulse token, and a daemon token too', async () => {
+    // Three credentials, three scopes. A session is not a pulse token, and a
+    // daemon token must not read its account's runners.
+    await pulseToken('user_1')
+    await pair('user_1', 'mine')
+    expect((await pulse(await sessionFor('user_1'))).status).toBe(401)
+    expect((await pulse('mine')).status).toBe(401)
+  })
+
+  it('stops answering once the device is revoked', async () => {
+    const token = await pulseToken('user_1')
+    const id = (await env.DB.prepare(`SELECT id FROM devices`).first<{ id: string }>())!.id
+    await post('/v1/devices/revoke', { id }, await sessionFor('user_1'))
+    expect((await pulse(token)).status).toBe(401)
+  })
+})

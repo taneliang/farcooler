@@ -101,6 +101,10 @@ export default {
           return await notify(request, env)
         case '/v1/notify/retire':
           return await retireActivities(request, env)
+        case '/v1/heartbeat':
+          return await heartbeat(request, env)
+        case '/v1/pulse':
+          return await pulse(request, env)
         default:
           return json({ error: 'not found' }, 404)
       }
@@ -360,10 +364,25 @@ async function registerDevice(request: Request, env: Env): Promise<Response> {
     )
     .run()
 
+  // A pulse token, only when asked: the iOS app asks, so its widget can read
+  // which runners are beating (`/v1/pulse`). Minted AFTER the upsert and
+  // written by push token, because that is the row the upsert just made or
+  // kept. A registration that doesn't ask leaves the hash alone, so the Mac
+  // or an older code path re-registering can't strand a widget's credential.
+  let pulseToken: string | undefined
+  if (body.pulse === true) {
+    pulseToken = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '')
+    await env.DB.prepare(
+      `UPDATE devices SET pulse_hash = ? WHERE platform = ? AND push_token = ? AND account_id = ?`,
+    )
+      .bind(await sha256(pulseToken), body.platform, body.pushToken, account)
+      .run()
+  }
+
   await record(env.METRICS, env.ANALYTICS_SALT, 'device_registered', account, {
     platform: body.platform,
   })
-  return json({ ok: true })
+  return json(pulseToken === undefined ? { ok: true } : { ok: true, pulseToken })
 }
 
 /// What an app sends to register. Everything but the platform and the token is
@@ -392,6 +411,9 @@ interface Registration {
   /// Absent means notify. A build that predates the field sends nothing and
   /// keeps the behavior it has; see the COALESCE below and migration 0007.
   notifyOnDone?: unknown
+  /// `true` asks for a pulse token, answered once as `pulseToken`. Anything
+  /// else asks for nothing. See migration 0015.
+  pulse?: unknown
 }
 
 /// The fingerprint this registration PROVED it holds, or the response to send
@@ -1213,6 +1235,113 @@ async function notify(request: Request, env: Env): Promise<Response> {
     .run()
 
   return json({ delivered })
+}
+
+// MARK: - The runner heartbeat (ov-53)
+
+/// How often a runner may promise to beat, in seconds.
+///
+/// A promise is what `/v1/pulse` hands a widget to judge silence by, so one
+/// the relay can't hold a runner to is clamped rather than refused: a beat
+/// every second would be a D1 write every second, and a beat every day would
+/// let a runner stopped since breakfast read as live. The shipped daemon says
+/// 300; see `push::BEAT_EVERY`.
+const BEAT_EVERY_MIN_S = 60
+const BEAT_EVERY_MAX_S = 60 * 60
+
+/// A runner saying it's alive, and nothing else.
+///
+/// The daemon token authenticates it exactly as `/v1/notify` does, and it
+/// lands on the same `last_seen_at` a notice stamps. What it adds is the
+/// promise, `beat_every`, which is what tells a runner that beats and went
+/// quiet from one too old ever to beat (migration 0015). No push, no card, no
+/// roster row: a beat is a write to one row.
+async function heartbeat(request: Request, env: Env): Promise<Response> {
+  const daemon = await requireDaemon(request, env)
+  if (daemon instanceof Response) return daemon
+
+  const body = await request.json<{ beatEvery?: unknown; install?: unknown; version?: unknown }>()
+  const promised = typeof body.beatEvery === 'number' && Number.isFinite(body.beatEvery)
+    ? Math.round(body.beatEvery)
+    : 300
+  const beatEvery = Math.min(BEAT_EVERY_MAX_S, Math.max(BEAT_EVERY_MIN_S, promised))
+  // The install id keys the runner, as on a notice, so two tokens of one
+  // runner are one runner in the pulse too. Written only when it moves.
+  const install = await installKey(daemon.account_id, body.install)
+
+  await env.DB.prepare(
+    `UPDATE daemons SET last_seen_at = ?, beat_every = ?,
+                        install_id = COALESCE(?, install_id),
+                        version = COALESCE(?, version)
+     WHERE id = ?`,
+  )
+    .bind(
+      Date.now(),
+      beatEvery,
+      install,
+      typeof body.version === 'string' ? body.version.slice(0, 64) : null,
+      daemon.id,
+    )
+    .run()
+  return json({ ok: true })
+}
+
+/// Which of an account's runners are beating, and how long ago each was heard.
+///
+/// Read by a phone's widget, which can't see the app's links while the app is
+/// suspended, with the device's pulse token (see `registerDevice`). It reads
+/// labels and ages on its own account and nothing else.
+///
+/// **An age, not a timestamp**, so the phone's clock never enters it: the
+/// relay's clock stamped the beat and the relay's clock measures from it.
+///
+/// Only runners that promised a beat (`beat_every` set): a runner too old to
+/// beat is silent by construction, and the widget keeps today's hedge for it.
+/// One entry per runner, by install id where it sent one, and the newest beat
+/// among its tokens. A runner silent for `ROW_RETENTION_MS` is left out, the
+/// age at which the relay forgets its roster rows as well.
+///
+/// Whether a runner is quiet is the phone's call, not this route's:
+/// `RunnerPulse.quietAfter` in AgentKit is the one place that rule lives.
+async function pulse(request: Request, env: Env): Promise<Response> {
+  const header = request.headers.get('authorization') ?? ''
+  const token = header.startsWith('Bearer ') ? header.slice(7) : ''
+  if (!token) return json({ error: 'unauthorized' }, 401)
+  const device = await env.DB.prepare(`SELECT account_id FROM devices WHERE pulse_hash = ?`)
+    .bind(await sha256(token))
+    .first<{ account_id: string }>()
+  if (!device) return json({ error: 'unauthorized' }, 401)
+
+  const now = Date.now()
+  const beating = await env.DB.prepare(
+    `SELECT id, label, install_id, last_seen_at, beat_every FROM daemons
+     WHERE account_id = ? AND beat_every IS NOT NULL AND last_seen_at >= ?
+       AND (expires_at IS NULL OR expires_at > ?)`,
+  )
+    .bind(device.account_id, now - ROW_RETENTION_MS, now)
+    .all<{
+      id: string
+      label: string
+      install_id: string | null
+      last_seen_at: number
+      beat_every: number
+    }>()
+
+  const newest = new Map<string, { label: string; last_seen_at: number; beat_every: number }>()
+  for (const row of beating.results ?? []) {
+    const runner = row.install_id !== null ? `install:${row.install_id}` : `daemon:${row.id}`
+    const held = newest.get(runner)
+    if (!held || row.last_seen_at > held.last_seen_at) newest.set(runner, row)
+  }
+  return json({
+    runners: [...newest.values()]
+      .sort((a, b) => a.label.localeCompare(b.label))
+      .map(row => ({
+        label: row.label,
+        heardAgo: Math.max(0, now - row.last_seen_at),
+        beatEvery: row.beat_every,
+      })),
+  })
 }
 
 /// How many terminals one retirement request may name.

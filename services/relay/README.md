@@ -93,6 +93,20 @@ files when it next opens addresses the single card that exists. The window is
 still "until the app runs"; what accumulates inside it no longer scales with the
 fleet.
 
+## Runner heartbeat
+
+A paired runner beats: `POST /v1/heartbeat` every five minutes, carrying
+nothing but its install id, its build and how often it promised to beat. The
+relay stamps `daemons.last_seen_at` and `beat_every` (migration 0015) and
+pushes nothing. A phone's widget, which can't see the app's links while the
+app is suspended, posts its device's pulse token to `/v1/pulse` and gets back
+each beating runner's label, how long ago it was heard, and its promise; the
+phone decides what "quiet" is. The pulse token is minted by `/v1/devices` when
+the registration asks (`pulse: true`), is kept only as a hash, and reads
+labels and ages on its own account and nothing else. A runner too old to beat
+never appears there, so its silence means nothing. See
+docs/superpowers/specs/2026-09-30-runner-heartbeat-design.md.
+
 ## Sandbox and production
 
 A locally-signed build has `aps-environment: development` and so holds a
