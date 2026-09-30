@@ -779,6 +779,14 @@ class Connection(
         }
 
     /**
+     * [id] isn't being read any more: gives the claim back if it is still
+     * [id]'s, and does nothing if a pane claimed since (ov-69).
+     */
+    fun releaseVisible(id: String) {
+        if (visibleTerminal == id) visibleTerminal = null
+    }
+
+    /**
      * Whether this connection is allowed to poll. False while backgrounded.
      *
      * Set through [setForeground] rather than assigned, because coming back is

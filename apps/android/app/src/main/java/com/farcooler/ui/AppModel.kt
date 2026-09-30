@@ -26,6 +26,7 @@ import com.farcooler.net.FleetRepository
 import com.farcooler.net.Reachability
 import com.farcooler.net.TerminalRef
 import com.farcooler.notify.Notifier
+import com.farcooler.notify.ReadingRegister
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -61,7 +62,9 @@ class AppModel(
 ) : AndroidViewModel(application) {
     val hosts = RunnerStore(application)
     val settings = Settings(application)
-    val notifier = Notifier(application, settings)
+    /** Which terminal is being read; written only through [claimReading] and [releaseReading]. */
+    val reading = ReadingRegister()
+    val notifier = Notifier(application, settings, reading)
     val account = Account(application)
     val push = PushRegistration(application, account, settings)
 
@@ -706,6 +709,26 @@ class AppModel(
      * that has since died would be a claim about nothing.
      */
     val foreground: StateFlow<Boolean> = _foreground.asStateFlow()
+
+    /**
+     * [id] is the pane being read now on [connection], or null for none (the
+     * Changes tab). The one place a screen says so: the banner rule and the
+     * claim to the runner move together.
+     */
+    fun claimReading(connection: Connection, id: String?) {
+        reading.claim(id)
+        connection.visibleTerminal = id
+    }
+
+    /**
+     * [id] isn't being read any more. Each side gives back only what is still
+     * [id]'s, so a screen leaving after another has claimed (the orchestrator's
+     * tab over a worktree, or the reverse) wipes nothing (ov-69).
+     */
+    fun releaseReading(connection: Connection, id: String) {
+        reading.release(id)
+        connection.releaseVisible(id)
+    }
 
     fun setForeground(foreground: Boolean) {
         _foreground.value = foreground

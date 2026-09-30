@@ -154,15 +154,11 @@ fun WorkspaceScreen(
     val reading = live?.terminal?.id?.takeIf { route.tab == WorkspaceTab.ORCHESTRATOR && onScreen }
     DisposableEffect(reading) {
         if (reading != null) {
-            connection.visibleTerminal = reading
-            model.notifier.visibleTerminal = reading
+            model.claimReading(connection, reading)
             scope.launch { connection.markVisibleSeen() }
         }
         onDispose {
-            if (reading != null) {
-                connection.visibleTerminal = null
-                model.notifier.visibleTerminal = null
-            }
+            if (reading != null) model.releaseReading(connection, reading)
         }
     }
 

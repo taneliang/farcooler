@@ -38,7 +38,11 @@ import com.farcooler.ui.MainActivity
  * next time the phone is picked up. One channel would force the same answer for
  * both, and the answer people give to "too noisy" is to turn everything off.
  */
-class Notifier(private val context: Context, private val settings: Settings) {
+class Notifier(
+    private val context: Context,
+    private val settings: Settings,
+    private val reading: ReadingRegister = ReadingRegister(),
+) {
 
     /**
      * The terminal on screen.
@@ -48,8 +52,11 @@ class Notifier(private val context: Context, private val settings: Settings) {
      * is the one that got stuck, and swallowing every foreground banner would
      * hide exactly that. The one case it is noise is being told about the pane
      * you are already reading.
+     *
+     * Read from [ReadingRegister], which is written through
+     * `AppModel.claimReading` and nowhere else (ov-69).
      */
-    var visibleTerminal: String? = null
+    val visibleTerminal: String? get() = reading.current
 
     var isForeground: Boolean = true
 

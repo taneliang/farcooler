@@ -262,15 +262,11 @@ fun WorktreeScreen(
     val reading = (deck?.current as? Pane.Terminal)?.terminalId
     DisposableEffect(reading, onScreen) {
         if (onScreen) {
-            connection.visibleTerminal = reading
-            model.notifier.visibleTerminal = reading
+            model.claimReading(connection, reading)
             scope.launch { connection.markVisibleSeen() }
         }
         onDispose {
-            if (onScreen) {
-                connection.visibleTerminal = null
-                model.notifier.visibleTerminal = null
-            }
+            if (onScreen && reading != null) model.releaseReading(connection, reading)
         }
     }
 
