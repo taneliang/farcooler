@@ -32,6 +32,7 @@ import com.farcooler.notify.release
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -489,22 +490,41 @@ class AppModel(
      * workspace's Board tab, so Back walks to the board and then Needs You.
      * Held until a runner that knows the key has answered, as a terminal is.
      */
-    fun openByTaskKey(key: String) {
+    fun openByTaskKey(key: String, runner: String? = null) {
         pendingTask = key
+        pendingTaskRunner = runner
         // Somebody asked for this by name; a launch decision must not move them.
         launchDecided = true
         saved[LAUNCH] = true
         resolvePendingTask()
+        if (pendingTask == null) return
+        // A runner's id is read after its needs-you list, so a push naming one
+        // is retried until it can be told from the rest. After a minute a name
+        // nobody answers to is dropped and the key searched for alone (iOS's
+        // `PhoneDecisionLink.followWithin`).
+        viewModelScope.launch {
+            val began = System.currentTimeMillis()
+            while (pendingTask == key) {
+                val over = System.currentTimeMillis() - began >= DECISION_FOLLOW_MS
+                resolvePendingTask(waitEnded = over)
+                if (over) {
+                    if (pendingTask == key) pendingTask = null
+                    return@launch
+                }
+                delay(500)
+            }
+        }
     }
 
     private var pendingTask: String? = null
+    private var pendingTaskRunner: String? = null
 
-    private fun resolvePendingTask() {
+    private fun resolvePendingTask(waitEnded: Boolean = false) {
         val key = pendingTask ?: return
         val sources = fleet.active.value.map {
-            DecisionSource(it.host.id, it.needsYou.value, it.boards.value)
+            DecisionSource(it.host.id, it.needsYou.value, it.boards.value, it.daemon.value?.runnerId)
         }
-        val target = DecisionLink.find(key, sources) ?: return
+        val target = DecisionLink.find(key, sources, pendingTaskRunner, waitEnded) ?: return
         pendingTask = null
         _landed.value = true
         saved[LANDED] = true
@@ -745,6 +765,9 @@ class AppModel(
     }
 
     private companion object {
+        /** How long a decision push waits for its task at most, as on iOS. */
+        const val DECISION_FOLLOW_MS = 60_000L
+
         // Namespaced, because a `SavedStateHandle` is one bundle shared with
         // anything else that ever writes to this activity's saved state.
         const val STACK = "farcooler.nav.stack"

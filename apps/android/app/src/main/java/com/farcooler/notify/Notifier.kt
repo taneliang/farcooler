@@ -240,6 +240,12 @@ class Notifier(
          */
         const val PUSH_EXTRA_TASK = "task"
 
+        /**
+         * A decision push's `data.runner`: the runner its task is on, by
+         * `Host.runner_id` (ov-72). Absent from a daemon older than it.
+         */
+        const val PUSH_EXTRA_RUNNER = "runner"
+
         /** [PUSH_EXTRA_KIND]'s value on a decision push. */
         const val KIND_DECISION = "decision"
     }

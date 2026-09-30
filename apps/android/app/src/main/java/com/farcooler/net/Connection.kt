@@ -1123,6 +1123,7 @@ class Connection(
             // "keep offering what we offer today", so a runner newer than this
             // build cannot silently strip controls off it.
             grantedScope = body["grantedScope"]?.jsonPrimitive?.contentOrNull ?: "unspecified",
+            runnerId = body["runnerId"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotEmpty() },
         )
         // Read from the same call, which is already made once per connection.
         //

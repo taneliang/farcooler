@@ -320,18 +320,50 @@ class NeedsYouTest {
         val decision = item("decision:t7", "decision", 300_000_000, workspaceId = "ws-b", repositoryId = "repo")
             .copy(task = TaskRef(id = "t7", key = "bil-7"))
         val sources = listOf(
-            DecisionSource("studio", RunnerNeedsYou(emptyList()), emptyMap()),
-            DecisionSource("box", RunnerNeedsYou(listOf(decision)), emptyMap()),
+            DecisionSource("studio", RunnerNeedsYou(emptyList()), emptyMap(), null),
+            DecisionSource("box", RunnerNeedsYou(listOf(decision)), emptyMap(), null),
         )
         assertEquals(DecisionTarget("box", "ws-b", "repo", "t7"), DecisionLink.find("bil-7", sources))
 
         // Answered since, so not an item: its card on a board read still is.
         val board = TaskBoard(listOf(TaskBoardColumn(TaskStatus.NEEDS_DECISION, listOf(TaskRow("t7", "bil-7", "x", TaskStatus.NEEDS_DECISION, 0L)))))
-        val onBoard = listOf(DecisionSource("box", RunnerNeedsYou(emptyList()), mapOf("ws-b" to board)))
+        val onBoard = listOf(DecisionSource("box", RunnerNeedsYou(emptyList()), mapOf("ws-b" to board), null))
         assertEquals(DecisionTarget("box", "ws-b", null, "t7"), DecisionLink.find("bil-7", onBoard))
 
         assertNull(DecisionLink.find("bil-8", sources))
         assertNull(DecisionLink.find("", sources))
+    }
+
+    /**
+     * A key on two runners goes to the one the push names, by its
+     * `Host.runner_id`, however cased; with no name it is nobody's (ov-72).
+     * A name nobody answers to waits, then falls back to the key alone: one
+     * runner has it, so it opens; two, and it does not.
+     */
+    @Test
+    fun `a decision push names its runner when the key is on two`() {
+        fun on(host: String, id: String?, ws: String) = DecisionSource(
+            host,
+            RunnerNeedsYou(listOf(
+                item("decision:t7", "decision", 300_000_000, workspaceId = ws, repositoryId = "repo")
+                    .copy(task = TaskRef(id = "t7", key = "bil-7")),
+            )),
+            emptyMap(),
+            id,
+        )
+        val both = listOf(on("a", "host-a", "ws-a"), on("b", "host-b", "ws-b"))
+        assertEquals(DecisionTarget("b", "ws-b", "repo", "t7"), DecisionLink.find("bil-7", both, runner = "HOST-b"))
+        assertNull(DecisionLink.find("bil-7", both))
+        assertNull(DecisionLink.find("bil-7", both, runner = "host-gone"))
+        assertNull(DecisionLink.find("bil-7", both, runner = "host-gone", waitEnded = true))
+        val bare = listOf(on("a", "host-a", "ws-a"), DecisionSource("b", RunnerNeedsYou(emptyList()), emptyMap(), "host-b"))
+        assertNull(DecisionLink.find("bil-7", bare, runner = "host-b", waitEnded = true))
+        val unread = listOf(on("a", null, "ws-a"))
+        assertNull(DecisionLink.find("bil-7", unread, runner = "host-a"))
+        assertEquals(
+            DecisionTarget("a", "ws-a", "repo", "t7"),
+            DecisionLink.find("bil-7", unread, runner = "host-a", waitEnded = true),
+        )
     }
 
     // ---- fixtures ----

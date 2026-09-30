@@ -937,6 +937,11 @@ data class DaemonBuild(
      * [mayAdministerRunner]. Matches the iOS reading exactly.
      */
     val grantedScope: String = "unspecified",
+    /**
+     * The runner's own id, `Host.runner_id`: what a decision push names its
+     * runner by (ov-72). Null from a runner too old to say.
+     */
+    val runnerId: String? = null,
 ) {
     /**
      * Whether this runner can do something, by name.

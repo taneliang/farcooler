@@ -330,27 +330,50 @@ data class DecisionSource(
     val reading: RunnerNeedsYou?,
     /** Its boards as last read, by workspace id. */
     val boards: Map<String, TaskBoard>,
+    /** Its `Host.runner_id`, which a push names it by; null until read. */
+    val runnerId: String?,
 )
 
 object DecisionLink {
     /**
      * The task a decision push names, by its key (`bil-7`, the relay's
-     * `data.task`) — which carries no runner, so every runner is searched, in
-     * order. Its needs-you item first, which knows its workspace; then any
-     * board read so far that holds a card with that key. Null until one does.
+     * `data.task`), and by its runner (`data.runner`, `Host.runner_id`) when
+     * it names one (ov-72).
+     *
+     * On the named runner when one answers to the name, by [DecisionSource.runnerId]
+     * and however cased; a runner whose id is unread is not it. Once
+     * [waitEnded], a name nobody answers to is dropped, and the key is looked
+     * for alone. Otherwise on the one runner with a task under that key: its
+     * needs-you item first, which knows its workspace, then any board read so
+     * far with a card under it. Two runners with the key is null, not the first
+     * of them: landing on another runner's task is worse than Needs You, where
+     * both are. Null until one does.
      */
-    fun find(key: String, sources: List<DecisionSource>): DecisionTarget? {
+    fun find(
+        key: String,
+        sources: List<DecisionSource>,
+        runner: String? = null,
+        waitEnded: Boolean = false,
+    ): DecisionTarget? {
         if (key.isBlank()) return null
-        for (source in sources) {
-            val item = source.reading?.items?.firstOrNull { it.task?.key == key } ?: continue
-            val task = item.task ?: continue
+        var named = sources
+        if (runner != null) {
+            val matching = sources.filter { it.runnerId.equals(runner, ignoreCase = true) }
+            if (matching.isNotEmpty() || !waitEnded) named = matching
+        }
+        val found = named.mapNotNull { targetOn(key, it) }
+        return found.singleOrNull()
+    }
+
+    private fun targetOn(key: String, source: DecisionSource): DecisionTarget? {
+        val item = source.reading?.items?.firstOrNull { it.task?.key == key }
+        val task = item?.task
+        if (item != null && task != null) {
             return DecisionTarget(source.hostId, item.workspaceId, item.repositoryId, task.id)
         }
-        for (source in sources) {
-            for ((workspace, board) in source.boards) {
-                val row = board.rows.firstOrNull { it.key == key } ?: continue
-                return DecisionTarget(source.hostId, workspace, null, row.id)
-            }
+        for ((workspace, board) in source.boards) {
+            val row = board.rows.firstOrNull { it.key == key } ?: continue
+            return DecisionTarget(source.hostId, workspace, null, row.id)
         }
         return null
     }
