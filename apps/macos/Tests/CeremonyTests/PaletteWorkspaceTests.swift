@@ -41,4 +41,16 @@ struct PaletteWorkspaceTests {
         // And creation is still last, under anything to go to.
         #expect(found.last?.action == .newWorktree("billing"))
     }
+
+    /// New Workspace… is offered, named what was typed, below everything
+    /// to go to and never on a runner without workspaces.
+    @Test("Typing a name offers New Workspace, below everything to go to")
+    func typingANameOffersNewWorkspace() {
+        let found = PaletteIndex.matching("billing", in: [Self.lane], workspaces: [Self.billing], offersNewWorkspace: true)
+        let at = found.firstIndex { $0.action == .newWorkspace("billing") }
+        #expect(at != nil)
+        #expect(found.first { $0.action == .newWorkspace("billing") }?.title == "New Workspace “billing”…")
+        if let at { #expect(!found[at...].contains { $0.kind != "action" }, "creation above something to go to") }
+        #expect(!PaletteIndex.matching("billing", in: [Self.lane]).contains { $0.id == "new-workspace" })
+    }
 }

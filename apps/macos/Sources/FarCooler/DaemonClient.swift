@@ -2123,6 +2123,39 @@ final class DaemonClient: ObservableObject {
         return Self.orchestratorRefusal(message, workspace: workspace, replace: replace)
     }
 
+    /// `farcooler workspace create`: a workspace in `repository` (its uuid),
+    /// with `prefix` for its task keys, or the runner's choice when empty.
+    static func createWorkspaceArguments(repository: String, name: String, prefix: String) -> [String] {
+        ["workspace", "create", "--repo", repository, "--name", name]
+            + (prefix.isEmpty ? [] : ["--prefix", prefix]) + ["--json"]
+    }
+
+    /// Make a workspace: New Workspace…. The workspace the runner made, or
+    /// why not, in this app's words by the `code:` word. The fleet is read
+    /// again either way, so the sidebar lists it.
+    func createWorkspace(repository: String, name: String, prefix: String) async
+        -> (made: WorkspaceSummary?, refusal: String?)
+    {
+        let (data, message) = await runRaw(
+            Self.createWorkspaceArguments(repository: repository, name: name, prefix: prefix))
+        await refresh()
+        if let data {
+            return (try? JSONDecoder().decode(WorkspaceSummary.self, from: data), nil)
+        }
+        switch TaskFailure.code(in: message) {
+        case "invalid-argument":
+            return (nil, "That prefix is taken or isn’t valid. Use a letter and up to seven letters or digits.")
+        case "capability-unsupported":
+            return (nil, "This runner’s Far Cooler is too old to make workspaces. Update it there, then try again.")
+        case "scope-denied":
+            return (nil, "This runner lets Far Cooler see its workspaces but not change them.")
+        case .some:
+            return (nil, "This runner couldn’t make \(name). That’s a problem in the app, not in anything you did.")
+        case nil:
+            return (nil, "Couldn’t make \(name). Check that the runner is reachable, then try again.")
+        }
+    }
+
     /// The banner for a worktree that moved to `workspace` and then couldn't
     /// be put where it was dropped: the move held, the place didn't.
     static func movedButNotPlaced(_ worktree: Worktree, to workspace: WorkspaceSummary) -> String {

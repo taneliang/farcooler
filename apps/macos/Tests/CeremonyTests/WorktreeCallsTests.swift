@@ -439,6 +439,13 @@ struct WorktreeCallsTests {
         #expect(boards.calls.count == 2)
         lines += boards.calls
 
+        // New Workspace….
+        let making = Recorder()
+        _ = await self.client(making).createWorkspace(repository: "repo", name: "Billing", prefix: "bil")
+        #expect(making.calls.first == ["workspace", "create", "--repo", "repo", "--name", "Billing", "--prefix", "bil", "--json"])
+        _ = await self.client(making).createWorkspace(repository: "repo", name: "Ops", prefix: "")
+        lines += making.calls.filter { $0.first == "workspace" }
+
         // Needs You's read, and an ask's answer.
         let needs = Recorder()
         needs.capabilities = ["needs_you"]

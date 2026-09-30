@@ -155,6 +155,13 @@ struct ContentView: View {
     @State private var changesFocus: String?
     /// Whether the one-time workspaces tip is up. See `WorkspacesTip`.
     @State private var showWorkspacesTip = WorkspacesTip.shouldShow()
+    /// New Workspace…, with the name typed into the palette, while its
+    /// sheet is up.
+    @State private var newWorkspaceName: NewWorkspaceName?
+    struct NewWorkspaceName: Identifiable {
+        let name: String
+        var id: String { name }
+    }
     /// Which workspaces' Worktrees disclosures are open, as
     /// `SidebarEntry.openKey`s, one a line. Empty by default (spec §9).
     @AppStorage("sidebar.openWorktrees") private var openWorktrees = ""
@@ -395,6 +402,17 @@ struct ContentView: View {
             markVisibleSeen()
         }
         .sheet(isPresented: $showShortcuts) { ShortcutsSheet() }
+        .sheet(item: $newWorkspaceName) { intent in
+            NewWorkspaceSheet(repositories: workspaceRepositories, name: intent.name) { host, repository, name, prefix in
+                if let why = store.refusal(for: host) { return why }
+                guard let client = store.clients[host] else { return "That runner isn’t connected." }
+                let made = await client.createWorkspace(repository: repository, name: name, prefix: prefix)
+                if let workspace = made.made {
+                    selection = .workspace(host: host, workspace: workspace.id, focus: nil)
+                }
+                return made.refusal
+            }
+        }
         .sheet(isPresented: $showAbout) { AboutSheet() }
         .sheet(isPresented: $showResumeBranch) {
             ResumeBranch(
@@ -465,6 +483,7 @@ struct ContentView: View {
                         worktrees: store.fleet.worktrees,
                         workspaces: paletteWorkspaces,
                         tasks: paletteTasks,
+                        offersNewWorkspace: !workspaceRepositories.isEmpty,
                         current: selectedPane,
                         screen: { short in await screen(forTerminalShort: short) },
                         onRun: { perform($0) },
@@ -704,6 +723,12 @@ struct ContentView: View {
     private func showBoard(host: String, workspace: String) {
         workspacePicks["\(host)|\(workspace)"] = .board
         selection = .workspace(host: host, workspace: workspace, focus: nil)
+    }
+
+    /// Repositories New Workspace… can make one in: on runners with
+    /// workspaces.
+    private var workspaceRepositories: [(host: String, repository: Repository)] {
+        store.repositories.filter { store.fleet.runnerWorkspaces[$0.host] != nil }
     }
 
     /// Every workspace in the sidebar, for the palette.
@@ -3140,6 +3165,9 @@ struct ContentView: View {
 
         case .openTask(let host, let workspace, let id):
             openTask(id, host: host, workspace: workspace)
+
+        case .newWorkspace(let name):
+            newWorkspaceName = NewWorkspaceName(name: name)
 
         case .newWorktree(let described):
             if store.repositories.isEmpty {

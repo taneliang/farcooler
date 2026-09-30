@@ -21,6 +21,8 @@ enum PaletteAction: Hashable {
     case openWorkspace(host: String, id: String)
     /// A task, in its workspace's task column.
     case openTask(host: String, workspace: String, id: String)
+    /// Make a workspace, named what was typed (`workspace create`).
+    case newWorkspace(String)
     /// Terminal ⟷ chat, for one specific pane. The palette is one of the two
     /// places the plan names for this toggle — the other is `⌃B a` — because
     /// the pane itself grew no button for it.
@@ -139,7 +141,7 @@ enum PaletteIndex {
     static func matching(
         _ query: String, in worktrees: [Worktree], current: String? = nil,
         currentTerminal: Terminal? = nil, workspaces: [PaletteWorkspace] = [], tasks: [PaletteTask] = [],
-        limit: Int = 20
+        offersNewWorkspace: Bool = false, limit: Int = 20
     ) -> [PaletteEntry] {
         var scored: [(entry: PaletteEntry, score: Int)] = []
         var bestWorktree: (worktree: Worktree, score: Int)?
@@ -260,6 +262,17 @@ enum PaletteIndex {
                 detail: "Describe it and go",
                 symbol: "sparkle",
                 kind: "action"))
+        // Only where a runner has workspaces to make one on.
+        if offersNewWorkspace {
+            actions.append(
+                PaletteEntry(
+                    id: "new-workspace",
+                    action: .newWorkspace(described),
+                    title: described.isEmpty ? "New Workspace…" : "New Workspace “\(described)”…",
+                    detail: "A board and an orchestrator of its own",
+                    symbol: "square.stack.3d.up",
+                    kind: "action"))
+        }
 
         return navigation + actions
     }
