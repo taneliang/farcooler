@@ -2344,13 +2344,55 @@ enum PhoneLaunch {
     /// Decided once. A stack somebody already moved, or a notification's
     /// link, wins outright. Past `decideWithin` with a runner still silent,
     /// the launch stays where it is rather than deciding late.
+    ///
+    /// **A stack saved by the last run reopens where it was** (ov-66, the
+    /// owner's ruling 1), as the Mac restores its selection: its workspace,
+    /// its task, its worktree, over Needs You, whatever is waiting there.
+    /// Only once every screen in it is still on its runner; one that's gone
+    /// sends the launch back to Needs You, and says nothing about it. A
+    /// screen that can't be answered for yet (a task whose board hasn't been
+    /// read) holds the decision, until `decideWithin`. An empty saved stack
+    /// was Needs You itself, and the rule above decides.
     static func decide(
         _ runners: [Reading], elapsed: TimeInterval, moved: Bool, linking: Bool,
-        itemCount: Int, last: PhoneWorkspace?, exists: (PhoneWorkspace) -> Bool
+        itemCount: Int, last: PhoneWorkspace?, exists: (PhoneWorkspace) -> Bool,
+        saved: [PhoneRoute] = [], presence: (PhoneRoute) -> Presence = { _ in .here }
     ) -> Decision {
         if moved || linking { return .stay }
-        guard canDecide(runners) else { return elapsed >= decideWithin ? .stay : .wait }
-        return .open(stack(itemCount: itemCount, last: last, exists: exists))
+        let late: Decision = elapsed >= decideWithin ? .stay : .wait
+        guard canDecide(runners) else { return late }
+        guard !saved.isEmpty else {
+            return .open(stack(itemCount: itemCount, last: last, exists: exists))
+        }
+        let found = saved.map(presence)
+        if found.contains(.gone) { return .stay }
+        if found.contains(.unknown) { return late }
+        return .open(saved)
+    }
+
+    /// Whether one screen of a saved stack is still on its runner.
+    enum Presence: Equatable, Sendable {
+        case here
+        case gone
+        /// Not known yet: its board hasn't been read.
+        case unknown
+    }
+
+    /// Where the stack is kept between runs, as `encode` writes it.
+    static let stackKey = "phone.stack"
+
+    /// A stack as `stackKey` keeps it: the pushed screens, then the worktree
+    /// over them when one is open.
+    static func encode(_ stack: [PhoneRoute]) -> Data? {
+        try? JSONEncoder().encode(stack)
+    }
+
+    /// A kept stack, or none at all: one written by a build whose routes
+    /// this one can't read is not a partial place to reopen.
+    static func decode(_ data: Data?) -> [PhoneRoute] {
+        guard let data, let stack = try? JSONDecoder().decode([PhoneRoute].self, from: data)
+        else { return [] }
+        return stack
     }
 }
 
@@ -2398,6 +2440,142 @@ extension Fleet {
             return PhoneLink(stack: stack, segment: nil)
         }
         return nil
+    }
+}
+
+/// What a tapped notification asks for (ov-66, the owner's ruling 3).
+///
+/// A decision names a task by its key and no terminal: the relay sends
+/// `kind: "decision"` and `task: "bil-7"` (`services/relay/src/push.ts`,
+/// `Payload.kind` and `.task`). Anything else is about an agent, by its
+/// terminal: the push's `terminal`, else the thread a banner this app
+/// posted itself was filed under (`Notifier.report`), which is the
+/// terminal's id.
+enum PushTap: Equatable, Sendable {
+    case terminal(String)
+    case task(key: String)
+
+    init?(userInfo: [AnyHashable: Any], thread: String) {
+        if userInfo["kind"] as? String == "decision",
+            let key = userInfo["task"] as? String, !key.isEmpty
+        {
+            self = .task(key: key)
+            return
+        }
+        let terminal = (userInfo["terminal"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? thread
+        guard !terminal.isEmpty else { return nil }
+        self = .terminal(terminal)
+    }
+}
+
+/// Where a decision push lands: its workspace, then its task, with the
+/// question on it (ruling 3), as Android's `DecisionLink` finds it.
+enum PhoneDecisionLink {
+    /// One runner, as the search reads it.
+    struct Source {
+        var runner: String
+        /// Its Needs You list.
+        var items: [NeedsYouItem]
+        /// Its boards read so far, by workspace id.
+        var boards: [String: TaskBoardModel]
+        /// Whether it has no workspaces, so an item's board is its
+        /// repository's implicit one.
+        var implicit: Bool
+    }
+
+    /// The stack for the task whose key is `key`, or nil until a runner has
+    /// it. The push names no runner, so every runner is searched, in order:
+    /// its Needs You items first, which know their workspace, then any board
+    /// read so far with a card under that key.
+    static func find(key: String, in sources: [Source]) -> [PhoneRoute]? {
+        guard !key.isEmpty else { return nil }
+        for source in sources {
+            for item in source.items where item.task?.key == key {
+                guard let task = item.task,
+                    let workspace = item.workspaceID
+                        ?? (source.implicit ? item.repositoryID : nil)
+                else { continue }
+                let place = PhoneWorkspace(runner: source.runner, workspace: workspace)
+                return [.workspace(place), .task(place, task: task.id)]
+            }
+        }
+        for source in sources {
+            for workspace in source.boards.keys.sorted() {
+                guard let row = source.boards[workspace]?.rows.first(where: { $0.key == key })
+                else { continue }
+                let place = PhoneWorkspace(runner: source.runner, workspace: workspace)
+                return [.workspace(place), .task(place, task: row.id)]
+            }
+        }
+        return nil
+    }
+}
+
+/// New Task… on a phone's board (ov-66, the owner's ruling 4): filing a
+/// task through the client core's `task.create` (`crates/client/src/ffi.rs`),
+/// which files it as the user. Android's `NewTask`, word for word, and the
+/// Mac's `TaskBoardWrites` for the title's limit and its too-long line.
+enum PhoneNewTask {
+    /// The runner's cap on a title, in Unicode scalars (`checked_title`).
+    static let titleLimit = 200
+
+    /// The Mac's line for a title past the cap, verbatim.
+    static let tooLong = "That title is too long. Shorten it to add the task."
+
+    /// Whether a board offers New Task…: filing a task is a Control-scope
+    /// write, so a Read grant gets no button. A runner that hasn't said
+    /// isn't "read" (`DaemonBuild.mayAct`).
+    static func offered(_ build: DaemonBuild?) -> Bool { build?.mayAct ?? true }
+
+    /// Whether the runner will take `title`: not empty once trimmed, and at
+    /// most `titleLimit` Unicode scalars. Scalars rather than characters, as
+    /// the runner counts: a flag is one character and two scalars.
+    static func titleFits(_ title: String) -> Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && trimmed.unicodeScalars.count <= titleLimit
+    }
+
+    /// Whether `title` has words in it and too many of them.
+    static func isTooLong(_ title: String) -> Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && !titleFits(trimmed)
+    }
+
+    /// `task.create`'s arguments: `workspace`'s board, the title trimmed,
+    /// and `details` as the intent when there are any. An implicit
+    /// workspace names none, and the task goes on its repository's board.
+    static func request(_ workspace: WorkspaceSummary, title: String, details: String)
+        -> [String: String]
+    {
+        var args = [
+            "repository": workspace.repository ?? workspace.id,
+            "title": title.trimmingCharacters(in: .whitespacesAndNewlines),
+        ]
+        if let board = workspace.boardWorkspace { args["workspace"] = board }
+        let intent = details.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !intent.isEmpty { args["intent"] = intent }
+        return args
+    }
+
+    /// The one line a failed create leaves on the sheet, from the runner's
+    /// `word` and `what`; never the runner's own words. No word is a link
+    /// that dropped rather than a runner that said no.
+    static func refusal(word: String?, what: String?) -> String {
+        if what == "title" { return tooLong }
+        switch word {
+        case "scope-denied":
+            return "This device can only look at this runner, so it can’t add tasks."
+        case "capability-unsupported":
+            return "This runner’s Far Cooler is too old to add tasks from a phone. "
+                + "Update it there, then try again."
+        case "not-found":
+            return "This board isn’t on the runner anymore."
+        case .some:
+            return "The runner couldn’t add that task. "
+                + "That’s a problem in the app, not in anything you typed."
+        case nil:
+            return "Couldn’t add that task. Check that the runner is reachable, then try again."
+        }
     }
 }
 
