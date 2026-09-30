@@ -1,4 +1,5 @@
 import AgentKit
+import Combine
 import Foundation
 import Testing
 
@@ -35,6 +36,8 @@ struct WorktreeCallsTests {
         var answerRefusal: String?
         /// Whether `needs-you` fails, as a runner that can't be reached does.
         var needsYouFails = false
+        /// Whether `needs-you` answers with nothing in it.
+        var needsYouEmpty = false
 
         func answer(_ args: [String]) -> (data: Data?, message: String?) {
             calls.append(args)
@@ -48,6 +51,9 @@ struct WorktreeCallsTests {
             }
             if words.first == "needs-you", needsYouFails {
                 return (nil, "ssh: connect to host runner: Connection refused")
+            }
+            if words.first == "needs-you", needsYouEmpty {
+                return (Data(#"{"items":[]}"#.utf8), nil)
             }
             if words.first == "needs-you" {
                 return (
@@ -316,6 +322,30 @@ struct WorktreeCallsTests {
         recorder.needsYouFails = true
         await reader.refreshNeedsYou()
         #expect(reader.boardWaiting(columnCount: 2, decisions: 1) == 1, "the last good list stands")
+    }
+
+    /// A read that succeeds with nothing in it, after one that failed,
+    /// changes no list, so it's the flag alone that has to tell the window
+    /// the pill can now say 0: published, or the pill kept the column's
+    /// count until something else redrew it.
+    @Test("An empty read after a failed one redraws the board's pill")
+    func anEmptyReadAfterAFailedOneRedrawsThePill() async {
+        let recorder = Recorder()
+        recorder.capabilities = ["workspaces", "terminals", "needs_you"]
+        recorder.needsYouFails = true
+        let reader = client(recorder)
+        await reader.refreshNeedsYou()
+        #expect(reader.boardWaiting(columnCount: 2, decisions: 0) == 2)
+
+        final class Count { var changes = 0 }
+        let count = Count()
+        let watching = reader.objectWillChange.sink { _ in count.changes += 1 }
+        defer { watching.cancel() }
+        recorder.needsYouFails = false
+        recorder.needsYouEmpty = true
+        await reader.refreshNeedsYou()
+        #expect(reader.boardWaiting(columnCount: 2, decisions: 0) == 0)
+        #expect(count.changes > 0, "nothing told the window to redraw the pill")
     }
 
     /// A reconnection clears the runner's build until `status` answers

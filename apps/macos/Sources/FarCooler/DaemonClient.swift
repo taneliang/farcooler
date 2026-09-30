@@ -1194,8 +1194,9 @@ final class DaemonClient: ObservableObject {
     /// runner known to serve none. Not `needsYouKnown`, which a failed read
     /// sets too so the window doesn't wait: counting an unread list as an
     /// empty one put the board's pill at 0 (`boardWaiting`). iOS and Android
-    /// mark theirs read on the same terms.
-    private(set) var needsYouLoaded = false
+    /// mark theirs read on the same terms. Published: an empty read after a
+    /// failed one changes no list, and this is then all that moves the pill.
+    @Published private(set) var needsYouLoaded = false
 
     /// Whether this runner computes its own list (`needs_you`). A runner not
     /// yet asked counts as not, so its blocked agents still show while the
@@ -1240,12 +1241,12 @@ final class DaemonClient: ObservableObject {
         defer { if !needsYouKnown { needsYouKnown = true } }
         guard servesNeedsYou else {
             if !needsYouRead.isEmpty { needsYouRead = [] }
-            needsYouLoaded = true
+            if !needsYouLoaded { needsYouLoaded = true }
             return
         }
         let (data, _) = await runRaw(Self.needsYouArguments, background: true)
         guard let data, let list = try? JSONDecoder().decode(NeedsYouList.self, from: data) else { return }
-        needsYouLoaded = true
+        if !needsYouLoaded { needsYouLoaded = true }
         if list.items != needsYouRead { needsYouRead = list.items }
     }
 
