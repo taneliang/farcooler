@@ -148,3 +148,19 @@ extension GlanceAnswer {
         return Closing(outcome: .over, message: sentence)
     }
 }
+
+/// What a lock-screen tap does first (ov-57 T-iOS-2).
+public enum GlanceTapRoute: Equatable, Sendable {
+    /// Settle without connecting: nothing can be sent.
+    case refuse(GlanceAnswer.Closing)
+    /// Connect and send. `verifyFirst` replays the pane's stream to check the
+    /// request is still the one pending, which a hook ask skips: the daemon
+    /// refuses a stale `hook-ask-` id itself, under the ledger's lock, so the
+    /// replay would only spend up to seven of the hold's seconds re-proving it.
+    case send(verifyFirst: Bool)
+
+    public static func route(request: String, until: Date?, now: Date) -> GlanceTapRoute {
+        if let refused = GlanceAnswer.refusedHere(until: until, now: now) { return .refuse(refused) }
+        return .send(verifyFirst: !request.hasPrefix(CardAsk.idPrefix))
+    }
+}

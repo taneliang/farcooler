@@ -511,6 +511,90 @@ struct GlancePermissionsTests {
         #expect(CardAskWording.caption(tool: nil, workspace: "") == nil)
     }
 
+    // MARK: - What the card's leader offers (ov-57 T-iOS-1)
+
+    /// A suspended app, a locked phone, a card ask: buttons, the tool and the
+    /// workspace in place of the question, and the hold's end for a countdown.
+    ///
+    /// Mutation: `caption` read from the store rather than the card ask. Red: nil.
+    @Test func aCardAskLeadsWithItsCaptionAndHoldEnd() {
+        let leader = CardLeaderAsk.current(store: .empty, state: card(), now: before)
+        #expect(leader.isPresent)
+        #expect(leader.offersButtons)
+        #expect(leader.caption == "Bash · Billing")
+        #expect(leader.until == until)
+        #expect(leader.permission?.request == "hook-ask-1")
+    }
+
+    /// An ask the app filed and the card did not carry keeps today's card:
+    /// no caption (the question stays), no countdown.
+    ///
+    /// Mutation: the caption drawn with no card ask. Red: "Billing".
+    @Test func aStoreOnlyAskHasNoCaptionOrCountdown() {
+        let leader = CardLeaderAsk.current(store: storeRecord(), state: card(ask: nil), now: before)
+        #expect(leader.offersButtons)
+        #expect(leader.caption == nil)
+        #expect(leader.until == nil)
+    }
+
+    /// A tap that came back `.over` keeps the buttons off and its sentence on,
+    /// even though the card still carries the ask.
+    ///
+    /// Mutation: `offersButtons` ignoring the answer. Red: buttons back.
+    @Test func anOverAnswerKeepsTheCardsButtonsOff() {
+        let now = before
+        let over = GlancePermissions()
+            .claiming(terminal: "t1", request: "hook-ask-1", option: "allow", optionName: "Allow", at: now)!
+            .settling(
+                terminal: "t1", request: "hook-ask-1", outcome: .over,
+                message: "Answered on another device.", at: now)
+        let leader = CardLeaderAsk.current(store: over, state: card(), now: now)
+        #expect(leader.isPresent)
+        #expect(!leader.offersButtons)
+        #expect(leader.answer?.outcome == .over)
+    }
+
+    /// An answer about an older ask says nothing about this one, and the card
+    /// offers this one's buttons with no sentence under them.
+    ///
+    /// Mutation: the request check on the answer removed. Red: the old answer
+    /// is drawn and the buttons are off.
+    @Test func anAnswerToAnotherAskIsDropped() {
+        let now = before
+        let old = GlancePermissions()
+            .claiming(terminal: "t1", request: "hook-ask-0", option: "allow", optionName: "Allow", at: now)!
+            .settling(terminal: "t1", request: "hook-ask-0", outcome: .sent, message: "Sent", at: now)
+        let leader = CardLeaderAsk.current(store: old, state: card(), now: now)
+        #expect(leader.answer == nil)
+        #expect(leader.offersButtons)
+    }
+
+    /// Past the hold the buttons go, but a sentence about this phone's own tap
+    /// stays until it is stale.
+    ///
+    /// Mutation: the answer dropped with the permission. Red: nothing present.
+    @Test func pastTheHoldOnlyTheSentenceIsLeft() {
+        let sent = GlancePermissions()
+            .claiming(terminal: "t1", request: "hook-ask-1", option: "deny", optionName: "Deny", at: before)!
+            .settling(terminal: "t1", request: "hook-ask-1", outcome: .sent, message: "Sent “Deny”.", at: before)
+        let leader = CardLeaderAsk.current(store: sent, state: card(), now: until.addingTimeInterval(5))
+        #expect(leader.permission == nil)
+        #expect(leader.answer?.message == "Sent “Deny”.")
+        #expect(!leader.offersButtons)
+        #expect(CardLeaderAsk.current(store: .empty, state: card(), now: until) == .none)
+    }
+
+    /// Provisional D2: an answer that allows needs an unlock, one that refuses
+    /// does not.
+    ///
+    /// Mutation: `needsUnlock` true for every option. Red: Deny needs an unlock.
+    @Test func onlyAnAllowNeedsAnUnlock() {
+        #expect(option("allow", "Allow", "allow_once").needsUnlock)
+        #expect(option("a", "Yes", "allow_always").needsUnlock)
+        #expect(!option("deny", "Deny", "reject_once").needsUnlock)
+        #expect(!option("z", "Go on", "proceed").needsUnlock)
+    }
+
     /// An unreadable file says the same thing as an absent one — nothing is
     /// known — and a card with no buttons is the correct rendering of that.
     @Test func anUnreadableFileReadsAsEmpty() {

@@ -156,4 +156,26 @@ struct PermissionAnsweringTests {
             #expect(refused?.message == "Too late here. Answer it in the terminal.")
         }
     }
+
+    /// A card tap on a hook ask skips the stream replay: the daemon refuses a
+    /// stale hook-ask id atomically, so the replay only costs time inside the
+    /// hold. Any other permission is still checked first.
+    ///
+    /// Mutation: `verifyFirst` true for a hook ask. Red: a replay is asked for.
+    @Test func aHookAskTapSkipsTheReplayAndOthersDoNot() {
+        #expect(GlanceTapRoute.route(request: "hook-ask-1", until: Self.until, now: Self.before)
+            == .send(verifyFirst: false))
+        #expect(GlanceTapRoute.route(request: "hook-ask-1", until: nil, now: Self.after)
+            == .send(verifyFirst: false))
+        #expect(GlanceTapRoute.route(request: "perm-7", until: nil, now: Self.after)
+            == .send(verifyFirst: true))
+    }
+
+    /// Past the hold, the route is a refusal on the phone, before connecting.
+    ///
+    /// Mutation: the local refusal skipped. Red: `.send`.
+    @Test func aTapPastTheHoldIsRoutedToARefusal() {
+        #expect(GlanceTapRoute.route(request: "hook-ask-1", until: Self.until, now: Self.until)
+            == .refuse(GlanceAnswer.Closing(outcome: .over, message: ClosedAskWording.tooLate)))
+    }
 }

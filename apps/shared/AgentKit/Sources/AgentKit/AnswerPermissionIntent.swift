@@ -87,14 +87,22 @@
         @Parameter(title: "Permission") public var request: String
         @Parameter(title: "Answer") public var option: String
         @Parameter(title: "Answer Name") public var optionName: String
+        /// When the daemon's hold on a hook ask ends, from the card's own ask
+        /// (ov-57). Past it the tap is refused on the phone without
+        /// connecting (`GlanceTapRoute`). Nil for an ask only the app filed.
+        @Parameter(title: "Answer By") public var until: Date?
 
         public init() {}
 
-        public init(terminal: String, request: String, option: String, optionName: String) {
+        public init(
+            terminal: String, request: String, option: String, optionName: String,
+            until: Date? = nil
+        ) {
             self.terminal = terminal
             self.request = request
             self.option = option
             self.optionName = optionName
+            self.until = until
         }
 
         /// One attempt, and whatever came of it is written where the surface
@@ -110,6 +118,57 @@
         @MainActor
         public func perform() async throws -> some IntentResult {
             await AnswerPermissionDelivery.deliver(self)
+            return .result()
+        }
+    }
+
+    /// `AnswerPermissionIntent` for an answer that ALLOWS, which asks for the
+    /// phone to be unlocked before it runs (ov-57, provisional D2).
+    ///
+    /// **A second type, because the policy is static per intent type.** "Deny
+    /// from a locked phone, Allow only after Face ID" cannot be one intent: a
+    /// refusal costs nothing if the wrong hand makes it, and an allow on a
+    /// shell command does. The widget picks this for every option whose
+    /// `needsUnlock` is true. Whether iOS honors `authenticationPolicy` for a
+    /// Lock Screen Live Activity button is a device check (T-iOS-5).
+    ///
+    /// Everything past the unlock is `AnswerPermissionIntent`'s, delivered
+    /// through the same hook with the same fields, so the two cannot answer
+    /// one ask differently.
+    public struct AllowPermissionIntent: LiveActivityIntent {
+        public static let title: LocalizedStringResource = "Allow an Agent"
+        public static let description = IntentDescription(
+            "Allows what an agent is waiting on, after you unlock.")
+        public static let isDiscoverable = false
+        public static let openAppWhenRun = false
+        public static let authenticationPolicy: IntentAuthenticationPolicy =
+            .requiresAuthentication
+
+        @Parameter(title: "Agent") public var terminal: String
+        @Parameter(title: "Permission") public var request: String
+        @Parameter(title: "Answer") public var option: String
+        @Parameter(title: "Answer Name") public var optionName: String
+        @Parameter(title: "Answer By") public var until: Date?
+
+        public init() {}
+
+        public init(
+            terminal: String, request: String, option: String, optionName: String,
+            until: Date? = nil
+        ) {
+            self.terminal = terminal
+            self.request = request
+            self.option = option
+            self.optionName = optionName
+            self.until = until
+        }
+
+        @MainActor
+        public func perform() async throws -> some IntentResult {
+            await AnswerPermissionDelivery.deliver(
+                AnswerPermissionIntent(
+                    terminal: terminal, request: request, option: option,
+                    optionName: optionName, until: until))
             return .result()
         }
     }

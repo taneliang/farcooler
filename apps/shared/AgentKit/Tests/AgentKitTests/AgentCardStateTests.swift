@@ -278,3 +278,21 @@ private func decode(_ json: String) throws -> AgentCardState {
     let bare = try JSONSerialization.jsonObject(with: JSONEncoder().encode(none))
     #expect((bare as? [String: Any]).map { $0.keys.contains("ask") } == false)
 }
+
+/// A Live Activity redraws only on an update or at its stale date, so a card
+/// whose ask-clear push was lost would keep its buttons past the hold. Its
+/// stale date is therefore the ask's `until` when that comes first: iOS redraws
+/// the card then, and `CardLeaderAsk` draws no buttons past `until`.
+///
+/// Mutation: the ask ignored. Red: the hour-long stale date is kept.
+@Test func aCardWithAnAskGoesStaleWhenItsHoldEnds() throws {
+    let until = Date(timeIntervalSince1970: 1_790_551_063)
+    let hour = until.addingTimeInterval(3600)
+    let asking = AgentCardState(status: "blocked", detail: "", ask: CardAsk(id: "hook-ask-1", until: until))
+    #expect(asking.staleDate(capping: hour) == until)
+    #expect(asking.staleDate(capping: nil) == until)
+    #expect(asking.staleDate(capping: until.addingTimeInterval(-5)) == until.addingTimeInterval(-5))
+    let quiet = AgentCardState(status: "blocked", detail: "")
+    #expect(quiet.staleDate(capping: hour) == hour)
+    #expect(quiet.staleDate(capping: nil) == nil)
+}

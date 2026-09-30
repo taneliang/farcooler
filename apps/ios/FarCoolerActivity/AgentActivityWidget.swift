@@ -146,7 +146,9 @@ struct AgentActivityWidget: Widget {
                                 context.state.label, in: context.state.workspace)
                         )
                         .font(.headline)
-                        let body = context.state.detail
+                        // The card ask's caption in place of the question,
+                        // as on the lock screen card.
+                        let body = ask.caption ?? context.state.detail
                         if !body.isEmpty {
                             Text(body)
                                 .font(.subheadline)
@@ -339,50 +341,18 @@ enum AppScheme {
 /// cannot name. That is also what keeps the overflow copy below honest — it
 /// tells somebody to tap the card, and `terminalURL` returns nil for exactly
 /// this state.
-struct LeaderAsk {
-    let terminal: String
-    /// What the agent offered, if this phone has ever read it off the stream.
-    let permission: GlancePermission?
-    /// What this phone last sent about that permission, and how it went.
-    let answer: GlanceAnswer?
+typealias LeaderAsk = CardLeaderAsk
 
-    /// Nothing to say, which draws nothing and leaves the card as it was.
-    static let none = LeaderAsk(terminal: "", permission: nil, answer: nil)
-
+/// The store read and the colors. What to offer is `CardLeaderAsk`'s, in
+/// AgentKit, where it runs under test: the push's ask (ov-57) or the store's
+/// record, the answer that goes with it, and whether the buttons are on.
+extension CardLeaderAsk {
     static func current(
         for state: AgentActivityAttributes.ContentState, now: Date = Date()
-    ) -> LeaderAsk {
+    ) -> CardLeaderAsk {
+        // No file read for a leader that cannot have buttons.
         guard AgentStatus(state.status) == .blocked, !state.terminal.isEmpty else { return .none }
-        let store = GlancePermissionStore.read()
-        let permission = store.permission(for: state.terminal)
-        var answer = store.answer(for: state.terminal).flatMap { $0.isFresh(at: now) ? $0 : nil }
-        // An answer about a DIFFERENT request says nothing about this one, and
-        // showing it beside these buttons would report on a question that is
-        // already over. Dropped rather than drawn.
-        if let permission, let standing = answer, standing.request != permission.request {
-            answer = nil
-        }
-        guard permission != nil || answer != nil else { return .none }
-        return LeaderAsk(terminal: state.terminal, permission: permission, answer: answer)
-    }
-
-    /// Whether the card has anything at all to add under the leader. What the
-    /// timer and the fleet line give way to.
-    var isPresent: Bool { permission != nil || answer != nil }
-
-    /// Whether a tap may still write to this agent.
-    ///
-    /// False for every outcome except `nothingSent`, which is the one that
-    /// established the runner was never written to. This is the card's version
-    /// of what `PermissionView` gets from `@State` — buttons off for the
-    /// duration of a send, handed back only on the failure that is safe to
-    /// repeat — and it has to be persisted rather than held in memory, because
-    /// the process that renders this card is not the process that sent the
-    /// answer and may not have existed when it was sent.
-    var offersButtons: Bool {
-        guard permission != nil else { return false }
-        guard let answer else { return true }
-        return !answer.refusesAnotherTap
+        return current(store: GlancePermissionStore.read(), state: state, now: now)
     }
 
     /// The sentence under the leader, if there is one to say.
@@ -401,6 +371,9 @@ struct LeaderAsk {
         case .inFlight: return ("Sending your answer…", "arrow.up.circle", .secondary)
         case .sent: return (answer.message, "checkmark.circle.fill", .green)
         case .unsure, .nothingSent: return (answer.message, "exclamationmark.triangle.fill", .red)
+        // The ask is closed: not a failure of this phone's, and nothing to
+        // retry, so neither red nor green. The sentence says where to answer.
+        case .over: return (answer.message, "clock.badge.xmark", .secondary)
         }
     }
 }
@@ -450,12 +423,23 @@ private struct AnswerControls: View {
                         .foregroundStyle(note.tint)
                 }
                 if ask.offersButtons, let permission = ask.permission {
+                    // The hold's end, counted by the system so it keeps
+                    // counting with no push. Guarded: a range that ends before
+                    // it starts traps.
+                    if let until = ask.until, until > Date() {
+                        Text(
+                            "Answer within \(Text(timerInterval: Date()...until, countsDown: true, showsHours: false))"
+                        )
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    }
                     let fit = permission.fit(lines: Self.lines, columns: Self.columns)
                     ForEach(fit.shown) { option in
                         OptionButton(
                             terminal: ask.terminal,
                             request: permission.request,
                             option: option,
+                            until: ask.until,
                             // The same derivation the phone and the watch run,
                             // so all three agree about which answer is the
                             // plain yes. Emphasis only — every word on every
@@ -503,6 +487,9 @@ private struct OptionButton: View {
     let terminal: String
     let request: String
     let option: GlancePermissionOption
+    /// The card ask's hold end, so the app can refuse a late tap without
+    /// connecting. Nil for an ask only the store knows.
+    let until: Date?
     let emphasized: Bool
 
     var body: some View {
@@ -516,24 +503,36 @@ private struct OptionButton: View {
         .controlSize(.small)
     }
 
-    private var button: some View {
-        Button(
-            intent: AnswerPermissionIntent(
-                terminal: terminal,
-                request: request,
-                option: option.id,
-                // Carried so the card can name the answer that landed once the
-                // permission it belonged to is gone and its words with it. See
-                // `GlanceAnswer.optionName`.
-                optionName: option.name)
-        ) {
-            Text(option.name)
-                .font(.footnote)
-                // No `lineLimit`, no `truncationMode`. A long name wraps; it is
-                // never cut. See this view's enclosing type.
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
+    /// An answer that allows goes through `AllowPermissionIntent`, which asks
+    /// for an unlock first; any other through `AnswerPermissionIntent`, which
+    /// doesn't (provisional D2, `GlancePermissionOption.needsUnlock`).
+    ///
+    /// `optionName` is carried so the card can name the answer that landed
+    /// once the permission it belonged to is gone and its words with it. See
+    /// `GlanceAnswer.optionName`.
+    @ViewBuilder private var button: some View {
+        if option.needsUnlock {
+            Button(
+                intent: AllowPermissionIntent(
+                    terminal: terminal, request: request, option: option.id,
+                    optionName: option.name, until: until)
+            ) { label }
+        } else {
+            Button(
+                intent: AnswerPermissionIntent(
+                    terminal: terminal, request: request, option: option.id,
+                    optionName: option.name, until: until)
+            ) { label }
         }
+    }
+
+    private var label: some View {
+        Text(option.name)
+            .font(.footnote)
+            // No `lineLimit`, no `truncationMode`. A long name wraps; it is
+            // never cut. See this view's enclosing type.
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -625,7 +624,10 @@ private struct LeaderRow: View {
                     Text(runnerSuffixed)
                         .font(.headline)
                         .lineLimit(1)
-                    let body = state.detail
+                    // A card ask draws its tool and workspace in place of the
+                    // question: the locked card never shows the command
+                    // (provisional D3). See `CardLeaderAsk.caption`.
+                    let body = ask.caption ?? state.detail
                     if !body.isEmpty {
                         // One line rather than two while there is an answer to
                         // offer. The question stays — answering something you

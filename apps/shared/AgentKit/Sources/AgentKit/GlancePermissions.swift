@@ -544,6 +544,82 @@ public enum CardAskSource {
     }
 }
 
+/// What the card's leader is waiting on, and what this phone last did about it:
+/// everything the widget's ask block draws, decided here where it's tested.
+///
+/// The widget's `LeaderAsk` is this plus a store read and a color. It used to
+/// hold this logic itself, where CI compiles it and never runs it.
+public struct CardLeaderAsk: Equatable, Sendable {
+    public let terminal: String
+    /// The answers to offer, from `CardAskSource`.
+    public let permission: GlancePermission?
+    /// What this phone last sent about that permission, and how it went.
+    public let answer: GlanceAnswer?
+    /// "Bash · Billing", drawn in place of `detail` while a CARD ask is on
+    /// offer; the locked card never shows the command (provisional D3). Nil
+    /// for an ask only the store knows, which keeps today's card.
+    public let caption: String?
+    /// When the card ask's hold ends, for the countdown and the intent's own
+    /// local refusal. Nil with no card ask.
+    public let until: Date?
+
+    public static let none = CardLeaderAsk(
+        terminal: "", permission: nil, answer: nil, caption: nil, until: nil)
+
+    public init(
+        terminal: String, permission: GlancePermission?, answer: GlanceAnswer?,
+        caption: String?, until: Date?
+    ) {
+        self.terminal = terminal
+        self.permission = permission
+        self.answer = answer
+        self.caption = caption
+        self.until = until
+    }
+
+    public static func current(
+        store: GlancePermissions, state: AgentCardState, now: Date
+    ) -> CardLeaderAsk {
+        guard state.status == "blocked", !state.terminal.isEmpty else { return .none }
+        let permission = CardAskSource.permission(store: store, state: state, now: now)
+        var answer = store.answer(for: state.terminal).flatMap { $0.isFresh(at: now) ? $0 : nil }
+        // An answer about a DIFFERENT request says nothing about this one, and
+        // showing it beside these buttons would report on a question that is
+        // already over.
+        let asked = permission?.request ?? state.ask?.id
+        if let asked, let standing = answer, standing.request != asked { answer = nil }
+        guard permission != nil || answer != nil else { return .none }
+        let carded = permission != nil && permission?.request == state.ask?.id
+        return CardLeaderAsk(
+            terminal: state.terminal, permission: permission, answer: answer,
+            caption: carded
+                ? CardAskWording.caption(tool: state.ask?.tool, workspace: state.workspace) : nil,
+            until: carded ? state.ask?.until : nil)
+    }
+
+    /// Whether the card has anything to add under the leader.
+    public var isPresent: Bool { permission != nil || answer != nil }
+
+    /// Whether a tap may still write to this agent: there is something to
+    /// answer and no answer from this phone that refuses another tap.
+    public var offersButtons: Bool {
+        guard permission != nil else { return false }
+        guard let answer else { return true }
+        return !answer.refusesAnotherTap
+    }
+}
+
+extension GlancePermissionOption {
+    /// Whether answering with this option needs the phone unlocked first.
+    ///
+    /// **Provisional (ov-57), D2**: an answer that allows does, one that
+    /// refuses does not. The widget picks `AllowPermissionIntent`, whose
+    /// `authenticationPolicy` asks for the unlock, for exactly these. Whether
+    /// iOS honors that policy on a Lock Screen button is a device check
+    /// (T-iOS-5).
+    public var needsUnlock: Bool { GlancePermission.allows(self) }
+}
+
 /// Where the glance permissions live, and the only code that reads or writes
 /// them.
 ///

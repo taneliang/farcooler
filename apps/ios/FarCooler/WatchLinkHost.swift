@@ -780,6 +780,19 @@ final class WatchLinkHost: NSObject {
         }
         GlancePermissionStore.write(claimed)
 
+        // A card ask carries its hold's end. Past it nothing can land, so the
+        // tap is refused here without connecting, and a hook ask skips the
+        // replay below: the daemon refuses a stale `hook-ask-` id itself
+        // (ov-57, `GlanceTapRoute`).
+        let verifyFirst: Bool
+        switch GlanceTapRoute.route(request: request, until: intent.until, now: Date()) {
+        case let .refuse(closing):
+            await settle(intent, closing.outcome, closing.message)
+            return
+        case let .send(verify):
+            verifyFirst = verify
+        }
+
         guard fleet != nil else {
             await settle(intent, .nothingSent, missed(hasScene: false))
             return
@@ -808,49 +821,51 @@ final class WatchLinkHost: NSObject {
             return
         }
 
-        switch await pendingPermission(
-            terminal: terminal, on: connection, within: Self.glanceReplayBudget)
-        {
-        case let .permission(pending):
-            guard let pending else {
-                // Nothing pending. NOT the same as "answered", and the sentence
-                // must not say so: `PermissionView` spells out that an agent
-                // can be blocked on something this vocabulary has no word for —
-                // a trust gate, a plain question — and a restarted session
-                // reads identically from here. What IS known is that the thing
-                // these buttons offered to answer is not what the agent is
-                // waiting on, so the buttons go and the sentence says only that.
-                GlancePermissionStore.update { $0.clearingPermission(for: terminal) }
-                await settle(intent, .nothingSent, "This agent isn’t waiting on that anymore.")
+        if verifyFirst {
+            switch await pendingPermission(
+                terminal: terminal, on: connection, within: Self.glanceReplayBudget)
+            {
+            case let .permission(pending):
+                guard let pending else {
+                    // Nothing pending. NOT the same as "answered", and the sentence
+                    // must not say so: `PermissionView` spells out that an agent
+                    // can be blocked on something this vocabulary has no word for —
+                    // a trust gate, a plain question — and a restarted session
+                    // reads identically from here. What IS known is that the thing
+                    // these buttons offered to answer is not what the agent is
+                    // waiting on, so the buttons go and the sentence says only that.
+                    GlancePermissionStore.update { $0.clearingPermission(for: terminal) }
+                    await settle(intent, .nothingSent, "This agent isn’t waiting on that anymore.")
+                    return
+                }
+                guard pending.id == request else {
+                    // Answered somewhere else, and the agent has since stopped on
+                    // something new. The new permission is deliberately NOT written
+                    // here: this path is an answer, not an observation, and filing
+                    // fresh options under a claim made against the old ones is how
+                    // a card ends up offering buttons beside a sentence about a
+                    // different question. The next real observation records it.
+                    GlancePermissionStore.update { $0.clearingPermission(for: terminal) }
+                    await settle(
+                        intent, .nothingSent, "This agent’s waiting on something else now.")
+                    return
+                }
+            case let .failed(reason):
+                // The phone's own sentence, unedited — it already says whether this
+                // is a runner it cannot reach or an agent it could not read in
+                // time. Nothing was sent either way.
+                await settle(intent, .nothingSent, reason)
                 return
-            }
-            guard pending.id == request else {
-                // Answered somewhere else, and the agent has since stopped on
-                // something new. The new permission is deliberately NOT written
-                // here: this path is an answer, not an observation, and filing
-                // fresh options under a claim made against the old ones is how
-                // a card ends up offering buttons beside a sentence about a
-                // different question. The next real observation records it.
-                GlancePermissionStore.update { $0.clearingPermission(for: terminal) }
+            case .sent, .transcript:
+                // A receipt or a conversation in answer to a question about what is
+                // pending is this build's own vocabulary contradicting itself. It
+                // establishes nothing about what the agent is waiting on, so it must
+                // not be treated as a match.
                 await settle(
-                    intent, .nothingSent, "This agent’s waiting on something else now.")
+                    intent, .nothingSent,
+                    "Your \(DeviceKind.current) couldn’t read that agent’s conversation.")
                 return
             }
-        case let .failed(reason):
-            // The phone's own sentence, unedited — it already says whether this
-            // is a runner it cannot reach or an agent it could not read in
-            // time. Nothing was sent either way.
-            await settle(intent, .nothingSent, reason)
-            return
-        case .sent, .transcript:
-            // A receipt or a conversation in answer to a question about what is
-            // pending is this build's own vocabulary contradicting itself. It
-            // establishes nothing about what the agent is waiting on, so it must
-            // not be treated as a match.
-            await settle(
-                intent, .nothingSent,
-                "Your \(DeviceKind.current) couldn’t read that agent’s conversation.")
-            return
         }
 
         do {
@@ -871,7 +886,7 @@ final class WatchLinkHost: NSObject {
             // tap and the confirmation can be minutes apart.
             await settle(intent, .sent, "Sent “\(intent.optionName)”.")
         } catch {
-            let (outcome, message) = Self.glanceFailure(error)
+            let (outcome, message) = Self.glanceFailure(error, answering: intent)
             await settle(intent, outcome, message)
         }
     }
@@ -926,7 +941,9 @@ final class WatchLinkHost: NSObject {
     /// `rejected` is the one error that is genuinely safe. It is the DAEMON's
     /// own refusal, returned through `DomainError`, which means the call
     /// arrived and was declined before any message reached the agent.
-    private static func glanceFailure(_ error: Error) -> (GlanceAnswer.Outcome, String) {
+    private static func glanceFailure(
+        _ error: Error, answering intent: AnswerPermissionIntent
+    ) -> (GlanceAnswer.Outcome, String) {
         if error is Timeout {
             return (
                 .unsure,
@@ -940,7 +957,16 @@ final class WatchLinkHost: NSObject {
                     .nothingSent,
                     "Your \(DeviceKind.current) couldn’t start its connection. Nothing was sent."
                 )
-            case let .rejected(_, word):
+            case let .rejected(refusal, word):
+                // A hook ask the runner no longer holds is over, not unsent:
+                // `not_held` or `not_delivered`, both `resource-conflict`.
+                // `.over` keeps the buttons off (ov-57, `GlanceAnswer.closing`).
+                if let closing = GlanceAnswer.closing(
+                    request: intent.request, word: word, message: refusal,
+                    until: intent.until, now: Date())
+                {
+                    return (closing.outcome, closing.message)
+                }
                 // The daemon answers `NotFound` for a terminal it no longer has,
                 // which is worth its own sentence: nothing is wrong with the
                 // link and trying again will not help.
@@ -987,9 +1013,14 @@ final class WatchLinkHost: NSObject {
     private static func redraw(leading terminal: String) async {
         for activity in Activity<AgentActivityAttributes>.activities
         where activity.content.state.terminal == terminal {
+            // The stale date is the card's own, capped at its ask's `until`: not
+            // a second author, but the one redraw that makes the buttons go at
+            // the hold's end if the relay's clear never comes (ov-57).
             await activity.update(
                 ActivityContent(
-                    state: activity.content.state, staleDate: activity.content.staleDate))
+                    state: activity.content.state,
+                    staleDate: activity.content.state.staleDate(
+                        capping: activity.content.staleDate)))
         }
     }
 

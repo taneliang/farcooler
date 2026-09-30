@@ -422,6 +422,22 @@ public struct AgentCardState: Codable, Hashable, Sendable {
     }
 }
 
+extension AgentCardState {
+    /// The stale date a card showing this state should carry: `staleDate`, or
+    /// the ask's `until` when that is sooner.
+    ///
+    /// A Live Activity redraws only on an update or at its stale date. A card
+    /// whose ask-clear never arrived (a failed push, a pane closed, a daemon
+    /// restarted) would otherwise keep Allow and Deny up for the rest of its
+    /// hour; redrawn at `until`, `CardLeaderAsk` draws none (ov-57). The
+    /// relay's `stale-date` needs the same cap for a suspended app.
+    public func staleDate(capping staleDate: Date?) -> Date? {
+        guard let until = ask?.until else { return staleDate }
+        guard let staleDate else { return until }
+        return min(staleDate, until)
+    }
+}
+
 /// One open hook ask, as the Live Activity's content state carries it:
 /// `{"id": "hook-ask-…", "tool": "Bash", "until": 1790551063000}`.
 ///
