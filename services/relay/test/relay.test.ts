@@ -2709,6 +2709,57 @@ describe('/v1/notify and Live Activities', () => {
     expect(pushes(calls)[0].headers['apns-priority']).toBe('10')
   })
 
+  it('marks a card stale when the ask it carries runs out', async () => {
+    // A Live Activity redraws only on a push or at its stale date. A card whose
+    // ask outlives the hold keeps drawing Allow and Deny for an ask the runner
+    // has already given up on, if the push that clears it is missed.
+    const calls = watchFetch()
+    const until = (Math.floor(Date.now() / 1000) + 45) * 1000 + 700
+    const state = {
+      terminal: 't', label: 'a', machine: 'm', status: 'blocked' as const, detail: '',
+      ask: { id: 'hook-ask-1', tool: 'Bash', until },
+    }
+    await sendLiveActivity(env, 'activity-token', { event: 'update', state }, null)
+
+    expect(pushes(calls)[0].body.aps['stale-date']).toBe(Math.floor(until / 1000))
+  })
+
+  it('leaves the stale date of an update with no ask alone', async () => {
+    const calls = watchFetch()
+    const state = { terminal: 't', label: 'a', machine: 'm', status: 'blocked' as const, detail: '' }
+    await sendLiveActivity(env, 'activity-token', { event: 'update', state }, null)
+    await sendLiveActivity(
+      env,
+      'start-token',
+      { event: 'start', state, alert: { title: '1 needs you', body: '' }, attributes: { version: 3 } },
+      null,
+    )
+
+    const [update, start] = pushes(calls)
+    expect('stale-date' in update.body.aps).toBe(false)
+    expect(start.body.aps['stale-date']).toBe(start.body.aps.timestamp + 3600)
+  })
+
+  it('keeps the hour cap when an ask runs past it', async () => {
+    const calls = watchFetch()
+    const until = Date.now() + 3 * 60 * 60 * 1000
+    const state = {
+      terminal: 't', label: 'a', machine: 'm', status: 'blocked' as const, detail: '',
+      ask: { id: 'hook-ask-1', until },
+    }
+    await sendLiveActivity(env, 'activity-token', { event: 'update', state }, null)
+    await sendLiveActivity(
+      env,
+      'start-token',
+      { event: 'start', state, alert: { title: '1 needs you', body: '' }, attributes: { version: 3 } },
+      null,
+    )
+
+    for (const push of pushes(calls)) {
+      expect(push.body.aps['stale-date']).toBe(push.body.aps.timestamp + 3600)
+    }
+  })
+
   it('refuses to send a start with no alert, because iOS would discard it', async () => {
     // The check the platform will not give us. iOS drops a push-to-start
     // activity that carries no alert dictionary, silently, after APNs has

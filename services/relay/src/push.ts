@@ -559,6 +559,17 @@ export async function sendLiveActivity(
     aps.attributes = activity.attributes
     aps['stale-date'] = now + STALE_AFTER_S
   }
+  // A card redraws only on a push or at its stale date, so a card carrying an
+  // ask goes stale when the runner's hold ends. Otherwise a missed clearing
+  // push leaves Allow and Deny drawn for an ask nobody is holding. Floored,
+  // because `until` is already early (T0 contract C1) and early is the safe side.
+  // Capped at the hour a start carries, so an ask never makes a card look
+  // current for longer than a start without one.
+  const ask = activity.state.ask
+  if (ask && activity.event !== 'end') {
+    const cap = typeof aps['stale-date'] === 'number' ? aps['stale-date'] : now + STALE_AFTER_S
+    aps['stale-date'] = Math.min(cap, Math.floor(ask.until / 1000))
+  }
   if (activity.event === 'end') {
     // `now` rather than an omitted date for a retirement: a dismissal date that
     // has already passed takes the card off the lock screen at once, which is
