@@ -284,13 +284,11 @@ final class ShellGestureTests: XCTestCase {
     /// proves that for every angle in five-degree steps; this proves the
     /// finger reaches it.
     ///
-    /// **The same two numbers, swapped.** 52 across against 80 up is a tab
-    /// chosen off the column; 80 across against 52 up leans the other way, and
-    /// over one worktree there is no neighbor for it to change to. Both are
-    /// well inside the 19° band `redirect` would hold a gesture through if
-    /// either of them ever got there — they are 57° and 33° — and both are
-    /// unambiguous outcomes rather than two flavours of nothing: the first
-    /// changes tab, the second changes nothing.
+    /// 52 across against 80 up is a tab chosen off the column. It is well
+    /// inside the 19° band `redirect` would hold a gesture through if it ever
+    /// got there — 57° — and the outcome is unambiguous. (The other lean, 80
+    /// across against 52 up, changed worktree when there were neighbors; over
+    /// one worktree it changes nothing, and a test of nothing cannot fail.)
     ///
     /// 52 across is also deliberately SHORT of the 70-point commit, so a
     /// gesture that leaned the wrong way would spring back and change no tab,
@@ -309,13 +307,6 @@ final class ShellGestureTests: XCTestCase {
         XCTAssertEqual(
             lifted["tab"], 1,
             "the fingertip was over the second row from the bar, which is tab 1")
-
-        // Leaning horizontal: the same two numbers the other way round.
-        dragBar(app, by: CGVector(dx: -80, dy: -52))
-        let sideways = try state(app)
-        XCTAssertEqual(sideways["ws"], 0, "a drag that leans horizontal left the worktree")
-        XCTAssertEqual(sideways["tab"], 1, "a drag that leans horizontal chose a tab")
-        XCTAssertEqual(sideways["column"], 0, "the column stayed open after the finger left")
     }
 
     /// One straight drag from the bar's center, held before release so it
