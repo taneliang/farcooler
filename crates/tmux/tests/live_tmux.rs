@@ -526,3 +526,44 @@ async fn a_narrowed_window_keeps_every_panes_share() {
 
     srv.kill_server().await.unwrap();
 }
+
+#[tokio::test]
+async fn a_zoomed_window_is_still_zoomed_on_the_same_pane_after_a_resize() {
+    // `select-layout` unzooms, so keeping the shares must not cost the zoom,
+    // and the pane zoomed again must be the one that was: here the lower
+    // shell, not the first pane.
+    let Some(srv) = live_server("a_zoomed_window_is_still_zoomed_on_the_same_pane_after_a_resize").await
+    else {
+        return;
+    };
+    use farcooler_tmux::windows::Axis;
+    let win = srv
+        .create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "agent", "/tmp", "sleep 60")
+        .await
+        .unwrap();
+    let right = srv
+        .split_pane(&win.pane_id, Axis::Horizontal, Uuid::now_v7(), "/tmp", "sleep 60", false)
+        .await
+        .unwrap();
+    let lower = srv
+        .split_pane(&right, Axis::Vertical, Uuid::now_v7(), "/tmp", "sleep 60", false)
+        .await
+        .unwrap();
+    srv.resize_window_keeping_shares(&win.window_id, 105, 36).await.unwrap();
+    srv.set_pane_size(&win.pane_id, 78, 36).await.unwrap();
+    srv.select_pane(&lower).await.unwrap();
+    srv.toggle_zoom(&lower).await.unwrap();
+
+    srv.resize_window_keeping_shares(&win.window_id, 55, 36).await.unwrap();
+    let panes = srv.list_tagged_panes().await.unwrap();
+    let shell = panes.iter().find(|p| p.pane_id == lower).unwrap();
+    assert!(shell.zoomed && shell.pane_active, "still zoomed, on the shell: {shell:?}");
+    assert_eq!((shell.columns, shell.rows), (55, 36), "and the zoomed pane is the window");
+
+    srv.unzoom(&win.window_id).await.unwrap();
+    let panes = srv.list_tagged_panes().await.unwrap();
+    let agent = panes.iter().find(|p| p.pane_id == win.pane_id).unwrap();
+    assert!(agent.columns.abs_diff(40) <= 1, "the shares held underneath: {panes:?}");
+
+    srv.kill_server().await.unwrap();
+}
