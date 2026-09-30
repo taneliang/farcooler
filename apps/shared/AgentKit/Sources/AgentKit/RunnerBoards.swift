@@ -162,9 +162,11 @@ public enum RunnerBoards {
         panes: [P],
         build: DaemonBuild?,
         lastKnownBuild: DaemonBuild? = nil,
+        needsYou: [NeedsYouItem]? = nil,
         connected: Bool
     ) -> [RunnerBoardRow] {
         guard (build ?? lastKnownBuild)?.can("tasks") == true else { return [] }
+        let served = (build ?? lastKnownBuild)?.can("needs_you") == true
         let speaks = TaskAgentLink.speaksOfAgents(connected: connected, build: build)
         return boards.map { workspace in
             let board = models[workspace.id]
@@ -172,9 +174,41 @@ public enum RunnerBoards {
             return RunnerBoardRow(
                 workspace: workspace,
                 name: workspace.isImplicit ? (names[repository] ?? workspace.name) : workspace.name,
-                decisions: board?.waitingOnYou ?? 0,
+                decisions: waiting(
+                    columnCount: board?.waitingOnYou ?? 0,
+                    decisions: decisions(for: workspace, in: needsYou ?? []),
+                    listRead: needsYou != nil, listServed: served),
                 agents: speaks ? (board?.tasksWithLiveAgents(in: panes) ?? 0) : 0)
         }
+    }
+
+    /// The decision items `workspace` has, out of one runner's needs-you list:
+    /// its items that are a decision, alone or beside an ask. Not the Needs
+    /// Decision column's rows, which an answer leaves as they were (spec
+    /// §2.2: an answer doesn't move status). An implicit workspace counts its
+    /// repository's items that name no workspace.
+    ///
+    /// `items` are ONE runner's: the phone's connection holds a list per
+    /// runner, and a merged list would need the runner matched too.
+    public static func decisions(for workspace: WorkspaceSummary, in items: [NeedsYouItem]) -> Int {
+        items.filter { item in
+            guard item.kind == .decision || item.also.contains(.decision) else { return false }
+            if workspace.isImplicit {
+                return item.workspaceID == nil && item.repositoryID == workspace.id
+            }
+            return item.workspaceID == workspace.id
+        }.count
+    }
+
+    /// What a board says is waiting on the person: the decision items once
+    /// the runner's list is read, and the Needs Decision column's count
+    /// until then, and always on a runner that serves no list. An unread
+    /// list is not a list with nothing in it. The Mac's
+    /// `WorkspaceCounts.waiting`, and the same rule.
+    public static func waiting(
+        columnCount: Int, decisions: Int, listRead: Bool, listServed: Bool
+    ) -> Int {
+        listRead && listServed ? decisions : columnCount
     }
 
     /// The Board rows of a runner without workspaces: one per repository, in
@@ -187,13 +221,14 @@ public enum RunnerBoards {
         panes: [P],
         build: DaemonBuild?,
         lastKnownBuild: DaemonBuild? = nil,
+        needsYou: [NeedsYouItem]? = nil,
         connected: Bool
     ) -> [RunnerBoardRow] {
         rows(
             boards: repositories.map { WorkspaceSummary.implicit(repository: $0.id) },
             names: Dictionary(repositories.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a }),
             models: boards, panes: panes, build: build, lastKnownBuild: lastKnownBuild,
-            connected: connected)
+            needsYou: needsYou, connected: connected)
     }
 }
 

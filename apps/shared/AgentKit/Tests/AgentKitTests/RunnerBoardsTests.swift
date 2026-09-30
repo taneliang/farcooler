@@ -309,3 +309,69 @@ func anEmptyImplicitBoardStillHasARow() {
     #expect(rows.map(\.name) == ["overnight", "scratch", "never-read", "newer"])
     #expect(rows.map(\.decisions) == [2, 0, 0, 0])
 }
+
+// MARK: - The waiting count is decision items, not the column (ov-69)
+
+private func item(
+    _ id: String, _ kind: NeedsYouKind, also: [NeedsYouKind] = [], workspace: String?,
+    repository: String = "r-busy"
+) -> NeedsYouItem {
+    NeedsYouItem(
+        id: id, kind: kind, also: also, rank: 1, since: nil, workspaceID: workspace,
+        repositoryID: repository, question: "q")
+}
+
+private let served = DaemonBuild(
+    version: "1", matches: true, platform: "",
+    capabilities: ["workspaces", "tasks", "terminal_task", "needs_you"])
+
+/// A workspace's decision items, alone or beside an ask; not another
+/// workspace's, and not a review or a plain ask.
+@Test func decisionsAreTheWorkspacesDecisionItems() {
+    let billing = WorkspaceSummary(
+        id: "w-billing", name: "Billing", taskPrefix: "", isMain: false, ordinal: 1,
+        repository: "r-busy")
+    let items = [
+        item("a", .decision, workspace: "w-billing"),
+        item("b", .ask, also: [.decision], workspace: "w-billing"),
+        item("c", .ask, workspace: "w-billing"), item("d", .review, workspace: "w-billing"),
+        item("e", .decision, workspace: "w-main"),
+    ]
+    #expect(RunnerBoards.decisions(for: billing, in: items) == 2)
+    #expect(RunnerBoards.decisions(for: billing, in: []) == 0)
+    // An implicit workspace counts its repository's items that name no workspace.
+    let implicit = WorkspaceSummary.implicit(repository: "r-busy")
+    let loose = [item("f", .decision, workspace: nil), item("g", .decision, workspace: "w-main")]
+    #expect(RunnerBoards.decisions(for: implicit, in: loose) == 1)
+}
+
+/// The items once read and served; the column until then, and always on a
+/// runner that serves none. An unread list is not a list with nothing in it.
+@Test func waitingFallsBackToTheColumnUntilTheListIsRead() {
+    #expect(RunnerBoards.waiting(columnCount: 2, decisions: 0, listRead: false, listServed: true) == 2)
+    #expect(RunnerBoards.waiting(columnCount: 2, decisions: 0, listRead: true, listServed: false) == 2)
+    #expect(RunnerBoards.waiting(columnCount: 2, decisions: 0, listRead: true, listServed: true) == 0)
+    #expect(RunnerBoards.waiting(columnCount: 2, decisions: 1, listRead: true, listServed: true) == 1)
+}
+
+/// The Board row counts what the runner's list says once it has loaded: an
+/// answered decision leaves its task in the column and no item behind.
+@Test func aRowCountsItsItemsOnceTheListIsRead() throws {
+    let busy = WorkspaceSummary.implicit(repository: "r-busy")
+    let unread = RunnerBoards.rows(
+        boards: [busy], names: [:], models: ["r-busy": boards["r-busy"]!], panes: panes,
+        build: served, needsYou: nil, connected: true)
+    #expect(try #require(unread.first).decisions == 2, "before the list loads, the column")
+    let answered = RunnerBoards.rows(
+        boards: [busy], names: [:], models: ["r-busy": boards["r-busy"]!], panes: panes,
+        build: served, needsYou: [], connected: true)
+    #expect(try #require(answered.first).decisions == 0, "both answered: two tasks, no items")
+    let older = RunnerBoards.rows(
+        boards: [busy], names: [:], models: ["r-busy": boards["r-busy"]!], panes: panes,
+        build: both, needsYou: [], connected: true)
+    #expect(try #require(older.first).decisions == 2, "a runner that serves no list keeps the column")
+    let one = RunnerBoards.rows(
+        boards: [busy], names: [:], models: ["r-busy": boards["r-busy"]!], panes: panes,
+        build: served, needsYou: [item("x", .decision, workspace: nil)], connected: true)
+    #expect(try #require(one.first).decisions == 1)
+}
