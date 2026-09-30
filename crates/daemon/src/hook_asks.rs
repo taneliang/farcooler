@@ -487,7 +487,7 @@ mod tests {
         let (quiet, _rx) = asks.hold(pane);
         asks.withdraw(pane, &quiet);
         assert!(!changes.has_changed().unwrap(), "nothing was open, so nothing changed");
-        let (id, _rx) = offered(&asks, pane);
+        let (_first, _rx) = offered(&asks, pane);
         assert!(changes.has_changed().unwrap(), "an offer is a change");
         changes.borrow_and_update();
         let (_newer, _newer_rx) = asks.hold(pane);
@@ -495,7 +495,17 @@ mod tests {
         changes.borrow_and_update();
         asks.turn_boundary(pane);
         assert!(!changes.has_changed().unwrap(), "the newer one was never offered");
-        let _ = id;
+
+        // An offered ask ending through `settle`, each way it can.
+        let (id, _rx) = offered(&asks, pane);
+        changes.borrow_and_update();
+        asks.withdraw(pane, &id);
+        assert!(changes.has_changed().unwrap(), "an offered ask withdrawn is a change");
+        changes.borrow_and_update();
+        let (_id, _rx) = offered(&asks, pane);
+        changes.borrow_and_update();
+        asks.turn_boundary(pane);
+        assert!(changes.has_changed().unwrap(), "an offered ask ended at a turn is a change");
     }
 
     /// One pane holds one ask, so the newer one is what's open.

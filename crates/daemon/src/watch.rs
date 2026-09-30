@@ -507,6 +507,21 @@ pub(crate) struct Tapped {
 /// A starting number, not a measured one — see the design's risk 2.
 const CARD_REFRESH_MS: i64 = 10_000;
 
+/// How long a `kind:"ask"` CLEAR waits before it goes out (ov-57).
+///
+/// An ask usually ends because it was answered, and the pane then leaves
+/// Blocked: the screen changes within a second, the watcher confirms it over
+/// `CONFIRMATIONS` samples `SAMPLE_INTERVAL` apart (up to 2 s), and the
+/// transition resets the card throttle so a working notice goes out at once.
+/// That notice clears the ask on the relay too (W1), so a clear sent first is
+/// a second priority-10 card push for the same moment. Waiting 3 s (the 2 s
+/// of confirmation plus the notice's round trip) lets the working notice land
+/// and take the pane out of `asks_told`, and the clear is then never sent.
+/// A hold that runs out with the dialog still up gets its clear 3 s late,
+/// which the card covers itself: it hides the buttons at `until`.
+/// An offer is never delayed.
+const ASK_CLEAR_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// How long `announce_needs_you` gathers changes before it says so once.
 const NEEDS_YOU_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(250);
 
@@ -781,6 +796,9 @@ pub struct Watcher {
     /// Held across one pass of `sync_asks`, so two passes can't both decide
     /// the same ask is news.
     ask_sync: tokio::sync::Mutex<()>,
+    /// Terminals with a deferred clear already scheduled. See
+    /// `ASK_CLEAR_GRACE`.
+    clears_pending: std::sync::Mutex<HashSet<Uuid>>,
     /// Where a test reads the notices this watcher sends. `None` in a daemon.
     taps: std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<Tapped>>>,
     /// How many times a count was gathered, so a test can see an unpaired
@@ -2650,7 +2668,7 @@ impl Watcher {
             runtime.spawn(async move {
                 while changes.changed().await.is_ok() {
                     let Some(watcher) = weak.upgrade() else { return };
-                    watcher.sync_asks(None).await;
+                    watcher.sync_asks(None, false).await;
                 }
             });
         }
@@ -2664,6 +2682,7 @@ impl Watcher {
             last_count: std::sync::Mutex::new(None),
             asks_told: std::sync::Mutex::new(HashMap::new()),
             ask_sync: tokio::sync::Mutex::new(()),
+            clears_pending: std::sync::Mutex::new(HashSet::new()),
             taps: std::sync::Mutex::new(None),
             #[cfg(test)]
             counts_gathered: std::sync::atomic::AtomicUsize::new(0),
@@ -2898,7 +2917,7 @@ impl Watcher {
             }
         }
         if blocked {
-            self.sync_asks(Some(terminal)).await;
+            self.sync_asks(Some(terminal), false).await;
         }
     }
 
@@ -2908,7 +2927,11 @@ impl Watcher {
     ///
     /// Recorded as told only once it lands, as the count is, so a push that
     /// failed is tried again at the next change.
-    async fn sync_asks(&self, only: Option<Uuid>) {
+    ///
+    /// An offer goes out at once. A clear goes out only when `clear_now`;
+    /// otherwise it is deferred by `ASK_CLEAR_GRACE`, and dropped then if the
+    /// pane's working notice has landed in the meantime.
+    async fn sync_asks(&self, only: Option<Uuid>, clear_now: bool) {
         let _one = self.ask_sync.lock().await;
         let told: Vec<(Uuid, Option<String>)> = {
             let told = self.asks_told.lock().unwrap_or_else(|e| e.into_inner());
@@ -2920,6 +2943,10 @@ impl Watcher {
         for (terminal, last) in told {
             let ask = self.open_ask(terminal);
             if ask.as_ref().map(crate::push::WireAsk::id) == last.as_deref() {
+                continue;
+            }
+            if ask.is_none() && !clear_now {
+                self.defer_clear(terminal);
                 continue;
             }
             let Some(pairing) = self.audience() else { return };
@@ -2951,6 +2978,25 @@ impl Watcher {
                 self.told(count);
             }
         }
+    }
+
+    /// Look again at `terminal`'s ask after `ASK_CLEAR_GRACE`, and send the
+    /// clear then if it is still owed. One pending look per terminal.
+    fn defer_clear(&self, terminal: Uuid) {
+        if !self.clears_pending.lock().unwrap_or_else(|e| e.into_inner()).insert(terminal) {
+            return;
+        }
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            self.clears_pending.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
+            return;
+        };
+        let me = self.me.clone();
+        runtime.spawn(async move {
+            tokio::time::sleep(ASK_CLEAR_GRACE).await;
+            let Some(watcher) = me.upgrade() else { return };
+            watcher.clears_pending.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
+            watcher.sync_asks(Some(terminal), true).await;
+        });
     }
 
     /// Ask the relay to take down cards this runner can no longer account for,
@@ -8548,6 +8594,16 @@ mod needs_you_push_tests {
         }
     }
 
+    /// Every notice sent from now until the watcher goes quiet (with the
+    /// clock paused, until nothing is left to wake).
+    async fn drain(taps: &mut tokio::sync::mpsc::UnboundedReceiver<Tapped>) -> Vec<Tapped> {
+        let mut all = Vec::new();
+        while let Some(tapped) = next(taps).await {
+            all.push(tapped);
+        }
+        all
+    }
+
     /// The next agent notice (no kind).
     async fn next_agent(taps: &mut tokio::sync::mpsc::UnboundedReceiver<Tapped>) -> Option<Tapped> {
         loop {
@@ -8608,7 +8664,7 @@ mod needs_you_push_tests {
         let told = next_ask(&mut taps).await.expect("the offer is told");
         assert_eq!((told.terminal, told.ask.as_deref()), (Some(pane), Some(id.as_str())));
         assert_eq!(told.title, "", "an ask notice is silent: no title to alert with");
-        watcher.sync_asks(None).await;
+        watcher.sync_asks(None, false).await;
         assert_eq!(next_ask(&mut taps).await, None, "once");
     }
 
@@ -8626,14 +8682,54 @@ mod needs_you_push_tests {
         assert_eq!(sent.ask.as_deref(), Some(id.as_str()), "the blocked notice carries its ask");
         noted(&watcher, pane, true).await;
 
-        // What `serve` does when its hold's timer fires.
+        // What `serve` does when its hold's timer fires. The dialog stays up,
+        // so no working notice follows, and after the grace the clear is owed.
+        let ended = tokio::time::Instant::now();
         asks.withdraw(pane, &id);
-        let cleared = next_ask(&mut taps).await.expect("the hold running out is told");
-        assert_eq!((cleared.kind, cleared.terminal, cleared.ask), (Some("ask"), Some(pane), None));
-        assert_eq!(cleared.title, "", "never an alert");
-        let rest: Vec<_> = std::iter::from_fn(|| taps.try_recv().ok()).collect();
-        assert!(rest.iter().all(|t| t.kind.is_some()), "no second agent notice buzzes: {rest:?}");
-        assert_eq!(next_ask(&mut taps).await, None, "and only once");
+        // Everything sent until the clear. The relay alerts on an agent
+        // notice, never on `kind:"ask"`, so "without an alert" is: the clear
+        // is an ask notice, and no agent notice went out beside it.
+        let mut between = Vec::new();
+        let cleared = loop {
+            let tapped = next(&mut taps).await.expect("the hold running out is told");
+            if tapped.kind == Some("ask") {
+                break tapped;
+            }
+            between.push(tapped);
+        };
+        assert_eq!((cleared.terminal, cleared.ask), (Some(pane), None), "a clear: no ask");
+        assert!(ended.elapsed() >= ASK_CLEAR_GRACE, "a clear waits out the grace: {:?}", ended.elapsed());
+        between.extend(drain(&mut taps).await);
+        assert!(between.iter().all(|t| t.kind.is_some()), "an agent notice went out: {between:?}");
+        assert!(between.iter().all(|t| t.kind != Some("ask")), "the clear went out twice: {between:?}");
+    }
+
+    /// An answered ask is followed by the pane leaving Blocked, and that
+    /// working notice clears the ask on the relay itself. So the clear is not
+    /// sent as well: one card push for the answer, not two.
+    #[tokio::test]
+    async fn an_answered_ask_that_unblocks_sends_no_separate_clear() {
+        let (_dir, svc, pane, watcher, mut taps) = a_blocked_pane().await;
+        let asks = svc.hooks().asks().clone();
+        let (id, _rx) = asks.hold(pane);
+        assert!(asks.offer(pane, &id, ask(&id)));
+        tokio::time::pause();
+        watcher.push_if_paired(pane, AgentActivity::Blocked, "claude", blocked(), false, None);
+        assert_eq!(next_agent(&mut taps).await.expect("blocked").ask.as_deref(), Some(id.as_str()));
+        noted(&watcher, pane, true).await;
+
+        // Answered: the ask ends, and a second later the pane is working.
+        asks.withdraw(pane, &id);
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        watcher.push_if_paired(pane, AgentActivity::Working, "claude", working(), false, None);
+        noted(&watcher, pane, false).await;
+        // Everything sent from the answer on, past the grace: the working
+        // notice, maybe a count, and no ask notice.
+        let sent = drain(&mut taps).await;
+        let agent: Vec<_> = sent.iter().filter(|t| t.kind.is_none()).collect();
+        assert_eq!(agent.len(), 1, "the working notice, once: {sent:?}");
+        assert_eq!(agent[0].ask, None);
+        assert!(sent.iter().all(|t| t.kind != Some("ask")), "the working notice already cleared it: {sent:?}");
     }
 
     /// The relay already has the ask the blocked notice carried, so a change
@@ -8653,8 +8749,8 @@ mod needs_you_push_tests {
         let other = Uuid::now_v7();
         let (elsewhere, _other_rx) = asks.hold(other);
         assert!(asks.offer(other, &elsewhere, ask(&elsewhere)));
-        watcher.sync_asks(None).await;
-        watcher.sync_asks(Some(pane)).await;
+        watcher.sync_asks(None, true).await;
+        watcher.sync_asks(Some(pane), true).await;
         assert_eq!(next_ask(&mut taps).await, None, "nothing changed on this pane");
     }
 
