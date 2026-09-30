@@ -926,9 +926,6 @@ enum StateKind {
     }
 }
 
-/// A terminal as the board reads it. Both rules are AgentKit's —
-/// `TaskAgentLink.isWorking`, and `TaskAgentLink.runsAgent` for what "runs an
-/// agent" means — so this app and the phone agree about the same pane.
 extension Worktree {
     /// Its open tasks' keys, in the runner's order.
     var taskKeys: [String] { (openTasks ?? []).map(\.key) }
@@ -947,6 +944,9 @@ extension Worktree: TaskLinkWorktree {
     var openTaskIDs: [String] { (openTasks ?? []).map(\.id) }
 }
 
+/// A terminal as the board reads it. Both rules are AgentKit's —
+/// `TaskAgentLink.isWorking`, and `TaskAgentLink.runsAgent` for what "runs an
+/// agent" means — so this app and the phone agree about the same pane.
 extension Terminal: TaskBoardPane {
     var boardTaskID: String? { taskId }
     var boardState: String { state }
