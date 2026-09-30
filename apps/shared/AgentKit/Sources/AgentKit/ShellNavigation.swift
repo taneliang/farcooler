@@ -97,23 +97,6 @@ enum ShellMetrics {
     /// Horizontal distance that commits a page turn.
     static let pageCommit: CGFloat = 70
 
-    /// Downward travel that commits the pull back out of the overview.
-    ///
-    /// **A THROW distance, not a translation**, the same way `pageCommit` is:
-    /// `ShellGesture.pullCommits` measures `projected` against it, so a
-    /// deliberate pull is judged on where the finger got and a flick on where
-    /// it was going. It was a bare `> 40` on the translation, read once, in
-    /// `onEnded`.
-    ///
-    /// Just past half of `overRun`, which is the distance the pull TRACKS
-    /// over — so a pull released past the half way point of the motion it is
-    /// drawing goes, and one released before it comes back. That relationship
-    /// is the reason the number is stated here beside the travel rather than
-    /// written into the gesture, and it is why 40 rather than the 38 that
-    /// would make it exactly half: 40 is what the threshold has always been
-    /// and no shipped gesture needed to change length to gain a middle.
-    static let pullDismiss: CGFloat = 40
-
     /// The device width the prototype was built at, and one content pane.
     ///
     /// The views take their real width from the geometry they are handed and
@@ -253,13 +236,15 @@ struct ShellTab: Identifiable, Hashable {
     /// **Carried rather than re-derived from `mark`, because it is deliberately
     /// BROADER than the amber ring.** Since `done` joined the review tier a
     /// finished turn draws the middle-weight review ring rather than the heavy
-    /// amber one — but it is still a worktree you should be shown first.
-    /// `ShellWorktree.precedence` is the only thing that reads this and the
-    /// only place the distinction matters; what a mark SAYS and what a rank
-    /// SAYS are different questions, and folding them together would silently
-    /// demote every finished agent a rung. (Nothing sorts by the rank today —
-    /// see `precedence`.) Android's
-    /// `ShellTab` makes the same split for the same reason.
+    /// amber one — but it is still a tab you should be shown first. What a
+    /// mark SAYS and whether somebody is WANTED are different questions.
+    ///
+    /// **Nothing in the app reads it today.** It ranked worktrees for the
+    /// overview (`ShellWorktree.precedence`), and both are gone; `ShellScreen`
+    /// still sets it, `said(answering:)` still leaves it alone, and the tests
+    /// pin that. Delete it with the first change that touches every tab
+    /// fixture, unless a surface has come to want it by then. Android's
+    /// `ShellTab` makes the same split.
     var wantsAttention: Bool
 
     /// Whether this tab is a terminal somebody could close.
@@ -1142,40 +1127,6 @@ enum ShellGesture {
         return tabCount - 1 - fromBottom
     }
 
-    /// How far a pull-down out of the overview has got, 0…1.
-    ///
-    /// **The reverse of the lift, and tracked for its whole length.** Leaving
-    /// the overview used to be a `DragGesture(minimumDistance: 20)` whose
-    /// `onChanged` recorded one boolean and whose `onEnded` either dismissed
-    /// or did not — so the way IN was a continuous, abandonable, one-to-one
-    /// gesture and the way OUT was a threshold that moved nothing until you
-    /// let go. WWDC 2018 803 names that exactly: *"when implementing your
-    /// gestures, you should avoid methods that are only detected at the end of
-    /// the gesture"*, and one page earlier makes the case for why it matters
-    /// — while nothing moves *"you actually wouldn't know the difference
-    /// between a frozen phone, and phone that's just at the top of the edge of
-    /// the screen"*. The path was already symmetric; the TRACKING was not, and
-    /// tracking is what makes a path readable.
-    ///
-    /// Over `overRun`, which is the same 76 points the lift spends carrying
-    /// the page off the display — so the page is taken back out of the grid
-    /// over exactly the distance it was put in by. There is no second number
-    /// to learn and no direction in which this gesture is longer than itself.
-    static func pullProgress(down: CGFloat) -> CGFloat {
-        min(1, max(0, down / ShellMetrics.overRun))
-    }
-
-    /// Whether letting go of a pull-down leaves the overview.
-    ///
-    /// The ESCAPE, so it is measured on the throw and not on the translation —
-    /// see `projected`, and `commits(dx:)` next door, which is this same
-    /// sentence about the other axis. A flick down off the top of the grid
-    /// leaves even though the thumb barely moved; a pull dragged half way and
-    /// parked comes back, because a finger that stopped was asking to stop.
-    static func pullCommits(down: CGFloat, velocity: CGFloat = 0) -> Bool {
-        projected(down, velocity: velocity) >= ShellMetrics.pullDismiss
-    }
-
     /// The lift at which the column has nothing left to reveal.
     ///
     /// The join. Everything about this gesture is measured from it rather than
@@ -1216,23 +1167,13 @@ enum ShellGesture {
         return up >= ShellMetrics.openMin ? full : 0
     }
 
-    /// How far into the overview a lift of `up` has got, 0…1.
-    ///
-    /// Measured from the point where the column has nothing left to reveal, so
-    /// the overview is always "keep going" and never "go a specific distance".
-    static func overviewProgress(up: CGFloat, tabCount: Int) -> CGFloat {
-        min(1, max(0, pageRise(up: up, tabCount: tabCount) / ShellMetrics.overRun))
-    }
-
     /// How far the PAGE itself has travelled for a lift of `up`.
     ///
     /// Zero for the whole column phase, and that is the rule rather than an
     /// implementation detail: picking a tab is a light action taken INSIDE the
     /// worktree, so the menu opens over a page that has not moved. The page
     /// only becomes something you are holding once the finger goes past the
-    /// last row and there is nothing left to pick — which is exactly where
-    /// `overviewProgress` starts, so the two say the same thing about the same
-    /// point and cannot come apart.
+    /// last row and there is nothing left to pick.
     ///
     /// **`up` has to be a PLACE, not a distance travelled, for that last
     /// sentence to mean anything in screen terms.** This function does not
@@ -1248,10 +1189,10 @@ enum ShellGesture {
     /// number its two callers — `ShellDrag.swift` and
     /// `ShellRootView.menuShouldShow` — actually pass here now.
     ///
-    /// Unclamped above, unlike `overviewProgress`. Past the overview's own run
-    /// the page has finished shrinking but the finger has not finished moving,
-    /// and a card that stopped following the thumb at some invisible line
-    /// would be a card you had let go of without letting go.
+    /// Unclamped above. Past the shrink's own run the page has finished
+    /// shrinking but the finger has not finished moving, and a card that
+    /// stopped following the thumb at some invisible line would be a card you
+    /// had let go of without letting go.
     static func pageRise(up: CGFloat, tabCount: Int) -> CGFloat {
         max(0, up - columnFull(tabCount: tabCount))
     }
@@ -1293,35 +1234,6 @@ enum ShellGesture {
         pageRise(up: up, tabCount: tabCount) > 0
     }
 
-    /// How far through the COLUMN's own stretch of the lift `up` has got, 0…1.
-    ///
-    /// The other half of the same drag. `overviewProgress` starts where this
-    /// one finishes, so between them they cover the whole upward gesture with
-    /// no gap and no overlap — this one for the stretch where the COLUMN
-    /// answers the finger, the other for the stretch where the PAGE does.
-    ///
-    /// Nothing is drawn straight off this number: the column springs open at
-    /// `openMin` rather than unrolling, and the page reads `pageRise`. What it
-    /// is for is the join. It reaching 1 at precisely the lift where
-    /// `overviewProgress` leaves 0 is what the tests pin down, and that single
-    /// point is where the whole gesture changes hands.
-    ///
-    /// Normalized by the column's length rather than by an absolute distance,
-    /// for the reason `overRun` gives: this gesture is "keep going until there
-    /// is nothing left to reveal, then keep going", and a worktree with one
-    /// tab has less to reveal than one with nine. A join fixed at some number
-    /// of points would fall in the middle of a nine-tab column and past the
-    /// end of a one-tab one.
-    ///
-    /// A worktree with no tabs has no column, so there is nothing for the
-    /// lift to be a fraction OF; it reports fully travelled, which hands the
-    /// whole gesture to `overviewProgress` and is the only answer that does
-    /// not divide by zero.
-    static func columnProgress(up: CGFloat, tabCount: Int) -> CGFloat {
-        let full = columnFull(tabCount: tabCount)
-        guard full > 0 else { return 1 }
-        return min(1, max(0, up / full))
-    }
 }
 
 // MARK: - What a pane has left
@@ -1492,7 +1404,7 @@ struct ShellBarDrag {
     /// start of the gesture, and never touched again.
     ///
     /// **The fix for the owner's report, and the reason it belongs here
-    /// rather than in `ShellDrag.swift`.** `pageRise` and `overviewProgress`
+    /// rather than in `ShellDrag.swift`.** `pageRise`
     /// used to be asked about `up` alone — the RAW travel since touch-down —
     /// which is the finger's true place above the bar only when the finger
     /// happened to land exactly on the bar's own top edge. Touch down lower
@@ -1524,8 +1436,8 @@ struct ShellBarDrag {
         /// and net of whatever a handover charged.
         var lift: CGFloat
         /// How far the finger is drawn above the bar's own top edge — a
-        /// POSITION, and the number `ShellGesture.pageRise`,
-        /// `overviewProgress` and `pageIsHeld` should be asked about once the
+        /// POSITION, and the number `ShellGesture.pageRise` and
+        /// `pageIsHeld` should be asked about once the
         /// vertical owns the gesture, in place of `lift`.
         ///
         /// Equal to `lift` for as long as a handover has charged something —

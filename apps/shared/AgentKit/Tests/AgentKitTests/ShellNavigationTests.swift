@@ -1059,8 +1059,8 @@ struct ShellNavigationTests {
         #expect(single.frame.axis == .vertical)
         #expect(abs(single.drag.spentLift - 40) < 2, "84 at the turn, less a 44-point column")
         #expect(
-            ShellGesture.overviewProgress(up: 84 - single.drag.spentLift, tabCount: 1) == 0,
-            "so the page starts the overview's run at nothing, not halfway through it")
+            ShellGesture.pageRise(up: 84 - single.drag.spentLift, tabCount: 1) == 0,
+            "so the page starts its rise at nothing, not halfway through it")
     }
 
     // MARK: - The page's own join, and where the drag started
@@ -1387,43 +1387,6 @@ struct ShellNavigationTests {
 
     // MARK: - The overview
 
-    /// The overview starts where the column runs out, so it is always the same
-    /// gesture — keep going — whether the worktree has one tab or nine.
-    @Test func theOverviewBeginsWhereTheColumnRunsOut() {
-        #expect(ShellGesture.overviewProgress(up: 102, tabCount: 3) == 0)
-        #expect(ShellGesture.overviewProgress(up: ShellMetrics.rowHeight * 3 + ShellMetrics.overRun / 2, tabCount: 3) == 0.5)
-        #expect(ShellGesture.overviewProgress(up: ShellMetrics.rowHeight * 3 + ShellMetrics.overRun, tabCount: 3) == 1)
-        #expect(ShellGesture.overviewProgress(up: 400, tabCount: 3) == 1)
-        #expect(ShellGesture.overviewProgress(up: 0, tabCount: 3) == 0)
-        // A one-tab worktree reaches it 68 points sooner, and that is the
-        // point: the distance is measured from the end of the column.
-        #expect(ShellGesture.overviewProgress(up: ShellMetrics.rowHeight + ShellMetrics.overRun, tabCount: 1) == 1)
-    }
-
-    /// The two halves of the lift meet exactly, with nothing between them.
-    ///
-    /// This is the assertion the page's motion rests on: `columnProgress`
-    /// reaches 1 at precisely the lift where `overviewProgress` leaves 0, so a
-    /// transform blended from the two of them is continuous across the join.
-    /// A gap would be a stretch of the drag where the screen does not move; an
-    /// overlap would be a stretch where it moves twice as fast.
-    @Test func theColumnAndTheOverviewCoverTheLiftBetweenThem() {
-        #expect(ShellGesture.columnProgress(up: 0, tabCount: 3) == 0)
-        #expect(ShellGesture.columnProgress(up: -40, tabCount: 3) == 0)
-        #expect(ShellGesture.columnProgress(up: ShellMetrics.rowHeight * 1.5, tabCount: 3) == 0.5)
-
-        let join = ShellMetrics.rowHeight * 3
-        #expect(ShellGesture.columnProgress(up: join, tabCount: 3) == 1)
-        #expect(ShellGesture.overviewProgress(up: join, tabCount: 3) == 0)
-
-        // Past the join the column has nothing left to say and stays at 1,
-        // which is what leaves the rest of the travel to the overview alone.
-        #expect(ShellGesture.columnProgress(up: join + ShellMetrics.overRun, tabCount: 3) == 1)
-
-        // A worktree with no tabs has no column to be a fraction of.
-        #expect(ShellGesture.columnProgress(up: 10, tabCount: 0) == 1)
-    }
-
     /// The page does not move at all until the lift has passed the tabs.
     ///
     /// The rule the whole lift now rests on: picking a tab is a light action
@@ -1437,7 +1400,6 @@ struct ShellNavigationTests {
 
         for up in stride(from: CGFloat(0), through: join, by: ShellMetrics.rowHeight / 4) {
             #expect(ShellGesture.pageRise(up: up, tabCount: 3) == 0)
-            #expect(ShellGesture.columnProgress(up: up, tabCount: 3) <= 1)
         }
         #expect(ShellGesture.pageRise(up: -40, tabCount: 3) == 0)
 
@@ -1445,30 +1407,19 @@ struct ShellNavigationTests {
         #expect(ShellGesture.pageRise(up: join + 1, tabCount: 3) == 1)
         #expect(ShellGesture.pageRise(up: join + ShellMetrics.overRun, tabCount: 3) == ShellMetrics.overRun)
 
-        // Unclamped above, where `overviewProgress` is not: the page has
-        // finished shrinking there, and it still has to follow the thumb.
+        // Unclamped above: the page has finished shrinking there, and it still
+        // has to follow the thumb.
         #expect(ShellGesture.pageRise(up: join + 400, tabCount: 3) == 400)
-        #expect(ShellGesture.overviewProgress(up: join + 400, tabCount: 3) == 1)
 
         // A worktree with no tabs has no column to hold the page still.
         #expect(ShellGesture.pageRise(up: 10, tabCount: 0) == 10)
-    }
 
-    /// The page starts moving at exactly the point the overview starts
-    /// arriving, for any number of tabs.
-    ///
-    /// Two facts about the same instant, so they are asserted together: a
-    /// `pageRise` that began before `overviewProgress` would be a page that
-    /// steps back to pick a tab, and one that began after would be a stretch
-    /// of the drag where the overview is arriving behind a page that has not
-    /// moved to reveal it.
-    @Test func thePageBeginsMovingWhereTheOverviewBegins() {
+        // The same join for any number of tabs: the page starts rising at the
+        // end of the column, wherever that is.
         for tabs in 0...9 {
-            let join = ShellGesture.columnFull(tabCount: tabs)
-            #expect(ShellGesture.pageRise(up: join, tabCount: tabs) == 0)
-            #expect(ShellGesture.overviewProgress(up: join, tabCount: tabs) == 0)
-            #expect(ShellGesture.pageRise(up: join + 8, tabCount: tabs) == 8)
-            #expect(ShellGesture.overviewProgress(up: join + 8, tabCount: tabs) > 0)
+            let end = ShellGesture.columnFull(tabCount: tabs)
+            #expect(ShellGesture.pageRise(up: end, tabCount: tabs) == 0)
+            #expect(ShellGesture.pageRise(up: end + 8, tabCount: tabs) == 8)
         }
     }
 
@@ -2035,54 +1986,6 @@ struct ShellNavigationTests {
     @Test func theRailIsThePageLessTheBarsTwoInsets() {
         #expect(ShellMetrics.railWidth() == 361)
         #expect(ShellMetrics.railWidth(page: 440) == 408)
-    }
-
-    // MARK: - Leaving the overview by hand
-
-    /// **The pull back out is tracked for its whole length**, over exactly the
-    /// distance the lift spent putting the page away.
-    ///
-    /// The point of the assertion is the pair of endpoints and the fact that
-    /// there is something in between: what this replaced had no in-between at
-    /// all, only a boolean read at the release.
-    @Test func thePullOutOfTheOverviewIsTrackedOverTheLiftsOwnRun() {
-        #expect(ShellGesture.pullProgress(down: 0) == 0)
-        #expect(ShellGesture.pullProgress(down: ShellMetrics.overRun) == 1)
-        #expect(ShellGesture.pullProgress(down: ShellMetrics.overRun / 2) == 0.5)
-        // Clamped at both ends: a drag that wanders upward moves nothing, and
-        // one that keeps going past the display has nothing left to grow.
-        #expect(ShellGesture.pullProgress(down: -120) == 0)
-        #expect(ShellGesture.pullProgress(down: 400) == 1)
-    }
-
-    /// **The release reads momentum**, which is what makes a flick down off
-    /// the top of the grid mean the same thing as a deliberate pull.
-    ///
-    /// Two gestures that travelled the SAME distance and resolve differently,
-    /// which is the whole of the projection: 20 points placed and let go of
-    /// stays, 20 points still moving at 600 points a second leaves.
-    @Test func aFlickOutOfTheGridLeavesAndAPlacedTwentyPointsDoesNot() {
-        #expect(!ShellGesture.pullCommits(down: 20))
-        #expect(ShellGesture.pullCommits(down: 20, velocity: 600))
-        // And the deliberate pull is unchanged: the threshold is still the
-        // same 40 points it was when it was read off the translation alone,
-        // so nothing anybody had learned about this gesture stopped being
-        // true.
-        #expect(!ShellGesture.pullCommits(down: 39.9))
-        #expect(ShellGesture.pullCommits(down: 40))
-    }
-
-    /// The commit sits just past the half way point of the motion the pull
-    /// draws, so letting go of a page more than half way home sends it home.
-    ///
-    /// Stated as a relationship rather than as two numbers, because the two
-    /// numbers only mean anything together — a threshold beyond the travel
-    /// would be a gesture that tracks all the way and then refuses.
-    @Test func lettingGoPastHalfWayHomeGoesHome() {
-        #expect(ShellMetrics.pullDismiss > ShellMetrics.overRun / 2)
-        #expect(ShellMetrics.pullDismiss < ShellMetrics.overRun)
-        #expect(ShellGesture.pullCommits(down: ShellMetrics.overRun * 0.6))
-        #expect(!ShellGesture.pullCommits(down: ShellMetrics.overRun * 0.4))
     }
 
     // MARK: - The phone's stack (ov-55 4A)
