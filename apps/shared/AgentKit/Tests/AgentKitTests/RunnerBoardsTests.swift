@@ -375,3 +375,22 @@ private let served = DaemonBuild(
         build: served, needsYou: [item("x", .decision, workspace: nil)], connected: true)
     #expect(try #require(one.first).decisions == 1)
 }
+
+/// The workspace screen's line: what a board says is waiting, from the board
+/// it holds, the workspace, and what the runner's needs-you reading says.
+/// Nothing for a board not read yet, and for a list derived from an older
+/// runner's fleet the column, never the derived items.
+@Test func aBoardsWaitingIsTheItemsOnceReadAndServed() {
+    let busy = WorkspaceSummary.implicit(repository: "r-busy")
+    let column = boards["r-busy"]
+    let none: [NeedsYouItem] = []
+    let one = [item("x", .decision, workspace: nil)]
+    #expect(
+        RunnerBoards.waiting(on: nil, in: busy, items: one, listRead: true, build: served) == 0,
+        "a board not read has nothing to count")
+    #expect(RunnerBoards.waiting(on: column, in: busy, items: none, listRead: false, build: served) == 2)
+    #expect(RunnerBoards.waiting(on: column, in: busy, items: none, listRead: true, build: served) == 0)
+    #expect(RunnerBoards.waiting(on: column, in: busy, items: one, listRead: true, build: served) == 1)
+    #expect(RunnerBoards.waiting(on: column, in: busy, items: one, listRead: true, build: both) == 2)
+    #expect(RunnerBoards.waiting(on: column, in: busy, items: one, listRead: true, build: nil) == 2)
+}

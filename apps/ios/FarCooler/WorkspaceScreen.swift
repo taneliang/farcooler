@@ -96,6 +96,10 @@ struct WorkspaceScreen: View {
                     place: place,
                     speaksOfAgents: TaskAgentLink.speaksOfAgents(
                         connected: connection.isAnswering, build: connection.daemon),
+                    waiting: RunnerBoards.waiting(
+                        on: connection.boards[summary.id], in: summary, items: connection.needsYou,
+                        listRead: connection.needsYouRead && !connection.needsYouDerived,
+                        build: connection.daemon),
                     agents: connection.boardAgents(for:),
                     onOpen: { row in navigator?.open(.task(place, task: row.id)) },
                     onJump: { agent in openAgent(agent) },

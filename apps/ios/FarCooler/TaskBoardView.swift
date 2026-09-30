@@ -47,6 +47,10 @@ struct WorkspaceBoardList: View {
     /// Whether this runner can be believed about its panes right now — see
     /// `TaskAgentLink.speaksOfAgents`. False draws no agent control at all.
     let speaksOfAgents: Bool
+    /// How many tasks are waiting on the person: the workspace's decision
+    /// items once the runner's list is read, the column until then
+    /// (`RunnerBoards.waiting`). The line the Mac's board header draws.
+    let waiting: Int
     /// The panes working a card, in fleet order.
     let agents: (TaskRow) -> [BoardAgent]
     let onOpen: (TaskRow) -> Void
@@ -57,13 +61,14 @@ struct WorkspaceBoardList: View {
 
     init(
         board: TaskBoardModel?, unread: Bool, place: PhoneWorkspace, speaksOfAgents: Bool,
-        agents: @escaping (TaskRow) -> [BoardAgent], onOpen: @escaping (TaskRow) -> Void,
+        waiting: Int, agents: @escaping (TaskRow) -> [BoardAgent], onOpen: @escaping (TaskRow) -> Void,
         onJump: @escaping (BoardAgent) -> Void, onRefresh: @escaping () async -> Void
     ) {
         self.board = board
         self.unread = unread
         self.place = place
         self.speaksOfAgents = speaksOfAgents
+        self.waiting = waiting
         self.agents = agents
         self.onOpen = onOpen
         self.onJump = onJump
@@ -92,6 +97,16 @@ struct WorkspaceBoardList: View {
         .accessibilityIdentifier("board")
     }
 
+    private func waitingPill(_ text: String) -> some View {
+        Text(text)
+            .font(.footnote.weight(.semibold))
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Color.accentColor.opacity(0.18), in: Capsule())
+    }
+
     private func list(_ board: TaskBoardModel) -> some View {
         List {
             if unread {
@@ -102,6 +117,24 @@ struct WorkspaceBoardList: View {
                     )
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                }
+            }
+            // The one count worth putting above a board, in the Mac's words
+            // (`TaskBoardModel.waitingSentence`), and nothing at zero: a
+            // badge reading zero teaches people to ignore it. One line
+            // always; where the sentence doesn't fit it's said short, as the
+            // Mac says it.
+            if let sentence = TaskBoardModel.waitingSentence(waiting) {
+                Section {
+                    ViewThatFits(in: .horizontal) {
+                        waitingPill(sentence)
+                        waitingPill("\(waiting) waiting")
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .listRowBackground(Color.clear)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(sentence)
+                    .accessibilityIdentifier("board-waiting")
                 }
             }
             ForEach(board.sections) { section in

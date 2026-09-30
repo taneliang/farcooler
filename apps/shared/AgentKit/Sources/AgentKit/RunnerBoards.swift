@@ -211,6 +211,22 @@ public enum RunnerBoards {
         listRead && listServed ? decisions : columnCount
     }
 
+    /// What a workspace's board screen says is waiting, from the board it
+    /// holds and one runner's needs-you reading: `waiting` over the board's
+    /// Needs Decision column and `decisions`. Zero for a board not read
+    /// yet. `listRead` is a list the runner itself served; a reading derived
+    /// from an older runner's fleet is not one, and such a runner's `build`
+    /// doesn't advertise `needs_you` either, which is the guard that counts.
+    public static func waiting(
+        on board: TaskBoardModel?, in workspace: WorkspaceSummary, items: [NeedsYouItem],
+        listRead: Bool, build: DaemonBuild?
+    ) -> Int {
+        guard let board else { return 0 }
+        return waiting(
+            columnCount: board.waitingOnYou, decisions: decisions(for: workspace, in: items),
+            listRead: listRead, listServed: build?.can("needs_you") == true)
+    }
+
     /// The Board rows of a runner without workspaces: one per repository, in
     /// the order the runner lists them, each the repository's implicit board.
     /// `rows(boards:…)` over `WorkspaceSummary.implicit`, for a caller that

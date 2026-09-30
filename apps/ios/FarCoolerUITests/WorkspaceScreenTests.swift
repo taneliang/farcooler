@@ -69,6 +69,31 @@ final class WorkspaceScreenTests: XCTestCase {
         XCTAssertTrue(app.buttons["segment-worktrees"].isSelected)
     }
 
+    /// **The board says how many decisions are waiting, from the runner's
+    /// list** (ov-69): the Mac's sentence, over the workspace's decision
+    /// items. Billing has one, bil-7's, beside an ask that isn't one.
+    func testBoardSaysHowManyDecisionsAreWaiting() throws {
+        let app = XCUIApplication.phoneHarness([])
+        openWorkspace(app, "Billing")
+        choose(app, "Board")
+        let line = element(app, "board-waiting")
+        XCTAssertTrue(line.waitForExistence(timeout: 10), "no waiting line: \(app.debugDescription)")
+        XCTAssertEqual(line.label, "1 task is waiting on you")
+    }
+
+    /// **An answered decision leaves the card in Needs Decision and the line
+    /// gone** (spec 2.2): with nothing needing the person, the column still
+    /// holds bil-7 and the board says nothing is waiting.
+    func testAnAnsweredDecisionLeavesNoWaitingLine() throws {
+        let app = launch()
+        openWorkspace(app, "Billing")
+        choose(app, "Board")
+        XCTAssertTrue(
+            element(app, "board-card-bil-7").waitForExistence(timeout: 10),
+            "bil-7 is not in Needs Decision")
+        XCTAssertFalse(element(app, "board-waiting").exists, "a waiting line for an empty list")
+    }
+
     /// **A workspace with no orchestrator can start one from the phone**
     /// (ruling 8): the harness is chosen from a menu, the screen says it's
     /// starting, and the pane takes its place once the runner has it.
