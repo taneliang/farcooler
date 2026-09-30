@@ -6387,21 +6387,33 @@ describe('topic and channel must agree', () => {
 ///
 /// The widget can't see the app's links while the app is suspended, so a
 /// runner that stopped hours ago read exactly like a live one. These are the
-/// three halves of telling them apart: the beat lands on the runner's row,
-/// the pulse token reads only its own account, and a runner too old to beat
-/// never reaches the answer — its silence means nothing.
+/// halves of telling them apart: the beat lands on the runner's row, the
+/// phone's own pulse token reads only its own account, a runner too old to
+/// beat never reaches the answer, and a runner unpaired on purpose leaves it.
 describe('the runner heartbeat', () => {
-  /// Register the way the iOS app does, asking for a pulse token.
-  async function pulseToken(account: string): Promise<string> {
+  /// A token the phone made, as the iOS app makes one: 32 random bytes, hex.
+  function phoneToken(): string {
+    return [...crypto.getRandomValues(new Uint8Array(32))]
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('')
+  }
+
+  /// Register the way the iOS app does, sending its own pulse token.
+  async function pulseToken(account: string, token = phoneToken()): Promise<string> {
     watchFetch()
-    const response = await register(account, { pulse: true })
-    const body = await response.json<{ ok: boolean; pulseToken?: string }>()
-    expect(body.pulseToken).toMatch(/^[0-9a-f]{64}$/)
-    return body.pulseToken!
+    const response = await register(account, { pulseToken: token })
+    expect(response.status).toBe(200)
+    return token
   }
 
   async function pulse(token?: string) {
     return await post('/v1/pulse', {}, token)
+  }
+
+  type Runner = { label: string; name: string | null; heardAgo: number; beatEvery: number }
+
+  async function runners(token: string): Promise<Runner[]> {
+    return (await (await pulse(token)).json<{ runners: Runner[] }>()).runners
   }
 
   it('records the beat on the runner, and how often it promised one', async () => {
@@ -6447,31 +6459,66 @@ describe('the runner heartbeat', () => {
     ).toBe(3600)
   })
 
-  it('mints a pulse token only when asked, and keeps only its hash', async () => {
-    watchFetch()
-    const plain = await (await register('user_1')).json<{ pulseToken?: string }>()
-    expect(plain.pulseToken).toBeUndefined()
-
+  it('keeps only the hash of the pulse token the phone sent', async () => {
     const token = await pulseToken('user_1')
     const row = await env.DB.prepare(`SELECT pulse_hash FROM devices`).first<{ pulse_hash: string }>()
     expect(row?.pulse_hash).toBe(await sha256(token))
   })
 
-  it('keeps the pulse token through a registration that does not ask', async () => {
-    // The Mac and every older build register without `pulse`; a phone's
-    // widget must not lose its credential because the app re-registered
-    // for a new notification toggle from an older code path.
+  it('leaves the pulse token alone on a registration that sends none', async () => {
+    // The Mac, Android and every older build register without one.
     const token = await pulseToken('user_1')
     await register('user_1')
     expect((await pulse(token)).status).toBe(200)
   })
 
-  it('replaces the pulse token at every registration that asks', async () => {
+  it('keeps the widget token valid through two registrations in a row', async () => {
+    // The race the phone used to lose: two registrations at launch, answered
+    // in either order. The phone owns the token, so both carry the same one
+    // and neither strands the widget, whichever the relay sees last.
+    const token = phoneToken()
+    watchFetch()
+    const session = await sessionFor('user_1')
+    const [a, b] = await Promise.all([
+      post('/v1/devices', { platform: 'apns', pushToken: 'device-token', pulseToken: token }, session),
+      post('/v1/devices', { platform: 'apns', pushToken: 'device-token', pulseToken: token }, session),
+    ])
+    expect([a.status, b.status]).toEqual([200, 200])
+    await register('user_1', { pulseToken: token })
+    expect((await pulse(token)).status).toBe(200)
+  })
+
+  it('replaces the old token when the phone sends a new one', async () => {
     const first = await pulseToken('user_1')
     const second = await pulseToken('user_1')
-    expect(second).not.toBe(first)
     expect((await pulse(first)).status).toBe(401)
     expect((await pulse(second)).status).toBe(200)
+  })
+
+  it('moves a token to the device that sent it last', async () => {
+    // A reinstall files a new push token under the same keychain token. The
+    // unique index must not turn that registration into a 500.
+    const token = await pulseToken('user_1')
+    const response = await register('user_1', { pushToken: 'reinstalled', pulseToken: token })
+    expect(response.status).toBe(200)
+    expect((await pulse(token)).status).toBe(200)
+    const holders = await env.DB.prepare(`SELECT COUNT(*) AS n FROM devices WHERE pulse_hash IS NOT NULL`)
+      .first<{ n: number }>()
+    expect(holders?.n).toBe(1)
+  })
+
+  it('ignores a pulse token that is not one', async () => {
+    watchFetch()
+    const response = await register('user_1', { pulseToken: 'short' })
+    expect(response.status).toBe(200)
+    const row = await env.DB.prepare(`SELECT pulse_hash FROM devices`).first<{ pulse_hash: string | null }>()
+    expect(row?.pulse_hash).toBeNull()
+  })
+
+  it("drops the old account's token when the device changes hands", async () => {
+    const token = await pulseToken('user_1')
+    await register('user_2')
+    expect((await pulse(token)).status).toBe(401)
   })
 
   it('answers how long ago each beating runner was heard, and its promise', async () => {
@@ -6479,14 +6526,25 @@ describe('the runner heartbeat', () => {
     await pair('user_1', 'mine')
     await post('/v1/heartbeat', { beatEvery: 300 }, 'mine')
 
-    const body = await (await pulse(token)).json<{
-      runners: { label: string; heardAgo: number; beatEvery: number }[]
-    }>()
-    expect(body.runners).toHaveLength(1)
-    expect(body.runners[0].label).toBe('Studio')
-    expect(body.runners[0].beatEvery).toBe(300)
-    expect(body.runners[0].heardAgo).toBeGreaterThanOrEqual(0)
-    expect(body.runners[0].heardAgo).toBeLessThan(60_000)
+    const answer = await runners(token)
+    expect(answer).toHaveLength(1)
+    expect(answer[0].label).toBe('Studio')
+    expect(answer[0].name).toBeNull()
+    expect(answer[0].beatEvery).toBe(300)
+    expect(answer[0].heardAgo).toBeGreaterThanOrEqual(0)
+    expect(answer[0].heardAgo).toBeLessThan(60_000)
+  })
+
+  it("carries the runner's own name, which a phone reads before the pairing label", async () => {
+    // Every Mac pairs its own runner as "This Mac", which names nothing on a
+    // phone. The runner says what it's called.
+    const token = await pulseToken('user_1')
+    await pair('user_1', 'mine')
+    await post('/v1/heartbeat', { beatEvery: 300, name: "  E-Liang's MacBook Pro  " }, 'mine')
+    expect((await runners(token))[0].name).toBe("E-Liang's MacBook Pro")
+
+    await post('/v1/heartbeat', { beatEvery: 300, name: 'x'.repeat(200) }, 'mine')
+    expect((await runners(token))[0].name).toHaveLength(64)
   })
 
   it('reports an age, so a runner silent for an hour reads as an hour', async () => {
@@ -6495,18 +6553,26 @@ describe('the runner heartbeat', () => {
     await post('/v1/heartbeat', { beatEvery: 300 }, 'mine')
     await env.DB.prepare(`UPDATE daemons SET last_seen_at = ?`).bind(Date.now() - 3_600_000).run()
 
-    const body = await (await pulse(token)).json<{ runners: { heardAgo: number }[] }>()
-    expect(body.runners[0].heardAgo).toBeGreaterThanOrEqual(3_600_000)
-    expect(body.runners[0].heardAgo).toBeLessThan(3_660_000)
+    const answer = await runners(token)
+    expect(answer[0].heardAgo).toBeGreaterThanOrEqual(3_600_000)
+    expect(answer[0].heardAgo).toBeLessThan(3_660_000)
   })
 
   it('leaves out a runner too old to beat, so its silence means nothing', async () => {
     const token = await pulseToken('user_1')
     await pair('user_1', 'old')
     await post('/v1/notify', { title: 'hi' }, 'old')
+    expect(await runners(token)).toEqual([])
+  })
 
-    const body = await (await pulse(token)).json<{ runners: unknown[] }>()
-    expect(body.runners).toEqual([])
+  it('leaves out a runner withdrawn on purpose, rather than calling it lost', async () => {
+    // Stop Notifying: the runner is fine, it just shouldn't be reported on.
+    const token = await pulseToken('user_1')
+    await pair('user_1', 'mine')
+    await post('/v1/heartbeat', { beatEvery: 300 }, 'mine')
+    const response = await post('/v1/heartbeat', { withdrawn: true }, 'mine')
+    expect(response.status).toBe(200)
+    expect(await runners(token)).toEqual([])
   })
 
   it('forgets a runner silent for a day, as it forgets its rows', async () => {
@@ -6516,9 +6582,7 @@ describe('the runner heartbeat', () => {
     await env.DB.prepare(`UPDATE daemons SET last_seen_at = ?`)
       .bind(Date.now() - 25 * 3_600_000)
       .run()
-
-    const body = await (await pulse(token)).json<{ runners: unknown[] }>()
-    expect(body.runners).toEqual([])
+    expect(await runners(token)).toEqual([])
   })
 
   it('counts one runner paired twice once, by its newest beat', async () => {
@@ -6527,23 +6591,20 @@ describe('the runner heartbeat', () => {
     await pair('user_1', 'second')
     await post('/v1/heartbeat', { beatEvery: 300, install: 'runner-a' }, 'first')
     await post('/v1/heartbeat', { beatEvery: 300, install: 'runner-a' }, 'second')
-    const firstHash = await sha256('first')
     await env.DB.prepare(`UPDATE daemons SET last_seen_at = ? WHERE token_hash = ?`)
-      .bind(Date.now() - 3_600_000, firstHash)
+      .bind(Date.now() - 3_600_000, await sha256('first'))
       .run()
 
-    const body = await (await pulse(token)).json<{ runners: { heardAgo: number }[] }>()
-    expect(body.runners).toHaveLength(1)
-    expect(body.runners[0].heardAgo).toBeLessThan(60_000)
+    const answer = await runners(token)
+    expect(answer).toHaveLength(1)
+    expect(answer[0].heardAgo).toBeLessThan(60_000)
   })
 
   it("reads only its own account's runners", async () => {
     const token = await pulseToken('user_1')
     await pair('user_2', 'theirs')
     await post('/v1/heartbeat', { beatEvery: 300 }, 'theirs')
-
-    const body = await (await pulse(token)).json<{ runners: unknown[] }>()
-    expect(body.runners).toEqual([])
+    expect(await runners(token)).toEqual([])
   })
 
   it('refuses a caller with no pulse token, or a guessed one', async () => {

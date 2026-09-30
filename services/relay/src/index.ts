@@ -337,6 +337,12 @@ async function registerDevice(request: Request, env: Env): Promise<Response> {
                                THEN devices.state
                              ELSE 'pending'
                            END,
+                   -- A device that changes accounts loses the old account's
+                   -- pulse token: it read the old account's runners.
+                   pulse_hash = CASE
+                                  WHEN devices.account_id <> excluded.account_id THEN NULL
+                                  ELSE devices.pulse_hash
+                                END,
                    updated_at = excluded.updated_at`,
   )
     .bind(
@@ -364,25 +370,37 @@ async function registerDevice(request: Request, env: Env): Promise<Response> {
     )
     .run()
 
-  // A pulse token, only when asked: the iOS app asks, so its widget can read
-  // which runners are beating (`/v1/pulse`). Minted AFTER the upsert and
-  // written by push token, because that is the row the upsert just made or
-  // kept. A registration that doesn't ask leaves the hash alone, so the Mac
-  // or an older code path re-registering can't strand a widget's credential.
-  let pulseToken: string | undefined
-  if (body.pulse === true) {
-    pulseToken = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '')
+  // The phone's pulse token, so its widget can read which runners are
+  // beating (`/v1/pulse`). The PHONE makes it, once, and sends it on every
+  // registration, so two registrations at launch answered in either order
+  // leave the same hash. The relay minting one per registration was a race
+  // the phone could lose, filing a token whose hash had already been
+  // replaced. Stored after the upsert, on the row the upsert made or kept. A
+  // token already on another row (a reinstall under a new push token) moves
+  // here: whoever presents it owns it, and the unique index must not 500 the
+  // one call push depends on. A registration that sends none leaves it alone.
+  const pulseToken = typeof body.pulseToken === 'string' && /^[0-9a-f]{64}$/.test(body.pulseToken)
+    ? body.pulseToken
+    : null
+  if (pulseToken !== null) {
+    const hash = await sha256(pulseToken)
+    await env.DB.prepare(
+      `UPDATE devices SET pulse_hash = NULL
+       WHERE pulse_hash = ? AND NOT (platform = ? AND push_token = ?)`,
+    )
+      .bind(hash, body.platform, body.pushToken)
+      .run()
     await env.DB.prepare(
       `UPDATE devices SET pulse_hash = ? WHERE platform = ? AND push_token = ? AND account_id = ?`,
     )
-      .bind(await sha256(pulseToken), body.platform, body.pushToken, account)
+      .bind(hash, body.platform, body.pushToken, account)
       .run()
   }
 
   await record(env.METRICS, env.ANALYTICS_SALT, 'device_registered', account, {
     platform: body.platform,
   })
-  return json(pulseToken === undefined ? { ok: true } : { ok: true, pulseToken })
+  return json({ ok: true })
 }
 
 /// What an app sends to register. Everything but the platform and the token is
@@ -411,9 +429,9 @@ interface Registration {
   /// Absent means notify. A build that predates the field sends nothing and
   /// keeps the behavior it has; see the COALESCE below and migration 0007.
   notifyOnDone?: unknown
-  /// `true` asks for a pulse token, answered once as `pulseToken`. Anything
-  /// else asks for nothing. See migration 0015.
-  pulse?: unknown
+  /// The phone's own pulse token, 64 hex characters; anything else is
+  /// ignored rather than refused. See migration 0015.
+  pulseToken?: unknown
 }
 
 /// The fingerprint this registration PROVED it holds, or the response to send
@@ -1260,18 +1278,43 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
   const daemon = await requireDaemon(request, env)
   if (daemon instanceof Response) return daemon
 
-  const body = await request.json<{ beatEvery?: unknown; install?: unknown; version?: unknown }>()
+  const body = await request.json<{
+    beatEvery?: unknown
+    install?: unknown
+    version?: unknown
+    name?: unknown
+    withdrawn?: unknown
+  }>()
+
+  // Unpaired on purpose: the runner is fine and is no longer to be reported
+  // on. `beat_every` back to NULL takes it out of the pulse, so the widget
+  // says nothing about it rather than "lost touch". A withdrawal that never
+  // arrives costs a day of "lost touch" at most: the pulse drops a runner
+  // silent for `ROW_RETENTION_MS`.
+  if (body.withdrawn === true) {
+    await env.DB.prepare(`UPDATE daemons SET beat_every = NULL WHERE id = ?`).bind(daemon.id).run()
+    return json({ ok: true })
+  }
+
   const promised = typeof body.beatEvery === 'number' && Number.isFinite(body.beatEvery)
     ? Math.round(body.beatEvery)
     : 300
   const beatEvery = Math.min(BEAT_EVERY_MAX_S, Math.max(BEAT_EVERY_MIN_S, promised))
   // The install id keys the runner, as on a notice, so two tokens of one
-  // runner are one runner in the pulse too. Written only when it moves.
+  // runner are one runner in the pulse too. Rewritten on every beat, and
+  // COALESCEd so a beat without one never erases it.
   const install = await installKey(daemon.account_id, body.install)
+  // What the runner calls itself, which the phone prefers to the pairing
+  // label. Trimmed and cut to 64 characters; an empty or absent one keeps
+  // the last.
+  const name = typeof body.name === 'string' && body.name.trim()
+    ? [...body.name.trim()].slice(0, 64).join('')
+    : null
 
   await env.DB.prepare(
     `UPDATE daemons SET last_seen_at = ?, beat_every = ?,
                         install_id = COALESCE(?, install_id),
+                        name = COALESCE(?, name),
                         version = COALESCE(?, version)
      WHERE id = ?`,
   )
@@ -1279,6 +1322,7 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
       Date.now(),
       beatEvery,
       install,
+      name,
       typeof body.version === 'string' ? body.version.slice(0, 64) : null,
       daemon.id,
     )
@@ -1286,17 +1330,19 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
   return json({ ok: true })
 }
 
-/// Which of an account's runners are beating, and how long ago each was heard.
+/// Which of an account's runners are beating, what each calls itself, and how
+/// long ago each was heard.
 ///
 /// Read by a phone's widget, which can't see the app's links while the app is
 /// suspended, with the device's pulse token (see `registerDevice`). It reads
-/// labels and ages on its own account and nothing else.
+/// names and ages on its own account and nothing else.
 ///
 /// **An age, not a timestamp**, so the phone's clock never enters it: the
 /// relay's clock stamped the beat and the relay's clock measures from it.
 ///
 /// Only runners that promised a beat (`beat_every` set): a runner too old to
-/// beat is silent by construction, and the widget keeps today's hedge for it.
+/// beat is silent by construction, and the widget keeps today's hedge for it;
+/// so is one withdrawn on purpose (`/v1/heartbeat` with `withdrawn`).
 /// One entry per runner, by install id where it sent one, and the newest beat
 /// among its tokens. A runner silent for `ROW_RETENTION_MS` is left out, the
 /// age at which the relay forgets its roster rows as well.
@@ -1314,7 +1360,7 @@ async function pulse(request: Request, env: Env): Promise<Response> {
 
   const now = Date.now()
   const beating = await env.DB.prepare(
-    `SELECT id, label, install_id, last_seen_at, beat_every FROM daemons
+    `SELECT id, label, name, install_id, last_seen_at, beat_every FROM daemons
      WHERE account_id = ? AND beat_every IS NOT NULL AND last_seen_at >= ?
        AND (expires_at IS NULL OR expires_at > ?)`,
   )
@@ -1322,12 +1368,16 @@ async function pulse(request: Request, env: Env): Promise<Response> {
     .all<{
       id: string
       label: string
+      name: string | null
       install_id: string | null
       last_seen_at: number
       beat_every: number
     }>()
 
-  const newest = new Map<string, { label: string; last_seen_at: number; beat_every: number }>()
+  const newest = new Map<
+    string,
+    { label: string; name: string | null; last_seen_at: number; beat_every: number }
+  >()
   for (const row of beating.results ?? []) {
     const runner = row.install_id !== null ? `install:${row.install_id}` : `daemon:${row.id}`
     const held = newest.get(runner)
@@ -1338,6 +1388,7 @@ async function pulse(request: Request, env: Env): Promise<Response> {
       .sort((a, b) => a.label.localeCompare(b.label))
       .map(row => ({
         label: row.label,
+        name: row.name,
         heardAgo: Math.max(0, now - row.last_seen_at),
         beatEvery: row.beat_every,
       })),
