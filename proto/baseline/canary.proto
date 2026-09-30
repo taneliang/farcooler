@@ -1,4 +1,4 @@
-// Shipped by Canary at 8b6ecdebf67f2308e06ba8406b53fcf03425fdbb. Written by canary.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 1da8643a2b15a898214b37e1d88bfcc433cc9e27. Written by canary.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -1192,6 +1192,13 @@ message Terminal {
   optional bytes workspace_id = 39;
   // UNSPECIFIED from a runner without `workstreams`.
   TerminalRole role = 40;
+  // The terminal this one was split from, when a split made it: the app's
+  // split, its ⌃B % and ⌃B ", and `terminal.create` joining the active layout.
+  // Absent for a terminal opened in a window of its own, for one recorded
+  // before this existed, and from an older runner: all three are "not known
+  // to be a split", and a client treats them alike. May name a terminal that
+  // has since been removed. Set once, at creation.
+  optional bytes split_of = 41;
 }
 
 // What a terminal is for. At most one live orchestrator per workspace.
