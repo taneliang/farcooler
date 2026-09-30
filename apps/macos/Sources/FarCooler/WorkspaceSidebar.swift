@@ -53,7 +53,16 @@ struct SidebarEntry: Identifiable {
     /// A repository header's shown worktrees, or a Worktrees disclosure's,
     /// or an Unclaimed or Hidden group's.
     var worktrees: [Worktree] = []
-    /// How many steps in from the repository's header this row is drawn.
+    /// How many gutters in from the sidebar's edge this row is drawn.
+    ///
+    /// A repository is a section header, like a section of Finder's
+    /// sidebar: its workspaces, Unclaimed and Hidden sit flush under it, at
+    /// 0. A workspace's Worktrees disclosure and the worktrees in it are one
+    /// step in, at 1, and nothing is deeper than that but the empty
+    /// disclosure's sentence, at 2 so it starts where a worktree's title
+    /// does. A worktree's terminals are the row's own, drawn by
+    /// `WorktreeSection` one gutter under its title (ov-63: there were four
+    /// columns, repository, workspace, worktree and terminal).
     var depth = 0
 
     /// Which repository this row is under, on which runner: by uuid where the
@@ -187,7 +196,6 @@ extension ContentView {
             if !shown.isEmpty {
                 var loose = entry(.unclaimed(count: shown.count))
                 loose.worktrees = shown.map { $0.without(drawn) }
-                loose.depth = 1
                 rows.append(loose)
             }
         } else {
@@ -212,7 +220,6 @@ extension ContentView {
                 var row = entry(.workspace(workspace.isImplicit ? "Main" : workspace.name))
                 row.workspace = workspace
                 row.orchestrator = seat
-                row.depth = 1
                 rows.append(row)
 
                 // Its worktrees: all of them, or while searching, the hits
@@ -226,21 +233,21 @@ extension ContentView {
                 var disclosure = entry(.worktrees(count: worktrees.count))
                 disclosure.workspace = workspace
                 disclosure.worktrees = worktrees
-                disclosure.depth = 2
+                disclosure.depth = 1
                 rows.append(disclosure)
                 let isOpen = open(SidebarEntry.openKey(host: host, workspace: workspace.id)) || (searching && !hits.isEmpty)
                 guard isOpen else { continue }
                 if worktrees.isEmpty {
                     var empty = entry(.noWorktrees)
                     empty.workspace = workspace
-                    empty.depth = 3
+                    empty.depth = 2
                     rows.append(empty)
                 }
                 for worktree in worktrees {
                     var line = entry(.worktree(worktree.id))
                     line.workspace = workspace
                     line.worktree = worktree
-                    line.depth = 2
+                    line.depth = 1
                     rows.append(line)
                 }
             }
@@ -248,14 +255,12 @@ extension ContentView {
             if !unclaimed.isEmpty {
                 var group = entry(.unclaimed(count: unclaimed.count))
                 group.worktrees = unclaimed
-                group.depth = 1
                 rows.append(group)
             }
         }
         if !hidden.isEmpty {
             var group = entry(.hidden(count: hidden.count))
             group.worktrees = hidden.map { $0.without(drawn) }
-            group.depth = 1
             rows.append(group)
         }
         return rows

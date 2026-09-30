@@ -790,15 +790,26 @@ struct BoardSidebarTests {
         ])
         #expect(!rows.contains { if case .worktree = $0.kind { true } else { false } })
         #expect(rows.filter { if case .workspace = $0.kind { true } else { false } }.map(\.workspace?.id) == [Self.main, Self.billing, ops])
-        #expect(rows.map(\.depth) == [0, 1, 2, 1, 2, 1, 2, 1, 1])
+        // The repository is a section header, so its workspaces sit flush
+        // under it, and Unclaimed and Hidden with them; a workspace's
+        // Worktrees is the one step in (ov-63).
+        #expect(rows.map(\.depth) == [0, 0, 1, 0, 1, 0, 1, 0, 0])
 
-        // Billing's disclosure opened: its worktree, under it.
+        // Billing's disclosure opened: its worktree, under it, one step in
+        // like the disclosure and no deeper.
         let open = ContentView.sidebarRows(
             fleet: fleet, open: { $0 == SidebarEntry.openKey(host: "", workspace: Self.billing) })
         #expect(open.map(\.kind).prefix(6) == [
             .repository, .workspace("Main"), .worktrees(count: 1), .workspace("Billing"), .worktrees(count: 1),
             .worktree("bill"),
         ])
+        #expect(open.map(\.depth).prefix(6) == [0, 0, 1, 0, 1, 1])
+
+        // Ops's, empty: its sentence starts where a worktree's title does,
+        // a gutter past the worktree row's chevron (checklist step 20).
+        let empty = ContentView.sidebarRows(
+            fleet: fleet, open: { $0 == SidebarEntry.openKey(host: "", workspace: ops) })
+        #expect(empty.first { $0.kind == .noWorktrees }?.depth == 2)
     }
 
     /// A runner without `workstreams` has one implicit workspace per

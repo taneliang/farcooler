@@ -535,35 +535,21 @@ struct ProjectHeader: View {
     @State private var hovering = false
 
     var body: some View {
-        // One band, one indent level for the title's gutter, and a `+` that is
-        // a Button rather than a Menu — so it sits in exactly the same column
+        // One band, and a `+` that is a Button rather than a Menu — so it sits in exactly the same column
         // as the sidebar header's, which no amount of padding on a `Menu` could
         // achieve.
         SidebarRow {
             HStack(spacing: 0) {
-                // One semantic gutter, never an icon followed by a disclosure
-                // column. At rest it says what the row is; on hover a
-                // collapsible row becomes its control. A host with nothing to
-                // disclose keeps the machine icon rather than advertising a
-                // caret that cannot do anything.
-                if onToggleCollapse != nil {
-                    ZStack(alignment: .leading) {
-                        Image(systemName: "folder")
-                            .font(.system(size: 10, weight: .medium))
-                            .opacity(hovering ? 0 : 1)
-
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
-                            .rotationEffect(.degrees(isCollapsed ? 0 : 90))
-                            .opacity(hovering ? 1 : 0)
-                    }
-                    .foregroundStyle(.tertiary)
-                    .frame(width: SidebarGrid.gutter, alignment: .leading)
-                } else {
+                // Flush, like a section of Finder's sidebar: a repository
+                // heads its workspaces rather than containing them, so it
+                // takes no gutter of its own and they take no indent under
+                // it (ov-63). A silent runner's header keeps its machine
+                // icon, which is what says it names a runner.
+                if onToggleCollapse == nil {
                     Image(systemName: "desktopcomputer")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.tertiary)
-                        .frame(width: SidebarGrid.gutter, alignment: .leading)
+                        .padding(.trailing, 5)
                 }
 
                 HStack(spacing: 6) {
@@ -613,6 +599,20 @@ struct ProjectHeader: View {
                             items: [SidebarMenuItem(title: "Remove \(name)…", action: onRemove)])
                         .opacity(hovering ? 1 : 0)
                     }
+
+                    // Finder's Show and Hide, as a chevron at the trailing
+                    // edge on hover. The whole row toggles; this says so.
+                    if onToggleCollapse != nil {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                            .frame(width: SidebarGrid.control, height: SidebarGrid.control)
+                            // Kept while collapsed: a section with nothing
+                            // under it has to say it can open.
+                            .opacity(hovering || isCollapsed ? 1 : 0)
+                            .accessibilityLabel(isCollapsed ? "Show \(name)" : "Hide \(name)")
+                    }
                 }
             }
         }
@@ -624,13 +624,10 @@ struct ProjectHeader: View {
         // Buttons, which take their own clicks ahead of this.
         .onTapGesture { onToggleCollapse?() }
         .onHover { hovering = $0 }
-        // The one hover in the sidebar that changes SHAPE and not just alpha:
-        // the gutter swaps a 10pt folder for a 9pt chevron, and the `+` and `…`
-        // arrive at the same instant. Cut hard, that is three things appearing
-        // out of nothing under a pointer that only grazed the row. `Motion.snap`
-        // is the app's own "instant, but not a cut" — 0.22s — and it was
-        // already in four other files while this file, the one with the most
-        // hover states in the app, had no animation modifier at all.
+        // The `+`, the `…` and the chevron arrive at the same instant. Cut
+        // hard, that is three things appearing out of nothing under a
+        // pointer that only grazed the row. `Motion.snap` is the app's own
+        // "instant, but not a cut" — 0.22s.
         .animation(Motion.snap, value: hovering)
     }
 }

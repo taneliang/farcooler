@@ -1170,8 +1170,8 @@ struct ContentView: View {
     /// have re-indented the whole block to say one thing. A builder method is
     /// what this file already does for the detail side — see `tiled(_:group:)`.
     private func sidebarRow(_ entry: SidebarEntry) -> some View {
-        // One gutter in per level, so repository, workspace and the rows under
-        // it read as three levels and not as one list in three fonts.
+        // One gutter in per level, and only two levels: see
+        // `SidebarEntry.depth`.
         sidebarRowContent(entry)
             .padding(.leading, CGFloat(entry.depth) * SidebarGrid.gutter)
     }
@@ -1224,7 +1224,11 @@ struct ContentView: View {
                         unclaimedExpanded.insert(entry.group)
                     }
                 },
-                row: { worktree in worktreeRow(worktree, usable: usable) })
+                // One step in from the group's header, as a workspace's
+                // worktrees are from its Worktrees disclosure.
+                row: { worktree in
+                    worktreeRow(worktree, usable: usable).padding(.leading, SidebarGrid.gutter)
+                })
         case .hidden:
             HiddenWorktrees(
                 project: key,
