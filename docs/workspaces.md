@@ -90,7 +90,10 @@ how work gets from idea to landed, what done means, who reviews, what it may
 decide alone. You can edit the charter any time with **Show Charter**; the
 orchestrator rereads it whenever it picks the work back up.
 
-**The board** fits the space it has. When it's narrow, it's a list sectioned by
+**The board** fits the space it has. When a workspace has tasks waiting on a
+decision, the header says "3 tasks are waiting on you" ("1 task is waiting on
+you" for one), and "3 waiting" where the room is short. It says nothing at
+zero. When it's narrow, it's a list sectioned by
 status, with Needs Decision first. When it's wide, it's a kanban with a column
 per status. The toggle in the board's header forces either one, and choosing it
 again returns to automatic; the Mac remembers your choice per workspace. Every
@@ -177,14 +180,23 @@ terminal, and yours takes over the board. The command refuses instead, and you
 step the old one down first (**Stop Being Orchestrator**, or `set-role` with
 `agent` or `shell`).
 
-### One place for the orchestrator
+### One place for the orchestrator, on the Mac
 
-An orchestrator is shown only in its workspace's conversation column, not also
-as a terminal under a worktree. If another terminal shares the orchestrator's
+On the Mac, an orchestrator is shown only in its workspace's conversation
+column, not also as a terminal under a worktree. (The phones still list it
+among the worktree's terminals.) If another terminal shares the orchestrator's
 tmux window, the column says so ("`name` shares the orchestrator's window.") and
 offers **Move to Its Own Window**. That click gives the other terminal a window
 of its own, so the orchestrator keeps its window and focus. Nothing rearranges
 your windows unless you click it.
+
+The notice isn't for every terminal in that window. It skips the orchestrator's
+own changes pane (**Show Changes**) and a pane you split into the window on
+purpose, with ⌃B or the app's split, which stays in the orchestrator's column.
+A pane split from the orchestrator after it became the orchestrator counts as
+on purpose. One split beside a terminal before that terminal became the
+orchestrator, such as a shell beside a Claude you later adopted, still gets the
+notice.
 
 ## Splitting off a workspace
 
@@ -213,29 +225,56 @@ farcooler workspace start-orchestrator Billing --harness claude --read bil-3
 ## On the phone
 
 The iPhone and Android apps have the same shape as the Mac, in each platform's
-own style. They open on Needs You when something is waiting, and otherwise on
-the last workspace you had open, with Needs You still one Back away.
+own style. They wait to hear from every runner (up to ten seconds), then open
+on Needs You when something is waiting, and otherwise on the last workspace you
+had open, with Needs You still one Back away. The iPhone differs in one way: it
+reopens the screen you left, whether a workspace, a task or a worktree, even
+with items waiting, and falls back to Needs You if that screen is gone. The
+Mac and Android open on Needs You whenever something is waiting.
 
 Needs You lists the waiting items, answerable in place, and then your
 workspaces, grouped by runner and repository. A workspace has three views:
 
 - **Orchestrator**: its conversation, as a terminal or as chat. A workspace
   without one offers **Start Orchestrator**.
-- **Board**: the board as a sectioned list. Select a task to see its card and
-  answer its decision, then go on to its **Agent**, its **Changes** or its
-  **Worktree**. Back always returns to the task, and then to the board.
+- **Board**: the board as a sectioned list, with "N tasks are waiting on you"
+  above it when any are. **New Task…** files a task by hand, with a title and
+  optional details; it's offered when the runner lets the phone write to the
+  board. Select a task to see its card and answer its decision, then go on to
+  its **Agent**, its **Changes** or its **Worktree**. Back always returns to the
+  task, and then to the board.
 - **Worktrees**: the worktrees it owns, with their task keys. **New Worktree…**
-  here makes one that belongs to this workspace.
+  here makes one that belongs to this workspace. On the iPhone, swipe a
+  worktree to **Hide** it; hidden ones are kept under **Hidden**, where the
+  same swipe says **Unhide**.
 
 A notification or widget that opens an agent lands on its workspace and task
 first, so Back walks up from the agent to the task to the workspace. (An
 orchestrator opens on its workspace's Orchestrator view, since it works no one
-task.) Notifications lead with the workspace's name: "Billing · claude needs
-you", "Billing Orchestrator needs you", or "Billing · bil-7 needs a decision"
-when the orchestrator asks you something.
+task.) The push a runner sends when the app is closed leads with the workspace's
+name: "Billing · claude needs you", "Billing Orchestrator needs you", or
+"Billing · bil-7 needs a decision" when the orchestrator asks you something.
+Opening a decision push lands on its task. A banner the app posts itself leads
+with the agent instead ("claude needs you"), with the place in its body.
 
 On the watch, Needs You comes first. Permission asks can be answered there;
 decisions and reviews say "Open on iPhone".
+
+## When a runner goes quiet
+
+Each runner tells the push relay it's alive every five minutes while it's
+paired for notifications. When the relay hasn't heard from one for fifteen
+minutes, the iPhone's widget and the watch's list and complication say "Lost
+touch with" that runner (the widget's footer reads "lost touch with Studio"),
+and stop saying that runner's agents are working. The Live Activity does the
+same: its tail reads "+1 more · lost touch with Studio", and a card left with
+nothing to show stops saying "Working". A blocked agent's question stays up.
+The word comes from the relay, not from the phone's own clock, so a runner the
+app reached directly a moment ago isn't reported.
+
+A runner you unpair on purpose (`farcooler push forget`) tells the relay first,
+and just disappears from the widget and watch. If that call fails, the runner
+can read as lost touch for up to a day. The Mac and Android don't show this.
 
 ## Reading the rule off a sentence
 
