@@ -260,12 +260,14 @@ struct PhoneRoot: View {
                     implicit: runner.connection.fleet.workspaces == nil,
                     hostRunner: runner.connection.lastDaemon?.runnerId)
             }
-            if let stack = PhoneDecisionLink.find(push, in: sources) {
+            let over = PhoneDecisionLink.givesUp(
+                settled: settled, elapsed: Date().timeIntervalSince(began))
+            if let stack = PhoneDecisionLink.find(push, in: sources, waitEnded: over) {
                 pendingTask = nil
                 navigator.go(stack)
                 return
             }
-            if PhoneDecisionLink.givesUp(settled: settled, elapsed: Date().timeIntervalSince(began)) {
+            if over {
                 pendingTask = nil
                 return
             }

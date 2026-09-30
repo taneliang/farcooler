@@ -154,6 +154,22 @@ struct PhoneFollowUpTests {
         #expect(PhoneDecisionLink.find(Self.push("bil-7", runner: "RUNNER-B"), in: [a, b]) == nil)
         // A runner whose id hasn't been read yet is not the one named.
         #expect(PhoneDecisionLink.find(Self.push("bil-7", runner: "host-runner-a"), in: [unread]) == nil)
+        // While the wait is on, a runner nobody knows is nobody. Once it has
+        // ended, the key is looked for on its own: exactly one runner has it,
+        // so that one opens; two, and it's Needs You still.
+        let onA = PhoneWorkspace(runner: "RUNNER-A", workspace: "ws-RUNNER-A")
+        #expect(
+            PhoneDecisionLink.find(Self.push("bil-7", runner: "host-runner-a"), in: [unread], waitEnded: true)
+                == [.workspace(onA), .task(onA, task: "t7")])
+        #expect(
+            PhoneDecisionLink.find(Self.push("bil-7", runner: "host-gone"), in: [a], waitEnded: true)
+                == [.workspace(onA), .task(onA, task: "t7")])
+        #expect(PhoneDecisionLink.find(Self.push("bil-7", runner: "host-gone"), in: [a, b], waitEnded: true) == nil)
+        // A runner that is known, and doesn't have the key, is not fallen back
+        // from: the task is not there, whatever the other runner holds.
+        var bare = b
+        bare.items = []
+        #expect(PhoneDecisionLink.find(Self.push("bil-7", runner: "host-runner-b"), in: [a, bare], waitEnded: true) == nil)
         #expect(PhoneDecisionLink.find(Self.push("bil-7"), in: [a, b]) == nil)
         #expect(PhoneDecisionLink.find(Self.push("bil-7", runner: "host-runner-c"), in: [a, b]) == nil)
         #expect(

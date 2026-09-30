@@ -2501,23 +2501,31 @@ enum PhoneDecisionLink {
         var implicit: Bool
         /// Its `Host.runner_id`, which a push names it by; nil until the
         /// phone has read it, and from a runner too old to say.
-        var hostRunner: String? = nil
+        var hostRunner: String?
     }
 
     /// The stack for the task `push` names, or nil until one runner has it.
     ///
     /// On the runner the push names, when it names one, by its
-    /// `hostRunner`: a runner whose id isn't known yet isn't it. Otherwise on the one
+    /// `hostRunner`: a runner whose id isn't known yet isn't it, until
+    /// `waitEnded`, when a name nobody answers to is dropped and the key
+    /// is searched for alone. Otherwise on the one
     /// runner that has a task under that key: its Needs You item first,
     /// which knows its workspace, then any board read so far with a card
     /// under the key. Two runners with a task under one key is nil, not the
     /// first of them: a push landing on another runner's task is worse than
     /// Needs You, where both are.
-    static func find(_ push: DecisionPush, in sources: [Source]) -> [PhoneRoute]? {
+    static func find(
+        _ push: DecisionPush, in sources: [Source], waitEnded: Bool = false
+    ) -> [PhoneRoute]? {
         guard !push.key.isEmpty else { return nil }
-        let named = push.runner.map { runner in
-            sources.filter { $0.hostRunner?.lowercased() == runner.lowercased() }
-        } ?? sources
+        var named = sources
+        if let runner = push.runner {
+            let matching = sources.filter { $0.hostRunner?.lowercased() == runner.lowercased() }
+            // Known: only its word counts. Unknown, once the wait is over:
+            // the key alone, as for a push naming nobody.
+            if !matching.isEmpty || !waitEnded { named = matching }
+        }
         let found = named.compactMap { stack(for: push.key, on: $0) }
         return found.count == 1 ? found[0] : nil
     }
