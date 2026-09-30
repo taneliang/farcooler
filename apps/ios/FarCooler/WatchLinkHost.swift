@@ -107,9 +107,24 @@ final class WatchLinkHost: NSObject {
     /// current one, or none.
     private func pulseChanged() {
         pulse = nil
-        guard let lastSent else { return }
-        lastSentAt = .distantPast
-        send(snapshot: lastSent)
+        if let lastSent {
+            lastSentAt = .distantPast
+            send(snapshot: lastSent)
+            return
+        }
+        // Nothing sent since launch, as when signing out before the first
+        // poll (re-review N2). A context with no snapshot still carries the
+        // credential, or its absence: the watch files that before it looks
+        // for a snapshot, and keeps the fleet it already has.
+        guard session.activationState == .activated, session.isPaired,
+            session.isWatchAppInstalled
+        else { return }
+        var context: [String: Any] = [:]
+        if let credential = PulseStore.read()?.contextValue {
+            context[PulseCredential.watchContextKey] = credential
+            pulse = .some(credential)
+        }
+        try? session.updateApplicationContext(context)
     }
 
     /// Point the link at the app's fleet.

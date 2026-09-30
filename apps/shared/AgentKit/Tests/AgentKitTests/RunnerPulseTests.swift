@@ -333,6 +333,18 @@ struct RunnerPulseTests {
         #expect(fleet.merging(pushed, at: now).agents.first?.hostRunner == "h")
     }
 
+    /// A sign-out context reaching a locked watch still deletes the copy:
+    /// the file is there (`holds`) though protection keeps it unreadable,
+    /// and deciding by what can be read would keep a live token (N1).
+    ///
+    /// Mutation: `adopt` deciding deletion by `read` again. Red.
+    @Test func aLockedWatchStillForgetsAtSignOut() {
+        let vault = LockedVault()
+        #expect(PulseStore.adopt(nil, in: vault))
+        #expect(!vault.holds)
+        #expect(!PulseStore.adopt(nil, in: vault))
+    }
+
     /// A credential the watch holds but can't read yet (the file is
     /// protected until the watch unlocks) is a look that failed, not a
     /// watch with no credential: it looks again rather than parking.
@@ -418,4 +430,15 @@ final class Counter: @unchecked Sendable {
     private var count = 0
     var value: Int { lock.withLock { count } }
     func bump() { lock.withLock { count += 1 } }
+}
+
+/// A vault holding a credential it can't read, as a watch's protected file
+/// is while the watch is locked.
+final class LockedVault: PulseVault, @unchecked Sendable {
+    private let lock = NSLock()
+    private var present = true
+    func read() -> Data? { nil }
+    @discardableResult func write(_ data: Data) -> Bool { false }
+    func delete() { lock.withLock { present = false } }
+    var holds: Bool { lock.withLock { present } }
 }

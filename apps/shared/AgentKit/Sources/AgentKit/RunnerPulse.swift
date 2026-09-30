@@ -415,13 +415,18 @@ public enum PulseStore {
     /// when the phone sent none. Whether anything changed, which is when the
     /// complication is worth reloading.
     @discardableResult
+    ///
+    /// **Forgetting goes by `holds`, not by what can be read** (re-review
+    /// N1). On a locked watch the file is there and protection keeps it
+    /// unreadable, and a sign-out context arriving then must still delete it:
+    /// the phone sends that context once.
     public static func adopt(_ credential: PulseCredential?, in vault: PulseVault) -> Bool {
-        let held = read(from: vault)
-        guard held != credential else { return false }
         guard let credential, let data = credential.contextValue else {
+            let had = vault.holds
             vault.delete()
-            return held != nil
+            return had
         }
+        guard read(from: vault) != credential else { return false }
         return vault.write(data)
     }
 
