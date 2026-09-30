@@ -1404,6 +1404,14 @@ struct ContentView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 12.5))
                 .focused($searchFocused)
+                // Esc clears the search, and on an empty one leaves the
+                // field (checklist F3). The window's Esc monitor passes Esc
+                // to a text field, so this is the one place it's heard.
+                .onExitCommand {
+                    let next = SearchEscape.after(query: query)
+                    query = next.query
+                    if !next.keepsFocus { searchFocused = false }
+                }
             if !query.isEmpty {
                 Button { query = "" } label: {
                     Image(systemName: "xmark.circle.fill")
@@ -3262,6 +3270,12 @@ struct ContentView: View {
                 // nothing behind — that is what closing means everywhere else.
                 await act(on: worktree) { c in await c.stop(terminal: terminal.short) }
                 await act(on: worktree) { c in await c.removeTerminal(terminal.short) }
+                // The runner publishes no layout when a pane closes, so the
+                // pane left behind kept the closed one's half of the grid
+                // until something else read the layout: a click (checklist
+                // O1). Read it now; the view re-sends its viewport when the
+                // arrangement changes.
+                await store.client(for: worktree)?.refreshLayout(worktree)
                 // Nothing to select here. Where the selection goes when a
                 // terminal disappears is `healSelection`'s one rule, run from
                 // `.onChange(of: store.fleet)` once the removal reaches the
@@ -3759,6 +3773,14 @@ struct ContentView: View {
         Task { await act(on: worktree) { c in await c.focusPane(rect.short, in: worktree) } }
     }
 
+}
+
+/// What Esc does in the sidebar's search field.
+enum SearchEscape {
+    /// With text, clears it and keeps the field; empty, leaves the field.
+    static func after(query: String) -> (query: String, keepsFocus: Bool) {
+        query.isEmpty ? ("", false) : ("", true)
+    }
 }
 
 enum TerminalAction { case restart, dismissLost, stop, useAsOrchestrator, stopBeingOrchestrator }

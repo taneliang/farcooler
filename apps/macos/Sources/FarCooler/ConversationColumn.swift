@@ -90,8 +90,8 @@ struct ConversationHeader: View {
         HStack(spacing: 8) {
             if let seat { StatusGlyph(status: seat.terminal.status) }
             Text("Orchestrator").font(.system(size: 12, weight: .semibold))
-            if let seat {
-                Text(Terminal.name(of: seat.terminal.preset))
+            if let name = Self.agentName(seat) {
+                Text(name)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -134,6 +134,17 @@ struct ConversationHeader: View {
         .padding(.horizontal, 12)
         .frame(height: 30)
         .background(WorkspaceStyle.canvas)
+    }
+}
+
+extension ConversationHeader {
+    /// The agent the header names beside "Orchestrator": its harness while
+    /// one runs, and nothing otherwise. A lost pane reports no process, which
+    /// `Terminal.name(of:)` calls "shell", and "Orchestrator · shell" named
+    /// the one thing it wasn't (checklist O7).
+    static func agentName(_ seat: BoardPane?) -> String? {
+        guard let seat, seat.terminal.runsAgent else { return nil }
+        return Terminal.name(of: seat.terminal.preset)
     }
 }
 

@@ -589,17 +589,22 @@ struct TaskBoardView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Text(store.title).font(WorkspaceStyle.sectionTitle)
+            Text(store.title).font(WorkspaceStyle.sectionTitle).lineLimit(1)
             // The one count worth putting in a title bar, and the sentence is
             // the model's like every other one here. Nothing when nothing is
             // waiting — `waitingSentence` is nil at zero, because a badge
             // reading zero teaches people to ignore it.
+            //
+            // One line always: at a narrow board the sentence wrapped a word
+            // to a line into a tall lozenge (checklist F2). Where the whole
+            // sentence doesn't fit, it's said short.
             if let waiting = store.board.waitingSentence {
-                Text(waiting)
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .semibold))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(Color.accentColor.opacity(0.18), in: Capsule())
+                ViewThatFits(in: .horizontal) {
+                    waitingPill(waiting)
+                    waitingPill(Self.waitingShort(store.board.waitingOnYou))
+                }
+                .layoutPriority(1)
+                .help(waiting)
             }
             Spacer()
             if store.reading { ProgressView().controlSize(.small) }
@@ -627,12 +632,26 @@ struct TaskBoardView: View {
                 }
             }
             formToggle
-            Button("Refresh") { Task { await store.reload() } }
+            Button("Refresh") { Task { await store.reload() } }.fixedSize()
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(WorkspaceStyle.paneChrome)
     }
+
+    private func waitingPill(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .semibold))
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(Color.accentColor.opacity(0.18), in: Capsule())
+    }
+
+    /// The waiting pill's short form, for a board too narrow for the
+    /// sentence: "2 waiting".
+    static func waitingShort(_ count: Int) -> String { "\(count) waiting" }
 
     /// `≡` List and `▦` Kanban. Clicking one forces it; clicking the one
     /// forced goes back to Automatic, which is also in the control's menu.

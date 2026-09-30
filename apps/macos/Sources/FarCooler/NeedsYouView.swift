@@ -153,6 +153,9 @@ struct NeedsYouItemRow: View {
     @State private var answering: NeedsYouRowModel.Answering = .idle
     @State private var typing = false
     @State private var typed = ""
+    /// The answer field has the keyboard as soon as Answer… opens it: the
+    /// first keystrokes went nowhere until it was clicked (checklist F4).
+    @FocusState private var answerFocused: Bool
 
     var body: some View {
         let offered = NeedsYouRowModel.buttons(for: item, canAct: canAct)
@@ -205,7 +208,14 @@ struct NeedsYouItemRow: View {
                 HStack {
                     TextField("Your answer", text: $typed)
                         .textFieldStyle(.roundedBorder)
+                        .focused($answerFocused)
                         .onSubmit { sendTyped() }
+                        // Esc closes it, keeping what was typed for the
+                        // next Answer… (checklist F4).
+                        .onExitCommand { typing = false }
+                        // Once it's in the window: focus set in the same
+                        // update that inserts the field is dropped.
+                        .task { answerFocused = true }
                     SwiftUI.Button("Send") { sendTyped() }
                         .disabled(typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }

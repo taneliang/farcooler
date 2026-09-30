@@ -289,9 +289,13 @@ struct TileView: View {
         var font: Int
         var haveColumns: Int
         var haveRows: Int
+        /// How many panes: a pane closing changes the arrangement even where
+        /// the depth doesn't say so (checklist O1).
+        var panes: Int
 
         init(size: CGSize, group: PaneGroup, font: Int) {
             self.size = size
+            self.panes = group.panes.count
             let depth = TileGeometry.depth(of: group.panes)
             self.across = depth.across
             self.down = depth.down
