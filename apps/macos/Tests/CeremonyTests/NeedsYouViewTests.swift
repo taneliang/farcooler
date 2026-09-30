@@ -73,4 +73,19 @@ struct NeedsYouViewTests {
         #expect(decision.more == [.decide("Neither")])
         #expect(NeedsYouRowModel.buttons(for: Self.item(.decision), canAct: true).buttons == [.answerTyped])
     }
+
+    /// A sent answer spins until its item leaves, and no longer than the
+    /// timeout: then the row gets its buttons back with a line, rather than
+    /// spinning forever on a change that never arrived.
+    @Test("An answered row doesn't spin forever")
+    func anAnsweredRowDoesntSpinForever() {
+        #expect(NeedsYouRowModel.settleTimeout <= .seconds(15))
+        guard case .refused(let line) = NeedsYouRowModel.afterTimeout(.sending) else {
+            Issue.record("still spinning")
+            return
+        }
+        #expect(line.contains("hasn’t cleared"))
+        #expect(NeedsYouRowModel.afterTimeout(.idle) == .idle)
+        #expect(NeedsYouRowModel.afterTimeout(.refused("x")) == .refused("x"))
+    }
 }

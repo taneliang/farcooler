@@ -1060,7 +1060,12 @@ final class DaemonClient: ObservableObject {
             // same news. One that is down now will re-read on the way back.
             let wasConnected = state == .connected
             await refresh()
-            if wasConnected, state == .connected { rereadMissedNews() }
+            if wasConnected, state == .connected {
+                rereadMissedNews()
+                // A dropped `needs_you` line is news too: the count and the
+                // list would otherwise stay stale until the next change.
+                await refreshNeedsYou()
+            }
         } while missedNewsOwed
     }
 

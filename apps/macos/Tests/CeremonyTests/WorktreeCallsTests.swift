@@ -311,6 +311,22 @@ struct WorktreeCallsTests {
         reader.stopEvents()
     }
 
+    /// A stream that fell behind re-reads Needs You with everything else it
+    /// feeds: a dropped `needs_you` line left the count stale until the
+    /// next change.
+    @Test("Missed events re-read Needs You")
+    func missedEventsReReadNeedsYou() async {
+        let recorder = Recorder()
+        recorder.capabilities = ["workspaces", "terminals", "needs_you"]
+        let reader = client(recorder)
+        await reader.refresh()
+        await reader.refreshNeedsYou()
+        recorder.calls = []
+        await reader.eventsMissed()
+        #expect(recorder.calls.contains(["needs-you", "--json"]), "\(recorder.calls)")
+        reader.stopEvents()
+    }
+
     /// An ask's Allow and Deny send `terminal agent-answer` with the ask's own
     /// ids, exactly as the runner sent them. A refusal is told apart by its
     /// `what:` word: someone else answered, or the agent didn't take it.

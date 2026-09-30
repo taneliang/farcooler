@@ -63,6 +63,17 @@ enum NeedsYouRowModel {
         .refused(refusal.sentence(agent: item.terminal?.label))
     }
 
+    /// How long a sent answer's spinner waits for its item to leave before
+    /// the row comes back: a `needs_you_changed` that never arrives mustn't
+    /// leave it spinning with no buttons.
+    static let settleTimeout: Duration = .seconds(8)
+
+    /// Where a row goes when `settleTimeout` passes: a row still sending
+    /// gets its buttons back with a line; any other is left as it is.
+    static func afterTimeout(_ state: Answering) -> Answering {
+        state == .sending ? .refused("This hasn’t cleared yet. It may have gone through; check before answering again.") : state
+    }
+
     /// The line a decision keeps when its answer wasn't written.
     static let decisionRefused = Answering.refused("Couldn’t send that answer. Try again.")
 
@@ -243,8 +254,9 @@ struct NeedsYouItemRow: View {
                 answering = NeedsYouRowModel.refused(refusal, item: item)
             } else {
                 // It leaves on the next `needs_you_changed`; until then it
-                // keeps its spinner rather than offering the same answer again.
-                answering = .sending
+                // keeps its spinner rather than offering the same answer
+                // again, but not forever.
+                await settle()
             }
         }
     }
@@ -253,8 +265,17 @@ struct NeedsYouItemRow: View {
         answering = .sending
         Task {
             answering = await onDecide(body) ? .sending : NeedsYouRowModel.decisionRefused
-            if answering == .sending { typing = false }
+            if answering == .sending {
+                typing = false
+                await settle()
+            }
         }
+    }
+
+    /// Wait for the item to leave, and bring the row back if it hasn't.
+    private func settle() async {
+        try? await Task.sleep(for: NeedsYouRowModel.settleTimeout)
+        answering = NeedsYouRowModel.afterTimeout(answering)
     }
 
     private func sendTyped() {
