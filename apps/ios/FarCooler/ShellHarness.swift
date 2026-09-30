@@ -60,21 +60,19 @@ struct ShellHarness: View {
                 initial: ShellPosition(worktree: 0, tab: 0),
                 request: $request,
                 // A close, done the way a runner does it: the tab leaves the
-                // fleet a round trip later and the shell's vanish rule takes
-                // it from there. Only so `ShellColumnCloseTests` can see that a
+                // fleet on a later turn and the shell's vanish rule takes it
+                // from there. Only so `ShellColumnCloseTests` can see that a
                 // Close tap reached this closure at all — the confirmation and
                 // the two calls are `ShellScreen`'s, and a fixture has no
                 // runner for them.
                 //
-                // **Not inside the swipe action.** Removing the row from the
-                // data source while the row's own contextual action is still
-                // running asks the list for a batch update in the middle of
-                // one, and UIKit aborts the process ("invalid number of items
-                // in section"). A real runner never answers synchronously, so
-                // neither does this.
+                // Not inside the swipe action, which is the turn the tap is
+                // still on. That aborted the app once (`ShellColumn`'s Close
+                // used to be `role: .destructive`; see there); the fix is in
+                // the app, so this hop is only the runner's not answering
+                // synchronously, with no delay padded on.
                 onCloseTab: { worktree, tab in
                     Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(300))
                         guard
                             let index = fleet.worktrees.firstIndex(where: { $0.id == worktree.id })
                         else { return }

@@ -450,9 +450,18 @@ struct ShellColumn: View {
                         // Mac's rule, kept: a daemon-side refusal is a safety
                         // net, and the button should not be there to press.
                         if closable, tab.closable {
-                            Button(role: .destructive) { onClose?(tab) } label: {
+                            // Not `role: .destructive`. That role has UIKit
+                            // remove the row itself when the action returns,
+                            // and this row goes when the RUNNER says the
+                            // terminal is gone; a poll landing between the
+                            // two asked the list for a batch update in the
+                            // middle of the first, and the app aborted
+                            // ("invalid number of items in section"). The
+                            // red is the tint's.
+                            Button { onClose?(tab) } label: {
                                 Label("Close", systemImage: "trash")
                             }
+                            .tint(.red)
                         }
                     }
             }
