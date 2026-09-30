@@ -334,6 +334,7 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         task_id: t.task_id.map(id_bytes),
         // The record's own too: set once, when a split made the terminal.
         split_of: t.split_of.map(id_bytes),
+        split_of_orchestrator: t.split_of_orchestrator,
         // Left unset here for the same reason as `activity`: both describe a
         // live ACP session, and only the supervisor holding that session knows
         // them. A converter that guessed would report a mode the agent is not

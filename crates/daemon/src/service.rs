@@ -4160,9 +4160,16 @@ impl Service {
         self.claim_for_task(&ws, task)?;
         let (axis, before) = crate::layout::split_args(side);
 
-        // Recorded as split from `target`, which is what lets a client tell
-        // a pane somebody split beside the orchestrator on purpose from one
-        // that landed in its window another way (ov-73).
+        // Recorded as split from `target`, and whether `target` is the
+        // orchestrator now, which is what lets a client tell a pane somebody
+        // split beside the orchestrator on purpose from one that landed in
+        // its window another way (ov-73), or that was split beside a
+        // terminal only later made the orchestrator (ov-76).
+        // A pane whose record is gone isn't anybody's orchestrator.
+        let from_orchestrator = self
+            .store
+            .get_terminal(target)
+            .is_ok_and(|t| t.role == models::TerminalRole::Orchestrator);
         let term = self.store.create_split_terminal(
             worktree_id,
             title,
@@ -4172,6 +4179,7 @@ impl Service {
             40,
             task,
             target,
+            from_orchestrator,
         )?;
         let term = self.mark_changes_pane(term, command_preset)?;
 
@@ -7088,6 +7096,43 @@ mod pane_workspace_tests {
         };
         assert_eq!(on_wire(split.id).as_deref(), Some(target.id.as_bytes().as_slice()));
         assert_eq!(on_wire(target.id), None, "a window of its own names none");
+    }
+
+    /// A split records whether the pane it was split from was the orchestrator
+    /// THEN, on the record and on the wire. A shell split beside a claude
+    /// that is made the orchestrator afterwards keeps `false`, which is what
+    /// keeps it in the orchestrator's Move to Its Own Window notice; a split
+    /// made from the orchestrator says `true` (ov-76).
+    #[tokio::test]
+    async fn a_split_records_whether_its_source_was_the_orchestrator_then() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let claude = svc.create_terminal(ws.id, "one", "shell").await.expect("a pane to split");
+        let before = svc
+            .split_terminal(ws.id, claude.id, farcooler_protocol::v1::SplitSide::Right, "before", "shell")
+            .await
+            .expect("split");
+        assert_eq!(before.split_of_orchestrator, Some(false));
+
+        svc.store.set_terminal_role(claude.id, models::TerminalRole::Orchestrator).unwrap();
+        let after = svc
+            .split_terminal(ws.id, claude.id, farcooler_protocol::v1::SplitSide::Bottom, "after", "shell")
+            .await
+            .expect("split");
+        assert_eq!(after.split_of_orchestrator, Some(true));
+        assert_eq!(
+            svc.store.get_terminal(before.id).unwrap().split_of_orchestrator,
+            Some(false),
+            "the role change afterwards leaves the earlier split as it was"
+        );
+
+        let view = svc.worktree_view(&ws).await.expect("view");
+        let on_wire = |id: Uuid| {
+            let t = view.terminals.iter().find(|v| v.terminal.id == id).expect("listed");
+            crate::wire::terminal(t).split_of_orchestrator
+        };
+        assert_eq!(on_wire(before.id), Some(false));
+        assert_eq!(on_wire(after.id), Some(true));
+        assert_eq!(on_wire(claude.id), None, "not a split: not known");
     }
 
     #[tokio::test]

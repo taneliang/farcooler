@@ -2478,9 +2478,10 @@ fn terminal_label(s: TerminalState) -> &'static str {
 /// from a runner without `workstreams`; `claim_source` is the machine word
 /// for what made the claim; `foreign_writers` names the other workspaces with
 /// a live terminal in it. On each terminal: `workspace`, whose work it is
-/// doing (not always the worktree's owner), `role`, and `splitOf`, the pane
-/// a split made it beside (`split_of`). The CLI's `worktree
-/// list --json` spells all five the same way; see `workspaces_json`. The Mac
+/// doing (not always the worktree's owner), `role`, `splitOf`, the pane a
+/// split made it beside (`split_of`), and `splitOfOrchestrator`, whether
+/// that pane was the orchestrator then. The CLI's `worktree list --json`
+/// spells all six the same way; see `workspaces_json`. The Mac
 /// draws an orchestrator once, as its workspace's own row, and leaves it out
 /// of the worktree it runs in.
 fn with_workspaces(
@@ -2507,6 +2508,7 @@ fn with_workspaces(
             // Here rather than in the row's `json!`, which is at the macro's
             // recursion limit. The CLI's two projections carry the same key.
             out["splitOf"] = json!(split_of(t));
+            out["splitOfOrchestrator"] = json!(split_of(t).and(t.split_of_orchestrator));
         }
     }
     row
@@ -2758,6 +2760,27 @@ mod tests {
         for i in 1..4 {
             assert_eq!(row["terminals"][i]["splitOf"], serde_json::json!(null), "{row}");
         }
+    }
+
+    /// Whether a split was made from the orchestrator rides beside `splitOf`,
+    /// either way, and never without it (ov-76).
+    #[test]
+    fn a_pane_says_whether_it_was_split_from_the_orchestrator() {
+        let from = Some(bytes::Bytes::copy_from_slice(uuid::Uuid::now_v7().as_bytes()));
+        let w = farcooler_protocol::v1::Worktree::default();
+        let pane = |split_of, said| farcooler_protocol::v1::Terminal {
+            split_of,
+            split_of_orchestrator: said,
+            ..Default::default()
+        };
+        let terminals =
+            [pane(from.clone(), Some(true)), pane(from.clone(), Some(false)), pane(from, None), pane(None, Some(true))];
+        let row = serde_json::json!({ "terminals": [{}, {}, {}, {}] });
+        let row = super::with_workspaces(row, &w, &terminals, &[]);
+        assert_eq!(row["terminals"][0]["splitOfOrchestrator"], true, "{row}");
+        assert_eq!(row["terminals"][1]["splitOfOrchestrator"], false, "{row}");
+        assert_eq!(row["terminals"][2]["splitOfOrchestrator"], serde_json::json!(null), "{row}");
+        assert_eq!(row["terminals"][3]["splitOfOrchestrator"], serde_json::json!(null), "{row}");
     }
 
     /// The fleet trace's anchor reaches the app as its own number, and never

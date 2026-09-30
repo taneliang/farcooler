@@ -1198,6 +1198,13 @@ message Terminal {
   // to be a split", and a client treats them alike. May name a terminal that
   // has since been removed. Set once, at creation.
   optional bytes split_of = 41;
+  // Whether `split_of` was its workspace's orchestrator when the split was
+  // made: a pane split beside the orchestrator on purpose, as opposed to one
+  // split beside a terminal that was only later made the orchestrator (Use
+  // as Orchestrator), which still shares its window by accident. Absent
+  // whenever `split_of` is, for a split recorded before this existed, and
+  // from an older runner: not known. Set once, at creation.
+  optional bool split_of_orchestrator = 42;
 }
 
 // What a terminal is for. At most one live orchestrator per workspace.

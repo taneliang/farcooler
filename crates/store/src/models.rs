@@ -325,6 +325,11 @@ pub struct Terminal {
     /// are not told apart, because nothing reads them differently. Set at
     /// creation and never moved; may name a terminal since removed.
     pub split_of: Option<Uuid>,
+    /// Whether `split_of` was the orchestrator when the split was made. `None`
+    /// whenever `split_of` is, and for a split from before this was recorded:
+    /// not known. Set at creation and never moved; later role changes on
+    /// either terminal leave it as it was, which is the point.
+    pub split_of_orchestrator: Option<bool>,
 }
 
 pub(crate) fn row_to_terminal(row: &Row) -> rusqlite::Result<Terminal> {
@@ -348,6 +353,7 @@ pub(crate) fn row_to_terminal(row: &Row) -> rusqlite::Result<Terminal> {
         workspace_id: get_optional_uuid(row, 16)?,
         role: TerminalRole::from_i64(row.get(17)?),
         split_of: get_optional_uuid(row, 18)?,
+        split_of_orchestrator: row.get(19)?,
     })
 }
 

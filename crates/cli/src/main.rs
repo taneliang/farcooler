@@ -3402,6 +3402,14 @@ fn split_of(t: &farcooler_protocol::v1::Terminal) -> Option<String> {
     t.split_of.as_deref().and_then(|b| Uuid::from_slice(b).ok()).map(|u| u.to_string())
 }
 
+/// Whether the pane `t` was split from was the orchestrator at the time, or
+/// nothing: not a split, a split recorded before this was, or a runner too
+/// old to say. Only beside a `split_of` that reads, so the two keys never
+/// disagree about whether this is a split.
+fn split_of_orchestrator(t: &farcooler_protocol::v1::Terminal) -> Option<bool> {
+    split_of(t).and(t.split_of_orchestrator)
+}
+
 /// One row of `worktree list --json`: the object the Mac app decodes a
 /// worktree from.
 ///
@@ -3566,6 +3574,10 @@ fn worktree_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_js
         // pane somebody split beside the orchestrator out of its Move to Its
         // Own Window notice. Null when not known to be a split.
         "splitOf": split_of(t),
+        // Whether that pane was the orchestrator when the split was made, so
+        // a shell split beside a claude later made the orchestrator still
+        // gets the notice. Null when not known.
+        "splitOfOrchestrator": split_of_orchestrator(t),
         "state": terminal_label(t.state()),
         "activity": activity_label(t.activity),
         "activitySince": activity_since(t),
@@ -3818,6 +3830,10 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         // pane somebody split beside the orchestrator out of its Move to Its
         // Own Window notice. Null when not known to be a split.
         "splitOf": split_of(t),
+        // Whether that pane was the orchestrator when the split was made, so
+        // a shell split beside a claude later made the orchestrator still
+        // gets the notice. Null when not known.
+        "splitOfOrchestrator": split_of_orchestrator(t),
         "state": terminal_label(t.state()),
         "activity": activity_label(t.activity),
         "activitySince": activity_since(t),
@@ -5106,6 +5122,7 @@ mod tests {
             "workspace",
             "role",
             "splitOf",
+            "splitOfOrchestrator",
         ] {
             assert!(event.contains(field), "{field} is in neither projection");
         }
@@ -5149,6 +5166,32 @@ mod tests {
             let t = farcooler_protocol::v1::Terminal { split_of, ..Default::default() };
             assert_eq!(worktree_list_terminal_json(&t)["splitOf"], serde_json::json!(null));
             assert_eq!(terminal_event_json(&t)["splitOf"], serde_json::json!(null));
+        }
+    }
+
+    /// Whether a split was made from the orchestrator crosses both
+    /// projections, either way, and only beside a `splitOf` that reads: the
+    /// Mac keeps a pane split beside a terminal later made the orchestrator
+    /// in its Move to Its Own Window notice (ov-76).
+    #[test]
+    fn a_split_says_whether_it_was_made_from_the_orchestrator_in_both_projections() {
+        let from = Some(bytes::Bytes::copy_from_slice(uuid::Uuid::now_v7().as_bytes()));
+        for said in [true, false] {
+            let t = farcooler_protocol::v1::Terminal {
+                split_of: from.clone(),
+                split_of_orchestrator: Some(said),
+                ..Default::default()
+            };
+            assert_eq!(worktree_list_terminal_json(&t)["splitOfOrchestrator"], said);
+            assert_eq!(terminal_event_json(&t)["splitOfOrchestrator"], said);
+        }
+        let unknown = [
+            farcooler_protocol::v1::Terminal { split_of: from.clone(), ..Default::default() },
+            farcooler_protocol::v1::Terminal { split_of_orchestrator: Some(true), ..Default::default() },
+        ];
+        for t in unknown {
+            assert_eq!(worktree_list_terminal_json(&t)["splitOfOrchestrator"], serde_json::json!(null));
+            assert_eq!(terminal_event_json(&t)["splitOfOrchestrator"], serde_json::json!(null));
         }
     }
 

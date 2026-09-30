@@ -110,6 +110,46 @@ struct OrchestratorPlaceTests {
         #expect(sharers(s1: "elsewhere", s2: "s1") == ["s1"])
     }
 
+    /// Split beside the orchestrator is on purpose only when it already was
+    /// the orchestrator (ov-76). A shell split beside a claude that was then
+    /// adopted with Use as Orchestrator (the owner's sleepnomore) shares its
+    /// window by accident, and is offered the move. A ⌃B split in the
+    /// orchestrator's column, from it or from a pane split from it there,
+    /// isn't. A split whose source's role wasn't recorded reads as ov-73 did.
+    @Test("A pane split beside a terminal before it was the orchestrator is offered a move")
+    func aPaneSplitBeforeTheOrchestratorWasOneIsOfferedAMove() {
+        let three = [
+            PaneGroup(
+                id: "@1", name: "", active: true, columns: 122, rows: 24, layout: "@1",
+                panes: [Self.pane("conductor", left: 0), Self.pane("s1", left: 41), Self.pane("s2", left: 82)])
+        ]
+        func sharers(_ s1: (String?, Bool?), _ s2: (String?, Bool?) = (nil, nil)) -> [String] {
+            var fleet = Self.fleet()
+            fleet.worktrees[0].terminals[1].splitOf = s1.0
+            fleet.worktrees[0].terminals[1].splitOfOrchestrator = s1.1
+            var second = Terminal(id: "s2", short: "s2", title: "logs", preset: "zsh", state: "running", epoch: 0)
+            second.splitOf = s2.0
+            second.splitOfOrchestrator = s2.1
+            fleet.worktrees[0].terminals.append(second)
+            let seat = WorkspaceScreen.pane("conductor", host: "", in: fleet)!
+            return WorkspaceScreen.sharers(of: seat, layouts: three).map(\.id)
+        }
+
+        // Split beside the claude before it was adopted: offered the move.
+        #expect(sharers(("conductor", false)) == ["s1", "s2"])
+        // And a pane split from that one: it wasn't split from the
+        // orchestrator either.
+        #expect(sharers(("conductor", false), ("s1", false)) == ["s1", "s2"])
+        // ⌃B in the orchestrator's column: from it, then from that pane.
+        #expect(sharers(("conductor", true)) == ["s2"])
+        #expect(sharers(("conductor", true), ("s1", false)) == [])
+        // Not recorded: as ov-73 read every split.
+        #expect(sharers(("conductor", nil)) == ["s2"])
+        #expect(sharers(("conductor", false), ("s1", nil)) == ["s1"])
+        // Said without a split to say it of: no split.
+        #expect(sharers((nil, true)) == ["s1", "s2"])
+    }
+
     /// The main checkout, opened, knows which orchestrators run in it, so it
     /// can leave them out and say where they are.
     @Test("The main checkout names the orchestrators it hosts")

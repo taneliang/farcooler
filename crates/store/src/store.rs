@@ -625,9 +625,10 @@ impl Store {
     }
 
     /// `create_terminal_for_task` for a terminal a split makes: it records
-    /// `split_of`, the terminal it was split from, in the same INSERT. What
-    /// lets a client tell a pane somebody split beside another on purpose
-    /// from one that landed in that window some other way.
+    /// `split_of`, the terminal it was split from, and whether that one was
+    /// the orchestrator then (`from_orchestrator`), in the same INSERT. What
+    /// lets a client tell a pane somebody split beside the orchestrator on
+    /// purpose from one that landed in its window some other way.
     #[allow(clippy::too_many_arguments)]
     pub fn create_split_terminal(
         &self,
@@ -639,8 +640,18 @@ impl Store {
         rows: u32,
         task_id: Option<Uuid>,
         split_of: Uuid,
+        from_orchestrator: bool,
     ) -> Result<Terminal> {
-        self.insert_terminal(worktree_id, title, command_preset, intent, columns, rows, task_id, Some(split_of))
+        self.insert_terminal(
+            worktree_id,
+            title,
+            command_preset,
+            intent,
+            columns,
+            rows,
+            task_id,
+            Some((split_of, from_orchestrator)),
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -653,7 +664,7 @@ impl Store {
         columns: u32,
         rows: u32,
         task_id: Option<Uuid>,
-        split_of: Option<Uuid>,
+        split_of: Option<(Uuid, bool)>,
     ) -> Result<Terminal> {
         let id = Uuid::now_v7();
         self.conn()
@@ -661,9 +672,10 @@ impl Store {
                 r#"INSERT INTO terminals
                  (id, worktree_id, title, command_preset, intent, runtime_confirmed,
                   exit_code, exit_signal, lease_generation, epoch,
-                  "columns", "rows", resource_version, task_id, workspace_id, role, split_of)
+                  "columns", "rows", resource_version, task_id, workspace_id, role, split_of,
+                  split_of_orchestrator)
                  VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL, NULL, 0, 0, ?6, ?7, 1, ?8,
-                         (SELECT workspace_id FROM worktrees WHERE id = ?2), ?9, ?10)"#,
+                         (SELECT workspace_id FROM worktrees WHERE id = ?2), ?9, ?10, ?11)"#,
                 params![
                     uuid_blob(id),
                     uuid_blob(worktree_id),
@@ -674,7 +686,8 @@ impl Store {
                     rows,
                     task_id.map(uuid_blob),
                     TerminalRole::for_preset(command_preset).as_i64(),
-                    split_of.map(uuid_blob),
+                    split_of.map(|(from, _)| uuid_blob(from)),
+                    split_of.map(|(_, orchestrator)| orchestrator),
                 ],
             )
             .map_err(map_err)?;
@@ -688,7 +701,7 @@ impl Store {
                 r#"SELECT id, worktree_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, lease_generation, epoch,
                           "columns", "rows", resource_version, pane_mode, agent_session_id, task_id,
-                          workspace_id, role, split_of
+                          workspace_id, role, split_of, split_of_orchestrator
                    FROM terminals WHERE id = ?1"#,
                 params![uuid_blob(id)],
                 row_to_terminal,
@@ -703,7 +716,7 @@ impl Store {
                 r#"SELECT id, worktree_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, lease_generation, epoch,
                           "columns", "rows", resource_version, pane_mode, agent_session_id, task_id,
-                          workspace_id, role, split_of
+                          workspace_id, role, split_of, split_of_orchestrator
                    FROM terminals WHERE worktree_id = ?1"#,
             )
             .map_err(map_err)?;
@@ -740,7 +753,7 @@ impl Store {
                 r#"SELECT id, worktree_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, lease_generation, epoch,
                           "columns", "rows", resource_version, pane_mode, agent_session_id, task_id,
-                          workspace_id, role, split_of
+                          workspace_id, role, split_of, split_of_orchestrator
                    FROM terminals WHERE agent_session_id = ?1"#,
             )
             .map_err(map_err)?;
@@ -997,9 +1010,11 @@ mod tests {
             // anything was seen running.
             "workspace_id",
             "role",
-            // Where it came from: the terminal a split made it beside. Set at
-            // creation and never moved.
+            // Where it came from: the terminal a split made it beside, and
+            // whether that was the orchestrator then. Set at creation and
+            // never moved.
             "split_of",
+            "split_of_orchestrator",
         ];
         assert_eq!(cols.len(), expected.len(), "unexpected column set: {cols:?}");
         for e in expected {
@@ -1044,7 +1059,7 @@ mod tests {
         let (ws, task) = a_lane_with_a_task(&s);
         let first = s.create_terminal(ws, "p", "shell", TerminalIntent::Running, 80, 24).unwrap();
         let split = s
-            .create_split_terminal(ws, "w", "claude", TerminalIntent::Running, 80, 24, Some(task), first.id)
+            .create_split_terminal(ws, "w", "claude", TerminalIntent::Running, 80, 24, Some(task), first.id, false)
             .unwrap();
         assert_eq!(split.split_of, Some(first.id));
         assert_eq!(split.task_id, Some(task), "and keeps its task");
@@ -1052,6 +1067,25 @@ mod tests {
         let listed = s.list_terminals_for_worktree(ws).unwrap();
         assert_eq!(listed.iter().find(|t| t.id == split.id).unwrap().split_of, Some(first.id));
         assert_eq!(s.get_terminal(first.id).unwrap().split_of, None, "a window of its own names none");
+    }
+
+    /// A split records whether it was made from the orchestrator, either way,
+    /// and reads it back; a terminal that isn't a split says neither.
+    #[test]
+    fn a_split_records_whether_it_was_made_from_the_orchestrator() {
+        let s = store();
+        let (ws, _) = a_lane_with_a_task(&s);
+        let first = s.create_terminal(ws, "p", "claude", TerminalIntent::Running, 80, 24).unwrap();
+        for from_orchestrator in [true, false] {
+            let split = s
+                .create_split_terminal(ws, "w", "shell", TerminalIntent::Running, 80, 24, None, first.id, from_orchestrator)
+                .unwrap();
+            assert_eq!(split.split_of_orchestrator, Some(from_orchestrator));
+            assert_eq!(s.get_terminal(split.id).unwrap().split_of_orchestrator, Some(from_orchestrator));
+            let listed = s.list_terminals_for_worktree(ws).unwrap();
+            assert_eq!(listed.iter().find(|t| t.id == split.id).unwrap().split_of_orchestrator, Some(from_orchestrator));
+        }
+        assert_eq!(s.get_terminal(first.id).unwrap().split_of_orchestrator, None, "not a split: not known");
     }
 
     /// A terminal outlives its ticket. Deleting the task must neither fail on

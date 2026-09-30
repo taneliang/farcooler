@@ -543,6 +543,7 @@ mod tests {
                 workspace_id: None,
                 role,
                 split_of: None,
+                split_of_orchestrator: None,
             });
             self.observe(id, AgentActivity::Working, 0);
             id

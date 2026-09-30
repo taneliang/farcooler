@@ -29,6 +29,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_0015_workspaces,
     migration_0016_tasks_by_worktree,
     migration_0017_terminal_split_of,
+    migration_0018_terminal_split_of_orchestrator,
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -791,6 +792,16 @@ fn migration_0016_tasks_by_worktree(tx: &Transaction) -> rusqlite::Result<()> {
 /// no cascade to write on every terminal removal.
 fn migration_0017_terminal_split_of(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch("ALTER TABLE terminals ADD COLUMN split_of BLOB;")
+}
+
+/// Whether the terminal a split was made from (`split_of`) was the
+/// orchestrator at the time: 1 or 0, written in the split's own INSERT. NULL
+/// for every row that isn't a split and for every split from before this
+/// column, whose answer nobody wrote down. `split_of` alone can't tell a pane
+/// split beside the orchestrator from one split beside a terminal that was
+/// made the orchestrator afterwards, and only the first is meant to be there.
+fn migration_0018_terminal_split_of_orchestrator(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch("ALTER TABLE terminals ADD COLUMN split_of_orchestrator INTEGER;")
 }
 
 /// Every migration below `version`, applied in one transaction, with the
@@ -1657,6 +1668,34 @@ mod tests {
             .query_row("SELECT split_of FROM terminals WHERE id = x'06'", [], |r| r.get(0))
             .expect("the old terminal is still there, with the column");
         assert_eq!(split_of, None, "an old row's origin is unknown");
+    }
+
+    /// A split recorded before the source's role was gains the column, and
+    /// reads as not known: NULL, never a guess either way.
+    #[test]
+    fn a_split_from_before_the_sources_role_was_recorded_reads_as_unknown() {
+        let mut conn = open();
+        migrate_only_to(&mut conn, 17);
+        conn.execute_batch(
+            "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
+             INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1, 'r');
+             INSERT INTO worktrees (id, repository_id, branch, worktree_path, hidden, creation_failed, resource_version)
+                 VALUES (x'05', x'03', 'main', '/r', 0, 0, 1);
+             INSERT INTO terminals (id, worktree_id, title, command_preset, intent, runtime_confirmed,
+                 lease_generation, epoch, \"columns\", \"rows\", resource_version, split_of)
+                 VALUES (x'06', x'05', 'old', 'shell', 1, 0, 0, 0, 80, 24, 1, x'07');",
+        )
+        .unwrap();
+
+        migrate(&mut conn, 17).unwrap();
+
+        let (split_of, from_orchestrator): (Option<Vec<u8>>, Option<i64>) = conn
+            .query_row("SELECT split_of, split_of_orchestrator FROM terminals WHERE id = x'06'", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .expect("the old split is still there, with the column");
+        assert_eq!(split_of, Some(vec![7]), "its origin stands");
+        assert_eq!(from_orchestrator, None, "whether that was the orchestrator isn't known");
     }
 
     /// One Main per repository, held by the schema.

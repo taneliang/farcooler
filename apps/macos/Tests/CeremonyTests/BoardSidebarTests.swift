@@ -66,6 +66,14 @@ struct BoardSidebarTests {
         let older = Data(
             #"{"id":"t1","short":"t1","title":"","preset":"zsh","state":"running","epoch":0}"#.utf8)
         #expect(try JSONDecoder().decode(Terminal.self, from: older).splitOf == nil)
+        #expect(try JSONDecoder().decode(Terminal.self, from: older).splitOfOrchestrator == nil)
+        // Whether it was split from the orchestrator, either way (ov-76).
+        for said in [true, false] {
+            let json = Data(
+                #"{"id":"t1","short":"t1","title":"","preset":"zsh","state":"running","epoch":0,"splitOf":"t0","splitOfOrchestrator":\#(said)}"#
+                    .utf8)
+            #expect(try JSONDecoder().decode(Terminal.self, from: json).splitOfOrchestrator == said)
+        }
     }
 
     /// An agent, and only an agent: a shell the dispatched agent exited back

@@ -92,21 +92,40 @@ enum WorkspaceScreen {
     /// offers each Move to Its Own Window. Empty before the layouts are read.
     ///
     /// Not listed: a changes pane (Show Changes), which is the
-    /// orchestrator's own, and a pane split from a terminal in this window
-    /// (`splitOf`), which somebody split there with ⌃B or the app's split
-    /// and meant to keep there (ov-73). A pane whose origin isn't known (a
-    /// record from before runners wrote it down, or an older runner) is
-    /// listed, as every sharer was before.
+    /// orchestrator's own, and a pane split into this window on purpose
+    /// (`splitOnPurpose`), with ⌃B or the app's split, in the orchestrator's
+    /// column (ov-73). A pane whose origin isn't known (a record from before
+    /// runners wrote it down, or an older runner) is listed, as every sharer
+    /// was before; so is one split beside a terminal before that terminal
+    /// was made the orchestrator (ov-76).
     static func sharers(of seat: BoardPane, layouts: [PaneGroup]?) -> [Terminal] {
         guard let group = layouts?.first(where: { $0.terminals.contains(seat.terminal.id) }) else { return [] }
         return group.terminals.compactMap { id in
             guard id != seat.terminal.id,
                 let terminal = seat.worktree.terminals.first(where: { $0.id == id }),
                 !terminal.isChangesPane, terminal.role != seat.terminal.role,
-                !(terminal.splitOf.map(group.terminals.contains) ?? false)
+                !splitOnPurpose(terminal, into: group, among: seat.worktree.terminals)
             else { return nil }
             return terminal
         }
+    }
+
+    /// Whether `terminal` was split into `group` by somebody working in the
+    /// orchestrator's column: from a pane in the window that was the
+    /// orchestrator then (`splitOfOrchestrator`), or from a pane that was
+    /// itself split in that way. Not from a pane that wasn't the
+    /// orchestrator at the time, such as a claude later adopted with Use as
+    /// Orchestrator: a shell split beside that shares its window by accident.
+    /// A split whose source's role wasn't recorded reads as ov-73 read every
+    /// split: on purpose.
+    static func splitOnPurpose(
+        _ terminal: Terminal, into group: PaneGroup, among terminals: [Terminal], seen: Set<String> = []
+    ) -> Bool {
+        guard let from = terminal.splitOf, group.terminals.contains(from), !seen.contains(terminal.id)
+        else { return false }
+        guard terminal.splitOfOrchestrator == false else { return true }
+        guard let source = terminals.first(where: { $0.id == from }) else { return false }
+        return splitOnPurpose(source, into: group, among: terminals, seen: seen.union([terminal.id]))
     }
 
     /// The orchestrators seated in `worktree`, each with its workspace: the
