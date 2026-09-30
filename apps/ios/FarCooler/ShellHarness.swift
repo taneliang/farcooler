@@ -45,13 +45,6 @@ struct ShellHarness: View {
     /// request, applied here in its place.
     @State private var fleet = Self.fleet
 
-    /// The board a Board row opened, the tab its Agent button asked for, and
-    /// the tab being handed to the shell. `-shell-board` only; see
-    /// `HarnessBoard`, and `ShellScreen`'s `boardJump`, which this mirrors.
-    /// `-shell-board-open` opens it at launch, for a screenshot of the board
-    /// that needs no tap.
-    @State private var boardOpen = CommandLine.arguments.contains("-shell-board-open")
-    @State private var boardJump: String?
     @State private var request: String?
 
     var body: some View {
@@ -83,7 +76,8 @@ struct ShellHarness: View {
                     boards: { _ in
                         HarnessWorkspaces.isRequested ? HarnessWorkspaces.rows : HarnessBoard.rows
                     },
-                    onOpenBoard: { _, _ in boardOpen = true },
+                    // A board is a workspace's segment on the phone's stack
+                    // now (ov-55): the rows are drawn, and open nothing.
                     headings: { _ in HarnessWorkspaces.headings },
                     // The orchestrator's row hands back a harness TAB id,
                     // which is what `request` takes; in the app it is a
@@ -126,32 +120,6 @@ struct ShellHarness: View {
             }
         }
         .preferredColorScheme(.dark)
-        // The production sheet, over canned rows: the same `TaskBoardView`
-        // `ShellScreen` presents, and the same close-then-land order.
-        .sheet(
-            isPresented: $boardOpen,
-            onDismiss: {
-                request = boardJump
-                boardJump = nil
-            }
-        ) {
-            TaskBoardView(
-                name: "overnight", board: HarnessBoard.board, unread: false,
-                speaksOfAgents: true, agents: HarnessBoard.agents(for:),
-                onJump: { agent in
-                    // The shell's own question, as `ShellScreen` asks it:
-                    // is there a tab to land on? A harness pane whose tab the
-                    // fleet does not have is the closed pane.
-                    guard fleet.position(ofTab: agent.id) != nil else {
-                        return TaskAgentLink.paneHasClosed
-                    }
-                    boardJump = agent.id
-                    boardOpen = false
-                    return nil
-                },
-                onRefresh: {}, onDone: { boardOpen = false })
-            .environment(\.boardClock, HarnessBoard.clock)
-        }
     }
 
     /// The review pane over `ChangesLayoutHarness`'s own canned change set, or

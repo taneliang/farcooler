@@ -430,8 +430,13 @@ struct FleetView: View {
     /// runner in the order each runner keeps — and a second screen answering the
     /// same question with rows instead of cards was a second thing to keep
     /// true.
+    ///
+    /// **It is the phone's stack now (ov-55), and the shell is one screen in
+    /// it.** The app opens on Needs You, with workspaces, tasks and a
+    /// worktree pushed over it; a worktree is the shell scoped to that
+    /// worktree. See `PhoneRoot`.
     private var connected: some View {
-        ShellScreen(fleet: fleet, hosts: store, pendingTerminal: $pendingTerminal)
+        PhoneRoot(fleet: fleet, hosts: store, pendingTerminal: $pendingTerminal)
     }
 
     // MARK: - What used to stand in front of a runner

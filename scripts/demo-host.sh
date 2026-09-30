@@ -71,6 +71,10 @@ fi
 # The trailing slash macOS puts on TMPDIR is trimmed, so every path printed and
 # every path compared against `ps` output has exactly one separator in it.
 DIR="${TMPDIR:-/tmp}"; DIR="${DIR%/}/farcooler-demo-host"
+# Which simulator: `DEMO_UDID` names one, for a Mac with several booted (two
+# lanes testing at once); unset, the booted one, as it always was. Every
+# `simctl` call below goes to this device and no other.
+SIM="${DEMO_UDID:-booted}"
 # The account home the ssh session runs with, and the runtime directory the demo
 # daemon owns. Two separate things:
 #
@@ -139,7 +143,7 @@ stop() {
     echo "stopped the demo sshd, its sync loop and its daemon"
     # Nothing to remove from the app: the host lives only in the launch
     # argument, so relaunching without it is what forgets it.
-    xcrun simctl terminate booted "$BUNDLE" >/dev/null 2>&1 || true
+    xcrun simctl terminate "$SIM" "$BUNDLE" >/dev/null 2>&1 || true
 }
 
 GRANT="fenced"
@@ -161,7 +165,7 @@ xcrun simctl list devices booted | grep -q iPhone || {
 }
 # The booted one, by udid, so the build targets the device the app is installed
 # on rather than whichever simulator Xcode last had selected.
-UDID=$(xcrun simctl list devices booted | sed -n 's/.*(\([0-9A-F-]\{36\}\)) (Booted).*/\1/p' | head -1)
+UDID="${DEMO_UDID:-$(xcrun simctl list devices booted | sed -n 's/.*(\([0-9A-F-]\{36\}\)) (Booted).*/\1/p' | head -1)}"
 
 mkdir -p "$DIR" "$SESSION_HOME" "$FC_HOME"
 # A second run replaces the first rather than racing it: two daemons on one
@@ -831,23 +835,23 @@ xcodebuild -project apps/ios/FarCooler.xcodeproj -scheme FarCooler \
 APP="$DERIVED/Build/Products/Debug-iphonesimulator/FarCooler.app"
 [ -d "$APP" ] || { echo "no app at $APP; see $DIR/xcodebuild.log"; exit 1; }
 
-xcrun simctl install booted "$APP"
-xcrun simctl launch booted "$BUNDLE" >/dev/null
+xcrun simctl install "$SIM" "$APP"
+xcrun simctl launch "$SIM" "$BUNDLE" >/dev/null
 sleep 4
 # Stopped before reading, because `cfprefsd` writes the preferences file lazily
 # and the app is quitting is when it flushes. Reading while it runs returns
 # whatever was on disk from a previous launch — which, since the simulator
 # re-scopes the keychain on every re-signed build and the app then generates a
 # fresh key, is reliably the wrong one.
-xcrun simctl terminate booted "$BUNDLE" >/dev/null 2>&1 || true
+xcrun simctl terminate "$SIM" "$BUNDLE" >/dev/null 2>&1 || true
 sleep 2
 
 # Read straight out of the app's own preferences file.
 #
-# `simctl spawn booted defaults read` reports the domain as missing even when the
+# `simctl spawn "$SIM" defaults read` reports the domain as missing even when the
 # plist plainly exists — `defaults` inside the simulator does not resolve a
 # sandboxed app's domain by name. The file is the thing either way.
-PREFS="$(xcrun simctl get_app_container booted "$BUNDLE" data)/Library/Preferences/$BUNDLE.plist"
+PREFS="$(xcrun simctl get_app_container "$SIM" "$BUNDLE" data)/Library/Preferences/$BUNDLE.plist"
 PUBKEY=$(plutil -extract publicKey raw -o - "$PREFS" 2>/dev/null || true)
 [ -n "$PUBKEY" ] || {
     echo "The app has not generated a device key yet. Open it once and try again."
@@ -956,14 +960,14 @@ cat > "$DIR/sync-key.sh" <<'SYNC'
 # it. The log then says `Failed publickey` for a key that is byte-for-byte the
 # one in the file, which is the most misleading pair of facts this demo can
 # produce, and it is what made every UI test that needs a pane skip.
-dir=$1; render=$2; grant=$3; bundle=$4; prefix=$5
+dir=$1; render=$2; grant=$3; bundle=$4; prefix=$5; sim=${6:-booted}
 
 while true; do
     # Resolved every pass rather than baked in once. A reinstall can move the app
     # to a new data container, after which a remembered path names a file that no
     # longer exists: the follower then reads nothing, forever, and silently stops
     # tracking the device it exists to track.
-    prefs="$(xcrun simctl get_app_container booted "$bundle" data 2>/dev/null)"
+    prefs="$(xcrun simctl get_app_container "$sim" "$bundle" data 2>/dev/null)"
     prefs="$prefs/Library/Preferences/$bundle.plist"
     key=$(plutil -extract publicKey raw -o - "$prefs" 2>/dev/null || true)
     if [ -n "$key" ] && [ "$key" != "$(cat "$dir/synced-key" 2>/dev/null)" ]; then
@@ -974,7 +978,7 @@ while true; do
 done
 SYNC
 chmod +x "$DIR/sync-key.sh"
-nohup "$DIR/sync-key.sh" "$DIR" "$RENDER" "$GRANT" "$BUNDLE" "$PREFIX" >/dev/null 2>&1 &
+nohup "$DIR/sync-key.sh" "$DIR" "$RENDER" "$GRANT" "$BUNDLE" "$PREFIX" "$SIM" >/dev/null 2>&1 &
 echo $! > "$DIR/sync-key.pid"
 
 cat > "$DIR/sshd_config" <<EOF
@@ -1021,8 +1025,8 @@ echo "sshd:   listening on 127.0.0.1:$PORT, pid $(cat "$DIR/sshd.pid")"
 #
 # It also means nothing is persisted: launch without the argument and the host is
 # gone, so there is nothing for `stop` to clean up.
-xcrun simctl terminate booted "$BUNDLE" >/dev/null 2>&1 || true
-xcrun simctl launch booted "$BUNDLE" -farcoolerDemoHost "$USER@127.0.0.1:$PORT" >/dev/null
+xcrun simctl terminate "$SIM" "$BUNDLE" >/dev/null 2>&1 || true
+xcrun simctl launch "$SIM" "$BUNDLE" -farcoolerDemoHost "$USER@127.0.0.1:$PORT" >/dev/null
 
 echo
 if [ "$GRANT" = "fenced" ]; then

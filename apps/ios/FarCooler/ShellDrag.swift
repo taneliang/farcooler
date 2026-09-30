@@ -193,7 +193,9 @@ extension ShellRootView {
             // said the page should already be rising with the fingertip
             // still short of the topmost row.
             pageAbove = frame.above
-            reveal = ShellGesture.overviewProgress(up: frame.above, tabCount: tabCount)
+            reveal =
+                reachesOverview
+                ? ShellGesture.overviewProgress(up: frame.above, tabCount: tabCount) : 0
             // The other axis, and only once there is something in your hand to
             // move. This is not a redirection — the gesture is still the
             // vertical one and `lean` has stopped being asked — it is the lift
@@ -730,6 +732,15 @@ extension ShellRootView {
     }
 
     private func apply(_ release: ShellRelease, dx: CGFloat, page: CGFloat, wasOpen: Bool) {
+        // A shell with no overview to reach puts a lift that would have
+        // reached it back down, as it does one that fell short.
+        var release = release
+        if !reachesOverview {
+            switch release {
+            case .openOverview, .carry: release = .springBack
+            default: break
+            }
+        }
         switch release {
         case .commit(let step):
             commit(step, dx: dx, page: page)

@@ -33,13 +33,8 @@ final class NewTerminalTests: XCTestCase {
     private var runner = "<never launched>"
 
     private func launch() -> XCUIApplication {
-        let app = XCUIApplication()
-        let user = ProcessInfo.processInfo.environment["DEMO_USER"] ?? ""
-        let host = ProcessInfo.processInfo.environment["DEMO_HOST"] ?? "127.0.0.1:2222"
-        runner = "\(user)@\(host)"
-        app.launchArguments += ["-farcoolerDemoHost", runner]
-        app.launch()
-        return app
+        runner = LiveRunner.address
+        return LiveRunner.launch()
     }
 
     /// `ws`, `tab`, `worktrees`, `tabs`, … off the shell's probe.
@@ -59,23 +54,12 @@ final class NewTerminalTests: XCTestCase {
         return parsed
     }
 
-    /// Wait for the shell to render at all, or skip saying which runner it was
-    /// waiting on.
-    ///
-    /// 180 seconds, copied from `TerminalScrollTests.openATerminalInTheShell`
-    /// along with its reasoning: `xcodebuild test` installs a fresh build and
-    /// the first launches after an install are far slower than the rest, so a
-    /// 60-second probe measured how recently the app was installed — and
-    /// reported the answer by SKIPPING, which looks exactly like nothing being
-    /// wrong.
+    /// Walk into the demo's 'crossing' worktree (ov-55: the app opens on
+    /// Needs You, not on a pane), or skip as `LiveRunner.missing`, which the
+    /// script turns red. 'crossing' and not 'scrolling': a terminal left
+    /// behind here must not land among the panes the scroll suite measures.
     private func waitForShell(_ app: XCUIApplication) throws {
-        let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
-        guard probe.waitForExistence(timeout: 180) else {
-            print(app.debugDescription)
-            throw XCTSkip(
-                "The shell never rendered against \(runner); run ./scripts/demo-host.sh "
-                    + "first, then ./scripts/ios-ui-tests.sh.")
-        }
+        try LiveRunner.openWorktree(app, named: "crossing")
     }
 
     /// The overflow button of the pane actually on screen.
@@ -105,13 +89,9 @@ final class NewTerminalTests: XCTestCase {
     /// would.**
     ///
     /// The runner is shared by the whole suite and outlives every test in it,
-    /// so a terminal left here is a fixture the NEXT test inherits. It lands in
-    /// the worktree the app opens on, which on the demo runner is the
-    /// repository's own checkout and otherwise has no terminal — so every
-    /// later test that opens "the first terminal" opened this one instead, in
-    /// a different worktree from the one it was written against.
-    /// `TerminalScrollTests.testCrossingBackToAWorktreeReopensTheTabYouLeft`
-    /// failed on every run after this one for exactly that reason. The runner
+    /// so a terminal left here is a fixture the NEXT test inherits: every later
+    /// test that opens "the first terminal" of this worktree would open this
+    /// one instead. The runner
     /// has a CLI that could do this, and a UI test on the simulator cannot
     /// reach it; the app's own close can.
     ///
@@ -198,7 +178,8 @@ final class NewTerminalTests: XCTestCase {
 
         guard let overflow = visibleOverflow(app) else {
             print(app.debugDescription)
-            throw XCTSkip("No pane with an overflow menu on \(runner).")
+            XCTFail("The worktree is open on \(runner) and no pane has an overflow menu.")
+            return
         }
         overflow.tap()
 

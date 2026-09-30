@@ -16,6 +16,10 @@ import SwiftUI
 @MainActor
 struct TaskComposerView: View {
     @ObservedObject var connection: Connection
+    /// The workspace whose screen this was opened from, which the worktree is
+    /// claimed for (ruling 8), and whose repository it's made in. Nil is
+    /// Main, in whichever repository is chosen.
+    var workspace: WorkspaceSummary? = nil
 
     @Environment(\.dismiss) private var dismiss
 
@@ -25,10 +29,10 @@ struct TaskComposerView: View {
     /// interrupted, come back — and losing it on a swipe-to-dismiss (which,
     /// on a phone, happens by accident far more often than Esc does on a Mac)
     /// would teach people not to close the sheet, which is worse.
-    @AppStorage("quicktask.draft") private var text = ""
-    @AppStorage("quicktask.project") private var project = ""
-    @AppStorage("quicktask.agent") private var agentID = "claude"
-    @AppStorage("quicktask.model") private var model = ""
+    @AppStorage("newworktree.draft") private var text = ""
+    @AppStorage("newworktree.project") private var project = ""
+    @AppStorage("newworktree.agent") private var agentID = "claude"
+    @AppStorage("newworktree.model") private var model = ""
 
     @State private var phase: Phase = .idle
 
@@ -59,7 +63,10 @@ struct TaskComposerView: View {
     }
 
     private var chosenRepository: Repository? {
-        connection.repositories.first { $0.id == project } ?? connection.repositories.first
+        if let fixed = workspace?.repository {
+            return connection.repositories.first { $0.id == fixed }
+        }
+        return connection.repositories.first { $0.id == project } ?? connection.repositories.first
     }
 
     private var canSubmit: Bool {
@@ -87,9 +94,9 @@ struct TaskComposerView: View {
                 // Only shown with a choice to make. A picker with one option
                 // is not a picker, it is a label that looks tappable — the
                 // same reasoning as the Mac's `if projects.count > 1`.
-                if connection.repositories.count > 1 {
-                    Section("Project") {
-                        Picker("Project", selection: $project) {
+                if workspace == nil, connection.repositories.count > 1 {
+                    Section("Repository") {
+                        Picker("Repository", selection: $project) {
                             ForEach(connection.repositories) { repo in
                                 Text(repo.displayName).tag(repo.id)
                             }
@@ -128,7 +135,7 @@ struct TaskComposerView: View {
                     .disabled(!canSubmit)
                 }
             }
-            .navigationTitle("Quick Task")
+            .navigationTitle("New Worktree")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -218,7 +225,8 @@ struct TaskComposerView: View {
             let worktreeID: String
             do {
                 worktreeID = try await connection.createWorktree(
-                    repository: repository.id, name: name, branch: branch, base: "")
+                    repository: repository.id, name: name, branch: branch, base: "",
+                    workspace: workspace?.boardWorkspace)
             } catch {
                 let why = ClientCore.trouble(error, after: "Couldn’t create the worktree.")
                 phase = .failed(why.sentence, transcript: why.transcript)
@@ -311,5 +319,30 @@ private struct ProgressRow: View {
             ProgressView().controlSize(.small)
             Text(label).foregroundStyle(.secondary)
         }
+    }
+}
+
+/// What this app kept under names it has since changed, moved once at launch
+/// (ov-55 4A.4). Idempotent: a key already moved is left alone.
+enum PhoneMigration {
+    /// The composer was "Quick Task" and is "New Worktree…", the Mac's word
+    /// for the same action; its drafts move with it, so a half-written
+    /// description survives the update.
+    static let renamedDrafts = [
+        ("quicktask.draft", "newworktree.draft"),
+        ("quicktask.project", "newworktree.project"),
+        ("quicktask.agent", "newworktree.agent"),
+        ("quicktask.model", "newworktree.model"),
+    ]
+
+    static func run(_ defaults: UserDefaults = .standard) {
+        for (old, new) in renamedDrafts {
+            guard let value = defaults.object(forKey: old) else { continue }
+            if defaults.object(forKey: new) == nil { defaults.set(value, forKey: new) }
+            defaults.removeObject(forKey: old)
+        }
+        // The crossing note retired with the overview; a relaunch no longer
+        // reads it, so an old one would only linger.
+        defaults.removeObject(forKey: ShellScreen.crossingKey)
     }
 }

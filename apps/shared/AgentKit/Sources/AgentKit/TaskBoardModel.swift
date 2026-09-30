@@ -725,10 +725,14 @@ public struct TaskNoteRow: Equatable, Sendable, Hashable, Identifiable {
     /// Never the raw word: `agent:0198f2c0-…` is an id in a byline, which is
     /// noise on every row and only ever useful on one. The uuid is still on
     /// `actor` for anything that needs to match against it.
+    ///
+    /// `manager` is the orchestrator's actor word, and the word a person
+    /// reads is "Orchestrator" (spec §1): `manager` stays the actor and the
+    /// skill's name, which nobody sees.
     public var byline: String {
         switch actor {
         case "user": return "You"
-        case "manager": return "The manager"
+        case "manager": return "Orchestrator"
         default: return actor.hasPrefix("agent:") ? "An agent" : "Someone else"
         }
     }

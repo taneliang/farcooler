@@ -90,6 +90,15 @@ SOURCES = [
     # The shell over a real runner: the fleet mapped onto its vocabulary, and
     # terminals in the slots.
     "ShellScreen.swift",
+    # The phone's navigation (ov-55): one stack whose root is Needs You, with
+    # a workspace, a task and a scoped worktree pushed over it. The shell is
+    # still what a worktree looks like once you're in one (`WorktreeScreen`).
+    "PhoneRoot.swift",
+    "NeedsYouScreen.swift",
+    "WorkspaceScreen.swift",
+    "TaskScreen.swift",
+    # The same stack over a canned runner, for the UI suite. DEBUG only.
+    "PhoneHarness.swift",
     "ShellHarness.swift",
     # The tunnel ceremony under a launch argument, for a real device. DEBUG
     # only, and the one step it stands in for is the camera.
@@ -345,6 +354,10 @@ AGENTKIT_SOURCES = [
     # `NeedsYouTests`.
     "NeedsYou.swift",
     "TaskLink.swift",
+    # The board's list-form rules and a decision's open question, which the
+    # phone's workspace and task screens draw (ov-55 4A).
+    "BoardForm.swift",
+    "TaskQuestion.swift",
     # In this list AND in `WATCH_AGENTKIT_SOURCES` below: the phone and the
     # watch are two binaries that have to agree about these messages down to the
     # key names, which is the whole reason the file exists. A `WatchRequest` the
@@ -614,10 +627,21 @@ UI_TEST_SOURCES = [
     # Needs no runner: the harness answers a drop in the runner's place, so it
     # cannot skip itself green when the demo daemon is down.
     "ShellRunnerHeadingTests.swift",
-    # A repository's board from its Board row, and a card's Agent button
-    # landing on the pane. Needs no runner: `-shell-board` puts a canned board
-    # on the harness's runner, so this one cannot skip itself green either.
-    "ShellBoardTests.swift",
+    # The phone's workspace screen: its Orchestrator, Board and Worktrees
+    # segments, Start Orchestrator, and the board's empty statuses. Needs no
+    # runner: `-phone-harness` stands the stack on a canned one whose answers
+    # check what they are sent, so it cannot skip itself green either.
+    # Not a test: launching the `-phone-harness` stack and waiting until its
+    # canned runner is up.
+    "PhoneHarnessLaunch.swift",
+    # Not a test: the demo runner, and the walk from Needs You into one of
+    # its worktrees that every live-runner suite starts with.
+    "LiveRunner.swift",
+    "WorkspaceScreenTests.swift",
+    # A task's agent and back, a notification landing with its workspace and
+    # task under it, and a decision answered from Needs You. Needs no runner,
+    # for the same reason.
+    "TaskScreenTests.swift",
     # A claude TUI pane's permission ask, answered from the phone and at the
     # keyboard, against the demo runner's asking stand-in.
     "TerminalPermissionTests.swift",

@@ -19,19 +19,7 @@ final class TerminalPermissionTests: XCTestCase {
     }
 
     private func launch() throws -> XCUIApplication {
-        let app = XCUIApplication()
-        let user = ProcessInfo.processInfo.environment["DEMO_USER"] ?? ""
-        let host = ProcessInfo.processInfo.environment["DEMO_HOST"] ?? "127.0.0.1:2222"
-        app.launchArguments += ["-farcoolerDemoHost", "\(user)@\(host)"]
-        app.launch()
-        let shell = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
-        // 180 s for `TerminalScrollTests.openATerminalInTheShell`'s measured
-        // reason: the first launches of a fresh install are slow.
-        guard shell.waitForExistence(timeout: 180) else {
-            throw XCTSkip(
-                "The shell never rendered against \(user)@\(host); run ./scripts/demo-host.sh.")
-        }
-        return app
+        LiveRunner.launch()
     }
 
     private func probe(_ app: XCUIApplication, _ identifier: String) -> [String: String] {
@@ -54,46 +42,13 @@ final class TerminalPermissionTests: XCTestCase {
         return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
     }
 
-    /// Up into the overview, onto the `asking` card, and along to its claude
-    /// tab: Changes, then the shell the worktree was made with, then claude.
+    /// Needs You, into the `asking` worktree, and along to its claude tab:
+    /// Changes, then the shell the worktree was made with, then claude.
     private func openTheAskingClaude(_ app: XCUIApplication) throws {
+        try LiveRunner.openWorktree(app, named: "asking")
         let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
         XCTAssertTrue(bar.waitForExistence(timeout: 30), "the bar never appeared")
-        // `ShellBoardTests.testTheRealBoardRowLandsOnTheDispatchedPane`'s way
-        // up, for its reasons: the keyboard away first, then a held lift or a
-        // fling.
-        for attempt in 0..<4 where probe(app, "shell-state")["overview"] != "1" {
-            let hide = app.buttons[XCTestCase.terminalHideKeyboard]
-            if hide.exists, hide.isHittable { hide.tap() }
-            Thread.sleep(forTimeInterval: 0.5)
-            let from = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            if attempt % 2 == 0 {
-                from.press(
-                    forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: -700)),
-                    withVelocity: .slow, thenHoldForDuration: 0.5)
-            } else {
-                from.press(
-                    forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: -400)),
-                    withVelocity: XCUIGestureVelocity(rawValue: 12000), thenHoldForDuration: 0)
-            }
-            Thread.sleep(forTimeInterval: 1)
-        }
-        XCTAssertEqual(
-            probe(app, "shell-state")["overview"], "1",
-            "never reached the overview: \(probe(app, "shell-state"))")
-
-        let card = app.buttons.matching(
-            NSPredicate(
-                format: "identifier BEGINSWITH %@ AND label == %@", "shell-card-", "asking")
-        ).firstMatch
-        XCTAssertTrue(
-            card.waitForExistence(timeout: 30),
-            "no `asking` card; did ./scripts/demo-host.sh make its asking claude?")
-        card.tap()
-        XCTAssertTrue(
-            waitFor(15) { self.probe(app, "shell-state")["overview"] == "0" },
-            "the overview did not close onto asking")
-        XCTAssertTrue(bar.label.contains("asking"), "landed on \(bar.label), not asking")
+        XCTAssertTrue(bar.label.contains("asking"), "opened \(bar.label), not asking")
 
         for _ in 0..<4 where probe(app, "shell-state")["tab"] != "2" {
             let y = 0.42

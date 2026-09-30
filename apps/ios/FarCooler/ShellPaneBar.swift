@@ -143,6 +143,8 @@ struct ShellPaneChromeModifier: ViewModifier {
     /// column and this bar are then three renderings of ONE string, so a
     /// terminal cannot be "claude 2" in the column and something else here.
     let title: String
+    /// The runner this pane is on, for the task chip's route.
+    let runner: UUID
     @ObservedObject var connection: Connection
     /// Images on their way into a terminal. Owned by `ShellScreen`, so a
     /// transfer started here keeps running when you swipe to another pane.
@@ -170,6 +172,8 @@ struct ShellPaneChromeModifier: ViewModifier {
     /// than a nicety on top of it.
     let onCreated: (String) -> Void
 
+    @Environment(\.phoneNavigator) private var navigator
+
     @State private var showPhotoPicker = false
     @State private var pickedImage: PhotosPickerItem?
     /// Where a removal started here has got to. The ceremony itself is
@@ -193,6 +197,7 @@ struct ShellPaneChromeModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .modifier(PhoneBackItem())
             .navigationTitle(title)
             // Inline, and not a choice worth agonising over: a large title
             // belongs to a screen you scroll from the top of, and a pane is a
@@ -201,6 +206,9 @@ struct ShellPaneChromeModifier: ViewModifier {
             // above.
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                if let chip = taskChip {
+                    ToolbarItem(placement: .principal) { chipTitle(chip) }
+                }
                 // One group rather than an item each, so the system spaces
                 // them the way it spaces every other trailing group on this
                 // platform instead of this file inventing a gap.
@@ -290,6 +298,55 @@ struct ShellPaneChromeModifier: ViewModifier {
             .onChange(of: isVisible) { _, visible in
                 if !visible { dismissEverything() }
             }
+    }
+
+    /// The task this pane is shown under, by `TaskLink`'s rule, with the
+    /// workspace its screen is on. On the Changes tab, which has no pane, the
+    /// worktree's one open task. Nil for an orchestrator, and for a pane with
+    /// no task or two.
+    private var taskChip: (task: NeedsYouTask, workspace: String?)? {
+        guard let worktree else { return nil }
+        let id: String?
+        if let live {
+            id = TaskLink.task(of: live, in: worktree)
+        } else {
+            let open = worktree.openTaskIDs
+            id = open.count == 1 ? open[0] : nil
+        }
+        guard let id, let task = worktree.openTasks?.first(where: { $0.id == id }) else {
+            return nil
+        }
+        let workspace = live.flatMap { connection.fleet.workspace(of: $0, in: worktree) }
+            ?? worktree.workspace
+            ?? (connection.fleet.workspaces == nil ? worktree.repository : nil)
+        return (task, workspace)
+    }
+
+    /// The pane's title with its task under it: "bil-9 Invoice PDF export",
+    /// which opens the task (spec §3.2).
+    private func chipTitle(_ chip: (task: NeedsYouTask, workspace: String?)) -> some View {
+        VStack(spacing: 0) {
+            Text(title)
+                .font(.headline)
+                .lineLimit(1)
+            Button {
+                guard let workspace = chip.workspace else { return }
+                navigator?.open(
+                    .task(
+                        PhoneWorkspace(runner: runner.uuidString, workspace: workspace),
+                        task: chip.task.id))
+            } label: {
+                HStack(spacing: 4) {
+                    Text(chip.task.key).font(.caption.monospaced())
+                    Text(chip.task.title).font(.caption).lineLimit(1)
+                }
+                .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .disabled(navigator == nil || chip.workspace == nil)
+            .accessibilityLabel("Task \(chip.task.key), \(chip.task.title)")
+            .accessibilityIdentifier("pane-task-chip")
+        }
     }
 
     /// Every pane in the track stays MOUNTED when it is not on screen — that is
@@ -387,7 +444,10 @@ struct ShellPaneChromeModifier: ViewModifier {
         } label: {
             Image(systemName: "ellipsis")
         }
-        .accessibilityLabel("Pane options")
+        .accessibilityLabel("More")
+        // The identifier the UI suite finds it by, unchanged: an identifier
+        // isn't spoken, and VoiceOver hears "More".
+        .accessibilityIdentifier("Pane options")
     }
 
     /// Another terminal in this worktree.
@@ -497,6 +557,28 @@ struct ShellPaneChromeModifier: ViewModifier {
                 terminal.isAgentPane ? "Show the Terminal" : "Show the Chat",
                 systemImage: terminal.isAgentPane
                     ? "terminal" : "bubble.left.and.text.bubble.right")
+        }
+    }
+}
+
+/// Back, on a pane's own bar, when the worktree it's in was pushed onto the
+/// phone's stack (`WorktreeScreen`). That screen hides the stack's bar, since
+/// every pane has a bar of its own, so the way back has to be on this one.
+struct PhoneBackItem: ViewModifier {
+    @Environment(\.phoneBack) private var back
+
+    func body(content: Content) -> some View {
+        content.toolbar {
+            if let back {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: back) {
+                        Image(systemName: "chevron.backward")
+                            .fontWeight(.semibold)
+                    }
+                    .accessibilityLabel("Back")
+                    .accessibilityIdentifier("worktree-back")
+                }
+            }
         }
     }
 }

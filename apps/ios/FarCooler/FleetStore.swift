@@ -79,6 +79,24 @@ final class FleetStore: ObservableObject {
     /// One per runner currently being talked to, in the order they are listed.
     @Published private(set) var active: [Connection] = []
 
+    /// What needs you, on every runner, as one list: by rank, then by runner
+    /// (`NeedsYou.merge`). The phone's front door, and its count is the one
+    /// number every surface shows (spec §2.2). Each item's `runner` is its
+    /// runner's id.
+    @Published private(set) var needsYou: [NeedsYouItem] = []
+
+    /// Each runner's own list, by runner id, for the runners that have
+    /// answered. `needsYou` adds an unread runner's blocked agents; this
+    /// doesn't. What the glances write their snapshot from (4C). A runner
+    /// that hasn't answered has no entry, rather than an empty list: it
+    /// hasn't said nothing needs you.
+    @Published private(set) var needsYouByRunner: [String: [NeedsYouItem]] = [:]
+
+    /// The runners whose items were derived from their fleet, because they're
+    /// too old to send a list of their own. Each gets
+    /// `NeedsYou.olderRunnerNote`.
+    @Published private(set) var olderRunners: [Runner] = []
+
     private let hosts: RunnerStore
 
     /// The runners to publish in the order of, which is `hosts` in the app and
@@ -288,6 +306,28 @@ final class FleetStore: ObservableObject {
             runners: Set(mine.map { $0.0.id.uuidString }),
             answering: Set(mine.filter { $0.1.isAnswering }.map { $0.0.id.uuidString }))
 
+        var lists: [String: [NeedsYouItem]] = [:]
+        for (host, connection) in mine where connection.needsYouRead {
+            lists[host.id.uuidString] = connection.needsYou
+        }
+        needsYouByRunner = lists
+        // A runner with a fleet and no list yet shows its blocked agents, as
+        // the glances do for it (`PhoneInbox.shown`).
+        var unread: [String: [NeedsYou.OlderPane]] = [:]
+        for (host, connection) in mine where !connection.needsYouRead && connection.hasFleet {
+            unread[host.id.uuidString] = connection.fleet.olderPanes()
+        }
+        needsYou = PhoneInbox.shown(lists: lists, unread: unread)
+        // And the lists to the glances' snapshot, which the widget, the
+        // complication, the watch and the Live Activity's fleet rows read, so
+        // they count what this app's Needs You counts (spec §7). The Live
+        // Activity's header is the relay's count, not this. Only the lists
+        // read: the snapshot derives an unread runner's items itself, by the
+        // same rule. Written only when a list moved; see
+        // `FleetSnapshotWriter.write(needsYou:)`.
+        FleetSnapshotWriter.write(needsYou: lists)
+        olderRunners = mine.filter { $0.1.needsYouRead && $0.1.needsYouDerived }.map(\.0)
+
         entries = mine.flatMap { host, connection -> [FleetEntry] in
             let counts = connection.inbox
             return connection.fleet.worktrees.map { worktree in
@@ -361,6 +401,18 @@ final class FleetStore: ObservableObject {
     }
 
     // MARK: - What the screens ask
+
+    /// What each runner has said about what needs you, for deciding where a
+    /// launch opens (`PhoneLaunch.canDecide`).
+    var needsYouReadings: [PhoneLaunch.Reading] {
+        runners.map { runner in
+            if runner.connection.needsYouRead { return .read }
+            switch runner.connection.phase {
+            case .failed, .needsApproval: return .unreachable
+            case .connecting, .reconnecting, .connected: return .waiting
+            }
+        }
+    }
 
     /// Whether ANY runner has said what it has, at least once.
     ///

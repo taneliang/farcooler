@@ -184,4 +184,22 @@ if [ "$RAN" -eq 0 ]; then
     exit 1
 fi
 
+# The second guard. A live-runner test that could not find the runner skips
+# with `LiveRunner.missing` ("NO LIVE RUNNER:") at the front of its message, and
+# that is never a pass: the harness suites still ran, so the count above is
+# satisfied, and the whole live half of the suite — scrollback, streaming, an
+# ask answered from the phone — would otherwise be reported green while
+# testing nothing (ov-55 4A review). Other skips (hardware this Mac lacks, a
+# runner without a capability) stay allowed.
+MISSING=$(grep -E 'Test skipped.*NO LIVE RUNNER:' "$LOG" | sort -u || true)
+if [ -n "$MISSING" ]; then
+    echo
+    echo "FAILED: live-runner tests skipped because they could not reach the runner:"
+    echo "$MISSING" | sed -E 's/^.*-\[([^]]*)\].*$/  \1/'
+    echo
+    echo "Start it with ./scripts/demo-host.sh (DEMO_PORT and DEMO_UDID pick a"
+    echo "port and a simulator), then run this again with DEMO_HOST to match."
+    exit 1
+fi
+
 echo "OK: $RAN test(s) executed."

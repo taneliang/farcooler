@@ -2441,4 +2441,36 @@ struct ShellNavigationTests {
         #expect(ShellGesture.pullCommits(down: ShellMetrics.overRun * 0.6))
         #expect(!ShellGesture.pullCommits(down: ShellMetrics.overRun * 0.4))
     }
+
+    // MARK: - The phone's stack (ov-55 4A)
+
+    private static let billing = PhoneWorkspace(runner: "studio", workspace: "ws-billing")
+
+    /// **The front door is the inbox.** With anything in it, a launch pushes
+    /// nothing over Needs You, whatever workspace was open last.
+    @Test("Launch lands on Needs You when it has items")
+    func launchLandsOnNeedsYouWhenItHasItems() {
+        #expect(PhoneLaunch.stack(itemCount: 1, last: Self.billing, exists: { _ in true }) == [])
+        #expect(PhoneLaunch.stack(itemCount: 3, last: nil, exists: { _ in true }) == [])
+        // Not before every runner has said: a second runner may be about to
+        // fill the inbox the first left empty.
+        #expect(!PhoneLaunch.canDecide([.read, .waiting]))
+        #expect(PhoneLaunch.canDecide([.read, .unreachable]))
+        #expect(!PhoneLaunch.canDecide([]))
+    }
+
+    /// **An empty inbox is a screen with nothing to do**, so the last
+    /// workspace is pushed over it, and Back still reaches Needs You. A
+    /// workspace that's gone since isn't pushed at all.
+    @Test("With nothing waiting, launch pushes the last workspace over Needs You")
+    func withNothingWaitingLaunchPushesTheLastWorkspace() {
+        #expect(
+            PhoneLaunch.stack(itemCount: 0, last: Self.billing, exists: { $0 == Self.billing })
+                == [.workspace(Self.billing)])
+        #expect(PhoneLaunch.stack(itemCount: 0, last: Self.billing, exists: { _ in false }) == [])
+        #expect(PhoneLaunch.stack(itemCount: 0, last: nil, exists: { _ in true }) == [])
+        // Kept as one string, and read back as the same workspace.
+        #expect(PhoneWorkspace(stored: Self.billing.stored) == Self.billing)
+        #expect(PhoneWorkspace(stored: "no-bar") == nil)
+    }
 }

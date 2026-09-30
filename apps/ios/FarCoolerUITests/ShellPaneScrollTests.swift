@@ -30,7 +30,7 @@ import XCTest
 ///
 /// Neither needs a runner, so unlike `TerminalScrollTests` this never skips.
 /// The live half — the page turn over a real Changes pane on the demo host —
-/// is at the bottom and does skip.
+/// is at the bottom, and a missing runner there turns the script red.
 final class ShellPaneScrollTests: XCTestCase {
     private func launch(_ extra: [String]) -> XCUIApplication {
         let app = XCUIApplication()
@@ -366,38 +366,12 @@ final class ShellPaneScrollTests: XCTestCase {
     /// tests above are what run everywhere; this is what says the mechanism
     /// reached the pane the owner was actually complaining about.
     func testAHorizontalSwipeOverTheLiveDiffTurnsThePage() throws {
-        // Forwarded by xcodebuild from an assignment written BEFORE the
-        // command, never after it — see the long note in `TerminalScrollTests`,
-        // and use ./scripts/ios-ui-tests.sh, which gets it right.
-        let user = ProcessInfo.processInfo.environment["DEMO_USER"] ?? ""
-        let host = ProcessInfo.processInfo.environment["DEMO_HOST"] ?? "127.0.0.1:2222"
-        let runner = "\(user)@\(host)"
-        // No shell flag: the shell IS the app. The only argument is the runner
-        // to stand on.
-        let app = launch(["-farcoolerDemoHost", runner])
-
+        // Needs You, then the demo's 'scrolling' worktree (ov-55: the app
+        // opens on the inbox, not on a pane). A runner that isn't there is a
+        // `LiveRunner.missing` skip, which the script turns red.
+        let app = LiveRunner.launch()
+        try LiveRunner.openWorktree(app, named: "scrolling")
         let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
-        // 180 seconds, not 60, and the number is measured rather than chosen.
-        //
-        // `xcodebuild test` installs a fresh build, and the first launches of a
-        // freshly installed app on the simulator are far slower than the rest:
-        // in one run of TerminalScrollTests the first three launches never rendered
-        // inside 60s, the fourth took about 40, and the last four took about
-        // five each. So a 60-second probe did not test the app, it tested how
-        // recently the app had been installed — and it failed that test by
-        // SKIPPING, which is the one outcome that looks like nothing is wrong.
-        //
-        // The cost is that a genuinely absent runner now takes three minutes
-        // per test to say so. That is the right way round: a slow correct
-        // answer beats a fast one that reads as success, and
-        // `scripts/ios-ui-tests.sh` now makes an all-skipped run red, so this
-        // path is only reached when something really is broken.
-        guard probe.waitForExistence(timeout: 180) else {
-            print(app.debugDescription)
-            throw XCTSkip(
-                "The shell never rendered against \(runner); run "
-                    + "./scripts/demo-host.sh first, then ./scripts/ios-ui-tests.sh.")
-        }
         // The diff is tab 0 of every worktree — `ShellFleetMap` puts Changes
         // first — so walking backward inside this worktree reaches it, and
         // arriving there is also how this test knows the fleet has one.
@@ -406,17 +380,12 @@ final class ShellPaneScrollTests: XCTestCase {
             swipeAcross(app, toward: 1)
             guard_ += 1
         }
-        try XCTSkipUnless(
-            (try state(app)["tab"] ?? -1) == 0, "could not reach the diff on this runner")
-        // FORWARD, which always has somewhere to go: the flat sequence runs
-        // off the end of a worktree into the next one, so a demo fleet whose
-        // first worktree is a diff and nothing else is still a fleet this can
-        // be asked about. What is asserted is that the shell MOVED, not which
-        // way — `ShellNavigationTests` owns the sequence.
+        XCTAssertEqual(try state(app)["tab"], 0, "could not reach the diff in 'scrolling'")
+        // FORWARD, onto one of 'scrolling''s two terminals. What is asserted
+        // is that the shell MOVED, not where to.
         let before = try state(app)
-        try XCTSkipUnless(
-            (before["tabs"] ?? 0) > 1 || (before["worktrees"] ?? 0) > 1,
-            "one worktree with one tab: there is nowhere to turn to")
+        XCTAssertGreaterThan(
+            before["tabs"] ?? 0, 1, "'scrolling' has only its Changes: nowhere to turn to")
         func place() -> String { "\(try? state(app)["ws"] ?? -1)/\(try? state(app)["tab"] ?? -1)" }
         let started = place()
 

@@ -439,7 +439,12 @@ final class Connection: ObservableObject {
                     for board in RunnerBoards.touched(by: moved, among: self.boardList) {
                         await self.readBoard(board)
                     }
-                case "resync": await self.loadBoards()
+                case "resync":
+                    await self.loadNeedsYou()
+                    await self.loadBoards()
+                // The rollup moved: an ask held or settled, a decision asked
+                // or answered, a review in or out. See `loadNeedsYou`.
+                case "needs_you": await self.loadNeedsYou()
                 default: break
                 }
             }
@@ -1024,6 +1029,10 @@ final class Connection: ObservableObject {
             // the poll, at most once a minute. With a channel this is never
             // true and costs nothing.
             if await boardsMayHaveMissedNews() { loadBoardsDetached() }
+
+            // What needs you, on the same poll where nothing announces it.
+            // See `needsYouOwedAfterFleet`.
+            if await needsYouOwedAfterFleet() { await loadNeedsYou() }
         } catch {
             // A failed poll is not a disconnection — unless the core says it
             // is. That distinction did not exist before: this swallowed every
@@ -1219,7 +1228,7 @@ final class Connection: ObservableObject {
 
     /// The display names, by repository id. Derived from `repositories`, which
     /// is a list because that is what the picker draws and what the wire sends.
-    private var repositoryNames: [String: String] = [:]
+    private(set) var repositoryNames: [String: String] = [:]
 
     /// What to call the repository a worktree belongs to, or nil when this
     /// connection cannot say yet.
@@ -1377,8 +1386,10 @@ final class Connection: ObservableObject {
         var read = false
         repeat {
             boardMovedAgain.remove(key)
-            guard phase == .connected, daemon?.can("tasks") == true else { return read }
-            if let data = try? await core.call("task.list", args),
+            guard phase == .connected, (daemon ?? standInBuild)?.can("tasks") == true else {
+                return read
+            }
+            if let data = try? await rpc("task.list", args),
                 let board = try? TaskBoardModel.decode(data)
             {
                 boards[key] = board
@@ -1417,6 +1428,144 @@ final class Connection: ObservableObject {
         inbox = Dictionary(
             reply.items.map { ($0.worktreeId, $0) }, uniquingKeysWith: { _, latest in latest })
     }
+
+    // MARK: - What needs you (ov-55)
+
+    /// Everything on this runner a person has to act on, in the runner's own
+    /// rank order: its `needs_you` list, or, from a runner too old to send
+    /// one, the blocked agents its fleet shows (`NeedsYou.derived`).
+    ///
+    /// Kept through a dropped link, like `fleet`: an inbox that emptied every
+    /// time the Wi-Fi blinked would be an inbox nobody trusts. `FleetStore`
+    /// merges every runner's into the one list the phone shows.
+    @Published private(set) var needsYou: [NeedsYouItem] = []
+
+    /// Whether `needsYou` is an answer: the runner's list read, or derived
+    /// from its fleet, at least once. "Nothing needs you" is never said
+    /// before this.
+    @Published private(set) var needsYouRead = false
+
+    /// Whether `needsYou` was derived from an older runner's fleet rather
+    /// than read from its own list. Its section says so, and says to update
+    /// (`NeedsYou.olderRunnerNote`).
+    @Published private(set) var needsYouDerived = false
+
+    /// Read what needs you on this runner, or derive it from an older one.
+    ///
+    /// On the `needs_you` notice the daemon sends whenever the rollup moves,
+    /// on `resync`, and after a fleet read when nothing else would say (see
+    /// `needsYouOwedAfterFleet`). A failed read keeps the last good list, as
+    /// `loadInbox` keeps its counts, and never reads as a dropped link.
+    func loadNeedsYou() async {
+        guard phase == .connected || isStandIn, let build = daemon ?? standInBuild else { return }
+        guard build.can("needs_you") else {
+            needsYou = NeedsYou.derived(fromTerminals: fleet.olderPanes())
+            needsYouDerived = true
+            needsYouRead = true
+            return
+        }
+        guard let data = try? await rpc("needs_you"),
+            let list = try? JSONDecoder().decode(NeedsYouList.self, from: data)
+        else { return }
+        needsYou = list.items
+        needsYouDerived = false
+        needsYouRead = true
+    }
+
+    /// Whether a fleet read owes a needs-you read too.
+    ///
+    /// Always for an older runner, whose items ARE its fleet's blocked
+    /// agents, so they're derived again from each new fleet at no cost. For
+    /// a current one, only before its first answer, or when no event channel
+    /// is up to carry its `needs_you` notice: then the poll is all there is.
+    private func needsYouOwedAfterFleet() async -> Bool {
+        guard let build = daemon else { return false }
+        if !build.can("needs_you") || !needsYouRead { return true }
+        return !(await core.eventsLive)
+    }
+
+    /// Answer an ask from Needs You: `terminal.agent_answer`, the path a
+    /// pane's own card takes, which refuses a stale or second answer.
+    ///
+    /// Nil when the runner took it; the item leaves on the next
+    /// `needs_you` notice. Otherwise the sentence the row keeps under it.
+    func answer(_ item: NeedsYouItem, with option: NeedsYouAction) async -> String? {
+        guard let terminal = item.terminal, let ask = item.askID else {
+            return "Open this to answer it."
+        }
+        return await sending("terminal.agent_answer", [
+            "terminal": terminal.id, "requestId": ask, "optionId": option.id,
+        ], agent: terminal.label)
+    }
+
+    /// Answer a task's decision: an `answer` note, written as you
+    /// (`task.note`). The runner leaves the task in Needs Decision for its
+    /// orchestrator to move; the item leaves Needs You because it's answered.
+    func answerDecision(task: String, with text: String) async -> String? {
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return "Write an answer first." }
+        return await sending(
+            "task.note", ["task": task, "kind": "answer", "body": body], agent: "the runner")
+    }
+
+    /// One answer's round trip, and what to say when it didn't land. Reads
+    /// the rollup again either way, so a row doesn't wait on the notice to
+    /// learn whether it's still there.
+    private func sending(_ method: String, _ args: [String: Any], agent: String) async -> String? {
+        var refused: String?
+        do {
+            _ = try await rpc(method, args)
+        } catch let ClientCore.CoreError.rejected(_, word, what) {
+            refused = PhoneAnswer.refusal(word: word, what: what, agent: agent)
+        } catch {
+            refused = PhoneAnswer.refusal(word: nil, what: nil, agent: agent)
+        }
+        await loadNeedsYou()
+        return refused
+    }
+
+    /// Start `workspace`'s orchestrator, or replace the one it has (ruling 8).
+    ///
+    /// Returns the new terminal's id, or throws what the runner said; the
+    /// screen turns that into a sentence (`ClientCore.trouble`).
+    func startOrchestrator(workspace: String, harness: String, replace: Bool) async throws -> String {
+        let data = try await rpc(
+            "workspace.start_orchestrator",
+            ["workspace": workspace, "harness": harness, "replace": replace])
+        await refresh()
+        let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        return body?["id"] as? String ?? ""
+    }
+
+    /// One task's record, as `task.get` answers it: the notes the task screen
+    /// lists, and the question still waiting in them.
+    func taskRecord(_ task: String) async -> (detail: TaskDetailModel, question: TaskQuestion?)? {
+        guard let data = try? await rpc("task.get", ["task": task]),
+            let detail = try? TaskDetailModel.decode(data)
+        else { return nil }
+        return (detail, TaskQuestion.open(in: data))
+    }
+
+    /// One call on this runner, through a harness's stand-in when there is
+    /// one. What the phone's workspace screens call through, so a UI test can
+    /// stand them on a canned runner (`PhoneHarness`).
+    func rpc(_ method: String, _ args: [String: Any] = [:]) async throws -> Data {
+        #if DEBUG
+        if let standInCalls { return try await standInCalls(method, args) }
+        #endif
+        return try await core.call(method, args)
+    }
+
+    #if DEBUG
+    /// A canned runner's answers, for `PhoneHarness`. Nil in the app.
+    var standInCalls: ((String, [String: Any]) async throws -> Data)?
+    /// A canned runner's build, since a stand-in never reads `host`.
+    var standInBuild: DaemonBuild?
+    private var isStandIn: Bool { standInCalls != nil }
+    #else
+    private var standInBuild: DaemonBuild? { nil }
+    private var isStandIn: Bool { false }
+    #endif
 
     /// Merge whatever this runner defines into the picker.
     ///
@@ -1734,17 +1883,19 @@ final class Connection: ObservableObject {
     /// daemon says so too, and this passes it anyway rather than pretending the
     /// two calls have different shapes.
     func createWorktree(
-        repository: String, name: String, branch: String, adopt: Bool = false
+        repository: String, name: String, branch: String, adopt: Bool = false,
+        workspace: String? = nil
     ) async {
-        _ = try? await core.call(
-            "worktree.create",
-            // A shell, because a worktree with nothing running in it is a
-            // directory. This is the manual form; the quick-task flow below
-            // creates its own agent terminal and asks for none.
-            [
-                "repository": repository, "task": name, "branch": branch,
-                "terminal": "shell", "adopt": adopt,
-            ])
+        // A shell, because a worktree with nothing running in it is a
+        // directory. This is the manual form; the quick-task flow below
+        // creates its own agent terminal and asks for none.
+        var args: [String: Any] = [
+            "repository": repository, "task": name, "branch": branch,
+            "terminal": "shell", "adopt": adopt,
+        ]
+        // Claimed for the workspace whose screen it was made from (ruling 8).
+        if let workspace { args["workspace"] = workspace }
+        _ = try? await core.call("worktree.create", args)
         await refresh()
     }
 
@@ -1878,12 +2029,17 @@ final class Connection: ObservableObject {
     /// Throws instead of swallowing the error, because the caller has nothing
     /// to create a terminal in if this fails and needs to say so rather than
     /// press on silently.
-    func createWorktree(repository: String, name: String, branch: String, base: String)
-        async throws -> String
-    {
-        let data = try await core.call(
-            "worktree.create",
-            ["repository": repository, "task": name, "branch": branch, "base": base])
+    ///
+    /// `workspace` is the workspace whose screen it was made from, which it's
+    /// claimed for (ruling 8). Nil, as from anywhere else, is Main.
+    func createWorktree(
+        repository: String, name: String, branch: String, base: String, workspace: String? = nil
+    ) async throws -> String {
+        var args: [String: Any] = [
+            "repository": repository, "task": name, "branch": branch, "base": base,
+        ]
+        if let workspace { args["workspace"] = workspace }
+        let data = try await core.call("worktree.create", args)
         return try JSONDecoder().decode(IdentifiedReply.self, from: data).id
     }
 
@@ -2157,6 +2313,18 @@ final class Connection: ObservableObject {
         hasFleet = true
         fleetOnThisLink = true
         phase = .connected
+    }
+
+    /// The same, with what `PhoneHarness` also has to claim: the runner's
+    /// repositories and its build, which the workspace screens read.
+    func standIn(on fleet: Fleet, repositories: [Repository], build: DaemonBuild) {
+        standIn(on: fleet)
+        self.repositories = repositories
+        repositoryNames = Dictionary(
+            repositories.map { ($0.id, $0.displayName) }, uniquingKeysWith: { first, _ in first })
+        standInBuild = build
+        daemon = build
+        lastDaemon = build
     }
     #endif
 }

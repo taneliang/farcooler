@@ -53,6 +53,10 @@ struct FarCoolerApp: App {
             // The tunnel ceremony, on a real device, with the camera leg
             // supplied as a launch argument. Nothing but a test reaches it.
             TunnelE2EHarness()
+        } else if PhoneHarness.isRequested {
+            // The phone's stack over a canned runner: Needs You, the
+            // workspace, task and worktree screens, with nothing dialed.
+            PhoneHarness()
         } else if ShellHarness.isRequested {
             // The navigation shell, over a canned fleet. A branch here and
             // nothing else: the shell does not replace this app's navigation
@@ -170,6 +174,9 @@ struct ConnectedRoot: View {
             // everything through whichever runner started last. Idempotent, and
             // a `.task` because a background launch that never builds a scene
             // has no fleet to adopt — `WatchLinkHost.perform` says so in words.
+            // Keys renamed since the last build, moved once. See
+            // `PhoneMigration`.
+            PhoneMigration.run()
             WatchLinkHost.shared.adopt(fleet)
             // Worktrees remembered for a runner nobody has any more are
             // worktrees the grid would offer to cross to and then could not.

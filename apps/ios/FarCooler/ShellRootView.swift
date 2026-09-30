@@ -603,10 +603,16 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// is the thing this exists to prevent.
     @State var flights = 0
 
+    /// Whether a lift can reach the overview at all. False for the phone's
+    /// worktree screen, which is one worktree on a stack: the stack is the
+    /// way to the rest, and a lift there reaches only the column.
+    let reachesOverview: Bool
+
     init(
         fleet: ShellFleet,
         initial: ShellPosition,
         openingOnOverview: Bool = false,
+        reachesOverview: Bool = true,
         request: Binding<String?> = .constant(nil),
         onRest: ((ShellPosition, ShellArrival) -> Void)? = nil,
         onOverview: ((Bool) -> Void)? = nil,
@@ -620,6 +626,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         @ViewBuilder pane: @escaping (ShellPaneSlot) -> Pane
     ) {
         self.fleet = fleet
+        self.reachesOverview = reachesOverview
         self.runnerSections = runnerSections
         self.onCross = onCross
         self.onToggleHidden = onToggleHidden
@@ -915,7 +922,9 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
             // could reproduce and not explain, so the version that keeps the
             // grid off the screen when nothing is touching it is the one that
             // ships.
-            if (gestureActive && track == .bar) || lift > 0 || reveal > 0 || overview || flying {
+            if reachesOverview,
+                (gestureActive && track == .bar) || lift > 0 || reveal > 0 || overview || flying
+            {
                 ShellOverview(
                     fleet: fleet, current: position.worktree,
                     // The cell the page is going to is a HOLE while it is on

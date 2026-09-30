@@ -648,7 +648,7 @@ private let realDetailJSON = """
         TaskNoteRow(id: "n", kind: .comment, actor: actor, at: .now, body: "").byline
     }
     #expect(byline("user") == "You")
-    #expect(byline("manager") == "The manager")
+    #expect(byline("manager") == "Orchestrator")
     #expect(byline("agent:0198f2c0-0000-7000-8000-0000000000bb") == "An agent")
     // A word from a runner this app has never met. Something rather than
     // nothing, and never the word itself.
@@ -714,4 +714,14 @@ private let realDetailJSON = """
 @Test func aDetailWithNoRecordAndNoBlocksIsNotAFailure() throws {
     let detail = try TaskDetailModel.decode(Data(#"{"task":{}}"#.utf8))
     #expect(detail == .empty)
+}
+
+/// The orchestrator writes its notes as `manager`, and the product calls it
+/// the Orchestrator everywhere a person reads (spec §1). "The manager" was
+/// the one place it was called something else.
+@Test("An orchestrator's note is bylined Orchestrator")
+func anOrchestratorsNoteIsBylinedOrchestrator() {
+    let note = TaskNoteRow(id: "n", kind: .question, actor: "manager", at: .now, body: "Which?")
+    #expect(note.byline == "Orchestrator")
+    #expect(!note.byline.localizedCaseInsensitiveContains("manager"))
 }

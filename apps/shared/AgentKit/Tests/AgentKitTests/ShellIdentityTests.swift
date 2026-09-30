@@ -78,4 +78,69 @@ struct ShellIdentityTests {
             ShellIdentity.tab(runner: "RUNNER-A", worktree: "3f9a1c07", pane: "0")
                 == "RUNNER-A/3f9a1c07/0")
     }
+
+    // MARK: - What VoiceOver says (ov-55 4A.4)
+
+    /// **No VoiceOver label or hint on the phone says pane, tab or session.**
+    /// A terminal is an agent or a terminal, and the pane, the tab and the
+    /// session are this app's plumbing (spec §1). A source scrape over
+    /// `apps/ios/FarCooler`, of every `accessibilityLabel` and
+    /// `accessibilityHint` given a string: the iOS target has no unit tests
+    /// to ask the rendered tree, and this is where the words are written.
+    ///
+    /// One exemption, by name: the key row's Tab key is called "Tab", which
+    /// is what the key is, not a tab of the app.
+    @Test("No VoiceOver label says pane, tab or session")
+    func noVoiceOverLabelSaysPaneTabOrSession() throws {
+        // The scrape itself fails on a planted string, so an empty result
+        // below means the words aren't there, not that nothing was read.
+        let planted = #"x.accessibilityLabel("Close \(name) Pane").accessibilityHint("Switches tab")"#
+        #expect(Self.offenders(in: planted).count == 2)
+        #expect(Self.offenders(in: #".accessibilityLabel("Tab")"#).isEmpty)
+
+        let root = try #require(Self.repositoryRoot(), "cannot find the repository")
+        let app = root.appendingPathComponent("apps/ios/FarCooler")
+        let files = try #require(
+            FileManager.default.enumerator(at: app, includingPropertiesForKeys: nil)?
+                .compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" })
+        var scanned = 0
+        var found: [String] = []
+        for file in files {
+            guard let source = try? String(contentsOf: file, encoding: .utf8) else { continue }
+            scanned += 1
+            found += Self.offenders(in: source).map { "\(file.lastPathComponent): \($0)" }
+        }
+        #expect(scanned > 40, "the scrape read \(scanned) files")
+        #expect(found.isEmpty, "\(found)")
+    }
+
+    /// The labels and hints in `source` whose words include pane, tab or
+    /// session, except the Tab key's own name.
+    static func offenders(in source: String) -> [String] {
+        let call = try! NSRegularExpression(
+            pattern: #"accessibility(?:Label|Hint)\(\s*(?:Text\(\s*)?"((?:[^"\\]|\\.)*)""#)
+        let word = try! NSRegularExpression(
+            pattern: #"\b(?:panes?|tabs?|sessions?)\b"#, options: .caseInsensitive)
+        let range = NSRange(source.startIndex..., in: source)
+        return call.matches(in: source, range: range).compactMap { match in
+            guard let text = Range(match.range(at: 1), in: source).map({ String(source[$0]) }),
+                text != "Tab"
+            else { return nil }
+            let words = NSRange(text.startIndex..., in: text)
+            return word.firstMatch(in: text, range: words) == nil ? nil : text
+        }
+    }
+
+    private static func repositoryRoot() -> URL? {
+        var directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        while directory.path != "/" {
+            if FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent("apps/ios/generate-project.py").path)
+            {
+                return directory
+            }
+            directory = directory.deletingLastPathComponent()
+        }
+        return nil
+    }
 }

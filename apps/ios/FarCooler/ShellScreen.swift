@@ -38,6 +38,19 @@ import SwiftUI
 /// a threshold in minutes would draw half a healthy fleet as unknown.
 private let staleAfter: TimeInterval = 60 * 60
 
+/// One worktree, as the phone's stack pushes it (ov-55, spec §6.1): the
+/// shell over that worktree's panes and nothing else, with no overview.
+///
+/// Nil scope is the whole fleet, which is what the layout harnesses still
+/// mount. The app mounts the shell scoped, from `WorktreeScreen`.
+struct ShellScope: Equatable {
+    var runner: UUID
+    /// The daemon's own worktree id.
+    var worktree: String
+    /// Which pane it opens on.
+    var landing: WorktreeLanding
+}
+
 /// What one shell tab draws, and where.
 ///
 /// A side table keyed by tab id rather than something encoded IN the id.
@@ -291,7 +304,7 @@ struct ShellFleetMap {
         var tabs: [ShellTab] = [
             ShellTab(
                 id: tabID(runner: runner, worktree: worktree.id, pane: .changes),
-                title: "Diff",
+                title: "Changes",
                 mark: diffMark(inbox))
         ]
         var order: [ShellPaneRef] = [
@@ -733,6 +746,7 @@ struct ShellPaneRealView: View {
     private var paneChrome: ShellPaneChromeModifier {
         ShellPaneChromeModifier(
             title: slot.tab.title,
+            runner: ref.runner,
             connection: connection,
             pastes: pastes,
             worktree: worktree,
@@ -828,6 +842,8 @@ struct ShellScreen: View {
     /// The terminal a tapped Live Activity card asked for, held by `FleetView`
     /// until this runner's fleet has it. See `requestedTab`.
     @Binding var pendingTerminal: String?
+    /// The one worktree this shell is about, or nil for the whole fleet.
+    var scope: ShellScope? = nil
 
     @StateObject private var pastes = ImagePasteQueue()
     /// Where the shell opens. Resolved once, from the first fleet that
@@ -885,23 +901,12 @@ struct ShellScreen: View {
     /// to open.
     @State private var createdTerminal: String?
 
-    /// The board a Board row in the overview opened, if one is open.
-    ///
-    /// A sheet presented HERE for `authorizingDevice`'s reason: the overview's
-    /// own stack is unmounted the moment the grid stops showing.
-    @State private var boardSheet: BoardSheet?
-    /// The agent a board card asked for, until the board has gone.
-    ///
-    /// Held while the sheet closes and handed to `boardTerminal` by its
-    /// `onDismiss`, so the page grows out of the worktree's card in a grid you
-    /// can see rather than behind a sheet still on its way down — the Mac's
-    /// "close the board, then select" in the phone's own motion.
-    @State private var boardJump: String?
-    /// A terminal a board card asked for, until the shell has landed on it.
+    /// A terminal the overview's orchestrator row asked for, until the shell
+    /// has landed on it.
     ///
     /// The third asker `requestedTab` resolves, and treated like
-    /// `createdTerminal` rather than like a deep link: tapping Agent on a card
-    /// is somebody choosing that tab, and the worktree should remember it.
+    /// `createdTerminal` rather than like a deep link: tapping the row is
+    /// somebody choosing that tab, and the worktree should remember it.
     @State private var boardTerminal: String?
 
     /// A worktree on another runner whose card was tapped, until the shell
@@ -958,7 +963,19 @@ struct ShellScreen: View {
     @Environment(\.scenePhase) private var scenePhase
 
     /// The whole fleet, in the shell's vocabulary, rebuilt every poll.
-    private var map: ShellFleetMap { ShellFleetMap.of(fleet) }
+    private var map: ShellFleetMap {
+        guard scope != nil else { return ShellFleetMap.of(fleet) }
+        return ShellFleetMap.of(scoped)
+    }
+
+    /// The store's entries this shell draws: every one, or the one worktree
+    /// it's scoped to.
+    private var scoped: [FleetEntry] {
+        guard let scope else { return fleet.entries }
+        return fleet.entries.filter {
+            $0.host.id == scope.runner && $0.worktree.id == scope.worktree
+        }
+    }
 
     // MARK: - Which runner a thing is on
 
@@ -1009,7 +1026,11 @@ struct ShellScreen: View {
         Group {
             switch opening {
             case .pane(let initial):
-                shell(map, from: initial)
+                if scope != nil, openableCount == 0 {
+                    worktreeGone
+                } else {
+                    shell(map, from: initial)
+                }
             case .waiting:
                 // Before the first fleet there is no position to open on, and
                 // an empty shell would be a bar naming a worktree that does
@@ -1021,7 +1042,7 @@ struct ShellScreen: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Themes.shared.current.backgroundColor.ignoresSafeArea())
             case .noWorktrees:
-                bringUp
+                if scope != nil { worktreeGone } else { bringUp }
             }
         }
         .onAppear {
@@ -1145,43 +1166,6 @@ struct ShellScreen: View {
             NavigationStack { SettingsView(connection: resting, runners: hosts) }
         }
         .sheet(isPresented: $showAdd) { AddView(runners: hosts) }
-        // A repository's board, from its Board row. Going to an agent closes
-        // it first and lands after — see `boardJump`.
-        .sheet(item: $boardSheet, onDismiss: landOnBoardJump) { sheet in
-            if let connection = fleet.runners.first(where: {
-                $0.host.id.uuidString == sheet.runner
-            })?.connection {
-                BoardSheetHost(
-                    sheet: sheet, connection: connection,
-                    onJump: { agent in
-                        // Resolved BEFORE the board closes: a pane that has
-                        // exited, or sits in a worktree the shell does not
-                        // draw, is said on the board rather than closed onto.
-                        guard boardCanLand(on: agent.id) else {
-                            return TaskAgentLink.paneHasClosed
-                        }
-                        boardJump = agent.id
-                        boardSheet = nil
-                        return nil
-                    },
-                    onDone: { boardSheet = nil })
-            } else {
-                // The runner was removed while its board was open. A sheet
-                // with no body would have no way off it.
-                NavigationStack {
-                    ContentUnavailableView {
-                        Label("Runner Removed", systemImage: "server.rack")
-                    } description: {
-                        Text("This board’s runner isn’t in Far Cooler anymore.")
-                    }
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Done") { boardSheet = nil }
-                        }
-                    }
-                }
-            }
-        }
         // The ceremony a card's menu starts, run from the screen rather than
         // from the card. Shared with the pane's own bar — see
         // `RemoveWorktreeFlow`.
@@ -1356,7 +1340,7 @@ struct ShellScreen: View {
         } label: {
             Image(systemName: "sparkle")
         }
-        .accessibilityLabel("Quick Task")
+        .accessibilityLabel("New Worktree")
 
         Button {
             startingOn = nil
@@ -1364,7 +1348,7 @@ struct ShellScreen: View {
         } label: {
             Image(systemName: "plus")
         }
-        .accessibilityLabel("New Worktree")
+        .accessibilityLabel("New Worktree from a Branch")
     }
 
     /// The runners this app is CURRENTLY talking to.
@@ -1468,13 +1452,13 @@ struct ShellScreen: View {
         else { return [] }
         let connection = runner.connection
         return [
-            ShellHeaderAction(title: "New Worktree…", systemImage: "plus") {
-                startingOn = connection
-                showNewWorktree = true
-            },
-            ShellHeaderAction(title: "Quick Task…", systemImage: "sparkle") {
+            ShellHeaderAction(title: "New Worktree…", systemImage: "sparkle") {
                 startingOn = connection
                 showQuickTask = true
+            },
+            ShellHeaderAction(title: "From a Branch…", systemImage: "plus") {
+                startingOn = connection
+                showNewWorktree = true
             },
             ShellHeaderAction(title: "Runner Settings…", systemImage: "slider.horizontal.3") {
                 runnerSettings = RunnerSheet(host: runner.host, connection: connection)
@@ -1551,7 +1535,11 @@ struct ShellScreen: View {
     /// entry and gives each of them a Diff tab, so a worktree in the fleet is
     /// always a position in the shell.
     private var openableCount: Int {
-        fleet.runners.reduce(0) { $0 + $1.connection.fleet.worktrees.count }
+        if let scope {
+            return fleet.connection(for: scope.runner)?.fleet.worktrees
+                .contains { $0.id == scope.worktree } == true ? 1 : 0
+        }
+        return fleet.runners.reduce(0) { $0 + $1.connection.fleet.worktrees.count }
     }
 
     /// The same question as a flag, for the one place that only needs the edge.
@@ -1645,11 +1633,27 @@ struct ShellScreen: View {
         #endif
     }
 
+    /// A scoped shell whose worktree has gone: removed, or its runner no
+    /// longer lists it. Back is the way out.
+    private var worktreeGone: some View {
+        NavigationStack {
+            ContentUnavailableView {
+                Label("Worktree Gone", systemImage: "folder.badge.questionmark")
+            } description: {
+                Text("This worktree isn’t on its runner anymore.")
+            }
+            .modifier(PhoneBackItem())
+        }
+    }
+
     private func shell(_ map: ShellFleetMap, from initial: ShellPosition) -> some View {
         ShellRootView(
             fleet: map.fleet,
             initial: initial,
             openingOnOverview: Self.opensOnTheGrid,
+            // One worktree has nothing to lift into: the stack under it is
+            // the way to the rest.
+            reachesOverview: scope == nil,
             // A tapped Live Activity card, resolved against the fleet this
             // very body pass was built from. See `requestedTab`.
             request: Binding(
@@ -1704,11 +1708,8 @@ struct ShellScreen: View {
             // `ShellOverviewRunners`.
             runnerSections: ShellOverviewRunners(
                 live: liveLabels,
-                boards: boardRows,
-                onOpenBoard: { label, row in
-                    boardSheet = BoardSheet(
-                        runner: label.id, workspace: row.workspace, name: row.name)
-                },
+                // No Board rows: a board is a workspace's segment on the
+                // phone's stack now (ov-55), not a sheet over this grid.
                 headings: { map.headings[$0] ?? [] },
                 // The orchestrator's pane, landed on as a board card's Agent
                 // button lands: somebody chose that tab, and its worktree
@@ -1813,14 +1814,14 @@ struct ShellScreen: View {
     /// resolved by `requestedTab` like a deep link, the moment the new runner's
     /// fleet has the worktree.
     ///
-    /// `UserDefaults` as well as `@State` for the note: an app killed between
-    /// the tap and the answer comes back without this screen's state, and
-    /// `seed` still reads the note back for that launch. Spent when the
-    /// request is taken, so it cannot steer a later launch.
+    /// **No note outlives the process any more (ov-55).** It used to be kept
+    /// in `UserDefaults` too, so a relaunch landed on it; the app now opens
+    /// on Needs You and a crossing happens only in the whole-fleet shell a
+    /// harness mounts, so the note retired and `PhoneLaunch` decides where a
+    /// launch lands.
     private func select(runner: String, landingOn worktree: String) {
         guard let picked = hosts.hosts.first(where: { $0.id.uuidString == runner })
         else { return }
-        UserDefaults.standard.set("\(runner)/\(worktree)", forKey: Self.crossingKey)
         crossing = ShellCrossing(runner: runner, worktree: worktree)
         hosts.selected = picked
     }
@@ -1887,10 +1888,9 @@ struct ShellScreen: View {
         if !keeps { spendCrossing() }
     }
 
-    /// Forget a crossing, here and in the note a relaunch would read.
+    /// Forget a crossing.
     private func spendCrossing() {
         crossing = nil
-        UserDefaults.standard.removeObject(forKey: Self.crossingKey)
     }
 
     /// Each runner and what it has said, in `report(_:)`'s vocabulary, for
@@ -1926,7 +1926,8 @@ struct ShellScreen: View {
         hosts.selected = host
     }
 
-    /// Which worktree a crossing was aimed at, spelled `runner/worktree`.
+    /// Where a crossing's note was kept before it retired (ov-55). Removed
+    /// once by `PhoneMigration`, so an old note never lingers.
     static let crossingKey = "shell.crossingTo"
 
 
@@ -1946,22 +1947,24 @@ struct ShellScreen: View {
         guard initial == nil else { return }
         let map = self.map
         guard !map.fleet.isEmpty, let at = map.fleet.first else { return }
-        // A crossing names a worktree, so a crossing lands on it. Spent
-        // whether or not it resolved: a note left standing would steer the
-        // next launch of a runner somebody reached the ordinary way, which is
-        // the self-fulfilling memory `remember(_:leaving:tab:)` refuses for
-        // the same reason one paragraph down.
-        let worktree = takeCrossing().flatMap { wanted in
-            // Both halves. A crossing note names a runner AND a worktree —
-            // that is what `crossingKey` writes — and honoring only the second
-            // over a merged fleet would land on whichever runner's copy the
-            // merge put first.
-            map.fleet.worktrees.indices.first {
-                let entry = map.entries[map.fleet.worktrees[$0].id]
-                return entry?.worktree.id == wanted.worktree
-                    && entry?.host.id.uuidString == wanted.runner
+        // One worktree, on the pane it was opened for.
+        if let scope {
+            let worktree = map.fleet.worktrees[0]
+            var tab = worktree.resumeTab
+            switch scope.landing {
+            case .resume: break
+            case .changes: tab = 0
+            case .terminal(let id):
+                if let wanted = map.tabOfTerminal[id],
+                    let index = worktree.tabs.firstIndex(where: { $0.id == wanted })
+                {
+                    tab = index
+                }
             }
-        } ?? onSelectedRunner(in: map) ?? at.worktree
+            initial = ShellPosition(worktree: 0, tab: tab)
+            return
+        }
+        let worktree = onSelectedRunner(in: map) ?? at.worktree
         initial = ShellPosition(
             worktree: worktree, tab: map.fleet.worktrees[worktree].resumeTab)
     }
@@ -1986,25 +1989,6 @@ struct ShellScreen: View {
             map.entries[map.fleet.worktrees[$0].id]?.host.id == selected
         }
     }
-
-    /// The worktree a crossing was aimed at, if it was aimed at THIS runner.
-    ///
-    /// Checked against the runner as well as read, because the note outlives
-    /// the tap: an app killed between the alert and the connection would come
-    /// back with a note about a runner somebody may no longer be on.
-    private func takeCrossing() -> (runner: String, worktree: String)? {
-        guard let note = UserDefaults.standard.string(forKey: Self.crossingKey) else { return nil }
-        UserDefaults.standard.removeObject(forKey: Self.crossingKey)
-        let parts = note.split(separator: "/", maxSplits: 1)
-        // Checked against the runners that are LIVE rather than against the one
-        // this screen is on, because there is no longer one it is on. An app
-        // killed between the tap and the connection comes back with a note
-        // about a runner it may no longer be talking to, and a note that names
-        // nothing here is spent rather than honored.
-        guard parts.count == 2, liveRunners.contains(String(parts[0])) else { return nil }
-        return (String(parts[0]), String(parts[1]))
-    }
-
 
     // MARK: - Remembering where you were
 
@@ -2218,86 +2202,12 @@ struct ShellScreen: View {
     }
 }
 
-extension ShellScreen {
-    /// A live runner's Board rows. `RunnerBoards.rows` decides them; this
-    /// only hands it what the runner's connection holds.
-    fileprivate func boardRows(_ label: ShellRunnerLabel) -> [RunnerBoardRow] {
-        guard
-            let connection = fleet.runners.first(where: {
-                $0.host.id.uuidString == label.id
-            })?.connection
-        else { return [] }
-        return RunnerBoards.rows(
-            boards: connection.boardList,
-            names: Dictionary(
-                connection.repositories.map { ($0.id, $0.displayName) },
-                uniquingKeysWith: { first, _ in first }),
-            models: connection.boards,
-            panes: connection.fleet.worktrees.flatMap(\.terminals),
-            build: connection.daemon,
-            lastKnownBuild: connection.lastDaemon,
-            connected: connection.isAnswering)
-    }
-
-    /// Whether a board's Agent button has a pane to land on. See `onJump` on
-    /// the sheet, and `ShellFleet.landing` for the decision.
-    ///
-    /// No "hidden worktree" case: the shell draws hidden worktrees too (the
-    /// overview's Hidden section), so a hidden worktree's pane has a tab and
-    /// lands. The only pane with no tab is one that is gone.
-    fileprivate func boardCanLand(on terminal: String) -> Bool {
-        tab(forTerminal: terminal, in: map) != nil
-    }
-
-    /// Hand the agent a card asked for to the shell, now that the board is
-    /// down.
-    ///
-    /// Spent a second later if the shell never took it — the pane went away
-    /// between the tap and the landing — so a request nobody could honor does
-    /// not stand waiting for a tab that may appear much later and pull the
-    /// screen to it.
-    fileprivate func landOnBoardJump() {
-        guard let id = boardJump else { return }
-        boardJump = nil
-        boardTerminal = id
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            if boardTerminal == id { boardTerminal = nil }
-        }
-    }
-}
-
-/// One board sheet, watching the connection it reads from, so a board that
-/// moves while it is open redraws — a `task` notice re-reads it, and the
-/// fleet's panes are what the Agent buttons are drawn from.
-private struct BoardSheetHost: View {
-    let sheet: BoardSheet
-    @ObservedObject var connection: Connection
-    let onJump: (BoardAgent) -> String?
-    let onDone: () -> Void
-
-    var body: some View {
-        TaskBoardView(
-            name: sheet.name,
-            board: connection.boards[sheet.workspace.id],
-            unread: connection.unreadBoards.contains(sheet.workspace.id),
-            speaksOfAgents: TaskAgentLink.speaksOfAgents(
-                connected: connection.isAnswering, build: connection.daemon),
-            agents: agents(for:),
-            onJump: onJump,
-            onRefresh: { await connection.readBoard(sheet.workspace) },
-            onDone: onDone)
-            // Read on opening, whatever was last read: the row that opened
-            // this may be showing a count from before the last reconnect.
-            // While it is open, a reconnect's sweep reads it again, and a
-            // notice for this workspace does; see `Connection.loadBoards`.
-            .task { await connection.readBoard(sheet.workspace) }
-    }
-
+extension Connection {
     /// The panes working `row` on this runner, in fleet order, each named
     /// the way a menu item needs: the pane, then the worktree it is in.
-    private func agents(for row: TaskRow) -> [BoardAgent] {
+    func boardAgents(for row: TaskRow) -> [BoardAgent] {
         let now = Date()
-        let found = connection.fleet.worktrees.flatMap { worktree in
+        let found = fleet.worktrees.flatMap { worktree in
             let ordinals = worktree.ordinals()
             return row.livePanes(in: worktree.terminals).map { terminal in
                 (

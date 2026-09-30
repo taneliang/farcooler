@@ -2193,3 +2193,367 @@ extension RunnerDirectory {
         }
     }
 }
+
+// MARK: - The phone's stack (ov-55 4A)
+//
+// The iPhone opens on Needs You, and everything else is pushed over it: a
+// workspace, then a task, then the worktree an agent runs in (spec §6.1). The
+// shell above is still what a worktree looks like once you're in one; these are
+// the rules for how you get there, kept here for this file's reason: the iOS
+// target has no unit tests, and a stack that lands on the wrong screen looks
+// fine in a screenshot.
+
+/// A workspace, as the phone's stack names it: the runner it's on, and its id.
+///
+/// A runner without `workstreams` has one implicit workspace per repository,
+/// whose id is the repository's (`WorkspaceSummary.implicit`), so this names
+/// every board a phone can show.
+struct PhoneWorkspace: Hashable, Codable, Sendable {
+    var runner: String
+    var workspace: String
+
+    init(runner: String, workspace: String) {
+        self.runner = runner
+        self.workspace = workspace
+    }
+
+    /// `runner|workspace`: how `PhoneLaunch.lastWorkspaceKey` keeps it.
+    var stored: String { "\(runner)|\(workspace)" }
+
+    init?(stored: String) {
+        let parts = stored.split(separator: "|", maxSplits: 1).map(String.init)
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
+        self.init(runner: parts[0], workspace: parts[1])
+    }
+}
+
+/// Which pane a worktree screen opens on.
+enum WorktreeLanding: Hashable, Codable, Sendable {
+    /// The one it would open on anyway: the last chosen, else
+    /// `PaneFocus.rule`'s answer.
+    case resume
+    /// Its Changes.
+    case changes
+    /// This terminal.
+    case terminal(String)
+}
+
+/// One screen pushed over Needs You.
+enum PhoneRoute: Hashable, Codable, Sendable {
+    case workspace(PhoneWorkspace)
+    /// A task on that workspace's board, by the task's id.
+    case task(PhoneWorkspace, task: String)
+    /// One worktree, scoped: its panes and nothing else. By the runner's id
+    /// and the daemon's own worktree id.
+    case worktree(runner: String, worktree: String, landing: WorktreeLanding)
+}
+
+/// The three things a workspace screen shows, one at a time.
+enum WorkspaceSegment: String, CaseIterable, Hashable, Sendable {
+    case orchestrator, board, worktrees
+
+    var title: String {
+        switch self {
+        case .orchestrator: "Orchestrator"
+        case .board: "Board"
+        case .worktrees: "Worktrees"
+        }
+    }
+
+    /// The segments a workspace has. An implicit one, on a runner without
+    /// workspaces, can't have an orchestrator, so it has no such segment.
+    static func offered(implicit: Bool) -> [WorkspaceSegment] {
+        implicit ? [.board, .worktrees] : allCases
+    }
+
+    /// Where one workspace's choice is kept on this device.
+    static func key(_ workspace: PhoneWorkspace) -> String {
+        "workspace.segment.\(workspace.runner).\(workspace.workspace)"
+    }
+
+    /// The segment last chosen for `workspace`, or its first when none was,
+    /// or when the one chosen isn't offered any more.
+    static func remembered(
+        _ workspace: PhoneWorkspace, implicit: Bool, in defaults: UserDefaults = .standard
+    ) -> WorkspaceSegment {
+        let offered = offered(implicit: implicit)
+        let chosen = defaults.string(forKey: key(workspace)).flatMap(WorkspaceSegment.init(rawValue:))
+        if let chosen, offered.contains(chosen) { return chosen }
+        return offered[0]
+    }
+
+    func remember(for workspace: PhoneWorkspace, in defaults: UserDefaults = .standard) {
+        defaults.set(rawValue, forKey: Self.key(workspace))
+    }
+}
+
+/// Where a stack of screens opens, and where a link lands.
+enum PhoneLaunch {
+    /// The last workspace somebody was in, as `PhoneWorkspace.stored`.
+    static let lastWorkspaceKey = "workspace.last"
+
+    /// The stack a launch opens with, over the Needs You root (ruling 4).
+    ///
+    /// Needs You itself when anything is in it: the front door is the inbox.
+    /// Otherwise the last workspace, pushed so Back still reaches Needs You,
+    /// because an empty inbox is a screen with nothing to do. Nothing is
+    /// pushed for a workspace that's gone, or when none was ever opened.
+    static func stack(
+        itemCount: Int, last: PhoneWorkspace?, exists: (PhoneWorkspace) -> Bool
+    ) -> [PhoneRoute] {
+        guard itemCount == 0, let last, exists(last) else { return [] }
+        return [.workspace(last)]
+    }
+
+    /// What one runner has said about what needs you, for deciding a launch.
+    enum Reading: Equatable, Sendable {
+        /// Still being asked.
+        case waiting
+        /// Answered: its own list, or one derived from an older runner's fleet.
+        case read
+        /// Not answering, and not about to.
+        case unreachable
+    }
+
+    /// Whether a launch can decide yet: every runner has either answered or
+    /// isn't going to. Deciding before would push the last workspace over
+    /// an inbox a second runner was about to fill.
+    static func canDecide(_ runners: [Reading]) -> Bool {
+        !runners.isEmpty && !runners.contains(.waiting)
+    }
+
+    /// How long a launch waits for every runner before it gives up and
+    /// stays on Needs You, as Android's `LaunchRule` does. A last workspace
+    /// pushed a minute after launch would land over whatever somebody had
+    /// started reading.
+    static let decideWithin: TimeInterval = 10
+
+    /// What a launch does now.
+    enum Decision: Equatable, Sendable {
+        /// Not yet: a runner is still being asked.
+        case wait
+        /// Nothing, for good: somebody moved first, a link is landing, or
+        /// the runners took too long.
+        case stay
+        /// Open these screens over Needs You, and decide nothing again.
+        case open([PhoneRoute])
+    }
+
+    /// Where a launch opens, `elapsed` seconds after it began (ruling 4).
+    ///
+    /// Decided once. A stack somebody already moved, or a notification's
+    /// link, wins outright. Past `decideWithin` with a runner still silent,
+    /// the launch stays where it is rather than deciding late.
+    static func decide(
+        _ runners: [Reading], elapsed: TimeInterval, moved: Bool, linking: Bool,
+        itemCount: Int, last: PhoneWorkspace?, exists: (PhoneWorkspace) -> Bool
+    ) -> Decision {
+        if moved || linking { return .stay }
+        guard canDecide(runners) else { return elapsed >= decideWithin ? .stay : .wait }
+        return .open(stack(itemCount: itemCount, last: last, exists: exists))
+    }
+}
+
+/// A deep link, resolved: the screens to push, and the segment the
+/// workspace screen should show when it's the top of them.
+struct PhoneLink: Equatable, Sendable {
+    var stack: [PhoneRoute]
+    var segment: WorkspaceSegment?
+}
+
+extension Fleet {
+    /// The workspace a terminal is counted under: its own, else its
+    /// worktree's owner, else, on a runner without workspaces, its
+    /// repository's implicit one. Nil for an unclaimed worktree's shell.
+    func workspace(of terminal: Terminal, in worktree: Worktree) -> String? {
+        if let own = terminal.workspace, !own.isEmpty { return own }
+        if let owner = worktree.workspace, !owner.isEmpty { return owner }
+        if workspaces == nil { return worktree.repository }
+        return nil
+    }
+
+    /// Where `farcooler://terminal/<id>` lands on a phone (spec §6.1): its
+    /// workspace, then its task when the pane has one, then the pane, so
+    /// Back walks up that chain. An orchestrator's pane is its workspace's
+    /// Orchestrator segment. Nil when this runner has no such terminal.
+    ///
+    /// The task is `TaskLink`'s: the one the pane's header names.
+    func phoneLink(toTerminal id: String, runner: String) -> PhoneLink? {
+        for worktree in worktrees {
+            guard let terminal = worktree.terminals.first(where: { $0.id == id }) else { continue }
+            let pane = PhoneRoute.worktree(
+                runner: runner, worktree: worktree.id, landing: .terminal(id))
+            guard let workspace = workspace(of: terminal, in: worktree) else {
+                return PhoneLink(stack: [pane], segment: nil)
+            }
+            let place = PhoneWorkspace(runner: runner, workspace: workspace)
+            if terminal.isOrchestrator {
+                return PhoneLink(stack: [.workspace(place)], segment: .orchestrator)
+            }
+            var stack: [PhoneRoute] = [.workspace(place)]
+            if let task = TaskLink.task(of: terminal, in: worktree) {
+                stack.append(.task(place, task: task))
+            }
+            stack.append(pane)
+            return PhoneLink(stack: stack, segment: nil)
+        }
+        return nil
+    }
+}
+
+/// What a Needs You row says when an answer from it didn't land (spec §2.5).
+enum PhoneAnswer {
+    /// The sentence for a refusal: by the runner's `what` where it named
+    /// one, else by its code. `agent` is who the answer was for (`claude`).
+    ///
+    /// `not_held` is an ask nothing holds any more: someone got there first.
+    /// `not_delivered` is one still held that the agent didn't take, so
+    /// trying again can work. Both are one code on the wire, which is why
+    /// the code alone can't choose between them.
+    static func refusal(word: String?, what: String?, agent: String) -> String {
+        switch what {
+        case "not_held": return "Someone already answered this."
+        case "not_delivered": return "Couldn’t reach \(agent). Try again."
+        default: break
+        }
+        guard let word, !word.isEmpty else {
+            return "Your answer may not have reached the runner. Try again."
+        }
+        return RunnerRefusal.trouble(
+            forWord: word, message: "", after: "The runner didn’t take your answer."
+        ).sentence
+    }
+}
+
+// MARK: - Needs You's Workspaces list
+
+/// One repository's rows in Needs You's Workspaces list, on one runner: its
+/// workspaces, then the worktrees none of them owns, then the hidden ones.
+struct PhoneRepositorySection: Identifiable, Equatable, Sendable {
+    var runner: String
+    var repository: String
+    var workspaces: [PhoneWorkspaceRow]
+    /// Worktrees no workspace owns, shown and not hidden, in runner order.
+    var unclaimed: [String]
+    /// Items counted under no workspace in this repository: the Unclaimed
+    /// group's count.
+    var unclaimedCount: Int
+    /// Hidden worktrees, whoever owns them.
+    var hidden: [String]
+
+    var id: String { "\(runner)/\(repository)" }
+}
+
+/// One workspace's row: its name, its orchestrator, and what needs you in it.
+struct PhoneWorkspaceRow: Identifiable, Equatable, Sendable {
+    var place: PhoneWorkspace
+    var name: String
+    /// A repository's one board on a runner without workspaces.
+    var isImplicit: Bool
+    /// The live orchestrator's terminal id, or nil for none.
+    var orchestrator: String?
+    /// Its items: the workspace's needs-you count.
+    var count: Int
+    /// The orchestrator finished a turn nobody has looked at yet: a dot, not
+    /// an item (ruling 10).
+    var unread: Bool
+
+    var id: String { place.stored }
+}
+
+extension Fleet {
+    /// Needs You's Workspaces list for this runner's fleet (spec §6.1).
+    ///
+    /// Every workspace is a row, empty or not, and so is a repository's
+    /// implicit one on a runner without workspaces: an empty board has to be
+    /// reachable (spec §8). `names` are the repositories' display names, by
+    /// id, for the implicit rows. `items` are this runner's.
+    ///
+    /// An item on a runner without workspaces names no workspace, so it's
+    /// counted under its repository's implicit one, which is where its
+    /// worktrees are.
+    func phoneSections(
+        runner: String, names: [String: String], items: [NeedsYouItem]
+    ) -> [PhoneRepositorySection] {
+        let terminals = Dictionary(
+            worktrees.flatMap(\.terminals).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let hiddenIDs = Set(worktrees.filter(\.isHidden).map(\.id))
+        return repositoryGroups().map { group in
+            let rows = group.workspaces.map { owned in
+                let workspace = owned.workspace
+                let count = items.filter { item in
+                    if workspace.isImplicit {
+                        return item.workspaceID == workspace.id
+                            || (item.workspaceID == nil && item.repositoryID == group.repository)
+                    }
+                    return item.workspaceID == workspace.id
+                }.count
+                let orchestrator = owned.orchestrator.flatMap { terminals[$0] }
+                return PhoneWorkspaceRow(
+                    place: PhoneWorkspace(runner: runner, workspace: workspace.id),
+                    name: workspace.isImplicit
+                        ? (names[group.repository] ?? workspace.name) : workspace.name,
+                    isImplicit: workspace.isImplicit,
+                    orchestrator: orchestrator?.id,
+                    count: count,
+                    unread: orchestrator?.agent == .done)
+            }
+            let implicit = group.workspaces.contains { $0.workspace.isImplicit }
+            return PhoneRepositorySection(
+                runner: runner,
+                repository: group.repository,
+                workspaces: rows,
+                unclaimed: group.unclaimed.filter { !hiddenIDs.contains($0) },
+                unclaimedCount: implicit
+                    ? 0 : items.unclaimedCount(inRepository: group.repository),
+                hidden: worktrees.filter {
+                    $0.isHidden && ($0.repository ?? "") == group.repository
+                }.map(\.id))
+        }
+    }
+}
+
+/// What Needs You says under "Nothing needs you" when it can't be sure.
+enum PhoneInbox {
+    /// Every item Needs You shows, across runners: each runner's own list
+    /// where it has one, and for a runner whose list isn't read yet (still
+    /// coming, or the read failed), the blocked agents its fleet shows, as
+    /// derived items.
+    ///
+    /// The glances' rule (`FleetPublication.merged`), so the app and the
+    /// widget, the watch and the Live Activity count the same thing while a
+    /// list is on its way, instead of the app saying nothing and the widget
+    /// counting that runner's blocked agents.
+    ///
+    /// `unread` is by runner id, each runner's panes (`Fleet.olderPanes`).
+    static func shown(
+        lists: [String: [NeedsYouItem]], unread: [String: [NeedsYou.OlderPane]]
+    ) -> [NeedsYouItem] {
+        var all = lists
+        for (runner, panes) in unread where all[runner] == nil {
+            all[runner] = NeedsYou.derived(fromTerminals: panes)
+        }
+        return NeedsYou.merge(all)
+    }
+
+    /// Nil when every runner answered. Otherwise names the ones that didn't,
+    /// since their items aren't in the list: "Nothing needs you" about a
+    /// runner nobody could ask would be a claim nobody made.
+    static func caveat(unanswered: [String]) -> String? {
+        switch unanswered.count {
+        case 0: return nil
+        case 1: return "\(unanswered[0]) isn’t answering, so this may not be everything."
+        default:
+            return "\(unanswered.count) runners aren’t answering, so this may not be everything."
+        }
+    }
+}
+
+extension DaemonBuild {
+    /// Whether this phone may act on the runner, not only read it: answer an
+    /// ask or a decision, or start, restart or replace an orchestrator. A
+    /// Read grant sees the items and the panes and does none of these (spec
+    /// §2.5), as Android decides (`grantedScope != "read"`). A runner that
+    /// hasn't said is not "read", so its phone keeps what it offered before.
+    var mayAct: Bool { grantedScope != "read" }
+}

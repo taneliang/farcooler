@@ -1,23 +1,20 @@
 import SwiftUI
 
-// One repository's board, on a phone: read it, and go to the agent on a card.
+// A workspace's board, on a phone: the list form, in-line on the workspace
+// screen's Board segment (ov-55, spec §5), and the card rows it and the task
+// screen share.
 //
-// Opened from a Board row at the top of a runner's section in the shell
-// overview (`ShellOverview.boardRow`), and presented as a sheet by
-// `ShellScreen` rather than pushed into the overview's own stack — the
-// overview is unmounted the moment the grid stops showing, so a push into it
-// is a push whose stack can vanish under it (see `authorizingDevice` there).
-//
-// A list grouped by status rather than the Mac's seven columns: seven columns
-// side by side do not fit a phone, and the order is the Mac's — Needs Decision
+// A list grouped by status rather than the Mac's kanban: seven columns side
+// by side do not fit a phone, and the order is the Mac's — Needs Decision
 // first, because it is the one status waiting on the person reading. Every
 // sentence and every rule on a card is AgentKit's (`TaskBoardModel`,
-// `TaskBoardAgents`, `RunnerBoards`), so this phone and the Mac say the same
+// `TaskBoardAgents`, `BoardForm`), so this phone and the Mac say the same
 // thing about the same card. This file draws.
 //
-// Tapping a card pushes it (`TaskCardDetail`): intent, every acceptance line
-// with its tick, and the same Agent control. Read-only in this phase. Moving a card and answering a question are writes
-// with their own rules, and they come with the screen that makes them.
+// It used to be a sheet over the shell's overview, and an Agent button closed
+// it to land on the pane. A card now pushes its task (`TaskScreen`), and an
+// agent pushes over that, so the board is never covered or dismissed by a
+// jump (spec §6.3).
 
 /// A pane a card can go to, as the board draws it.
 struct BoardAgent: Identifiable, Equatable {
@@ -31,124 +28,68 @@ struct BoardAgent: Identifiable, Equatable {
     let mark: GlanceMark
 }
 
-/// What a board sheet is about, and where it came from.
+/// A workspace's board, in-line on its screen: every status, Needs Decision
+/// first, each a section with its count (spec §5's list form).
 ///
-/// A WORKSPACE's board: a repository has one per workspace, and the sheet is
-/// read and refreshed by the workspace it names (`Connection.readBoard`). On
-/// a runner without workspaces that is the repository's implicit one, whose
-/// board is the whole repository's.
-struct BoardSheet: Identifiable {
-    let runner: String
-    let workspace: WorkspaceSummary
-    let name: String
-    var id: String { "\(runner)/\(workspace.id)" }
-}
-
-struct TaskBoardView: View {
-    let name: String
+/// An empty status is a header reading "Backlog 0" that doesn't open: a list
+/// that dropped it said nothing about what isn't there, and moved every
+/// heading under it when a task was filed. Done and Canceled start
+/// collapsed, and what's collapsed is remembered per workspace on this
+/// device (`BoardForm.collapsed`). A phone is always the list.
+struct WorkspaceBoardList: View {
     /// The board as last read, or nil when it has never been read.
     let board: TaskBoardModel?
-    /// Whether the last read failed. With a board in hand, that board is still
-    /// drawn and a line says it may be behind.
+    /// Whether the last read failed. With a board in hand, that board is
+    /// still drawn and a line says it may be behind.
     let unread: Bool
+    /// The runner and workspace, for where the collapsed sections are kept.
+    let place: PhoneWorkspace
     /// Whether this runner can be believed about its panes right now — see
     /// `TaskAgentLink.speaksOfAgents`. False draws no agent control at all.
     let speaksOfAgents: Bool
     /// The panes working a card, in fleet order.
     let agents: (TaskRow) -> [BoardAgent]
-    /// Go to `agent`. Nil when going — the caller closes the board and lands
-    /// — or the sentence to say instead when there is nowhere to land.
-    let onJump: (BoardAgent) -> String?
+    let onOpen: (TaskRow) -> Void
+    let onJump: (BoardAgent) -> Void
     let onRefresh: () async -> Void
-    let onDone: () -> Void
 
-    /// The card pushed over the list, by task id. An id and not a row, so the
-    /// card that is open redraws from the board as it is now when a notice
-    /// re-reads it — and closes itself if the task leaves the board.
-    @State private var path: [String] = []
-    /// Why the last Agent tap went nowhere, shown at the foot of the board
-    /// for a few seconds. See `jump`.
-    @State private var notice: String?
+    @State private var collapsed: Set<TaskStatus>
+
+    init(
+        board: TaskBoardModel?, unread: Bool, place: PhoneWorkspace, speaksOfAgents: Bool,
+        agents: @escaping (TaskRow) -> [BoardAgent], onOpen: @escaping (TaskRow) -> Void,
+        onJump: @escaping (BoardAgent) -> Void, onRefresh: @escaping () async -> Void
+    ) {
+        self.board = board
+        self.unread = unread
+        self.place = place
+        self.speaksOfAgents = speaksOfAgents
+        self.agents = agents
+        self.onOpen = onOpen
+        self.onJump = onJump
+        self.onRefresh = onRefresh
+        _collapsed = State(
+            initialValue: BoardForm.collapsed(host: place.runner, workspace: place.workspace))
+    }
 
     var body: some View {
-        NavigationStack(path: $path) {
-            content
-                .navigationTitle(name)
-                .navigationBarTitleDisplayMode(.inline)
-                // The one count worth putting at the top, in the Mac's words.
-                .navigationSubtitle(board?.waitingSentence ?? "")
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done", action: onDone)
-                            .accessibilityIdentifier("board-done")
-                    }
-                }
-                .refreshable { await onRefresh() }
-                .navigationDestination(for: String.self) { id in
-                    if let row = board?.rows.first(where: { $0.id == id }) {
-                        let live = speaksOfAgents ? agents(row) : []
-                        TaskCardDetail(
-                            row: row, live: live,
-                            presence: row.agentPresence(
-                                livePanes: live.count, runnerRecordsTasks: speaksOfAgents),
-                            onJump: jump)
-                    } else {
-                        ContentUnavailableView {
-                            Label("Not on This Board", systemImage: "checklist")
-                        } description: {
-                            Text("This task isn’t on the board anymore.")
-                        }
-                    }
-                }
-        }
-        .overlay(alignment: .bottom) {
-            if let notice {
-                Text(notice)
-                    .font(.subheadline)
-                    .padding(.horizontal, PaneMetrics.edge)
-                    .padding(.vertical, PaneMetrics.step)
-                    .background(.regularMaterial, in: Capsule())
-                    .padding(.bottom, PaneMetrics.edge)
-                    .transition(.opacity)
-                    .accessibilityIdentifier("board-notice")
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("board")
-    }
-
-    /// An Agent tap: go, or say why not and stay on the board.
-    private func jump(_ agent: BoardAgent) {
-        guard let why = onJump(agent) else { return }
-        withAnimation(.easeOut(duration: 0.2)) { notice = why }
-        UIAccessibility.post(notification: .announcement, argument: why)
-        Task {
-            try? await Task.sleep(for: .seconds(4))
-            if notice == why { withAnimation(.easeOut(duration: 0.2)) { notice = nil } }
-        }
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        if let board {
-            if board.rows.isEmpty && board.unreadable.isEmpty {
+        Group {
+            if let board {
+                list(board)
+            } else if unread {
                 ContentUnavailableView {
-                    Label("No Tasks", systemImage: "checklist")
+                    Label("Couldn’t Read This Board", systemImage: "exclamationmark.triangle")
                 } description: {
-                    Text("Nothing is on this board yet.")
+                    Text("Far Cooler couldn’t read this board. Pull down to try again.")
                 }
             } else {
-                list(board)
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-        } else if unread {
-            ContentUnavailableView {
-                Label("Couldn’t Read This Board", systemImage: "exclamationmark.triangle")
-            } description: {
-                Text("Far Cooler couldn’t read this board. Pull down to try again.")
-            }
-        } else {
-            ProgressView()
         }
+        .refreshable { await onRefresh() }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("board")
     }
 
     private func list(_ board: TaskBoardModel) -> some View {
@@ -163,27 +104,23 @@ struct TaskBoardView: View {
                     .foregroundStyle(.secondary)
                 }
             }
-            ForEach(board.listed) { column in
+            ForEach(board.sections) { section in
+                let open = BoardForm.isExpanded(section, collapsed: collapsed)
                 Section {
-                    ForEach(column.rows) { row in
-                        let live = speaksOfAgents ? agents(row) : []
-                        TaskBoardCardRow(
-                            row: row,
-                            live: live,
-                            presence: row.agentPresence(
-                                livePanes: live.count, runnerRecordsTasks: speaksOfAgents),
-                            onOpen: { path.append(row.id) },
-                            onJump: jump)
+                    if open {
+                        ForEach(section.rows) { row in
+                            let live = speaksOfAgents ? agents(row) : []
+                            TaskBoardCardRow(
+                                row: row,
+                                live: live,
+                                presence: row.agentPresence(
+                                    livePanes: live.count, runnerRecordsTasks: speaksOfAgents),
+                                onOpen: { onOpen(row) },
+                                onJump: onJump)
+                        }
                     }
                 } header: {
-                    HStack(spacing: PaneMetrics.tight) {
-                        Text(column.title)
-                        Text("\(column.rows.count)")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("board-section-\(column.id)")
+                    header(section, open: open)
                 }
             }
             // Rows this build has no status for: carried and shown under a
@@ -208,11 +145,47 @@ struct TaskBoardView: View {
         }
         .listStyle(.insetGrouped)
     }
+
+    /// "In Progress 3", with a chevron when it opens. An empty status's
+    /// header has no chevron and does nothing: there's nothing under it.
+    private func header(_ section: TaskBoardColumn, open: Bool) -> some View {
+        let expandable = BoardForm.canExpand(section)
+        return Button {
+            guard expandable else { return }
+            if collapsed.contains(section.status) {
+                collapsed.remove(section.status)
+            } else {
+                collapsed.insert(section.status)
+            }
+            BoardForm.setCollapsed(collapsed, host: place.runner, workspace: place.workspace)
+        } label: {
+            HStack(spacing: PaneMetrics.tight) {
+                Text(section.title)
+                Text("\(section.count)")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                if expandable {
+                    Image(systemName: "chevron.forward")
+                        .font(.caption.weight(.semibold))
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(!expandable)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(section.title) \(section.count)")
+        .accessibilityValue(expandable ? (open ? "Expanded" : "Collapsed") : "Empty")
+        .accessibilityIdentifier("board-section-\(section.id)")
+    }
 }
 
 /// One card: its key, its title, what it asks of you, how long it has sat, how
 /// much of its acceptance holds, and the way to its agent.
-private struct TaskBoardCardRow: View {
+struct TaskBoardCardRow: View {
     let row: TaskRow
     let live: [BoardAgent]
     let presence: TaskAgentPresence
@@ -290,7 +263,7 @@ private struct TaskBoardCardRow: View {
 /// only when a task changes, so without a clock of its own a card filed at six
 /// would still read "Added just now" at eleven. `BoardTick` scoped to these
 /// lines alone, so a tick redraws the sentences and not the board.
-private struct CardTimeLines: View {
+struct CardTimeLines: View {
     let row: TaskRow
     let timeFont: Font
 
@@ -309,101 +282,8 @@ private struct CardTimeLines: View {
     }
 }
 
-/// One card, opened: what it is, why, what "done" means, and the way to its
-/// agent. Read-only — every field here is what `task.list` already carried, so
-/// opening a card costs no round trip.
-private struct TaskCardDetail: View {
-    let row: TaskRow
-    let live: [BoardAgent]
-    let presence: TaskAgentPresence
-    let onJump: (BoardAgent) -> Void
-
-    @Environment(\.colorScheme) private var scheme
-
-    var body: some View {
-        List {
-            Section {
-                VStack(alignment: .leading, spacing: PaneMetrics.tight) {
-                    Text(row.key)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                    Text(row.title)
-                        .font(.headline)
-                    Text(row.status.title)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if let ask = row.callToAction {
-                        Text(ask)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(GlancePalette.amber(scheme))
-                    }
-                    CardTimeLines(row: row, timeFont: .caption)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("board-detail-heading")
-
-                if presence != .unsaid {
-                    HStack {
-                        Text("Agent")
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        AgentControl(key: row.key, live: live, presence: presence, onJump: onJump)
-                    }
-                }
-            }
-
-            if !row.intent.isEmpty {
-                Section("Intent") {
-                    Text(row.intent)
-                        .font(.subheadline)
-                        .textSelection(.enabled)
-                        .accessibilityIdentifier("board-detail-intent")
-                }
-            }
-
-            if let progress = row.acceptanceProgress {
-                Section {
-                    ForEach(row.acceptance) { line in
-                        let met = line.met
-                        HStack(alignment: .firstTextBaseline, spacing: PaneMetrics.step) {
-                            Image(systemName: met ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(met ? Color.accentColor : Color.secondary)
-                            Text(line.text)
-                                .font(.subheadline)
-                        }
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(line.text)
-                        .accessibilityValue(met ? "Met" : "Not met")
-                        .accessibilityIdentifier("board-acceptance-\(line.id)")
-                    }
-                } header: {
-                    HStack {
-                        Text("Acceptance")
-                        Spacer()
-                        Text(progress.sentence)
-                            .monospacedDigit()
-                    }
-                }
-            }
-
-            if !row.labels.isEmpty {
-                Section("Labels") {
-                    Text(row.labels.joined(separator: ", "))
-                        .font(.system(.subheadline, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .listStyle(.insetGrouped)
-        .navigationTitle(row.key)
-        .navigationBarTitleDisplayMode(.inline)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("board-detail")
-    }
-}
-
 /// `2 of 5`, or `All 5 met` in the accent color once every line holds.
-private struct AcceptanceLine: View {
+struct AcceptanceLine: View {
     let progress: TaskAcceptanceProgress
 
     var body: some View {
@@ -424,7 +304,7 @@ private struct AcceptanceLine: View {
 /// The way from a card to the agent working it: a button for one, a menu for
 /// several, a quiet "No Agent" for a task in progress with nobody on it, and
 /// nothing on a runner that cannot say.
-private struct AgentControl: View {
+struct AgentControl: View {
     let key: String
     let live: [BoardAgent]
     let presence: TaskAgentPresence

@@ -607,7 +607,7 @@ struct AgentView: View {
                             // The sentence beside it says all of this, and a
                             // symbol read out as well would say it twice.
                             .accessibilityHidden(true)
-                        Text("This pane no longer has an agent. The conversation stays here to read.")
+                        Text("This terminal no longer has an agent. The conversation stays here to read.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .accessibilityIdentifier("agent-session-ended")

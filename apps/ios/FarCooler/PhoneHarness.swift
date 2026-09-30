@@ -1,0 +1,388 @@
+#if DEBUG
+import SwiftUI
+
+// The phone's stack over a canned runner, for the UI suite (`-phone-harness`).
+//
+// Everything on screen is the shipping code: `PhoneRoot`, Needs You, the
+// workspace, task and worktree screens, reading a `FleetStore` stood on one
+// `Connection` nobody dialed. What is canned is the runner: its fleet, and
+// the answers to the calls those screens make, through
+// `Connection.standInCalls`. The answers CHECK what they were sent, so a
+// screen that sends the wrong task or the wrong option is told no, and the
+// test watching it fails, rather than a stub agreeing with anything.
+//
+// No real agent runs, and nothing is dialed. Launch arguments:
+//
+//   -phone-harness           the fixture below
+//   -phone-empty-inbox       nothing needs you
+//   -phone-last-billing      Billing was the last workspace open
+//   -phone-list-fails        the runner refuses `needs_you`, so its list is
+//                            never read
+//   -phone-answer-taken      the runner refuses an ask's answer as not_held
+//   -phone-read-scope        this phone holds a Read grant: the runner sends
+//                            items without their answers, as the daemon does
+//   -deep-link <terminal>    as though a notification for it was tapped
+
+struct PhoneHarness: View {
+    static var isRequested: Bool { CommandLine.arguments.contains("-phone-harness") }
+
+    @StateObject private var hosts = RunnerStore()
+    @StateObject private var fleet: FleetStore
+    @State private var runner: HarnessRunner
+    @State private var pendingTerminal: String?
+    /// Whether the canned runner has been stood up: its fleet, its list and
+    /// its boards. A UI test waits on this (`phone-harness-ready`) before
+    /// anything else, rather than on a guess at how long a first launch
+    /// after an install takes.
+    @State private var ready = false
+
+    init() {
+        let connection = Connection()
+        let runner = HarnessRunner(connection: connection)
+        _runner = State(initialValue: runner)
+        _fleet = StateObject(
+            wrappedValue: FleetStore.standIn(on: connection, host: HarnessRunner.host))
+        _pendingTerminal = State(
+            initialValue: UserDefaults.standard.string(forKey: "deep-link"))
+        Self.forgetOnce()
+    }
+
+    /// What a previous launch left behind, cleared once per process: SwiftUI
+    /// builds this view's value more than once, and clearing on each would
+    /// forget what the test under way just chose.
+    private static let forgotten: Void = {
+        if CommandLine.arguments.contains("-phone-last-billing") {
+            UserDefaults.standard.set(
+                PhoneWorkspace(
+                    runner: HarnessRunner.host.id.uuidString, workspace: HarnessRunner.billing
+                ).stored,
+                forKey: PhoneLaunch.lastWorkspaceKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: PhoneLaunch.lastWorkspaceKey)
+        }
+        for key in UserDefaults.standard.dictionaryRepresentation().keys
+        where key.hasPrefix("workspace.segment.") || key.hasPrefix("board.collapsed.") {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }()
+
+    private static func forgetOnce() { _ = forgotten }
+
+    var body: some View {
+        PhoneRoot(fleet: fleet, hosts: hosts, pendingTerminal: $pendingTerminal)
+            .overlay(alignment: .topLeading) { snapshotProbe }
+            .overlay(alignment: .topTrailing) {
+                if ready {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.001))
+                        .frame(width: 1, height: 1)
+                        .accessibilityElement()
+                        .accessibilityIdentifier("phone-harness-ready")
+                }
+            }
+            .task {
+                await runner.stand()
+                fleet.republish()
+                ready = true
+            }
+    }
+}
+
+extension PhoneHarness {
+    /// What the glances would count: `needsYou=<n>` off the snapshot the
+    /// widget, the complication and the watch read, or `needsYou=-` for none.
+    /// Sampled, since the file isn't observable; a one-point element, as the
+    /// shell's probes are.
+    private var snapshotProbe: some View {
+        TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+            Rectangle()
+                .fill(Color.white.opacity(0.001))
+                .frame(width: 1, height: 1)
+                .accessibilityElement()
+                .accessibilityIdentifier("snapshot-probe")
+                .accessibilityValue(
+                    "needsYou=\(SnapshotStore.read()?.needsYou.map { String($0.count) } ?? "-")")
+        }
+    }
+}
+
+/// The canned runner: what it has, and how it answers.
+@MainActor
+final class HarnessRunner {
+    /// Fixed, so a workspace remembered by one launch is the same one the
+    /// next launch finds.
+    static let host = Runner(
+        id: UUID(uuidString: "0198F2C0-0000-7000-8000-00000000FACE")!,
+        label: "studio", address: "harness.invalid", user: "harness")
+
+    static let repository = "0198f2c0-0000-7000-8000-00000000a001"
+    static let main = "0198f2c0-0000-7000-8000-00000000b001"
+    static let billing = "0198f2c0-0000-7000-8000-00000000b002"
+    static let checkout = "0198f2c0-0000-7000-8000-00000000c001"
+    static let webhooks = "0198f2c0-0000-7000-8000-00000000c002"
+    static let scratch = "0198f2c0-0000-7000-8000-00000000c003"
+    static let mainOrchestrator = "0198f2c0-0000-7000-8000-00000000d001"
+    static let agent = "0198f2c0-0000-7000-8000-00000000d002"
+    static let shell = "0198f2c0-0000-7000-8000-00000000d003"
+    static let billingOrchestrator = "0198f2c0-0000-7000-8000-00000000d004"
+    static let decisionTask = "0198f2c0-0000-7000-8000-00000000e007"
+    static let agentTask = "0198f2c0-0000-7000-8000-00000000e009"
+    static let doneTask = "0198f2c0-0000-7000-8000-00000000e005"
+
+    private let connection: Connection
+    /// Whether Billing has an orchestrator yet. It starts without one.
+    private var billingLed = false
+    /// The items still waiting, by id.
+    private var waiting: [String]
+
+    init(connection: Connection) {
+        self.connection = connection
+        waiting =
+            CommandLine.arguments.contains("-phone-empty-inbox")
+            ? [] : ["ask:hook-ask-1", "decision:\(Self.decisionTask)"]
+    }
+
+    func stand() async {
+        connection.standInCalls = { [weak self] method, args in
+            guard let self else { throw ClientCore.CoreError.notStarted }
+            return try await self.answer(method, args)
+        }
+        connection.standIn(
+            on: fleet(),
+            repositories: [
+                Repository(
+                    id: Self.repository, short: "a001", displayName: "overnight", remote: "")
+            ],
+            build: DaemonBuild(
+                version: "harness", matches: true, platform: "harness",
+                capabilities: ["tasks", "needs_you", "workstreams", "terminal_task"],
+                grantedScope: Self.readOnly ? "read" : "control"))
+        // What a poll does with a fleet: the runner's projection for the
+        // glances, which they need before they'll take a Needs You list.
+        FleetSnapshotWriter.write(
+            fleet: fleet(), inbox: nil, machine: Self.host.label,
+            runner: Self.host.id.uuidString)
+        await connection.loadNeedsYou()
+        await connection.loadBoards()
+    }
+
+    // MARK: - What it has
+
+    private func fleet() -> Fleet {
+        let now = Date().timeIntervalSince1970 * 1000
+        var checkoutTerminals = [
+            Terminal(
+                id: Self.mainOrchestrator, short: "d001", title: "claude", preset: "claude",
+                state: "running", activity: "working", activitySince: now - 60_000,
+                epoch: 1, paneMode: "terminal", chatCapable: false, workspace: Self.main,
+                role: "orchestrator")
+        ]
+        if billingLed {
+            checkoutTerminals.append(
+                Terminal(
+                    id: Self.billingOrchestrator, short: "d004", title: "claude",
+                    preset: "claude", state: "running", activity: "idle", epoch: 1,
+                    paneMode: "terminal", chatCapable: false, workspace: Self.billing,
+                    role: "orchestrator"))
+        }
+        return Fleet(
+            runtimeHealthy: true, livePanes: 3,
+            worktrees: [
+                Worktree(
+                    id: Self.checkout, short: "c001", repository: Self.repository,
+                    task: "overnight", branch: "main", state: "ready",
+                    terminals: checkoutTerminals, isMainCheckout: true, workspace: Self.main,
+                    openTasks: []),
+                Worktree(
+                    id: Self.webhooks, short: "c002", repository: Self.repository,
+                    task: "fc-3-webhooks", branch: "feat/webhooks", state: "ready",
+                    terminals: [
+                        Terminal(
+                            id: Self.agent, short: "d002", title: "claude", preset: "claude",
+                            state: "running", activity: "blocked", activitySince: now - 120_000,
+                            blockedQuestion: "Allow touch x", epoch: 1, paneMode: "terminal",
+                            chatCapable: false, taskId: Self.agentTask, workspace: Self.billing,
+                            role: "agent"),
+                        Terminal(
+                            id: Self.shell, short: "d003", title: "Terminal 1", preset: "shell",
+                            state: "running", epoch: 1, paneMode: "terminal",
+                            chatCapable: false, workspace: Self.billing, role: "shell"),
+                    ],
+                    workspace: Self.billing,
+                    openTasks: [
+                        NeedsYouTask(
+                            id: Self.agentTask, key: "bil-9", title: "Invoice PDF export",
+                            status: "in_progress")
+                    ]),
+                Worktree(
+                    id: Self.scratch, short: "c003", repository: Self.repository,
+                    task: "scratch", branch: "scratch", state: "ready", terminals: [],
+                    openTasks: []),
+            ],
+            workspaces: [
+                WorkspaceSummary(
+                    id: Self.main, name: "Main", taskPrefix: "ove", isMain: true, ordinal: 0,
+                    repository: Self.repository, orchestrator: Self.mainOrchestrator),
+                WorkspaceSummary(
+                    id: Self.billing, name: "Billing", taskPrefix: "bil", isMain: false,
+                    ordinal: 1, repository: Self.repository,
+                    orchestrator: billingLed ? Self.billingOrchestrator : nil),
+            ])
+    }
+
+    // MARK: - How it answers
+
+    private struct Refused: Error {}
+
+    private func answer(_ method: String, _ args: [String: Any]) async throws -> Data {
+        switch method {
+        case "needs_you":
+            if CommandLine.arguments.contains("-phone-list-fails") {
+                throw ClientCore.CoreError.rejected("unavailable", word: "unavailable")
+            }
+            return try json(["items": items()])
+        case "task.list":
+            return try json(["tasks": tasks(args["workspace"] as? String)])
+        case "task.get":
+            guard args["task"] as? String == Self.decisionTask else { return try json(["notes": []]) }
+            return try json([
+                "notes": waiting.contains("decision:\(Self.decisionTask)")
+                    ? [question] : [question, answered]
+            ])
+        case "task.note":
+            // An answer to bil-7, written as an answer, with words in it.
+            guard args["task"] as? String == Self.decisionTask,
+                args["kind"] as? String == "answer",
+                let body = args["body"] as? String, !body.isEmpty
+            else { throw ClientCore.CoreError.rejected("bad answer", word: "invalid-argument") }
+            waiting.removeAll { $0 == "decision:\(Self.decisionTask)" }
+            return try json([:])
+        case "terminal.agent_answer" where CommandLine.arguments.contains("-phone-answer-taken"):
+            throw ClientCore.CoreError.rejected(
+                "Someone already answered this.", word: "resource-conflict", what: "not_held")
+        case "terminal.agent_answer":
+            guard args["terminal"] as? String == Self.agent,
+                args["requestId"] as? String == "hook-ask-1",
+                ["allow", "deny"].contains(args["optionId"] as? String ?? "")
+            else { throw ClientCore.CoreError.rejected("bad answer", word: "invalid-argument") }
+            waiting.removeAll { $0 == "ask:hook-ask-1" }
+            return try json([:])
+        case "workspace.start_orchestrator":
+            guard args["workspace"] as? String == Self.billing,
+                ["claude", "codex", "cursor"].contains(args["harness"] as? String ?? "")
+            else { throw ClientCore.CoreError.rejected("bad start", word: "invalid-argument") }
+            // Lands a moment later, as a real one does, so "Starting
+            // Orchestrator…" is on screen long enough to be read.
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(6))
+                billingLed = true
+                connection.standIn(on: fleet())
+            }
+            return try json(["id": Self.billingOrchestrator])
+        default:
+            throw ClientCore.CoreError.rejected("not in the harness", word: "unimplemented")
+        }
+    }
+
+    /// `-phone-read-scope`.
+    static var readOnly: Bool { CommandLine.arguments.contains("-phone-read-scope") }
+
+    private func json(_ object: Any) throws -> Data {
+        try JSONSerialization.data(withJSONObject: object)
+    }
+
+    private var question: [String: Any] {
+        [
+            "id": "note-q", "kind": "question", "actor": "manager",
+            "at": Int64(Date().timeIntervalSince1970 * 1000) - 600_000,
+            "body": "Which PDF library?",
+            "extra": ["options": ["pdfkit", "wkhtmltopdf"]],
+        ]
+    }
+
+    private var answered: [String: Any] {
+        [
+            "id": "note-a", "kind": "answer", "actor": "user",
+            "at": Int64(Date().timeIntervalSince1970 * 1000), "body": "pdfkit",
+        ]
+    }
+
+    private func items() -> [[String: Any]] {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        var out: [[String: Any]] = []
+        if waiting.contains("ask:hook-ask-1") {
+            out.append([
+                "id": "ask:hook-ask-1", "kind": "ask", "rank": 120, "since": now - 120_000,
+                "workspace_id": Self.billing, "workspace_name": "Billing",
+                "repository_id": Self.repository,
+                "task": [
+                    "id": Self.agentTask, "key": "bil-9", "title": "Invoice PDF export",
+                    "status": "in_progress",
+                ],
+                "terminal": [
+                    "id": Self.agent, "worktree_id": Self.webhooks, "label": "claude",
+                    "role": "agent", "pane_mode": "terminal", "chat_capable": false,
+                ],
+                "question": "Allow touch x", "detail": "touch x", "ask_id": "hook-ask-1",
+                "actions": [
+                    ["id": "deny", "title": "Deny", "destructive": true, "primary": false],
+                    ["id": "allow", "title": "Allow", "destructive": false, "primary": true],
+                ],
+            ])
+        }
+        if waiting.contains("decision:\(Self.decisionTask)") {
+            out.append([
+                "id": "decision:\(Self.decisionTask)", "kind": "decision",
+                "rank": 200_000_600, "since": now - 600_000,
+                "workspace_id": Self.billing, "workspace_name": "Billing",
+                "repository_id": Self.repository,
+                "task": [
+                    "id": Self.decisionTask, "key": "bil-7", "title": "Pick a PDF library",
+                    "status": "needs_decision",
+                ],
+                "question": "Which PDF library?",
+                "actions": [
+                    ["id": "pdfkit", "title": "pdfkit", "destructive": false, "primary": false],
+                    [
+                        "id": "wkhtmltopdf", "title": "wkhtmltopdf", "destructive": false,
+                        "primary": false,
+                    ],
+                ],
+            ])
+        }
+        // Below Control, the runner sends an item's id, kind, rank, subject
+        // and a fixed question, and none of its answers (spec §2.4).
+        guard Self.readOnly else { return out }
+        return out.map { item in
+            var redacted = item
+            for key in ["actions", "detail", "ask_id"] { redacted.removeValue(forKey: key) }
+            return redacted
+        }
+    }
+
+    private func tasks(_ workspace: String?) -> [[String: Any]] {
+        guard workspace == Self.billing else { return [] }
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        return [
+            [
+                "id": Self.decisionTask, "key": "bil-7", "title": "Pick a PDF library",
+                "status": "needs_decision", "status_since": now - 600_000,
+                "intent": "Invoices need a PDF.", "workspace": Self.billing,
+            ],
+            [
+                "id": Self.agentTask, "key": "bil-9", "title": "Invoice PDF export",
+                "status": "in_progress", "status_since": now - 3_600_000,
+                "worktree_id": Self.webhooks, "workspace": Self.billing,
+                "acceptance": [
+                    ["id": "a1", "text": "Exports a PDF", "met": true],
+                    ["id": "a2", "text": "Emails it", "met": false],
+                ],
+            ],
+            [
+                "id": Self.doneTask, "key": "bil-5", "title": "Stripe webhooks",
+                "status": "done", "status_since": now - 86_400_000, "workspace": Self.billing,
+            ],
+        ]
+    }
+}
+#endif
