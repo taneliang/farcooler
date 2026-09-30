@@ -2157,8 +2157,22 @@ final class DaemonClient: ObservableObject {
         case .some:
             return (nil, "This runner couldn’t make \(name). That’s a problem in the app, not in anything you did.")
         case nil:
-            return (nil, "Couldn’t make \(name). Check that the runner is reachable, then try again.")
+            // Refused before it reached the runner, in the CLI's own words.
+            return (nil, Self.saidByCLI(message) ?? "Couldn’t make \(name). Check that the runner is reachable, then try again.")
         }
+    }
+
+    /// The CLI's `error:` line as a sentence, or nil for none: capitalized,
+    /// with a full stop. What a refusal with no `code:` says, since only the
+    /// CLI knows why it refused.
+    static func saidByCLI(_ message: String?) -> String? {
+        guard let line = (message ?? "").split(whereSeparator: \.isNewline).first(where: { $0.hasPrefix("error: ") })
+        else { return nil }
+        var words = String(line.dropFirst("error: ".count)).trimmingCharacters(in: .whitespaces)
+        guard let first = words.first else { return nil }
+        words = first.uppercased() + words.dropFirst()
+        if !(words.hasSuffix(".") || words.hasSuffix("?") || words.hasSuffix("!")) { words += "." }
+        return words
     }
 
     /// The banner for a worktree that moved to `workspace` and then couldn't

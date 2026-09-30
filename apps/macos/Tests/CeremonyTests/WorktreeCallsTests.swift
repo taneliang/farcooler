@@ -483,6 +483,51 @@ struct WorktreeCallsTests {
         }
     }
 
+    /// New Workspace…'s line gets past the CLI's own checks, which `--help`
+    /// never reaches: clap answers `--help` before `workspace create`
+    /// refuses a missing `--prefix`, which is how a sheet whose prefix was
+    /// "optional" always failed. So this runs the real create path against a
+    /// runner that can't be reached (`--host` at a name that doesn't
+    /// resolve): a line the CLI accepts fails only at connecting. The
+    /// prefix-less line is the control, refused before that.
+    @Test("New Workspace's line passes the CLI's own checks")
+    func newWorkspacesLinePassesTheCLIsOwnChecks() throws {
+        let cli = try #require(Self.cli, "No farcooler CLI to run. Build it with cargo build --bin farcooler.")
+        let prefix = WorkspacePrefix.derive(name: "Billing", taken: ["fc"])
+        let line = DaemonClient.createWorkspaceArguments(repository: "0198f2c0", name: "Billing", prefix: prefix)
+        let (status, stderr) = Self.run(["--host", "fc-nowhere.invalid"] + line, with: cli)
+        #expect(status != 0)
+        #expect(!stderr.contains("--prefix") && !stderr.contains("--name"), "refused by its own checks: \(stderr)")
+
+        let bare = ["workspace", "create", "--repo", "0198f2c0", "--name", "Billing", "--json"]
+        let (_, refused) = Self.run(["--host", "fc-nowhere.invalid"] + bare, with: cli)
+        #expect(refused.contains("task prefix"), "the control wasn't refused: \(refused)")
+        #expect(
+            DaemonClient.saidByCLI(refused)?.hasPrefix("Give the workspace a task prefix") == true,
+            "\(DaemonClient.saidByCLI(refused) ?? "nil")")
+    }
+
+    /// Run `farcooler <line>` with a home of its own, and at most 30 s.
+    private static func run(_ line: [String], with cli: String) -> (Int32, String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: cli)
+        process.arguments = line
+        var environment = ProcessInfo.processInfo.environment
+        environment["FARCOOLER_HOME"] = "/tmp/fc-t/ui-2/h-\(UUID().uuidString.prefix(8))"
+        process.environment = environment
+        let err = Pipe()
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = err
+        process.standardInput = FileHandle.nullDevice
+        do { try process.run() } catch { return (-1, "\(error)") }
+        let deadline = Date().addingTimeInterval(30)
+        while process.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+        if process.isRunning { process.terminate() }
+        let stderr = err.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationStatus, String(decoding: stderr, as: UTF8.self))
+    }
+
     /// The CLI this tree builds: `FARCOOLER_BIN`, or the newer of cargo's two
     /// builds of it.
     private static var cli: String? {

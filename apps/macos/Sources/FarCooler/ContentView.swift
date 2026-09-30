@@ -439,7 +439,10 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showShortcuts) { ShortcutsSheet() }
         .sheet(item: $newWorkspaceName) { intent in
-            NewWorkspaceSheet(repositories: workspaceRepositories, name: intent.name) { host, repository, name, prefix in
+            NewWorkspaceSheet(
+                repositories: workspaceRepositories, name: intent.name,
+                takenPrefixes: { host in Set((store.fleet.runnerWorkspaces[host] ?? []).map(\.taskPrefix)) }
+            ) { host, repository, name, prefix in
                 if let why = store.refusal(for: host) { return why }
                 guard let client = store.clients[host] else { return "That runner isn’t connected." }
                 let made = await client.createWorkspace(repository: repository, name: name, prefix: prefix)

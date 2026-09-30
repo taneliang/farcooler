@@ -53,4 +53,22 @@ struct PaletteWorkspaceTests {
         if let at { #expect(!found[at...].contains { $0.kind != "action" }, "creation above something to go to") }
         #expect(!PaletteIndex.matching("billing", in: [Self.lane]).contains { $0.id == "new-workspace" })
     }
+
+    /// Left empty, the prefix comes from the name, lowercase letters only,
+    /// and never one the runner's workspaces use already: the runner
+    /// requires one, and refuses a taken one.
+    @Test("A new workspace's prefix is derived from its name")
+    func aNewWorkspacesPrefixIsDerivedFromItsName() {
+        #expect(WorkspacePrefix.derive(name: "Billing", taken: []) == "bil")
+        #expect(WorkspacePrefix.derive(name: "Billing", taken: ["bil"]) == "bill")
+        #expect(WorkspacePrefix.derive(name: "Relay rewrite", taken: ["rel", "rela", "relay"]) == "relayr")
+        #expect(WorkspacePrefix.derive(name: "Ops", taken: ["ops"]) == "ops2")
+        #expect(WorkspacePrefix.derive(name: "2026 Q4!", taken: []) == "q")
+        #expect(WorkspacePrefix.derive(name: "", taken: []) == "ws")
+        #expect(WorkspacePrefix.derive(name: "Élan", taken: []) == "lan")
+        for name in ["Billing", "Ops", "", "A really long workspace name"] {
+            let prefix = WorkspacePrefix.derive(name: name, taken: [])
+            #expect(prefix.first?.isLetter == true && prefix.count <= 8, "\(prefix)")
+        }
+    }
 }
