@@ -3620,6 +3620,17 @@ impl Watcher {
         }
     }
 
+    /// Tell the relay this runner is alive, if it's paired. `true` once the
+    /// beat has landed.
+    ///
+    /// Read from the pairing file on each beat, as every notice is, so a
+    /// runner paired or forgotten while the daemon runs starts or stops
+    /// beating on the next tick without a restart. See `push::heartbeat`.
+    async fn beat(&self) -> bool {
+        let Some(pairing) = crate::push::Pairing::load_in(self.service.root_dir()) else { return false };
+        crate::push::heartbeat(&self.push, &pairing, Some(self.service.install_id())).await
+    }
+
     /// Send a count notice in `COUNT_NOTICE_EVERY`, unless one is already on
     /// its way, and then only if the count is not the one the relay already
     /// has. So answering a decision or a chat ask, which changes no terminal
@@ -4203,6 +4214,11 @@ impl Watcher {
         backstop.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut change_sets = tokio::time::interval(CHANGE_SET_INTERVAL);
         change_sets.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        // Its first tick is immediate, so a runner says it's alive the moment
+        // it starts rather than five minutes later. Skip, so a laptop waking
+        // from a night's sleep beats once rather than a night's worth.
+        let mut beats = tokio::time::interval(crate::push::BEAT_EVERY);
+        beats.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         // The first tick of an interval completes immediately, and comparing
         // the inventory against itself before anything has had a chance to
         // diverge would only ever report a false alarm.
@@ -4224,6 +4240,12 @@ impl Watcher {
                 // is unprobed at startup, so this pass is what puts a number
                 // beside a row before anybody asks for one.
                 _ = change_sets.tick() => self.spawn_change_set_probe(),
+                // Spawned, so a relay that's slow to answer never holds up a
+                // sample.
+                _ = beats.tick() => {
+                    let me = self.clone();
+                    tokio::spawn(async move { me.beat().await });
+                }
             }
         }
     }
@@ -8551,6 +8573,52 @@ mod needs_you_push_tests {
         let body = tokio::time::timeout(std::time::Duration::from_secs(30), relay).await.unwrap().unwrap();
         assert_eq!(body["kind"], "count", "{body}");
         assert_eq!(body["install"], svc.install_id(), "{body}");
+    }
+
+    /// A paired runner beats at `/v1/heartbeat`, naming itself by its install
+    /// id and promising the next beat: the phone's widget judges its silence
+    /// by that promise (ov-53).
+    #[tokio::test]
+    async fn a_paired_runner_beats_and_names_itself() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (_dir, svc, _, _pane) = a_runner().await;
+        let watcher = Watcher::new(svc.clone());
+        assert!(!watcher.beat().await, "an unpaired runner has nobody to beat to");
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        crate::push::Pairing { relay: format!("http://{}", listener.local_addr().unwrap()), token: "t".into() }
+            .save_in(svc.root_dir())
+            .unwrap();
+        let relay = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut seen = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = socket.read(&mut buf).await.unwrap();
+                seen.extend_from_slice(&buf[..n]);
+                let text = String::from_utf8_lossy(&seen).to_string();
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let length = text[..end]
+                        .lines()
+                        .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap()))
+                        .unwrap_or(0);
+                    if seen.len() >= end + 4 + length {
+                        socket.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}").await.unwrap();
+                        let line = text.lines().next().unwrap_or_default().to_string();
+                        let body = serde_json::from_slice::<serde_json::Value>(&seen[end + 4..end + 4 + length]).unwrap();
+                        return (line, body);
+                    }
+                }
+                if n == 0 {
+                    panic!("the relay's socket closed before a whole request");
+                }
+            }
+        });
+        assert!(watcher.beat().await, "the beat landed");
+        let (line, body) = tokio::time::timeout(std::time::Duration::from_secs(30), relay).await.unwrap().unwrap();
+        assert!(line.starts_with("POST /v1/heartbeat "), "{line}");
+        assert_eq!(body["install"], svc.install_id(), "{body}");
+        assert_eq!(body["beatEvery"], crate::push::BEAT_EVERY.as_secs(), "{body}");
     }
 
     #[tokio::test]

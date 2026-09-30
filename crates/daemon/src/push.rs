@@ -606,9 +606,76 @@ pub async fn retire(client: &reqwest::Client, pairing: &Pairing, terminals: &[St
     }
 }
 
+/// How often a paired runner tells the relay it's alive.
+///
+/// Five minutes: the phone's widget reads the relay about every twenty to
+/// thirty minutes at best (WidgetKit's reload budget), so beating faster buys
+/// nothing it can see, and each beat is a D1 write. The phone calls a runner
+/// quiet after two missed beats and five minutes' slack
+/// (`RunnerPulse.quietAfter` in AgentKit), so this number is also the promise
+/// the phone judges silence by — sent with every beat rather than assumed.
+/// See docs/superpowers/specs/2026-09-30-runner-heartbeat-design.md.
+pub const BEAT_EVERY: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+/// What a heartbeat carries: that this runner is alive, which runner it is,
+/// what it runs, and how often to expect the next one. Nothing else — no
+/// count, no agent, no card.
+#[derive(Debug, serde::Serialize)]
+struct Beat<'a> {
+    #[serde(rename = "beatEvery")]
+    beat_every: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    install: Option<&'a str>,
+    version: &'a str,
+}
+
+fn beat_body(install: Option<&str>) -> Beat<'_> {
+    Beat { beat_every: BEAT_EVERY.as_secs(), install, version: farcooler_protocol::BUILD }
+}
+
+/// Tell the relay this runner is alive.
+///
+/// Logged and swallowed, like `notify`: a beat that doesn't land costs the
+/// phone's widget one "lost touch" it didn't need, and a beat that took the
+/// watcher down would cost every notice after it. A relay too old for the
+/// route answers 404, which is logged at debug: it would otherwise be a
+/// warning every five minutes for as long as that relay runs.
+pub async fn heartbeat(client: &reqwest::Client, pairing: &Pairing, install: Option<&str>) -> bool {
+    let url = format!("{}/v1/heartbeat", pairing.relay.trim_end_matches('/'));
+    let result = client.post(&url).bearer_auth(&pairing.token).json(&beat_body(install)).send().await;
+    match result {
+        Ok(response) if response.status().is_success() => true,
+        Ok(response) if response.status() == reqwest::StatusCode::NOT_FOUND => {
+            tracing::debug!("the relay has no heartbeat route");
+            false
+        }
+        Ok(response) => {
+            tracing::warn!(status = %response.status(), "relay refused a heartbeat");
+            false
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "could not reach the relay");
+            false
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_beat_carries_its_promise_its_runner_and_nothing_else() {
+        // Three programs read this body. The relay reads `beatEvery` in
+        // seconds and clamps it; a rename or a unit change here is a runner
+        // the phone judges by the wrong clock.
+        let sent = serde_json::to_value(beat_body(Some("0190-abc"))).expect("serialize");
+        assert_eq!(sent["beatEvery"], 300, "{sent}");
+        assert_eq!(sent["install"], "0190-abc", "{sent}");
+        assert_eq!(sent["version"], farcooler_protocol::BUILD, "{sent}");
+        let keys: Vec<&str> = sent.as_object().expect("an object").keys().map(String::as_str).collect();
+        assert_eq!(keys.len(), 3, "a beat says nothing else: {sent}");
+    }
 
     #[test]
     fn a_saved_pairing_comes_back_and_can_be_forgotten() {
