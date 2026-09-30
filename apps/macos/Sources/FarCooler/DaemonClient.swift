@@ -1190,6 +1190,13 @@ final class DaemonClient: ObservableObject {
     /// before it opens anywhere but Needs You (`FleetStore.needsYouSettled`).
     @Published private(set) var needsYouKnown = false
 
+    /// Whether this runner's list has been read: a read that decoded, or a
+    /// runner known to serve none. Not `needsYouKnown`, which a failed read
+    /// sets too so the window doesn't wait: counting an unread list as an
+    /// empty one put the board's pill at 0 (`boardWaiting`). iOS and Android
+    /// mark theirs read on the same terms.
+    private(set) var needsYouLoaded = false
+
     /// Whether this runner computes its own list (`needs_you`). A runner not
     /// yet asked counts as not, so its blocked agents still show while the
     /// first `status` read is in flight. Between a reconnection and its
@@ -1217,6 +1224,12 @@ final class DaemonClient: ObservableObject {
     /// What `needs-you` is asked with.
     static let needsYouArguments = ["needs-you", "--json"]
 
+    /// What the board's pill says on this runner (`WorkspaceCounts.waiting`).
+    func boardWaiting(columnCount: Int, decisions: Int) -> Int {
+        WorkspaceCounts.waiting(
+            columnCount: columnCount, decisions: decisions, listRead: needsYouLoaded, listServed: servesNeedsYou)
+    }
+
     /// Read this runner's list again. Nothing on a runner without
     /// `needs_you`, whose items are derived from the fleet instead; a read
     /// that fails keeps the last list rather than emptying the count.
@@ -1227,10 +1240,12 @@ final class DaemonClient: ObservableObject {
         defer { if !needsYouKnown { needsYouKnown = true } }
         guard servesNeedsYou else {
             if !needsYouRead.isEmpty { needsYouRead = [] }
+            needsYouLoaded = true
             return
         }
         let (data, _) = await runRaw(Self.needsYouArguments, background: true)
         guard let data, let list = try? JSONDecoder().decode(NeedsYouList.self, from: data) else { return }
+        needsYouLoaded = true
         if list.items != needsYouRead { needsYouRead = list.items }
     }
 

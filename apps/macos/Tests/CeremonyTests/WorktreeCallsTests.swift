@@ -33,6 +33,8 @@ struct WorktreeCallsTests {
         var capabilities: [String]?
         /// What `terminal agent-answer` fails with, or nil to take it.
         var answerRefusal: String?
+        /// Whether `needs-you` fails, as a runner that can't be reached does.
+        var needsYouFails = false
 
         func answer(_ args: [String]) -> (data: Data?, message: String?) {
             calls.append(args)
@@ -43,6 +45,9 @@ struct WorktreeCallsTests {
                     "capabilities": capabilities,
                 ]
                 return (try? JSONSerialization.data(withJSONObject: body), nil)
+            }
+            if words.first == "needs-you", needsYouFails {
+                return (nil, "ssh: connect to host runner: Connection refused")
             }
             if words.first == "needs-you" {
                 return (
@@ -289,6 +294,28 @@ struct WorktreeCallsTests {
         await old.refreshNeedsYou()
         #expect(!older.calls.contains { $0.first == "needs-you" }, "\(older.calls)")
         #expect(old.needsYouFromOlderRunner)
+    }
+
+    /// A needs-you read that fails isn't a read: the board's pill counts the
+    /// Needs Decision column, as it does before the first read, rather than
+    /// the empty list's 0. Once a read succeeds, a later failure keeps that
+    /// list and its count (M4 of the night review, ov-76).
+    @Test("A failed Needs You read leaves the board's pill on the column's count")
+    func aFailedNeedsYouReadLeavesThePillOnTheColumn() async {
+        let recorder = Recorder()
+        recorder.capabilities = ["workspaces", "terminals", "needs_you"]
+        recorder.needsYouFails = true
+        let reader = client(recorder)
+        await reader.refreshNeedsYou()
+        #expect(reader.needsYouKnown, "the window still settles on a runner that can't say")
+        #expect(reader.boardWaiting(columnCount: 2, decisions: 0) == 2)
+
+        recorder.needsYouFails = false
+        await reader.refreshNeedsYou()
+        #expect(reader.boardWaiting(columnCount: 2, decisions: 1) == 1)
+        recorder.needsYouFails = true
+        await reader.refreshNeedsYou()
+        #expect(reader.boardWaiting(columnCount: 2, decisions: 1) == 1, "the last good list stands")
     }
 
     /// A reconnection clears the runner's build until `status` answers

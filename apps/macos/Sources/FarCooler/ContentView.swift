@@ -2455,10 +2455,9 @@ struct ContentView: View {
                 store: boardStore(for: workspace, client: client, host: host),
                 client: client,
                 agents: boardAgents(host: host, client: client),
-                waiting: WorkspaceCounts.waiting(
+                waiting: client.boardWaiting(
                     columnCount: boardStore(for: workspace, client: client, host: host).board.waitingOnYou,
-                    decisions: WorkspaceCounts.decisions(for: workspace, host: host, in: store.needsYou),
-                    listRead: client.needsYouKnown, listServed: client.servesNeedsYou),
+                    decisions: WorkspaceCounts.decisions(for: workspace, host: host, in: store.needsYou)),
                 onGoTo: { pane in go(to: pane) }
             )
         } else {
