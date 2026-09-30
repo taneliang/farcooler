@@ -109,9 +109,8 @@ at most one read per widget reload.
 
 ## Not in this change
 
-- The watch complication and the Live Activity keep today's gate: the watch
-  draws what the phone sends it, and the relay pushes the card only when a
-  notice arrives. Both could read the same `beat_every` later.
+- ~~The watch complication and the Live Activity keep today's gate.~~ Done
+  in ov-71; see below.
 - Marking a quiet runner's WORKING rows "last seen": the widget's rows name a
   runner by the phone's label and the relay by the runner's own name, and the
   two don't reliably match. The footer names the runner; the rows are
@@ -125,3 +124,61 @@ at most one read per widget reload.
 - Rate limits on `/v1/heartbeat` and `/v1/pulse` (both need a credential; a
   guessed one costs a hash and an indexed read).
 - Android has no widget.
+
+## ov-71: the watch and the Live Activity
+
+**The watch borrows the phone's token.** A watch has no sign-in (the WorkOS
+session is in the phone app's keychain group) and no push registration, so
+it can't file a token of its own at `/v1/devices`. `WatchLinkHost` puts the
+pulse credential in every application context beside the snapshot
+(`PulseCredential.watchContextKey`); a context without it, after sign-out,
+takes it away. `WatchLinkClient` keeps it in a file in the watch's own App
+Group container (`ContainerPulseVault`), because the keychain app-group
+share the phone relies on is unverified on watchOS and the container
+demonstrably works (the snapshot lives there). WatchConnectivity is
+encrypted between the paired devices, and the token reads names and ages.
+
+**The watch reads it the widget's way** (`RunnerPulse.look`, which is
+`fetch` then `plan`): the fleet list asks while it's in front and names a
+quiet runner in its footer (`hedge(quiet:)`, "Lost touch with Studio, so
+its agents may have changed."); the rectangular complication asks in
+`getTimeline` and says "Lost touch with Studio" in place of the top agent's
+line when no count outranks it, looking again hourly while anything beats
+(24 a day; the circular and inline families have no room and don't ask).
+
+**The Live Activity is moved by a relay cron sweep.** A card redraws only
+when pushed, and a dead runner sends nothing, so a five-minute cron trigger
+(`sweepQuiet`) finds each addressable, undismissed card whose quiet runners
+differ from what it last said (`install_cards.quiet`, migration 0016) and
+pushes an update: the quiet runner's working rows leave `working` and the
+lines (blocked and done hold), and the state carries `quiet: [name]`, which
+the tail draws as "+1 more · lost touch with Studio". A card left with no
+rows and a quiet runner is drawn like a stale one (`unvouched(stale:)`), so
+its headline stops saying "Working". The relay states the quiet rule once
+more (`quietAfterMs`), pinned to `RunnerPulse.quietAfter` by tests on both
+sides. Every other push composes the same card, and remembers what it said.
+
+Rejected:
+
+- **Ending the card when its runner goes quiet.** It could take a blocked
+  agent's question with it, and a card starts again only on a blocked
+  notice. An update says the true thing and leaves the question up.
+- **A `stale-date` pushed with every beat** (so the card goes stale 15
+  minutes after the last one). A push per card per five minutes to learn
+  one bit, and a stale card can't say which runner, or why.
+- **Checking on other runners' beats instead of a cron.** With one runner,
+  nothing would ever arrive to notice it stopped; the widget's spec rejects
+  folding liveness into existing traffic for the same reason.
+- **A cron push to the phone app** is still rejected (background pushes;
+  see above). A Live Activity push goes straight to the card and runs no
+  app code, which is why the sweep is sound here and not there.
+- **The watch registering its own device.** No session on the watch.
+- **The watch's keychain.** Unverified for an App Group access group on
+  watchOS; a failure there would be silent, the footer never changing.
+- **The phone pushing quiet names to the watch.** The phone app is
+  suspended exactly when a runner goes quiet unnoticed.
+
+Not in this change: a card whose app never filed an update token can't be
+moved (as before); the rows of a quiet runner on the watch and the widget
+are unchanged (the labels still don't reliably match); the complication's
+look shares the watch's reload budget with the app's reloads.
