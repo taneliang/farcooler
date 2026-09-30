@@ -626,12 +626,25 @@ struct Beat<'a> {
     beat_every: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     install: Option<&'a str>,
+    /// This runner's id as a phone knows it, `Host.runner_id`: derived from
+    /// the install id, as the daemon derives it for every client. The relay
+    /// keeps only a per-account hash of it, and a watch hashes the id its
+    /// phone learned to match, so a quiet runner's agents are the ones it
+    /// stops vouching for (ov-71).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runner: Option<String>,
     name: &'a str,
     version: &'a str,
 }
 
 fn beat_body(install: Option<&str>) -> Beat<'_> {
-    Beat { beat_every: BEAT_EVERY.as_secs(), install, name: runner_name(), version: farcooler_protocol::BUILD }
+    Beat {
+        beat_every: BEAT_EVERY.as_secs(),
+        install,
+        runner: install.map(|id| crate::service::stable_host_id(id).to_string()),
+        name: runner_name(),
+        version: farcooler_protocol::BUILD,
+    }
 }
 
 /// What this runner calls itself on a phone: the computer's name on a Mac
@@ -743,8 +756,24 @@ mod tests {
         assert_eq!(sent["version"], farcooler_protocol::BUILD, "{sent}");
         // The name the phone says "lost touch with" — never "This Mac".
         assert_eq!(sent["name"], runner_name(), "{sent}");
+        // Which runner, as its phone knows it (`Host.runner_id`), so a watch
+        // can tell which agents are this runner's (ov-71).
+        assert_eq!(sent["runner"], crate::service::stable_host_id("0190-abc").to_string(), "{sent}");
         let keys: Vec<&str> = sent.as_object().expect("an object").keys().map(String::as_str).collect();
-        assert_eq!(keys.len(), 4, "a beat says nothing else: {sent}");
+        assert_eq!(keys.len(), 5, "a beat says nothing else: {sent}");
+    }
+
+    /// The runner id a beat carries is the one `Host.runner_id` gives a
+    /// phone, pinned as text: the relay keys it and the phone hashes it, and
+    /// a change of spelling on one side is a watch that attributes nothing.
+    /// `services/relay/test/relay.test.ts` and `RunnerPulseTests` pin the
+    /// same literal.
+    #[test]
+    fn a_beats_runner_is_the_hosts_runner_id() {
+        assert_eq!(
+            crate::service::stable_host_id("install-with-more-than-sixteen-bytes").to_string(),
+            "7537626f-0002-415e-1e11-000d48034210"
+        );
     }
 
     #[test]

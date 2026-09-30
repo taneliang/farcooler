@@ -257,6 +257,12 @@ fn event_line(what: &crate::session::FleetEvent) -> String {
     .to_string()
 }
 
+/// The runner's own id, `Host.runner_id`, or None from a runner too old to
+/// send one. `host` hands it to the phone (ov-71).
+fn runner_id(host: &farcooler_protocol::v1::Host) -> Option<&str> {
+    Some(host.runner_id.as_str()).filter(|id| !id.is_empty())
+}
+
 /// `host.health`'s answer: the runner's own account of itself, as a phone's
 /// runner settings draw it.
 fn health_json(host: farcooler_protocol::v1::Host) -> Value {
@@ -1665,6 +1671,11 @@ async fn dispatch(
                 .collect();
             let facts = session.host().await?;
             Ok(json!({
+                // Which runner this is, by its own id: what its beats name it
+                // by at the relay, so a watch can tell its agents apart from
+                // another runner's when one goes quiet (ov-71). Null from a
+                // runner too old to say.
+                "runnerId": runner_id(&facts),
                 "daemonVersion": facts.daemon_version,
                 "clientVersion": farcooler_protocol::BUILD,
                 "buildsMatch": facts.daemon_version == farcooler_protocol::BUILD,
@@ -2574,6 +2585,17 @@ mod tests {
         assert_eq!(with["standInAgent"], "/bin/sleep");
         let without = health_json(farcooler_protocol::v1::Host::default());
         assert!(without["standInAgent"].is_null());
+    }
+
+    /// `host` names the runner by its own id (`Host.runner_id`), so a phone
+    /// can stamp each agent with it and a watch can tell which agents belong
+    /// to a runner the relay says went quiet (ov-71). None from a runner too
+    /// old to send one, never an empty string.
+    #[test]
+    fn host_names_its_runner_id_or_nothing() {
+        let with = farcooler_protocol::v1::Host { runner_id: "7537626f-0002".into(), ..Default::default() };
+        assert_eq!(runner_id(&with), Some("7537626f-0002"));
+        assert_eq!(runner_id(&farcooler_protocol::v1::Host::default()), None);
     }
 
     /// The line a phone reads carries the runner's word, not just its prose.
