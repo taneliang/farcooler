@@ -784,6 +784,23 @@ struct TerminalRow: View {
     /// note on the four insets that used to be chosen locally.
     private static let markerGap: CGFloat = 7
 
+    /// The row's leading inset inside its highlight: none past the band's.
+    ///
+    /// A terminal takes no indent step of its own (ov-63: two steps at
+    /// most). Drawn under a worktree at depth 1, its glyph sits in the
+    /// worktree's chevron column and its name about where the worktree's
+    /// title starts, so the text runs 14, 32, 50 and no deeper; the chevron
+    /// and the lighter single-line row carry the hierarchy, as Xcode's
+    /// navigator does for leaf rows.
+    static let leading: CGFloat = SidebarGrid.edge - SidebarGrid.highlightInset
+
+    /// Where a terminal's glyph and name start, from the sidebar's edge,
+    /// under a worktree drawn at `depth`.
+    static func columns(depth: Int) -> (glyph: CGFloat, text: CGFloat) {
+        let glyph = CGFloat(depth) * SidebarGrid.gutter + SidebarGrid.highlightInset + leading
+        return (glyph, glyph + StatusGlyph.inline + markerGap)
+    }
+
     var body: some View {
         // A column, not a row, since this task: the status line reads across
         // and the feed reads down under it. Everything that positions the row
@@ -909,9 +926,8 @@ struct TerminalRow: View {
             //
             // Named rather than counted here, because a sidebar has the room:
             // the COUNT is already on the signal line above, for the surfaces
-            // that do not. Indented one step further than the transcript, so
-            // the branch mark reads as work happening underneath this row
-            // rather than as another thing the row itself said.
+            // that do not. The branch mark reads as work happening underneath
+            // this row rather than as another thing the row itself said.
             //
             // Gone the moment they finish — unlike the transcript, which is
             // kept. "Two agents are running" stops being true when they stop.
@@ -925,14 +941,17 @@ struct TerminalRow: View {
                             .truncationMode(.tail)
                     }
                 }
-                .padding(.leading, StatusGlyph.inline + Self.markerGap * 2)
+                // Under the name like the lines above, not a step further:
+                // the branch mark says they're underneath (ov-63, no text
+                // deeper than a worktree's title).
+                .padding(.leading, StatusGlyph.inline + Self.markerGap)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(.vertical, SidebarGrid.rowVerticalPadding)
-        // A terminal is one level in from its worktree; the highlight sits
-        // inside the band exactly as the worktree row's does.
-        .padding(.leading, SidebarGrid.edge - SidebarGrid.highlightInset + SidebarGrid.gutter)
+        // The highlight sits inside the band exactly as the worktree row's
+        // does. No gutter of its own: see `leading`.
+        .padding(.leading, Self.leading)
         .padding(.trailing, SidebarGrid.edge - SidebarGrid.highlightInset)
         .background(
             RoundedRectangle(cornerRadius: 6)

@@ -32,3 +32,33 @@ struct ChecklistFixesTests {
         #expect(ConversationHeader.agentName(nil) == nil)
     }
 }
+
+/// The sidebar's text columns, measured from its edge (ov-63 M3): 14 for a
+/// repository and a workspace's glyph, 32 for a workspace's name and a
+/// worktree's chevron, 50 for a worktree's title, and nothing deeper.
+@MainActor
+struct SidebarColumnTests {
+    @Test func aTerminalTakesNoIndentStepOfItsOwn() {
+        let edge = SidebarGrid.edge, gutter = SidebarGrid.gutter
+        #expect(edge == 14 && gutter == 18)
+        let worktreeDepth = ContentView.sidebarRows(
+            fleet: {
+                var fleet = Fleet(runtimeHealthy: true, livePanes: 0, worktrees: [
+                    Worktree(
+                        id: "w", short: "w", task: "w", branch: "b", repository: "r", host: "", path: "/tmp/w",
+                        state: "active", terminals: [], repositoryID: "repo", workspace: "ws")
+                ], branchPrefix: nil)
+                fleet.runnerWorkspaces[""] = [
+                    WorkspaceSummary(id: "ws", name: "Main", taskPrefix: "fc", isMain: true, ordinal: 0, repository: "repo")
+                ]
+                return fleet
+            }(),
+            open: { _ in true }
+        ).first { if case .worktree = $0.kind { true } else { false } }!.depth
+        let worktreeTitle = edge + CGFloat(worktreeDepth) * gutter + gutter
+        #expect(worktreeTitle == 50)
+        let terminal = TerminalRow.columns(depth: worktreeDepth)
+        #expect(terminal.glyph == 32, "a terminal's glyph sits in its worktree's chevron column")
+        #expect(terminal.text <= worktreeTitle, "a terminal's name starts deeper than its worktree's title")
+    }
+}
