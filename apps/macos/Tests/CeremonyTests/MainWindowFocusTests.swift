@@ -15,6 +15,12 @@ struct MainWindowFocusTests {
         #expect(!MainWindowFocus.closesTerminal(nil))
     }
 
+    @Test("Next Needing Attention acts only while the main window is key")
+    func nextAttentionActsOnlyInTheMainWindow() {
+        #expect(MainWindowFocus.stepsToAttention(MainWindowFocus(overlayOpen: false)))
+        #expect(!MainWindowFocus.stepsToAttention(nil))
+    }
+
     @Test("Zoom Pane acts only in the main window with nothing open over it")
     func zoomPaneActsOnlyWithNothingOverTheWindow() {
         #expect(MainWindowFocus.zoomsPane(MainWindowFocus(overlayOpen: false)))

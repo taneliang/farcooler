@@ -20,6 +20,12 @@ struct MainWindowFocus: Equatable {
         focus != nil
     }
 
+    /// Next Needing Attention (⌃⌘N) acts only when the main window is key: with
+    /// Settings or About key, it opened an item in the window behind.
+    static func stepsToAttention(_ focus: MainWindowFocus?) -> Bool {
+        focus != nil
+    }
+
     /// Zoom Pane (⇧⌘↩) acts only when the main window is key and nothing is
     /// open over it. The ⌘N panel and the ⌘P palette each have their own
     /// meaning for ⇧⌘↩ (a newline, and submit), and an enabled menu item would

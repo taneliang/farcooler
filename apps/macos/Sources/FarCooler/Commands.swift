@@ -149,6 +149,7 @@ struct FarCoolerCommands: Commands {
             // you. It is the reason to open the app at all.
             Button("Next Needing Attention") { AppCommand.nextAttention.post() }
                 .keyboardShortcut("n", modifiers: [.command, .control])
+                .disabled(!MainWindowFocus.stepsToAttention(mainWindow))
             Divider()
             ForEach(1...9, id: \.self) { n in
                 Button("Terminal \(n)") { AppCommand.selectIndex(n - 1) }
