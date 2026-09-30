@@ -59,6 +59,11 @@ export interface Payload {
   /// content: a fixed word, and a key the runner minted.
   kind?: string
   task?: string
+  /// The runner a decision's task is on, as a phone knows it
+  /// (`Host.runner_id`), so a key on two runners opens the right one. Only a
+  /// decision carries it; forwarded as sent, never stored. A UUID the
+  /// daemon derived from its install id: it names no person, path or host.
+  runner?: string
 }
 
 /// Which of Apple's two push services issued a device's token.
@@ -198,6 +203,7 @@ async function sendApns(
       failed: payload.failed,
       ...(payload.kind ? { kind: payload.kind } : {}),
       ...(payload.task ? { task: payload.task } : {}),
+      ...(payload.runner ? { runner: payload.runner } : {}),
     }),
   })
   return response.ok
@@ -748,6 +754,7 @@ async function sendFcm(env: any, token: string, payload: Payload): Promise<boole
             ...(payload.status ? { status: payload.status } : {}),
             ...(payload.kind ? { kind: payload.kind } : {}),
             ...(payload.task ? { task: payload.task } : {}),
+            ...(payload.runner ? { runner: payload.runner } : {}),
           },
         },
       }),

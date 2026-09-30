@@ -1032,6 +1032,10 @@ interface Notification {
   /// The task a decision notice is about, by its key (`bil-7`). Forwarded to
   /// the phone so a tap can open the task; never stored.
   task?: string
+  /// The runner a decision's task is on, as a phone knows it
+  /// (`Host.runner_id`). Forwarded to the phone beside `task`, so a key that
+  /// is on two runners opens the right one; never stored.
+  runner?: string
   /// The workspace the notice's agent or task belongs to, by name, or absent.
   /// The alert's title already leads with it; this is for the card's rows.
   workspace?: string
@@ -1209,6 +1213,12 @@ async function notify(request: Request, env: Env): Promise<Response> {
           failed: body.failed,
           kind,
           task: typeof body.task === 'string' ? body.task.slice(0, 64) : undefined,
+          // Only on a decision, and only if it looks like a runner id: the
+          // heartbeat's own test, so a stray value is no id rather than a 400.
+          runner: kind === 'decision' && typeof body.runner === 'string'
+            && /^[A-Za-z0-9-]{1,64}$/.test(body.runner)
+            ? body.runner.toLowerCase()
+            : undefined,
         },
         device.environment,
       )

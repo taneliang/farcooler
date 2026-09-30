@@ -1314,6 +1314,22 @@ describe('the Android push body', () => {
     expect(message.data).toEqual({ terminal: '', kind: 'decision', task: 'bil-7' })
   })
 
+  it("names the decision's runner to an Android phone, and only a decision's", async () => {
+    // A task key is only unique on its own runner, so a phone with two runners
+    // needs the runner beside the key (ov-72).
+    const calls = watchFetch()
+    await register('user_1', android)
+    await pair('user_1', 'mine')
+    await post(
+      '/v1/notify',
+      { kind: 'decision', task: 'bil-7', runner: '7537626F-0002-415E-1E11-000D48034210', title: 'bil-7 needs a decision', needsYou: 1 },
+      'mine',
+    )
+    expect(fcm(calls).data).toEqual({
+      terminal: '', kind: 'decision', task: 'bil-7', runner: '7537626f-0002-415e-1e11-000d48034210',
+    })
+  })
+
   it('leaves a finished agent on the quiet channel', async () => {
     // The half that must NOT change. Over-alerting every finished agent breaks
     // a Focus for the normal case, and that is the failure people answer by
@@ -4287,6 +4303,20 @@ describe('/v1/notify and Live Activities', () => {
       expect(await cardOf('user_1')).toBeNull()
       const row = await env.DB.prepare(`SELECT needs_you FROM daemons`).first<any>()
       expect(row?.needs_you).toBe(1)
+    })
+
+    it("carries a decision's runner id to the phone, and drops one that isn't an id", async () => {
+      // A key on two runners can't be routed without it (ov-72). The value is
+      // the runner's `Host.runner_id`, lowercased as the heartbeat's is, and
+      // a decision alone carries it: an agent notice is routed by terminal.
+      const calls = watchFetch()
+      await ready()
+      const runner = '7537626F-0002-415E-1E11-000D48034210'
+      await post('/v1/notify', { kind: 'decision', task: 'bil-7', runner, title: 'bil-7 needs a decision', needsYou: 1 }, 'mine')
+      await post('/v1/notify', { kind: 'decision', task: 'bil-8', runner: 'not an id!', title: 'bil-8 needs a decision', needsYou: 2 }, 'mine')
+      await post('/v1/notify', { title: 'claude needs you', terminal: 'term-1', status: 'blocked', runner, needsYou: 3 }, 'mine')
+      const alerts = pushes(calls).filter(call => call.headers['apns-push-type'] === 'alert')
+      expect(alerts.map(call => call.body.runner)).toEqual(['7537626f-0002-415e-1e11-000d48034210', undefined, undefined])
     })
 
     it("moves a card's count on a decision, with the one alert and no second", async () => {
