@@ -180,10 +180,6 @@ struct ContentView: View {
     /// When each workspace's orchestrator start began, by `host|workspace`:
     /// this app's, or one first seen starting. See `ConversationColumn.slowStart`.
     @State private var orchestratorStartedAt: [String: Date] = [:]
-    /// Orchestrators this app has asked the runner to give a window of their
-    /// own, once each: see `WorkspaceScreen.sharesWindow`. Once, so a runner
-    /// that won't doesn't get asked on every read.
-    @State private var brokenOut: Set<String> = []
 
     /// What confirming a pane-mode switch would do, and to which pane.
     struct PaneModeConfirmation: Identifiable {
@@ -313,10 +309,7 @@ struct ContentView: View {
         .onCommand { command in run(command) }
         .onTileCommand { command in Task { await tile(command) } }
         .onSelectIndex { index in selectTerminal(at: index) }
-        .onChange(of: store.layouts) { _, _ in
-            followLayoutFocus()
-            breakOutOrchestrators()
-        }
+        .onChange(of: store.layouts) { _, _ in followLayoutFocus() }
         // Every client change reaches `store.fleet` — `FleetStore` remerges
         // on each one — so this hears a runner leaving, coming back as a new
         // client, and listing its projects without one.
@@ -338,7 +331,6 @@ struct ContentView: View {
             // brings every client up in the background, on its own schedule.
             // A no-op once the window has opened somewhere.
             settleLaunch()
-            breakOutOrchestrators()
         }
         .onChange(of: store.needsYou) { _, _ in settleLaunch() }
         // ⌃HJKL traverse the layout the keyboard is in, and pass through to
@@ -2133,6 +2125,16 @@ struct ContentView: View {
                         if let seat { Task { await stepDown(seat) } }
                     })
                 Divider()
+                if let seat {
+                    let sharers = WorkspaceScreen.sharers(
+                        of: seat, layouts: store.client(for: seat.worktree)?.layouts[seat.worktree.id])
+                    ForEach(sharers) { terminal in
+                        SharedWindowNotice(title: terminal.label, canAct: canAct) {
+                            Task { await moveOutOfOrchestratorWindow(terminal, in: seat.worktree) }
+                        }
+                        Divider()
+                    }
+                }
                 TimelineView(.periodic(from: .now, by: 5)) { context in
                     let state = ConversationColumn.state(
                         seat: seat, isStarting: startingOrchestrators.isStarting(workspace, host: host),
@@ -2361,25 +2363,14 @@ struct ContentView: View {
         .task(id: row.id) { await board.open(row) }
     }
 
-    /// Ask the runner to give every seated orchestrator that shares its tmux
-    /// window a window of its own (`layout break`), once each.
-    ///
-    /// A terminal is shown in one place (ov-63): the conversation column
-    /// draws the orchestrator alone meanwhile (`WorkspaceScreen.shown`), and
-    /// the terminals it shared with stay the worktree's. Every read, not only
-    /// with the column on screen: opening the main checkout, or clicking
-    /// sleepnomore in it, would otherwise draw that shared window whole.
-    private func breakOutOrchestrators() {
-        for (host, workspaces) in store.fleet.runnerWorkspaces where store.refusal(for: host) == nil {
-            for workspace in workspaces {
-                guard let seat = WorkspaceScreen.orchestrator(of: workspace, host: host, in: store.fleet),
-                    !brokenOut.contains(seat.terminal.id),
-                    let client = store.client(for: seat.worktree),
-                    WorkspaceScreen.sharesWindow(seat, layouts: client.layouts[seat.worktree.id])
-                else { continue }
-                brokenOut.insert(seat.terminal.id)
-                Task { _ = await client.breakPane(seat.terminal.short, in: seat.worktree) }
-            }
+    /// Move to Its Own Window: `terminal`, sharing the orchestrator's
+    /// window, gets a window of its own (`layout break`, tmux's
+    /// `break-pane -d`), so the orchestrator keeps its window and focus.
+    /// Only on this click: nothing rearranges a runner's windows unasked.
+    private func moveOutOfOrchestratorWindow(_ terminal: Terminal, in worktree: Worktree) async {
+        guard let client = store.client(for: worktree) else { return }
+        if !(await client.moveToOwnWindow(terminal, in: worktree)) {
+            errorBanner = "Couldn’t move \(terminal.label) to its own window. Check that the runner is reachable, then try again."
         }
     }
 
@@ -2390,7 +2381,8 @@ struct ContentView: View {
     private func worktreeDetail(_ ws: Worktree) -> some View {
         let host = ws.host ?? ""
         return WorktreeDetail(
-            worktree: WorkspaceScreen.ownTerminals(of: ws, fleet: store.fleet),
+            worktree: WorkspaceScreen.ownTerminals(
+                of: ws, fleet: store.fleet, layouts: store.client(for: ws)?.layouts[ws.id]),
             hosted: WorkspaceScreen.seated(in: ws, fleet: store.fleet).map { seat in
                 WorktreeDetail.Hosted(name: seat.workspace.name) {
                     selection = .workspace(host: host, workspace: seat.workspace.id, focus: nil)

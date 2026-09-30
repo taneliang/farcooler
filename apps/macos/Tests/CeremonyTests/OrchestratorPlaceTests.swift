@@ -41,34 +41,42 @@ struct OrchestratorPlaceTests {
 
     private static var workspace: ContentView.Selection { .workspace(host: "", workspace: main, focus: nil) }
 
-    /// The conversation column never draws the window whole while another
-    /// terminal is in it: it draws the orchestrator on its own, and the
-    /// app asks the runner to give it a window of its own.
-    @Test("An orchestrator sharing a window is drawn alone, and broken out")
-    func anOrchestratorSharingAWindowIsDrawnAloneAndBrokenOut() {
+    private static let apart = [
+        PaneGroup(id: "@1", name: "", active: false, columns: 80, rows: 24, layout: "@1", panes: [pane("s1", left: 0)]),
+        PaneGroup(id: "@2", name: "", active: true, columns: 80, rows: 24, layout: "@2", panes: [pane("conductor", left: 0)]),
+    ]
+
+    /// The column draws the orchestrator's window whole, as it always has,
+    /// and names what shares it, so one click can move that out. Nothing
+    /// is moved unasked.
+    @Test("An orchestrator's window is drawn whole, and what shares it is named")
+    func anOrchestratorsWindowIsDrawnWholeAndWhatSharesItIsNamed() {
         let fleet = Self.fleet()
         let shown = WorkspaceScreen.shown(Self.workspace, in: fleet, layouts: { _, _ in Self.shared })
-        #expect(!shown.contains { $0.column == .conversation }, "the conversation drew sleepnomore beside the orchestrator")
+        #expect(shown.first { $0.column == .conversation }?.group.terminals == ["conductor", "s1"])
         let seat = WorkspaceScreen.pane("conductor", host: "", in: fleet)!
-        #expect(WorkspaceScreen.sharesWindow(seat, layouts: Self.shared))
+        #expect(WorkspaceScreen.sharers(of: seat, layouts: Self.shared).map(\.id) == ["s1"])
+        #expect(SharedWindowNotice.sentence("sleepnomore") == "sleepnomore shares the orchestrator’s window.")
 
-        // Once it has a window of its own, that window is the column's.
-        let apart = [
-            PaneGroup(id: "@1", name: "", active: false, columns: 80, rows: 24, layout: "@1", panes: [Self.pane("s1", left: 0)]),
-            PaneGroup(id: "@2", name: "", active: true, columns: 80, rows: 24, layout: "@2", panes: [Self.pane("conductor", left: 0)]),
-        ]
-        #expect(!WorkspaceScreen.sharesWindow(seat, layouts: apart))
-        let after = WorkspaceScreen.shown(Self.workspace, in: fleet, layouts: { _, _ in apart })
-        #expect(after.first { $0.column == .conversation }?.group.terminals == ["conductor"])
-        // Nothing read yet: nothing to break out.
-        #expect(!WorkspaceScreen.sharesWindow(seat, layouts: nil))
+        // Apart, or not read yet: nothing to say.
+        #expect(WorkspaceScreen.sharers(of: seat, layouts: Self.apart).isEmpty)
+        #expect(WorkspaceScreen.sharers(of: seat, layouts: nil).isEmpty)
+        #expect(
+            WorkspaceScreen.shown(Self.workspace, in: fleet, layouts: { _, _ in Self.apart })
+                .first { $0.column == .conversation }?.group.terminals == ["conductor"])
 
-        // Until then, sleepnomore opened from the main checkout doesn't draw
-        // the shared window either: the checkout falls back to its cards.
+        // Show Changes' pane is the orchestrator's own.
+        var changes = fleet
+        changes.worktrees[0].terminals[1].paneMode = "changes"
+        let withChanges = WorkspaceScreen.pane("conductor", host: "", in: changes)!
+        #expect(WorkspaceScreen.sharers(of: withChanges, layouts: Self.shared).isEmpty)
+
+        // Meanwhile sleepnomore, opened from the main checkout, isn't drawn
+        // a second time there: it's in the column.
         let sleep = ContentView.Selection.workspace(host: "", workspace: Self.main, focus: .worktree("checkout", terminal: "s1"))
-        #expect(WorkspaceScreen.shown(sleep, in: fleet, layouts: { _, _ in Self.shared }).isEmpty)
-        // Apart, it's its own window.
-        #expect(WorkspaceScreen.shown(sleep, in: fleet, layouts: { _, _ in apart }).last?.group.terminals == ["s1"])
+        #expect(WorkspaceScreen.shown(sleep, in: fleet, layouts: { _, _ in Self.shared }).map(\.column) == [.conversation])
+        // Moved out, it's the checkout's own window.
+        #expect(WorkspaceScreen.shown(sleep, in: fleet, layouts: { _, _ in Self.apart }).last?.group.terminals == ["s1"])
     }
 
     /// The main checkout, opened, knows which orchestrators run in it, so it
@@ -79,8 +87,10 @@ struct OrchestratorPlaceTests {
         let checkout = fleet.worktrees[0]
         #expect(WorkspaceScreen.seated(in: checkout, fleet: fleet).map(\.workspace.name) == ["Main"])
         #expect(WorkspaceScreen.seated(in: checkout, fleet: fleet).map(\.pane.terminal.id) == ["conductor"])
-        // Its own terminals, for the card view, without the orchestrator.
-        #expect(WorkspaceScreen.ownTerminals(of: checkout, fleet: fleet).terminals.map(\.id) == ["s1"])
+        // Its own terminals, for the card view, without the orchestrator,
+        // or anything in the orchestrator's window.
+        #expect(WorkspaceScreen.ownTerminals(of: checkout, fleet: fleet, layouts: Self.apart).terminals.map(\.id) == ["s1"])
+        #expect(WorkspaceScreen.ownTerminals(of: checkout, fleet: fleet, layouts: Self.shared).terminals.isEmpty)
 
         // And says where it is instead.
         #expect(WorktreeDetail.hostedSentence(["Main"]) == "The orchestrator runs here. It’s in the Orchestrator column.")
@@ -93,7 +103,7 @@ struct OrchestratorPlaceTests {
         ]
         unseated.worktrees[0].terminals[0].state = "exited"
         #expect(WorkspaceScreen.seated(in: unseated.worktrees[0], fleet: unseated).isEmpty)
-        #expect(WorkspaceScreen.ownTerminals(of: unseated.worktrees[0], fleet: unseated).terminals.count == 2)
+        #expect(WorkspaceScreen.ownTerminals(of: unseated.worktrees[0], fleet: unseated, layouts: Self.shared).terminals.count == 2)
     }
 
     /// An orchestrator carrying a task id is still not that task's agent: a

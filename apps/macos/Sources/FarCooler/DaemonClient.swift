@@ -1592,6 +1592,13 @@ final class DaemonClient: ObservableObject {
         await layout(worktree, ["break"], terminal.map { [$0] } ?? [])
     }
 
+    /// Move `terminal` out of the window it shares into one of its own,
+    /// leaving the window it was in, and which window is current, as they
+    /// were (`layout break`, tmux's `break-pane -d`). Whether the runner did.
+    func moveToOwnWindow(_ terminal: Terminal, in worktree: Worktree) async -> Bool {
+        await layoutOrNil(worktree, ["break"], [terminal.short]) != nil
+    }
+
     @discardableResult
     func renameLayout(_ name: String, in worktree: Worktree, layout group: String? = nil)
         async -> [PaneGroup]

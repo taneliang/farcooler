@@ -85,16 +85,21 @@ enum WorkspaceScreen {
         return all.first { $0.terminal.id == chosen } ?? all.first
     }
 
-    /// Whether `seat`'s tmux window holds other terminals too: a split made
-    /// by hand, or a shell adopted as the orchestrator beside another.
-    ///
-    /// The conversation column draws the orchestrator and nothing else, so
-    /// while this holds it draws the orchestrator's pane on its own rather
-    /// than the window (`shown`), and the app asks the runner to give it a
-    /// window of its own (`layout break`). False before the layouts are read.
-    static func sharesWindow(_ seat: BoardPane, layouts: [PaneGroup]?) -> Bool {
-        guard let group = layouts?.first(where: { $0.terminals.contains(seat.terminal.id) }) else { return false }
-        return group.terminals.contains { $0 != seat.terminal.id }
+    /// The terminals sharing `seat`'s tmux window that aren't part of it:
+    /// other records with another role, such as a shell somebody split
+    /// beside the claude they then made the orchestrator. The column draws
+    /// the window whole, these included, and offers each Move to Its Own
+    /// Window. A changes pane (Show Changes) is the orchestrator's own and
+    /// isn't listed. Empty before the layouts are read.
+    static func sharers(of seat: BoardPane, layouts: [PaneGroup]?) -> [Terminal] {
+        guard let group = layouts?.first(where: { $0.terminals.contains(seat.terminal.id) }) else { return [] }
+        return group.terminals.compactMap { id in
+            guard id != seat.terminal.id,
+                let terminal = seat.worktree.terminals.first(where: { $0.id == id }),
+                !terminal.isChangesPane, terminal.role != seat.terminal.role
+            else { return nil }
+            return terminal
+        }
     }
 
     /// The orchestrators seated in `worktree`, each with its workspace: the
@@ -113,10 +118,13 @@ enum WorkspaceScreen {
         }
     }
 
-    /// `worktree` without the orchestrators seated in it: what opening it
-    /// whole lists, so no terminal is shown in two places.
-    static func ownTerminals(of worktree: Worktree, fleet: Fleet) -> Worktree {
-        worktree.without(Set(seated(in: worktree, fleet: fleet).map(\.pane.terminal.id)))
+    /// `worktree` without what the conversation columns draw: the
+    /// orchestrators seated in it, and every terminal in their windows. What
+    /// opening it whole lists, so no terminal is shown in two places.
+    static func ownTerminals(of worktree: Worktree, fleet: Fleet, layouts: [PaneGroup]?) -> Worktree {
+        let seats = seated(in: worktree, fleet: fleet).map(\.pane.terminal.id)
+        let windows = (layouts ?? []).filter { $0.terminals.contains(where: seats.contains) }
+        return worktree.without(Set(seats + windows.flatMap(\.terminals)))
     }
 
     /// A terminal on `host`, with the worktree it's in.
@@ -151,10 +159,11 @@ enum WorkspaceScreen {
             let own = ContentView.ownLayouts(all, of: worktree)
             // An orchestrator's window is never a worktree's layout, even
             // named: it's the conversation column's. Nor is a window a
-            // seated one shares with the terminal named, until the runner
-            // breaks it out (`sharesWindow`): the column draws that one. An
-            // orchestrator nobody seats has no column, so the window it
-            // shares is still where the named terminal is shown.
+            // seated one shares with the terminal named: the column draws
+            // that window whole, and the terminal is shown there until it's
+            // moved to its own (`sharers`). An orchestrator nobody seats has
+            // no column, so the window it shares is where the named terminal
+            // is shown.
             let orchestrators = ContentView.orchestrators(in: worktree)
             let seated = Set(seated(in: worktree, fleet: fleet).map(\.pane.terminal.id))
             if let terminal, !orchestrators.contains(terminal),
@@ -184,10 +193,7 @@ enum WorkspaceScreen {
                 // Starting, the column draws "Starting Orchestrator…", not
                 // the pane: nothing of it is on screen to be seen.
                 StateKind.parse(seat.terminal.state) != .starting,
-                let group = holding(seat),
-                // Sharing a window, it's drawn on its own until the runner
-                // gives it one: see `sharesWindow`.
-                group.terminals.allSatisfy({ $0 == seat.terminal.id })
+                let group = holding(seat)
             {
                 out.append(ShownLayout(column: .conversation, worktree: seat.worktree, group: group, groups: [group]))
             }

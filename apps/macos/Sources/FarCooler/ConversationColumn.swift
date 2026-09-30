@@ -148,6 +148,35 @@ extension ConversationHeader {
     }
 }
 
+/// A terminal that isn't the orchestrator, sharing its window, and the
+/// one click that moves it out: see `WorkspaceScreen.sharers`.
+struct SharedWindowNotice: View {
+    let title: String
+    let canAct: Bool
+    let onMove: () -> Void
+
+    static func sentence(_ title: String) -> String { "\(title) shares the orchestrator’s window." }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(Self.sentence(title))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 6)
+            if canAct {
+                Button("Move to Its Own Window", action: onMove)
+                    .controlSize(.small)
+                    .fixedSize()
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .background(WorkspaceStyle.canvas)
+    }
+}
+
 /// Every state but a live orchestrator, centered in the column.
 struct ConversationPlaceholder: View {
     let state: ConversationColumn.State
