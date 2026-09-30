@@ -49,6 +49,10 @@ struct FleetView: View {
     /// a fleet to look in. See `dropUnknownTerminal`.
     @State private var pendingTerminal: String?
 
+    /// A tapped decision push's task, by its key, held for `PhoneRoot` to
+    /// find on whichever runner has it (ruling 3).
+    @State private var pendingTask: String?
+
     /// Whether to offer a way off the spinner yet. See `waitedLongEnough`.
     @State private var stalled = false
 
@@ -156,6 +160,22 @@ struct FleetView: View {
             // stopped between the tap and the answer.
             // Any runner's poll is a fresh answer to "does anybody have this
             // pane". `entries` is republished on every one of them.
+            // A tapped notification: an agent's, by its terminal, the way a
+            // card's link arrives; a decision's, by its task (ruling 3).
+            // Published by the notification center's delegate, which is
+            // there before this view is, so a tap that launched the app is
+            // still waiting here when it appears.
+            .onReceive(NotificationTaps.shared.$tap) { tap in
+                guard let tap else { return }
+                NotificationTaps.shared.tap = nil
+                switch tap {
+                case .terminal(let terminal):
+                    pendingTerminal = terminal
+                    dropUnknownTerminal()
+                case .task(let key):
+                    pendingTask = key
+                }
+            }
             .onChange(of: fleet.entries.count) { _, _ in dropUnknownTerminal() }
             .onChange(of: fleet.hasFleet) { _, _ in dropUnknownTerminal() }
     }
@@ -436,7 +456,8 @@ struct FleetView: View {
     /// worktree pushed over it; a worktree is the shell scoped to that
     /// worktree. See `PhoneRoot`.
     private var connected: some View {
-        PhoneRoot(fleet: fleet, hosts: store, pendingTerminal: $pendingTerminal)
+        PhoneRoot(
+            fleet: fleet, hosts: store, pendingTerminal: $pendingTerminal, pendingTask: $pendingTask)
     }
 
     // MARK: - What used to stand in front of a runner

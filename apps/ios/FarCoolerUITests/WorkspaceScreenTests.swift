@@ -91,6 +91,70 @@ final class WorkspaceScreenTests: XCTestCase {
             element(app, "orchestrator-pane").waitForExistence(timeout: 20),
             "the orchestrator's pane did not appear: \(app.debugDescription)")
         XCTAssertFalse(element(app, "orchestrator-refusal").exists, "the runner refused the start")
+        // A start, not a replace: the menu's harness, and replace false.
+        XCTAssertEqual(
+            element(app, "harness-sent").value as? String, "start billing claude replace=false")
+    }
+
+    /// **The orchestrator's pane stays mounted while the board is up**
+    /// (ov-66, ruling 2): back on Orchestrator it's the same pane, not one
+    /// built again, which is what would reconnect it and lose its place.
+    func testTheOrchestratorStaysMountedAcrossSegments() throws {
+        let app = launch()
+        openWorkspace(app, "Main")
+        let mount = element(app, "orchestrator-mount")
+        XCTAssertTrue(mount.waitForExistence(timeout: 10), "no orchestrator pane")
+        let before = try XCTUnwrap(mount.value as? String)
+        choose(app, "Board")
+        XCTAssertTrue(element(app, "board").waitForExistence(timeout: 10), "the board did not show")
+        choose(app, "Worktrees")
+        choose(app, "Orchestrator")
+        XCTAssertTrue(mount.waitForExistence(timeout: 10), "the pane did not come back")
+        XCTAssertEqual(mount.value as? String, before, "the pane was built again")
+    }
+
+    /// **New Task… files a task on the board** (ov-66, ruling 4): a title
+    /// past 200 scalars says the Mac's line and can't be added, a refusal
+    /// is a sentence that keeps the sheet up, and a filed task is on the
+    /// board when the sheet closes.
+    func testNewTaskFilesATaskOnTheBoard() throws {
+        let app = launch()
+        openWorkspace(app, "Billing")
+        choose(app, "Board")
+        let add = app.buttons["new-task"]
+        XCTAssertTrue(add.waitForExistence(timeout: 10), "no New Task…")
+        add.tap()
+
+        let title = app.textFields["new-task-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5), "no New Task sheet")
+        title.tap()
+        title.typeText(String(repeating: "a", count: 201))
+        let tooLong = element(app, "new-task-too-long")
+        XCTAssertTrue(tooLong.waitForExistence(timeout: 5), "a title past 200 says nothing")
+        XCTAssertEqual(tooLong.label, "That title is too long. Shorten it to add the task.")
+        XCTAssertFalse(app.buttons["new-task-add"].isEnabled, "Add Task takes a title too long")
+        title.typeText(XCUIKeyboardKey.delete.rawValue)
+        XCTAssertFalse(tooLong.exists, "200 scalars is still too long")
+        XCTAssertTrue(app.buttons["new-task-add"].isEnabled)
+
+        // The runner says no: its sentence, and the sheet stays.
+        title.clearText()
+        title.typeText("Refuse me")
+        app.buttons["new-task-add"].tap()
+        // The label's words, not its icon, which carries the same name.
+        let failure = app.staticTexts["new-task-failure"].firstMatch
+        XCTAssertTrue(failure.waitForExistence(timeout: 10), "the refusal said nothing")
+        XCTAssertEqual(
+            failure.label, "This device can only look at this runner, so it can’t add tasks.")
+
+        title.clearText()
+        title.typeText("Email the invoice")
+        app.buttons["new-task-add"].tap()
+        let card = element(app, "board-card-bil-20")
+        XCTAssertTrue(card.waitForExistence(timeout: 10), "the filed task isn't on the board")
+        XCTAssertFalse(title.exists, "the sheet is still up")
+        XCTAssertEqual(
+            element(app, "harness-sent").value as? String, "task.create billing Email the invoice")
     }
 
     /// **An empty status is a header reading its zero, and it doesn't open.**
@@ -119,5 +183,16 @@ final class WorkspaceScreenTests: XCTestCase {
         // Tapping the empty one opens nothing.
         todo.tap()
         XCTAssertEqual(element(app, "board-section-todo").value as? String, "Empty")
+    }
+}
+
+private extension XCUIElement {
+    /// Delete everything in a text field, one key at a time: what a person
+    /// holding Delete does. Tapped first, since a sheet that was sending
+    /// took the focus away.
+    func clearText() {
+        tap()
+        let typed = (value as? String) ?? ""
+        typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: typed.count))
     }
 }

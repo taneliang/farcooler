@@ -116,6 +116,8 @@ final class TaskScreenTests: XCTestCase {
         XCTAssertTrue(element(app, "needs-you-item-ask:hook-ask-1").exists, "the ask went too")
         XCTAssertFalse(
             element(app, "needs-you-failure-\(Self.decision)").exists, "the answer was refused")
+        // The option it was answered with, not the other one, and not a title.
+        XCTAssertEqual(element(app, "harness-sent").value as? String, "task.note bil-7 pdfkit")
     }
 
     /// **An answer someone else got to first says so**, on the row, in the
@@ -195,5 +197,10 @@ final class ReadScopeTests: XCTestCase {
             app.descendants(matching: .any)["task-question"].waitForExistence(timeout: 10),
             "the question isn't shown")
         XCTAssertFalse(app.buttons["task-answer-pdfkit"].exists, "an answer is offered")
+
+        // Nor a way to file a task.
+        app.navigationBars.buttons["BackButton"].firstMatch.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["board"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["new-task"].exists, "New Task… offered")
     }
 }

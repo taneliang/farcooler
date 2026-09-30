@@ -813,12 +813,14 @@ private struct ShellCrossing: Equatable {
 ///   its panes.
 /// - The pull request on the Changes tab's header, read for the worktree at
 ///   rest and only while its diff is the pane on screen.
-/// - **The one writer of `Notifier.shared.visibleTerminal`.** Read by
-///   `Notifications.swift:162` to suppress a banner about the pane you are
+/// - **The shell's claim on `Notifier.shared.visibleTerminal`.** Read by
+///   `Notifications.swift` to suppress a banner about the pane you are
 ///   already looking at, and by `Connection.markVisibleSeen()` to claim the
-///   runner's ten-second watch. One writer, fed by one callback, fired when
-///   the pane AT REST changes and at no other time — never mid-gesture, when
-///   two panes are on screen and neither has arrived.
+///   runner's ten-second watch. Claimed through `Notifier.claim`, fed by one
+///   callback, fired when the pane AT REST changes and at no other time —
+///   never mid-gesture, when two panes are on screen and neither has
+///   arrived. `Notifier` is the one writer; a pane's own mount and the
+///   workspace's orchestrator claim through it too.
 struct ShellScreen: View {
     /// Every runner this app is talking to, and the merged fleet across them.
     ///
@@ -1080,7 +1082,11 @@ struct ShellScreen: View {
             guard phase == .active else { return }
             markVisible()
         }
-        .onDisappear { Notifier.shared.visibleTerminal = nil }
+        // Only this shell's own claim: a claim made since, by a screen
+        // this one was covering, isn't this one's to give back.
+        .onDisappear {
+            if let id = restingRef?.pane.terminal?.id { Notifier.shared.release(id) }
+        }
         #if DEBUG
         .overlay(alignment: .topLeading) { watchProbe }
         #endif
@@ -2098,7 +2104,7 @@ struct ShellScreen: View {
         map.fleet.landing(forTerminal: id, tabOfTerminal: map.tabOfTerminal)
     }
 
-    // MARK: - The one writer of `visibleTerminal`
+    // MARK: - The shell's claim on `visibleTerminal`
 
     /// Whether the grid is up, as `ShellRootView` reports it. Nothing is
     /// being read while it is: see `markVisible`.
@@ -2146,7 +2152,7 @@ struct ShellScreen: View {
     private func markVisible(_ ref: ShellPaneRef? = nil) {
         let resting = ref ?? restingRef
         let at = overviewUp ? nil : resting
-        Notifier.shared.visibleTerminal = at?.pane.terminal?.id
+        Notifier.shared.claim(at?.pane.terminal?.id)
         // Claimed on the runner the pane is on, and only there. Every other
         // runner clears its own watch on its own next poll — `Connection.refresh`
         // has always ended with this call — so fanning out here would be N round

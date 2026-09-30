@@ -1537,6 +1537,25 @@ final class Connection: ObservableObject {
         return body?["id"] as? String ?? ""
     }
 
+    /// File a task on `workspace`'s board from New Task… (ruling 4), through
+    /// the client core's `task.create`, which files it as the user; then
+    /// read that board again, so the card is there when the sheet closes.
+    ///
+    /// Nil when the runner took it. Otherwise the sentence the sheet keeps
+    /// (`PhoneNewTask.refusal`), never the runner's own words.
+    func createTask(on workspace: WorkspaceSummary, title: String, details: String) async -> String? {
+        do {
+            _ = try await rpc(
+                "task.create", PhoneNewTask.request(workspace, title: title, details: details))
+        } catch let ClientCore.CoreError.rejected(_, word, what) {
+            return PhoneNewTask.refusal(word: word, what: what)
+        } catch {
+            return PhoneNewTask.refusal(word: nil, what: nil)
+        }
+        await readBoard(workspace)
+        return nil
+    }
+
     /// One task's record, as `task.get` answers it: the notes the task screen
     /// lists, and the question still waiting in them.
     func taskRecord(_ task: String) async -> (detail: TaskDetailModel, question: TaskQuestion?)? {

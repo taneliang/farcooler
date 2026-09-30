@@ -31,7 +31,27 @@ final class Notifier {
     /// `Connection.markVisibleSeen`. Suppressing a banner and marking something
     /// read are the same judgement — "you are looking at this" — and answering
     /// it in two places is how they come to disagree.
-    var visibleTerminal: String?
+    ///
+    /// **Written here and nowhere else**, through `claim` and `release`
+    /// (ov-66). Three screens decide what's being read — the shell's pane at
+    /// rest (`ShellScreen.markVisible`), a pane's own mount
+    /// (`TerminalView`), and the workspace's orchestrator — and each used to
+    /// assign this directly, so one clearing on its way out wiped a claim
+    /// another had made since. A release names what it gives back, and
+    /// gives back only that.
+    private(set) var visibleTerminal: String?
+
+    /// `id` is the pane being read now, or nil for none: the Changes tab,
+    /// or the grid up.
+    func claim(_ id: String?) {
+        visibleTerminal = id
+    }
+
+    /// `id` isn't being read any more. A no-op when another pane has
+    /// claimed since, which is the whole difference from `claim(nil)`.
+    func release(_ id: String) {
+        if visibleTerminal == id { visibleTerminal = nil }
+    }
 
     private let presenter = ForegroundPresenter()
     /// What was last announced per terminal, so a state that persists is
@@ -40,8 +60,16 @@ final class Notifier {
     /// to ignore notifications.
     private var announced: [String: AgentActivity] = [:]
 
-    func requestAuthorization() {
+    /// Be the notification center's delegate: banners while the app is
+    /// open, and where a tapped one goes. At launch, from `PushDelegate`,
+    /// since a tap that launched the app is delivered to whatever delegate
+    /// is set by the time launching ends, and to nothing otherwise.
+    func listen() {
         UNUserNotificationCenter.current().delegate = presenter
+    }
+
+    func requestAuthorization() {
+        listen()
         UNUserNotificationCenter.current()
             .requestAuthorization(options: [.alert, .sound, .badge]) { [weak self] granted, _ in
                 Task { @MainActor in
@@ -162,6 +190,27 @@ private final class ForegroundPresenter: NSObject, UNUserNotificationCenterDeleg
         let visible = await MainActor.run { Notifier.shared.visibleTerminal }
         return subject == visible ? [] : [.banner, .sound]
     }
+
+    /// A tapped notification: its agent's pane, or a decision's task, over
+    /// the screens that lead to it (ruling 3). Handed to `FleetView` through
+    /// `NotificationTaps`, which routes it as it routes a card's link.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        let content = response.notification.request.content
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier,
+            let tap = PushTap(userInfo: content.userInfo, thread: content.threadIdentifier)
+        else { return }
+        await MainActor.run { NotificationTaps.shared.tap = tap }
+    }
+}
+
+/// The last notification tapped, until `FleetView` takes it.
+@MainActor
+final class NotificationTaps: ObservableObject {
+    static let shared = NotificationTaps()
+    @Published var tap: PushTap?
 }
 
 
@@ -202,6 +251,7 @@ final class PushDelegate: NSObject, UIApplicationDelegate {
         MainActor.assumeIsolated {
             WatchLinkHost.shared.start()
             WatchLinkHost.shared.acceptAnswersFromGlances()
+            Notifier.shared.listen()
         }
         return true
     }

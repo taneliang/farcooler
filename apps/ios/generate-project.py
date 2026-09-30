@@ -97,6 +97,8 @@ SOURCES = [
     "NeedsYouScreen.swift",
     "WorkspaceScreen.swift",
     "TaskScreen.swift",
+    # New Task… on a workspace's board, through `task.create` (ov-66).
+    "NewTaskSheet.swift",
     # The same stack over a canned runner, for the UI suite. DEBUG only.
     "PhoneHarness.swift",
     "ShellHarness.swift",
@@ -646,6 +648,9 @@ UI_TEST_SOURCES = [
     # task under it, and a decision answered from Needs You. Needs no runner,
     # for the same reason.
     "TaskScreenTests.swift",
+    # The stack reopening where a relaunch left it, and a decision push
+    # landing on its task (ov-66). Needs no runner, for the same reason.
+    "PhoneReopenTests.swift",
     # A claude TUI pane's permission ask, answered from the phone and at the
     # keyboard, against the demo runner's asking stand-in.
     "TerminalPermissionTests.swift",

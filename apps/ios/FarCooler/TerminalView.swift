@@ -1086,17 +1086,15 @@ struct TerminalView: View {
         // on the pair, so the grid closing onto this pane claims it.
         .task(id: isVisible && !overviewShowing) {
             guard isVisible, !overviewShowing, !Task.isCancelled else { return }
-            Notifier.shared.visibleTerminal = terminal.id
+            Notifier.shared.claim(terminal.id)
             await connection.markVisibleSeen()
             // The grid came up, or the pane moved off, while that call was on
             // the wire: the claim set above is stale, and this task has been
             // replaced by one that makes no claim. Give it back rather than
             // leave it for the next poll to re-send. Only if it is still ours:
             // another pane may have claimed since.
-            if (Task.isCancelled || overviewShowing || !isVisible),
-                Notifier.shared.visibleTerminal == terminal.id
-            {
-                Notifier.shared.visibleTerminal = nil
+            if Task.isCancelled || overviewShowing || !isVisible {
+                Notifier.shared.release(terminal.id)
             }
         }
         .task(id: PaneDuty(visible: isVisible, drawsGrid: live.needsTerminalSession)) {

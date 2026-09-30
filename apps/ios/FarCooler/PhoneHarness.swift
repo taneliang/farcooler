@@ -22,6 +22,11 @@ import SwiftUI
 //   -phone-read-scope        this phone holds a Read grant: the runner sends
 //                            items without their answers, as the daemon does
 //   -deep-link <terminal>    as though a notification for it was tapped
+//   -push-task <key>         as though a decision push for that task was
+//                            tapped
+//   -phone-keep-stack        reopen the stack the last launch kept, rather
+//                            than forgetting it
+//   -phone-saved-gone        the last launch kept a stack whose task is gone
 
 struct PhoneHarness: View {
     static var isRequested: Bool { CommandLine.arguments.contains("-phone-harness") }
@@ -30,6 +35,7 @@ struct PhoneHarness: View {
     @StateObject private var fleet: FleetStore
     @State private var runner: HarnessRunner
     @State private var pendingTerminal: String?
+    @State private var pendingTask: String?
     /// Whether the canned runner has been stood up: its fleet, its list and
     /// its boards. A UI test waits on this (`phone-harness-ready`) before
     /// anything else, rather than on a guess at how long a first launch
@@ -44,6 +50,7 @@ struct PhoneHarness: View {
             wrappedValue: FleetStore.standIn(on: connection, host: HarnessRunner.host))
         _pendingTerminal = State(
             initialValue: UserDefaults.standard.string(forKey: "deep-link"))
+        _pendingTask = State(initialValue: UserDefaults.standard.string(forKey: "push-task"))
         Self.forgetOnce()
     }
 
@@ -60,6 +67,15 @@ struct PhoneHarness: View {
         } else {
             UserDefaults.standard.removeObject(forKey: PhoneLaunch.lastWorkspaceKey)
         }
+        if CommandLine.arguments.contains("-phone-saved-gone") {
+            let billing = PhoneWorkspace(
+                runner: HarnessRunner.host.id.uuidString, workspace: HarnessRunner.billing)
+            UserDefaults.standard.set(
+                PhoneLaunch.encode([.workspace(billing), .task(billing, task: HarnessRunner.goneTask)]),
+                forKey: PhoneLaunch.stackKey)
+        } else if !CommandLine.arguments.contains("-phone-keep-stack") {
+            UserDefaults.standard.removeObject(forKey: PhoneLaunch.stackKey)
+        }
         for key in UserDefaults.standard.dictionaryRepresentation().keys
         where key.hasPrefix("workspace.segment.") || key.hasPrefix("board.collapsed.") {
             UserDefaults.standard.removeObject(forKey: key)
@@ -69,8 +85,11 @@ struct PhoneHarness: View {
     private static func forgetOnce() { _ = forgotten }
 
     var body: some View {
-        PhoneRoot(fleet: fleet, hosts: hosts, pendingTerminal: $pendingTerminal)
+        PhoneRoot(
+            fleet: fleet, hosts: hosts, pendingTerminal: $pendingTerminal, pendingTask: $pendingTask
+        )
             .overlay(alignment: .topLeading) { snapshotProbe }
+            .overlay(alignment: .bottomLeading) { sentProbe }
             .overlay(alignment: .topTrailing) {
                 if ready {
                     Rectangle()
@@ -104,6 +123,20 @@ extension PhoneHarness {
                     "needsYou=\(SnapshotStore.read()?.needsYou.map { String($0.count) } ?? "-")")
         }
     }
+
+    /// What the screens sent the canned runner, one write per line
+    /// (`HarnessRunner.sent`), for a test to check the words and not only
+    /// that the runner took them. Sampled, as `snapshotProbe` is.
+    private var sentProbe: some View {
+        TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+            Rectangle()
+                .fill(Color.white.opacity(0.001))
+                .frame(width: 1, height: 1)
+                .accessibilityElement()
+                .accessibilityIdentifier("harness-sent")
+                .accessibilityValue(runner.sent.joined(separator: "\n"))
+        }
+    }
 }
 
 /// The canned runner: what it has, and how it answers.
@@ -128,12 +161,20 @@ final class HarnessRunner {
     static let decisionTask = "0198f2c0-0000-7000-8000-00000000e007"
     static let agentTask = "0198f2c0-0000-7000-8000-00000000e009"
     static let doneTask = "0198f2c0-0000-7000-8000-00000000e005"
+    /// A task no board has: what a kept stack names once it's deleted.
+    static let goneTask = "0198f2c0-0000-7000-8000-00000000e404"
 
     private let connection: Connection
     /// Whether Billing has an orchestrator yet. It starts without one.
     private var billingLed = false
     /// The items still waiting, by id.
     private var waiting: [String]
+    /// Every write the screens made, as `harness-sent` shows it:
+    /// `task.note <task> <body>`, `start <workspace> <harness> replace=<b>`,
+    /// `task.create <workspace> <title>`.
+    private(set) var sent: [String] = []
+    /// Tasks filed from the phone, on Billing's board.
+    private var filed: [[String: Any]] = []
 
     init(connection: Connection) {
         self.connection = connection
@@ -256,6 +297,7 @@ final class HarnessRunner {
                 let body = args["body"] as? String, !body.isEmpty
             else { throw ClientCore.CoreError.rejected("bad answer", word: "invalid-argument") }
             waiting.removeAll { $0 == "decision:\(Self.decisionTask)" }
+            sent.append("task.note bil-7 \(body)")
             return try json([:])
         case "terminal.agent_answer" where CommandLine.arguments.contains("-phone-answer-taken"):
             throw ClientCore.CoreError.rejected(
@@ -271,6 +313,8 @@ final class HarnessRunner {
             guard args["workspace"] as? String == Self.billing,
                 ["claude", "codex", "cursor"].contains(args["harness"] as? String ?? "")
             else { throw ClientCore.CoreError.rejected("bad start", word: "invalid-argument") }
+            sent.append(
+                "start billing \(args["harness"] as? String ?? "") replace=\(args["replace"] as? Bool ?? true)")
             // Lands a moment later, as a real one does, so "Starting
             // Orchestrator…" is on screen long enough to be read.
             Task { @MainActor in
@@ -279,6 +323,28 @@ final class HarnessRunner {
                 connection.standIn(on: fleet())
             }
             return try json(["id": Self.billingOrchestrator])
+        case "task.create":
+            // Billing's board, as the user; the title held to 200 scalars
+            // the way the client core holds it, refused by its word.
+            guard args["repository"] as? String == Self.repository,
+                args["workspace"] as? String == Self.billing,
+                let title = args["title"] as? String, !title.isEmpty
+            else { throw ClientCore.CoreError.rejected("bad create", word: "invalid-argument") }
+            guard title.unicodeScalars.count <= 200 else {
+                throw ClientCore.CoreError.rejected("title too long", word: "invalid-argument", what: "title")
+            }
+            if title == "Refuse me" {
+                throw ClientCore.CoreError.rejected("scope", word: "scope-denied")
+            }
+            let key = "bil-\(20 + filed.count)"
+            filed.append([
+                "id": "0198f2c0-0000-7000-8000-0000000f\(String(format: "%04d", filed.count))",
+                "key": key, "title": title, "status": "backlog",
+                "status_since": Int64(Date().timeIntervalSince1970 * 1000),
+                "intent": args["intent"] as? String ?? "", "workspace": Self.billing,
+            ])
+            sent.append("task.create billing \(title)")
+            return try json(filed.last ?? [:])
         default:
             throw ClientCore.CoreError.rejected("not in the harness", word: "unimplemented")
         }
@@ -382,7 +448,7 @@ final class HarnessRunner {
                 "id": Self.doneTask, "key": "bil-5", "title": "Stripe webhooks",
                 "status": "done", "status_since": now - 86_400_000, "workspace": Self.billing,
             ],
-        ]
+        ] + filed
     }
 }
 #endif

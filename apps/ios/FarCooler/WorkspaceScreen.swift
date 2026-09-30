@@ -9,7 +9,8 @@ import SwiftUI
 //   Replace; starting, "Starting Orchestrator…" and, after 30 seconds, the
 //   warning that the seat can stick (spec §8).
 // - Board: the list form, in-line (`WorkspaceBoardList`). A card pushes its
-//   task, so the board is never covered by a jump.
+//   task, so the board is never covered by a jump. New Task… files one
+//   (`NewTaskSheet`), below a Read grant.
 // - Worktrees: the ones it owns, with their tasks and changes. New Worktree…
 //   claims the worktree for this workspace.
 
@@ -21,6 +22,7 @@ struct WorkspaceScreen: View {
 
     /// The segment on screen, kept per workspace (`WorkspaceSegment`).
     @State private var segment: WorkspaceSegment
+    @State private var filing = false
 
     init(fleet: FleetStore, hosts: RunnerStore, connection: Connection, place: PhoneWorkspace) {
         self.fleet = fleet
@@ -71,10 +73,22 @@ struct WorkspaceScreen: View {
     @ViewBuilder
     private func content(_ summary: WorkspaceSummary) -> some View {
         let shown = current(summary)
-        Group {
+        ZStack {
+            // Mounted whenever the workspace has the segment, whichever is
+            // up, and live only on its own (ov-66, the owner's ruling 2), as
+            // Android keeps it: going to the board and back neither
+            // reconnects the pane nor loses its place. Hidden, it holds no
+            // stream (`TerminalView`'s `isVisible`) and takes no touches.
+            if WorkspaceSegment.offered(implicit: summary.isImplicit).contains(.orchestrator) {
+                let up = shown == .orchestrator
+                OrchestratorSegment(connection: connection, summary: summary, shown: up)
+                    .opacity(up ? 1 : 0)
+                    .allowsHitTesting(up)
+                    .accessibilityHidden(!up)
+            }
             switch shown {
             case .orchestrator:
-                OrchestratorSegment(connection: connection, summary: summary)
+                EmptyView()
             case .board:
                 WorkspaceBoardList(
                     board: connection.boards[summary.id],
@@ -92,6 +106,17 @@ struct WorkspaceScreen: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .toolbar {
+            if shown == .board && PhoneNewTask.offered(connection.daemon) {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("New Task…", systemImage: "plus") { filing = true }
+                        .accessibilityIdentifier("new-task")
+                }
+            }
+        }
+        .sheet(isPresented: $filing) {
+            NewTaskSheet(connection: connection, workspace: summary)
+        }
         // A bar of the navigation bar's own, so the control sits in its
         // material and takes its touches, rather than under its edge.
         .safeAreaBar(edge: .top) {
@@ -162,6 +187,8 @@ private struct SegmentBar: View {
 private struct OrchestratorSegment: View {
     @ObservedObject var connection: Connection
     let summary: WorkspaceSummary
+    /// Whether it's the segment up, rather than mounted under another.
+    let shown: Bool
 
     @StateObject private var pastes = ImagePasteQueue()
     /// When this phone asked for one, until its pane appears.
@@ -225,7 +252,8 @@ private struct OrchestratorSegment: View {
             case .starting:
                 starting(since: startedAt ?? Date())
             default:
-                OrchestratorPane(terminal: terminal, connection: connection, pastes: pastes)
+                OrchestratorPane(
+                    terminal: terminal, connection: connection, pastes: pastes, shown: shown)
                     .id(terminal.id)
             }
         } else if let startedAt {
@@ -320,26 +348,58 @@ private struct OrchestratorSegment: View {
 
 /// The orchestrator's own pane, full height: the same terminal and agent
 /// views a worktree's panes use, and the one pane being read while it's up.
+///
+/// Being read is `TerminalView`'s to claim, as every pane's is: while
+/// `isVisible`, it tells `Notifier` and marks the pane seen. What that
+/// claim never does is give itself back when the pane is only hidden, so
+/// this does, when another segment comes up or the screen goes.
 private struct OrchestratorPane: View {
     let terminal: Terminal
     @ObservedObject var connection: Connection
     @ObservedObject var pastes: ImagePasteQueue
+    let shown: Bool
+
+    #if DEBUG
+    /// Which mount of the pane this is, for a UI test to tell a pane kept
+    /// mounted from one built again (`orchestrator-mount`).
+    @StateObject private var mount = PaneMount()
+    #endif
 
     var body: some View {
-        TerminalView(terminal: terminal, isVisible: true, connection: connection, pastes: pastes)
+        TerminalView(terminal: terminal, isVisible: shown, connection: connection, pastes: pastes)
             .background(TerminalPalette.background.ignoresSafeArea(edges: .bottom))
             .accessibilityIdentifier("orchestrator-pane")
-            .onAppear {
-                Notifier.shared.visibleTerminal = terminal.id
-                Task { await connection.markVisibleSeen() }
+            .onChange(of: shown) { _, up in
+                if !up { Notifier.shared.release(terminal.id) }
             }
-            .onDisappear {
-                if Notifier.shared.visibleTerminal == terminal.id {
-                    Notifier.shared.visibleTerminal = nil
-                }
+            .onDisappear { Notifier.shared.release(terminal.id) }
+            #if DEBUG
+            .overlay(alignment: .topTrailing) {
+                Rectangle()
+                    .fill(Color.white.opacity(0.001))
+                    .frame(width: 1, height: 1)
+                    .accessibilityElement()
+                    .accessibilityIdentifier("orchestrator-mount")
+                    .accessibilityValue("mount=\(mount.serial)")
             }
+            #endif
     }
 }
+
+#if DEBUG
+/// A count of the orchestrator panes built, one per mount: a `StateObject`
+/// is made once for as long as its view is in the tree.
+@MainActor
+private final class PaneMount: ObservableObject {
+    private static var built = 0
+    let serial: Int
+
+    init() {
+        Self.built += 1
+        serial = Self.built
+    }
+}
+#endif
 
 // MARK: - Worktrees
 

@@ -40,6 +40,7 @@
 		628AFBD4A96C5EE385233135 /* NeedsYouScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0CB9D9FF7935B02B74AA453; };
 		E3763DC57F845868BFD5611D /* WorkspaceScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22BC9A8E84FA5814B11CAD5A; };
 		1EB44A68546253D799F467BE /* TaskScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EE80D199E965C9DBD89B354; };
+		DB7DD0767AD156FBAC3595DB /* NewTaskSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 569D38F70C8B53259BB58E2B; };
 		CA994DCD72065DA7AFD2ABF5 /* PhoneHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9BCC126D70758278242837F; };
 		25877588360854AC87D9BB37 /* ShellHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90B7569A5F745E6B85EC796E; };
 		7D3AD3D96B0A58BBB9F8C359 /* TunnelE2EHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EF733CFE8DC5FD194DB89A3; };
@@ -185,6 +186,7 @@
 		B726FE60E6E65B02A1A2395C /* LiveRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59E51511E9C7529495920A96; };
 		CB742AFCE4CC587F846E7346 /* WorkspaceScreenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5951CB89F4FA52438238F13D; };
 		D7BFEA1F317D5A418F93A1C3 /* TaskScreenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD1F3CC700F95FB48294AB37; };
+		9FE140CA75A9558496196D4A /* PhoneReopenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70571C4EE1465283B9786587; };
 		19B7EA784E635D98BE09B664 /* TerminalPermissionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23895DE7BEE35D69A0A6AEF3; };
 		721F4953DDF9524495D06AFE /* TerminalLigatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C6D3916C0759178BBBDF27; };
 		8B376F9E067550C8BB02D4A0 /* ShellPaneScrollTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A910AA73FC4572AB46D62BA; };
@@ -234,6 +236,7 @@
 		E0CB9D9FF7935B02B74AA453 /* NeedsYouScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeedsYouScreen.swift; sourceTree = "<group>"; };
 		22BC9A8E84FA5814B11CAD5A /* WorkspaceScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceScreen.swift; sourceTree = "<group>"; };
 		4EE80D199E965C9DBD89B354 /* TaskScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskScreen.swift; sourceTree = "<group>"; };
+		569D38F70C8B53259BB58E2B /* NewTaskSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewTaskSheet.swift; sourceTree = "<group>"; };
 		B9BCC126D70758278242837F /* PhoneHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneHarness.swift; sourceTree = "<group>"; };
 		90B7569A5F745E6B85EC796E /* ShellHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellHarness.swift; sourceTree = "<group>"; };
 		4EF733CFE8DC5FD194DB89A3 /* TunnelE2EHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelE2EHarness.swift; sourceTree = "<group>"; };
@@ -345,6 +348,7 @@
 		59E51511E9C7529495920A96 /* LiveRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveRunner.swift; sourceTree = "<group>"; };
 		5951CB89F4FA52438238F13D /* WorkspaceScreenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceScreenTests.swift; sourceTree = "<group>"; };
 		FD1F3CC700F95FB48294AB37 /* TaskScreenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskScreenTests.swift; sourceTree = "<group>"; };
+		70571C4EE1465283B9786587 /* PhoneReopenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneReopenTests.swift; sourceTree = "<group>"; };
 		23895DE7BEE35D69A0A6AEF3 /* TerminalPermissionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalPermissionTests.swift; sourceTree = "<group>"; };
 		90C6D3916C0759178BBBDF27 /* TerminalLigatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalLigatureTests.swift; sourceTree = "<group>"; };
 		6A910AA73FC4572AB46D62BA /* ShellPaneScrollTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellPaneScrollTests.swift; sourceTree = "<group>"; };
@@ -438,6 +442,7 @@
 				E0CB9D9FF7935B02B74AA453 /* NeedsYouScreen.swift */,
 				22BC9A8E84FA5814B11CAD5A /* WorkspaceScreen.swift */,
 				4EE80D199E965C9DBD89B354 /* TaskScreen.swift */,
+				569D38F70C8B53259BB58E2B /* NewTaskSheet.swift */,
 				B9BCC126D70758278242837F /* PhoneHarness.swift */,
 				90B7569A5F745E6B85EC796E /* ShellHarness.swift */,
 				4EF733CFE8DC5FD194DB89A3 /* TunnelE2EHarness.swift */,
@@ -516,6 +521,7 @@
 				59E51511E9C7529495920A96 /* LiveRunner.swift */,
 				5951CB89F4FA52438238F13D /* WorkspaceScreenTests.swift */,
 				FD1F3CC700F95FB48294AB37 /* TaskScreenTests.swift */,
+				70571C4EE1465283B9786587 /* PhoneReopenTests.swift */,
 				23895DE7BEE35D69A0A6AEF3 /* TerminalPermissionTests.swift */,
 				90C6D3916C0759178BBBDF27 /* TerminalLigatureTests.swift */,
 				6A910AA73FC4572AB46D62BA /* ShellPaneScrollTests.swift */,
@@ -931,6 +937,7 @@
 				628AFBD4A96C5EE385233135 /* NeedsYouScreen.swift in Sources */,
 				E3763DC57F845868BFD5611D /* WorkspaceScreen.swift in Sources */,
 				1EB44A68546253D799F467BE /* TaskScreen.swift in Sources */,
+				DB7DD0767AD156FBAC3595DB /* NewTaskSheet.swift in Sources */,
 				CA994DCD72065DA7AFD2ABF5 /* PhoneHarness.swift in Sources */,
 				25877588360854AC87D9BB37 /* ShellHarness.swift in Sources */,
 				7D3AD3D96B0A58BBB9F8C359 /* TunnelE2EHarness.swift in Sources */,
@@ -1105,6 +1112,7 @@
 				B726FE60E6E65B02A1A2395C /* LiveRunner.swift in Sources */,
 				CB742AFCE4CC587F846E7346 /* WorkspaceScreenTests.swift in Sources */,
 				D7BFEA1F317D5A418F93A1C3 /* TaskScreenTests.swift in Sources */,
+				9FE140CA75A9558496196D4A /* PhoneReopenTests.swift in Sources */,
 				19B7EA784E635D98BE09B664 /* TerminalPermissionTests.swift in Sources */,
 				721F4953DDF9524495D06AFE /* TerminalLigatureTests.swift in Sources */,
 				8B376F9E067550C8BB02D4A0 /* ShellPaneScrollTests.swift in Sources */,
