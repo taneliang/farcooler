@@ -2337,12 +2337,8 @@ struct ContentView: View {
             if expanded.wrappedValue {
                 Divider()
                 ScrollView {
-                    TaskCard(
-                        row: board.opened?.id == row.id ? board.opened ?? row : row, detail: board.detail(for: row.id),
-                        question: board.question(for: row.id), canAnswer: board.offersWrites,
-                        onAnswer: { body in await board.answer(row, with: body) },
-                        draft: TaskCard.Draft(read: { board.draft(for: $0) }, write: { board.setDraft($1, for: $0) }))
-                    .padding(12)
+                    TaskColumnCard(row: row, store: board)
+                        .padding(12)
                 }
                 .frame(maxHeight: 280)
                 .background(WorkspaceStyle.document)

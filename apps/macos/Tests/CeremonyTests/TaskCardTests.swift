@@ -141,4 +141,76 @@ struct TaskCardTests {
         #expect(store.detail(for: "t1").notes.isEmpty, "drew t9's notes under t1")
         #expect(store.question(for: "t1") == nil, "offered t9's question under t1")
     }
+
+    /// **A task switched to draws its record when it arrives.** The column's
+    /// card was built in `ContentView`'s body, which doesn't observe the
+    /// board's store, so the question read for a task just opened stayed
+    /// off screen, and its Answer buttons with it, until something else
+    /// redrew the window (live check, ov-75). Hosted under a parent that
+    /// observes nothing, as the window is, the card follows the store alone.
+    @Test("The column's card draws a task's question once it's read, with no other redraw")
+    func theColumnsCardDrawsTheQuestionWhenItArrives() async throws {
+        let client = DaemonClient(target: "", notifications: NotificationCenter())
+        client.commandRunnerForTesting = { args in
+            if args.starts(with: ["task", "list"]) {
+                return (
+                    Data(
+                        #"{"tasks":[{"id":"t9","key":"-9","title":"Pick","status":"needs_decision"},{"id":"t1","key":"-1","title":"Other","status":"needs_decision"}]}"#
+                            .utf8), nil
+                )
+            }
+            if args.starts(with: ["task", "show"]), args.contains("-1") {
+                return (
+                    Data(
+                        #"{"task":{},"notes":[{"id":"q2","kind":"question","actor":"manager","at":2,"body":"Ship it?","extra":{}}],"blocks":[]}"#
+                            .utf8), nil
+                )
+            }
+            if args.starts(with: ["task", "show"]) {
+                return (
+                    Data(
+                        #"{"task":{},"notes":[{"id":"q1","kind":"question","actor":"manager","at":1,"body":"Which store?","extra":{}}],"blocks":[]}"#
+                            .utf8), nil
+                )
+            }
+            return (Data(), nil)
+        }
+        let store = TaskBoardStore(client: client, workspace: .implicit(repository: "r"))
+        await store.readIfNeverRead()
+        let first = try #require(store.board.rows.first { $0.id == "t9" })
+        let second = try #require(store.board.rows.first { $0.id == "t1" })
+        await store.open(first)
+
+        final class Drawn { var question: [String?] = [] }
+        let drawn = Drawn()
+        // The window's side: a view built once for `second` that observes
+        // nothing itself.
+        struct Hosted: View {
+            let row: TaskRow
+            let store: TaskBoardStore
+            let drawn: Drawn
+            var body: some View {
+                TaskColumnCard(row: row, store: store) { _, _, question -> Color in
+                    drawn.question.append(question?.body)
+                    return Color.clear
+                }
+            }
+        }
+        let host = NSHostingView(rootView: Hosted(row: second, store: store, drawn: drawn))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.borderless],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+        host.layoutSubtreeIfNeeded()
+        #expect(drawn.question.last == .some(nil), "drew t9's question under t1: \(drawn.question)")
+
+        await store.open(second)
+        for _ in 0..<20 where drawn.question.last != "Ship it?" {
+            host.layoutSubtreeIfNeeded()
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(drawn.question.last == "Ship it?", "t1's question never reached its card: \(drawn.question)")
+    }
 }

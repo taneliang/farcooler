@@ -55,6 +55,38 @@ enum TaskColumnModel {
     static func startsExpanded(_ status: TaskStatus) -> Bool { status == .needsDecision }
 }
 
+/// The task column's card: `row`'s record and question, drawn from the
+/// board's store, which this observes.
+///
+/// Its own view for that observation. Built in `ContentView`'s body, which
+/// doesn't observe the board, the card of a task just switched to stayed
+/// blank, no question and no Answer buttons, until something unrelated
+/// redrew the window. Through `detail(for:)` and `question(for:)`, as ov-65
+/// had it, so no frame draws another task's record. `card` is what draws
+/// them: `TaskCard`, or a test's probe.
+struct TaskColumnCard<Card: View>: View {
+    let row: TaskRow
+    @ObservedObject var store: TaskBoardStore
+    let card: (_ row: TaskRow, _ detail: TaskDetailModel, _ question: TaskQuestion?) -> Card
+
+    var body: some View {
+        card(
+            store.opened?.id == row.id ? store.opened ?? row : row, store.detail(for: row.id),
+            store.question(for: row.id))
+    }
+}
+
+extension TaskColumnCard where Card == TaskCard {
+    init(row: TaskRow, store: TaskBoardStore) {
+        self.init(row: row, store: store) { shown, detail, question in
+            TaskCard(
+                row: shown, detail: detail, question: question, canAnswer: store.offersWrites,
+                onAnswer: { body in await store.answer(row, with: body) },
+                draft: TaskCard.Draft(read: { store.draft(for: $0) }, write: { store.setDraft($1, for: $0) }))
+        }
+    }
+}
+
 /// The task column's header: key and title, the status pop-up, the agent
 /// picker, Open Worktree and close, with the card under a disclosure.
 struct TaskColumnHeader: View {
