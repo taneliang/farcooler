@@ -258,7 +258,11 @@ fun BoardTab(
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).testTag("board-new-task"),
             )
         }
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
+        // Above the New Task… button, which sits at the bottom end.
+        SnackbarHost(
+            snackbar,
+            Modifier.align(Alignment.BottomCenter).padding(bottom = if (offersNewTask) 72.dp else 0.dp),
+        )
     }
     if (composing && offersNewTask) {
         NewTaskSheet(connection, workspace, onDismiss = { composing = false })
@@ -279,8 +283,18 @@ private fun NewTaskSheet(connection: Connection, workspace: WorkspaceSummary, on
     val scope = rememberCoroutineScope()
     var title by rememberSaveable { mutableStateOf("") }
     var details by rememberSaveable { mutableStateOf("") }
-    var sending by remember { mutableStateOf(false) }
+    // Saved with the rest: a create in flight when the activity is recreated may
+    // have landed, and an enabled button under it would file a second one. Its
+    // coroutine dies with the old activity, so nothing here would ever clear
+    // it; the effect below turns a restored "sending" into a sentence instead.
+    var sending by rememberSaveable { mutableStateOf(false) }
     var failure by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        if (sending) {
+            sending = false
+            failure = "Couldn’t tell whether that task was added. Check the board before trying again."
+        }
+    }
     val trimmed = title.trim()
     val tooLong = trimmed.isNotEmpty() && !NewTask.titleFits(trimmed)
 

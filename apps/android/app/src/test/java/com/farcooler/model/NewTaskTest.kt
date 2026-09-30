@@ -67,7 +67,7 @@ class NewTaskTest {
     /** What a refused create says: this app's sentence, never the runner's words. */
     @Test
     fun `a refused create says why in the app's own words`() {
-        assertEquals("A title can be at most 200 characters.", NewTask.refusal("invalid-argument", "title"))
+        assertEquals("That title is too long. Shorten it to add the task.", NewTask.refusal("invalid-argument", "title"))
         assertEquals(
             "This device can only look at this runner, so it can’t add tasks.",
             NewTask.refusal("scope-denied", null),

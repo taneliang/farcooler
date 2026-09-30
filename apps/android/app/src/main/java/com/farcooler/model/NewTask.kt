@@ -56,7 +56,7 @@ object NewTask {
      * that dropped rather than a runner that said no.
      */
     fun refusal(word: String?, what: String?): String = when {
-        what == "title" -> "A title can be at most $TITLE_LIMIT characters."
+        what == "title" -> "That title is too long. Shorten it to add the task."
         word == "scope-denied" -> "This device can only look at this runner, so it can’t add tasks."
         word == "capability-unsupported" ->
             "This runner’s Far Cooler is too old to add tasks from a phone. Update it there, then try again."
