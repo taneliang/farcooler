@@ -328,7 +328,7 @@ private fun OrchestratorActions(
         IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(
-                text = { Text("Open worktree") },
+                text = { Text("Open Worktree") },
                 onClick = {
                     open = false
                     onOpenWorktree(TerminalRef(connection.host.id, live.worktreeId, terminal.id))
