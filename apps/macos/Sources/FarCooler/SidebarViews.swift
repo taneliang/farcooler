@@ -1409,6 +1409,32 @@ struct WorktreesDisclosure: View {
     }
 }
 
+/// An open Worktrees disclosure with nothing in it (spec §8).
+struct NoWorktreesRow: View {
+    /// New Worktree…, claimed for this workspace; nil when the runner can't
+    /// be acted on.
+    let onNewWorktree: (() -> Void)?
+
+    static let sentence = "No worktrees yet. The orchestrator makes them as it dispatches tasks."
+
+    var body: some View {
+        SidebarRow {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(Self.sentence)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let onNewWorktree {
+                    Button("New Worktree…", action: onNewWorktree)
+                        .buttonStyle(.link)
+                        .font(.system(size: 11))
+                }
+            }
+        }
+        .padding(.vertical, 3)
+    }
+}
+
 /// The sidebar's first row: everything waiting on you, from every
 /// workspace.
 struct NeedsYouRow: View {

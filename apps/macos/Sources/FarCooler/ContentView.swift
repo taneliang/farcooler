@@ -686,6 +686,19 @@ struct ContentView: View {
         openWorktrees = set.sorted().joined(separator: "\n")
     }
 
+    /// New Worktree… from an empty Worktrees disclosure: in the workspace
+    /// first, so the sheet claims what it makes for it
+    /// (`claim(newWorktreeIn:…)`).
+    private func newWorktreeAction(for entry: SidebarEntry) -> () -> Void {
+        let host = entry.host
+        let project = entry.project
+        let workspace = entry.workspace?.id
+        return {
+            if let workspace { selection = .workspace(host: host, workspace: workspace, focus: nil) }
+            newWorktree(host: host, project: project)
+        }
+    }
+
     /// Show Board: the workspace, with its board on screen, in the
     /// one-column form too.
     private func showBoard(host: String, workspace: String) {
@@ -1120,6 +1133,8 @@ struct ContentView: View {
             }
         case .worktree:
             if let worktree = entry.worktree { worktreeRow(worktree, usable: usable) }
+        case .noWorktrees:
+            NoWorktreesRow(onNewWorktree: usable ? newWorktreeAction(for: entry) : nil)
         case .unclaimed:
             UnclaimedWorktrees(
                 worktrees: entry.worktrees,

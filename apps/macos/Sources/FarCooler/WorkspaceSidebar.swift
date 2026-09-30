@@ -26,6 +26,9 @@ struct SidebarEntry: Identifiable {
         case worktrees(count: Int)
         /// A worktree inside an open Worktrees disclosure, by its id.
         case worktree(String)
+        /// An open Worktrees disclosure with nothing in it: says so, and
+        /// offers New Worktree… (spec §8).
+        case noWorktrees
         /// The repository's worktrees no workspace owns, collapsed.
         case unclaimed(count: Int)
         /// The repository's hidden worktrees, collapsed.
@@ -80,6 +83,7 @@ struct SidebarEntry: Identifiable {
         case .workspace: return "\(group)\u{1}workspace\u{1}\(workspace?.id ?? "")"
         case .worktrees: return "\(group)\u{1}worktrees\u{1}\(workspace?.id ?? "")"
         case .worktree(let id): return "\(group)\u{1}worktree\u{1}\(id)"
+        case .noWorktrees: return "\(group)\u{1}noworktrees\u{1}\(workspace?.id ?? "")"
         case .unclaimed: return "\(group)\u{1}unclaimed"
         case .hidden: return "\(group)\u{1}hidden"
         }
@@ -215,7 +219,10 @@ extension ContentView {
                 // (all of them for a workspace found by its name).
                 let listedIDs = searching && !nameMatches ? hits : group.worktrees
                 let worktrees = listedIDs.compactMap { owned[$0]?.without(drawn) }
-                guard !worktrees.isEmpty else { continue }
+                // An empty one is drawn too, so a new workspace says where
+                // its worktrees will be — but not while searching, where it
+                // would look like a hit.
+                guard !worktrees.isEmpty || !searching else { continue }
                 var disclosure = entry(.worktrees(count: worktrees.count))
                 disclosure.workspace = workspace
                 disclosure.worktrees = worktrees
@@ -223,6 +230,12 @@ extension ContentView {
                 rows.append(disclosure)
                 let isOpen = open(SidebarEntry.openKey(host: host, workspace: workspace.id)) || (searching && !hits.isEmpty)
                 guard isOpen else { continue }
+                if worktrees.isEmpty {
+                    var empty = entry(.noWorktrees)
+                    empty.workspace = workspace
+                    empty.depth = 3
+                    rows.append(empty)
+                }
                 for worktree in worktrees {
                     var line = entry(.worktree(worktree.id))
                     line.workspace = workspace
