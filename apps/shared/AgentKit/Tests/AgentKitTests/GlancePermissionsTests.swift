@@ -584,15 +584,44 @@ struct GlancePermissionsTests {
         #expect(CardLeaderAsk.current(store: .empty, state: card(), now: until) == .none)
     }
 
-    /// Provisional D2: an answer that allows needs an unlock, one that refuses
-    /// does not.
+    /// Provisional D2, failing closed: every answer needs an unlock except
+    /// one whose kind says it refuses. A kind this build has never met is
+    /// treated as an allow.
     ///
-    /// Mutation: `needsUnlock` true for every option. Red: Deny needs an unlock.
-    @Test func onlyAnAllowNeedsAnUnlock() {
+    /// Mutation: `needsUnlock` as "allows" again. Red: "proceed" needs none.
+    @Test func everyAnswerButARefusalNeedsAnUnlock() {
         #expect(option("allow", "Allow", "allow_once").needsUnlock)
         #expect(option("a", "Yes", "allow_always").needsUnlock)
+        #expect(option("z", "Go on", "proceed").needsUnlock)
+        #expect(option("q", "Sure", "").needsUnlock)
         #expect(!option("deny", "Deny", "reject_once").needsUnlock)
-        #expect(!option("z", "Go on", "proceed").needsUnlock)
+        #expect(!option("n", "No", "deny").needsUnlock)
+    }
+
+    /// The unauthenticated intent decides for itself, not by trusting the
+    /// widget to have picked the right one: only an option this phone knows
+    /// to be a refusal may be sent without an unlock. A card ask's refusal is
+    /// `deny`; a filed ask's is whatever option its kind says refuses.
+    ///
+    /// Mutation: an unknown option allowed through. Red: "allow" on a hook
+    /// ask with no record is let through.
+    @Test func aLockedTapMayOnlyRefuse() {
+        let filed = GlancePermissions(pending: [
+            permission(
+                [option("yes", "Yes", "allow_once"), option("go", "Go on", "proceed"),
+                 option("no", "No", "reject_once")],
+                request: "perm-7")
+        ])
+        #expect(filed.answersWithoutUnlock(terminal: "t1", request: "perm-7", option: "no"))
+        #expect(!filed.answersWithoutUnlock(terminal: "t1", request: "perm-7", option: "yes"))
+        #expect(!filed.answersWithoutUnlock(terminal: "t1", request: "perm-7", option: "go"))
+        #expect(!filed.answersWithoutUnlock(terminal: "t1", request: "perm-7", option: "gone"))
+        #expect(!filed.answersWithoutUnlock(terminal: "t1", request: "perm-8", option: "no"))
+
+        let empty = GlancePermissions.empty
+        #expect(empty.answersWithoutUnlock(terminal: "t1", request: "hook-ask-1", option: "deny"))
+        #expect(!empty.answersWithoutUnlock(terminal: "t1", request: "hook-ask-1", option: "allow"))
+        #expect(!empty.answersWithoutUnlock(terminal: "t1", request: "perm-7", option: "deny"))
     }
 
     /// An unreadable file says the same thing as an absent one — nothing is

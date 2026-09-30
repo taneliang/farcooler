@@ -612,12 +612,33 @@ public struct CardLeaderAsk: Equatable, Sendable {
 extension GlancePermissionOption {
     /// Whether answering with this option needs the phone unlocked first.
     ///
-    /// **Provisional (ov-57), D2**: an answer that allows does, one that
-    /// refuses does not. The widget picks `AllowPermissionIntent`, whose
-    /// `authenticationPolicy` asks for the unlock, for exactly these. Whether
-    /// iOS honors that policy on a Lock Screen button is a device check
-    /// (T-iOS-5).
-    public var needsUnlock: Bool { GlancePermission.allows(self) }
+    /// **Provisional (ov-57), D2, failing closed**: every answer does, except
+    /// one whose kind says it refuses. A kind this build has never met is
+    /// treated as an allow, because a refusal from the wrong hand costs
+    /// nothing and an allow on a shell command does. The widget picks
+    /// `AllowPermissionIntent`, whose `authenticationPolicy` asks for the
+    /// unlock, for these. Whether iOS honors that policy on a Lock Screen
+    /// button is a device check (T-iOS-5).
+    public var needsUnlock: Bool { !GlancePermission.rejects(self) }
+}
+
+extension GlancePermissions {
+    /// Whether `option` may be sent with no unlock: the check the
+    /// unauthenticated `AnswerPermissionIntent` makes itself, rather than
+    /// trusting the widget to have picked the right intent.
+    ///
+    /// True only for an option this phone knows to refuse: the filed record's
+    /// option of that id, when its kind refuses; or, for a hook ask with no
+    /// record, `deny`, the refusal every hook ask offers
+    /// (`GlancePermission.fromCard`). Anything else, including an id nothing
+    /// here recognizes, needs the unlock.
+    public func answersWithoutUnlock(terminal: String, request: String, option: String) -> Bool {
+        if let filed = permission(for: terminal), filed.request == request {
+            guard let known = filed.options.first(where: { $0.id == option }) else { return false }
+            return !known.needsUnlock
+        }
+        return request.hasPrefix(CardAsk.idPrefix) && option == "deny"
+    }
 }
 
 /// Where the glance permissions live, and the only code that reads or writes

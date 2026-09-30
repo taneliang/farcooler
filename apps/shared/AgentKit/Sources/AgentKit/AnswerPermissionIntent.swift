@@ -117,7 +117,9 @@
         /// which is two accounts of one event.
         @MainActor
         public func perform() async throws -> some IntentResult {
-            await AnswerPermissionDelivery.deliver(self)
+            // Performed with no unlock, so this intent sends only a refusal and
+            // refuses anything else itself (ov-57, D2), whichever button asked.
+            await AnswerPermissionDelivery.deliver(self, unlocked: false)
             return .result()
         }
     }
@@ -168,7 +170,8 @@
             await AnswerPermissionDelivery.deliver(
                 AnswerPermissionIntent(
                     terminal: terminal, request: request, option: option,
-                    optionName: optionName, until: until))
+                    optionName: optionName, until: until),
+                unlocked: true)
             return .result()
         }
     }
@@ -198,7 +201,29 @@
         /// Set by the app at launch. Nil everywhere else.
         public static var handler: ((AnswerPermissionIntent) async -> Void)?
 
-        static func deliver(_ intent: AnswerPermissionIntent) async {
+        static func deliver(_ intent: AnswerPermissionIntent, unlocked: Bool) async {
+            // The unlock boundary, held here and not only by which intent the
+            // widget chose: without an unlock, only an option this phone knows
+            // refuses may go out. Refused before the handler, so nothing
+            // connects; `nothingSent` hands the buttons back.
+            if !unlocked,
+                !GlancePermissionStore.read().answersWithoutUnlock(
+                    terminal: intent.terminal, request: intent.request, option: intent.option)
+            {
+                GlancePermissionStore.update {
+                    $0.claiming(
+                        terminal: intent.terminal, request: intent.request,
+                        option: intent.option, optionName: intent.optionName, at: Date()
+                    )?
+                    .settling(
+                        terminal: intent.terminal, request: intent.request,
+                        outcome: .nothingSent,
+                        message:
+                            "Unlock your \(DeviceKind.current) to allow this. Nothing was sent.",
+                        at: Date())
+                }
+                return
+            }
             guard let handler else {
                 GlancePermissionStore.update {
                     // Claimed and settled in one step, so the card has
