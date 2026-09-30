@@ -157,6 +157,9 @@ struct ContentView: View {
     @State private var showWorkspacesTip = WorkspacesTip.shouldShow()
     /// The key monitor that turns Esc into Back. See `EscapeBack`.
     @State private var escapeMonitor: Any?
+    /// ⌥⌘2 gave the board the keyboard: no terminal takes typed keys until
+    /// a pane is clicked or chosen again.
+    @State private var keyboardOnBoard = false
     /// This window, for the Esc monitor, which hears every window's keys.
     @State private var windowBox = WindowBox()
     /// New Workspace…, with the name typed into the palette, while its
@@ -355,6 +358,10 @@ struct ContentView: View {
             // through, which makes it the narrowest point that sees every one
             // of them.
             errorBanner = nil
+            // Focus Column and a board holding the keyboard are about the
+            // view that was on screen, not the next one.
+            focusColumn = false
+            keyboardOnBoard = false
 
             // Selecting a pane focuses it, which is also what switches to its
             // layout. Done here rather than in `detail`, because it is a write and
@@ -2379,7 +2386,8 @@ struct ContentView: View {
             onSwitchPaneMode: { terminal in Task { await togglePaneMode(terminal, in: ws) } },
             title: frame.title,
             subtitle: frame.subtitle,
-            setsTitle: titled
+            setsTitle: titled,
+            hasKeyboard: WorkspaceScreen.hasKeyboard(shown, key: selectedPane, onBoard: keyboardOnBoard)
         )
     }
 
@@ -2942,22 +2950,13 @@ struct ContentView: View {
     /// lives, as `land(on:)` does.
     private func focus(_ pane: PaneRef) {
         changesFocus = nil
-        guard let worktree = worktree(host: pane.host, id: pane.worktree) else { return }
-        if Self.shows(worktree, selection) {
-            let next = Self.opening(worktree, terminal: pane.terminal, in: store.fleet)
-            if case .workspace(let host, let id, .worktree(let wt, let t)) = next,
-                case .workspace(_, let current, _)? = selection, current != id
-            {
-                // Opened from another workspace's Worktrees or a task's Open
-                // Worktree: stay in the workspace it was opened from.
-                selection = .workspace(host: host, workspace: current, focus: .worktree(wt, terminal: t))
-            } else {
-                selection = next
-            }
-        } else if !shown.contains(where: { $0.contains(pane) }) {
+        keyboardOnBoard = false
+        guard let next = WorkspaceScreen.focusing(pane, selection: selection, shown: shown, fleet: store.fleet)
+        else {
             land(on: pane)
             return
         }
+        if next != selection { selection = next }
         keyPane = pane
     }
 
@@ -2979,13 +2978,19 @@ struct ContentView: View {
             }
             if let pane = Self.stepOrder(shownLayouts(for: selection).filter { $0.column == .conversation }).first {
                 keyPane = pane
+                keyboardOnBoard = false
             }
         case .focusBoard:
             workspacePicks[key] = .board
             focusColumn = false
+            // Beside the others, the board has no text to type into: the
+            // terminals let go of the keyboard.
+            keyboardOnBoard = true
+            windowBox.window?.makeFirstResponder(nil)
         case .focusTask:
             if let pane = shown.last(where: { $0.column != .conversation }).map({ Self.stepOrder([$0]) })?.first {
                 keyPane = pane
+                keyboardOnBoard = false
             }
         default:
             break

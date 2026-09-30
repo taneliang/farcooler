@@ -88,6 +88,10 @@ struct TileView: View {
     /// Whether this view names the window. Not in a workspace, which shows
     /// two of these at once and titles the window itself.
     var setsTitle = true
+    /// Whether this view has the keyboard: with a workspace's conversation
+    /// and a task's agent both on screen, only the view holding the key pane
+    /// draws a focused pane and takes typed keys (`WorkspaceScreen.hasKeyboard`).
+    var hasKeyboard = true
 
     @ObservedObject private var prefix = PrefixMode.shared
     @ObservedObject private var preferences = Preferences.shared
@@ -243,7 +247,7 @@ struct TileView: View {
     private func pane(
         _ terminal: Terminal, rect: PaneRect, group: PaneGroup, size: CGSize
     ) -> some View {
-        let isFocused = rect.focused
+        let isFocused = rect.focused && hasKeyboard
 
         return TilePane(
             terminal: terminal,

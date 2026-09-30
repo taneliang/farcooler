@@ -113,7 +113,12 @@ enum WorkspaceScreen {
         func opened(_ worktree: Worktree, terminal: String?) -> ShownLayout? {
             let all = layouts(worktree.host ?? "", worktree.id) ?? []
             let own = ContentView.ownLayouts(all, of: worktree)
-            if let terminal, let group = all.first(where: { $0.terminals.contains(terminal) }) {
+            // An orchestrator's window is never a worktree's layout, even
+            // named: it's the conversation column's.
+            let orchestrators = ContentView.orchestrators(in: worktree)
+            if let terminal, !orchestrators.contains(terminal),
+                let group = all.first(where: { $0.terminals.contains(terminal) })
+            {
                 return ShownLayout(
                     column: .worktree, worktree: worktree, group: group,
                     groups: own.contains { $0.id == group.id } ? own : [group])
@@ -190,6 +195,42 @@ enum WorkspaceScreen {
                 return arrangement.task
             }
         }
+    }
+
+    /// What the selection becomes when the keyboard goes to `pane` (a click,
+    /// ⌘], ⌃B o), or nil when the pane isn't on screen and has to be gone to
+    /// (`WorkspaceSelection.landing`).
+    ///
+    /// A pane in the conversation leaves the selection as it is, even with
+    /// the main checkout open whole beside it, where the orchestrator runs:
+    /// naming it there would draw the orchestrator's window in the third
+    /// column too. A pane in a worktree opened whole names it, so its row
+    /// lights, staying in the workspace it was opened from.
+    static func focusing(
+        _ pane: PaneRef, selection: ContentView.Selection?, shown: [ShownLayout], fleet: Fleet
+    ) -> ContentView.Selection?? {
+        if shown.contains(where: { $0.column == .conversation && $0.contains(pane) }) { return .some(selection) }
+        if let worktree = WorkspaceSelection.worktree(host: pane.host, id: pane.worktree, in: fleet),
+            ContentView.shows(worktree, selection)
+        {
+            let next = ContentView.opening(worktree, terminal: pane.terminal, in: fleet)
+            if case .workspace(let host, let id, .worktree(let wt, let t)) = next,
+                case .workspace(_, let current, _)? = selection, current != id
+            {
+                return .some(.workspace(host: host, workspace: current, focus: .worktree(wt, terminal: t)))
+            }
+            return .some(next)
+        }
+        return shown.contains(where: { $0.contains(pane) }) ? .some(selection) : nil
+    }
+
+    /// Whether a terminal view drawing `layout` has the keyboard: it holds
+    /// the key pane, and the board hasn't been given it (⌥⌘2). Only that
+    /// view's focused pane draws focused and takes typed keys, so what you
+    /// type, ⌃B and ⌘W all reach the same pane.
+    static func hasKeyboard(_ layout: ShownLayout, key: PaneRef?, onBoard: Bool) -> Bool {
+        guard !onBoard, let key else { return false }
+        return layout.contains(key)
     }
 
     /// The pane the keyboard acts on: `key`, the pane last clicked or
