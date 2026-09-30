@@ -28,6 +28,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_0014_worktrees,
     migration_0015_workspaces,
     migration_0016_tasks_by_worktree,
+    migration_0017_terminal_split_of,
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -775,6 +776,21 @@ fn migration_0015_workspaces(tx: &Transaction) -> rusqlite::Result<()> {
 /// whole table.
 fn migration_0016_tasks_by_worktree(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch("CREATE INDEX tasks_by_worktree ON tasks (worktree_id, status);")
+}
+
+/// Where a terminal came from: the terminal it was split from, when a split
+/// made it (`Service::split_terminal_with_prompt`, which the app's split, ⌃B %
+/// and ⌃B ", and `terminal.create`'s join-the-layout all come through). NULL
+/// for everything else, and for every row from before this column: a row
+/// that predates it has an origin nobody wrote down, and a guess is worse
+/// than none.
+///
+/// No foreign key, on purpose. A split that outlives the terminal it was
+/// split from keeps the id it came with; that id names no terminal, which is
+/// the same answer to "was this split from one in my window?" as a NULL, with
+/// no cascade to write on every terminal removal.
+fn migration_0017_terminal_split_of(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch("ALTER TABLE terminals ADD COLUMN split_of BLOB;")
 }
 
 /// Every migration below `version`, applied in one transaction, with the
@@ -1616,6 +1632,31 @@ mod tests {
             [],
         );
         assert!(second.is_err(), "a prefix differing only by case is the same prefix");
+    }
+
+    /// A database from before a terminal recorded where it came from gains
+    /// the column, and its terminals read as unknown: NULL, never a guess.
+    #[test]
+    fn a_database_from_before_splits_were_recorded_reads_every_terminal_as_unknown() {
+        let mut conn = open();
+        migrate_only_to(&mut conn, 16);
+        conn.execute_batch(
+            "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
+             INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1, 'r');
+             INSERT INTO worktrees (id, repository_id, branch, worktree_path, hidden, creation_failed, resource_version)
+                 VALUES (x'05', x'03', 'main', '/r', 0, 0, 1);
+             INSERT INTO terminals (id, worktree_id, title, command_preset, intent, runtime_confirmed,
+                 lease_generation, epoch, \"columns\", \"rows\", resource_version)
+                 VALUES (x'06', x'05', 'old', 'shell', 1, 0, 0, 0, 80, 24, 1);",
+        )
+        .unwrap();
+
+        migrate(&mut conn, 16).unwrap();
+
+        let split_of: Option<Vec<u8>> = conn
+            .query_row("SELECT split_of FROM terminals WHERE id = x'06'", [], |r| r.get(0))
+            .expect("the old terminal is still there, with the column");
+        assert_eq!(split_of, None, "an old row's origin is unknown");
     }
 
     /// One Main per repository, held by the schema.

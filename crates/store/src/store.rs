@@ -621,15 +621,49 @@ impl Store {
         rows: u32,
         task_id: Option<Uuid>,
     ) -> Result<Terminal> {
+        self.insert_terminal(worktree_id, title, command_preset, intent, columns, rows, task_id, None)
+    }
+
+    /// `create_terminal_for_task` for a terminal a split makes: it records
+    /// `split_of`, the terminal it was split from, in the same INSERT. What
+    /// lets a client tell a pane somebody split beside another on purpose
+    /// from one that landed in that window some other way.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_split_terminal(
+        &self,
+        worktree_id: Uuid,
+        title: &str,
+        command_preset: &str,
+        intent: TerminalIntent,
+        columns: u32,
+        rows: u32,
+        task_id: Option<Uuid>,
+        split_of: Uuid,
+    ) -> Result<Terminal> {
+        self.insert_terminal(worktree_id, title, command_preset, intent, columns, rows, task_id, Some(split_of))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn insert_terminal(
+        &self,
+        worktree_id: Uuid,
+        title: &str,
+        command_preset: &str,
+        intent: TerminalIntent,
+        columns: u32,
+        rows: u32,
+        task_id: Option<Uuid>,
+        split_of: Option<Uuid>,
+    ) -> Result<Terminal> {
         let id = Uuid::now_v7();
         self.conn()
             .execute(
                 r#"INSERT INTO terminals
                  (id, worktree_id, title, command_preset, intent, runtime_confirmed,
                   exit_code, exit_signal, lease_generation, epoch,
-                  "columns", "rows", resource_version, task_id, workspace_id, role)
+                  "columns", "rows", resource_version, task_id, workspace_id, role, split_of)
                  VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL, NULL, 0, 0, ?6, ?7, 1, ?8,
-                         (SELECT workspace_id FROM worktrees WHERE id = ?2), ?9)"#,
+                         (SELECT workspace_id FROM worktrees WHERE id = ?2), ?9, ?10)"#,
                 params![
                     uuid_blob(id),
                     uuid_blob(worktree_id),
@@ -640,6 +674,7 @@ impl Store {
                     rows,
                     task_id.map(uuid_blob),
                     TerminalRole::for_preset(command_preset).as_i64(),
+                    split_of.map(uuid_blob),
                 ],
             )
             .map_err(map_err)?;
@@ -653,7 +688,7 @@ impl Store {
                 r#"SELECT id, worktree_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, lease_generation, epoch,
                           "columns", "rows", resource_version, pane_mode, agent_session_id, task_id,
-                          workspace_id, role
+                          workspace_id, role, split_of
                    FROM terminals WHERE id = ?1"#,
                 params![uuid_blob(id)],
                 row_to_terminal,
@@ -668,7 +703,7 @@ impl Store {
                 r#"SELECT id, worktree_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, lease_generation, epoch,
                           "columns", "rows", resource_version, pane_mode, agent_session_id, task_id,
-                          workspace_id, role
+                          workspace_id, role, split_of
                    FROM terminals WHERE worktree_id = ?1"#,
             )
             .map_err(map_err)?;
@@ -705,7 +740,7 @@ impl Store {
                 r#"SELECT id, worktree_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, lease_generation, epoch,
                           "columns", "rows", resource_version, pane_mode, agent_session_id, task_id,
-                          workspace_id, role
+                          workspace_id, role, split_of
                    FROM terminals WHERE agent_session_id = ?1"#,
             )
             .map_err(map_err)?;
@@ -962,6 +997,9 @@ mod tests {
             // anything was seen running.
             "workspace_id",
             "role",
+            // Where it came from: the terminal a split made it beside. Set at
+            // creation and never moved.
+            "split_of",
         ];
         assert_eq!(cols.len(), expected.len(), "unexpected column set: {cols:?}");
         for e in expected {
@@ -996,6 +1034,24 @@ mod tests {
 
         let plain = s.create_terminal(ws, "p", "shell", TerminalIntent::Running, 80, 24).unwrap();
         assert_eq!(s.get_terminal(plain.id).unwrap().task_id, None);
+    }
+
+    /// A split names the terminal it was split from; any other terminal names
+    /// none. Read back through both reads every caller uses.
+    #[test]
+    fn a_split_terminal_names_what_it_was_split_from() {
+        let s = store();
+        let (ws, task) = a_lane_with_a_task(&s);
+        let first = s.create_terminal(ws, "p", "shell", TerminalIntent::Running, 80, 24).unwrap();
+        let split = s
+            .create_split_terminal(ws, "w", "claude", TerminalIntent::Running, 80, 24, Some(task), first.id)
+            .unwrap();
+        assert_eq!(split.split_of, Some(first.id));
+        assert_eq!(split.task_id, Some(task), "and keeps its task");
+        assert_eq!(s.get_terminal(split.id).unwrap().split_of, Some(first.id), "read back from disk");
+        let listed = s.list_terminals_for_worktree(ws).unwrap();
+        assert_eq!(listed.iter().find(|t| t.id == split.id).unwrap().split_of, Some(first.id));
+        assert_eq!(s.get_terminal(first.id).unwrap().split_of, None, "a window of its own names none");
     }
 
     /// A terminal outlives its ticket. Deleting the task must neither fail on

@@ -319,6 +319,12 @@ pub struct Terminal {
     /// unclaimed and nothing has said otherwise.
     pub workspace_id: Option<Uuid>,
     pub role: TerminalRole,
+    /// The terminal this one was split from, when a split made it
+    /// (`Store::create_split_terminal`). `None` for a terminal opened in a
+    /// window of its own, and for one from before this was recorded: the two
+    /// are not told apart, because nothing reads them differently. Set at
+    /// creation and never moved; may name a terminal since removed.
+    pub split_of: Option<Uuid>,
 }
 
 pub(crate) fn row_to_terminal(row: &Row) -> rusqlite::Result<Terminal> {
@@ -341,6 +347,7 @@ pub(crate) fn row_to_terminal(row: &Row) -> rusqlite::Result<Terminal> {
         task_id: get_optional_uuid(row, 15)?,
         workspace_id: get_optional_uuid(row, 16)?,
         role: TerminalRole::from_i64(row.get(17)?),
+        split_of: get_optional_uuid(row, 18)?,
     })
 }
 
