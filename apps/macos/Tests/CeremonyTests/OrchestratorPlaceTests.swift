@@ -6,7 +6,8 @@ import Testing
 
 /// A terminal is shown in exactly one place (ov-63): an orchestrator in its
 /// workspace's conversation column, and nowhere else, however many other
-/// terminals share its worktree or its tmux window.
+/// terminals share its worktree or its tmux window. And the orchestrator is
+/// one pane (ov-78): nothing is split into its window or joins it.
 @MainActor
 struct OrchestratorPlaceTests {
     private static let repo = "0198f2c0-0000-7000-8000-0000000000aa"
@@ -46,108 +47,95 @@ struct OrchestratorPlaceTests {
         PaneGroup(id: "@2", name: "", active: true, columns: 80, rows: 24, layout: "@2", panes: [pane("conductor", left: 0)]),
     ]
 
-    /// The column draws the orchestrator's window whole, as it always has,
-    /// and names what shares it, so one click can move that out. Nothing
-    /// is moved unasked.
-    @Test("An orchestrator's window is drawn whole, and what shares it is named")
-    func anOrchestratorsWindowIsDrawnWholeAndWhatSharesItIsNamed() {
+    /// The owner's report (ov-78): a pane in the orchestrator's window, a
+    /// split made in its column before ov-78 among them, is listed under the
+    /// main checkout but couldn't be opened there, because the checkout left
+    /// out everything the column draws. Now it's named in the column, with
+    /// Move to Its Own Window, and opening it from the checkout says which
+    /// seat's window it has to leave first. Nothing is moved unasked.
+    @Test("A pane sharing the orchestrator's window is named, and opening it from the checkout moves it")
+    func aPaneSharingTheOrchestratorsWindowIsNamedAndOpeningItMovesIt() {
         let fleet = Self.fleet()
         let shown = WorkspaceScreen.shown(Self.workspace, in: fleet, layouts: { _, _ in Self.shared })
+        // Until it's moved the column draws the window whole: tmux can't
+        // draw one pane of a window apart from the rest.
         #expect(shown.first { $0.column == .conversation }?.group.terminals == ["conductor", "s1"])
         let seat = WorkspaceScreen.pane("conductor", host: "", in: fleet)!
         #expect(WorkspaceScreen.sharers(of: seat, layouts: Self.shared).map(\.id) == ["s1"])
         #expect(SharedWindowNotice.sentence("sleepnomore") == "sleepnomore shares the orchestrator’s window.")
+        let checkout = fleet.worktrees[0]
+        #expect(WorkspaceScreen.seat(sharedBy: "s1", in: checkout, fleet: fleet, layouts: Self.shared)?.terminal.id == "conductor")
+        #expect(WorkspaceScreen.seat(sharedBy: "conductor", in: checkout, fleet: fleet, layouts: Self.shared) == nil)
 
-        // Apart, or not read yet: nothing to say.
+        // Apart, or not read yet: nothing to say or move.
         #expect(WorkspaceScreen.sharers(of: seat, layouts: Self.apart).isEmpty)
         #expect(WorkspaceScreen.sharers(of: seat, layouts: nil).isEmpty)
+        #expect(WorkspaceScreen.seat(sharedBy: "s1", in: checkout, fleet: fleet, layouts: Self.apart) == nil)
         #expect(
             WorkspaceScreen.shown(Self.workspace, in: fleet, layouts: { _, _ in Self.apart })
                 .first { $0.column == .conversation }?.group.terminals == ["conductor"])
 
-        // Show Changes' pane is the orchestrator's own.
+        // A changes pane in the window is a sharer too: Show Changes no
+        // longer opens one there.
         var changes = fleet
         changes.worktrees[0].terminals[1].paneMode = "changes"
         let withChanges = WorkspaceScreen.pane("conductor", host: "", in: changes)!
-        #expect(WorkspaceScreen.sharers(of: withChanges, layouts: Self.shared).isEmpty)
+        #expect(WorkspaceScreen.sharers(of: withChanges, layouts: Self.shared).map(\.id) == ["s1"])
 
-        // Meanwhile sleepnomore, opened from the main checkout, isn't drawn
-        // a second time there: it's in the column.
+        // Opened from the main checkout while it's shared, it isn't drawn a
+        // second time there; moved out, it's the checkout's own window.
         let sleep = ContentView.Selection.workspace(host: "", workspace: Self.main, focus: .worktree("checkout", terminal: "s1"))
         #expect(WorkspaceScreen.shown(sleep, in: fleet, layouts: { _, _ in Self.shared }).map(\.column) == [.conversation])
-        // Moved out, it's the checkout's own window.
         #expect(WorkspaceScreen.shown(sleep, in: fleet, layouts: { _, _ in Self.apart }).last?.group.terminals == ["s1"])
     }
 
-    /// A pane somebody split beside the orchestrator, or beside a pane in
-    /// its window, was put there on purpose, so it isn't offered a move
-    /// (ov-73). One whose origin is unknown (a record from before splits
-    /// were recorded, or an older runner), one opened on its own and joined
-    /// in later, or one split from a pane that's since gone, still is.
-    @Test("Only a pane that wasn't split into the orchestrator's window is offered a move")
-    func onlyAPaneThatWasntSplitIntoTheOrchestratorsWindowIsOfferedAMove() {
+    /// Every pane in the orchestrator's window is offered the move, however
+    /// it got there: ov-73 and ov-76 spared a split made in the column, and
+    /// that split is exactly the terminal the owner couldn't open. Another
+    /// orchestrator is never moved on this one's behalf.
+    @Test("Every pane in the orchestrator's window but an orchestrator is offered a move")
+    func everyPaneInTheOrchestratorsWindowIsOfferedAMove() {
         let three = [
             PaneGroup(
                 id: "@1", name: "", active: true, columns: 122, rows: 24, layout: "@1",
                 panes: [Self.pane("conductor", left: 0), Self.pane("s1", left: 41), Self.pane("s2", left: 82)])
         ]
-        func sharers(s1: String?, s2: String? = nil) -> [String] {
-            var fleet = Self.fleet()
-            fleet.worktrees[0].terminals[1].splitOf = s1
-            var second = Terminal(id: "s2", short: "s2", title: "logs", preset: "zsh", state: "running", epoch: 0)
-            second.splitOf = s2
-            fleet.worktrees[0].terminals.append(second)
-            let seat = WorkspaceScreen.pane("conductor", host: "", in: fleet)!
-            return WorkspaceScreen.sharers(of: seat, layouts: three).map(\.id)
-        }
+        var fleet = Self.fleet()
+        fleet.worktrees[0].terminals.append(
+            Terminal(id: "s2", short: "s2", title: "logs", preset: "zsh", state: "running", epoch: 0))
+        let seat = WorkspaceScreen.pane("conductor", host: "", in: fleet)!
+        #expect(WorkspaceScreen.sharers(of: seat, layouts: three).map(\.id) == ["s1", "s2"])
 
-        // Unknown, as every record was before ov-73: today's notice.
-        #expect(sharers(s1: nil) == ["s1", "s2"])
-        // Split from the orchestrator, or from a pane split from it.
-        #expect(sharers(s1: "conductor") == ["s2"])
-        #expect(sharers(s1: "conductor", s2: "s1") == [])
-        // Split from something outside the window, or since removed.
-        #expect(sharers(s1: "elsewhere", s2: "s1") == ["s1"])
+        fleet.worktrees[0].terminals[2].role = "orchestrator"
+        #expect(WorkspaceScreen.sharers(of: WorkspaceScreen.pane("conductor", host: "", in: fleet)!, layouts: three).map(\.id) == ["s1"])
     }
 
-    /// Split beside the orchestrator is on purpose only when it already was
-    /// the orchestrator (ov-76). A shell split beside a claude that was then
-    /// adopted with Use as Orchestrator (the owner's sleepnomore) shares its
-    /// window by accident, and is offered the move. A ⌃B split in the
-    /// orchestrator's column, from it or from a pane split from it there,
-    /// isn't. A split whose source's role wasn't recorded reads as ov-73 did.
-    @Test("A pane split beside a terminal before it was the orchestrator is offered a move")
-    func aPaneSplitBeforeTheOrchestratorWasOneIsOfferedAMove() {
-        let three = [
-            PaneGroup(
-                id: "@1", name: "", active: true, columns: 122, rows: 24, layout: "@1",
-                panes: [Self.pane("conductor", left: 0), Self.pane("s1", left: 41), Self.pane("s2", left: 82)])
-        ]
-        func sharers(_ s1: (String?, Bool?), _ s2: (String?, Bool?) = (nil, nil)) -> [String] {
-            var fleet = Self.fleet()
-            fleet.worktrees[0].terminals[1].splitOf = s1.0
-            fleet.worktrees[0].terminals[1].splitOfOrchestrator = s1.1
-            var second = Terminal(id: "s2", short: "s2", title: "logs", preset: "zsh", state: "running", epoch: 0)
-            second.splitOf = s2.0
-            second.splitOfOrchestrator = s2.1
-            fleet.worktrees[0].terminals.append(second)
-            let seat = WorkspaceScreen.pane("conductor", host: "", in: fleet)!
-            return WorkspaceScreen.sharers(of: seat, layouts: three).map(\.id)
+    /// The orchestrator is one pane (ov-78). ⌃B %, ⌃B " and ⌃B c with the
+    /// keyboard in its column open a shell in the main checkout instead;
+    /// with the keyboard anywhere else they split as before. And a drop
+    /// never moves the orchestrator or puts a pane in its window.
+    @Test("Nothing splits into the orchestrator's window or joins it")
+    func nothingSplitsIntoTheOrchestratorsWindowOrJoinsIt() {
+        let fleet = Self.fleet()
+        let shown = WorkspaceScreen.shown(Self.workspace, in: fleet, layouts: { _, _ in Self.apart })
+        let conductor = PaneRef(host: "", worktree: "checkout", terminal: "conductor")
+        for command in [TileCommand.splitRight, .splitDown, .newGroup] {
+            #expect(WorkspaceScreen.opensShellInstead(command, key: conductor, in: shown))
         }
+        #expect(!WorkspaceScreen.opensShellInstead(.zoom, key: conductor, in: shown))
+        #expect(!WorkspaceScreen.opensShellInstead(.splitRight, key: nil, in: shown))
+        // In the checkout's own window, opened beside it, a split is a split.
+        let opened = WorkspaceScreen.shown(
+            .workspace(host: "", workspace: Self.main, focus: .worktree("checkout", terminal: "s1")), in: fleet,
+            layouts: { _, _ in Self.apart })
+        let s1 = PaneRef(host: "", worktree: "checkout", terminal: "s1")
+        #expect(!WorkspaceScreen.opensShellInstead(.splitRight, key: s1, in: opened))
 
-        // Split beside the claude before it was adopted: offered the move.
-        #expect(sharers(("conductor", false)) == ["s1", "s2"])
-        // And a pane split from that one: it wasn't split from the
-        // orchestrator either.
-        #expect(sharers(("conductor", false), ("s1", false)) == ["s1", "s2"])
-        // ⌃B in the orchestrator's column: from it, then from that pane.
-        #expect(sharers(("conductor", true)) == ["s2"])
-        #expect(sharers(("conductor", true), ("s1", false)) == [])
-        // Not recorded: as ov-73 read every split.
-        #expect(sharers(("conductor", nil)) == ["s2"])
-        #expect(sharers(("conductor", false), ("s1", nil)) == ["s1"])
-        // Said without a split to say it of: no split.
-        #expect(sharers((nil, true)) == ["s1", "s2"])
+        let checkout = fleet.worktrees[0]
+        #expect(WorkspaceScreen.joinsOrchestrator("s1", window: ["conductor"], in: checkout, fleet: fleet))
+        #expect(WorkspaceScreen.joinsOrchestrator("conductor", window: ["s1"], in: checkout, fleet: fleet))
+        #expect(WorkspaceScreen.joinsOrchestrator("s2", window: ["conductor", "s1"], in: checkout, fleet: fleet))
+        #expect(!WorkspaceScreen.joinsOrchestrator("s2", window: ["s1"], in: checkout, fleet: fleet))
     }
 
     /// The main checkout, opened, knows which orchestrators run in it, so it
@@ -158,10 +146,9 @@ struct OrchestratorPlaceTests {
         let checkout = fleet.worktrees[0]
         #expect(WorkspaceScreen.seated(in: checkout, fleet: fleet).map(\.workspace.name) == ["Main"])
         #expect(WorkspaceScreen.seated(in: checkout, fleet: fleet).map(\.pane.terminal.id) == ["conductor"])
-        // Its own terminals, for the card view, without the orchestrator,
-        // or anything in the orchestrator's window.
-        #expect(WorkspaceScreen.ownTerminals(of: checkout, fleet: fleet, layouts: Self.apart).terminals.map(\.id) == ["s1"])
-        #expect(WorkspaceScreen.ownTerminals(of: checkout, fleet: fleet, layouts: Self.shared).terminals.isEmpty)
+        // Its own terminals, for the card view: all but the orchestrator,
+        // a pane sharing its window included, which opening moves out.
+        #expect(WorkspaceScreen.ownTerminals(of: checkout, fleet: fleet).terminals.map(\.id) == ["s1"])
 
         // And says where it is instead.
         #expect(WorktreeDetail.hostedSentence(["Main"]) == "The orchestrator runs here. It’s in the Orchestrator column.")
@@ -174,7 +161,7 @@ struct OrchestratorPlaceTests {
         ]
         unseated.worktrees[0].terminals[0].state = "exited"
         #expect(WorkspaceScreen.seated(in: unseated.worktrees[0], fleet: unseated).isEmpty)
-        #expect(WorkspaceScreen.ownTerminals(of: unseated.worktrees[0], fleet: unseated, layouts: Self.shared).terminals.count == 2)
+        #expect(WorkspaceScreen.ownTerminals(of: unseated.worktrees[0], fleet: unseated).terminals.count == 2)
     }
 
     /// An orchestrator carrying a task id is still not that task's agent: a

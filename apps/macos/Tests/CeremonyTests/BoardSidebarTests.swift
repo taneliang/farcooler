@@ -56,26 +56,6 @@ struct BoardSidebarTests {
         #expect(try JSONDecoder().decode(Terminal.self, from: older).taskId == nil)
     }
 
-    /// `splitOf`, the pane a split made this one beside, survives the decode
-    /// too (ov-73), and an older CLI's absent key reads as unknown.
-    @Test func aTerminalKeepsThePaneItWasSplitFrom() throws {
-        let json = Data(
-            #"{"id":"t1","short":"t1","title":"","preset":"zsh","state":"running","epoch":0,"splitOf":"t0"}"#
-                .utf8)
-        #expect(try JSONDecoder().decode(Terminal.self, from: json).splitOf == "t0")
-        let older = Data(
-            #"{"id":"t1","short":"t1","title":"","preset":"zsh","state":"running","epoch":0}"#.utf8)
-        #expect(try JSONDecoder().decode(Terminal.self, from: older).splitOf == nil)
-        #expect(try JSONDecoder().decode(Terminal.self, from: older).splitOfOrchestrator == nil)
-        // Whether it was split from the orchestrator, either way (ov-76).
-        for said in [true, false] {
-            let json = Data(
-                #"{"id":"t1","short":"t1","title":"","preset":"zsh","state":"running","epoch":0,"splitOf":"t0","splitOfOrchestrator":\#(said)}"#
-                    .utf8)
-            #expect(try JSONDecoder().decode(Terminal.self, from: json).splitOfOrchestrator == said)
-        }
-    }
-
     /// An agent, and only an agent: a shell the dispatched agent exited back
     /// to is not one, and neither is a changes pane, whose process is
     /// `farcooler` and reads as an agent to `hasDetectedAgent`.

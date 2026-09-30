@@ -85,47 +85,59 @@ enum WorkspaceScreen {
         return all.first { $0.terminal.id == chosen } ?? all.first
     }
 
-    /// The terminals sharing `seat`'s tmux window that aren't part of it and
-    /// weren't put there on purpose: other records with another role, such
-    /// as a shell that was in the window before its claude was made the
-    /// orchestrator. The column draws the window whole, these included, and
-    /// offers each Move to Its Own Window. Empty before the layouts are read.
+    /// The terminals sharing `seat`'s tmux window: every one but the
+    /// orchestrator itself (and any other orchestrator, which is never moved
+    /// on its behalf). Empty before the layouts are read.
     ///
-    /// Not listed: a changes pane (Show Changes), which is the
-    /// orchestrator's own, and a pane split into this window on purpose
-    /// (`splitOnPurpose`), with ⌃B or the app's split, in the orchestrator's
-    /// column (ov-73). A pane whose origin isn't known (a record from before
-    /// runners wrote it down, or an older runner) is listed, as every sharer
-    /// was before; so is one split beside a terminal before that terminal
-    /// was made the orchestrator (ov-76).
+    /// The orchestrator is one pane (ov-78): its column never splits it, and
+    /// a split or Show Changes made there opens in the main checkout
+    /// instead. So anything in its window was put there some other way: a
+    /// shell split beside a claude before it was adopted, a split made
+    /// before ov-78, or a pane joined in with tmux itself. Until it's moved
+    /// the column draws the window whole, with Move to Its Own Window for
+    /// each of these; opening one from the main checkout moves it too, as
+    /// does Use as Orchestrator. Nothing moves one unasked. ov-73 and ov-76
+    /// left out the panes split there on purpose, by the runner's
+    /// `split_of` and `split_of_orchestrator`; with nothing split there on
+    /// purpose any more, every sharer is listed, and this app reads neither.
     static func sharers(of seat: BoardPane, layouts: [PaneGroup]?) -> [Terminal] {
         guard let group = layouts?.first(where: { $0.terminals.contains(seat.terminal.id) }) else { return [] }
         return group.terminals.compactMap { id in
             guard id != seat.terminal.id,
                 let terminal = seat.worktree.terminals.first(where: { $0.id == id }),
-                !terminal.isChangesPane, terminal.role != seat.terminal.role,
-                !splitOnPurpose(terminal, into: group, among: seat.worktree.terminals)
+                !terminal.isOrchestrator
             else { return nil }
             return terminal
         }
     }
 
-    /// Whether `terminal` was split into `group` by somebody working in the
-    /// orchestrator's column: from a pane in the window that was the
-    /// orchestrator then (`splitOfOrchestrator`), or from a pane that was
-    /// itself split in that way. Not from a pane that wasn't the
-    /// orchestrator at the time, such as a claude later adopted with Use as
-    /// Orchestrator: a shell split beside that shares its window by accident.
-    /// A split whose source's role wasn't recorded reads as ov-73 read every
-    /// split: on purpose.
-    static func splitOnPurpose(
-        _ terminal: Terminal, into group: PaneGroup, among terminals: [Terminal], seen: Set<String> = []
+    /// The seat whose window `terminal` shares in `worktree`, or nil when it
+    /// shares none (or is a seat itself). A terminal in that window is drawn
+    /// in the conversation column, not the checkout, until it's moved to its
+    /// own window, which opening it from the checkout does first.
+    static func seat(sharedBy terminal: String, in worktree: Worktree, fleet: Fleet, layouts: [PaneGroup]?) -> BoardPane? {
+        seated(in: worktree, fleet: fleet).map(\.pane).first { seat in
+            sharers(of: seat, layouts: layouts).contains { $0.id == terminal }
+        }
+    }
+
+    /// Whether `command`, with the keyboard in `key`, would add a pane to the
+    /// orchestrator's window: a split or a new layout, with the key pane in
+    /// the conversation column. Such a command opens a shell in the main
+    /// checkout instead (ov-78: the orchestrator is one pane).
+    static func opensShellInstead(_ command: TileCommand, key: PaneRef?, in shown: [ShownLayout]) -> Bool {
+        guard [.splitRight, .splitDown, .newGroup].contains(command), let key else { return false }
+        return shown.contains { $0.column == .conversation && $0.contains(key) }
+    }
+
+    /// Whether dropping `dragged` beside `target` would move a seated
+    /// orchestrator, or put something in its window: `window` is the
+    /// terminals in the window holding `target`. Refused (ov-78).
+    static func joinsOrchestrator(
+        _ dragged: String, window: [String], in worktree: Worktree, fleet: Fleet
     ) -> Bool {
-        guard let from = terminal.splitOf, group.terminals.contains(from), !seen.contains(terminal.id)
-        else { return false }
-        guard terminal.splitOfOrchestrator == false else { return true }
-        guard let source = terminals.first(where: { $0.id == from }) else { return false }
-        return splitOnPurpose(source, into: group, among: terminals, seen: seen.union([terminal.id]))
+        let seats = Set(seated(in: worktree, fleet: fleet).map(\.pane.terminal.id))
+        return seats.contains(dragged) || window.contains(where: seats.contains)
     }
 
     /// The orchestrators seated in `worktree`, each with its workspace: the
@@ -144,13 +156,12 @@ enum WorkspaceScreen {
         }
     }
 
-    /// `worktree` without what the conversation columns draw: the
-    /// orchestrators seated in it, and every terminal in their windows. What
-    /// opening it whole lists, so no terminal is shown in two places.
-    static func ownTerminals(of worktree: Worktree, fleet: Fleet, layouts: [PaneGroup]?) -> Worktree {
-        let seats = seated(in: worktree, fleet: fleet).map(\.pane.terminal.id)
-        let windows = (layouts ?? []).filter { $0.terminals.contains(where: seats.contains) }
-        return worktree.without(Set(seats + windows.flatMap(\.terminals)))
+    /// `worktree` without the orchestrators seated in it, which only their
+    /// conversation columns draw. What opening it whole lists: its other
+    /// terminals, a sharer of an orchestrator's window included, since
+    /// opening that moves it to its own window first (ov-78).
+    static func ownTerminals(of worktree: Worktree, fleet: Fleet) -> Worktree {
+        worktree.without(Set(seated(in: worktree, fleet: fleet).map(\.pane.terminal.id)))
     }
 
     /// A terminal on `host`, with the worktree it's in.
@@ -186,10 +197,10 @@ enum WorkspaceScreen {
             // An orchestrator's window is never a worktree's layout, even
             // named: it's the conversation column's. Nor is a window a
             // seated one shares with the terminal named: the column draws
-            // that window whole, and the terminal is shown there until it's
-            // moved to its own (`sharers`). An orchestrator nobody seats has
-            // no column, so the window it shares is where the named terminal
-            // is shown.
+            // that window whole until the terminal is moved to its own
+            // (`sharers`), which opening it from the checkout does first. An
+            // orchestrator nobody seats has no column, so the window it
+            // shares is where the named terminal is shown.
             let orchestrators = ContentView.orchestrators(in: worktree)
             let seated = Set(seated(in: worktree, fleet: fleet).map(\.pane.terminal.id))
             if let terminal, !orchestrators.contains(terminal),

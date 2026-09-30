@@ -1776,7 +1776,7 @@ struct ContentView: View {
             worktree: ws,
             isExpanded: expanded.contains(ws.id),
             selected: Self.selected(in: ws, by: selection),
-            onSelect: { terminal in selection = Self.opening(ws, terminal: terminal, in: store.fleet) },
+            onSelect: { terminal in open(ws, terminal: terminal) },
             onToggle: { toggle(ws.id) },
             onNewTerminal: { newTerminal(in: ws) },
             onHide: {
@@ -1789,7 +1789,8 @@ struct ContentView: View {
             onTerminalAction: { term, action in
                 Task { await run(action, on: term, in: ws) }
             },
-            layouts: client?.layouts[ws.id] ?? [],
+            // Never an orchestrator's window: nothing is put beside it.
+            layouts: Self.ownLayouts(client?.layouts[ws.id] ?? [], of: listed),
             onMoveToLayout: { term, group in
                 moveToLayout(term, in: ws, group: group)
             },
@@ -2394,8 +2395,7 @@ struct ContentView: View {
     private func worktreeDetail(_ ws: Worktree) -> some View {
         let host = ws.host ?? ""
         return WorktreeDetail(
-            worktree: WorkspaceScreen.ownTerminals(
-                of: ws, fleet: store.fleet, layouts: store.client(for: ws)?.layouts[ws.id]),
+            worktree: WorkspaceScreen.ownTerminals(of: ws, fleet: store.fleet),
             hosted: WorkspaceScreen.seated(in: ws, fleet: store.fleet).map { seat in
                 WorktreeDetail.Hosted(name: seat.workspace.name) {
                     selection = .workspace(host: host, workspace: seat.workspace.id, focus: nil)
@@ -2405,10 +2405,32 @@ struct ContentView: View {
             onHide: { Task { await act(on: ws) { c in await c.hideWorktree(ws.short) } } },
             onUnhide: { Task { await act(on: ws) { c in await c.unhideWorktree(ws.short) } } },
             onRemove: { removeWorktree = ws },
-            onOpenTerminal: { t in
-                selection = Self.opening(ws, terminal: t.id, in: store.fleet)
-            }
+            onOpenTerminal: { t in open(ws, terminal: t.id) }
         )
+    }
+
+    /// Open `worktree`, or `terminal` in it, as its sidebar row and its card
+    /// do. A terminal sharing a seated orchestrator's window is moved to a
+    /// window of its own first (`moveOutOfOrchestratorWindow`: the sharer,
+    /// never the orchestrator), because the Orchestrator column draws that
+    /// window and the checkout can't draw a pane apart from it (ov-78).
+    /// Opening it is the ask; nothing else moves one.
+    private func open(_ worktree: Worktree, terminal: String?) {
+        let next = Self.opening(worktree, terminal: terminal, in: store.fleet)
+        // The runner's worktree, not a row's, which has the seats taken out.
+        let listed = self.worktree(host: worktree.host ?? "", id: worktree.id) ?? worktree
+        guard let terminal, let sharer = listed.terminals.first(where: { $0.id == terminal }),
+            WorkspaceScreen.seat(
+                sharedBy: terminal, in: listed, fleet: store.fleet,
+                layouts: store.client(for: listed)?.layouts[listed.id]) != nil
+        else {
+            selection = next
+            return
+        }
+        Task {
+            await moveOutOfOrchestratorWindow(sharer, in: listed)
+            selection = next
+        }
     }
 
     /// A pane drawn on its own, for the moment before its layout is read, or
@@ -2657,7 +2679,8 @@ struct ContentView: View {
     }
 
     /// Set the roles: `old` steps down first, since the runner allows one
-    /// live orchestrator a workspace, then `pane` takes the seat. If the
+    /// live orchestrator a workspace, then `pane` takes the seat, and every
+    /// other pane in its window is moved to a window of its own. If the
     /// runner refuses `pane`, `old` is put back, so a refusal never leaves
     /// the workspace with none. The column follows on the refresh.
     private func adopt(_ pane: BoardPane, in workspace: WorkspaceSummary, host: String, replacing old: BoardPane?) async {
@@ -2670,7 +2693,14 @@ struct ContentView: View {
             }
         }
         let (refused, message) = await client.setRole(pane.terminal, to: "orchestrator")
-        guard refused else { return }
+        guard refused else {
+            // Adopted: what shares its window moves out, so the column draws
+            // the orchestrator alone (ov-78). The adopting is the ask.
+            for sharer in WorkspaceScreen.sharers(of: pane, layouts: client.layouts[pane.worktree.id]) {
+                await moveOutOfOrchestratorWindow(sharer, in: pane.worktree)
+            }
+            return
+        }
         errorBanner = OrchestratorAdoption.refusal(message, terminal: pane.terminal.label, workspace: workspace.name)
         if let old { _ = await client.setRole(old.terminal, to: "orchestrator") }
     }
@@ -2888,6 +2918,13 @@ struct ContentView: View {
             if let id = selectedPane?.terminal, let pane = group?.pane(id) { return pane }
             return group?.panes.first(where: \.focused)
         }()
+        // The orchestrator is one pane (ov-78): with the keyboard in its
+        // column, what would add a pane there opens a shell in the main
+        // checkout instead, beside it in the third column.
+        if WorkspaceScreen.opensShellInstead(command, key: selectedPane, in: self.shown) {
+            await openShell(besideOrchestratorIn: worktree)
+            return
+        }
 
         switch command {
         case .zoom:
@@ -2947,6 +2984,16 @@ struct ContentView: View {
 
         case .breakPane:
             guard let here else { return }
+            // Never the orchestrator: what shares its window moves out
+            // instead, as Move to Its Own Window does.
+            if let seat = WorkspaceScreen.seated(in: worktree, fleet: store.fleet).map(\.pane)
+                .first(where: { $0.terminal.id == here.id })
+            {
+                let sharers = WorkspaceScreen.sharers(of: seat, layouts: store.client(for: worktree)?.layouts[worktree.id])
+                if sharers.isEmpty { errorBanner = "The orchestrator already has a window of its own." }
+                for sharer in sharers { await moveOutOfOrchestratorWindow(sharer, in: worktree) }
+                return
+            }
             let groups = await act(on: worktree, default: []) { c in
                 await c.breakPane(here.short, in: worktree)
             }
@@ -3126,6 +3173,13 @@ struct ContentView: View {
             worktree.terminals.first { $0.id == id }?.short
         }
         guard shorts.count == 2 else { return }
+        // The orchestrator is one pane (ov-78): nothing joins its window,
+        // and it never leaves it.
+        let window = store.client(for: worktree)?.group(holding: target, in: worktree.id)?.terminals ?? [target]
+        if WorkspaceScreen.joinsOrchestrator(dragged, window: window, in: worktree, fleet: store.fleet) {
+            errorBanner = "The orchestrator keeps a window of its own, so nothing can be put beside it."
+            return
+        }
         Task {
             let groups = await act(on: worktree, default: []) { c in
                 await c.movePane(shorts[0], onto: shorts[1], side: side, in: worktree)
@@ -3627,6 +3681,26 @@ struct ContentView: View {
         else { return nil }
         focus(PaneRef(host: worktree.host ?? "", worktree: worktree.id, terminal: created.id))
         return created
+    }
+
+    /// ⌃B %, ⌃B " or ⌃B c with the keyboard in the Orchestrator column: a
+    /// shell in the main checkout, in a window of its own, opened in the
+    /// third column of the workspace on screen. Never a split of the
+    /// orchestrator's window, which would make a checkout terminal only the
+    /// column could draw (ov-78).
+    private func openShell(besideOrchestratorIn checkout: Worktree) async {
+        guard case .workspace(let host, let id, _)? = selection else { return }
+        expanded.insert(checkout.id)
+        guard
+            let created = await act(
+                on: checkout, default: nil as Terminal?,
+                { c in
+                    await c.createTerminal(
+                        in: checkout, preset: "shell", title: "Terminal \(checkout.terminals.count + 1)")
+                })
+        else { return }
+        selection = .workspace(host: host, workspace: id, focus: .worktree(checkout.id, terminal: created.id))
+        keyPane = PaneRef(host: host, worktree: checkout.id, terminal: created.id)
     }
 
     /// The worktree the detail pane is actually showing.
