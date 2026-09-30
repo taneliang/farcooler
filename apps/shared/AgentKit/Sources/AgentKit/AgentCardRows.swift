@@ -429,7 +429,18 @@ public struct AgentCardLayout: Sendable, Equatable {
         if let totals = Self.diff(insertions: state.insertions, deletions: state.deletions) {
             tail.append(totals)
         }
-        line = tail.isEmpty ? nil : tail.joined(separator: " · ")
+        line = Self.saying(quiet: state.quiet, after: tail.isEmpty ? nil : tail.joined(separator: " · "))
+    }
+
+    /// A tail's line with the runners that stopped beating named after it, in
+    /// ov-50's words (`FleetSnapshot.Hedge.footer`, as the phone's widget
+    /// says it): "+1 more · lost touch with Studio", or alone and capitalized,
+    /// "Lost touch with Studio". The line unchanged when nobody is quiet.
+    static func saying(quiet: [String], after line: String?) -> String? {
+        guard !quiet.isEmpty else { return line }
+        let footer = FleetSnapshot.Hedge.lostTouch(quiet).footer
+        guard let line else { return footer.prefix(1).uppercased() + footer.dropFirst() }
+        return "\(line) · \(footer)"
     }
 
     /// The one window the card draws every row on: the COARSEST any drawn row
@@ -678,6 +689,10 @@ public struct FleetTail: Equatable, Sendable {
     public var insertions: Int? = nil
     public var deletions: Int? = nil
 
+    /// The runners the relay says stopped beating (ov-71), named after the
+    /// line. Only ever off the push: `AgentCardState.quiet`.
+    public var quiet: [String] = []
+
     /// Nothing known, which draws nothing.
     public static let unknown = FleetTail(others: 0, blocked: 0, qualified: false)
 
@@ -753,7 +768,8 @@ public struct FleetTail: Equatable, Sendable {
                 leaderTrace: snapshot?.agents.first { $0.id == state.terminal }?.trace,
                 fleetTrace: snapshot?.fleetTrace,
                 insertions: state.insertions,
-                deletions: state.deletions)
+                deletions: state.deletions,
+                quiet: state.quiet)
         }
 
         guard let snapshot, snapshot.capturedAt.timeIntervalSince1970 > 0 else { return .unknown }
@@ -835,6 +851,11 @@ public struct FleetTail: Equatable, Sendable {
     /// the line is the waiting alone: "1 needs you". Nil there would be the
     /// Island saying nothing needs you while the header says it does.
     public var line: String? {
+        AgentCardLayout.saying(quiet: quiet, after: counted)
+    }
+
+    /// `line` before the quiet runners are named.
+    private var counted: String? {
         let needs = "\(blocked) need\(blocked == 1 ? "s" : "") you"
         guard others > 0 else { return blocked > 0 ? needs : nil }
         if blocked > 0 {

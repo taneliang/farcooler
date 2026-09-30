@@ -256,6 +256,28 @@ public struct AgentCardState: Codable, Hashable, Sendable {
     /// nothing else (the T0 contract, C4).
     public var ask: CardAsk?
 
+    /// The runners on the card that stopped beating (ov-71), by the name each
+    /// beats with: the relay's cron sweep noticed the silence and pushed.
+    /// Their working agents are already out of `working` and `rows`; the card
+    /// says it lost touch with them (`AgentCardLayout.line`, `FleetTail.line`).
+    ///
+    /// Empty for none, which is also every card from a relay older than the
+    /// field. See `quietOf` in `services/relay/src/index.ts`.
+    public var quiet: [String]
+
+    /// Whether this card can vouch for anything as now.
+    ///
+    /// Not when it's stale, ActivityKit's hour of silence
+    /// (`AgentCardLayout.init(state:now:stale:)`); and not when runners went
+    /// quiet and no row is left, because the relay then headlines a row that
+    /// no longer speaks, most likely the quiet runner's working agent. The
+    /// presentations take this where they took `isStale`, so "Working", its
+    /// clock and "in flight" go exactly as they do on a stale card, and
+    /// needs-you and finished hold.
+    public func unvouched(stale: Bool) -> Bool {
+        stale || (!quiet.isEmpty && rows.isEmpty)
+    }
+
     /// Whether the relay told this card anything about its fleet.
     ///
     /// The one guard every count below needs. A card started by a relay
@@ -281,7 +303,8 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         more: Int = -1,
         needsYou: Int = -1,
         rows: [AgentCardRow] = [],
-        ask: CardAsk? = nil
+        ask: CardAsk? = nil,
+        quiet: [String] = []
     ) {
         self.terminal = terminal
         self.label = label
@@ -300,12 +323,13 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         self.needsYou = needsYou
         self.rows = rows
         self.ask = ask
+        self.quiet = quiet
     }
 
     private enum CodingKeys: String, CodingKey {
         case terminal, label, machine, workspace, status, detail, startedAt
         case blocked, review, working, insertions, deletions, commits
-        case more, needsYou, rows, ask
+        case more, needsYou, rows, ask, quiet
     }
 
     /// Hand-written for two reasons, and neither is the timestamp alone.
@@ -378,6 +402,8 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         // `CardAsk.init(from:)` throws for exactly the asks the contract says to
         // treat as absent, and `try?` turns each of those into nil here.
         ask = (try? container.decodeIfPresent(CardAsk.self, forKey: .ask)) ?? nil
+        // Names of the wrong shape cost the names, never the card.
+        quiet = ((try? container.decodeIfPresent([String].self, forKey: .quiet)) ?? nil) ?? []
     }
 
     /// The other half of the same decision, and it is not decorative
@@ -419,6 +445,8 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         // Absent, never `null`: the contract's "absent means none" holds on the
         // persisted card too.
         try container.encodeIfPresent(ask, forKey: .ask)
+        // Only when there are any, like `rows`: none reads back as none.
+        if !quiet.isEmpty { try container.encode(quiet, forKey: .quiet) }
     }
 }
 

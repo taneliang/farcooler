@@ -723,3 +723,50 @@ func aRowNamesItsWorkspace() throws {
     let working = try #require(layout.rows.first { $0.row.status == "working" })
     #expect(working.detail == working.row.detail)
 }
+
+// MARK: - A runner that stopped beating (ov-71)
+
+/// The rows card says which runner went quiet in its tail, in ov-50's words
+/// (`FleetSnapshot.Hedge.footer`): after what's hidden, or alone and
+/// capitalized when there's nothing else to say. Two names are joined, and
+/// past two it counts.
+///
+/// Mutation: the tail ignoring `quiet`. Red.
+@Test func theTailNamesARunnerThatWentQuiet() throws {
+    func line(more: Int, quiet: [String]) throws -> String? {
+        let names = quiet.map { "\"\($0)\"" }.joined(separator: ",")
+        let json = """
+            {"status":"blocked","detail":"","blocked":1,"review":0,"working":0,"more":\(more),
+             "rows":[{"terminal":"z","label":"zeno","status":"blocked","detail":""}],
+             "quiet":[\(names)]}
+            """
+        return try #require(AgentCardLayout(state: try decode(json), now: cardNow, stale: false)).line
+    }
+    #expect(try line(more: 1, quiet: ["Studio Mac"]) == "+1 more · lost touch with Studio Mac")
+    #expect(try line(more: 0, quiet: ["Studio Mac"]) == "Lost touch with Studio Mac")
+    #expect(try line(more: 0, quiet: ["Studio", "Attic"]) == "Lost touch with Studio and Attic")
+    #expect(try line(more: 0, quiet: ["A", "B", "C"]) == "Lost touch with 3 runners")
+    #expect(try line(more: 0, quiet: []) == nil)
+}
+
+/// The headline presentations say it too, from the relay's branch of the
+/// tail: the Island's expanded line, and the card with no rows left to draw.
+///
+/// Mutation: `FleetTail.line` ignoring `quiet`. Red.
+@Test func theHeadlineTailNamesARunnerThatWentQuiet() throws {
+    let state = try decode(
+        """
+        {"status":"working","detail":"","blocked":0,"review":0,"working":0,"more":1,
+         "rows":[],"quiet":["Studio Mac"]}
+        """)
+    let tail = FleetTail.current(for: state, snapshot: nil, now: cardNow, stale: true)
+    #expect(tail.line == "Lost touch with Studio Mac")
+
+    let busy = try decode(
+        """
+        {"status":"blocked","detail":"","blocked":1,"review":0,"working":2,
+         "quiet":["Studio Mac"]}
+        """)
+    let more = FleetTail.current(for: busy, snapshot: nil, now: cardNow, stale: false)
+    #expect(more.line == "+2 more working · lost touch with Studio Mac")
+}

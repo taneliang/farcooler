@@ -61,15 +61,21 @@ struct AgentActivityWidget: Widget {
             // is. Both are App Group file reads on a render path, and both are
             // wanted by two presentations that must not disagree.
             let ask = LeaderAsk.current(for: context.state)
+            // ActivityKit's hour of silence, or a card whose every line went
+            // to a runner that stopped beating (ov-71): either way nothing on
+            // it vouches for "Working" now. See `AgentCardState.unvouched`.
+            let stale = context.state.unvouched(stale: context.isStale)
             // Which of the two cards this is. See `LockScreenCard`, which is
             // where the choice is argued: rows when the relay sent any and
             // there is nothing to answer, the headline otherwise.
             //
-            // `isStale` is the relay's hour of silence, which is the one outage
-            // this card can see; see `AgentCardLayout.init(state:now:stale:)`.
+            // `isStale` is the relay's hour of silence; see
+            // `AgentCardLayout.init(state:now:stale:)`. A runner that stopped
+            // beating is the other outage the card now hears of, from the
+            // relay's sweep: its rows are gone and the tail names it.
             let layout =
                 ask.isPresent
-                ? nil : AgentCardLayout(state: context.state, stale: context.isStale)
+                ? nil : AgentCardLayout(state: context.state, stale: stale)
             LockScreenCard(
                 state: context.state,
                 // The fleet line steps aside while there is an answer on offer.
@@ -89,10 +95,10 @@ struct AgentActivityWidget: Widget {
                     ? FleetTail.unknown
                     : FleetTail.current(
                         for: context.state, snapshot: SnapshotStore.read(),
-                        stale: context.isStale),
+                        stale: stale),
                 ask: ask,
                 layout: layout,
-                stale: context.isStale)
+                stale: stale)
                 // The card's own background. Left to the system's material
                 // rather than a color of ours: the lock screen wallpaper is
                 // behind it and a flat fill sits on top of the photo like a
@@ -123,14 +129,16 @@ struct AgentActivityWidget: Widget {
         } dynamicIsland: { context in
             let status = AgentStatus(context.state.status)
             let ask = LeaderAsk.current(for: context.state)
+            // See the lock screen's `stale` above.
+            let stale = context.state.unvouched(stale: context.isStale)
             let tail =
                 ask.isPresent
                 ? FleetTail.unknown
                 : FleetTail.current(
-                    for: context.state, snapshot: SnapshotStore.read(), stale: context.isStale)
+                    for: context.state, snapshot: SnapshotStore.read(), stale: stale)
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    StatusBadge(status: status, stale: context.isStale)
+                    StatusBadge(status: status, stale: stale)
                         .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
@@ -163,7 +171,7 @@ struct AgentActivityWidget: Widget {
                         // `AgentCardLeader`.
                         if let started = context.state.startedAt, !ask.isPresent,
                             AgentCardLeader.isStated(
-                                status: context.state.status, stale: context.isStale)
+                                status: context.state.status, stale: stale)
                         {
                             Text(started, style: .timer)
                                 .font(.caption.monospacedDigit())
@@ -218,7 +226,7 @@ struct AgentActivityWidget: Widget {
                 // phone's appearance is — §01's light palette answers a
                 // different question, "what does this look like on a pale
                 // backdrop", and there is no pale backdrop here.
-                GlanceMarkView(status.mark(stale: context.isStale), size: .header)
+                GlanceMarkView(status.mark(stale: stale), size: .header)
                     .environment(\.colorScheme, .dark)
             } compactTrailing: {
                 // §07's compact presentation, which is about the FLEET: "Count
@@ -257,7 +265,7 @@ struct AgentActivityWidget: Widget {
                     // On a stale card with a count beside the name, the count
                     // is who the relay last knew about. See
                     // `FleetTail.dimsCompactCount`.
-                    .opacity(tail.dimsCompactCount(stale: context.isStale) ? 0.6 : 1)
+                    .opacity(tail.dimsCompactCount(stale: stale) ? 0.6 : 1)
                     .lineLimit(1)
                     .frame(maxWidth: 74)
                 }
@@ -265,7 +273,7 @@ struct AgentActivityWidget: Widget {
                 // §07, verbatim: "MINIMAL: The ring alone at 15pt. No count, no
                 // trace — history is unreadable at this size." The lone
                 // indicator, which is the whole presentation.
-                GlanceMarkView(status.mark(stale: context.isStale), size: .lone)
+                GlanceMarkView(status.mark(stale: stale), size: .lone)
                     .environment(\.colorScheme, .dark)
             }
             .widgetURL(terminalURL(context.state.terminal))

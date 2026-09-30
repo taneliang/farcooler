@@ -296,3 +296,63 @@ private func decode(_ json: String) throws -> AgentCardState {
     #expect(quiet.staleDate(capping: hour) == hour)
     #expect(quiet.staleDate(capping: nil) == nil)
 }
+
+// MARK: - A runner that stopped beating (ov-71)
+
+/// The relay names the runners on the card that stopped beating under
+/// `quiet`. Absent is none, which is every card from a relay older than
+/// this; a value of the wrong shape costs the names and never the card; and
+/// none is written back as no key, so ActivityKit's persisted round trip
+/// gives back what it was handed.
+///
+/// Mutation: `quiet` not decoded (always empty). Red.
+@Test func theQuietRunnersDecodeAndRoundTrip() throws {
+    let named = try decode(
+        """
+        {"status":"working","detail":"","blocked":0,"review":0,"working":0,
+         "quiet":["Studio Mac","Attic"]}
+        """)
+    #expect(named.quiet == ["Studio Mac", "Attic"])
+    let back = try JSONDecoder().decode(AgentCardState.self, from: JSONEncoder().encode(named))
+    #expect(back.quiet == ["Studio Mac", "Attic"])
+
+    #expect(try decode(#"{"status":"working","detail":""}"#).quiet == [])
+    let wrong = try decode(#"{"status":"blocked","detail":"?","quiet":"Studio"}"#)
+    #expect(wrong.quiet == [])
+    #expect(wrong.status == "blocked")
+
+    let keys = try JSONSerialization.jsonObject(
+        with: JSONEncoder().encode(AgentCardState(status: "working", detail: "")))
+    #expect((keys as? [String: Any])?["quiet"] == nil)
+}
+
+/// A card whose every line went to a runner that stopped beating can't vouch
+/// for anything as now, any more than a stale one: the relay took the quiet
+/// runner's working agents out of the rows, so a card with names and no rows
+/// is headlining one of them. Rows, or no names, and it vouches as before.
+///
+/// Mutation: `unvouched(stale:)` returning `stale` alone. Red.
+@Test func aCardWithOnlyQuietWorkVouchesForNothing() throws {
+    let quietOnly = try decode(
+        """
+        {"status":"working","detail":"","blocked":0,"review":0,"working":0,"more":1,
+         "rows":[],"quiet":["Studio Mac"]}
+        """)
+    #expect(quietOnly.unvouched(stale: false))
+    #expect(quietOnly.unvouched(stale: true))
+
+    let withRows = try decode(
+        """
+        {"status":"blocked","detail":"","blocked":1,"review":0,"working":0,"more":1,
+         "rows":[{"terminal":"z","label":"zeno","status":"blocked","detail":""}],
+         "quiet":["Studio Mac"]}
+        """)
+    #expect(!withRows.unvouched(stale: false))
+    #expect(withRows.unvouched(stale: true))
+
+    let nobodyQuiet = try decode(
+        """
+        {"status":"working","detail":"","blocked":0,"review":0,"working":1,"rows":[]}
+        """)
+    #expect(!nobodyQuiet.unvouched(stale: false))
+}
