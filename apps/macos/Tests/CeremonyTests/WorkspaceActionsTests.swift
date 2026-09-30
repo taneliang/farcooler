@@ -299,16 +299,30 @@ struct WorkspaceActionsTests {
 }
 
 /// A notification that arrives while Far Cooler is frontmost: shown unless
-/// its terminal is on screen.
+/// its terminal is on screen and somebody is there.
+@MainActor
 struct NotifierPresentationTests {
-    @Test("A frontmost app shows the banner and plays the sound for a pane not on screen")
-    func showsForAPaneNotOnScreen() {
-        #expect(Notifier.presentation(terminalID: "t2", watching: ["t1"]) == [.banner, .sound])
-        #expect(Notifier.presentation(terminalID: "t2", watching: []) == [.banner, .sound])
+    private static func presence(idle: TimeInterval) -> Presence {
+        Presence(
+            appActive: { true }, screenAwake: { true }, sessionUnlocked: { true },
+            secondsSinceInput: { idle })
     }
 
-    @Test("A pane on screen gets no banner")
+    @Test("A frontmost app shows the banner and plays the sound for a pane not on screen")
+    func showsForAPaneNotOnScreen() {
+        let here = Self.presence(idle: 1)
+        #expect(Notifier.presentation(terminalID: "t2", watching: ["t1"], presence: here) == [.banner, .list, .sound])
+        #expect(Notifier.presentation(terminalID: "t2", watching: [], presence: here) == [.banner, .list, .sound])
+    }
+
+    @Test("A pane on screen gets no banner, only the list entry")
     func silentForAPaneOnScreen() {
-        #expect(Notifier.presentation(terminalID: "t1", watching: ["t1", "t3"]).isEmpty)
+        #expect(Notifier.presentation(terminalID: "t1", watching: ["t1", "t3"], presence: Self.presence(idle: 1)) == [.list])
+    }
+
+    @Test("A pane on screen banners once the person has been idle a minute")
+    func bannersForAPaneOnScreenWhenIdle() {
+        let idle = Self.presence(idle: Presence.idleLimit + 1)
+        #expect(Notifier.presentation(terminalID: "t1", watching: ["t1"], presence: idle) == [.banner, .list, .sound])
     }
 }

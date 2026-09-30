@@ -20,9 +20,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     private override init() { super.init() }
 
-    /// The terminals this window is showing to somebody who is there, which
-    /// is what `reportWatching` tells the runners. Set from the window, empty
-    /// when nobody is present.
+    /// The terminals this window has on screen while the app is active, as of
+    /// its last report. Whether anybody is there to see them is asked live.
     private(set) var watching: Set<String> = []
 
     /// Record what is on screen, for `willPresent`.
@@ -34,17 +33,20 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     ///
     /// macOS shows nothing for the frontmost app's own notification unless
     /// its delegate asks. Asked for here when the terminal it is about is not
-    /// on screen: the app is in front but the pane that finished is in another
-    /// workspace, a collapsed column or behind a zoom, and a silent post is
-    /// how that gets missed. For a pane on screen the person is looking at it,
-    /// and a banner would tell them what they just watched happen.
+    /// on screen to somebody there: the app is in front but the pane that
+    /// finished is in another workspace or a collapsed column, or the person
+    /// has been idle a minute (`Presence`), and a silent post is how that gets
+    /// missed. For a pane on screen the person is looking at it, and a banner
+    /// would tell them what they just watched happen; it still goes in the
+    /// notification list. Decided from `presence` when the notification
+    /// arrives, not from when the window last reported: `watching` is only as
+    /// fresh as the last fleet event, and a person can walk away between.
     /// `terminalID` is the notification's thread identifier, which `report`
-    /// sets to the terminal's id; a notification with none is not about a
-    /// pane on screen.
-    nonisolated static func presentation(
-        terminalID: String, watching: Set<String>
+    /// sets to the terminal's id.
+    static func presentation(
+        terminalID: String, watching: Set<String>, presence: Presence
     ) -> UNNotificationPresentationOptions {
-        watching.contains(terminalID) ? [] : [.banner, .sound]
+        presence.isPresent && watching.contains(terminalID) ? [.list] : [.banner, .list, .sound]
     }
 
     nonisolated func userNotificationCenter(
@@ -52,7 +54,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     ) async -> UNNotificationPresentationOptions {
         let terminalID = notification.request.content.threadIdentifier
         return await MainActor.run {
-            Self.presentation(terminalID: terminalID, watching: watching)
+            Self.presentation(terminalID: terminalID, watching: watching, presence: .live)
         }
     }
 

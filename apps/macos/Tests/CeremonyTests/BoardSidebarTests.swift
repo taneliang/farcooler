@@ -844,6 +844,14 @@ struct BoardSidebarTests {
         #expect(WorkspaceCounts.decisions(for: billing, host: "", in: items) == 2)
     }
 
+    @Test("The pill falls back to the column until the list is read, and on a runner with none")
+    func thePillFallsBackToTheColumn() {
+        #expect(WorkspaceCounts.waiting(columnCount: 2, decisions: 0, listRead: false, listServed: true) == 2)
+        #expect(WorkspaceCounts.waiting(columnCount: 2, decisions: 0, listRead: true, listServed: false) == 2)
+        #expect(WorkspaceCounts.waiting(columnCount: 2, decisions: 0, listRead: true, listServed: true) == 0)
+        #expect(WorkspaceCounts.waiting(columnCount: 2, decisions: 1, listRead: true, listServed: true) == 1)
+    }
+
     /// A workspace row's count is the items counted under it, on its runner,
     /// not its terminals wanting attention: an ask and a decision about one
     /// task are one item. An implicit workspace counts its repository's

@@ -250,6 +250,14 @@ enum WorkspaceCounts {
         }.count
     }
 
+    /// What the board's pill says: the decision items once this runner's
+    /// list is read, and the Needs Decision column's count until then, and
+    /// always on a runner that serves no list. An unread list is not a list
+    /// with nothing in it.
+    static func waiting(columnCount: Int, decisions: Int, listRead: Bool, listServed: Bool) -> Int {
+        listRead && listServed ? decisions : columnCount
+    }
+
     private static func counted(_ item: NeedsYouItem, under workspace: WorkspaceSummary, host: String) -> Bool {
         guard item.runner == host else { return false }
         if workspace.isImplicit { return item.workspaceID == nil && item.repositoryID == workspace.id }

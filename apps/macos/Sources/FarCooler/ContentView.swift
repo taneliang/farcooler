@@ -2446,7 +2446,10 @@ struct ContentView: View {
                 store: boardStore(for: workspace, client: client, host: host),
                 client: client,
                 agents: boardAgents(host: host, client: client),
-                waiting: WorkspaceCounts.decisions(for: workspace, host: host, in: store.needsYou),
+                waiting: WorkspaceCounts.waiting(
+                    columnCount: boardStore(for: workspace, client: client, host: host).board.waitingOnYou,
+                    decisions: WorkspaceCounts.decisions(for: workspace, host: host, in: store.needsYou),
+                    listRead: client.needsYouKnown, listServed: client.servesNeedsYou),
                 onGoTo: { pane in go(to: pane) }
             )
         } else {
@@ -2811,9 +2814,9 @@ struct ContentView: View {
             Notifier.shared.setWatching([])
             return
         }
-        // What `willPresent` asks: the panes a present person is looking at,
-        // the same set the runners are told below.
-        Notifier.shared.setWatching(Presence.live.isPresent ? visibleTerminals.map(\.id) : [])
+        // What `willPresent` asks: the panes on screen, the same set the
+        // runners are told below.
+        Notifier.shared.setWatching(visibleTerminals.map(\.id))
         let client = selection?.host.flatMap { store.clients[$0] }
         // Full ids, not `short`: resolving an abbreviation costs the CLI a
         // fleet listing, and this runs on a clock. See the `Watching` command
