@@ -784,15 +784,14 @@ struct TerminalRow: View {
     /// note on the four insets that used to be chosen locally.
     private static let markerGap: CGFloat = 7
 
-    /// The row's leading inset inside its highlight: none past the band's.
+    /// The row's leading inset inside its highlight: one step past the
+    /// band's.
     ///
-    /// A terminal takes no indent step of its own (ov-63: two steps at
-    /// most). Drawn under a worktree at depth 1, its glyph sits in the
-    /// worktree's chevron column and its name about where the worktree's
-    /// title starts, so the text runs 14, 32, 50 and no deeper; the chevron
-    /// and the lighter single-line row carry the hierarchy, as Xcode's
-    /// navigator does for leaf rows.
-    static let leading: CGFloat = SidebarGrid.edge - SidebarGrid.highlightInset
+    /// A terminal is indented one step under its worktree (ov-78), so its
+    /// status glyph starts where the worktree's title does, one chevron's
+    /// width in, and never under the chevrons. ov-63 had it take no step,
+    /// which put a column of dots under a column of collapsed arrows.
+    static let leading: CGFloat = SidebarGrid.edge - SidebarGrid.highlightInset + SidebarGrid.gutter
 
     /// Where a terminal's glyph and name start, from the sidebar's edge,
     /// under a worktree drawn at `depth`.
@@ -942,15 +941,14 @@ struct TerminalRow: View {
                     }
                 }
                 // Under the name like the lines above, not a step further:
-                // the branch mark says they're underneath (ov-63, no text
-                // deeper than a worktree's title).
+                // the branch mark says they're underneath.
                 .padding(.leading, StatusGlyph.inline + Self.markerGap)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(.vertical, SidebarGrid.rowVerticalPadding)
         // The highlight sits inside the band exactly as the worktree row's
-        // does. No gutter of its own: see `leading`.
+        // does; the content one step in from it: see `leading`.
         .padding(.leading, Self.leading)
         .padding(.trailing, SidebarGrid.edge - SidebarGrid.highlightInset)
         .background(
@@ -1376,6 +1374,14 @@ struct WorkspaceRow: View {
     let onSelect: () -> Void
     /// What the context menu does, or nil for no menu.
     let actions: WorkspaceHeaderActions?
+    /// Whether its worktrees are listed under it. The row is their
+    /// disclosure (ov-78): only its chevron opens and closes it, and a click
+    /// anywhere else selects the workspace, as before.
+    var isOpen = false
+    var onToggle: () -> Void = {}
+    /// New Worktree…, claimed for this workspace, on the row's menu; nil
+    /// when the runner can't be acted on.
+    var onNewWorktree: (() -> Void)?
 
     @ObservedObject private var drag = WorktreeDrag.shared
     @State private var hovering = false
@@ -1385,6 +1391,20 @@ struct WorkspaceRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 0) {
+            // In the chevron column a repository's Unclaimed and Hidden use,
+            // so a workspace's worktrees, one step in, put their own
+            // chevrons under its status glyph.
+            Button(action: onToggle) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(isOpen ? 90 : 0))
+                    .frame(width: SidebarGrid.gutter, height: 16, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isOpen ? "Hide Worktrees" : "Show Worktrees")
+
             Group {
                 if implicit {
                     Image(systemName: "square.stack.3d.up")
@@ -1441,66 +1461,34 @@ struct WorkspaceRow: View {
         .onDrop(of: [.text], delegate: WorkspaceDropTarget(workspace: workspace))
         .contextMenu {
             if let actions { WorkspaceMenuItems(actions: actions) }
+            if let onNewWorktree {
+                if actions != nil { Divider() }
+                Button("New Worktree…", action: onNewWorktree)
+            }
         }
         .help(taskPrefix.isEmpty ? name : "\(name) · tasks are \(taskPrefix)-")
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction(named: "Open", onSelect)
+        .accessibilityAction(named: isOpen ? "Hide Worktrees" : "Show Worktrees", onToggle)
     }
 }
 
-/// A workspace's Worktrees disclosure: its worktrees, one click down.
-struct WorktreesDisclosure: View {
-    let count: Int
-    let isOpen: Bool
-    let onToggle: () -> Void
-
-    var body: some View {
-        SidebarRow {
-            Button(action: onToggle) {
-                HStack(spacing: SidebarGrid.gap) {
-                    Image(systemName: isOpen ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: SidebarGrid.gutter - SidebarGrid.gap, alignment: .leading)
-                    Text("Worktrees")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Text("\(count)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(isOpen ? "Hide Worktrees" : "Show Worktrees")
-        }
-        .padding(.vertical, 2)
-    }
-}
-
-/// An open Worktrees disclosure with nothing in it (spec §8).
+/// An open workspace with no worktrees: one dim line (spec §8), where a
+/// worktree's title would start. New Worktree… is on the workspace row's
+/// menu, and the repository header's +.
 struct NoWorktreesRow: View {
-    /// New Worktree…, claimed for this workspace; nil when the runner can't
-    /// be acted on.
-    let onNewWorktree: (() -> Void)?
-
-    static let sentence = "No worktrees yet. The orchestrator makes them as it dispatches tasks."
+    static let sentence = "No worktrees yet"
+    /// What the line's tooltip adds: where they'll come from.
+    static let help = "The orchestrator makes them as it dispatches tasks."
 
     var body: some View {
         SidebarRow {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(Self.sentence)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let onNewWorktree {
-                    Button("New Worktree…", action: onNewWorktree)
-                        .buttonStyle(.link)
-                        .font(.system(size: 11))
-                }
-            }
+            Text(Self.sentence)
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .help(Self.help)
         }
         .padding(.vertical, 3)
     }

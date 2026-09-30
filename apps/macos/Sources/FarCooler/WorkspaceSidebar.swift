@@ -2,9 +2,9 @@ import AgentKit
 import Foundation
 
 // The sidebar's shape (spec §4.5): Needs You at the top, then each
-// repository's workspaces, one row each, with a workspace's worktrees one
-// click down under its Worktrees disclosure, and the worktrees no workspace
-// owns in one collapsed Unclaimed group per repository.
+// repository's workspaces, one row each, with a workspace's worktrees listed
+// under its row while it's open, and the worktrees no workspace owns in one
+// collapsed Unclaimed group per repository.
 //
 // Worked out here, as values, and drawn by `ContentView.sidebar` from them.
 // Which workspace owns which worktree, and in what order workspaces come, is
@@ -22,12 +22,10 @@ struct SidebarEntry: Identifiable {
         /// orchestrator's status and its needs-you count. On a runner
         /// without workspaces, the repository's implicit one.
         case workspace(String)
-        /// A workspace's Worktrees disclosure, with how many it holds.
-        case worktrees(count: Int)
-        /// A worktree inside an open Worktrees disclosure, by its id.
+        /// A worktree under its open workspace, by its id.
         case worktree(String)
-        /// An open Worktrees disclosure with nothing in it: says so, and
-        /// offers New Worktree… (spec §8).
+        /// An open workspace with no worktrees: says so, in one dim line
+        /// (spec §8). New Worktree… is on the workspace row's menu.
         case noWorktrees
         /// The repository's worktrees no workspace owns, collapsed.
         case unclaimed(count: Int)
@@ -42,7 +40,7 @@ struct SidebarEntry: Identifiable {
     let project: String
     /// The repository's uuid, or nil from a CLI too old to send one.
     let repositoryID: String?
-    /// The workspace a workspace row, its disclosure or a worktree inside it
+    /// The workspace a workspace row, or a worktree or sentence under it,
     /// is for. An implicit one on a runner without workspaces.
     var workspace: WorkspaceSummary?
     /// The worktree a worktree row draws, without its orchestrators.
@@ -50,19 +48,21 @@ struct SidebarEntry: Identifiable {
     /// The workspace's orchestrator, and the worktree it runs in: its seat.
     /// Nil with none running.
     var orchestrator: BoardPane?
-    /// A repository header's shown worktrees, or a Worktrees disclosure's,
-    /// or an Unclaimed or Hidden group's.
+    /// A repository header's shown worktrees, a workspace row's (all of
+    /// them, or while searching the hits, whether it's open or not), or an
+    /// Unclaimed or Hidden group's.
     var worktrees: [Worktree] = []
     /// How many gutters in from the sidebar's edge this row is drawn.
     ///
     /// A repository is a section header, like a section of Finder's
     /// sidebar: its workspaces, Unclaimed and Hidden sit flush under it, at
-    /// 0. A workspace's Worktrees disclosure and the worktrees in it are one
-    /// step in, at 1, and nothing is deeper than that but the empty
-    /// disclosure's sentence, at 2 so it starts where a worktree's title
-    /// does. A worktree's terminals are the row's own, drawn by
-    /// `WorktreeSection` one gutter under its title (ov-63: there were four
-    /// columns, repository, workspace, worktree and terminal).
+    /// 0. A workspace's row is its disclosure (ov-78: there was a Worktrees
+    /// row under each), and its worktrees are one step in, at 1, so a
+    /// worktree's chevron sits under the workspace's status glyph and its
+    /// title where the workspace's name starts. An open workspace with no
+    /// worktrees says so at 2, where a worktree's title would start. A
+    /// worktree's terminals are the row's own, drawn by `WorktreeSection`
+    /// one step further in (`TerminalRow.columns(depth:)`).
     var depth = 0
 
     /// Which repository this row is under, on which runner: by uuid where the
@@ -74,8 +74,9 @@ struct SidebarEntry: Identifiable {
     /// sidebar reopens differently after an update.
     var collapseKey: String { "\(host)\u{1}\(project)" }
 
-    /// What a workspace's Worktrees disclosure is remembered open by, in
-    /// `sidebar.openWorktrees`.
+    /// What a workspace row is remembered open by, in
+    /// `sidebar.openWorktrees`: the key its Worktrees row was remembered by
+    /// before ov-78, so a workspace left open stays open.
     static func openKey(host: String, workspace: String) -> String { "\(host)\u{1}\(workspace)" }
 
     /// A workspace row's menu, from ov-60's: Show Board, Start or Replace
@@ -90,7 +91,6 @@ struct SidebarEntry: Identifiable {
         switch kind {
         case .repository: return group
         case .workspace: return "\(group)\u{1}workspace\u{1}\(workspace?.id ?? "")"
-        case .worktrees: return "\(group)\u{1}worktrees\u{1}\(workspace?.id ?? "")"
         case .worktree(let id): return "\(group)\u{1}worktree\u{1}\(id)"
         case .noWorktrees: return "\(group)\u{1}noworktrees\u{1}\(workspace?.id ?? "")"
         case .unclaimed: return "\(group)\u{1}unclaimed"
@@ -106,13 +106,13 @@ extension ContentView {
     /// - Grouped by runner, then repository: two runners can have a
     ///   project of the same name, and they are not the same project.
     /// - A repository lists its workspaces, never its worktrees: those are
-    ///   under each workspace's Worktrees, drawn only while it's `open`
-    ///   (keyed by `SidebarEntry.openKey`), and under Unclaimed and Hidden.
+    ///   under each workspace's row, drawn only while it's `open` (keyed by
+    ///   `SidebarEntry.openKey`), and under Unclaimed and Hidden.
     /// - A runner without workspaces (`fleet.runnerWorkspaces` has no key for
     ///   it) has one implicit workspace per repository.
     /// - With a `query`, a workspace is listed when its name, its
-    ///   orchestrator or one of its worktrees matches, and its Worktrees
-    ///   open on the matches. A repository with no match is left out: a
+    ///   orchestrator or one of its worktrees matches, and it opens on the
+    ///   matches. A repository with no match is left out: a
     ///   header with nothing under it would look like a hit.
     /// - `silentHosts` are runners that have contributed nothing yet; each
     ///   gets a header, as before.
@@ -154,8 +154,8 @@ extension ContentView {
         return rows
     }
 
-    /// One repository's rows: its header, each workspace's row and, open or
-    /// not, its Worktrees, then Unclaimed and Hidden.
+    /// One repository's rows: its header, each workspace's row and, open,
+    /// its worktrees, then Unclaimed and Hidden.
     private static func repositoryRows(
         _ host: String, _ project: String, _ repositoryID: String?, _ all: [Worktree],
         _ fleet: Fleet, _ query: String, _ open: (String) -> Bool
@@ -220,23 +220,19 @@ extension ContentView {
                 var row = entry(.workspace(workspace.isImplicit ? "Main" : workspace.name))
                 row.workspace = workspace
                 row.orchestrator = seat
-                rows.append(row)
 
                 // Its worktrees: all of them, or while searching, the hits
                 // (all of them for a workspace found by its name).
                 let listedIDs = searching && !nameMatches ? hits : group.worktrees
                 let worktrees = listedIDs.compactMap { owned[$0]?.without(drawn) }
-                // An empty one is drawn too, so a new workspace says where
-                // its worktrees will be — but not while searching, where it
-                // would look like a hit.
-                guard !worktrees.isEmpty || !searching else { continue }
-                var disclosure = entry(.worktrees(count: worktrees.count))
-                disclosure.workspace = workspace
-                disclosure.worktrees = worktrees
-                disclosure.depth = 1
-                rows.append(disclosure)
+                row.worktrees = worktrees
+                rows.append(row)
+                // The row is the disclosure (ov-78): open, its worktrees
+                // are listed under it. An empty one says so, so a new
+                // workspace says where its worktrees will be — but not
+                // while searching, where it would look like a hit.
                 let isOpen = open(SidebarEntry.openKey(host: host, workspace: workspace.id)) || (searching && !hits.isEmpty)
-                guard isOpen else { continue }
+                guard isOpen, !worktrees.isEmpty || !searching else { continue }
                 if worktrees.isEmpty {
                     var empty = entry(.noWorktrees)
                     empty.workspace = workspace

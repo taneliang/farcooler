@@ -765,13 +765,13 @@ struct BoardSidebarTests {
         let rows = ContentView.sidebarRows(fleet: Self.fleet(
             workspaces: [Self.summary(Self.main, "Main", isMain: true)],
             worktrees: [Self.worktree("lane", workspace: Self.main)]))
-        #expect(rows.map(\.kind) == [.repository, .workspace("Main"), .worktrees(count: 1)])
+        #expect(rows.map(\.kind) == [.repository, .workspace("Main")])
         let open = ContentView.sidebarRows(
             fleet: Self.fleet(
                 workspaces: [Self.summary(Self.main, "Main", isMain: true)],
                 worktrees: [Self.worktree("lane", workspace: Self.main)]),
             open: { _ in true })
-        #expect(open.map(\.kind) == [.repository, .workspace("Main"), .worktrees(count: 1), .worktree("lane")])
+        #expect(open.map(\.kind) == [.repository, .workspace("Main"), .worktree("lane")])
     }
 
     @Test func unclaimedWorktreesSitBelowTheWorkspaces() {
@@ -785,8 +785,8 @@ struct BoardSidebarTests {
 
     /// Main first, then the rest by their ordinal, one row each, and a
     /// workspace with no worktrees still listed. Its worktrees are one click
-    /// down, under Worktrees, and the repository lists none of its own
-    /// (spec §4.5). Hidden worktrees stay the repository's, last.
+    /// down, under its row's chevron, and the repository lists none of its
+    /// own (spec §4.5). Hidden worktrees stay the repository's, last.
     @Test("A repository lists workspaces, not worktrees")
     func aRepositoryListsWorkspacesNotWorktrees() {
         let ops = "0198f2c0-0000-7000-8000-0000000000ee"
@@ -803,30 +803,27 @@ struct BoardSidebarTests {
         let rows = ContentView.sidebarRows(fleet: fleet)
         #expect(rows.map(\.kind) == [
             .repository,
-            .workspace("Main"), .worktrees(count: 1),
-            .workspace("Billing"), .worktrees(count: 1),
-            .workspace("Ops"), .worktrees(count: 0),
+            .workspace("Main"), .workspace("Billing"), .workspace("Ops"),
             .unclaimed(count: 1), .hidden(count: 1),
         ])
         #expect(!rows.contains { if case .worktree = $0.kind { true } else { false } })
         #expect(rows.filter { if case .workspace = $0.kind { true } else { false } }.map(\.workspace?.id) == [Self.main, Self.billing, ops])
         // The repository is a section header, so its workspaces sit flush
-        // under it, and Unclaimed and Hidden with them; a workspace's
-        // Worktrees is the one step in (ov-63).
-        #expect(rows.map(\.depth) == [0, 0, 1, 0, 1, 0, 1, 0, 0])
+        // under it, and Unclaimed and Hidden with them (ov-63).
+        #expect(rows.map(\.depth) == [0, 0, 0, 0, 0, 0])
+        #expect(rows.first { $0.kind == .workspace("Main") }?.worktrees.map(\.id) == ["lane"])
 
-        // Billing's disclosure opened: its worktree, under it, one step in
-        // like the disclosure and no deeper.
+        // Billing opened: its worktree, directly under it, one step in
+        // (ov-78: no Worktrees row between them).
         let open = ContentView.sidebarRows(
             fleet: fleet, open: { $0 == SidebarEntry.openKey(host: "", workspace: Self.billing) })
-        #expect(open.map(\.kind).prefix(6) == [
-            .repository, .workspace("Main"), .worktrees(count: 1), .workspace("Billing"), .worktrees(count: 1),
-            .worktree("bill"),
+        #expect(open.map(\.kind).prefix(5) == [
+            .repository, .workspace("Main"), .workspace("Billing"), .worktree("bill"), .workspace("Ops"),
         ])
-        #expect(open.map(\.depth).prefix(6) == [0, 0, 1, 0, 1, 1])
+        #expect(open.map(\.depth).prefix(5) == [0, 0, 0, 1, 0])
 
-        // Ops's, empty: its sentence starts where a worktree's title does,
-        // a gutter past the worktree row's chevron (checklist step 20).
+        // Ops, empty: its sentence starts where a worktree's title would,
+        // a gutter past a worktree row's chevron (checklist step 20).
         let empty = ContentView.sidebarRows(
             fleet: fleet, open: { $0 == SidebarEntry.openKey(host: "", workspace: ops) })
         #expect(empty.first { $0.kind == .noWorktrees }?.depth == 2)
@@ -839,7 +836,8 @@ struct BoardSidebarTests {
         let rows = ContentView.sidebarRows(fleet: Self.fleet(
             workspaces: nil,
             worktrees: [Self.worktree("a", workspace: nil), Self.worktree("b", workspace: nil)]))
-        #expect(rows.map(\.kind) == [.repository, .workspace("Main"), .worktrees(count: 2)])
+        #expect(rows.map(\.kind) == [.repository, .workspace("Main")])
+        #expect(rows[1].worktrees.map(\.id) == ["a", "b"])
         #expect(rows[1].workspace == WorkspaceSummary.implicit(repository: Self.repoA))
         #expect(rows[1].menu.isEmpty, "an implicit workspace has no orchestrator or charter")
     }
@@ -894,11 +892,11 @@ struct BoardSidebarTests {
         #expect(WorkspaceCounts.count(for: Self.summary(Self.billing, "Billing"), host: "remote", in: items) == 1)
     }
 
-    /// Worktrees lists the workspace's worktrees in the runner's order, each
+    /// An open workspace lists its worktrees in the runner's order, each
     /// named with its open tasks' keys, "fc-3-webhooks · bil-9", with no
     /// board read (spec §3.2).
-    @Test("The Worktrees disclosure lists the workspace's worktrees with their open task keys")
-    func theWorktreesDisclosureListsTheWorkspacesWorktreesWithTheirOpenTaskKeys() {
+    @Test("An open workspace lists its worktrees with their open task keys")
+    func anOpenWorkspaceListsItsWorktreesWithTheirOpenTaskKeys() {
         var hooks = Self.worktree("fc-3-webhooks", workspace: Self.billing)
         hooks.openTasks = [NeedsYouTask(id: "t-9", key: "bil-9", title: "Invoice PDF export", status: "in_progress")]
         let scratch = Self.worktree("scratch", workspace: Self.billing)
@@ -907,7 +905,7 @@ struct BoardSidebarTests {
                 workspaces: [Self.summary(Self.main, "Main", isMain: true), Self.summary(Self.billing, "Billing")],
                 worktrees: [hooks, Self.worktree("lane", workspace: Self.main), scratch]),
             open: { $0 == SidebarEntry.openKey(host: "", workspace: Self.billing) })
-        let disclosure = rows.first { $0.kind == .worktrees(count: 2) && $0.workspace?.id == Self.billing }
+        let disclosure = rows.first { $0.kind == .workspace("Billing") }
         #expect(disclosure?.worktrees.map(\.rowTitle) == ["fc-3-webhooks · bil-9", "scratch"])
         let listed = rows.compactMap { row -> String? in
             if case .worktree = row.kind, row.workspace?.id == Self.billing { return row.worktree?.rowTitle }
@@ -916,23 +914,24 @@ struct BoardSidebarTests {
         #expect(listed == ["fc-3-webhooks · bil-9", "scratch"])
     }
 
-    /// A workspace with no worktrees still has its disclosure, and opened,
-    /// it says so and offers New Worktree… (spec §8). Not while searching,
-    /// where an empty disclosure would look like a hit.
-    @Test("A workspace with no worktrees says so when its Worktrees is opened")
+    /// A workspace with no worktrees, opened, says so in one line (spec §8);
+    /// New Worktree… is on its row's menu. Not while searching, where the
+    /// line would look like a hit.
+    @Test("A workspace with no worktrees says so when it's opened")
     func aWorkspaceWithNoWorktreesSaysSo() {
         let fleet = Self.fleet(
             workspaces: [Self.summary(Self.main, "Main", isMain: true), Self.summary(Self.billing, "Billing")],
             worktrees: [Self.worktree("lane", workspace: Self.main)])
         let closed = ContentView.sidebarRows(fleet: fleet)
-        #expect(closed.map(\.kind) == [.repository, .workspace("Main"), .worktrees(count: 1), .workspace("Billing"), .worktrees(count: 0)])
+        #expect(closed.map(\.kind) == [.repository, .workspace("Main"), .workspace("Billing")])
         let open = ContentView.sidebarRows(
             fleet: fleet, open: { $0 == SidebarEntry.openKey(host: "", workspace: Self.billing) })
         #expect(open.last?.kind == .noWorktrees)
         #expect(open.last?.workspace?.id == Self.billing)
-        #expect(NoWorktreesRow.sentence == "No worktrees yet. The orchestrator makes them as it dispatches tasks.")
-        let searching = ContentView.sidebarRows(fleet: fleet, query: "billing")
-        #expect(!searching.contains { $0.kind == .worktrees(count: 0) || $0.kind == .noWorktrees })
+        #expect(NoWorktreesRow.sentence == "No worktrees yet")
+        #expect(NoWorktreesRow.help == "The orchestrator makes them as it dispatches tasks.")
+        let searching = ContentView.sidebarRows(fleet: fleet, query: "billing", open: { _ in true })
+        #expect(searching.map(\.kind) == [.repository, .workspace("Billing")])
     }
 
     /// A workspace row carries ov-60's menu, Replace in place of Start while
@@ -1072,8 +1071,8 @@ struct BoardSidebarTests {
                 Self.worktree("loose", workspace: nil, repository: Self.repoB),
             ]))
         #expect(rows.map(\.kind) == [
-            .repository, .workspace("Main"), .worktrees(count: 1),
-            .repository, .workspace("Main"), .worktrees(count: 0), .unclaimed(count: 1),
+            .repository, .workspace("Main"),
+            .repository, .workspace("Main"), .unclaimed(count: 1),
         ])
         #expect(rows.filter { $0.kind == .repository }.map(\.repositoryID) == [Self.repoA, Self.repoB])
         #expect(rows.last?.repositoryID == Self.repoB)
@@ -1588,7 +1587,7 @@ struct BoardSidebarTests {
         #expect(found.last?.orchestrator?.terminal.id == "conductor")
 
         let server = ContentView.sidebarRows(fleet: fleet, query: "server")
-        #expect(server.map(\.kind) == [.repository, .workspace("Main"), .worktrees(count: 1), .worktree("checkout")])
+        #expect(server.map(\.kind) == [.repository, .workspace("Main"), .worktree("checkout")])
         #expect(server.last?.worktree?.terminals.map(\.id) == ["shell"])
 
         #expect(ContentView.sidebarRows(fleet: fleet, query: "nothing like it").isEmpty)

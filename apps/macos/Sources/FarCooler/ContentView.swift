@@ -177,8 +177,9 @@ struct ContentView: View {
         let name: String
         var id: String { name }
     }
-    /// Which workspaces' Worktrees disclosures are open, as
-    /// `SidebarEntry.openKey`s, one a line. Empty by default (spec §9).
+    /// Which workspaces are open in the sidebar, their worktrees listed, as
+    /// `SidebarEntry.openKey`s, one a line. Empty by default (spec §9). The
+    /// key it had when each had a Worktrees row, so none reopens differently.
     @AppStorage("sidebar.openWorktrees") private var openWorktrees = ""
     /// When each workspace's orchestrator start began, by `host|workspace`:
     /// this app's, or one first seen starting. See `ConversationColumn.slowStart`.
@@ -765,7 +766,7 @@ struct ContentView: View {
         Self.sidebarRows(fleet: store.fleet, query: query, silentHosts: silentHosts, open: isOpen)
     }
 
-    /// Whether a workspace's Worktrees disclosure is open: as it was left
+    /// Whether a workspace's row is open: as it was left
     /// (`sidebar.openWorktrees`), or because the selection is inside it.
     private func isOpen(_ key: String) -> Bool {
         if openWorktreesSet.contains(key) { return true }
@@ -783,8 +784,8 @@ struct ContentView: View {
         openWorktrees = set.sorted().joined(separator: "\n")
     }
 
-    /// New Worktree… from an empty Worktrees disclosure: in the workspace
-    /// first, so the sheet claims what it makes for it
+    /// New Worktree… from a workspace row's menu: in the workspace first,
+    /// so the sheet claims what it makes for it
     /// (`claim(newWorktreeIn:…)`).
     private func newWorktreeAction(for entry: SidebarEntry) -> () -> Void {
         let host = entry.host
@@ -797,7 +798,8 @@ struct ContentView: View {
     }
 
     /// Whether a workspace's row is lit for what's open in it: with nothing
-    /// or a task open, yes; with a worktree open, its row in Worktrees is.
+    /// or a task open, yes; with a worktree open, that worktree's row under
+    /// it is.
     nonisolated static func highlightsWorkspace(_ focus: Focus?) -> Bool {
         if case .worktree? = focus { return false }
         return true
@@ -1233,19 +1235,15 @@ struct ContentView: View {
                     isSelected: selection?.host == entry.host && selection?.workspace == workspace.id
                         && Self.highlightsWorkspace(selection?.focus),
                     onSelect: { selection = .workspace(host: entry.host, workspace: workspace.id, focus: nil) },
-                    actions: usable ? workspaceActions(entry) : nil)
-            }
-        case .worktrees(let count):
-            if let workspace = entry.workspace {
-                let key = SidebarEntry.openKey(host: entry.host, workspace: workspace.id)
-                WorktreesDisclosure(
-                    count: count, isOpen: isOpen(key),
-                    onToggle: { toggleWorktrees(key) })
+                    actions: usable ? workspaceActions(entry) : nil,
+                    isOpen: isOpen(SidebarEntry.openKey(host: entry.host, workspace: workspace.id)),
+                    onToggle: { toggleWorktrees(SidebarEntry.openKey(host: entry.host, workspace: workspace.id)) },
+                    onNewWorktree: usable ? newWorktreeAction(for: entry) : nil)
             }
         case .worktree:
             if let worktree = entry.worktree { worktreeRow(worktree, usable: usable) }
         case .noWorktrees:
-            NoWorktreesRow(onNewWorktree: usable ? newWorktreeAction(for: entry) : nil)
+            NoWorktreesRow()
         case .unclaimed:
             UnclaimedWorktrees(
                 worktrees: entry.worktrees,

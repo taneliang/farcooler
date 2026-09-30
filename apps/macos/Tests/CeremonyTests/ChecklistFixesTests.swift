@@ -39,15 +39,17 @@ struct ChecklistFixesTests {
     }
 }
 
-/// The sidebar's text columns, measured from its edge (ov-63 M3): 14 for a
-/// repository and a workspace's glyph, 32 for a workspace's name and a
-/// worktree's chevron, 50 for a worktree's title, and nothing deeper.
+/// The sidebar's columns, measured from its edge (ov-78, replacing ov-63
+/// M3's): 14 for a repository and a workspace's chevron; 32 for a workspace's
+/// status glyph and its worktrees' chevrons, one step in; 50 for a
+/// workspace's name, a worktree's title and, one step under that, its
+/// terminals' status glyphs. A terminal's glyph is never in a chevron column.
 @MainActor
 struct SidebarColumnTests {
-    @Test func aTerminalTakesNoIndentStepOfItsOwn() {
+    @Test func aTerminalIsIndentedUnderItsWorktreesTitle() {
         let edge = SidebarGrid.edge, gutter = SidebarGrid.gutter
         #expect(edge == 14 && gutter == 18)
-        let worktreeDepth = ContentView.sidebarRows(
+        let rows = ContentView.sidebarRows(
             fleet: {
                 var fleet = Fleet(runtimeHealthy: true, livePanes: 0, worktrees: [
                     Worktree(
@@ -59,12 +61,19 @@ struct SidebarColumnTests {
                 ]
                 return fleet
             }(),
-            open: { _ in true }
-        ).first { if case .worktree = $0.kind { true } else { false } }!.depth
-        let worktreeTitle = edge + CGFloat(worktreeDepth) * gutter + gutter
-        #expect(worktreeTitle == 50)
+            open: { _ in true })
+        // The worktree directly under its workspace: no Worktrees row.
+        #expect(rows.map(\.kind) == [.repository, .workspace("Main"), .worktree("w")])
+        let workspaceDepth = rows[1].depth, worktreeDepth = rows[2].depth
+        #expect(workspaceDepth == 0 && worktreeDepth == 1)
+        // A row's chevron is its first column; a workspace's glyph and a
+        // worktree's title are one gutter past it.
+        let workspaceGlyph = edge + CGFloat(workspaceDepth) * gutter + gutter
+        let worktreeChevron = edge + CGFloat(worktreeDepth) * gutter
+        let worktreeTitle = worktreeChevron + gutter
+        #expect(worktreeChevron == workspaceGlyph && worktreeTitle == 50)
         let terminal = TerminalRow.columns(depth: worktreeDepth)
-        #expect(terminal.glyph == 32, "a terminal's glyph sits in its worktree's chevron column")
-        #expect(terminal.text <= worktreeTitle, "a terminal's name starts deeper than its worktree's title")
+        #expect(terminal.glyph == worktreeTitle, "a terminal's glyph starts under its worktree's title")
+        #expect(terminal.text > worktreeTitle, "a terminal's name is indented past its worktree's title")
     }
 }
