@@ -658,6 +658,18 @@ class Connection(
     }
 
     /**
+     * New Task…: file a task titled [title] on [workspace]'s board, with
+     * [details] as its intent, as the person. Throws on a refusal, whose
+     * [com.farcooler.core.CoreException.word] and `what` say why: see
+     * [com.farcooler.model.NewTask.refusal]. Reads the board again on the way
+     * back, so the card the runner keyed is the one drawn.
+     */
+    suspend fun createTask(workspace: WorkspaceSummary, title: String, details: String) {
+        core.call("task.create", com.farcooler.model.NewTask.request(workspace, title, details))
+        readBoard(workspace)
+    }
+
+    /**
      * Start [workspace]'s orchestrator on [harness] (`claude`, `codex` or
      * `cursor`), stopping a live one first when [replace] (ruling 8). Throws on
      * a refusal; answers the new terminal's id.

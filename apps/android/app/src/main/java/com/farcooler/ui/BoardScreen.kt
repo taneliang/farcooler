@@ -85,6 +85,16 @@ import com.farcooler.model.NeedsYouRow
 import com.farcooler.model.RunnerNeedsYouItem
 import com.farcooler.model.TaskStatus
 import com.farcooler.model.WorkspaceSummary
+import com.farcooler.model.NewTask
+import com.farcooler.core.refusalWord
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import com.farcooler.net.rethrowIfCancellation
 import com.farcooler.net.Connection
 import com.farcooler.net.TerminalRef
@@ -150,6 +160,9 @@ fun BoardTab(
         scope.launch { snackbar.showSnackbar(why) }
     }
     val flipped = toggled.mapNotNull(TaskStatus::parse).toSet()
+    // New Task…: a Control-scope write, so not on a read-scoped connection.
+    val offersNewTask = NewTask.offered(daemon)
+    var composing by rememberSaveable(workspace.id) { mutableStateOf(false) }
 
     Box(modifier.fillMaxSize()) {
         PullToRefreshBox(
@@ -171,7 +184,11 @@ fun BoardTab(
                 board == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
-                else -> LazyColumn(Modifier.fillMaxSize().testTag("board")) {
+                else -> LazyColumn(
+                    Modifier.fillMaxSize().testTag("board"),
+                    // Room below the last card for New Task…, so it never sits on one.
+                    contentPadding = PaddingValues(bottom = if (offersNewTask) 88.dp else 0.dp),
+                ) {
                     if (workspace.id in unread) {
                         item(key = "unread") {
                             ListItem(
@@ -233,7 +250,101 @@ fun BoardTab(
                 }
             }
         }
+        if (offersNewTask) {
+            ExtendedFloatingActionButton(
+                onClick = { composing = true },
+                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                text = { Text("New Task…") },
+                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).testTag("board-new-task"),
+            )
+        }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
+    }
+    if (composing && offersNewTask) {
+        NewTaskSheet(connection, workspace, onDismiss = { composing = false })
+    }
+}
+
+/**
+ * New Task…: a title, which it needs, and details, which become the task's
+ * intent. Files on [workspace]'s board, as the person holding the phone.
+ *
+ * A failed create keeps what was typed and says why under it, in this app's
+ * words (`NewTask.refusal`); only a filed task closes the sheet.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NewTaskSheet(connection: Connection, workspace: WorkspaceSummary, onDismiss: () -> Unit) {
+    val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    var title by rememberSaveable { mutableStateOf("") }
+    var details by rememberSaveable { mutableStateOf("") }
+    var sending by remember { mutableStateOf(false) }
+    var failure by rememberSaveable { mutableStateOf<String?>(null) }
+    val trimmed = title.trim()
+    val tooLong = trimmed.isNotEmpty() && !NewTask.titleFits(trimmed)
+
+    ModalBottomSheet(onDismissRequest = { if (!sending) onDismiss() }, sheetState = state) {
+        Column(
+            Modifier
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 20.dp)
+                .imePadding()
+                .navigationBarsPadding()
+                .testTag("new-task-sheet"),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("New Task", style = MaterialTheme.typography.headlineSmall)
+            OutlinedTextField(
+                value = title,
+                onValueChange = { title = it },
+                label = { Text("Title") },
+                singleLine = true,
+                enabled = !sending,
+                isError = tooLong,
+                modifier = Modifier.fillMaxWidth().testTag("new-task-title"),
+            )
+            if (tooLong) {
+                Text(
+                    NewTask.refusal(null, "title"),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            OutlinedTextField(
+                value = details,
+                onValueChange = { details = it },
+                label = { Text("Details (optional)") },
+                minLines = 3,
+                enabled = !sending,
+                modifier = Modifier.fillMaxWidth().testTag("new-task-details"),
+            )
+            failure?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+            Button(
+                onClick = {
+                    sending = true
+                    failure = null
+                    scope.launch {
+                        try {
+                            connection.createTask(workspace, title, details)
+                            onDismiss()
+                        } catch (e: Exception) {
+                            e.rethrowIfCancellation()
+                            failure = NewTask.refusal(e.refusalWord, (e as? CoreException)?.what)
+                        } finally {
+                            sending = false
+                        }
+                    }
+                },
+                enabled = !sending && NewTask.titleFits(title),
+                modifier = Modifier.fillMaxWidth().testTag("new-task-add"),
+            ) {
+                if (sending) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                else Text("Add Task")
+            }
+        }
     }
 }
 
