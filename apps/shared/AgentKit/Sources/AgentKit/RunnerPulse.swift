@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Security
 
@@ -21,12 +22,29 @@ public struct RunnerPulse: Codable, Sendable, Equatable {
     public var heardAgo: Double
     /// How often the runner promised to beat, in seconds.
     public var beatEvery: Double
+    /// Which runner this is, as a key only its account can make: `key`, over
+    /// the id the runner's beat carried (ov-71). Nil from a runner too old
+    /// to send one, and from an older relay.
+    public var runner: String?
 
-    public init(label: String, name: String? = nil, heardAgo: Double, beatEvery: Double) {
+    public init(
+        label: String, name: String? = nil, heardAgo: Double, beatEvery: Double,
+        runner: String? = nil
+    ) {
         self.label = label
         self.name = name
         self.heardAgo = heardAgo
         self.beatEvery = beatEvery
+        self.runner = runner
+    }
+
+    /// The relay's key for a runner id on an account:
+    /// `sha256("runner:" + account + ":" + id)`, hex, the id lowercased as
+    /// the daemon writes it. The relay never keeps the id itself, and this is
+    /// how the watch matches an agent's `hostRunner` to a quiet runner.
+    public static func key(account: String, runner: String) -> String {
+        SHA256.hash(data: Data("runner:\(account):\(runner.lowercased())".utf8))
+            .map { String(format: "%02x", $0) }.joined()
     }
 
     /// What a phone calls this runner: its own name before the pairing
@@ -90,6 +108,10 @@ public struct RunnerPulse: Codable, Sendable, Equatable {
         public var quiet: [String]
         /// When to rebuild the timeline, or nil for never.
         public var nextLook: Date?
+        /// The agents no surface may state as working now, by id: the quiet
+        /// runners' working agents, and any agent that can't be told apart
+        /// from theirs (ov-71). `FleetSnapshot.quietened` draws them.
+        public var unstated: Set<String> = []
     }
 
     /// The widget's whole decision, kept here where it can be tested, so
@@ -111,7 +133,7 @@ public struct RunnerPulse: Codable, Sendable, Equatable {
     /// tighter and shared with every reload the watch app asks for.
     public static func plan(
         snapshot: FleetSnapshot, reading: Reading, at now: Date,
-        every: TimeInterval = lookEvery
+        every: TimeInterval = lookEvery, account: String? = nil
     ) -> Plan {
         switch reading {
         case .noCredential, .refused:
@@ -126,8 +148,31 @@ public struct RunnerPulse: Codable, Sendable, Equatable {
             }
             return Plan(
                 quiet: quiet(stale),
-                nextLook: pulses.isEmpty ? nil : now.addingTimeInterval(every))
+                nextLook: pulses.isEmpty ? nil : now.addingTimeInterval(every),
+                unstated: unstated(snapshot, quiet: stale.filter(\.isQuiet), account: account))
         }
+    }
+
+    /// Which agents to stop stating, given the runners that went quiet.
+    ///
+    /// An agent whose runner id hashes to a quiet runner's key. And, saying
+    /// less rather than more, every agent that can't be told apart: one with
+    /// no runner id (a push, an older runner or phone), or every agent at all
+    /// when a quiet runner sent no id or there's no account to hash with.
+    /// Blocked and done are never listed; they hold at any age.
+    static func unstated(
+        _ snapshot: FleetSnapshot, quiet: [RunnerPulse], account: String?
+    ) -> Set<String> {
+        guard !quiet.isEmpty else { return [] }
+        let keys = Set(quiet.compactMap(\.runner))
+        let blanket = account == nil || keys.count < quiet.count
+        return Set(
+            snapshot.agents.filter { agent in
+                guard !agent.isLatched else { return false }
+                if blanket { return true }
+                guard let account, let host = agent.hostRunner else { return true }
+                return keys.contains(key(account: account, runner: host))
+            }.map(\.id))
     }
 
     /// Ask with `credential`, if there is one, and plan: the whole of what a
@@ -144,7 +189,7 @@ public struct RunnerPulse: Codable, Sendable, Equatable {
         plan(
             snapshot: snapshot,
             reading: await read(credential, held: held, session: session),
-            at: now, every: every)
+            at: now, every: every, account: credential?.account)
     }
 
     /// What asking with `credential` came to. See `look`.
@@ -184,22 +229,16 @@ public struct RunnerPulse: Codable, Sendable, Equatable {
 }
 
 extension FleetSnapshot {
-    /// This snapshot, with no working agent stated as now while any runner is
-    /// quiet (ov-71 review M3).
-    ///
-    /// The relay names a quiet runner by the name it beats with, and a row
-    /// here names its runner by the phone's label; the two don't reliably
-    /// match, so the watch can't tell which agents are the quiet runner's.
-    /// It says less rather than more: every agent that isn't latched is
-    /// marked not answering, which is `confidence`'s "last seen", the
-    /// glance's uncounted, and no staleness moment ahead. Blocked and done
-    /// hold at any age. The same reading the card makes when its lines are
-    /// gone (`AgentCardState.unvouched`). Nobody quiet is `self`.
-    public func quietened(_ quiet: [String]) -> FleetSnapshot {
-        guard !quiet.isEmpty else { return self }
+    /// This snapshot, with the agents in `unstated` marked not answering
+    /// (ov-71 review M3): `confidence`'s "last seen", the glance's uncounted,
+    /// and no staleness moment ahead, exactly as for a runner the phone lost.
+    /// Only the ids `RunnerPulse.plan` lists, so another runner's agents are
+    /// drawn as they were. Latched agents are never touched. None is `self`.
+    public func quietened(_ unstated: Set<String>) -> FleetSnapshot {
+        guard !unstated.isEmpty else { return self }
         var copy = self
         copy.agents = agents.map { agent in
-            guard !agent.isLatched else { return agent }
+            guard unstated.contains(agent.id), !agent.isLatched else { return agent }
             var agent = agent
             agent.runnerAnswering = false
             return agent

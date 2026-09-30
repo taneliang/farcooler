@@ -122,15 +122,23 @@ public struct DaemonBuild: Equatable, Sendable {
     /// `mayAdministerRunner`.
     public let grantedScope: String
 
+    /// The runner's own id, `Host.runner_id`: what its heartbeat names it by
+    /// at the relay. The phone stamps each agent with it
+    /// (`FleetSnapshot.Agent.hostRunner`) so the watch can tell a quiet
+    /// runner's agents from the rest (ov-71). Nil from a runner too old to
+    /// say.
+    public let runnerId: String?
+
     public init(
         version: String, matches: Bool, platform: String, capabilities: Set<String> = [],
-        grantedScope: String = "unspecified"
+        grantedScope: String = "unspecified", runnerId: String? = nil
     ) {
         self.version = version
         self.matches = matches
         self.platform = platform
         self.capabilities = capabilities
         self.grantedScope = grantedScope
+        self.runnerId = runnerId
     }
 
     /// Whether this connection may ask for the calls that change the runner

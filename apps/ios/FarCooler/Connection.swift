@@ -895,7 +895,10 @@ final class Connection: ObservableObject {
             // permission". `DaemonBuild.mayAdministerRunner` reads either as
             // "keep offering what we offer today", so a runner newer than this
             // build cannot silently strip controls off it.
-            grantedScope: body["grantedScope"] as? String ?? "unspecified")
+            grantedScope: body["grantedScope"] as? String ?? "unspecified",
+            // Which runner this is, by its own id (ov-71). See
+            // `FleetSnapshot.Agent.hostRunner`.
+            runnerId: body["runnerId"] as? String)
         daemon = build
         lastDaemon = build
         // Boards this link never read — `loadBoards` refused them while the
@@ -991,7 +994,7 @@ final class Connection: ObservableObject {
             // runners said. See `FleetPublication`.
             FleetSnapshotWriter.write(
                 fleet: fleet, inbox: inboxRead ? inbox : nil, machine: hostLabel,
-                runner: host?.id.uuidString ?? "")
+                runner: host?.id.uuidString ?? "", hostRunner: lastDaemon?.runnerId)
 
             // And the same fleet again, in the one shape a runner you are NOT
             // looking at can still be drawn from. See `RunnerDirectory`, and

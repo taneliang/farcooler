@@ -132,8 +132,8 @@ struct WatchFleetProvider: TimelineProvider {
         // tighter and the watch app's reloads spend it too. No credential,
         // nothing beating, or a refused token: `.never`, as before.
         //
-        // Every family asks (review M3): while a runner is quiet, none of them
-        // may state a working agent as now (`FleetSnapshot.quietened`), and
+        // Every family asks (review M3): none of them may state a quiet
+        // runner's working agent as now (`FleetSnapshot.quietened`), and
         // the circular ring and the inline line have that claim to withdraw
         // even with no room to say why. A credential the watch holds but
         // can't read while locked looks again rather than parking.
@@ -144,7 +144,10 @@ struct WatchFleetProvider: TimelineProvider {
                 held: vault?.holds ?? false, at: now, every: Self.lookEvery)
             let policy: TimelineReloadPolicy = plan.nextLook.map { .after($0) } ?? .never
             completion(
-                Timeline(entries: Self.entries(snapshot, quiet: plan.quiet, at: now), policy: policy))
+                Timeline(
+                    entries: Self.entries(
+                        snapshot, quiet: plan.quiet, unstated: plan.unstated, at: now),
+                    policy: policy))
         }
     }
 
@@ -153,11 +156,12 @@ struct WatchFleetProvider: TimelineProvider {
     private static let lookEvery: TimeInterval = 60 * 60
 
     /// One entry for now and one per staleness moment, each saying `quiet`,
-    /// over the snapshot with no working agent stated while anyone is quiet.
+    /// over the snapshot with the quiet runners' working agents no longer
+    /// stated as now (`RunnerPulse.Plan.unstated`).
     private static func entries(
-        _ snapshot: FleetSnapshot, quiet: [String], at now: Date
+        _ snapshot: FleetSnapshot, quiet: [String], unstated: Set<String>, at now: Date
     ) -> [WatchFleetEntry] {
-        let snapshot = snapshot.quietened(quiet)
+        let snapshot = snapshot.quietened(unstated)
         return [WatchFleetEntry(date: now, snapshot: snapshot, quiet: quiet)]
             + wakes(for: snapshot, after: now).map {
                 WatchFleetEntry(date: $0, snapshot: snapshot, quiet: quiet)

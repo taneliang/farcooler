@@ -259,32 +259,78 @@ struct RunnerPulseTests {
 
     // MARK: - Review round (ov-71 M1, M3)
 
-    /// A runner went quiet and the watch can't tell which rows are its, so
-    /// no working agent is stated as now: each reads "last seen", the
-    /// glance stops counting it, and no staleness moment waits for it.
-    /// Blocked and done hold. Nobody quiet is the snapshot unchanged. The
-    /// same reading the card makes with `unvouched`.
+    /// Only the quiet runner's working agents stop being stated as now
+    /// (review M3, second round): the relay names each runner by a key only
+    /// its account can make, and the watch hashes each agent's runner id
+    /// (`hostRunner`, `Host.runner_id` as the phone learned it) the same way.
+    /// Another runner's agents stay as they were. An agent with no runner id
+    /// (a push, an old runner) or a quiet runner with no key (an old daemon)
+    /// can't be told apart, so it says less rather than more. Blocked and done
+    /// hold. The glance and the staleness moments follow `quietened`.
     ///
-    /// Mutation: `quietened` returning `self`. Red.
-    @Test func aQuietRunnerStopsTheWatchClaimingWork() {
-        func agent(_ id: String, _ status: String) -> FleetSnapshot.Agent {
-            FleetSnapshot.Agent(
+    /// Mutations: `plan` dimming every agent while anyone is quiet;
+    /// `quietened` ignoring its ids; the key not lowercasing. Red.
+    @Test func onlyAQuietRunnersAgentsStopBeingStated() {
+        let quietId = "7537626F-0002-415E-1E11-000D48034210"
+        func agent(_ id: String, _ status: String, host: String?) -> FleetSnapshot.Agent {
+            var agent = FleetSnapshot.Agent(
                 id: id, label: id, machine: "studio", status: status, glyph: "", headline: id,
                 line: "", feed: [], rank: 0, turnFailed: false, activityChangedAt: now,
                 observedAt: now)
+            agent.hostRunner = host
+            return agent
         }
         let fleet = FleetSnapshot(
-            agents: [agent("a", "working"), agent("b", "blocked")], capturedAt: now, complete: true)
-        #expect(fleet.quietened([]) == fleet)
-        #expect(fleet.glance(at: now) == .blocked(1))
+            agents: [
+                agent("quiet-work", "working", host: quietId),
+                agent("quiet-ask", "blocked", host: quietId),
+                agent("live-work", "working", host: "11111111-2222-3333-4444-555555555555"),
+                agent("pushed", "working", host: nil),
+            ],
+            capturedAt: now.addingTimeInterval(-7200), complete: false)
+        #expect(
+            RunnerPulse.key(account: "user_1", runner: quietId)
+                == "cbe66b5a6a925dacbda3748006d23728f80a570efd7f7661b032dc69eeddf883")
+        let studio = RunnerPulse(
+            label: "Studio", heardAgo: 3_600_000, beatEvery: 300,
+            runner: RunnerPulse.key(account: "user_1", runner: quietId))
+        let plan = RunnerPulse.plan(
+            snapshot: fleet, reading: .answered([studio]), at: now, account: "user_1")
+        #expect(plan.unstated == ["quiet-work", "pushed"])
 
-        let quiet = fleet.quietened(["Studio"])
-        #expect(quiet.confidence(in: quiet.agents[0], at: now) == .lastSeen)
-        #expect(quiet.confidence(in: quiet.agents[1], at: now) == .known)
-        #expect(quiet.stalenessMoments(after: now).isEmpty)
-        let working = FleetSnapshot(agents: [agent("a", "working")], capturedAt: now, complete: true)
-        #expect(working.glance(at: now) == .working(1))
-        #expect(working.quietened(["Studio"]).glance(at: now) == nil)
+        let shown = fleet.quietened(plan.unstated)
+        #expect(shown.confidence(in: shown.agents[0], at: now) == .lastSeen)
+        #expect(shown.confidence(in: shown.agents[1], at: now) == .known)
+        #expect(shown.agents[2].runnerAnswering == nil)
+        #expect(shown.agents[3].runnerAnswering == false)
+        #expect(fleet.quietened([]) == fleet)
+
+        // A quiet runner too old to send its id: nothing can be told apart.
+        let old = RunnerPulse(label: "Studio", heardAgo: 3_600_000, beatEvery: 300)
+        let blanket = RunnerPulse.plan(
+            snapshot: fleet, reading: .answered([old]), at: now, account: "user_1")
+        #expect(blanket.unstated == ["quiet-work", "live-work", "pushed"])
+        // Nobody quiet, nobody unstated.
+        let live = RunnerPulse(label: "Studio", heardAgo: 1_000, beatEvery: 300, runner: "k")
+        #expect(
+            RunnerPulse.plan(snapshot: fleet, reading: .answered([live]), at: now, account: "user_1")
+                .unstated.isEmpty)
+    }
+
+    /// A push names no runner id, so the agent keeps the one the app wrote:
+    /// otherwise every alert would make its agent "can't tell apart".
+    ///
+    /// Mutation: `merging` not carrying `hostRunner`. Red.
+    @Test func aPushKeepsItsAgentsRunnerId() {
+        var polled = FleetSnapshot.Agent(
+            id: "a", label: "a", machine: "studio", status: "working", glyph: "", headline: "a",
+            line: "", feed: [], rank: 0, turnFailed: false, activityChangedAt: now)
+        polled.hostRunner = "h"
+        let fleet = FleetSnapshot(agents: [polled], capturedAt: now, complete: true)
+        var pushed = polled
+        pushed.hostRunner = nil
+        pushed.status = "blocked"
+        #expect(fleet.merging(pushed, at: now).agents.first?.hostRunner == "h")
     }
 
     /// A credential the watch holds but can't read yet (the file is

@@ -52,16 +52,21 @@ struct FleetListView<Client: FleetClient>: View {
     @State private var items: [NeedsYouItem] = []
     /// What the relay last said about which runners beat (ov-71). The quiet
     /// ones are named in the footer beside the ones the phone lost touch
-    /// with, and while any is quiet no working agent is stated as now
+    /// with, and a quiet runner's working agents are not stated as now
     /// (`FleetSnapshot.quietened`). Replanned against every snapshot that
     /// arrives, not only at the next look, so a fresh, complete one from the
     /// phone wins at once (review m5). See `lookAtThePulse`.
     @State private var reading: RunnerPulse.Reading = .noCredential
 
-    /// The quiet runners, as `RunnerPulse.plan` reads `reading` against
-    /// this snapshot.
-    private func quiet(_ snapshot: FleetSnapshot?, at now: Date) -> [String] {
-        RunnerPulse.plan(snapshot: snapshot ?? .empty, reading: reading, at: now).quiet
+    /// The account the pulse credential reads, which the relay's runner
+    /// keys are made with. See `RunnerPulse.key`.
+    @State private var account: String?
+
+    /// What `RunnerPulse.plan` makes of `reading` against this snapshot: the
+    /// quiet runners to name, and the agents to stop stating.
+    private func plan(_ snapshot: FleetSnapshot?, at now: Date) -> RunnerPulse.Plan {
+        RunnerPulse.plan(
+            snapshot: snapshot ?? .empty, reading: reading, at: now, account: account)
     }
     @Environment(\.scenePhase) private var scenePhase
 
@@ -102,10 +107,10 @@ struct FleetListView<Client: FleetClient>: View {
         while !Task.isCancelled {
             let now = Date.now
             let vault = PulseStore.vault
-            reading = await RunnerPulse.read(
-                vault.flatMap(PulseStore.read(from:)), held: vault?.holds ?? false)
-            let plan = RunnerPulse.plan(
-                snapshot: client.state.snapshot ?? .empty, reading: reading, at: now)
+            let credential = vault.flatMap(PulseStore.read(from:))
+            account = credential?.account
+            reading = await RunnerPulse.read(credential, held: vault?.holds ?? false)
+            let plan = plan(client.state.snapshot, at: now)
             guard let next = plan.nextLook else { return }
             try? await Task.sleep(for: .seconds(max(60, next.timeIntervalSince(now))))
         }
@@ -114,7 +119,7 @@ struct FleetListView<Client: FleetClient>: View {
     /// The rows, the items and the schedule for a snapshot, drawn with no
     /// working agent stated as now while a runner is quiet.
     private func adopt(_ snapshot: FleetSnapshot?) {
-        let shown = snapshot.map { $0.quietened(quiet($0, at: .now)) }
+        let shown = snapshot.map { $0.quietened(plan($0, at: .now).unstated) }
         schedule = refreshes(for: shown, from: .now)
         let list = shown.map(WatchList.init)
         rows = list?.agents ?? []
@@ -137,16 +142,17 @@ struct FleetListView<Client: FleetClient>: View {
                 systemImage: "iphone",
                 description: Text("Open \(appName) on your iPhone to see your agents."))
         case let .live(snapshot):
-            fleet(snapshot, quiet: quiet(snapshot, at: now), at: now, unreachable: false)
+            fleet(snapshot, plan: plan(snapshot, at: now), at: now, unreachable: false)
         case let .cached(snapshot):
-            fleet(snapshot, quiet: quiet(snapshot, at: now), at: now, unreachable: true)
+            fleet(snapshot, plan: plan(snapshot, at: now), at: now, unreachable: true)
         }
     }
 
     @ViewBuilder private func fleet(
-        _ snapshot: FleetSnapshot, quiet: [String], at now: Date, unreachable: Bool
+        _ snapshot: FleetSnapshot, plan: RunnerPulse.Plan, at now: Date, unreachable: Bool
     ) -> some View {
-        let snapshot = snapshot.quietened(quiet)
+        let quiet = plan.quiet
+        let snapshot = snapshot.quietened(plan.unstated)
         List {
             // Once, at the top, and only when the phone is out of reach. Not
             // keyed off how old the snapshot looks: a fresh fleet with no link

@@ -84,7 +84,8 @@ enum FleetSnapshotWriter {
     /// out of order.
     @MainActor
     static func write(
-        fleet: Fleet, inbox: [String: InboxRow]?, machine: String, runner: String
+        fleet: Fleet, inbox: [String: InboxRow]?, machine: String, runner: String,
+        hostRunner: String? = nil
     ) {
         // One instant for the whole poll, and it reaches two places: the
         // snapshot's `capturedAt` and every agent's `observedAt`. They are the
@@ -101,6 +102,10 @@ enum FleetSnapshotWriter {
             // `FleetSnapshot.Agent.runner`.
             var agent = agent
             agent.runner = runner
+            // And the runner's own id, which its heartbeat names it by at the
+            // relay: how the watch tells a quiet runner's agents from the
+            // rest (ov-71). See `FleetSnapshot.Agent.hostRunner`.
+            agent.hostRunner = hostRunner
             return agent
         }
         // THIS runner's projection, which used to be the whole file.

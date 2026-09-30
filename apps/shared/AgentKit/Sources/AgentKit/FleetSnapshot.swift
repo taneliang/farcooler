@@ -206,6 +206,15 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         /// before this; `merging` carries the stored agent's across.
         public var runner: String?
 
+        /// The runner's own id, `Host.runner_id` as the phone read it when it
+        /// polled: what that runner's heartbeat names it by at the relay,
+        /// hashed with the account (`RunnerPulse.key`). It's what lets the
+        /// watch stop stating only a quiet runner's agents rather than
+        /// everyone's (ov-71). Stamped by `FleetSnapshotWriter`; nil from a
+        /// push, from a runner too old to say, and in older snapshots, and
+        /// `merging` carries the stored agent's across.
+        public var hostRunner: String?
+
         public init(
             id: String, label: String, machine: String, status: String,
             glyph: String, headline: String, line: String, feed: [String],
@@ -929,6 +938,9 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         // names its runner by label only.
         if incoming.runner == nil {
             incoming.runner = agents.first { $0.id == incoming.id }?.runner
+        }
+        if incoming.hostRunner == nil {
+            incoming.hostRunner = agents.first { $0.id == incoming.id }?.hostRunner
         }
 
         var merged = agents
