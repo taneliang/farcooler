@@ -367,15 +367,30 @@ impl TmuxServer {
         // Scaled to the size tmux actually gave the window, not the one asked
         // for: `select-layout` fits a layout of any other size back into the
         // window the way `resize-window` does, squeezing the edge again.
-        let (columns, rows) = self.window_size(window_id).await?;
+        //
+        // From here on the resize has already happened, so nothing that fails
+        // is an error for the viewport: tmux's own arrangement at the new size
+        // stands, and the failure is logged. `expect` logs a command tmux
+        // refused, but not one that never ran (a timeout), hence the log here.
+        let (columns, rows) = match self.window_size(window_id).await {
+            Ok(size) => size,
+            Err(error) => {
+                tracing::warn!(%error, window_id, "the resized window's size could not be read; its layout is tmux's own");
+                return Ok(());
+            }
+        };
         let Some(scaled) = crate::layout::scale(layout, columns, rows) else { return Ok(()) };
-        // Refused only if the panes changed between the read and now, and then
-        // the resize has still happened; the viewport is not an error for it.
-        if self.expect(&["select-layout", "-t", window_id, &scaled], "select-layout a scaled layout").await.is_err() {
+        // Refused only if the panes changed between the read and now.
+        if let Err(error) =
+            self.expect(&["select-layout", "-t", window_id, &scaled], "select-layout a scaled layout").await
+        {
+            tracing::warn!(%error, window_id, "the scaled layout was refused; the resize stands without it");
             return Ok(());
         }
-        if zoomed == "1" {
-            self.expect(&["resize-pane", "-Z", "-t", window_id], "resize-pane -Z").await?;
+        if zoomed == "1"
+            && let Err(error) = self.expect(&["resize-pane", "-Z", "-t", window_id], "resize-pane -Z").await
+        {
+            tracing::warn!(%error, window_id, "the window could not be zoomed again after a resize");
         }
         Ok(())
     }
