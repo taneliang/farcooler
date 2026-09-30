@@ -692,18 +692,32 @@ fn short_host(host: &str) -> &str {
 ///
 /// A short timeout of its own: this runs from `push forget`, where a person
 /// is waiting, and the local unpair must not wait on an unreachable relay.
-pub async fn withdraw(pairing: &Pairing) -> bool {
+///
+/// `install` is this runner's install id, which the relay uses to withdraw
+/// every pairing of it, including a stale row under an older token, and
+/// including this token's own when it never beat (ov-77). Absent, the relay
+/// withdraws this token's row alone, as it did before.
+pub async fn withdraw(pairing: &Pairing, install: Option<&str>) -> bool {
     let Ok(client) = reqwest::Client::builder().timeout(std::time::Duration::from_secs(5)).build() else {
         return false;
     };
     let url = format!("{}/v1/heartbeat", pairing.relay.trim_end_matches('/'));
-    let body = serde_json::json!({ "withdrawn": true });
+    let body = withdraw_body(install);
     match client.post(&url).bearer_auth(&pairing.token).json(&body).send().await {
         Ok(response) => response.status().is_success(),
         Err(e) => {
             tracing::warn!(error = %e, "could not reach the relay to withdraw this runner");
             false
         }
+    }
+}
+
+/// The body of a withdrawal: the word, and the install id when there is one.
+/// Never `"install": null`, which an older relay would read as a value.
+fn withdraw_body(install: Option<&str>) -> serde_json::Value {
+    match install {
+        Some(id) => serde_json::json!({ "withdrawn": true, "install": id }),
+        None => serde_json::json!({ "withdrawn": true }),
     }
 }
 
@@ -715,7 +729,15 @@ pub async fn withdraw(pairing: &Pairing) -> bool {
 /// may say it lost touch with it.
 pub async fn forget_and_withdraw(runtime_dir: &Path) -> bool {
     let withdrawn = match Pairing::load_in(runtime_dir) {
-        Some(pairing) => withdraw(&pairing).await,
+        Some(pairing) => {
+            // Read, never created: a runner with no install id has nothing to
+            // name, and `forget` must not mint one.
+            let install = std::fs::read_to_string(runtime_dir.join("install-id"))
+                .ok()
+                .map(|id| id.trim().to_string())
+                .filter(|id| !id.is_empty());
+            withdraw(&pairing, install.as_deref()).await
+        }
         None => false,
     };
     Pairing::forget_in(runtime_dir);
@@ -835,7 +857,28 @@ mod tests {
         let (line, body) = relay.await.unwrap();
         assert!(line.starts_with("POST /v1/heartbeat "), "{line}");
         assert_eq!(body["withdrawn"], true, "{body}");
+        assert!(body.get("install").is_none(), "no install id on disk, none sent: {body}");
         assert!(Pairing::load_in(dir.path()).is_none(), "forget means forgotten");
+        assert!(!dir.path().join("install-id").exists(), "forget mints no install id");
+    }
+
+    /// A withdrawal names the runner by its install id, so the relay can
+    /// clear every pairing of it (ov-77).
+    ///
+    /// Mutation: `forget_and_withdraw` passing `None`. Red.
+    #[tokio::test]
+    async fn forgetting_a_pairing_names_the_runner_by_its_install_id() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("install-id"), "0199-abc\n").unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        Pairing { relay: format!("http://{}", listener.local_addr().unwrap()), token: "t".into() }
+            .save_in(dir.path())
+            .expect("save");
+        let relay = tokio::spawn(one_request(listener, "200 OK"));
+        assert!(forget_and_withdraw(dir.path()).await);
+        let (_, body) = relay.await.unwrap();
+        assert_eq!(body["withdrawn"], true, "{body}");
+        assert_eq!(body["install"], "0199-abc", "{body}");
     }
 
     #[tokio::test]

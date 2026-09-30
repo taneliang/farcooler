@@ -6650,6 +6650,31 @@ describe('the runner heartbeat', () => {
     expect(await runners(theirs)).toHaveLength(1)
   })
 
+  it('withdraws the install a forget names, even from a token that never beat', async () => {
+    // `push forget` right after re-pairing: the new token has beaten never,
+    // so its row holds no install, but the old token's row does (ov-77). The
+    // daemon names its install in the withdrawal. The same name from another
+    // account is another runner.
+    const mine = await pulseToken('user_1')
+    const theirs = phoneToken()
+    await register('user_2', { pushToken: 'their-phone', pulseToken: theirs })
+    await pair('user_1', 'old')
+    await pair('user_1', 'fresh')
+    await pair('user_2', 'elsewhere')
+    await post('/v1/heartbeat', { beatEvery: 300, install: 'runner-a' }, 'old')
+    await post('/v1/heartbeat', { beatEvery: 300, install: 'runner-a' }, 'elsewhere')
+    expect(await runners(mine)).toHaveLength(1)
+
+    await post('/v1/heartbeat', { withdrawn: true, install: 'runner-a' }, 'fresh')
+    expect(await runners(mine)).toEqual([])
+    expect(await runners(theirs)).toHaveLength(1)
+
+    // Not a string, or absurd: ignored, and the sender's own row still goes.
+    await post('/v1/heartbeat', { beatEvery: 300, install: 'runner-a' }, 'old')
+    await post('/v1/heartbeat', { withdrawn: true, install: 42 }, 'fresh')
+    expect(await runners(mine)).toHaveLength(1)
+  })
+
   it('forgets a runner silent for a day, as it forgets its rows', async () => {
     const token = await pulseToken('user_1')
     await pair('user_1', 'mine')

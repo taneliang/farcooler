@@ -1328,16 +1328,20 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
     // Every pairing of this runner, not only the token that asked (ov-77).
     // A runner paired twice leaves a stale row under its old token, still
     // promising a beat and long silent; the pulse takes the newest beating row
-    // per install, so that one would win and read "lost touch" for a day. The
-    // runner is what the sender's row says it is (`install_id`, the account's
-    // hash of it), and never past the account: another account's runner can't
-    // share the hash, and this WHERE says so anyway.
+    // per install, so that one would win and read "lost touch" for a day.
+    // The runner is the install the daemon names in the withdrawal, hashed
+    // with this account like every install id, or failing that the one this
+    // token's row already holds (an older daemon names none). Scoped to the
+    // account either way. A token that never beat and names nothing withdraws
+    // its own row alone.
+    const named = await installKey(daemon.account_id, body.install)
     await env.DB.prepare(
       `UPDATE daemons SET beat_every = NULL
        WHERE id = ?1 OR (account_id = ?2 AND install_id IS NOT NULL
-         AND install_id = (SELECT install_id FROM daemons WHERE id = ?1))`,
+         AND (install_id = ?3
+              OR install_id = (SELECT install_id FROM daemons WHERE id = ?1)))`,
     )
-      .bind(daemon.id, daemon.account_id)
+      .bind(daemon.id, daemon.account_id, named)
       .run()
     return json({ ok: true })
   }
