@@ -2329,8 +2329,8 @@ struct ContentView: View {
                 Divider()
                 ScrollView {
                     TaskCard(
-                        row: board.opened?.id == row.id ? board.opened ?? row : row, detail: board.detail,
-                        question: board.question, canAnswer: board.offersWrites,
+                        row: board.opened?.id == row.id ? board.opened ?? row : row, detail: board.detail(for: row.id),
+                        question: board.question(for: row.id), canAnswer: board.offersWrites,
                         onAnswer: { body in await board.answer(row, with: body) },
                         draft: TaskCard.Draft(read: { board.draft(for: $0) }, write: { board.setDraft($1, for: $0) }))
                     .padding(12)
@@ -2446,6 +2446,7 @@ struct ContentView: View {
                 store: boardStore(for: workspace, client: client, host: host),
                 client: client,
                 agents: boardAgents(host: host, client: client),
+                waiting: WorkspaceCounts.decisions(for: workspace, host: host, in: store.needsYou),
                 onGoTo: { pane in go(to: pane) }
             )
         } else {

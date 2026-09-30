@@ -238,10 +238,21 @@ enum WorkspaceCounts {
     /// implicit workspace, on a runner without `workstreams`, counts its
     /// repository's items with no workspace.
     static func count(for workspace: WorkspaceSummary, host: String, in items: [NeedsYouItem]) -> Int {
+        items.filter { counted($0, under: workspace, host: host) }.count
+    }
+
+    /// The board's "N tasks are waiting on you": its items that are a
+    /// decision, alone or beside an ask. Not the Needs Decision column's
+    /// rows, which an answer leaves as they were (spec §2.2).
+    static func decisions(for workspace: WorkspaceSummary, host: String, in items: [NeedsYouItem]) -> Int {
         items.filter { item in
-            guard item.runner == host else { return false }
-            if workspace.isImplicit { return item.workspaceID == nil && item.repositoryID == workspace.id }
-            return item.workspaceID == workspace.id
+            counted(item, under: workspace, host: host) && (item.kind == .decision || item.also.contains(.decision))
         }.count
+    }
+
+    private static func counted(_ item: NeedsYouItem, under workspace: WorkspaceSummary, host: String) -> Bool {
+        guard item.runner == host else { return false }
+        if workspace.isImplicit { return item.workspaceID == nil && item.repositoryID == workspace.id }
+        return item.workspaceID == workspace.id
     }
 }

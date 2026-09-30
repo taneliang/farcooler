@@ -824,6 +824,26 @@ struct BoardSidebarTests {
         #expect(rows[1].menu.isEmpty, "an implicit workspace has no orchestrator or charter")
     }
 
+    /// The board's "waiting on you" is the workspace's decision items, alone
+    /// or beside an ask, not its Needs Decision column: an answer drops the
+    /// item and leaves the task in the column (spec §2.2).
+    @Test("The board counts a workspace's decision items")
+    func theBoardCountsDecisionItems() {
+        func item(_ id: String, _ kind: NeedsYouKind, also: [NeedsYouKind] = [], workspace: String?, runner: String = "") -> NeedsYouItem {
+            NeedsYouItem(
+                id: id, kind: kind, also: also, rank: 1, since: nil, workspaceID: workspace,
+                repositoryID: Self.repoA, question: "q", runner: runner)
+        }
+        let billing = Self.summary(Self.billing, "Billing")
+        #expect(WorkspaceCounts.decisions(for: billing, host: "", in: []) == 0, "an answered decision has no item")
+        let items = [
+            item("a", .decision, workspace: Self.billing), item("b", .ask, also: [.decision], workspace: Self.billing),
+            item("c", .ask, workspace: Self.billing), item("d", .review, workspace: Self.billing),
+            item("e", .decision, workspace: Self.main), item("f", .decision, workspace: Self.billing, runner: "remote"),
+        ]
+        #expect(WorkspaceCounts.decisions(for: billing, host: "", in: items) == 2)
+    }
+
     /// A workspace row's count is the items counted under it, on its runner,
     /// not its terminals wanting attention: an ask and a decision about one
     /// task are one item. An implicit workspace counts its repository's

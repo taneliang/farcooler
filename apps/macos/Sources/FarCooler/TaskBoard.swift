@@ -33,6 +33,17 @@ import SwiftUI
 final class TaskBoardStore: ObservableObject {
     @Published private(set) var board: TaskBoardModel = .empty
     @Published private(set) var detail: TaskDetailModel = .empty
+    /// The card `detail` and `question` were read for. They are single slots,
+    /// and a column that has just switched to another task renders once
+    /// before `open` blanks them: drawn through `detail(for:)` and
+    /// `question(for:)`, that frame is empty rather than the last task's.
+    private var readID: String?
+    /// `detail` if it is `id`'s record, else empty.
+    func detail(for id: String) -> TaskDetailModel { readID == id ? detail : .empty }
+
+    /// `question` if it is `id`'s, else nil.
+    func question(for id: String) -> TaskQuestion? { readID == id ? question : nil }
+
     /// The card that is open, or nil for the board alone.
     @Published var opened: TaskRow?
     /// What choosing a card does: the window opens it in the workspace's
@@ -217,6 +228,7 @@ final class TaskBoardStore: ObservableObject {
     func open(_ row: TaskRow) async {
         if opened?.id != row.id {
             opened = row
+            readID = row.id
             detail = .empty
             question = nil
         }
@@ -239,6 +251,7 @@ final class TaskBoardStore: ObservableObject {
             return
         }
         trouble = nil
+        readID = row.id
         detail = read
         let asked = TaskQuestion.open(in: data)
         // Assigned only when it changed, so an unchanged question keeps its
@@ -500,6 +513,11 @@ struct TaskBoardView: View {
     @ObservedObject var store: TaskBoardStore
     @ObservedObject var client: DaemonClient
     let agents: BoardAgents
+    /// How many decisions are waiting on the person, from the needs-you
+    /// store (`WorkspaceCounts.decisions`), not from the Needs Decision
+    /// column: answering a decision leaves its task in that column (spec
+    /// §2.2), so the column outlives the question.
+    let waiting: Int
     /// Go to a pane working a task. The window's, because only the window can
     /// change what is selected.
     let onGoTo: (BoardPane) -> Void
@@ -519,12 +537,13 @@ struct TaskBoardView: View {
     @State private var newTaskOpen = false
 
     init(
-        store: TaskBoardStore, client: DaemonClient, agents: BoardAgents,
+        store: TaskBoardStore, client: DaemonClient, agents: BoardAgents, waiting: Int = 0,
         onGoTo: @escaping (BoardPane) -> Void, defaults: UserDefaults = .standard
     ) {
         self.store = store
         self.client = client
         self.agents = agents
+        self.waiting = waiting
         self.onGoTo = onGoTo
         self.defaults = defaults
         _choice = State(
@@ -598,13 +617,13 @@ struct TaskBoardView: View {
             // One line always: at a narrow board the sentence wrapped a word
             // to a line into a tall lozenge (checklist F2). Where the whole
             // sentence doesn't fit, it's said short.
-            if let waiting = store.board.waitingSentence {
+            if let sentence = TaskBoardModel.waitingSentence(waiting) {
                 ViewThatFits(in: .horizontal) {
-                    waitingPill(waiting)
-                    waitingPill(Self.waitingShort(store.board.waitingOnYou))
+                    waitingPill(sentence)
+                    waitingPill(Self.waitingShort(waiting))
                 }
                 .layoutPriority(1)
-                .help(waiting)
+                .help(sentence)
             }
             Spacer()
             if store.reading { ProgressView().controlSize(.small) }

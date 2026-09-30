@@ -106,4 +106,39 @@ struct TaskCardTests {
         #expect(store.draft(for: question) == "Postgres, because")
         #expect(store.opened?.id == "t9")
     }
+
+    /// **A column never draws another task's record.** `detail` and `question`
+    /// are the store's single slots, and the column of a task just switched to
+    /// renders once before `open` blanks them. Asked for through the task's id,
+    /// the slots are empty for any task but the one they were read for.
+    @Test("The store's record and question are shown only for the task they were read for")
+    func theRecordIsShownOnlyForItsOwnTask() async throws {
+        let client = DaemonClient(target: "", notifications: NotificationCenter())
+        client.commandRunnerForTesting = { args in
+            if args.starts(with: ["task", "list"]) {
+                return (
+                    Data(
+                        #"{"tasks":[{"id":"t9","key":"-9","title":"Pick","status":"needs_decision"},{"id":"t1","key":"-1","title":"Other","status":"needs_decision"}]}"#
+                            .utf8), nil
+                )
+            }
+            if args.starts(with: ["task", "show"]) {
+                return (
+                    Data(
+                        #"{"task":{},"notes":[{"id":"q1","kind":"question","actor":"manager","at":1,"body":"Which store?","extra":{}}],"blocks":[]}"#
+                            .utf8), nil
+                )
+            }
+            return (Data(), nil)
+        }
+        let store = TaskBoardStore(client: client, workspace: .implicit(repository: "r"))
+        await store.readIfNeverRead()
+        let first = try #require(store.board.rows.first { $0.id == "t9" })
+        await store.open(first)
+        #expect(!store.detail(for: "t9").notes.isEmpty)
+        #expect(store.question(for: "t9") != nil)
+        // The other task's first frame, before `open` has run for it.
+        #expect(store.detail(for: "t1").notes.isEmpty, "drew t9's notes under t1")
+        #expect(store.question(for: "t1") == nil, "offered t9's question under t1")
+    }
 }
