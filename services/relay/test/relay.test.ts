@@ -6647,3 +6647,190 @@ describe('the runner heartbeat', () => {
     expect((await pulse(token)).status).toBe(401)
   })
 })
+
+// MARK: - A quiet runner on the card (ov-71)
+
+/// The lock screen card stops claiming a runner's work in flight once the
+/// runner stops beating, and says it lost touch with it.
+///
+/// A dead runner sends nothing, so nothing a runner sends can move the card;
+/// the relay's cron sweep (`sweepQuiet`) is what does. These are the halves: a
+/// quiet runner's working agents leave "in flight" and their lines, its
+/// blocked ones stay, the card names it once, and names it no more once it
+/// beats again. A runner too old to beat, or unpaired on purpose, is never
+/// quiet: its silence says nothing.
+describe('a runner that stops beating, on the card', () => {
+  /// One run of the cron trigger, as Cloudflare makes it.
+  async function sweep() {
+    await worker.scheduled!(
+      { cron: '*/5 * * * *', scheduledTime: Date.now(), noRetry() {} } as never,
+      env as never,
+      { waitUntil() {}, passThroughOnException() {} } as never,
+    )
+  }
+
+  /// A phone with a card up, a runner that beats, and one agent per status.
+  async function card(agents: Record<string, string> = { aria: 'working' }) {
+    await register('user_1', { liveActivityStartToken: 'start-token' })
+    await pair('user_1', 'mine')
+    await post(
+      '/v1/devices/activity',
+      { terminal: 'aria', updateToken: 'update-token' },
+      await sessionFor('user_1'),
+    )
+    await post('/v1/heartbeat', { beatEvery: 300, name: 'Studio Mac' }, 'mine')
+    for (const [terminal, status] of Object.entries(agents)) {
+      await post('/v1/notify', { title: terminal, terminal, status }, 'mine')
+    }
+  }
+
+  /// Wind the runner's last word back by `minutes`, beat and notice alike.
+  async function silence(minutes: number, token = 'mine') {
+    await env.DB.prepare(`UPDATE daemons SET last_seen_at = ? WHERE token_hash = ?`)
+      .bind(Date.now() - minutes * 60 * 1000, await sha256(token))
+      .run()
+  }
+
+  /// The card updates the sweep sent, and nothing else.
+  function updates(calls: Call[], from: number): any[] {
+    return pushes(calls)
+      .slice(from)
+      .filter(call => call.body?.aps?.event === 'update')
+      .map(call => call.body.aps['content-state'])
+  }
+
+  it("takes a quiet runner's work out of flight, and names it", async () => {
+    const calls = watchFetch()
+    await card({ aria: 'working', zeno: 'blocked' })
+    const before = pushes(calls).length
+    // Two missed beats and five minutes' slack: quiet past fifteen.
+    await silence(16)
+    await sweep()
+
+    const [state] = updates(calls, before)
+    expect(state.quiet).toEqual(['Studio Mac'])
+    // Working is a claim about now, and nothing vouches for it.
+    expect(state.working).toBe(0)
+    // Blocked is latched: the question is still open, whoever went quiet.
+    expect(state.blocked).toBe(1)
+    expect(state.rows.map((row: any) => row.terminal)).toEqual(['zeno'])
+    expect(state.more).toBe(1)
+    expect(state.terminal).toBe('zeno')
+  })
+
+  it('says it once', async () => {
+    const calls = watchFetch()
+    await card()
+    const before = pushes(calls).length
+    await silence(16)
+    await sweep()
+    await sweep()
+    expect(updates(calls, before).length).toBe(1)
+  })
+
+  it('takes it back when the runner beats again', async () => {
+    const calls = watchFetch()
+    await card()
+    await silence(16)
+    await sweep()
+    const before = pushes(calls).length
+    await post('/v1/heartbeat', { beatEvery: 300 }, 'mine')
+    await sweep()
+
+    const [state] = updates(calls, before)
+    expect(state.quiet).toBeUndefined()
+    expect(state.working).toBe(1)
+  })
+
+  it('leaves a runner inside its promise alone', async () => {
+    const calls = watchFetch()
+    await card()
+    const before = pushes(calls).length
+    await silence(14)
+    await sweep()
+    expect(updates(calls, before)).toEqual([])
+  })
+
+  it('never calls a runner too old to beat quiet', async () => {
+    const calls = watchFetch()
+    await card()
+    await env.DB.prepare(`UPDATE daemons SET beat_every = NULL`).run()
+    const before = pushes(calls).length
+    await silence(60)
+    await sweep()
+    expect(updates(calls, before)).toEqual([])
+  })
+
+  it('never calls a runner unpaired on purpose quiet', async () => {
+    const calls = watchFetch()
+    await card()
+    await post('/v1/heartbeat', { withdrawn: true }, 'mine')
+    const before = pushes(calls).length
+    await silence(60)
+    await sweep()
+    expect(updates(calls, before)).toEqual([])
+  })
+
+  it('names the runner on the next notice too, and the sweep then has nothing to say', async () => {
+    // Another runner's notice composes the same card, so it carries the name
+    // and remembers it: the sweep behind it pushes nothing new.
+    const calls = watchFetch()
+    await card()
+    await pair('user_1', 'other')
+    await silence(16)
+    const before = pushes(calls).length
+    await post('/v1/notify', { title: 'kai', terminal: 'kai', status: 'working' }, 'other')
+    await sweep()
+
+    const sent = updates(calls, before)
+    expect(sent.length).toBe(1)
+    expect(sent[0].quiet).toEqual(['Studio Mac'])
+    expect(sent[0].working).toBe(1)
+  })
+
+  it("doesn't call a runner quiet in the notice it just sent", async () => {
+    // A notice is the runner speaking, whatever its last beat says.
+    const calls = watchFetch()
+    await card()
+    await silence(16)
+    const before = pushes(calls).length
+    await post('/v1/notify', { title: 'aria', terminal: 'aria', status: 'blocked' }, 'mine')
+    const [state] = updates(calls, before)
+    expect(state.quiet).toBeUndefined()
+  })
+
+  it("doesn't name a quiet runner with nothing on the card", async () => {
+    const calls = watchFetch()
+    await card()
+    await pair('user_1', 'idle')
+    await post('/v1/heartbeat', { beatEvery: 300, name: 'Laptop' }, 'idle')
+    await silence(16, 'idle')
+    const before = pushes(calls).length
+    await sweep()
+    expect(updates(calls, before)).toEqual([])
+  })
+
+  it('pushes nothing to a card it cannot address', async () => {
+    // Started while the app was closed: the relay holds the row and no token
+    // to send it to.
+    const calls = watchFetch()
+    await register('user_1', { liveActivityStartToken: 'start-token' })
+    await pair('user_1', 'mine')
+    await post('/v1/heartbeat', { beatEvery: 300 }, 'mine')
+    await post('/v1/notify', { title: 'zeno', terminal: 'zeno', status: 'blocked' }, 'mine')
+    await post('/v1/notify', { title: 'aria', terminal: 'aria', status: 'working' }, 'mine')
+    expect((await cardOf('user_1'))?.update_token).toBe('')
+    await silence(16)
+    const before = pushes(calls).length
+    await sweep()
+    expect(pushes(calls).slice(before)).toEqual([])
+  })
+
+  it('runs every five minutes, on all four relays', () => {
+    // Inherited from the top level (wrangler's `triggers` is inheritable), so
+    // declared there once and in no environment block, which would replace it.
+    const top = wranglerToml.split(/^\[env\./m)[0]
+    expect(top).toMatch(/^\[triggers\]\s*\ncrons = \["\*\/5 \* \* \* \*"\]/m)
+    expect(wranglerToml.slice(top.length)).not.toMatch(/triggers/)
+  })
+})

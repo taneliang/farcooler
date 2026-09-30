@@ -351,6 +351,13 @@ export interface ActivityState {
   /// `STATE_BUDGET` is the one that cannot be argued with; see both in
   /// `index.ts`.
   rows?: ActivityRow[]
+  /// The runners on the card that stopped beating (ov-71), by the name each
+  /// beats with, else its pairing label. Their working agents are out of
+  /// `working` and out of `rows`; the card says it lost touch with them.
+  ///
+  /// Absent when there are none, and on every card from a relay older than
+  /// this, which the app reads as none. See `quietOf` in `index.ts`.
+  quiet?: string[]
 }
 
 /// A hook ask as the card carries it. The same object a daemon notice carries

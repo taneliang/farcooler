@@ -115,6 +115,12 @@ export default {
       return json({ error: 'internal' }, 500)
     }
   },
+
+  /// The cron trigger, every five minutes (`[triggers]` in wrangler.toml).
+  /// See `sweepQuiet`.
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    await sweepQuiet(env)
+  },
 }
 
 // MARK: - Signing in
@@ -1348,7 +1354,8 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
 /// age at which the relay forgets its roster rows as well.
 ///
 /// Whether a runner is quiet is the phone's call, not this route's:
-/// `RunnerPulse.quietAfter` in AgentKit is the one place that rule lives.
+/// `RunnerPulse.quietAfter` in AgentKit. The relay states the same rule once
+/// more, `quietAfterMs`, only for the Live Activity, which can't ask.
 async function pulse(request: Request, env: Env): Promise<Response> {
   const header = request.headers.get('authorization') ?? ''
   const token = header.startsWith('Bearer ') ? header.slice(7) : ''
@@ -1632,9 +1639,10 @@ const CLAIM_MEMORY_MS = 60 * 60 * 1000
 /// draw, and it has nothing left to say. Purging at the design's own maximum is
 /// the smallest number that loses nothing visible.
 ///
-/// Applied LAZILY, on write. There are no cron triggers in this relay, so there
-/// is nowhere else to put it; and doing it per account on the account's own
-/// notice means the work is proportional to what is actually running.
+/// Applied LAZILY, on write, and per account on the account's own notice, so
+/// the work is proportional to what is actually running. The one cron trigger
+/// (`sweepQuiet`) reaches it only through `readFleet`, for accounts with a card
+/// up.
 const ROW_RETENTION_MS = 24 * 60 * 60 * 1000
 
 /// How long a row keeps a LINE on the card before it collapses into `+N more`.
@@ -1820,7 +1828,14 @@ function tier(status: string | null): number {
 /// the test the `working` count uses: working is a claim about now, so a quiet
 /// working row leaves "in flight" with its line. Blocked and done are latched
 /// and stay in their counts at any age, and every quiet row is still in `more`.
-function speaks(row: AgentRow, now: number): boolean {
+///
+/// **And a working row whose runner stopped beating** (ov-71) says nothing about
+/// now either, well before its hour is up: the runner promised a beat and
+/// missed two. See `quietOf`.
+function speaks(row: AgentRow, now: number, quiet: Quiet = NOBODY_QUIET): boolean {
+  if (row.status === 'working' && row.daemon_id !== null && quiet.daemons.has(row.daemon_id)) {
+    return false
+  }
   return tier(row.status) < 3 && now - row.updated_at < ROW_QUIET_AFTER_MS
 }
 
@@ -1846,6 +1861,8 @@ interface Fleet {
   insertions: number | null
   deletions: number | null
   commits: number | null
+  /// The runners on the card that stopped beating, by name. See `quietOf`.
+  quiet: string[]
 }
 
 /// Forget this account's rows that have nothing left to say, then read the rest.
@@ -1863,7 +1880,15 @@ interface Fleet {
 /// The sum is read in this function and nowhere else, so it cannot be read
 /// without the purge having run first. A revoked machine's row is deleted by
 /// `revokeOwned`, count and all, so it is never here to be summed.
-async function readFleet(env: Env, account: string, now: number): Promise<Roster> {
+///
+/// `live` is a token that is speaking in this very request: its runner is not
+/// quiet, whatever its last beat says. See `quietOf`.
+async function readFleet(
+  env: Env,
+  account: string,
+  now: number,
+  live?: string,
+): Promise<Roster> {
   await env.DB.prepare(`DELETE FROM live_activities WHERE account_id = ? AND updated_at < ?`)
     .bind(account, now - ROW_RETENTION_MS)
     .run()
@@ -1896,22 +1921,105 @@ async function readFleet(env: Env, account: string, now: number): Promise<Roster
   // attributing it to a runner needs that token's install id whether or not
   // the token has a count.
   const paired = await env.DB.prepare(
-    `SELECT id, label, install_id, needs_you, needs_you_at, last_seen_at FROM daemons
-     WHERE account_id = ?`,
+    `SELECT id, label, name, install_id, needs_you, needs_you_at, last_seen_at, beat_every,
+            expires_at
+     FROM daemons WHERE account_id = ?`,
   )
     .bind(account)
     .all<Machine>()
-  return { rows: rows.results ?? [], counts: countsOf(paired.results ?? [], now) }
+  const machines = paired.results ?? []
+  const held = rows.results ?? []
+  return {
+    rows: held,
+    counts: countsOf(machines, now),
+    quiet: quietOf(machines, held, now, live),
+  }
 }
 
 /// One `daemons` row, as `readFleet` reads it.
 interface Machine {
   id: string
   label: string
+  /// What the runner calls itself, from its beat. See migration 0015.
+  name: string | null
   install_id: string | null
   needs_you: number | null
   needs_you_at: number | null
   last_seen_at: number | null
+  /// How often it promised to beat, in seconds; NULL for a runner too old to
+  /// beat, or one unpaired on purpose.
+  beat_every: number | null
+  expires_at: number | null
+}
+
+/// How long a runner may be silent before it's quiet, in milliseconds: two
+/// missed beats and five minutes' slack for a slow request. Fifteen minutes at
+/// the shipped five-minute beat.
+///
+/// **A second statement of `RunnerPulse.quietAfter`** in AgentKit, which the
+/// phone's widget and the watch judge `/v1/pulse` by. The card can't judge on
+/// its own — it redraws only when the relay pushes it — so the relay has to
+/// know when to push, and that is this. The two are pinned together by
+/// `RunnerPulseTests` (15 minutes at 300 s) and by the 14- and 16-minute
+/// tests in `a runner that stops beating, on the card`.
+export function quietAfterMs(beatEvery: number): number {
+  return (2 * beatEvery + 5 * 60) * 1000
+}
+
+/// Which of an account's runners stopped beating, among those with a row.
+interface Quiet {
+  /// Every token of every quiet runner: a row names the token that wrote it,
+  /// and a runner paired twice is one runner.
+  daemons: Set<string>
+  /// Each quiet runner with a row on the account, once, by the name it beats
+  /// with and else its pairing label, sorted.
+  names: string[]
+}
+
+const NOBODY_QUIET: Quiet = { daemons: new Set(), names: [] }
+
+/// The runners that promised to beat and have missed two beats and the slack.
+///
+/// The same reading `/v1/pulse` gives the phone: one entry per runner (its
+/// install id, else its token), the newest beat among its tokens, a runner
+/// that never promised a beat (`beat_every` NULL: too old, or withdrawn) never
+/// quiet, and one silent past `ROW_RETENTION_MS` forgotten. `live` is a token
+/// speaking in this request, so its runner is heard now.
+///
+/// Named only when the runner has a row: the card is about agents, and a
+/// runner with none on it changes nothing the card claims. A row from before
+/// migration 0012 names no token and is never attributed.
+function quietOf(machines: Machine[], rows: AgentRow[], now: number, live?: string): Quiet {
+  const newest = new Map<string, Machine>()
+  for (const machine of machines) {
+    if (machine.beat_every === null || machine.last_seen_at === null) continue
+    if (now - machine.last_seen_at >= ROW_RETENTION_MS) continue
+    if (machine.expires_at !== null && machine.expires_at <= now) continue
+    const runner = runnerOf(machine)
+    const held = newest.get(runner)
+    if (!held || machine.last_seen_at > held.last_seen_at!) newest.set(runner, machine)
+  }
+  const speaking = machines.find(machine => machine.id === live)
+  const heard = speaking ? runnerOf(speaking) : null
+
+  const quiet = new Set<string>()
+  for (const [runner, machine] of newest) {
+    if (runner === heard) continue
+    if (now - machine.last_seen_at! > quietAfterMs(machine.beat_every!)) quiet.add(runner)
+  }
+  if (quiet.size === 0) return NOBODY_QUIET
+
+  const daemons = new Set(
+    machines.filter(machine => quiet.has(runnerOf(machine))).map(machine => machine.id),
+  )
+  const runnerOfToken = new Map(machines.map(machine => [machine.id, runnerOf(machine)]))
+  const named = new Set<string>()
+  for (const row of rows) {
+    if (row.daemon_id === null || !daemons.has(row.daemon_id)) continue
+    const machine = newest.get(runnerOfToken.get(row.daemon_id)!)!
+    named.add(machine.name || machine.label)
+  }
+  return { daemons, names: [...named].sort() }
 }
 
 /// The runner a token belongs to: its install id where it sent one, and the
@@ -1974,6 +2082,8 @@ function countsOf(machines: Machine[], now: number): Counts | null {
 interface Roster {
   rows: AgentRow[]
   counts: Counts | null
+  /// The runners that stopped beating. See `quietOf`.
+  quiet: Quiet
 }
 
 /// The machines on an account that sent a fresh count, and their sum.
@@ -2323,7 +2433,12 @@ function numeric(value: unknown): number | null {
 /// during a rollout, and letting one runner's count stand for the account would
 /// hide every other runner's blocked agents. With no count at all it is NULL,
 /// and the card falls back to `blocked` exactly as before.
-function composeFleet(rows: AgentRow[], counts: Counts | null, now: number): Fleet {
+function composeFleet(
+  rows: AgentRow[],
+  counts: Counts | null,
+  now: number,
+  quiet: Quiet = NOBODY_QUIET,
+): Fleet {
   const all = [...rows].sort((a, b) => {
     const byTier = tier(a.status) - tier(b.status)
     if (byTier !== 0) return byTier
@@ -2346,7 +2461,7 @@ function composeFleet(rows: AgentRow[], counts: Counts | null, now: number): Fle
 
   return {
     all,
-    shown: all.filter(row => speaks(row, now)).slice(0, ROWS_SHOWN),
+    shown: all.filter(row => speaks(row, now, quiet)).slice(0, ROWS_SHOWN),
     blocked: all.filter(row => row.status === 'blocked').length,
     review: all.filter(row => row.status === 'done').length,
     // Only the working rows that still speak. Working is the one tier that is
@@ -2357,13 +2472,17 @@ function composeFleet(rows: AgentRow[], counts: Counts | null, now: number): Fle
     // runner kept the card moving. The same `speaks` the lines use, so a row
     // leaves the lines and the count together. Blocked and done are latched
     // and are counted at any age; `more` still owns up to the quiet row.
-    working: all.filter(row => row.status === 'working' && speaks(row, now)).length,
+    //
+    // A runner that stopped beating (`quietOf`) leaves "in flight" the same
+    // way, a quarter of an hour in rather than an hour.
+    working: all.filter(row => row.status === 'working' && speaks(row, now, quiet)).length,
     needsYou: counts === null
       ? null
       : counts.total + all.filter(row => row.status === 'blocked' && !covered(row, counts)).length,
     insertions,
     deletions,
     commits,
+    quiet: quiet.names,
   }
 }
 
@@ -2422,6 +2541,10 @@ function withFleet(state: ActivityState, fleet: Fleet): ActivityState {
   if (fleet.insertions !== null) state.insertions = fleet.insertions
   if (fleet.deletions !== null) state.deletions = fleet.deletions
   if (fleet.commits !== null) state.commits = fleet.commits
+  // Before the rows, so the byte budget prices it: a name is at most 64
+  // characters (`heartbeat`), and eight of them can cost the card a row,
+  // never the card. Past two the card counts rather than names anyway.
+  if (fleet.quiet.length > 0) state.quiet = fleet.quiet.slice(0, 8)
 
   const rows: ActivityRow[] = []
   for (const row of fleet.shown) {
@@ -2516,7 +2639,7 @@ async function pushActivity(
   // read either way — the card needs every row to compose a header, and the row
   // this notice is about is one of them.
   const now = Date.now()
-  const { rows: before, counts } = await readFleet(env, daemon.account_id, now)
+  const { rows: before, counts, quiet } = await readFleet(env, daemon.account_id, now, daemon.id)
   const prior = before.find(row => row.terminal === terminal)
   // The row the write just produced, handed back rather than read again: it is
   // the same object the statement was bound from, so the card cannot disagree
@@ -2528,6 +2651,7 @@ async function pushActivity(
     [...before.filter(row => row.terminal !== terminal), mine],
     counts,
     now,
+    quiet,
   )
 
   // The headline, which is what `leads` used to decide and no longer does.
@@ -2727,9 +2851,10 @@ async function pushActivity(
     // from the other — see migration 0008.
     const moved =
       running.leader_terminal !== headline.terminal || running.leader_status !== state.status
+    // And which runners it named as quiet, so the sweep pushes only a change.
     await env.DB.prepare(
       `UPDATE install_cards
-       SET leader_terminal = ?, leader_status = ?, pushed_at = ?, updated_at = ?
+       SET leader_terminal = ?, leader_status = ?, pushed_at = ?, updated_at = ?, quiet = ?
        WHERE account_id = ?`,
     )
       .bind(
@@ -2737,6 +2862,7 @@ async function pushActivity(
         state.status,
         now,
         moved ? now : running.updated_at,
+        JSON.stringify(fleet.quiet),
         daemon.account_id,
       )
       .run()
@@ -2821,8 +2947,8 @@ async function refreshCard(
   if (!running || running.update_token === TOKEN_UNKNOWN) return
 
   const now = Date.now()
-  const { rows, counts } = await readFleet(env, account, now)
-  const fleet = composeFleet(rows, counts, now)
+  const { rows, counts, quiet } = await readFleet(env, account, now)
+  const fleet = composeFleet(rows, counts, now, quiet)
   // The same headline `pushActivity` would draw: the first row that speaks,
   // and failing that the first row at all — quiet rows still hold a card up,
   // and its count is the one number that must not freeze. A card with no rows
@@ -2857,11 +2983,58 @@ async function refreshCard(
     running.leader_terminal !== headline.terminal || running.leader_status !== state.status
   await env.DB.prepare(
     `UPDATE install_cards
-     SET leader_terminal = ?, leader_status = ?, pushed_at = ?, updated_at = ?
+     SET leader_terminal = ?, leader_status = ?, pushed_at = ?, updated_at = ?, quiet = ?
      WHERE account_id = ?`,
   )
-    .bind(headline.terminal, state.status, now, moved ? now : running.updated_at, account)
+    .bind(
+      headline.terminal,
+      state.status,
+      now,
+      moved ? now : running.updated_at,
+      JSON.stringify(fleet.quiet),
+      account,
+    )
     .run()
+}
+
+/// Move every card whose runners went quiet, or came back, since it was last
+/// pushed (ov-71). The cron trigger's whole job.
+///
+/// **Why a sweep.** A runner that stops sends nothing, so nothing a runner
+/// sends can say it stopped: with one runner, no push would ever arrive. The
+/// widget asks the relay on its own timeline (`/v1/pulse`); a Live Activity
+/// can't ask anything and redraws only when pushed, so the relay has to notice
+/// the silence itself, on a clock. A Live Activity push goes straight to the
+/// card, so the reason the widget design rejected a relay-side sweep —
+/// background pushes are throttled, never reach a force-quit app, and don't run
+/// the notification extension — doesn't apply here.
+///
+/// **An update, never an end.** A card that vanished when its runner went
+/// quiet could take a blocked agent's question with it, which is the one thing
+/// this product exists to deliver (`STALE_AFTER_S` in `push.ts` makes the same
+/// argument); and a card can only be started again by a blocked notice.
+///
+/// Only cards the relay can address and nobody swiped away, and only when the
+/// quiet runners differ from what the card last said (`install_cards.quiet`),
+/// so a runner that goes quiet costs one push and one that comes back another.
+/// No alert: it interrupts nobody. Each card is its own try, so one account's
+/// failure can't stall the rest.
+export async function sweepQuiet(env: Env): Promise<void> {
+  const cards = await env.DB.prepare(
+    `SELECT account_id, quiet FROM install_cards
+     WHERE update_token != ? AND dismissed_at IS NULL`,
+  )
+    .bind(TOKEN_UNKNOWN)
+    .all<{ account_id: string; quiet: string | null }>()
+  for (const card of cards.results ?? []) {
+    try {
+      const { quiet } = await readFleet(env, card.account_id, Date.now())
+      if (JSON.stringify(quiet.names) === (card.quiet ?? '[]')) continue
+      await refreshCard(env, card.account_id)
+    } catch (error) {
+      console.error(error)
+    }
+  }
 }
 
 /// Raise a card from the outside, and remember that it is up.

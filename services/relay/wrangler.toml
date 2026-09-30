@@ -73,6 +73,19 @@ routes = [{ pattern = "relay.farcooler.com", custom_domain = true }]
 enabled = true
 head_sampling_rate = 1
 
+# The one cron trigger: every five minutes, the relay moves any Live Activity
+# whose runner stopped beating, or came back (`sweepQuiet`, ov-71). A dead
+# runner sends nothing, so only a clock can notice it.
+#
+# INHERITED, like `[observability]` above and for the same reason it's
+# declared once here: wrangler reads `triggers` through `inheritable()`, so all
+# four relays get it. An environment block that declared its own would
+# replace this one, not add to it. Five minutes because a runner reads as
+# quiet fifteen minutes after its last beat (`quietAfterMs`), so the card says
+# so within twenty; 288 runs a day, each one read of the few cards up.
+[triggers]
+crons = ["*/5 * * * *"]
+
 # Identity, devices, and pairings. Small and relational.
 [[d1_databases]]
 binding = "DB"
