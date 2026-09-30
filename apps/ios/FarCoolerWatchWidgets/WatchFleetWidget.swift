@@ -130,17 +130,18 @@ struct WatchFleetProvider: TimelineProvider {
         // (`RunnerPulse.look`), and looks again hourly while any runner beats:
         // 24 a day, half the phone widget's pace, because this budget is
         // tighter and the watch app's reloads spend it too. No credential,
-        // nothing beating, or a refused token: `.never`, as before. The
-        // circular and inline families have nowhere to say it, so they don't
-        // ask.
-        guard context.family == .accessoryRectangular else {
-            completion(Timeline(entries: Self.entries(snapshot, quiet: [], at: now), policy: .never))
-            return
-        }
+        // nothing beating, or a refused token: `.never`, as before.
+        //
+        // Every family asks (review M3): while a runner is quiet, none of them
+        // may state a working agent as now (`FleetSnapshot.quietened`), and
+        // the circular ring and the inline line have that claim to withdraw
+        // even with no room to say why. A credential the watch holds but
+        // can't read while locked looks again rather than parking.
         Task {
+            let vault = PulseStore.vault
             let plan = await RunnerPulse.look(
-                snapshot: snapshot, credential: PulseStore.read(), at: now,
-                every: Self.lookEvery)
+                snapshot: snapshot, credential: vault.flatMap(PulseStore.read(from:)),
+                held: vault?.holds ?? false, at: now, every: Self.lookEvery)
             let policy: TimelineReloadPolicy = plan.nextLook.map { .after($0) } ?? .never
             completion(
                 Timeline(entries: Self.entries(snapshot, quiet: plan.quiet, at: now), policy: policy))
@@ -151,11 +152,13 @@ struct WatchFleetProvider: TimelineProvider {
     /// hour. See `getTimeline`.
     private static let lookEvery: TimeInterval = 60 * 60
 
-    /// One entry for now and one per staleness moment, each saying `quiet`.
+    /// One entry for now and one per staleness moment, each saying `quiet`,
+    /// over the snapshot with no working agent stated while anyone is quiet.
     private static func entries(
         _ snapshot: FleetSnapshot, quiet: [String], at now: Date
     ) -> [WatchFleetEntry] {
-        [WatchFleetEntry(date: now, snapshot: snapshot, quiet: quiet)]
+        let snapshot = snapshot.quietened(quiet)
+        return [WatchFleetEntry(date: now, snapshot: snapshot, quiet: quiet)]
             + wakes(for: snapshot, after: now).map {
                 WatchFleetEntry(date: $0, snapshot: snapshot, quiet: quiet)
             }

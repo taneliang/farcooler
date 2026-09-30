@@ -221,10 +221,25 @@ public final class Account: NSObject, ObservableObject {
         // with. Clearing locally alone left the refresh token valid at WorkOS
         // until natural expiry — so anyone who had lifted it kept minting
         // sessions after the user believed they had signed out.
-        if let refresh = TokenStore.read(Self.refreshKey) {
-            _ = try? await post("/v1/auth/logout", ["refreshToken": refresh])
+        //
+        // With the pulse token too (ov-71): the watch holds a copy the phone
+        // can't delete, and the relay forgetting its hash is what makes that
+        // copy read nothing.
+        if let body = Self.logoutBody(
+            refresh: TokenStore.read(Self.refreshKey), pulse: PulseStore.read()?.token)
+        {
+            _ = try? await post("/v1/auth/logout", body)
         }
         clearSession()
+    }
+
+    /// What sign-out tells the relay: the refresh token to end and the pulse
+    /// token to forget, whichever this device holds; nil for neither.
+    nonisolated static func logoutBody(refresh: String?, pulse: String?) -> [String: Any]? {
+        var body: [String: Any] = [:]
+        if let refresh { body["refreshToken"] = refresh }
+        if let pulse { body["pulseToken"] = pulse }
+        return body.isEmpty ? nil : body
     }
 
     // MARK: - Talking to the relay

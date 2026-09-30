@@ -59,6 +59,12 @@ final class WatchLinkHost: NSObject {
     private var lastSent: FleetSnapshot?
     private var lastSentAt = Date.distantPast
 
+    /// The pulse credential as the watch should have it, read once and kept
+    /// until `PulseStore.changed` says otherwise, rather than a Keychain read
+    /// on every three-second send (ov-71 review m7). The outer optional is
+    /// "not read yet".
+    private var pulse: Data??
+
     /// Per-terminal transcripts, kept only so the SECOND question about one
     /// agent is cheap — and there are now two questions that read one, so the
     /// second is routinely asked. See `replay(terminal:on:within:)`.
@@ -87,6 +93,23 @@ final class WatchLinkHost: NSObject {
         started = true
         session.delegate = self
         session.activate()
+        // A credential made, moved or cleared reaches the watch at once, and
+        // a sign-out in particular: the context that follows carries no
+        // token, and the watch deletes its copy (ov-71 review M1).
+        NotificationCenter.default.addObserver(
+            forName: PulseStore.changed, object: nil, queue: .main
+        ) { _ in
+            Task { @MainActor in WatchLinkHost.shared.pulseChanged() }
+        }
+    }
+
+    /// Forget the cached credential and send the last fleet again with the
+    /// current one, or none.
+    private func pulseChanged() {
+        pulse = nil
+        guard let lastSent else { return }
+        lastSentAt = .distantPast
+        send(snapshot: lastSent)
     }
 
     /// Point the link at the app's fleet.
@@ -260,11 +283,12 @@ final class WatchLinkHost: NSObject {
         // relay which runners went quiet while this app is suspended, as the
         // phone's widget does. In every context and not only a changed one:
         // a context replaces the last one whole, so a key left out is a
-        // credential taken away, which is what signing out should do. A new
-        // one reaches the wrist within the thirty seconds below.
+        // credential taken away, which is what signing out should do. A
+        // change is sent at once: see `pulseChanged`.
         var context: [String: Any] = [Self.snapshotKey: data]
-        if let pulse = PulseStore.read()?.contextValue {
-            context[PulseCredential.watchContextKey] = pulse
+        if pulse == nil { pulse = .some(PulseStore.read()?.contextValue) }
+        if let credential = pulse ?? nil {
+            context[PulseCredential.watchContextKey] = credential
         }
         try? session.updateApplicationContext(context)
         lastSent = snapshot

@@ -133,13 +133,26 @@ public struct RunnerPulse: Codable, Sendable, Equatable {
     /// Ask with `credential`, if there is one, and plan: the whole of what a
     /// surface does with the pulse, so a watch and a widget can't read it
     /// two ways. No credential asks nothing and plans today's hedge.
+    ///
+    /// `held` is a credential the vault holds but can't read yet: the watch's
+    /// file, protected until the watch is unlocked. That's a look that
+    /// failed, and asks again, rather than a watch with no credential.
     public static func look(
-        snapshot: FleetSnapshot, credential: PulseCredential?, at now: Date,
+        snapshot: FleetSnapshot, credential: PulseCredential?, held: Bool = false, at now: Date,
         every: TimeInterval = lookEvery, session: URLSession = .shared
     ) async -> Plan {
-        let reading: Reading =
-            if let credential { await fetch(credential, session: session) } else { .noCredential }
-        return plan(snapshot: snapshot, reading: reading, at: now, every: every)
+        plan(
+            snapshot: snapshot,
+            reading: await read(credential, held: held, session: session),
+            at: now, every: every)
+    }
+
+    /// What asking with `credential` came to. See `look`.
+    public static func read(
+        _ credential: PulseCredential?, held: Bool = false, session: URLSession = .shared
+    ) async -> Reading {
+        if let credential { return await fetch(credential, session: session) }
+        return held ? .failed : .noCredential
     }
 
     /// What `/v1/pulse` answered, or nil for anything else.
@@ -167,6 +180,31 @@ public struct RunnerPulse: Codable, Sendable, Equatable {
         if status == 401 { return .refused }
         guard status == 200, let pulses = decode(data) else { return .failed }
         return .answered(pulses)
+    }
+}
+
+extension FleetSnapshot {
+    /// This snapshot, with no working agent stated as now while any runner is
+    /// quiet (ov-71 review M3).
+    ///
+    /// The relay names a quiet runner by the name it beats with, and a row
+    /// here names its runner by the phone's label; the two don't reliably
+    /// match, so the watch can't tell which agents are the quiet runner's.
+    /// It says less rather than more: every agent that isn't latched is
+    /// marked not answering, which is `confidence`'s "last seen", the
+    /// glance's uncounted, and no staleness moment ahead. Blocked and done
+    /// hold at any age. The same reading the card makes when its lines are
+    /// gone (`AgentCardState.unvouched`). Nobody quiet is `self`.
+    public func quietened(_ quiet: [String]) -> FleetSnapshot {
+        guard !quiet.isEmpty else { return self }
+        var copy = self
+        copy.agents = agents.map { agent in
+            guard !agent.isLatched else { return agent }
+            var agent = agent
+            agent.runnerAnswering = false
+            return agent
+        }
+        return copy
     }
 }
 
@@ -220,6 +258,12 @@ public protocol PulseVault: Sendable {
     func read() -> Data?
     @discardableResult func write(_ data: Data) -> Bool
     func delete()
+    /// Whether there's a credential here at all, readable or not.
+    var holds: Bool { get }
+}
+
+extension PulseVault {
+    public var holds: Bool { read() != nil }
 }
 
 /// The pulse credential in the Keychain, in the App Group's access group, so
@@ -277,8 +321,7 @@ public struct KeychainPulseVault: PulseVault {
 /// already lives beside it. The container is the watch's own: an App Group
 /// is per device, written by the watch app as contexts arrive and read by
 /// the complication. The token reads runner names and ages and nothing else.
-/// Protected until first unlock, like the phone's item, so a complication on
-/// a watch that has been unlocked since it booted can read it.
+/// Completely protected: readable only while the watch is unlocked.
 public struct ContainerPulseVault: PulseVault {
     let file: URL
 
@@ -288,10 +331,17 @@ public struct ContainerPulseVault: PulseVault {
 
     public func read() -> Data? { try? Data(contentsOf: file) }
 
+    /// Whether the file is there, which a locked watch can answer and can't
+    /// read. See `RunnerPulse.look`'s `held`.
+    public var holds: Bool { FileManager.default.fileExists(atPath: file.path) }
+
     @discardableResult
     public func write(_ data: Data) -> Bool {
+        // Complete protection: unreadable while the watch is locked (ov-71
+        // review M1). A complication drawing on a locked watch then finds the
+        // file and can't open it, which `holds` turns into a look that failed.
         #if os(watchOS) || os(iOS)
-            let options: Data.WritingOptions = [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+            let options: Data.WritingOptions = [.atomic, .completeFileProtection]
         #else
             let options: Data.WritingOptions = [.atomic]
         #endif
@@ -304,6 +354,12 @@ public struct ContainerPulseVault: PulseVault {
 /// The phone's pulse credential: made once, read by the widget, gone at
 /// sign-out. On the watch, what the phone last sent.
 public enum PulseStore {
+    /// Posted whenever this device's credential changes: made, moved to
+    /// another relay or account, or cleared at sign-out. The phone's watch
+    /// link sends the watch a context at once, with the new credential or
+    /// without one, rather than at its next poll (ov-71 review M1).
+    public static let changed = Notification.Name("farcooler.pulse.changed")
+
     /// This build's vault, or nil in one with no App Group (the Mac, a test
     /// host), where nothing reads a pulse. A file in the container on the
     /// watch (`ContainerPulseVault`), the Keychain everywhere else.
@@ -343,6 +399,7 @@ public enum PulseStore {
             if held.relay != relay {
                 held.relay = relay
                 guard let data = try? JSONEncoder().encode(held), vault.write(data) else { return nil }
+                NotificationCenter.default.post(name: changed, object: nil)
             }
             return held.token
         }
@@ -353,6 +410,7 @@ public enum PulseStore {
         let token = bytes.map { String(format: "%02x", $0) }.joined()
         let credential = PulseCredential(relay: relay, token: token, account: account)
         guard let data = try? JSONEncoder().encode(credential), vault.write(data) else { return nil }
+        NotificationCenter.default.post(name: changed, object: nil)
         return token
     }
 
@@ -364,5 +422,6 @@ public enum PulseStore {
     /// Forget the credential. At sign-out: the next sign-in makes a new one.
     public static func clear() {
         vault?.delete()
+        NotificationCenter.default.post(name: changed, object: nil)
     }
 }

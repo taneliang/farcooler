@@ -50,11 +50,19 @@ struct FleetListView<Client: FleetClient>: View {
     /// What needs you, first, in the app's order: `WatchList.items`, held for
     /// `rows`' reason.
     @State private var items: [NeedsYouItem] = []
-    /// The runners the relay says stopped beating (ov-71), named in the
-    /// footer beside the ones the phone lost touch with, as the phone's
-    /// widget names them. Empty until the relay has answered, and whenever it
-    /// can't: that's the footer as it was. See `lookAtThePulse`.
-    @State private var quiet: [String] = []
+    /// What the relay last said about which runners beat (ov-71). The quiet
+    /// ones are named in the footer beside the ones the phone lost touch
+    /// with, and while any is quiet no working agent is stated as now
+    /// (`FleetSnapshot.quietened`). Replanned against every snapshot that
+    /// arrives, not only at the next look, so a fresh, complete one from the
+    /// phone wins at once (review m5). See `lookAtThePulse`.
+    @State private var reading: RunnerPulse.Reading = .noCredential
+
+    /// The quiet runners, as `RunnerPulse.plan` reads `reading` against
+    /// this snapshot.
+    private func quiet(_ snapshot: FleetSnapshot?, at now: Date) -> [String] {
+        RunnerPulse.plan(snapshot: snapshot ?? .empty, reading: reading, at: now).quiet
+    }
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -69,11 +77,9 @@ struct FleetListView<Client: FleetClient>: View {
             .watchRoutes(client: client)
         }
         .onChange(of: client.state.snapshot, initial: true) { _, snapshot in
-            schedule = refreshes(for: snapshot, from: .now)
-            let list = snapshot.map(WatchList.init)
-            rows = list?.agents ?? []
-            items = list?.items ?? []
+            adopt(snapshot)
         }
+        .onChange(of: reading) { _, _ in adopt(client.state.snapshot) }
         // Each time the list comes to the front, and every look while it
         // stays there. See `lookAtThePulse`.
         .task(id: scenePhase) { await lookAtThePulse() }
@@ -95,12 +101,24 @@ struct FleetListView<Client: FleetClient>: View {
         guard scenePhase == .active else { return }
         while !Task.isCancelled {
             let now = Date.now
-            let plan = await RunnerPulse.look(
-                snapshot: client.state.snapshot ?? .empty, credential: PulseStore.read(), at: now)
-            quiet = plan.quiet
+            let vault = PulseStore.vault
+            reading = await RunnerPulse.read(
+                vault.flatMap(PulseStore.read(from:)), held: vault?.holds ?? false)
+            let plan = RunnerPulse.plan(
+                snapshot: client.state.snapshot ?? .empty, reading: reading, at: now)
             guard let next = plan.nextLook else { return }
             try? await Task.sleep(for: .seconds(max(60, next.timeIntervalSince(now))))
         }
+    }
+
+    /// The rows, the items and the schedule for a snapshot, drawn with no
+    /// working agent stated as now while a runner is quiet.
+    private func adopt(_ snapshot: FleetSnapshot?) {
+        let shown = snapshot.map { $0.quietened(quiet($0, at: .now)) }
+        schedule = refreshes(for: shown, from: .now)
+        let list = shown.map(WatchList.init)
+        rows = list?.agents ?? []
+        items = list?.items ?? []
     }
 
     /// The three states, kept three.
@@ -119,15 +137,16 @@ struct FleetListView<Client: FleetClient>: View {
                 systemImage: "iphone",
                 description: Text("Open \(appName) on your iPhone to see your agents."))
         case let .live(snapshot):
-            fleet(snapshot, at: now, unreachable: false)
+            fleet(snapshot, quiet: quiet(snapshot, at: now), at: now, unreachable: false)
         case let .cached(snapshot):
-            fleet(snapshot, at: now, unreachable: true)
+            fleet(snapshot, quiet: quiet(snapshot, at: now), at: now, unreachable: true)
         }
     }
 
     @ViewBuilder private func fleet(
-        _ snapshot: FleetSnapshot, at now: Date, unreachable: Bool
+        _ snapshot: FleetSnapshot, quiet: [String], at now: Date, unreachable: Bool
     ) -> some View {
+        let snapshot = snapshot.quietened(quiet)
         List {
             // Once, at the top, and only when the phone is out of reach. Not
             // keyed off how old the snapshot looks: a fresh fleet with no link

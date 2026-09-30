@@ -256,6 +256,80 @@ struct RunnerPulseTests {
             snapshot: old, credential: credential, at: now, session: StubbedRelay.session())
         #expect(asked.quiet == ["Studio"])
     }
+
+    // MARK: - Review round (ov-71 M1, M3)
+
+    /// A runner went quiet and the watch can't tell which rows are its, so
+    /// no working agent is stated as now: each reads "last seen", the
+    /// glance stops counting it, and no staleness moment waits for it.
+    /// Blocked and done hold. Nobody quiet is the snapshot unchanged. The
+    /// same reading the card makes with `unvouched`.
+    ///
+    /// Mutation: `quietened` returning `self`. Red.
+    @Test func aQuietRunnerStopsTheWatchClaimingWork() {
+        func agent(_ id: String, _ status: String) -> FleetSnapshot.Agent {
+            FleetSnapshot.Agent(
+                id: id, label: id, machine: "studio", status: status, glyph: "", headline: id,
+                line: "", feed: [], rank: 0, turnFailed: false, activityChangedAt: now,
+                observedAt: now)
+        }
+        let fleet = FleetSnapshot(
+            agents: [agent("a", "working"), agent("b", "blocked")], capturedAt: now, complete: true)
+        #expect(fleet.quietened([]) == fleet)
+        #expect(fleet.glance(at: now) == .blocked(1))
+
+        let quiet = fleet.quietened(["Studio"])
+        #expect(quiet.confidence(in: quiet.agents[0], at: now) == .lastSeen)
+        #expect(quiet.confidence(in: quiet.agents[1], at: now) == .known)
+        #expect(quiet.stalenessMoments(after: now).isEmpty)
+        let working = FleetSnapshot(agents: [agent("a", "working")], capturedAt: now, complete: true)
+        #expect(working.glance(at: now) == .working(1))
+        #expect(working.quietened(["Studio"]).glance(at: now) == nil)
+    }
+
+    /// A credential the watch holds but can't read yet (the file is
+    /// protected until the watch unlocks) is a look that failed, not a
+    /// watch with no credential: it looks again rather than parking.
+    ///
+    /// Mutation: `look` ignoring `held`. Red.
+    @Test func aCredentialTheWatchCantReadYetLooksAgain() async {
+        let old = snapshot(complete: false, age: 7200)
+        let locked = await RunnerPulse.look(snapshot: old, credential: nil, held: true, at: now)
+        #expect(locked == RunnerPulse.Plan(quiet: [], nextLook: now.addingTimeInterval(30 * 60)))
+    }
+
+    /// Every change to the phone's credential is announced, so the watch
+    /// link sends the watch a context with the new one, or without one,
+    /// at once rather than at its next poll. The same token again isn't.
+    ///
+    /// Mutation: `token` not posting for a new token. Red.
+    @Test func aNewCredentialIsAnnounced() throws {
+        let vault = MemoryVault()
+        let counter = Counter()
+        let observer = NotificationCenter.default.addObserver(
+            forName: PulseStore.changed, object: nil, queue: nil) { _ in counter.bump() }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        _ = try #require(PulseStore.token(relay: "https://a", account: "u1", in: vault))
+        #expect(counter.value == 1)
+        _ = PulseStore.token(relay: "https://a", account: "u1", in: vault)
+        #expect(counter.value == 1)
+        _ = PulseStore.token(relay: "https://a", account: "u2", in: vault)
+        #expect(counter.value == 2)
+        PulseStore.clear()
+        #expect(counter.value == 3)
+    }
+
+    /// Sign-out tells the relay to forget the pulse token beside the refresh
+    /// token, so the watch's copy reads nothing after (M1).
+    ///
+    /// Mutation: `logoutBody` leaving the pulse token out. Red.
+    @Test func signOutSendsThePulseTokenToForget() {
+        let body = Account.logoutBody(refresh: "rt", pulse: "p")
+        #expect(body?["refreshToken"] as? String == "rt")
+        #expect(body?["pulseToken"] as? String == "p")
+        #expect(Account.logoutBody(refresh: nil, pulse: "p")?["pulseToken"] as? String == "p")
+        #expect(Account.logoutBody(refresh: nil, pulse: nil) == nil)
+    }
 }
 
 /// A vault in memory, for tests with no Keychain group.
@@ -290,4 +364,12 @@ final class StubbedRelay: URLProtocol, @unchecked Sendable {
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
+}
+
+/// A count a notification observer can bump from any thread.
+final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int { lock.withLock { count } }
+    func bump() { lock.withLock { count += 1 } }
 }
