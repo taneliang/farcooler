@@ -26,10 +26,10 @@ import XCTest
 /// `ShellCloseTests` holds the sentence; `Connection.close` is the pair of
 /// calls, in the order the daemon requires.
 final class ShellColumnCloseTests: XCTestCase {
-    /// The default fixture's first worktree has three tabs — `Diff`, then
+    /// The default fixture's first worktree has three tabs — `Changes`, then
     /// `codex` and `shell`. Ten worktrees, tab counts `[3, 2, 5, 1, 4]`
     /// cycling, agent names cycling `[claude, codex, shell, aider]` from tab 0,
-    /// whose title is overwritten with `Diff`.
+    /// whose title is overwritten with `Changes`.
     private func launch() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-shell-harness"]
@@ -197,7 +197,7 @@ final class ShellColumnCloseTests: XCTestCase {
         try pinColumn(app)
         let diff = app.buttons["shell-column-row-0"]
         XCTAssertTrue(diff.waitForExistence(timeout: 10), "the column drew no Diff row")
-        XCTAssertEqual(diff.label, "Diff", "row 0 of every worktree is the diff")
+        XCTAssertEqual(diff.label, "Changes", "row 0 of every worktree is the diff")
         swipe(diff)
         XCTAssertFalse(
             app.buttons["Close"].waitForExistence(timeout: 3),

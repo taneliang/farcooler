@@ -309,7 +309,7 @@ internal fun WorktreeList(
                     TextButton(onClick = { showQuickTask = true }) {
                         Icon(Icons.Filled.AutoAwesome, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("New worktree…")
+                        Text("New Worktree…")
                     }
                     Spacer(Modifier.weight(1f))
                     IconButton(onClick = { showNewWorktree = true }) {
@@ -942,7 +942,7 @@ private fun WorktreeHeader(
                     DropdownMenuItem(
                         text = {
                             Text(
-                                "Remove worktree…",
+                                "Remove Worktree…",
                                 color = MaterialTheme.colorScheme.error,
                             )
                         },

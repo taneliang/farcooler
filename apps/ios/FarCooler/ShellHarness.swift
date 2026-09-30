@@ -248,7 +248,7 @@ struct ShellHarness: View {
                     tabs: (0..<tabs).map { tab in
                         ShellTab(
                             id: "ws-\(index)-tab-\(tab)",
-                            title: tab == 0 ? "Diff" : Self.agents[tab % Self.agents.count],
+                            title: tab == 0 ? "Changes" : Self.agents[tab % Self.agents.count],
                             // Tab 0 is the diff, in every worktree. "`Diff` is
                             // a tab like any other, first in the list" — and
                             // only a diff tab is ever `unreadDiff`, which is a
@@ -365,7 +365,7 @@ struct ShellHarness: View {
         RunnerDirectory.Worktree(
             id: name, name: name, isHidden: isHidden,
             tabs: [
-                RunnerDirectory.Tab(title: "Diff", mark: mark),
+                RunnerDirectory.Tab(title: "Changes", mark: mark),
                 RunnerDirectory.Tab(title: "claude", mark: "working"),
             ],
             tail: ["$ npm test", "142 passing, 0 failing"])
