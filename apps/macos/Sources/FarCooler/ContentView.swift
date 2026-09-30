@@ -219,9 +219,12 @@ struct ContentView: View {
                     // feature, so the split would open a pane running a
                     // subcommand that runner has never heard of — a dead pane
                     // where a diff was asked for, with nothing saying why.
-                    // Only for a worktree opened whole: a task's column shows
-                    // its changes already, without a pane (spec R3).
-                    if let ws = detailWorktree, Self.shows(ws, selection),
+                    // For a worktree opened whole, with a terminal or not,
+                    // or the main checkout beside the Orchestrator column
+                    // (ov-78); not for a task, whose column shows its
+                    // changes already, without a pane (spec R3).
+                    if let ws = WorkspaceScreen.changesTarget(
+                        selection, in: store.fleet, repositories: repositoryIDs(selection?.host ?? "")),
                         store.client(for: ws)?.changesSupported != false
                     {
                         ToolbarItem(placement: .primaryAction) {
@@ -1804,6 +1807,7 @@ struct ContentView: View {
             moveTargets: Self.moveTargets(for: listed, in: store.fleet, assigns: Self.assigns(store)(listed)),
             onMove: { target in move(listed, to: target) },
             roleOffer: roleOffer(in: listed),
+            onShowChanges: showChangesAction(for: listed, usable: usable),
             changes: changesStatus(ws),
             countsWidth: countsWidth
         )
@@ -1837,26 +1841,30 @@ struct ContentView: View {
         return client.changesInbox[ws.short]
     }
 
-    /// This worktree's changes pane, if it has one open.
+    /// This worktree's changes pane, if it has one open in the layout the
+    /// third column draws for it (or the detail, for a loose worktree).
     ///
-    /// Asked of the ACTIVE layout rather than of the worktree's terminals,
+    /// Asked of that layout rather than of the worktree's terminals,
     /// because that is the question the toolbar button is answering: whether
     /// the arrangement you are looking at is showing the diff. A changes pane
     /// in a layout two tabs over is not on screen, and offering to close it
-    /// from here would close something the window is not showing.
+    /// from here would close something the window is not showing. Never the
+    /// Orchestrator column's: nothing is split into the orchestrator's
+    /// window (ov-78).
     private func changesPane(in ws: Worktree) -> Terminal? {
-        guard let group = onScreen(in: ws)?.group else { return nil }
+        guard let group = worktreeColumn(of: ws)?.group else { return nil }
         let inGroup = Set(group.panes.map(\.id))
         return ws.terminals.first { inGroup.contains($0.id) && $0.isChangesPane }
     }
 
-    /// Open this worktree's diff beside what is focused, or close the one that
-    /// is already open.
-    ///
-    /// A split of the focused pane, exactly as `⌃B %` and a drop on an edge
-    /// are: the daemon has one verb for "a new pane, here, running this", and a
-    /// changes pane is that verb with a different preset. Nothing new had to be
-    /// taught about layouts to put a diff into one.
+    /// The layout the detail draws for `ws` opened whole: in a workspace's
+    /// third column, or on its own. Nil when it draws none, which is the
+    /// case for a worktree with no terminal.
+    private func worktreeColumn(of ws: Worktree) -> ShownLayout? {
+        shown.first { $0.column == .worktree && $0.host == (ws.host ?? "") && $0.worktree.id == ws.id }
+    }
+
+    /// Open this worktree's diff, or close the one the toolbar says is open.
     private func toggleChangesPane(in ws: Worktree) {
         if let open = changesPane(in: ws) {
             // Killing the pane is the whole of it. The record goes with it, but
@@ -1866,16 +1874,78 @@ struct ContentView: View {
             Task { await act(on: ws) { c in await c.stop(terminal: open.short) } }
             return
         }
-        let shown = onScreen(in: ws)?.group.id
-        Task {
-            let groups = await act(on: ws, default: []) { c in
-                // `beside: nil` means the focused pane of the layout on
-                // screen, which is the daemon's own default and the same
-                // anchor `⌃B %` uses.
-                await c.split(ws, beside: nil, side: .right, preset: "changes", layout: shown)
-            }
-            reveal(groups, in: ws)
+        showChanges(in: ws)
+    }
+
+    /// Show Changes: the toolbar's, a worktree row's menus' and its card's
+    /// (ov-78). Reachable whether or not the worktree has a terminal open.
+    ///
+    /// With the worktree's layout in the third column, a split of its
+    /// focused pane, exactly as `⌃B %` and a drop on an edge are: the daemon
+    /// has one verb for "a new pane, here, running this", and a changes pane
+    /// is that verb with a different preset. With no layout there (no
+    /// terminal, or the main checkout named from the Orchestrator column),
+    /// its changes pane, one it has or a new one in a window of its own,
+    /// opened in the third column. Never a split of the orchestrator's
+    /// window.
+    private func showChanges(in ws: Worktree) {
+        if let open = changesPane(in: ws) {
+            focus(PaneRef(host: ws.host ?? "", worktree: ws.id, terminal: open.id))
+            return
         }
+        if let layout = worktreeColumn(of: ws) {
+            Task {
+                let groups = await act(on: ws, default: []) { c in
+                    // `beside: nil` means the focused pane of the layout
+                    // named, which is the daemon's own default and the same
+                    // anchor `⌃B %` uses.
+                    await c.split(ws, beside: nil, side: .right, preset: "changes", layout: layout.group.id)
+                }
+                reveal(groups, in: ws)
+            }
+            return
+        }
+        // Where it opens: in the workspace on screen when the toolbar named
+        // this worktree, as its row does otherwise.
+        let stays = WorkspaceScreen.changesTarget(
+            selection, in: store.fleet, repositories: repositoryIDs(ws.host ?? ""))?.id == ws.id
+        let listed = worktree(host: ws.host ?? "", id: ws.id) ?? ws
+        Task {
+            let host = listed.host ?? ""
+            let layouts = store.client(for: listed)?.layouts[listed.id]
+            // One it has already, unless it's in an orchestrator's window.
+            let existing = listed.terminals.first {
+                $0.isChangesPane
+                    && WorkspaceScreen.seat(sharedBy: $0.id, in: listed, fleet: store.fleet, layouts: layouts) == nil
+            }
+            var pane = existing
+            if pane == nil {
+                pane = await act(
+                    on: listed, default: nil as Terminal?,
+                    { c in await c.createTerminal(in: listed, preset: "changes", title: "Changes") })
+            }
+            guard let pane else { return }
+            expanded.insert(listed.id)
+            if stays, case .workspace(host, let id, _)? = selection {
+                selection = .workspace(host: host, workspace: id, focus: .worktree(listed.id, terminal: pane.id))
+            } else {
+                selection = Self.opening(listed, terminal: pane.id, in: store.fleet)
+            }
+            keyPane = PaneRef(host: host, worktree: listed.id, terminal: pane.id)
+        }
+    }
+
+    /// Show Changes on `ws`'s row, or nil where it can't be: a runner that
+    /// can't be acted on, or that has said it can't read changes. Hoisted
+    /// for `worktreeRow`'s type checker.
+    private func showChangesAction(for ws: Worktree, usable: Bool) -> (() -> Void)? {
+        guard usable, store.client(for: ws)?.changesSupported != false else { return nil }
+        return { showChanges(in: ws) }
+    }
+
+    /// The repositories `host` lists, by id: what an implicit workspace is.
+    private func repositoryIDs(_ host: String) -> [String] {
+        store.clients[host]?.repositories.map(\.id) ?? []
     }
 
     /// One board store per workspace.
@@ -2405,7 +2475,8 @@ struct ContentView: View {
             onHide: { Task { await act(on: ws) { c in await c.hideWorktree(ws.short) } } },
             onUnhide: { Task { await act(on: ws) { c in await c.unhideWorktree(ws.short) } } },
             onRemove: { removeWorktree = ws },
-            onOpenTerminal: { t in open(ws, terminal: t.id) }
+            onOpenTerminal: { t in open(ws, terminal: t.id) },
+            onShowChanges: showChangesAction(for: ws, usable: store.refusal(for: host) == nil)
         )
     }
 

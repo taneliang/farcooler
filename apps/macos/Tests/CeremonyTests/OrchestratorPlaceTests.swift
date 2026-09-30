@@ -138,6 +138,31 @@ struct OrchestratorPlaceTests {
         #expect(!WorkspaceScreen.joinsOrchestrator("s2", window: ["s1"], in: checkout, fleet: fleet))
     }
 
+    /// Show Changes is reachable with no terminal open (ov-78): the
+    /// toolbar's Changes acts on a worktree opened whole, whatever it holds,
+    /// and beside the Orchestrator column on the main checkout, never the
+    /// orchestrator's window. Not for a task, whose column has its changes.
+    @Test("The toolbar's Changes names a worktree with no terminal, and the checkout beside the orchestrator")
+    func theToolbarsChangesNamesAWorktreeWithNoTerminal() {
+        var fleet = Self.fleet()
+        fleet.worktrees.append(
+            Worktree(
+                id: "lane", short: "ln", task: "lane", branch: "lane", repository: "overnight", host: "",
+                path: "/tmp/ln", state: "active", terminals: [], repositoryID: Self.repo, workspace: Self.main))
+        let lane = ContentView.Selection.workspace(host: "", workspace: Self.main, focus: .worktree("lane", terminal: nil))
+        #expect(WorkspaceScreen.changesTarget(lane, in: fleet)?.id == "lane")
+        #expect(WorkspaceScreen.changesTarget(.looseWorktree(host: "", worktree: "lane", terminal: nil), in: fleet)?.id == "lane")
+        #expect(WorkspaceScreen.changesTarget(Self.workspace, in: fleet)?.id == "checkout")
+        #expect(WorkspaceScreen.changesTarget(.workspace(host: "", workspace: Self.main, focus: .task("t-1")), in: fleet) == nil)
+        #expect(WorkspaceScreen.changesTarget(.needsYou, in: fleet) == nil)
+        var none = fleet
+        none.runnerWorkspaces[""] = [
+            WorkspaceSummary(id: Self.main, name: "Main", taskPrefix: "fc", isMain: true, ordinal: 0, repository: Self.repo)
+        ]
+        none.worktrees[0].terminals[0].state = "exited"
+        #expect(WorkspaceScreen.changesTarget(Self.workspace, in: none) == nil)
+    }
+
     /// The main checkout, opened, knows which orchestrators run in it, so it
     /// can leave them out and say where they are.
     @Test("The main checkout names the orchestrators it hosts")

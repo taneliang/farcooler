@@ -127,6 +127,10 @@ struct WorktreeSection: View {
     /// What each terminal's menu offers about its workspace's orchestrator:
     /// see `OrchestratorAdoption.offer`.
     var roleOffer: (Terminal) -> OrchestratorAdoption.Offer? = { _ in nil }
+    /// Show Changes, on the row's menus: the worktree opened with its
+    /// changes pane, which opens on its own when it has no terminal
+    /// (ov-78). Nil when its runner can't read changes.
+    var onShowChanges: (() -> Void)?
 
     /// Diff status for this worktree, when the fleet inbox has been read.
     ///
@@ -346,6 +350,7 @@ struct WorktreeSection: View {
                             showsSettingsItem: false)
                         Divider()
                         Button("New terminal", action: onNewTerminal)
+                        if let onShowChanges { Button("Show Changes", action: onShowChanges) }
                         Divider()
                         if worktree.isHidden {
                             Button("Unhide", action: onUnhide)
@@ -421,6 +426,7 @@ struct WorktreeSection: View {
         // The drag's menu equivalent (ruling 5): a drag nobody has been
         // told about needs somewhere to be discovered.
         .contextMenu {
+            if let onShowChanges, usable { Button("Show Changes", action: onShowChanges) }
             if !moveTargets.isEmpty, usable {
                 Menu("Move to Workspace") {
                     ForEach(moveTargets) { target in Button(target.name) { onMove(target) } }
@@ -1093,6 +1099,9 @@ struct WorktreeDetail: View {
     let onUnhide: () -> Void
     let onRemove: () -> Void
     let onOpenTerminal: (Terminal) -> Void
+    /// Show Changes, which opens its changes pane on its own when it has no
+    /// terminal (ov-78); nil when its runner can't read changes.
+    var onShowChanges: (() -> Void)?
 
     var body: some View {
         ScrollView {
@@ -1144,6 +1153,12 @@ struct WorktreeDetail: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut("t", modifiers: .command)
+
+                if let onShowChanges {
+                    Button(action: onShowChanges) {
+                        Label("Show Changes", systemImage: "plusminus")
+                    }
+                }
 
                 // No "Tile all" any more. It gathered every terminal into one
                 // arrangement, which was possible only while membership was a list

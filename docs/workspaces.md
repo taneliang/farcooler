@@ -130,10 +130,12 @@ in the header switches between the two.
 A worktree isn't a place of its own anymore; you reach it from what it's for.
 
 - **Under a task**, with **Open Worktree**.
-- **Under a workspace's Worktrees**, a disclosure on its sidebar row. It lists
-  every worktree the workspace owns, each with its task key and its line counts,
-  including ones with no task, such as a shell in a branch of your own.
-  Expanding a worktree lists its terminals.
+- **Under a workspace's sidebar row.** Its chevron lists every worktree the
+  workspace owns, each with its task key and its line counts, including ones
+  with no task, such as a shell in a branch of your own. Clicking the row
+  itself still opens the workspace. Expanding a worktree lists its terminals,
+  one step further in. **New Worktree…** is on the workspace row's shortcut
+  menu.
 
 To move a worktree to another workspace, drag it onto that workspace's row, or
 Control-click it and choose **Move to Workspace**. From a terminal, use
@@ -141,7 +143,10 @@ Control-click it and choose **Move to Workspace**. From a terminal, use
 and hidden ones under Hidden.
 
 Nothing about a worktree itself changed: its terminals, layouts and tmux
-commands work as they always have, in whichever view has focus.
+commands work as they always have, in whichever view has focus. On the Mac,
+**Show Changes** is on a worktree row's shortcut menu and its **…** menu, and
+**Changes** is in the toolbar while a worktree is open, whether or not it has a
+terminal: with none, its changes pane opens on its own.
 
 ## Starting an orchestrator
 
@@ -184,19 +189,21 @@ step the old one down first (**Stop Being Orchestrator**, or `set-role` with
 
 On the Mac, an orchestrator is shown only in its workspace's conversation
 column, not also as a terminal under a worktree. (The phones still list it
-among the worktree's terminals.) If another terminal shares the orchestrator's
-tmux window, the column says so ("`name` shares the orchestrator's window.") and
-offers **Move to Its Own Window**. That click gives the other terminal a window
-of its own, so the orchestrator keeps its window and focus. Nothing rearranges
-your windows unless you click it.
+among the worktree's terminals.) It's one pane: the column draws the
+orchestrator and nothing else. A split there (⌃B %, ⌃B " or ⌃B c) opens a new
+shell in the main checkout instead, beside the column, and **Changes** opens
+the main checkout's changes the same way. Every other terminal in the main
+checkout is listed under it in the sidebar and opens there.
 
-The notice isn't for every terminal in that window. It skips the orchestrator's
-own changes pane (**Show Changes**) and a pane you split into the window on
-purpose, with ⌃B or the app's split, which stays in the orchestrator's column.
-A pane split from the orchestrator after it became the orchestrator counts as
-on purpose. One split beside a terminal before that terminal became the
-orchestrator, such as a shell beside a Claude you later adopted, still gets the
-notice.
+If another terminal already shares the orchestrator's tmux window, such as a
+shell split beside a Claude you later adopted, or a split made in the column
+before this changed, the column draws the window whole, says so ("`name`
+shares the orchestrator's window.") and offers **Move to Its Own Window**. That
+click gives the other terminal a window of its own, so the orchestrator keeps
+its window and focus. Opening that terminal from the main checkout moves it the
+same way, and so does **Use as Orchestrator** for whatever shares the window of
+the terminal it adopts. Nothing rearranges your windows unless you do one of
+those.
 
 ## Splitting off a workspace
 

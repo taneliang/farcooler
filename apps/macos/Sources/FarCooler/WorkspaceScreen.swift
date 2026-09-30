@@ -121,6 +121,27 @@ enum WorkspaceScreen {
         }
     }
 
+    /// The worktree the toolbar's Changes acts on for `selection` (ov-78):
+    /// the worktree opened whole, in the third column or on its own, whether
+    /// or not it has a terminal; with none opened, the main checkout the
+    /// workspace's orchestrator runs in, whose changes open in the third
+    /// column, never in the orchestrator's window. None with a task open,
+    /// whose column shows its changes already (spec R3), or with no
+    /// orchestrator seated.
+    static func changesTarget(
+        _ selection: ContentView.Selection?, in fleet: Fleet, repositories: [String] = []
+    ) -> Worktree? {
+        switch selection {
+        case .looseWorktree(let host, let id, _), .workspace(let host, _, .worktree(let id, _)?):
+            return WorkspaceSelection.worktree(host: host, id: id, in: fleet)
+        case .workspace(let host, let id, nil):
+            guard let workspace = workspace(id, host: host, in: fleet, repositories: repositories) else { return nil }
+            return orchestrator(of: workspace, host: host, in: fleet)?.worktree
+        default:
+            return nil
+        }
+    }
+
     /// Whether `command`, with the keyboard in `key`, would add a pane to the
     /// orchestrator's window: a split or a new layout, with the key pane in
     /// the conversation column. Such a command opens a shell in the main
