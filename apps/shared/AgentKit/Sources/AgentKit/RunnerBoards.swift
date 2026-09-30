@@ -245,21 +245,6 @@ public struct BoardSweep: Equatable, Sendable {
 }
 
 extension TaskBoardModel {
-    /// The sections a phone's board lists, in `order`: every status with a
-    /// task in it, Needs Decision first.
-    ///
-    /// Only the ones with something in them, which is where a list parts
-    /// company with the Mac's columns. Seven fixed columns side by side keep
-    /// their places as cards move, and an empty one says "nothing is in
-    /// review" at a glance; seven headings down a phone, five of them over
-    /// nothing, would put the one card you came for below the fold.
-    @available(*, deprecated, message: "Use `sections`, which keeps the empty statuses (ov-55). Deleted in 4D.")
-    public var listed: [TaskBoardColumn] {
-        columns.filter { !$0.rows.isEmpty }
-    }
-}
-
-extension TaskBoardModel {
     /// The board's sections: every status in `order`, Needs Decision first,
     /// each with its rows and count, the empty ones included (owner decision
     /// 3, spec §5).

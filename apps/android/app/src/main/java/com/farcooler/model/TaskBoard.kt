@@ -228,10 +228,6 @@ data class TaskBoard(
     /** Tasks waiting on the person reading: the Needs Decision count. */
     val waitingOnYou: Int get() = columns.firstOrNull { it.status == TaskStatus.NEEDS_DECISION }?.rows?.size ?: 0
 
-    /** The statuses a phone lists: those with a task in them, in [TaskStatus.ORDER]. */
-    @Deprecated("Use sections, which keeps the empty statuses (ov-55). Deleted in 4D.")
-    val listed: List<TaskBoardColumn> get() = columns.filter { it.rows.isNotEmpty() }
-
     /**
      * Every status in [TaskStatus.ORDER], Needs Decision first, each with its
      * rows and count, the empty ones included (ov-55, owner decision 3). An

@@ -106,16 +106,6 @@ private let panes = [
             == "1 task needs a decision")
 }
 
-/// The phone lists the statuses with tasks in them, Needs Decision first and
-/// the rest in the order work moves. `listed` is deprecated for `sections`
-/// (ov-55) and kept until both phones move off it; this pins it until then.
-@available(*, deprecated)
-@Test func thePhoneListsOnlyTheStatusesWithTasksNeedsDecisionFirst() throws {
-    let listed = try #require(boards["r-busy"]).listed
-    #expect(listed.map(\.status) == [.needsDecision, .inProgress, .done])
-    #expect(board([]).listed.isEmpty)
-}
-
 /// A runner whose new link has not read its build yet keeps the rows the
 /// last build allowed, so nothing under them moves — and says nothing about
 /// agents until the fresh build lands.

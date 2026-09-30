@@ -115,18 +115,11 @@ class TaskBoardTest {
 
     // ---- order and counts ----
 
-    /**
-     * Needs Decision first, then the order work moves, and only statuses with
-     * tasks. `listed` is deprecated for `sections` (ov-55) and kept until both
-     * phones move off it; this pins it until then.
-     */
-    @Suppress("DEPRECATION")
+    /** What waits on the person reading is the Needs Decision count, and an empty board has none. */
     @Test
-    fun theBoardListsStatusesWithTasksNeedsDecisionFirst() {
-        val board = TaskBoard.decode(listJson)
-        assertEquals(listOf(TaskStatus.NEEDS_DECISION, TaskStatus.IN_PROGRESS), board.listed.map { it.status })
-        assertEquals(1, board.waitingOnYou)
-        assertTrue(TaskBoard.EMPTY.listed.isEmpty())
+    fun theTasksWaitingOnYouAreTheNeedsDecisionCount() {
+        assertEquals(1, TaskBoard.decode(listJson).waitingOnYou)
+        assertEquals(0, TaskBoard.EMPTY.waitingOnYou)
     }
 
     /** The whole order, not just its first two: Needs Decision, then the order work moves. */
@@ -507,7 +500,7 @@ class TaskBoardTest {
      * reading "Backlog 0"; a list that dropped it said nothing about what
      * isn't there. AgentKit's `everyStatusIsASectionEmptyOnesIncluded`.
      *
-     * Mutation: `sections` returning `listed`. Red.
+     * Mutation: `sections` dropping the statuses with no rows. Red.
      */
     @Test
     fun `every status is a section empty ones included`() {
