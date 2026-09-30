@@ -430,6 +430,12 @@ struct Terminal: Decodable, Identifiable, Hashable {
     var workspace: String?
     /// `orchestrator`, `agent` or `shell`, or nil when the runner set none.
     var role: String?
+    /// The terminal a split made this one beside: the app's split, ⌃B % or
+    /// ⌃B ", or a new terminal joining the layout. Nil when it isn't known to
+    /// be a split: opened in a window of its own, recorded before a runner
+    /// wrote this down, or from an older runner. What keeps a pane split
+    /// beside the orchestrator on purpose out of `WorkspaceScreen.sharers`.
+    var splitOf: String?
     /// Where this pane sorts among those wanting attention, on its runner's
     /// scale (`Terminal.rank`): a tier, then the oldest first. Read only to
     /// derive an older runner's Needs You items (`NeedsYou.derived`); nil

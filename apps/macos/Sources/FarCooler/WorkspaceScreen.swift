@@ -85,18 +85,25 @@ enum WorkspaceScreen {
         return all.first { $0.terminal.id == chosen } ?? all.first
     }
 
-    /// The terminals sharing `seat`'s tmux window that aren't part of it:
-    /// other records with another role, such as a shell somebody split
-    /// beside the claude they then made the orchestrator. The column draws
-    /// the window whole, these included, and offers each Move to Its Own
-    /// Window. A changes pane (Show Changes) is the orchestrator's own and
-    /// isn't listed. Empty before the layouts are read.
+    /// The terminals sharing `seat`'s tmux window that aren't part of it and
+    /// weren't put there on purpose: other records with another role, such
+    /// as a shell that was in the window before its claude was made the
+    /// orchestrator. The column draws the window whole, these included, and
+    /// offers each Move to Its Own Window. Empty before the layouts are read.
+    ///
+    /// Not listed: a changes pane (Show Changes), which is the
+    /// orchestrator's own, and a pane split from a terminal in this window
+    /// (`splitOf`), which somebody split there with ⌃B or the app's split
+    /// and meant to keep there (ov-73). A pane whose origin isn't known (a
+    /// record from before runners wrote it down, or an older runner) is
+    /// listed, as every sharer was before.
     static func sharers(of seat: BoardPane, layouts: [PaneGroup]?) -> [Terminal] {
         guard let group = layouts?.first(where: { $0.terminals.contains(seat.terminal.id) }) else { return [] }
         return group.terminals.compactMap { id in
             guard id != seat.terminal.id,
                 let terminal = seat.worktree.terminals.first(where: { $0.id == id }),
-                !terminal.isChangesPane, terminal.role != seat.terminal.role
+                !terminal.isChangesPane, terminal.role != seat.terminal.role,
+                !(terminal.splitOf.map(group.terminals.contains) ?? false)
             else { return nil }
             return terminal
         }

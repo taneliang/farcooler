@@ -79,6 +79,37 @@ struct OrchestratorPlaceTests {
         #expect(WorkspaceScreen.shown(sleep, in: fleet, layouts: { _, _ in Self.apart }).last?.group.terminals == ["s1"])
     }
 
+    /// A pane somebody split beside the orchestrator, or beside a pane in
+    /// its window, was put there on purpose, so it isn't offered a move
+    /// (ov-73). One whose origin is unknown (a record from before splits
+    /// were recorded, or an older runner), one opened on its own and joined
+    /// in later, or one split from a pane that's since gone, still is.
+    @Test("Only a pane that wasn't split into the orchestrator's window is offered a move")
+    func onlyAPaneThatWasntSplitIntoTheOrchestratorsWindowIsOfferedAMove() {
+        let three = [
+            PaneGroup(
+                id: "@1", name: "", active: true, columns: 122, rows: 24, layout: "@1",
+                panes: [Self.pane("conductor", left: 0), Self.pane("s1", left: 41), Self.pane("s2", left: 82)])
+        ]
+        func sharers(s1: String?, s2: String? = nil) -> [String] {
+            var fleet = Self.fleet()
+            fleet.worktrees[0].terminals[1].splitOf = s1
+            var second = Terminal(id: "s2", short: "s2", title: "logs", preset: "zsh", state: "running", epoch: 0)
+            second.splitOf = s2
+            fleet.worktrees[0].terminals.append(second)
+            let seat = WorkspaceScreen.pane("conductor", host: "", in: fleet)!
+            return WorkspaceScreen.sharers(of: seat, layouts: three).map(\.id)
+        }
+
+        // Unknown, as every record was before ov-73: today's notice.
+        #expect(sharers(s1: nil) == ["s1", "s2"])
+        // Split from the orchestrator, or from a pane split from it.
+        #expect(sharers(s1: "conductor") == ["s2"])
+        #expect(sharers(s1: "conductor", s2: "s1") == [])
+        // Split from something outside the window, or since removed.
+        #expect(sharers(s1: "elsewhere", s2: "s1") == ["s1"])
+    }
+
     /// The main checkout, opened, knows which orchestrators run in it, so it
     /// can leave them out and say where they are.
     @Test("The main checkout names the orchestrators it hosts")
