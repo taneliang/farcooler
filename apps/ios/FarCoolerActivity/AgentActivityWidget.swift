@@ -146,9 +146,9 @@ struct AgentActivityWidget: Widget {
                                 context.state.label, in: context.state.workspace)
                         )
                         .font(.headline)
-                        // The card ask's caption in place of the question,
-                        // as on the lock screen card.
-                        let body = ask.caption ?? context.state.detail
+                        // Never a blocked leader's question, as on the lock
+                        // screen card. See `CardAskWording.line`.
+                        let body = CardAskWording.line(state: context.state, leader: ask)
                         if !body.isEmpty {
                             Text(body)
                                 .font(.subheadline)
@@ -624,10 +624,11 @@ private struct LeaderRow: View {
                     Text(runnerSuffixed)
                         .font(.headline)
                         .lineLimit(1)
-                    // A card ask draws its tool and workspace in place of the
-                    // question: the locked card never shows the command
-                    // (provisional D3). See `CardLeaderAsk.caption`.
-                    let body = ask.caption ?? state.detail
+                    // A blocked leader draws its ask's tool and workspace, or a
+                    // generic line, and never the question: the locked card
+                    // never shows the command (provisional D3). See
+                    // `CardAskWording.line`.
+                    let body = CardAskWording.line(state: state, leader: ask)
                     if !body.isEmpty {
                         // One line rather than two while there is an answer to
                         // offer. The question stays — answering something you

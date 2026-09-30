@@ -461,6 +461,29 @@ public enum CardAskWording {
     public static let allow = "Allow"
     public static let deny = "Deny"
 
+    /// What a blocked agent's line says when there's no tool or workspace to
+    /// name: never its `detail`, which is the screen's question and for a
+    /// shell ask carries the command ("Run: cargo test?"), on a card that sits
+    /// on a locked screen.
+    public static let generic = "Needs your approval"
+
+    /// The line under the card's leader. A blocked leader gets the ask's
+    /// caption or `generic`, never `detail`, before, during and after the
+    /// hold; any other leader gets `detail`, as it always did.
+    public static func line(state: AgentCardState, leader: CardLeaderAsk) -> String {
+        if let caption = leader.caption { return caption }
+        guard state.status == "blocked" else { return state.detail }
+        if let ask = state.ask, let caption = caption(tool: ask.tool, workspace: state.workspace) {
+            return caption
+        }
+        return generic
+    }
+
+    /// A row's line, on the same rule: a blocked row never draws its question.
+    public static func rowLine(status: String, detail: String) -> String {
+        status == "blocked" ? generic : detail
+    }
+
     /// "Bash · Billing", or whichever of the two there is; nil for neither.
     /// What the ask block draws in place of `detail`.
     public static func caption(tool: String?, workspace: String) -> String? {

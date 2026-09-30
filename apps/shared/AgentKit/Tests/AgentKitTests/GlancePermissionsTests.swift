@@ -624,6 +624,33 @@ struct GlancePermissionsTests {
         #expect(!empty.answersWithoutUnlock(terminal: "t1", request: "perm-7", option: "deny"))
     }
 
+    // MARK: - The locked card never draws the question (ov-57 fix 1, F3)
+
+    /// The line under a blocked leader is the tool and workspace, or a generic
+    /// line, and never `detail`, which for a shell ask carries the command.
+    /// That holds past the hold, with no tool, and with no card ask at all.
+    ///
+    /// Mutation: falling back to `detail` when there is no caption. Red: "Run
+    /// this command?".
+    @Test func theLockedLineIsNeverTheQuestion() {
+        func line(_ state: AgentCardState, store: GlancePermissions = .empty, now: Date) -> String {
+            CardAskWording.line(
+                state: state, leader: CardLeaderAsk.current(store: store, state: state, now: now))
+        }
+        #expect(line(card(), now: before) == "Bash · Billing")
+        // Past the hold the buttons go; the words stay the ask's.
+        #expect(line(card(), now: until.addingTimeInterval(5)) == "Bash · Billing")
+        let bare = card(workspace: "", ask: CardAsk(id: "hook-ask-1", until: until))
+        #expect(line(bare, now: before) == CardAskWording.generic)
+        #expect(line(card(ask: nil), store: storeRecord(), now: before) == CardAskWording.generic)
+        #expect(line(card(ask: nil), now: before) == CardAskWording.generic)
+        for state in [card(), card(ask: nil), bare] {
+            #expect(!line(state, now: before).contains("command"))
+        }
+        // A leader that isn't blocked says what it's doing, as it always did.
+        #expect(line(card(status: "working", ask: nil), now: before) == "Run this command?")
+    }
+
     /// An unreadable file says the same thing as an absent one — nothing is
     /// known — and a card with no buttons is the correct rendering of that.
     @Test func anUnreadableFileReadsAsEmpty() {

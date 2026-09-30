@@ -706,3 +706,20 @@ func aRowNamesItsWorkspace() throws {
         AgentCardLayout.named("claude", in: long)
             == String(repeating: "w", count: 15) + "… · claude")
 }
+
+// MARK: - The locked card never draws a blocked question (ov-57 fix 1, F3)
+
+/// A blocked pane's `detail` is its screen question, and for a shell command
+/// that question carries the command ("Run: cargo test?"). The card is on a
+/// locked screen, so a blocked row draws the generic line instead; every
+/// other row keeps its words.
+///
+/// Mutation: the row's detail drawn as sent. Red: "Force-push to origin/main?".
+@Test func aBlockedRowNeverDrawsItsQuestion() throws {
+    let layout = try #require(AgentCardLayout(state: try decode(fleetPush()), now: cardNow, stale: false))
+    let blocked = try #require(layout.rows.first { $0.row.status == "blocked" })
+    #expect(blocked.detail == CardAskWording.generic)
+    #expect(!blocked.detail.contains("origin"))
+    let working = try #require(layout.rows.first { $0.row.status == "working" })
+    #expect(working.detail == working.row.detail)
+}

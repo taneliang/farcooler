@@ -385,7 +385,9 @@ public struct AgentCardLayout: Sendable, Equatable {
                 mark: GlanceMark(
                     status: row.status, confidence: row.confidence(at: now, answering: !stale)),
                 name: Self.name(of: row),
-                detail: row.detail,
+                // Never a blocked row's question: it can carry the command,
+                // and this card is on a locked screen (ov-57).
+                detail: CardAskWording.rowLine(status: row.status, detail: row.detail),
                 diff: Self.diff(insertions: row.insertions, deletions: row.deletions),
                 footnote: Self.footnote(row, at: now),
                 trace: axis.flatMap { Self.drawn(trace, anchor: anchor, on: $0, newest: newest) })
