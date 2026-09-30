@@ -178,8 +178,7 @@ struct ContentView: View {
         var id: String { name }
     }
     /// Which workspaces are open in the sidebar, their worktrees listed, as
-    /// `SidebarEntry.openKey`s, one a line. Empty by default (spec §9). The
-    /// key it had when each had a Worktrees row, so none reopens differently.
+    /// `SidebarEntry.openKey`s, one a line. Empty by default (spec §9).
     @AppStorage("sidebar.openWorktrees") private var openWorktrees = ""
     /// When each workspace's orchestrator start began, by `host|workspace`:
     /// this app's, or one first seen starting. See `ConversationColumn.slowStart`.
@@ -1215,7 +1214,7 @@ struct ContentView: View {
         // One gutter in per level, and only two levels: see
         // `SidebarEntry.depth`.
         sidebarRowContent(entry)
-            .padding(.leading, CGFloat(entry.depth) * SidebarGrid.gutter)
+            .padding(.leading, SidebarGrid.indent(entry.depth))
     }
 
     @ViewBuilder
@@ -1263,7 +1262,7 @@ struct ContentView: View {
                     }
                 },
                 // One step in from the group's header, as a workspace's
-                // worktrees are from its Worktrees disclosure.
+                // worktrees are from its row.
                 row: { worktree in
                     worktreeRow(worktree, usable: usable).padding(.leading, SidebarGrid.gutter)
                 })
@@ -2451,11 +2450,14 @@ struct ContentView: View {
     /// window, gets a window of its own (`layout break`, tmux's
     /// `break-pane -d`), so the orchestrator keeps its window and focus.
     /// Only on this click: nothing rearranges a runner's windows unasked.
-    private func moveOutOfOrchestratorWindow(_ terminal: Terminal, in worktree: Worktree) async {
-        guard let client = store.client(for: worktree) else { return }
+    @discardableResult
+    private func moveOutOfOrchestratorWindow(_ terminal: Terminal, in worktree: Worktree) async -> Bool {
+        guard let client = store.client(for: worktree) else { return false }
         if !(await client.moveToOwnWindow(terminal, in: worktree)) {
             errorBanner = "Couldn’t move \(terminal.label) to its own window. Check that the runner is reachable, then try again."
+            return false
         }
+        return true
     }
 
     /// A worktree with no layout yet: its card of terminals.
@@ -2481,26 +2483,36 @@ struct ContentView: View {
     }
 
     /// Open `worktree`, or `terminal` in it, as its sidebar row and its card
-    /// do. A terminal sharing a seated orchestrator's window is moved to a
-    /// window of its own first (`moveOutOfOrchestratorWindow`: the sharer,
-    /// never the orchestrator), because the Orchestrator column draws that
-    /// window and the checkout can't draw a pane apart from it (ov-78).
-    /// Opening it is the ask; nothing else moves one.
+    /// do. See `navigate(to:key:)`.
     private func open(_ worktree: Worktree, terminal: String?) {
-        let next = Self.opening(worktree, terminal: terminal, in: store.fleet)
-        // The runner's worktree, not a row's, which has the seats taken out.
-        let listed = self.worktree(host: worktree.host ?? "", id: worktree.id) ?? worktree
-        guard let terminal, let sharer = listed.terminals.first(where: { $0.id == terminal }),
+        navigate(to: Self.opening(worktree, terminal: terminal, in: store.fleet))
+    }
+
+    /// Go to `next`, an explicit open: a sidebar row, a card, Needs You, the
+    /// palette, or a pane gone to from the keyboard. A terminal it names that
+    /// shares a seated orchestrator's window is moved to a window of its own
+    /// first (`moveOutOfOrchestratorWindow`: the sharer, never the
+    /// orchestrator), because the Orchestrator column draws that window and
+    /// the checkout can't draw a pane apart from it (ov-78). Opening it is
+    /// the ask. If the move fails the selection stays where it was, with the
+    /// banner saying why, rather than landing on a pane that isn't there.
+    private func navigate(to next: Selection, key: PaneRef? = nil) {
+        func land() {
+            selection = next
+            if let key { keyPane = key }
+        }
+        guard let named = WorkspaceScreen.namedTerminal(next),
+            let listed = worktree(host: named.host, id: named.worktree),
+            let sharer = listed.terminals.first(where: { $0.id == named.terminal }),
             WorkspaceScreen.seat(
-                sharedBy: terminal, in: listed, fleet: store.fleet,
+                sharedBy: sharer.id, in: listed, fleet: store.fleet,
                 layouts: store.client(for: listed)?.layouts[listed.id]) != nil
         else {
-            selection = next
+            land()
             return
         }
         Task {
-            await moveOutOfOrchestratorWindow(sharer, in: listed)
-            selection = next
+            if await moveOutOfOrchestratorWindow(sharer, in: listed) { land() }
         }
     }
 
@@ -2765,10 +2777,13 @@ struct ContentView: View {
         }
         let (refused, message) = await client.setRole(pane.terminal, to: "orchestrator")
         guard refused else {
-            // Adopted: what shares its window moves out, so the column draws
-            // the orchestrator alone (ov-78). The adopting is the ask.
-            for sharer in WorkspaceScreen.sharers(of: pane, layouts: client.layouts[pane.worktree.id]) {
-                await moveOutOfOrchestratorWindow(sharer, in: pane.worktree)
+            // Adopted: what shares its window moves out, the orchestrator it
+            // replaced included, so the column draws it alone (ov-78). The
+            // adopting is the ask.
+            for other in WorkspaceScreen.movedOnAdopting(
+                pane, replacing: old?.terminal.id, layouts: client.layouts[pane.worktree.id])
+            {
+                await moveOutOfOrchestratorWindow(other, in: pane.worktree)
             }
             return
         }
@@ -3360,7 +3375,7 @@ struct ContentView: View {
             errorBanner = "That’s no longer on its runner."
             return
         }
-        selection = landed
+        navigate(to: landed)
     }
 
     /// Go to `pane` wherever it lives: its workspace, its task, or its
@@ -3368,8 +3383,7 @@ struct ContentView: View {
     private func land(on pane: PaneRef) {
         expanded.insert(pane.worktree)
         guard let landed = WorkspaceSelection.landing(on: pane, in: store.fleet) else { return }
-        selection = landed
-        keyPane = pane
+        navigate(to: landed, key: pane)
     }
 
     /// Follow the layout's focus when something else moved it.

@@ -132,7 +132,7 @@ struct Worktree: Decodable, Identifiable, Hashable {
     /// The workspace that owns this worktree, or nil for an unclaimed one.
     var workspace: String?
     /// The tasks working in this worktree that aren't Done or Cancelled, as
-    /// the runner fills `Worktree.open_tasks`: what a Worktrees row names
+    /// the runner fills `Worktree.open_tasks`: what a worktree row names
     /// ("fc-3-webhooks · bil-9") and what `TaskLink` reads for a pane with no
     /// task of its own. Nil from a CLI older than the key; `[]` from a runner
     /// too old to fill it.

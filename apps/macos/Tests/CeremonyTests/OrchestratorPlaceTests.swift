@@ -110,6 +110,39 @@ struct OrchestratorPlaceTests {
         #expect(WorkspaceScreen.sharers(of: WorkspaceScreen.pane("conductor", host: "", in: fleet)!, layouts: three).map(\.id) == ["s1"])
     }
 
+    /// Use as Orchestrator moves everything else out of the adopted pane's
+    /// window, the orchestrator it replaced included (stepped down by then,
+    /// though the fleet read before still calls it one), and never another
+    /// workspace's orchestrator.
+    @Test("Adopting moves the replaced orchestrator out of the new one's window too")
+    func adoptingMovesTheReplacedOrchestratorOut() {
+        let three = [
+            PaneGroup(
+                id: "@1", name: "", active: true, columns: 122, rows: 24, layout: "@1",
+                panes: [Self.pane("conductor", left: 0), Self.pane("s1", left: 41), Self.pane("billing", left: 82)])
+        ]
+        var fleet = Self.fleet()
+        var billing = Terminal(id: "billing", short: "bl", title: "claude", preset: "claude", state: "running", epoch: 0)
+        billing.role = "orchestrator"
+        fleet.worktrees[0].terminals.append(billing)
+        // s1, a claude, adopted in place of conductor.
+        let adopted = WorkspaceScreen.pane("s1", host: "", in: fleet)!
+        #expect(WorkspaceScreen.movedOnAdopting(adopted, replacing: "conductor", layouts: three).map(\.id) == ["conductor"])
+        #expect(WorkspaceScreen.movedOnAdopting(adopted, replacing: nil, layouts: three).isEmpty)
+        #expect(WorkspaceScreen.windowmates(of: adopted, layouts: three).map(\.id) == ["conductor", "billing"])
+    }
+
+    /// Every explicit open goes through one path, which reads the terminal
+    /// a selection names, to move it out of an orchestrator's window first.
+    @Test("An open names its terminal, wherever it came from")
+    func anOpenNamesItsTerminal() {
+        #expect(WorkspaceScreen.namedTerminal(.workspace(host: "h", workspace: Self.main, focus: .worktree("checkout", terminal: "s1"))).map { [$0.host, $0.worktree, $0.terminal] } == ["h", "checkout", "s1"])
+        #expect(WorkspaceScreen.namedTerminal(.looseWorktree(host: "", worktree: "w", terminal: "t")).map { [$0.host, $0.worktree, $0.terminal] } == ["", "w", "t"])
+        #expect(WorkspaceScreen.namedTerminal(.looseWorktree(host: "", worktree: "w", terminal: nil)) == nil)
+        #expect(WorkspaceScreen.namedTerminal(.workspace(host: "", workspace: Self.main, focus: .task("t"))) == nil)
+        #expect(WorkspaceScreen.namedTerminal(Self.workspace) == nil)
+    }
+
     /// The orchestrator is one pane (ov-78). ⌃B %, ⌃B " and ⌃B c with the
     /// keyboard in its column open a shell in the main checkout instead;
     /// with the keyboard anywhere else they split as before. And a drop

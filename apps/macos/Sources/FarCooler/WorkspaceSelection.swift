@@ -66,8 +66,8 @@ extension ContentView {
     enum Focus: Hashable {
         /// A task, by its id: its card, its agent and its changes (spec §4.4).
         case task(String)
-        /// A worktree opened whole, from a task's Open Worktree or the
-        /// Worktrees disclosure, with the pane selected in it.
+        /// A worktree opened whole, from a task's Open Worktree or its row
+        /// under the workspace, with the pane selected in it.
         case worktree(String, terminal: String?)
     }
 }

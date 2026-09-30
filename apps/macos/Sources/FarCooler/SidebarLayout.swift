@@ -24,6 +24,26 @@ enum SidebarGrid {
     /// The disclosure chevron's column, and therefore one indent level.
     static let gutter: CGFloat = 18
 
+    /// How far `ContentView.sidebarRow` indents a row drawn at `depth`.
+    static func indent(_ depth: Int) -> CGFloat { CGFloat(depth) * gutter }
+
+    /// A workspace, worktree or terminal row's content inset inside its
+    /// highlight, so its first column lands on `edge` at depth 0.
+    static let rowInset: CGFloat = edge - highlightInset
+
+    /// Where a workspace or worktree row drawn at `depth` puts its chevron,
+    /// from the sidebar's edge; its text starts one `gutter` (the chevron's
+    /// column) further in. What the rows lay out from, and what
+    /// `SidebarColumnTests` reads.
+    static func chevron(depth: Int) -> CGFloat { indent(depth) + highlightInset + rowInset }
+
+    /// The width of a workspace or worktree row's chevron column, the
+    /// frame its chevron is drawn in.
+    static let chevronColumn: CGFloat = gutter
+
+    /// Where a workspace or worktree row drawn at `depth` starts its text.
+    static func text(depth: Int) -> CGFloat { chevron(depth: depth) + chevronColumn }
+
     /// Space between a marker and the text it belongs to.
     static let gap: CGFloat = 8
 

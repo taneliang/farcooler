@@ -794,7 +794,7 @@ struct BoardSidebarTests {
         #expect(rows.first { $0.kind == .workspace("Main") }?.worktrees.map(\.id) == ["lane"])
 
         // Billing opened: its worktree, directly under it, one step in
-        // (ov-78: no Worktrees row between them).
+        // (ov-78).
         let open = ContentView.sidebarRows(
             fleet: fleet, open: { $0 == SidebarEntry.openKey(host: "", workspace: Self.billing) })
         #expect(open.map(\.kind).prefix(5) == [

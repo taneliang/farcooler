@@ -17,8 +17,8 @@ struct ShownLayout: Equatable {
         case conversation
         /// A task's agent (spec §4.4).
         case task
-        /// A worktree opened whole: from the Worktrees disclosure, a task's
-        /// Open Worktree, or a loose worktree.
+        /// A worktree opened whole: from its row under a workspace, a
+        /// task's Open Worktree, or a loose worktree.
         case worktree
     }
 
@@ -101,13 +101,35 @@ enum WorkspaceScreen {
     /// `split_of` and `split_of_orchestrator`; with nothing split there on
     /// purpose any more, every sharer is listed, and this app reads neither.
     static func sharers(of seat: BoardPane, layouts: [PaneGroup]?) -> [Terminal] {
-        guard let group = layouts?.first(where: { $0.terminals.contains(seat.terminal.id) }) else { return [] }
+        windowmates(of: seat, layouts: layouts).filter { !$0.isOrchestrator }
+    }
+
+    /// Every other terminal in the tmux window holding `pane`.
+    static func windowmates(of pane: BoardPane, layouts: [PaneGroup]?) -> [Terminal] {
+        guard let group = layouts?.first(where: { $0.terminals.contains(pane.terminal.id) }) else { return [] }
         return group.terminals.compactMap { id in
-            guard id != seat.terminal.id,
-                let terminal = seat.worktree.terminals.first(where: { $0.id == id }),
-                !terminal.isOrchestrator
-            else { return nil }
-            return terminal
+            id == pane.terminal.id ? nil : pane.worktree.terminals.first { $0.id == id }
+        }
+    }
+
+    /// What Use as Orchestrator moves out of `pane`'s window once `pane` has
+    /// the seat: its sharers, and the orchestrator it replaced if that one
+    /// was in the window too, which is stepped down by then though `pane`'s
+    /// worktree, read before, still calls it one. Never another workspace's
+    /// orchestrator.
+    static func movedOnAdopting(_ pane: BoardPane, replacing old: String?, layouts: [PaneGroup]?) -> [Terminal] {
+        windowmates(of: pane, layouts: layouts).filter { !$0.isOrchestrator || $0.id == old }
+    }
+
+    /// The terminal `selection` names in a worktree opened whole, with where.
+    static func namedTerminal(
+        _ selection: ContentView.Selection?
+    ) -> (host: String, worktree: String, terminal: String)? {
+        switch selection {
+        case .looseWorktree(let host, let id, let terminal?), .workspace(let host, _, .worktree(let id, let terminal?)?):
+            return (host, id, terminal)
+        default:
+            return nil
         }
     }
 

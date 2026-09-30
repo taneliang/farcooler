@@ -91,7 +91,7 @@ struct TaskColumnTests {
 
     /// Open Worktree puts the worktree whole in the third column, its own
     /// layouts in the bar, and Back returns to the task it came from. From
-    /// the Worktrees disclosure, with no task behind it, Back closes the
+    /// its row under the workspace, with no task behind it, Back closes the
     /// column.
     @Test("Open Worktree shows the worktree's own layouts, and Back returns to the task")
     func openWorktreeShowsTheWorktreesOwnLayoutsAndBackReturnsToTheTask() {

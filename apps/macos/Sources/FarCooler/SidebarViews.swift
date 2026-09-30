@@ -211,7 +211,7 @@ struct WorktreeSection: View {
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.tertiary)
                     .rotationEffect(.degrees(showsTerminals ? 90 : 0))
-                    .frame(width: SidebarGrid.gutter, height: 16, alignment: .leading)
+                    .frame(width: SidebarGrid.chevronColumn, height: 16, alignment: .leading)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -386,7 +386,7 @@ struct WorktreeSection: View {
             .padding(.leading, SidebarGrid.cellGap)
         }
         .padding(.vertical, SidebarGrid.rowVerticalPadding)
-        .padding(.horizontal, SidebarGrid.edge - SidebarGrid.highlightInset)
+        .padding(.horizontal, SidebarGrid.rowInset)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(
@@ -797,12 +797,12 @@ struct TerminalRow: View {
     /// status glyph starts where the worktree's title does, one chevron's
     /// width in, and never under the chevrons. ov-63 had it take no step,
     /// which put a column of dots under a column of collapsed arrows.
-    static let leading: CGFloat = SidebarGrid.edge - SidebarGrid.highlightInset + SidebarGrid.gutter
+    static let leading: CGFloat = SidebarGrid.rowInset + SidebarGrid.gutter
 
     /// Where a terminal's glyph and name start, from the sidebar's edge,
     /// under a worktree drawn at `depth`.
     static func columns(depth: Int) -> (glyph: CGFloat, text: CGFloat) {
-        let glyph = CGFloat(depth) * SidebarGrid.gutter + SidebarGrid.highlightInset + leading
+        let glyph = SidebarGrid.indent(depth) + SidebarGrid.highlightInset + leading
         return (glyph, glyph + StatusGlyph.inline + markerGap)
     }
 
@@ -956,7 +956,7 @@ struct TerminalRow: View {
         // The highlight sits inside the band exactly as the worktree row's
         // does; the content one step in from it: see `leading`.
         .padding(.leading, Self.leading)
-        .padding(.trailing, SidebarGrid.edge - SidebarGrid.highlightInset)
+        .padding(.trailing, SidebarGrid.rowInset)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(
@@ -1370,9 +1370,10 @@ struct HiddenWorktrees: View {
 /// A workspace in the sidebar: a place you select, which shows its
 /// orchestrator's conversation beside its board (spec §4.5).
 ///
-/// The orchestrator's status glyph, or a dashed circle with none; an unread
-/// dot for a finished turn nobody has seen (ruling 10); and the workspace's
-/// needs-you count in amber. The task prefix is in the tooltip. It keeps
+/// Its chevron, in the leading column (its worktrees' disclosure, ov-78);
+/// an unread dot for a finished turn nobody has seen (ruling 10); and at the
+/// trailing edge the orchestrator's status glyph, or a dashed circle with
+/// none, and the workspace's needs-you count in amber. The task prefix is in the tooltip. It keeps
 /// ov-60's menu and is still where a dragged worktree is dropped to move it.
 struct WorkspaceRow: View {
     let name: String
@@ -1406,20 +1407,35 @@ struct WorkspaceRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 0) {
-            // In the chevron column a repository's Unclaimed and Hidden use,
-            // so a workspace's worktrees, one step in, put their own
-            // chevrons under its status glyph.
+            // The chevron takes the leading column, where the status glyph
+            // was, so the name stays at 32 and each level's text is one
+            // step in from its parent's (ov-78): a worktree's chevron sits
+            // under this name, its title a step further in.
             Button(action: onToggle) {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.tertiary)
                     .rotationEffect(.degrees(isOpen ? 90 : 0))
-                    .frame(width: SidebarGrid.gutter, height: 16, alignment: .leading)
+                    .frame(width: SidebarGrid.chevronColumn, height: 16, alignment: .leading)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(isOpen ? "Hide Worktrees" : "Show Worktrees")
 
+            Text(name)
+                .font(WorkspaceStyle.sidebarPrimary)
+                .lineLimit(1)
+            if unread {
+                Circle()
+                    .fill(GlancePalette.amber(scheme))
+                    .frame(width: 5, height: 5)
+                    .padding(.leading, 5)
+                    .help("The orchestrator finished a turn you haven’t seen")
+                    .accessibilityLabel("Unread")
+            }
+            Spacer(minLength: 6)
+            // The orchestrator's status, at the trailing edge beside the
+            // count, now the chevron has the leading column.
             Group {
                 if implicit {
                     Image(systemName: "square.stack.3d.up")
@@ -1434,20 +1450,7 @@ struct WorkspaceRow: View {
                         .help("No orchestrator")
                 }
             }
-            .frame(width: SidebarGrid.gutter, height: 16, alignment: .leading)
-
-            Text(name)
-                .font(WorkspaceStyle.sidebarPrimary)
-                .lineLimit(1)
-            if unread {
-                Circle()
-                    .fill(GlancePalette.amber(scheme))
-                    .frame(width: 5, height: 5)
-                    .padding(.leading, 5)
-                    .help("The orchestrator finished a turn you haven’t seen")
-                    .accessibilityLabel("Unread")
-            }
-            Spacer(minLength: 6)
+            .padding(.leading, 6)
             if count > 0 {
                 Text("\(count)")
                     .font(.system(size: 11, weight: .semibold))
@@ -1458,7 +1461,7 @@ struct WorkspaceRow: View {
             }
         }
         .padding(.vertical, SidebarGrid.rowVerticalPadding)
-        .padding(.horizontal, SidebarGrid.edge - SidebarGrid.highlightInset)
+        .padding(.horizontal, SidebarGrid.rowInset)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(

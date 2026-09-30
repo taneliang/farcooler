@@ -271,7 +271,7 @@ enum WorkspaceNavigation {
     /// Whether a breadcrumb back to `trail` still holds on `now`: while the
     /// window is in the worktree Open Worktree opened from it (`opened`),
     /// with any pane of it selected. Choosing anything else, another
-    /// worktree from the Worktrees disclosure included, drops it.
+    /// worktree from its row under the workspace included, drops it.
     static func keeps(trail: Selection?, opened: String?, now: Selection?) -> Bool {
         guard case .workspace(let host, let id, .task?)? = trail, let opened else { return false }
         if case .workspace(host, id, .worktree(opened, _)?)? = now { return true }

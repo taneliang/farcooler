@@ -75,8 +75,7 @@ struct SidebarEntry: Identifiable {
     var collapseKey: String { "\(host)\u{1}\(project)" }
 
     /// What a workspace row is remembered open by, in
-    /// `sidebar.openWorktrees`: the key its Worktrees row was remembered by
-    /// before ov-78, so a workspace left open stays open.
+    /// `sidebar.openWorktrees`.
     static func openKey(host: String, workspace: String) -> String { "\(host)\u{1}\(workspace)" }
 
     /// A workspace row's menu, from ov-60's: Show Board, Start or Replace
