@@ -232,6 +232,13 @@ struct Notification<'a> {
     /// the field ignores it.
     #[serde(skip_serializing_if = "Option::is_none")]
     install: Option<&'a str>,
+    /// This runner's id as a phone knows it, `Host.runner_id`, derived from
+    /// the install id as the daemon derives it for every client. On a
+    /// decision alone: a task key is only unique on its own runner, and this
+    /// is what lets a phone with two runners open the right one (ov-72). The
+    /// beat's `runner` is the same value. Absent with no install id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runner: Option<String>,
     /// The claude permission ask held open on this pane, so the lock screen's
     /// card can answer it with the app suspended (ov-57 T0 C1, C2).
     ///
@@ -501,6 +508,7 @@ fn wire_body<'a>(o: &Outgoing<'a>) -> Option<Notification<'a>> {
             subtitle: Some(o.subtitle),
             task: o.task,
             workspace: o.workspace,
+            runner: o.install.map(|id| crate::service::stable_host_id(id).to_string()),
             ..shared
         },
         Some(_) => shared,
@@ -1048,6 +1056,35 @@ mod tests {
         assert_eq!(decision["task"], "bil-7");
         assert_eq!(decision["kind"], "decision");
         assert_eq!(decision["title"], "Billing · bil-7 needs a decision");
+    }
+
+    /// A decision names the runner it is on as a phone knows it
+    /// (`Host.runner_id`), the beat's own spelling, so a task key on two
+    /// runners can be routed (ov-72). No other kind does, and none with no
+    /// install id.
+    #[test]
+    fn a_decision_names_its_runner_as_the_phone_knows_it() {
+        let sent = |kind: Option<&'static str>, install| {
+            serde_json::to_value(
+                wire_body(&Outgoing {
+                    kind,
+                    terminal: Some("term-1"),
+                    task: Some("bil-7"),
+                    install,
+                    ..Outgoing::default()
+                })
+                .unwrap(),
+            )
+            .unwrap()
+        };
+        let install = "install-with-more-than-sixteen-bytes";
+        assert_eq!(
+            sent(Some("decision"), Some(install))["runner"],
+            "7537626f-0002-415e-1e11-000d48034210"
+        );
+        assert!(sent(Some("decision"), None).get("runner").is_none());
+        assert!(sent(None, Some(install)).get("runner").is_none());
+        assert!(sent(Some("count"), Some(install)).get("runner").is_none());
     }
 
     /// Every kind names the runner by its install id, so the relay can tell
