@@ -7,6 +7,10 @@ import Testing
 ///
 /// The relay reports how long ago each beating runner was heard; these are
 /// the phone's half: when that's quiet, and what the widget says about it.
+///
+/// Serialized because two tests answer through `StubbedRelay.answer`, one
+/// static, and two at once would each read the other's answer.
+@Suite(.serialized)
 struct RunnerPulseTests {
     /// Two missed beats and five minutes' slack: fifteen minutes at the
     /// shipped five-minute beat. Just inside is live; just past is quiet.
@@ -169,6 +173,88 @@ struct RunnerPulseTests {
         #expect(mine != theirs)
         vault.delete()
         #expect(PulseStore.read(from: vault) == nil)
+    }
+
+    // MARK: - The watch (ov-71)
+
+    /// The phone files its credential in the watch's application context
+    /// under one key, and the watch reads it back; a context with none, or
+    /// one it can't read, carries none.
+    ///
+    /// Mutation: `carried(in:)` reading another key. Red.
+    @Test func aWatchContextCarriesTheCredentialOrNothing() throws {
+        let credential = PulseCredential(relay: "https://pulse.test", token: "t", account: "u")
+        let context: [String: Any] = [
+            "snapshot": Data(), PulseCredential.watchContextKey: try #require(credential.contextValue),
+        ]
+        #expect(PulseCredential.carried(in: context) == credential)
+        #expect(PulseCredential.carried(in: ["snapshot": Data()]) == nil)
+        #expect(PulseCredential.carried(in: [PulseCredential.watchContextKey: Data("x".utf8)]) == nil)
+    }
+
+    /// The watch keeps what the phone last sent: a new credential is filed, the
+    /// same one again is no change, and a context without one (the phone
+    /// signed out) forgets it. The answer is whether anything changed, which
+    /// is when the complication is worth reloading.
+    ///
+    /// Mutations: `adopt` never deleting; `adopt` reporting a change for the
+    /// same credential. Red.
+    @Test func theWatchKeepsWhatThePhoneLastSent() {
+        let vault = MemoryVault()
+        let credential = PulseCredential(relay: "https://pulse.test", token: "t", account: "u")
+        #expect(PulseStore.adopt(credential, in: vault))
+        #expect(PulseStore.read(from: vault) == credential)
+        #expect(!PulseStore.adopt(credential, in: vault))
+        #expect(PulseStore.adopt(nil, in: vault))
+        #expect(PulseStore.read(from: vault) == nil)
+        #expect(!PulseStore.adopt(nil, in: vault))
+    }
+
+    /// The watch's vault is a file in its own App Group container, which the
+    /// watch app writes and the complication reads.
+    ///
+    /// Mutation: `delete` leaving the file. Red.
+    @Test func aContainerVaultKeepsAndForgets() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pulse-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let vault = ContainerPulseVault(container: directory)
+        #expect(vault.read() == nil)
+        #expect(vault.write(Data("one".utf8)))
+        #expect(vault.write(Data("two".utf8)))
+        #expect(vault.read() == Data("two".utf8))
+        vault.delete()
+        #expect(vault.read() == nil)
+    }
+
+    /// A surface may look at its own pace: the watch's complication spends a
+    /// tighter budget than the phone's widget.
+    ///
+    /// Mutation: `plan` ignoring `every`. Red.
+    @Test func aSurfaceLooksAgainAtItsOwnPace() {
+        let old = snapshot(complete: false, age: 7200)
+        let hour = now.addingTimeInterval(60 * 60)
+        #expect(
+            RunnerPulse.plan(snapshot: old, reading: .answered([lost]), at: now, every: 3600).nextLook
+                == hour)
+        #expect(RunnerPulse.plan(snapshot: old, reading: .failed, at: now, every: 3600).nextLook == hour)
+    }
+
+    /// `look` is the whole of what a surface does: no credential is no
+    /// fetch and today's hedge; a credential asks the relay and plans.
+    ///
+    /// Mutation: `look` planning `.failed` without a credential. Red.
+    @Test func aLookWithNoCredentialAsksNothing() async {
+        let old = snapshot(complete: false, age: 7200)
+        let none = await RunnerPulse.look(snapshot: old, credential: nil, at: now)
+        #expect(none == RunnerPulse.Plan(quiet: [], nextLook: nil))
+
+        let credential = PulseCredential(relay: "https://pulse.test", token: "t", account: "u")
+        StubbedRelay.answer = (200, #"{"runners":[{"label":"Studio","heardAgo":3600000,"beatEvery":300}]}"#)
+        let asked = await RunnerPulse.look(
+            snapshot: old, credential: credential, at: now, session: StubbedRelay.session())
+        #expect(asked.quiet == ["Studio"])
     }
 }
 

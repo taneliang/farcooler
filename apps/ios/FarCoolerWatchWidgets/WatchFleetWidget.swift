@@ -62,6 +62,9 @@ struct WatchFleetWidget: Widget {
 struct WatchFleetEntry: TimelineEntry {
     let date: Date
     let snapshot: FleetSnapshot
+    /// The runners the relay says stopped beating (ov-71), for the one family
+    /// with room to say so. Empty is the complication as it was.
+    var quiet: [String] = []
 
     /// Whether a snapshot has ever been written on THIS watch.
     ///
@@ -117,13 +120,45 @@ struct WatchFleetProvider: TimelineProvider {
         // moment every render says the same thing, and asking watchOS for
         // wake-ups that change nothing spends a budget that is tighter on this
         // hardware than on a phone and that the reloads from the app need.
-        let entries =
-            [WatchFleetEntry(date: now, snapshot: snapshot)]
-            + Self.wakes(for: snapshot, after: now).map {
-                WatchFleetEntry(date: $0, snapshot: snapshot)
-            }
+        //
+        // **Except the relay's word on which runners stopped beating** (ov-71),
+        // in the one family with a line to spare for it. The phone sends this
+        // fleet only while its app runs, so a runner that stops while the
+        // phone sleeps would otherwise read like a live one here for an hour.
+        // This asks the relay with the credential the watch app filed from the
+        // phone's context, through the plan the phone's widget uses
+        // (`RunnerPulse.look`), and looks again hourly while any runner beats:
+        // 24 a day, half the phone widget's pace, because this budget is
+        // tighter and the watch app's reloads spend it too. No credential,
+        // nothing beating, or a refused token: `.never`, as before. The
+        // circular and inline families have nowhere to say it, so they don't
+        // ask.
+        guard context.family == .accessoryRectangular else {
+            completion(Timeline(entries: Self.entries(snapshot, quiet: [], at: now), policy: .never))
+            return
+        }
+        Task {
+            let plan = await RunnerPulse.look(
+                snapshot: snapshot, credential: PulseStore.read(), at: now,
+                every: Self.lookEvery)
+            let policy: TimelineReloadPolicy = plan.nextLook.map { .after($0) } ?? .never
+            completion(
+                Timeline(entries: Self.entries(snapshot, quiet: plan.quiet, at: now), policy: policy))
+        }
+    }
 
-        completion(Timeline(entries: entries, policy: .never))
+    /// How long the complication waits between asks while a runner beats: an
+    /// hour. See `getTimeline`.
+    private static let lookEvery: TimeInterval = 60 * 60
+
+    /// One entry for now and one per staleness moment, each saying `quiet`.
+    private static func entries(
+        _ snapshot: FleetSnapshot, quiet: [String], at now: Date
+    ) -> [WatchFleetEntry] {
+        [WatchFleetEntry(date: now, snapshot: snapshot, quiet: quiet)]
+            + wakes(for: snapshot, after: now).map {
+                WatchFleetEntry(date: $0, snapshot: snapshot, quiet: quiet)
+            }
     }
 
     /// How many staleness entries one timeline may carry.
@@ -488,7 +523,18 @@ private struct Rectangular: View {
             // send somebody to the wrong screen.
             if blocked > 0 { GlanceLabel(glance: .blocked(blocked)) }
             if reviews > 0 { GlanceLabel(glance: .review(reviews)) }
-            if blocked == 0, reviews == 0, let top, !top.line.isEmpty,
+            if blocked == 0, reviews == 0, !entry.quiet.isEmpty,
+                let hedge = entry.snapshot.hedge(quiet: entry.quiet)
+            {
+                // A runner the relay says stopped beating (ov-71), in ov-50's
+                // words, in place of the agent's own line: that line may be
+                // the quiet runner's, and saying what it was doing is the
+                // claim this is here to stop. Counts outrank it, as they
+                // outrank the line: they're latched, and what to act on.
+                Text(hedge.standalone)
+                    .font(.caption)
+                    .lineLimit(1)
+            } else if blocked == 0, reviews == 0, let top, !top.line.isEmpty,
                 top.line != agentTitle(top)
             {
                 // The host's signal line — "3/7 · Designing test matrix · 2

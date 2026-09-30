@@ -486,6 +486,13 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
             }
         }
 
+        /// The footer on a line of its own: capitalized, since it starts one.
+        /// "Lost touch with Studio" on a card or a complication with nothing
+        /// before it to continue.
+        public var standalone: String {
+            footer.prefix(1).uppercased() + footer.dropFirst()
+        }
+
         /// The watch's footer: the same fact, and what it means for the list.
         public var sentence: String {
             switch self {

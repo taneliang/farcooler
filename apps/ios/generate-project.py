@@ -541,6 +541,10 @@ WATCH_AGENTKIT_SOURCES = [
     # The items `FleetSnapshot.needsYou` holds, which the watch lists first.
     "NeedsYou.swift",
     "SnapshotStore.swift",
+    # The runner heartbeat (ov-71): the watch app keeps the pulse credential
+    # the phone sends in its context, and asks the relay which runners went
+    # quiet for the list's footer. Foundation and Security, both on watchOS.
+    "RunnerPulse.swift",
     # The color, the mark and the type scale, which the watch app's own detail
     # header draws at
     # the 22pt lone-indicator size. Measured to typecheck for
@@ -587,10 +591,11 @@ WATCH_WIDGET_SOURCES = ["WatchFleetWidget.swift"]
 
 # AgentKit files the complication compiles.
 #
-# Five, and no more: the extension has no connection, no `WatchLinkClient` and
-# no screens. Its only window onto the fleet is the file the watch app writes
+# Few, and named: the extension has no link to the phone, no `WatchLinkClient`
+# and no screens. Its window onto the fleet is the file the watch app writes
 # into the shared container, so `FleetSnapshot` is the model it renders and
-# `SnapshotStore` is how it opens the file. `WatchLink.swift` is deliberately
+# `SnapshotStore` is how it opens the file; since ov-71 it also asks the relay
+# which runners went quiet, over HTTPS, with `RunnerPulse`. `WatchLink.swift` is deliberately
 # absent — this target never speaks to the phone, and listing the vocabulary for
 # symmetry would claim a capability it does not have.
 #
@@ -604,6 +609,9 @@ WATCH_WIDGET_AGENTKIT_SOURCES = [
     # The items `FleetSnapshot.needsYou` holds, which the complication counts.
     "NeedsYou.swift",
     "SnapshotStore.swift",
+    # The complication asks the relay itself, as the phone's widget does
+    # (ov-71), with the credential the watch app filed in this container.
+    "RunnerPulse.swift",
     "GlancePalette.swift",
     "GlanceMark.swift",
     "GlanceType.swift",

@@ -536,6 +536,7 @@ extension WatchLinkClient: WCSessionDelegate {
         // the difference between a watch that shows the fleet the moment it
         // opens and one that shows yesterday's until the phone next polls.
         let held = Self.decode(session.receivedApplicationContext)
+        Self.file(session.receivedApplicationContext)
         Task { @MainActor in
             if let held { self.receive(held) }
             self.recompute()
@@ -545,8 +546,22 @@ extension WatchLinkClient: WCSessionDelegate {
     nonisolated func session(
         _ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]
     ) {
+        Self.file(applicationContext)
         guard let snapshot = Self.decode(applicationContext) else { return }
         Task { @MainActor in self.receive(snapshot) }
+    }
+
+    /// Keep the pulse credential the phone sent with this context, or forget
+    /// it when the phone sent none (ov-71). See `PulseCredential.watchContextKey`
+    /// for why the watch borrows the phone's. On the delegate's queue, since
+    /// it's a small file write the screen doesn't wait on; the complication is
+    /// reloaded only when the credential changed, which is rare, so its first
+    /// look after pairing or sign-in doesn't wait for the fleet to move.
+    private nonisolated static func file(_ context: [String: Any]) {
+        guard let vault = PulseStore.vault else { return }
+        if PulseStore.adopt(PulseCredential.carried(in: context), in: vault) {
+            WidgetCenter.shared.reloadAllTimelines()
+        }
     }
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {

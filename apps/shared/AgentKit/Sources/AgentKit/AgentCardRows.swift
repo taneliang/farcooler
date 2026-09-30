@@ -438,9 +438,9 @@ public struct AgentCardLayout: Sendable, Equatable {
     /// "Lost touch with Studio". The line unchanged when nobody is quiet.
     static func saying(quiet: [String], after line: String?) -> String? {
         guard !quiet.isEmpty else { return line }
-        let footer = FleetSnapshot.Hedge.lostTouch(quiet).footer
-        guard let line else { return footer.prefix(1).uppercased() + footer.dropFirst() }
-        return "\(line) · \(footer)"
+        let hedge = FleetSnapshot.Hedge.lostTouch(quiet)
+        guard let line else { return hedge.standalone }
+        return "\(line) · \(hedge.footer)"
     }
 
     /// The one window the card draws every row on: the COARSEST any drawn row

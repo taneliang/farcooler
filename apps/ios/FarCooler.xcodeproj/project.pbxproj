@@ -164,6 +164,7 @@
 		84C4CDF23A975280B93535E4 /* FleetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C4E587A86625F06BA97600A; };
 		C2B28F800ED5547DAD2BE68E /* NeedsYou.swift in Sources */ = {isa = PBXBuildFile; fileRef = B85E58C2F8205636AE768473; };
 		0D2B1F974A4250E999F6F707 /* SnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57DDC26E14F651988BDDC06B; };
+		A28EAC79C39A5E8896A52F41 /* RunnerPulse.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA22CE0034F95DD6A5972F53; };
 		DB6BF827A8BF54BEA2D7EF02 /* GlancePalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = C121AB74CCAD5312B2AEAD9A; };
 		D80DD4E44E7C545899B69B9E /* GlanceMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 446113E07EEE5744810DE44C; };
 		AB7045FA90AE5235A0BA6167 /* GlanceType.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEB390C8D61D59D88274911A; };
@@ -171,6 +172,7 @@
 		C8BB9E84C655538E85154C45 /* FleetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C4E587A86625F06BA97600A; };
 		38C57DFD2B9D54DBB774A396 /* NeedsYou.swift in Sources */ = {isa = PBXBuildFile; fileRef = B85E58C2F8205636AE768473; };
 		59D256C95C545020AA02BE79 /* SnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57DDC26E14F651988BDDC06B; };
+		01999A00AE7B5D2297B69681 /* RunnerPulse.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA22CE0034F95DD6A5972F53; };
 		C26A6392BC0854D19F0D8573 /* GlancePalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = C121AB74CCAD5312B2AEAD9A; };
 		346CF7EABB275DC284626335 /* GlanceMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 446113E07EEE5744810DE44C; };
 		9781A8953E2A51C3B7C4417A /* GlanceType.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEB390C8D61D59D88274911A; };
@@ -1076,6 +1078,7 @@
 				84C4CDF23A975280B93535E4 /* FleetSnapshot.swift in Sources */,
 				C2B28F800ED5547DAD2BE68E /* NeedsYou.swift in Sources */,
 				0D2B1F974A4250E999F6F707 /* SnapshotStore.swift in Sources */,
+				A28EAC79C39A5E8896A52F41 /* RunnerPulse.swift in Sources */,
 				DB6BF827A8BF54BEA2D7EF02 /* GlancePalette.swift in Sources */,
 				D80DD4E44E7C545899B69B9E /* GlanceMark.swift in Sources */,
 				AB7045FA90AE5235A0BA6167 /* GlanceType.swift in Sources */,
@@ -1090,6 +1093,7 @@
 				C8BB9E84C655538E85154C45 /* FleetSnapshot.swift in Sources */,
 				38C57DFD2B9D54DBB774A396 /* NeedsYou.swift in Sources */,
 				59D256C95C545020AA02BE79 /* SnapshotStore.swift in Sources */,
+				01999A00AE7B5D2297B69681 /* RunnerPulse.swift in Sources */,
 				C26A6392BC0854D19F0D8573 /* GlancePalette.swift in Sources */,
 				346CF7EABB275DC284626335 /* GlanceMark.swift in Sources */,
 				9781A8953E2A51C3B7C4417A /* GlanceType.swift in Sources */,

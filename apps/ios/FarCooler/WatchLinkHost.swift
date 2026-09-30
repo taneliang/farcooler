@@ -256,7 +256,17 @@ final class WatchLinkHost: NSObject {
         // property-list value", both of which are already excluded above, and
         // there is no user-facing consequence to report: the next poll sends
         // the next snapshot thirty seconds from now at the latest.
-        try? session.updateApplicationContext([Self.snapshotKey: data])
+        // And the pulse credential beside it (ov-71), so the watch can ask the
+        // relay which runners went quiet while this app is suspended, as the
+        // phone's widget does. In every context and not only a changed one:
+        // a context replaces the last one whole, so a key left out is a
+        // credential taken away, which is what signing out should do. A new
+        // one reaches the wrist within the thirty seconds below.
+        var context: [String: Any] = [Self.snapshotKey: data]
+        if let pulse = PulseStore.read()?.contextValue {
+            context[PulseCredential.watchContextKey] = pulse
+        }
+        try? session.updateApplicationContext(context)
         lastSent = snapshot
         lastSentAt = Date()
     }

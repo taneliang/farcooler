@@ -50,6 +50,12 @@ struct FleetListView<Client: FleetClient>: View {
     /// What needs you, first, in the app's order: `WatchList.items`, held for
     /// `rows`' reason.
     @State private var items: [NeedsYouItem] = []
+    /// The runners the relay says stopped beating (ov-71), named in the
+    /// footer beside the ones the phone lost touch with, as the phone's
+    /// widget names them. Empty until the relay has answered, and whenever it
+    /// can't: that's the footer as it was. See `lookAtThePulse`.
+    @State private var quiet: [String] = []
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
@@ -67,6 +73,33 @@ struct FleetListView<Client: FleetClient>: View {
             let list = snapshot.map(WatchList.init)
             rows = list?.agents ?? []
             items = list?.items ?? []
+        }
+        // Each time the list comes to the front, and every look while it
+        // stays there. See `lookAtThePulse`.
+        .task(id: scenePhase) { await lookAtThePulse() }
+    }
+
+    /// Ask the relay which runners went quiet, while this screen is in front.
+    ///
+    /// The phone sends this fleet only while its app is running, so a runner
+    /// that stops while the phone sleeps leaves the watch drawing its last
+    /// rows under "from notifications", the same words a healthy fleet gets.
+    /// The relay hears every runner's heartbeat, and this asks it with the
+    /// phone's pulse credential (`WatchLinkClient.file`), through the same
+    /// plan the phone's widget uses (`RunnerPulse.look`): a fresh, complete
+    /// snapshot from the phone wins, and a failed fetch keeps today's footer.
+    ///
+    /// Only while active: a list nobody is looking at spends no radio, and
+    /// raising the wrist brings it back to the front and asks again.
+    private func lookAtThePulse() async {
+        guard scenePhase == .active else { return }
+        while !Task.isCancelled {
+            let now = Date.now
+            let plan = await RunnerPulse.look(
+                snapshot: client.state.snapshot ?? .empty, credential: PulseStore.read(), at: now)
+            quiet = plan.quiet
+            guard let next = plan.nextLook else { return }
+            try? await Task.sleep(for: .seconds(max(60, next.timeIntervalSince(now))))
         }
     }
 
@@ -117,7 +150,7 @@ struct FleetListView<Client: FleetClient>: View {
                 // Named only when there's a section above to tell it from.
                 if !items.isEmpty { Text("Agents") }
             }
-            if let hedge = snapshot.hedge { PartialFooter(hedge: hedge) }
+            if let hedge = snapshot.hedge(quiet: quiet) { PartialFooter(hedge: hedge) }
         }
     }
 
