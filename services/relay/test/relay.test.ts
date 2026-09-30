@@ -6618,6 +6618,28 @@ describe('the runner heartbeat', () => {
     expect(answer[0].heardAgo).toBeLessThan(60_000)
   })
 
+  it('names each runner by a key only its own account can make', async () => {
+    // A beat names its runner by `Host.runner_id` (ov-71). The relay keeps a
+    // hash of it with the account, never the id, and hands the hash to the
+    // pulse; a watch hashes the id its phone learned the same way to tell
+    // which agents are the quiet runner's. The id below is the literal
+    // `a_beats_runner_is_the_hosts_runner_id` pins in the daemon.
+    const token = await pulseToken('user_1')
+    await pair('user_1', 'mine')
+    const id = '7537626f-0002-415e-1e11-000d48034210'
+    await post('/v1/heartbeat', { beatEvery: 300, runner: id }, 'mine')
+    const [runner] = await runners(token)
+    expect((runner as any).runner).toBe(await sha256(`runner:user_1:${id}`))
+
+    // Anything that isn't a short id is no id, never an error.
+    await post('/v1/heartbeat', { beatEvery: 300, runner: 'x'.repeat(200) }, 'mine')
+    expect(((await runners(token))[0] as any).runner).toBe(await sha256(`runner:user_1:${id}`))
+    await pair('user_1', 'old')
+    await post('/v1/heartbeat', { beatEvery: 300 }, 'old')
+    const all = await runners(token)
+    expect(all.map(each => (each as any).runner ?? null)).toContain(null)
+  })
+
   it("reads only its own account's runners", async () => {
     const token = await pulseToken('user_1')
     await pair('user_2', 'theirs')
@@ -6886,6 +6908,44 @@ describe('a runner that stops beating, on the card', () => {
     await sweep()
     const stored = await env.DB.prepare(`SELECT quiet FROM install_cards`).first<{ quiet: string }>()
     expect(stored?.quiet).toBe('[]')
+  })
+
+  it('takes a name back when its runner is unpaired on purpose', async () => {
+    // Withdrawn, the runner leaves the pulse and the account may have nobody
+    // beating at all; the card must still stop naming it.
+    const calls = watchFetch()
+    await card()
+    await silence(16)
+    await sweep()
+    await post('/v1/heartbeat', { withdrawn: true }, 'mine')
+    const before = pushes(calls).length
+    await sweep()
+    const [state] = updates(calls, before)
+    expect(state.quiet).toBeUndefined()
+  })
+
+  it('remembers the names a card started with', async () => {
+    // Studio is quiet with work on the roster when another runner's agent
+    // blocks and raises the card; once the app files the card's token, the
+    // sweep has nothing new to say.
+    const calls = watchFetch()
+    await register('user_1', { liveActivityStartToken: 'start-token' })
+    await pair('user_1', 'mine')
+    await post('/v1/heartbeat', { beatEvery: 300, name: 'Studio Mac' }, 'mine')
+    await post('/v1/notify', { title: 'aria', terminal: 'aria', status: 'working' }, 'mine')
+    await silence(16)
+    await pair('user_1', 'other')
+    await post('/v1/notify', { title: 'zeno', terminal: 'zeno', status: 'blocked' }, 'other')
+    const start = pushes(calls).find(call => call.body?.aps?.event === 'start')
+    expect(start?.body.aps['content-state'].quiet).toEqual(['Studio Mac'])
+    await post(
+      '/v1/devices/activity',
+      { terminal: 'zeno', updateToken: 'update-token' },
+      await sessionFor('user_1'),
+    )
+    const before = pushes(calls).length
+    await sweep()
+    expect(updates(calls, before)).toEqual([])
   })
 
   it('runs every five minutes, on all four relays', () => {

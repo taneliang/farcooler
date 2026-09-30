@@ -1301,6 +1301,7 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
     install?: unknown
     version?: unknown
     name?: unknown
+    runner?: unknown
     withdrawn?: unknown
   }>()
 
@@ -1322,6 +1323,12 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
   // runner are one runner in the pulse too. Rewritten on every beat, and
   // COALESCEd so a beat without one never erases it.
   const install = await installKey(daemon.account_id, body.install)
+  // Which runner, as a phone knows it (`Host.runner_id`), hashed with the
+  // account like the install id: the pulse hands the hash to a watch, which
+  // hashes its own agents' runner ids to match (ov-71).
+  const runnerKey = typeof body.runner === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(body.runner)
+    ? await sha256(`runner:${daemon.account_id}:${body.runner.toLowerCase()}`)
+    : null
   // What the runner calls itself, which the phone prefers to the pairing
   // label. Trimmed and cut to 64 characters; an empty or absent one keeps
   // the last.
@@ -1332,6 +1339,7 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
   await env.DB.prepare(
     `UPDATE daemons SET last_seen_at = ?, beat_every = ?,
                         install_id = COALESCE(?, install_id),
+                        runner_key = COALESCE(?, runner_key),
                         name = COALESCE(?, name),
                         version = COALESCE(?, version)
      WHERE id = ?`,
@@ -1340,6 +1348,7 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
       Date.now(),
       beatEvery,
       install,
+      runnerKey,
       name,
       typeof body.version === 'string' ? body.version.slice(0, 64) : null,
       daemon.id,
@@ -1379,7 +1388,7 @@ async function pulse(request: Request, env: Env): Promise<Response> {
 
   const now = Date.now()
   const beating = await env.DB.prepare(
-    `SELECT id, label, name, install_id, last_seen_at, beat_every FROM daemons
+    `SELECT id, label, name, install_id, runner_key, last_seen_at, beat_every FROM daemons
      WHERE account_id = ? AND beat_every IS NOT NULL AND last_seen_at >= ?
        AND (expires_at IS NULL OR expires_at > ?)`,
   )
@@ -1389,13 +1398,20 @@ async function pulse(request: Request, env: Env): Promise<Response> {
       label: string
       name: string | null
       install_id: string | null
+      runner_key: string | null
       last_seen_at: number
       beat_every: number
     }>()
 
   const newest = new Map<
     string,
-    { label: string; name: string | null; last_seen_at: number; beat_every: number }
+    {
+      label: string
+      name: string | null
+      runner_key: string | null
+      last_seen_at: number
+      beat_every: number
+    }
   >()
   for (const row of beating.results ?? []) {
     const runner = row.install_id !== null ? `install:${row.install_id}` : `daemon:${row.id}`
@@ -1410,6 +1426,8 @@ async function pulse(request: Request, env: Env): Promise<Response> {
         name: row.name,
         heardAgo: Math.max(0, now - row.last_seen_at),
         beatEvery: row.beat_every,
+        // Which runner, as a key only this account can make. See `heartbeat`.
+        runner: row.runner_key,
       })),
   })
 }
@@ -3048,8 +3066,15 @@ async function refreshCard(
 /// failure can't stall the rest.
 export async function sweepQuiet(env: Env): Promise<void> {
   const cards = await env.DB.prepare(
+    // Only accounts with a runner that beats, or a card still naming one:
+    // everyone else has nothing a sweep could change, and reading their
+    // fleets every five minutes would be load for nothing (review m2).
     `SELECT account_id, quiet FROM install_cards
-     WHERE update_token != ? AND dismissed_at IS NULL`,
+     WHERE update_token != ? AND dismissed_at IS NULL
+       AND (COALESCE(quiet, '[]') != '[]'
+            OR EXISTS (SELECT 1 FROM daemons
+                       WHERE daemons.account_id = install_cards.account_id
+                         AND beat_every IS NOT NULL))`,
   )
     .bind(TOKEN_UNKNOWN)
     .all<{ account_id: string; quiet: string | null }>()
@@ -3166,14 +3191,15 @@ async function startCard(
   await env.DB.prepare(
     `INSERT INTO install_cards
        (id, account_id, update_token, environment, leader_terminal, leader_status,
-        updated_at, pushed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        updated_at, pushed_at, quiet)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (account_id)
      DO UPDATE SET leader_terminal = excluded.leader_terminal,
                    leader_status = excluded.leader_status,
                    dismissed_at = NULL,
                    updated_at = excluded.updated_at,
-                   pushed_at = excluded.pushed_at
+                   pushed_at = excluded.pushed_at,
+                   quiet = excluded.quiet
      WHERE install_cards.update_token = ?`,
   )
     .bind(
@@ -3185,6 +3211,8 @@ async function startCard(
       state.status,
       Date.now(),
       Date.now(),
+      // The quiet runners the start named, so the sweep says only a change.
+      JSON.stringify(state.quiet ?? []),
       TOKEN_UNKNOWN,
     )
     .run()
