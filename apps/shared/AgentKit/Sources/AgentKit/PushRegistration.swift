@@ -44,9 +44,9 @@ public final class PushRegistration: ObservableObject {
     /// every install has always had.
     public var notifyOnDone: () -> Bool = { true }
 
-    /// Whether to ask the relay for a pulse token at registration, and keep it
-    /// in the App Group for the widget (ov-53). Set by the phone at launch; the
-    /// Mac has no widget that reads one.
+    /// Whether to send the phone's pulse token at registration, making it the
+    /// first time, so the widget can ask which runners are beating (ov-53).
+    /// Set by the phone at launch; the Mac has no widget that reads one.
     public var wantsPulse = false
 
     /// ActivityKit's push-to-start token, when the app has one.
@@ -87,6 +87,13 @@ public final class PushRegistration: ObservableObject {
     /// about, one level up.
     public func sendIfPossible() async {
         guard let token, Account.shared.isSignedIn else { return }
+        // Made once per account and sent every time, so registrations are
+        // idempotent in whatever order they land. See `PulseStore.token`.
+        let pulseToken = wantsPulse
+            ? PulseStore.vault.flatMap {
+                PulseStore.token(relay: Account.shared.relay, account: Account.shared.userId, in: $0)
+            }
+            : nil
         switch await Account.shared.registerDevice(
             pushToken: token,
             platform: platform,
@@ -94,16 +101,9 @@ public final class PushRegistration: ObservableObject {
             environment: Self.environment,
             liveActivityStartToken: liveActivityStartToken,
             notifyOnDone: notifyOnDone(),
-            pulse: wantsPulse)
+            pulseToken: pulseToken)
         {
-        case .success(let pulseToken):
-            // Every registration that asks gets a new token and the relay
-            // forgets the old one, so this is written each time. Nil is a
-            // relay too old to mint one: the file is left as it is, and the
-            // widget's fetch with an old token fails into today's hedge.
-            if let pulseToken {
-                PulseStore.write(PulseCredential(relay: Account.shared.relay, token: pulseToken))
-            }
+        case .success:
             registered = true
             lastError = nil
         case .failure(let why):

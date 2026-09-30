@@ -91,27 +91,26 @@ struct FleetProvider: TimelineProvider {
         // and the extension need.
         //
         // **Except the relay's word on which runners are beating** (ov-53). A
-        // suspended app can't see its links, so this asks the relay, with the
-        // pulse token the app filed, and names a runner that's gone quiet in
-        // the footer. While any runner beats, the timeline asks to be looked
-        // at again (`RunnerPulse.nextLook`), since that is the only way this
-        // widget can learn one stopped. No credential, a failed fetch, or no
-        // runner that beats: `.never` and today's hedge, exactly as before.
+        // suspended app can't see its links, so this asks the relay with the
+        // phone's pulse token and names a runner that's gone quiet in the
+        // footer. What to name and when to look again is
+        // `RunnerPulse.plan`, where it's tested: a fresh app snapshot wins, a
+        // failed fetch looks again later, and with nothing beating this stays
+        // `.never` and today's hedge.
         Task {
-            let pulses: [RunnerPulse]? =
+            let reading: RunnerPulse.Reading =
                 if let credential = PulseStore.read() {
                     await RunnerPulse.fetch(credential)
                 } else {
-                    nil
+                    .noCredential
                 }
-            let quiet = RunnerPulse.quiet(pulses ?? [])
+            let plan = RunnerPulse.plan(snapshot: snapshot, reading: reading, at: now)
             let entries =
-                [FleetEntry(date: now, snapshot: snapshot, quiet: quiet)]
+                [FleetEntry(date: now, snapshot: snapshot, quiet: plan.quiet)]
                 + Self.wakes(for: snapshot, after: now).map {
-                    FleetEntry(date: $0, snapshot: snapshot, quiet: quiet)
+                    FleetEntry(date: $0, snapshot: snapshot, quiet: plan.quiet)
                 }
-            let policy: TimelineReloadPolicy =
-                RunnerPulse.nextLook(after: now, pulses: pulses).map { .after($0) } ?? .never
+            let policy: TimelineReloadPolicy = plan.nextLook.map { .after($0) } ?? .never
             completion(Timeline(entries: entries, policy: policy))
         }
     }

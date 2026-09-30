@@ -338,8 +338,8 @@ public final class Account: NSObject, ObservableObject {
         environment: String,
         liveActivityStartToken: String? = nil,
         notifyOnDone: Bool = true,
-        pulse: Bool = false
-    ) async -> Result<String?, AccountError> {
+        pulseToken: String? = nil
+    ) async -> Result<Void, AccountError> {
         var payload: [String: Any] = [
             "pushToken": pushToken, "platform": platform, "label": label,
             // "When an agent finishes or fails", so the toggle reaches the
@@ -371,14 +371,12 @@ public final class Account: NSObject, ObservableObject {
         if let liveActivityStartToken {
             payload["liveActivityStartToken"] = liveActivityStartToken
         }
-        // A pulse token, for the widget to ask the relay which runners are
-        // still beating (ov-53). Only the phone asks: nothing on the Mac reads
-        // one. Answered once, as `pulseToken`; a relay too old to mint one
-        // answers without it, and that is nil here.
-        if pulse { payload["pulse"] = true }
-        return await authenticatedPost("/v1/devices", payload).map { body in
-            body["pulseToken"] as? String
-        }
+        // The phone's own pulse token, for the widget to ask the relay which
+        // runners are still beating (ov-53). The same token on every
+        // registration, so two in flight at launch can't strand the widget.
+        // Only the phone sends one; the relay keeps its hash.
+        if let pulseToken { payload["pulseToken"] = pulseToken }
+        return await authenticatedPost("/v1/devices", payload).map { _ in () }
     }
 
     /// File the push token for one running Live Activity, or clear it.
@@ -729,7 +727,8 @@ public final class Account: NSObject, ObservableObject {
         TokenStore.delete(Self.accessKey)
         TokenStore.delete(Self.refreshKey)
         // The widget's pulse credential reads this account's runners, so it
-        // goes with the account. See `PulseStore`.
+        // goes with the account, and the next sign-in makes a new one. See
+        // `PulseStore`.
         PulseStore.clear()
     }
 
