@@ -306,6 +306,27 @@ mod tests {
     }
 
     #[test]
+    fn a_split_inside_a_split_inside_a_split_scales_all_the_way_down() {
+        // Side by side, then stacked on the right, then side by side again at
+        // the bottom right: three levels, each placed from its parent's new
+        // corner rather than its old one.
+        let deep = "0000,101x40,0,0{50x40,0,0,0,50x40,51,0[50x20,51,0,1,50x19,51,21{25x19,51,21,2,24x19,77,21,3}]}";
+        let out = scale(deep, 51, 40).unwrap();
+        let body = "51x40,0,0{25x40,0,0,0,25x40,26,0[25x20,26,0,1,25x19,26,21{12x19,26,21,2,12x19,39,21,3}]}";
+        assert_eq!(out, format!("{:04x},{body}", checksum(body)));
+    }
+
+    #[test]
+    fn a_nested_split_is_held_at_the_floor_of_everything_inside_it() {
+        // The right-hand column's share of 40 columns is under eight, but it
+        // holds two panes side by side, so its floor is 10 + 1 + 10, not 10.
+        let nested = "0000,101x20,0,0{80x20,0,0,0,20x20,81,0[20x10,81,0{10x10,81,0,1,9x10,92,0,2},20x9,81,11,3]}";
+        let out = scale(nested, 40, 20).unwrap();
+        let body = "40x20,0,0{18x20,0,0,0,21x20,19,0[21x10,19,0{10x10,19,0,1,10x10,30,0,2},21x9,19,11,3]}";
+        assert_eq!(out, format!("{:04x},{body}", checksum(body)));
+    }
+
+    #[test]
     fn nothing_to_do_or_nothing_readable_is_none() {
         assert_eq!(scale(AGENT_AND_TWO_SHELLS, 105, 36), None, "same size");
         assert_eq!(scale("b25d,80x24,0,0,0", 40, 24), None, "one pane");
