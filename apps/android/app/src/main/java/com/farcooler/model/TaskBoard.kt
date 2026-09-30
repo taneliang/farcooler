@@ -513,10 +513,8 @@ object RunnerBoards {
         panes: List<Terminal>,
         build: DaemonBuild?,
         link: RunnerLink,
-        needsYou: RunnerNeedsYou? = null,
     ): List<BoardRow> {
         if (build?.can("tasks") != true) return emptyList()
-        val served = build.can("needs_you")
         val speaks = TaskAgentLink.speaksOfAgents(link, build)
         val names = repositories.associate { it.id to it.displayName.ifEmpty { it.short } }
         return boards.map { workspace ->
@@ -527,12 +525,7 @@ object RunnerBoards {
                 hostId = hostId,
                 repository = repository,
                 name = if (workspace.isImplicit) repositoryName ?: workspace.name else workspace.name,
-                decisions = waiting(
-                    columnCount = board?.waitingOnYou ?: 0,
-                    decisions = decisions(workspace, needsYou?.items.orEmpty()),
-                    listRead = needsYou != null,
-                    listServed = served,
-                ),
+                decisions = board?.waitingOnYou ?: 0,
                 agents = if (speaks && board != null) board.tasksWithLiveAgents(panes) else 0,
                 workspace = workspace,
                 repositoryName = if (workspace.isImplicit) null else repositoryName,
@@ -574,7 +567,6 @@ object RunnerBoards {
         panes: List<Terminal>,
         build: DaemonBuild?,
         link: RunnerLink,
-        needsYou: RunnerNeedsYou? = null,
     ): List<BoardRow> = rows(
         hostId = hostId,
         boards = repositories.map { WorkspaceSummary.implicit(it.id) },
@@ -583,7 +575,6 @@ object RunnerBoards {
         panes = panes,
         build = build,
         link = link,
-        needsYou = needsYou,
     )
 }
 

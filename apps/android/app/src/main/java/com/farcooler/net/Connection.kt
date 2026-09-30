@@ -108,7 +108,7 @@ class Connection(
      */
     private val rendezvous: StateFlow<String>,
     private val scope: CoroutineScope,
-) : ChangesSource {
+) : ChangesSource, com.farcooler.notify.VisibleTerminalSink {
 
     sealed interface Phase {
         data object Connecting : Phase
@@ -771,20 +771,12 @@ class Connection(
      * claimed until the next poll, and leaving the app entirely would leave it
      * claimed until the runner's TTL ran out.
      */
-    var visibleTerminal: String? = null
+    override var visibleTerminal: String? = null
         set(value) {
             val changed = field != value
             field = value
             if (changed) scope.launch { reportWatching() }
         }
-
-    /**
-     * [id] isn't being read any more: gives the claim back if it is still
-     * [id]'s, and does nothing if a pane claimed since (ov-69).
-     */
-    fun releaseVisible(id: String) {
-        if (visibleTerminal == id) visibleTerminal = null
-    }
 
     /**
      * Whether this connection is allowed to poll. False while backgrounded.

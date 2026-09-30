@@ -27,6 +27,8 @@ import com.farcooler.net.Reachability
 import com.farcooler.net.TerminalRef
 import com.farcooler.notify.Notifier
 import com.farcooler.notify.ReadingRegister
+import com.farcooler.notify.claim
+import com.farcooler.notify.release
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -716,8 +718,7 @@ class AppModel(
      * claim to the runner move together.
      */
     fun claimReading(connection: Connection, id: String?) {
-        reading.claim(id)
-        connection.visibleTerminal = id
+        reading.claim(connection, id)
     }
 
     /**
@@ -726,8 +727,7 @@ class AppModel(
      * tab over a worktree, or the reverse) wipes nothing (ov-69).
      */
     fun releaseReading(connection: Connection, id: String) {
-        reading.release(id)
-        connection.releaseVisible(id)
+        reading.release(connection, id)
     }
 
     fun setForeground(foreground: Boolean) {

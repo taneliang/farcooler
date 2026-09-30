@@ -627,8 +627,6 @@ class TaskBoardTest {
 
     // ---- the waiting count is decision items, not the column (ov-69) ----
 
-    private val served = DaemonBuild("1", true, "", setOf("workspaces", "tasks", "terminal_task", "needs_you"))
-
     private fun item(
         id: String,
         kind: String,
@@ -662,24 +660,5 @@ class TaskBoardTest {
         assertEquals(2, RunnerBoards.waiting(columnCount = 2, decisions = 0, listRead = true, listServed = false))
         assertEquals(0, RunnerBoards.waiting(columnCount = 2, decisions = 0, listRead = true, listServed = true))
         assertEquals(1, RunnerBoards.waiting(columnCount = 2, decisions = 1, listRead = true, listServed = true))
-    }
-
-    /** The Board row counts the runner's list once it has loaded: an answered decision leaves its task in the column. */
-    @Test
-    fun aRowCountsItsItemsOnceTheListIsRead() {
-        fun decisions(build: DaemonBuild, reading: RunnerNeedsYou?) = RunnerBoards.rows(
-            hostId = "h",
-            boards = listOf(WorkspaceSummary.implicit("r-busy")),
-            repositories = repositories,
-            models = boards,
-            panes = panes,
-            build = build,
-            link = RunnerLink.ANSWERING,
-            needsYou = reading,
-        ).single().decisions
-        assertEquals("before the list loads, the column", 2, decisions(served, null))
-        assertEquals("answered: two tasks, no items", 0, decisions(served, RunnerNeedsYou(emptyList())))
-        assertEquals("no list served: the column", 2, decisions(both, RunnerNeedsYou(emptyList())))
-        assertEquals(1, decisions(served, RunnerNeedsYou(listOf(item("x", "decision", null)))))
     }
 }
