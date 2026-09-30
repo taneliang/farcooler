@@ -1045,7 +1045,16 @@ struct WorktreeDot: View {
 /// nobody needs. The terminals ARE the worktree, so they lead; the path is a
 /// footnote you can copy when you want it.
 struct WorktreeDetail: View {
+    /// An orchestrator running here, drawn in its workspace's conversation
+    /// column instead, and how to go there.
+    struct Hosted {
+        let name: String
+        let go: () -> Void
+    }
+
+    /// The worktree, without the orchestrators in `hosted`.
     let worktree: Worktree
+    var hosted: [Hosted] = []
     let onNewTerminal: () -> Void
     let onHide: () -> Void
     let onUnhide: () -> Void
@@ -1056,6 +1065,8 @@ struct WorktreeDetail: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
+
+                if !hosted.isEmpty { hostedNote }
 
                 if worktree.terminals.isEmpty {
                     empty
@@ -1130,6 +1141,34 @@ struct WorktreeDetail: View {
                 .menuStyle(.borderlessButton)
                 .fixedSize()
             }
+        }
+    }
+
+    /// Where the orchestrators that run here are drawn, since it isn't here.
+    private var hostedNote: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: "person.wave.2")
+                .foregroundStyle(.secondary)
+            Text(Self.hostedSentence(hosted.map(\.name)))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            ForEach(Array(hosted.enumerated()), id: \.offset) { _, seat in
+                Button(hosted.count == 1 ? "Show Orchestrator" : "Show \(seat.name)", action: seat.go)
+            }
+        }
+    }
+
+    /// "The orchestrator runs here…", for the workspaces whose orchestrators
+    /// run in this worktree.
+    static func hostedSentence(_ names: [String]) -> String {
+        switch names.count {
+        case 0: return ""
+        case 1: return "The orchestrator runs here. It’s in the Orchestrator column."
+        default:
+            let list = ListFormatter.localizedString(byJoining: names)
+            return "The orchestrators for \(list) run here. Each is in its workspace’s Orchestrator column."
         }
     }
 

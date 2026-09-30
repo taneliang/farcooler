@@ -178,6 +178,10 @@ struct ContentView: View {
     /// When each workspace's orchestrator start began, by `host|workspace`:
     /// this app's, or one first seen starting. See `ConversationColumn.slowStart`.
     @State private var orchestratorStartedAt: [String: Date] = [:]
+    /// Orchestrators this app has asked the runner to give a window of their
+    /// own, once each: see `WorkspaceScreen.sharesWindow`. Once, so a runner
+    /// that won't doesn't get asked on every read.
+    @State private var brokenOut: Set<String> = []
 
     /// What confirming a pane-mode switch would do, and to which pane.
     struct PaneModeConfirmation: Identifiable {
@@ -307,7 +311,10 @@ struct ContentView: View {
         .onCommand { command in run(command) }
         .onTileCommand { command in Task { await tile(command) } }
         .onSelectIndex { index in selectTerminal(at: index) }
-        .onChange(of: store.layouts) { _, _ in followLayoutFocus() }
+        .onChange(of: store.layouts) { _, _ in
+            followLayoutFocus()
+            breakOutOrchestrators()
+        }
         // Every client change reaches `store.fleet` — `FleetStore` remerges
         // on each one — so this hears a runner leaving, coming back as a new
         // client, and listing its projects without one.
@@ -329,6 +336,7 @@ struct ContentView: View {
             // brings every client up in the background, on its own schedule.
             // A no-op once the window has opened somewhere.
             settleLaunch()
+            breakOutOrchestrators()
         }
         .onChange(of: store.needsYou) { _, _ in settleLaunch() }
         // ⌃HJKL traverse the layout the keyboard is in, and pass through to
@@ -2313,10 +2321,41 @@ struct ContentView: View {
         .task(id: row.id) { await board.open(row) }
     }
 
+    /// Ask the runner to give every seated orchestrator that shares its tmux
+    /// window a window of its own (`layout break`), once each.
+    ///
+    /// A terminal is shown in one place (ov-63): the conversation column
+    /// draws the orchestrator alone meanwhile (`WorkspaceScreen.shown`), and
+    /// the terminals it shared with stay the worktree's. Every read, not only
+    /// with the column on screen: opening the main checkout, or clicking
+    /// sleepnomore in it, would otherwise draw that shared window whole.
+    private func breakOutOrchestrators() {
+        for (host, workspaces) in store.fleet.runnerWorkspaces where store.refusal(for: host) == nil {
+            for workspace in workspaces {
+                guard let seat = WorkspaceScreen.orchestrator(of: workspace, host: host, in: store.fleet),
+                    !brokenOut.contains(seat.terminal.id),
+                    let client = store.client(for: seat.worktree),
+                    WorkspaceScreen.sharesWindow(seat, layouts: client.layouts[seat.worktree.id])
+                else { continue }
+                brokenOut.insert(seat.terminal.id)
+                Task { _ = await client.breakPane(seat.terminal.short, in: seat.worktree) }
+            }
+        }
+    }
+
     /// A worktree with no layout yet: its card of terminals.
+    ///
+    /// Without the orchestrators seated in it, which are their workspaces'
+    /// conversation columns', and with where to find them instead.
     private func worktreeDetail(_ ws: Worktree) -> some View {
-        WorktreeDetail(
-            worktree: ws,
+        let host = ws.host ?? ""
+        return WorktreeDetail(
+            worktree: WorkspaceScreen.ownTerminals(of: ws, fleet: store.fleet),
+            hosted: WorkspaceScreen.seated(in: ws, fleet: store.fleet).map { seat in
+                WorktreeDetail.Hosted(name: seat.workspace.name) {
+                    selection = .workspace(host: host, workspace: seat.workspace.id, focus: nil)
+                }
+            },
             onNewTerminal: { newTerminal(in: ws) },
             onHide: { Task { await act(on: ws) { c in await c.hideWorktree(ws.short) } } },
             onUnhide: { Task { await act(on: ws) { c in await c.unhideWorktree(ws.short) } } },
