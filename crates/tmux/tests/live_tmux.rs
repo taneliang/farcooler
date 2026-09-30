@@ -461,3 +461,68 @@ async fn a_quiet_real_pane_produces_no_output_lines() {
 
     srv.kill_server().await.unwrap();
 }
+
+#[tokio::test]
+async fn a_narrowed_window_keeps_every_panes_share() {
+    // Live checklist F1. A worktree window of an agent on the left and two
+    // shells stacked on the right, which the Mac sized to 105x36 and then to
+    // 55x36. `resize-window` alone took all fifty columns from the right and
+    // left the shells one column wide; nothing but a real tmux can say what it
+    // does with a layout, so nothing but a real tmux can test the fix.
+    let Some(srv) = live_server("a_narrowed_window_keeps_every_panes_share").await else { return };
+    use farcooler_tmux::windows::Axis;
+    let worktree = Uuid::now_v7();
+    let win = srv
+        .create_terminal_window(worktree, Uuid::now_v7(), "agent", "/tmp", "sleep 60")
+        .await
+        .unwrap();
+    let right = srv
+        .split_pane(&win.pane_id, Axis::Horizontal, Uuid::now_v7(), "/tmp", "sleep 60", false)
+        .await
+        .unwrap();
+    srv.split_pane(&right, Axis::Vertical, Uuid::now_v7(), "/tmp", "sleep 60", false).await.unwrap();
+
+    srv.resize_window_keeping_shares(&win.window_id, 105, 36).await.unwrap();
+    srv.set_pane_size(&win.pane_id, 78, 36).await.unwrap();
+
+    let widths = || async {
+        let mut panes: Vec<_> = srv
+            .list_tagged_panes()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|p| p.window_id == win.window_id)
+            .map(|p| (p.pane_id, p.columns, p.rows))
+            .collect();
+        panes.sort();
+        panes
+    };
+    let agent_width = |panes: &[(String, u32, u32)]| {
+        panes.iter().find(|p| p.0 == win.pane_id).map(|p| p.1).unwrap()
+    };
+    let wide = widths().await;
+    assert_eq!(wide.len(), 3);
+    assert_eq!(agent_width(&wide), 78, "the divider is where it was put: {wide:?}");
+
+    srv.resize_window_keeping_shares(&win.window_id, 55, 36).await.unwrap();
+    let narrow = widths().await;
+    for (pane, columns, rows) in &narrow {
+        let was = wide.iter().find(|p| &p.0 == pane).unwrap();
+        // Its share of the 54 columns left after the divider, give or take one
+        // for rounding, but never less than ten where ten will fit.
+        let proportional = (f64::from(was.1) * 54.0 / 104.0).floor() as u32;
+        assert!(
+            *columns >= proportional.min(10),
+            "{pane} is {columns} columns at 55 wide, from {} at 105: {narrow:?}",
+            was.1
+        );
+        assert!(columns.abs_diff(proportional) <= 1, "{pane}: {columns} vs {proportional}: {narrow:?}");
+        assert_eq!(*rows, was.2, "a change in width leaves the rows alone: {narrow:?}");
+    }
+
+    srv.resize_window_keeping_shares(&win.window_id, 105, 36).await.unwrap();
+    let back = widths().await;
+    assert!(agent_width(&back).abs_diff(78) <= 1, "widening puts the ratio back: {back:?}");
+
+    srv.kill_server().await.unwrap();
+}

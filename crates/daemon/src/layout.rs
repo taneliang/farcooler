@@ -445,7 +445,9 @@ impl Service {
     ///
     /// tmux lays out for the window's size, so a client with a 200-column view has
     /// to say so before asking where the panes are — otherwise it gets an
-    /// arrangement computed for whatever size the window last had.
+    /// arrangement computed for whatever size the window last had. Every pane
+    /// keeps its share across the change, rather than tmux taking it all from
+    /// the right-hand edge.
     pub async fn layout_resize_window(
         &self,
         worktree: Uuid,
@@ -457,7 +459,7 @@ impl Service {
         // A window smaller than this cannot hold a usable pane, and tmux refuses
         // sizes it cannot satisfy anyway.
         if columns >= 20 && rows >= 5 {
-            self.tmux.resize_window(&view.window.window_id, columns, rows).await?;
+            self.tmux.resize_window_keeping_shares(&view.window.window_id, columns, rows).await?;
         }
         self.layout(worktree).await
     }

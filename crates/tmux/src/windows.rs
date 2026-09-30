@@ -335,6 +335,47 @@ impl TmuxServer {
         Ok(())
     }
 
+    /// Resize a window and keep every pane's share of it.
+    ///
+    /// `resize_window` alone lets tmux take the whole difference from the
+    /// cells at the right and bottom edges: an agent at 78 columns beside two
+    /// shells at 26, narrowed from 105 columns to 55, left the shells one
+    /// column wide. So the split tree is read first, the resize happens, and
+    /// the tree scaled to the new size is put back with `select-layout`
+    /// (see `crate::layout`).
+    ///
+    /// The resize is the part that has to happen. If the layout cannot be
+    /// read or scaled, tmux's own arrangement at the new size is left as it
+    /// is, which is no worse than before.
+    ///
+    /// `select-layout` unzooms a window, so a zoomed one is zoomed again
+    /// afterwards; tmux zooms the active pane, which is the one that was.
+    pub async fn resize_window_keeping_shares(
+        &self,
+        window_id: &str,
+        columns: u32,
+        rows: u32,
+    ) -> Result<()> {
+        let before = self
+            .run(&["display-message", "-p", "-t", window_id, "#{window_layout}\t#{window_zoomed_flag}"])
+            .await?;
+        self.resize_window(window_id, columns, rows).await?;
+        if !before.ok() {
+            return Ok(());
+        }
+        let (layout, zoomed) = before.stdout.trim().split_once('\t').unwrap_or((before.stdout.trim(), "0"));
+        // Scaled to the size tmux actually gave the window, not the one asked
+        // for: `select-layout` fits a layout of any other size back into the
+        // window the way `resize-window` does, squeezing the edge again.
+        let (columns, rows) = self.window_size(window_id).await?;
+        let Some(scaled) = crate::layout::scale(layout, columns, rows) else { return Ok(()) };
+        self.expect(&["select-layout", "-t", window_id, &scaled], "select-layout a scaled layout").await?;
+        if zoomed == "1" {
+            self.expect(&["resize-pane", "-Z", "-t", window_id], "resize-pane -Z").await?;
+        }
+        Ok(())
+    }
+
     /// Start streaming a pane's raw output into `command`'s stdin.
     ///
     /// This is the real terminal data plane. `pipe-pane` hands over the exact
@@ -795,9 +836,9 @@ pub struct ManagedLayout {
     /// tmux's own layout description — the split tree, verbatim.
     ///
     /// Carried opaquely and handed straight back to `select-layout` to restore an
-    /// arrangement. Far Cooler never parses it: it is tmux's format, tmux is the
-    /// only thing that has to understand it, and a parser here would be a copy of
-    /// tmux's tree that could drift from it.
+    /// arrangement. It is tmux's format and tmux is the authority on it; the one
+    /// reader here is `crate::layout`, which scales it across a resize and
+    /// writes it straight back, and keeps no tree of its own.
     pub layout: String,
     pub index: u32,
 }

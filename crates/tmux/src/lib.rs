@@ -9,6 +9,7 @@
 
 pub mod control;
 pub mod inventory;
+pub mod layout;
 pub mod server;
 pub mod windows;
 
