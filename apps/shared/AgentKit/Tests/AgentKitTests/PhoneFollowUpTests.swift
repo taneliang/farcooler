@@ -132,19 +132,33 @@ struct PhoneFollowUpTests {
         func source(_ runner: String) -> PhoneDecisionLink.Source {
             var item = Self.decisionItem(workspace: "ws-\(runner)")
             item.runner = runner
-            return PhoneDecisionLink.Source(runner: runner, items: [item], boards: [:], implicit: false)
+            // The phone's own id for a runner is not the id a push names: that
+            // is the daemon's `Host.runner_id`, lowercase (ov-72).
+            return PhoneDecisionLink.Source(
+                runner: runner, items: [item], boards: [:], implicit: false,
+                hostRunner: "host-\(runner.lowercased())")
         }
         let a = source("RUNNER-A")
         let b = source("RUNNER-B")
+        var unread = source("RUNNER-A")
+        unread.hostRunner = nil
         let onB = PhoneWorkspace(runner: "RUNNER-B", workspace: "ws-RUNNER-B")
         #expect(
-            PhoneDecisionLink.find(Self.push("bil-7", runner: "RUNNER-B"), in: [a, b])
+            PhoneDecisionLink.find(Self.push("bil-7", runner: "host-runner-b"), in: [a, b])
                 == [.workspace(onB), .task(onB, task: "t7")])
-        #expect(PhoneDecisionLink.find(Self.push("bil-7"), in: [a, b]) == nil)
-        #expect(PhoneDecisionLink.find(Self.push("bil-7", runner: "RUNNER-C"), in: [a, b]) == nil)
+        // The push says the id the daemon minted, however it is cased.
         #expect(
-            PushTap(userInfo: ["kind": "decision", "task": "bil-7", "runner": "RUNNER-B"], thread: "")
-                == .task(Self.push("bil-7", runner: "RUNNER-B")))
+            PhoneDecisionLink.find(Self.push("bil-7", runner: "HOST-runner-b"), in: [a, b])
+                == [.workspace(onB), .task(onB, task: "t7")])
+        // Naming the phone's own id for a runner names nobody.
+        #expect(PhoneDecisionLink.find(Self.push("bil-7", runner: "RUNNER-B"), in: [a, b]) == nil)
+        // A runner whose id hasn't been read yet is not the one named.
+        #expect(PhoneDecisionLink.find(Self.push("bil-7", runner: "host-runner-a"), in: [unread]) == nil)
+        #expect(PhoneDecisionLink.find(Self.push("bil-7"), in: [a, b]) == nil)
+        #expect(PhoneDecisionLink.find(Self.push("bil-7", runner: "host-runner-c"), in: [a, b]) == nil)
+        #expect(
+            PushTap(userInfo: ["kind": "decision", "task": "bil-7", "runner": "host-runner-b"], thread: "")
+                == .task(Self.push("bil-7", runner: "host-runner-b")))
     }
 
     /// **A push waits for its runners, not ten seconds**: on a cold launch

@@ -2472,11 +2472,15 @@ enum PushTap: Equatable, Sendable {
 /// A tapped decision push: the task's key, and the runner it's on when the
 /// push says.
 ///
-/// **No push says today.** The relay's `Payload` carries `kind` and `task`
-/// and no runner, and a task key is only unique on its own runner's
-/// workspace (`bil-7` can be on two runners at once). `runner` is read from
-/// `runner` in the push, as this app's own id for the runner, for when one
-/// is sent; until then `PhoneDecisionLink.find` refuses to guess between two.
+/// The relay forwards `runner` beside `task` (ov-72): the runner's
+/// `Host.runner_id`, the id its daemon derives from its install id and
+/// tells every client, lowercased. It is NOT this app's own id for the
+/// runner (`Host.id` on the phone, a pairing-local UUID the daemon and relay
+/// never see), so it's matched against `PhoneDecisionLink.Source.hostRunner`.
+/// A task key is only unique on its own runner's workspace (`bil-7` can be
+/// on two runners at once), so with no runner in the push, which is every
+/// push from a daemon older than the field, `PhoneDecisionLink.find`
+/// refuses to guess between two.
 struct DecisionPush: Equatable, Sendable {
     var key: String
     var runner: String?
@@ -2495,11 +2499,15 @@ enum PhoneDecisionLink {
         /// Whether it has no workspaces, so an item's board is its
         /// repository's implicit one.
         var implicit: Bool
+        /// Its `Host.runner_id`, which a push names it by; nil until the
+        /// phone has read it, and from a runner too old to say.
+        var hostRunner: String? = nil
     }
 
     /// The stack for the task `push` names, or nil until one runner has it.
     ///
-    /// On the runner the push names, when it names one. Otherwise on the one
+    /// On the runner the push names, when it names one, by its
+    /// `hostRunner`: a runner whose id isn't known yet isn't it. Otherwise on the one
     /// runner that has a task under that key: its Needs You item first,
     /// which knows its workspace, then any board read so far with a card
     /// under the key. Two runners with a task under one key is nil, not the
@@ -2507,7 +2515,9 @@ enum PhoneDecisionLink {
     /// Needs You, where both are.
     static func find(_ push: DecisionPush, in sources: [Source]) -> [PhoneRoute]? {
         guard !push.key.isEmpty else { return nil }
-        let named = push.runner.map { runner in sources.filter { $0.runner == runner } } ?? sources
+        let named = push.runner.map { runner in
+            sources.filter { $0.hostRunner?.lowercased() == runner.lowercased() }
+        } ?? sources
         let found = named.compactMap { stack(for: push.key, on: $0) }
         return found.count == 1 ? found[0] : nil
     }

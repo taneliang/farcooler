@@ -257,7 +257,8 @@ struct PhoneRoot: View {
                 PhoneDecisionLink.Source(
                     runner: runner.host.id.uuidString, items: runner.connection.needsYou,
                     boards: runner.connection.boards,
-                    implicit: runner.connection.fleet.workspaces == nil)
+                    implicit: runner.connection.fleet.workspaces == nil,
+                    hostRunner: runner.connection.lastDaemon?.runnerId)
             }
             if let stack = PhoneDecisionLink.find(push, in: sources) {
                 pendingTask = nil
