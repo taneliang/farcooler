@@ -297,3 +297,18 @@ struct WorkspaceActionsTests {
         #expect(Notifier.words(for: Self.terminal(activity: "working"), place: "x") == nil)
     }
 }
+
+/// A notification that arrives while Far Cooler is frontmost: shown unless
+/// its terminal is on screen.
+struct NotifierPresentationTests {
+    @Test("A frontmost app shows the banner and plays the sound for a pane not on screen")
+    func showsForAPaneNotOnScreen() {
+        #expect(Notifier.presentation(terminalID: "t2", watching: ["t1"]) == [.banner, .sound])
+        #expect(Notifier.presentation(terminalID: "t2", watching: []) == [.banner, .sound])
+    }
+
+    @Test("A pane on screen gets no banner")
+    func silentForAPaneOnScreen() {
+        #expect(Notifier.presentation(terminalID: "t1", watching: ["t1", "t3"]).isEmpty)
+    }
+}

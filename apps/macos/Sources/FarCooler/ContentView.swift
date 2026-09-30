@@ -2807,7 +2807,13 @@ struct ContentView: View {
     /// been wrong in the same way for as long as it has existed, and one
     /// answer is the point.
     private func markVisibleSeen() {
-        guard NSApp.isActive else { return }
+        guard NSApp.isActive else {
+            Notifier.shared.setWatching([])
+            return
+        }
+        // What `willPresent` asks: the panes a present person is looking at,
+        // the same set the runners are told below.
+        Notifier.shared.setWatching(Presence.live.isPresent ? visibleTerminals.map(\.id) : [])
         let client = selection?.host.flatMap { store.clients[$0] }
         // Full ids, not `short`: resolving an abbreviation costs the CLI a
         // fleet listing, and this runs on a clock. See the `Watching` command

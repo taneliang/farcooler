@@ -15,8 +15,46 @@ import UserNotifications
 /// makes a future push notification or Live Activity a delivery change rather
 /// than a rethink.
 @MainActor
-final class Notifier {
+final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = Notifier()
+
+    private override init() { super.init() }
+
+    /// The terminals this window is showing to somebody who is there, which
+    /// is what `reportWatching` tells the runners. Set from the window, empty
+    /// when nobody is present.
+    private(set) var watching: Set<String> = []
+
+    /// Record what is on screen, for `willPresent`.
+    func setWatching(_ terminalIDs: [String]) {
+        watching = Set(terminalIDs)
+    }
+
+    /// How to present a notification that arrives while the app is frontmost.
+    ///
+    /// macOS shows nothing for the frontmost app's own notification unless
+    /// its delegate asks. Asked for here when the terminal it is about is not
+    /// on screen: the app is in front but the pane that finished is in another
+    /// workspace, a collapsed column or behind a zoom, and a silent post is
+    /// how that gets missed. For a pane on screen the person is looking at it,
+    /// and a banner would tell them what they just watched happen.
+    /// `terminalID` is the notification's thread identifier, which `report`
+    /// sets to the terminal's id; a notification with none is not about a
+    /// pane on screen.
+    nonisolated static func presentation(
+        terminalID: String, watching: Set<String>
+    ) -> UNNotificationPresentationOptions {
+        watching.contains(terminalID) ? [] : [.banner, .sound]
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter, willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        let terminalID = notification.request.content.threadIdentifier
+        return await MainActor.run {
+            Self.presentation(terminalID: terminalID, watching: watching)
+        }
+    }
 
     private var authorized = false
     /// What was last announced per terminal, so a state that persists is
@@ -57,6 +95,7 @@ final class Notifier {
 
     func requestAuthorization() {
         guard Self.canNotify else { return }
+        UNUserNotificationCenter.current().delegate = self
         UNUserNotificationCenter.current()
             .requestAuthorization(options: [.alert, .sound]) { [weak self] granted, _ in
                 Task { @MainActor in
