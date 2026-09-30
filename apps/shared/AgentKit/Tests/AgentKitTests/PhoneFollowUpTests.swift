@@ -95,10 +95,10 @@ struct PhoneFollowUpTests {
             runner: "RUNNER-B", items: [item], boards: [:], implicit: false)
         let place = PhoneWorkspace(runner: "RUNNER-B", workspace: "ws-billing")
         #expect(
-            PhoneDecisionLink.find(key: "bil-7", in: [quiet, holding])
+            PhoneDecisionLink.find(Self.push("bil-7"), in: [quiet, holding])
                 == [.workspace(place), .task(place, task: "t7")])
-        #expect(PhoneDecisionLink.find(key: "bil-8", in: [quiet, holding]) == nil)
-        #expect(PhoneDecisionLink.find(key: "", in: [quiet, holding]) == nil)
+        #expect(PhoneDecisionLink.find(Self.push("bil-8"), in: [quiet, holding]) == nil)
+        #expect(PhoneDecisionLink.find(Self.push(""), in: [quiet, holding]) == nil)
 
         // On a runner without workspaces, the repository's board.
         let implicit = PhoneDecisionLink.Source(
@@ -106,7 +106,7 @@ struct PhoneFollowUpTests {
             implicit: true)
         let repo = PhoneWorkspace(runner: "RUNNER-B", workspace: "repo-1")
         #expect(
-            PhoneDecisionLink.find(key: "bil-7", in: [implicit])
+            PhoneDecisionLink.find(Self.push("bil-7"), in: [implicit])
                 == [.workspace(repo), .task(repo, task: "t7")])
 
         // Answered already, so off Needs You: its card on a board still has it.
@@ -116,8 +116,46 @@ struct PhoneFollowUpTests {
         let boards = PhoneDecisionLink.Source(
             runner: "RUNNER-A", items: [], boards: ["ws-billing": board], implicit: false)
         #expect(
-            PhoneDecisionLink.find(key: "bil-7", in: [boards])
+            PhoneDecisionLink.find(Self.push("bil-7"), in: [boards])
                 == [.workspace(Self.place), .task(Self.place, task: "t7")])
+    }
+
+    static func push(_ key: String, runner: String? = nil) -> DecisionPush {
+        DecisionPush(key: key, runner: runner)
+    }
+
+    /// **Two runners with a task under one key are never guessed between.**
+    /// A push naming its runner lands on that runner's; one naming none
+    /// lands nowhere, rather than on whichever runner was asked first.
+    @Test("A decision push lands on the runner it names, and never guesses between two")
+    func aDecisionPushNeverGuessesBetweenRunners() {
+        func source(_ runner: String) -> PhoneDecisionLink.Source {
+            var item = Self.decisionItem(workspace: "ws-\(runner)")
+            item.runner = runner
+            return PhoneDecisionLink.Source(runner: runner, items: [item], boards: [:], implicit: false)
+        }
+        let a = source("RUNNER-A")
+        let b = source("RUNNER-B")
+        let onB = PhoneWorkspace(runner: "RUNNER-B", workspace: "ws-RUNNER-B")
+        #expect(
+            PhoneDecisionLink.find(Self.push("bil-7", runner: "RUNNER-B"), in: [a, b])
+                == [.workspace(onB), .task(onB, task: "t7")])
+        #expect(PhoneDecisionLink.find(Self.push("bil-7"), in: [a, b]) == nil)
+        #expect(PhoneDecisionLink.find(Self.push("bil-7", runner: "RUNNER-C"), in: [a, b]) == nil)
+        #expect(
+            PushTap(userInfo: ["kind": "decision", "task": "bil-7", "runner": "RUNNER-B"], thread: "")
+                == .task(Self.push("bil-7", runner: "RUNNER-B")))
+    }
+
+    /// **A push waits for its runners, not ten seconds**: on a cold launch
+    /// over a slow network it keeps looking until every runner has said
+    /// what needs you and read its boards, or a minute has gone.
+    @Test("A decision push waits until the runners have settled, or a minute")
+    func aDecisionPushWaitsForTheRunners() {
+        #expect(!PhoneDecisionLink.givesUp(settled: false, elapsed: 30))
+        #expect(!PhoneDecisionLink.givesUp(settled: false, elapsed: 59))
+        #expect(PhoneDecisionLink.givesUp(settled: false, elapsed: 60))
+        #expect(PhoneDecisionLink.givesUp(settled: true, elapsed: 1))
     }
 
     /// **A tap says which it is**: a decision's task by key, else an agent's
@@ -126,7 +164,7 @@ struct PhoneFollowUpTests {
     func aTapIsATaskOrATerminal() {
         #expect(
             PushTap(userInfo: ["kind": "decision", "task": "bil-7", "terminal": ""], thread: "")
-                == .task(key: "bil-7"))
+                == .task(DecisionPush(key: "bil-7", runner: nil)))
         #expect(PushTap(userInfo: ["terminal": "d002", "status": "blocked"], thread: "x") == .terminal("d002"))
         #expect(PushTap(userInfo: [:], thread: "d003") == .terminal("d003"))
         #expect(PushTap(userInfo: ["kind": "decision"], thread: "d004") == .terminal("d004"))

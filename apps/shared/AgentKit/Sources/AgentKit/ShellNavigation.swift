@@ -2453,19 +2453,33 @@ extension Fleet {
 /// terminal's id.
 enum PushTap: Equatable, Sendable {
     case terminal(String)
-    case task(key: String)
+    case task(DecisionPush)
 
     init?(userInfo: [AnyHashable: Any], thread: String) {
         if userInfo["kind"] as? String == "decision",
             let key = userInfo["task"] as? String, !key.isEmpty
         {
-            self = .task(key: key)
+            let runner = (userInfo["runner"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            self = .task(DecisionPush(key: key, runner: runner))
             return
         }
         let terminal = (userInfo["terminal"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? thread
         guard !terminal.isEmpty else { return nil }
         self = .terminal(terminal)
     }
+}
+
+/// A tapped decision push: the task's key, and the runner it's on when the
+/// push says.
+///
+/// **No push says today.** The relay's `Payload` carries `kind` and `task`
+/// and no runner, and a task key is only unique on its own runner's
+/// workspace (`bil-7` can be on two runners at once). `runner` is read from
+/// `runner` in the push, as this app's own id for the runner, for when one
+/// is sent; until then `PhoneDecisionLink.find` refuses to guess between two.
+struct DecisionPush: Equatable, Sendable {
+    var key: String
+    var runner: String?
 }
 
 /// Where a decision push lands: its workspace, then its task, with the
@@ -2483,31 +2497,48 @@ enum PhoneDecisionLink {
         var implicit: Bool
     }
 
-    /// The stack for the task whose key is `key`, or nil until a runner has
-    /// it. The push names no runner, so every runner is searched, in order:
-    /// its Needs You items first, which know their workspace, then any board
-    /// read so far with a card under that key.
-    static func find(key: String, in sources: [Source]) -> [PhoneRoute]? {
-        guard !key.isEmpty else { return nil }
-        for source in sources {
-            for item in source.items where item.task?.key == key {
-                guard let task = item.task,
-                    let workspace = item.workspaceID
-                        ?? (source.implicit ? item.repositoryID : nil)
-                else { continue }
-                let place = PhoneWorkspace(runner: source.runner, workspace: workspace)
-                return [.workspace(place), .task(place, task: task.id)]
-            }
+    /// The stack for the task `push` names, or nil until one runner has it.
+    ///
+    /// On the runner the push names, when it names one. Otherwise on the one
+    /// runner that has a task under that key: its Needs You item first,
+    /// which knows its workspace, then any board read so far with a card
+    /// under the key. Two runners with a task under one key is nil, not the
+    /// first of them: a push landing on another runner's task is worse than
+    /// Needs You, where both are.
+    static func find(_ push: DecisionPush, in sources: [Source]) -> [PhoneRoute]? {
+        guard !push.key.isEmpty else { return nil }
+        let named = push.runner.map { runner in sources.filter { $0.runner == runner } } ?? sources
+        let found = named.compactMap { stack(for: push.key, on: $0) }
+        return found.count == 1 ? found[0] : nil
+    }
+
+    /// The task under `key` on one runner.
+    private static func stack(for key: String, on source: Source) -> [PhoneRoute]? {
+        for item in source.items where item.task?.key == key {
+            guard let task = item.task,
+                let workspace = item.workspaceID ?? (source.implicit ? item.repositoryID : nil)
+            else { continue }
+            let place = PhoneWorkspace(runner: source.runner, workspace: workspace)
+            return [.workspace(place), .task(place, task: task.id)]
         }
-        for source in sources {
-            for workspace in source.boards.keys.sorted() {
-                guard let row = source.boards[workspace]?.rows.first(where: { $0.key == key })
-                else { continue }
-                let place = PhoneWorkspace(runner: source.runner, workspace: workspace)
-                return [.workspace(place), .task(place, task: row.id)]
-            }
+        for workspace in source.boards.keys.sorted() {
+            guard let row = source.boards[workspace]?.rows.first(where: { $0.key == key })
+            else { continue }
+            let place = PhoneWorkspace(runner: source.runner, workspace: workspace)
+            return [.workspace(place), .task(place, task: row.id)]
         }
         return nil
+    }
+
+    /// How long a push waits for its task at most: a cold launch on a slow
+    /// network may take most of a minute to reach any runner at all.
+    static let followWithin: TimeInterval = 60
+
+    /// Whether to stop looking and leave the phone on Needs You: once
+    /// every runner has said what needs you and read its boards (`settled`)
+    /// and the task still isn't found, or past `followWithin`.
+    static func givesUp(settled: Bool, elapsed: TimeInterval) -> Bool {
+        settled || elapsed >= followWithin
     }
 }
 
