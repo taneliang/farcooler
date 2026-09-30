@@ -624,4 +624,62 @@ class TaskBoardTest {
         assertEquals("w2", landingWorktree("t2", worktrees))
         assertNull(landingWorktree("gone", worktrees))
     }
+
+    // ---- the waiting count is decision items, not the column (ov-69) ----
+
+    private val served = DaemonBuild("1", true, "", setOf("workspaces", "tasks", "terminal_task", "needs_you"))
+
+    private fun item(
+        id: String,
+        kind: String,
+        workspace: String?,
+        also: List<String> = emptyList(),
+        repository: String = "r-busy",
+    ) = NeedsYouItem(id = id, kind = kind, also = also, workspaceId = workspace, repositoryId = repository)
+
+    /** A workspace's decision items, alone or beside an ask; not another's, not a review or a plain ask. */
+    @Test
+    fun decisionsAreTheWorkspacesDecisionItems() {
+        val billing = WorkspaceSummary(id = "w-billing", name = "Billing", ordinal = 1, repository = "r-busy")
+        val items = listOf(
+            item("a", "decision", "w-billing"),
+            item("b", "ask", "w-billing", also = listOf("decision")),
+            item("c", "ask", "w-billing"),
+            item("d", "review", "w-billing"),
+            item("e", "decision", "w-main"),
+        )
+        assertEquals(2, RunnerBoards.decisions(billing, items))
+        assertEquals(0, RunnerBoards.decisions(billing, emptyList()))
+        // An implicit workspace counts its repository's items that name no workspace.
+        val implicit = WorkspaceSummary.implicit("r-busy")
+        assertEquals(1, RunnerBoards.decisions(implicit, listOf(item("f", "decision", null), item("g", "decision", "w-main"))))
+    }
+
+    /** The items once read and served; the column until then, and always where none is served. */
+    @Test
+    fun waitingFallsBackToTheColumnUntilTheListIsRead() {
+        assertEquals(2, RunnerBoards.waiting(columnCount = 2, decisions = 0, listRead = false, listServed = true))
+        assertEquals(2, RunnerBoards.waiting(columnCount = 2, decisions = 0, listRead = true, listServed = false))
+        assertEquals(0, RunnerBoards.waiting(columnCount = 2, decisions = 0, listRead = true, listServed = true))
+        assertEquals(1, RunnerBoards.waiting(columnCount = 2, decisions = 1, listRead = true, listServed = true))
+    }
+
+    /** The Board row counts the runner's list once it has loaded: an answered decision leaves its task in the column. */
+    @Test
+    fun aRowCountsItsItemsOnceTheListIsRead() {
+        fun decisions(build: DaemonBuild, reading: RunnerNeedsYou?) = RunnerBoards.rows(
+            hostId = "h",
+            boards = listOf(WorkspaceSummary.implicit("r-busy")),
+            repositories = repositories,
+            models = boards,
+            panes = panes,
+            build = build,
+            link = RunnerLink.ANSWERING,
+            needsYou = reading,
+        ).single().decisions
+        assertEquals("before the list loads, the column", 2, decisions(served, null))
+        assertEquals("answered: two tasks, no items", 0, decisions(served, RunnerNeedsYou(emptyList())))
+        assertEquals("no list served: the column", 2, decisions(both, RunnerNeedsYou(emptyList())))
+        assertEquals(1, decisions(served, RunnerNeedsYou(listOf(item("x", "decision", null)))))
+    }
 }

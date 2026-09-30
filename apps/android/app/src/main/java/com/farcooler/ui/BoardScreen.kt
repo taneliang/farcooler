@@ -141,6 +141,7 @@ fun BoardTab(
     val fleet by connection.fleet.collectAsStateWithLifecycle()
     val daemon by connection.daemon.collectAsStateWithLifecycle()
     val link by connection.link.collectAsStateWithLifecycle()
+    val needsYou by connection.needsYou.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var refreshing by remember { mutableStateOf(false) }
@@ -199,7 +200,15 @@ fun BoardTab(
                             )
                         }
                     }
-                    TaskBoard.waitingSentence(board.waitingOnYou)?.let { waiting ->
+                    // The workspace's decision items once the runner's list is
+                    // read, the Needs Decision column until then (spec §2.2).
+                    val waitingCount = RunnerBoards.waiting(
+                        columnCount = board.waitingOnYou,
+                        decisions = RunnerBoards.decisions(workspace, needsYou?.items.orEmpty()),
+                        listRead = needsYou != null,
+                        listServed = daemon?.can("needs_you") == true,
+                    )
+                    TaskBoard.waitingSentence(waitingCount)?.let { waiting ->
                         item(key = "waiting") {
                             Text(
                                 waiting,

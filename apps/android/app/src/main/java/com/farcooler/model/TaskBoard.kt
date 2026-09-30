@@ -513,8 +513,10 @@ object RunnerBoards {
         panes: List<Terminal>,
         build: DaemonBuild?,
         link: RunnerLink,
+        needsYou: RunnerNeedsYou? = null,
     ): List<BoardRow> {
         if (build?.can("tasks") != true) return emptyList()
+        val served = build.can("needs_you")
         val speaks = TaskAgentLink.speaksOfAgents(link, build)
         val names = repositories.associate { it.id to it.displayName.ifEmpty { it.short } }
         return boards.map { workspace ->
@@ -525,13 +527,41 @@ object RunnerBoards {
                 hostId = hostId,
                 repository = repository,
                 name = if (workspace.isImplicit) repositoryName ?: workspace.name else workspace.name,
-                decisions = board?.waitingOnYou ?: 0,
+                decisions = waiting(
+                    columnCount = board?.waitingOnYou ?: 0,
+                    decisions = decisions(workspace, needsYou?.items.orEmpty()),
+                    listRead = needsYou != null,
+                    listServed = served,
+                ),
                 agents = if (speaks && board != null) board.tasksWithLiveAgents(panes) else 0,
                 workspace = workspace,
                 repositoryName = if (workspace.isImplicit) null else repositoryName,
             )
         }
     }
+
+    /**
+     * The decision items [workspace] has, out of one runner's needs-you list:
+     * its items that are a decision, alone or beside an ask. Not the Needs
+     * Decision column's rows, which an answer leaves as they were (spec §2.2:
+     * an answer doesn't move status). An implicit workspace counts its
+     * repository's items that name no workspace. AgentKit's
+     * `RunnerBoards.decisions`.
+     */
+    fun decisions(workspace: WorkspaceSummary, items: List<NeedsYouItem>): Int = items.count { item ->
+        (item.kindValue == NeedsYouKind.DECISION || NeedsYouKind.DECISION in item.alsoValues) &&
+            if (workspace.isImplicit) item.workspaceId == null && item.repositoryId == workspace.id
+            else item.workspaceId == workspace.id
+    }
+
+    /**
+     * What a board says is waiting on the person: the decision items once the
+     * runner's list is read, and the Needs Decision column's count until
+     * then, and always on a runner that serves no list. An unread list is not
+     * a list with nothing in it. The Mac's `WorkspaceCounts.waiting`.
+     */
+    fun waiting(columnCount: Int, decisions: Int, listRead: Boolean, listServed: Boolean): Int =
+        if (listRead && listServed) decisions else columnCount
 
     /**
      * The Board rows of a runner without workspaces: one per repository, each
@@ -544,6 +574,7 @@ object RunnerBoards {
         panes: List<Terminal>,
         build: DaemonBuild?,
         link: RunnerLink,
+        needsYou: RunnerNeedsYou? = null,
     ): List<BoardRow> = rows(
         hostId = hostId,
         boards = repositories.map { WorkspaceSummary.implicit(it.id) },
@@ -552,6 +583,7 @@ object RunnerBoards {
         panes = panes,
         build = build,
         link = link,
+        needsYou = needsYou,
     )
 }
 
