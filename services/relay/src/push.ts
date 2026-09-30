@@ -468,6 +468,9 @@ interface ActivityBase {
   /// flight" — which is news about the fleet, and is the case this product
   /// exists to deliver. See `pushActivity` in `index.ts`.
   alert?: { title: string; body: string }
+  /// Send at priority 5 whatever the status: news nobody needs interrupting
+  /// for, like the quiet-runner sweep's (ov-71). Never on a start.
+  routine?: boolean
 }
 
 /// When a card that is ending should leave the lock screen.
@@ -606,7 +609,10 @@ export async function sendLiveActivity(
       // is written as the event rather than the status because that is the fact
       // that makes it true.
       'apns-priority':
-        activity.event === 'start' || activity.state.status !== 'working' ? '10' : '5',
+        activity.event === 'start' ||
+          (!activity.routine && activity.state.status !== 'working')
+          ? '10'
+          : '5',
     },
     body: JSON.stringify({ aps }),
   })

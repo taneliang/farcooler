@@ -6640,6 +6640,27 @@ describe('the runner heartbeat', () => {
     expect((await pulse('mine')).status).toBe(401)
   })
 
+  it('stops answering once the phone signs out with it', async () => {
+    // Sign-out sends the pulse token beside the refresh token, and the relay
+    // forgets its hash: a copy left anywhere (the watch, a context the system
+    // is holding) reads nothing from then on. Possession is the authority,
+    // as it is for the refresh token on the same route.
+    const token = await pulseToken('user_1')
+    const other = phoneToken()
+    expect((await register('user_2', { pushToken: 'their-phone', pulseToken: other })).status).toBe(200)
+    const response = await post('/v1/auth/logout', { refreshToken: 'rt', pulseToken: token })
+    expect(response.status).toBe(200)
+    expect((await pulse(token)).status).toBe(401)
+    // Nobody else's.
+    expect((await pulse(other)).status).toBe(200)
+  })
+
+  it('forgets the pulse token at sign-out even with no refresh token to end', async () => {
+    const token = await pulseToken('user_1')
+    expect((await post('/v1/auth/logout', { pulseToken: token })).status).toBe(200)
+    expect((await pulse(token)).status).toBe(401)
+  })
+
   it('stops answering once the device is revoked', async () => {
     const token = await pulseToken('user_1')
     const id = (await env.DB.prepare(`SELECT id FROM devices`).first<{ id: string }>())!.id
@@ -6824,6 +6845,47 @@ describe('a runner that stops beating, on the card', () => {
     const before = pushes(calls).length
     await sweep()
     expect(pushes(calls).slice(before)).toEqual([])
+  })
+
+  it('never spends the alert budget: a sweep push is routine, even over a blocked headline', async () => {
+    const calls = watchFetch()
+    await card({ aria: 'working', zeno: 'blocked' })
+    const before = pushes(calls).length
+    await silence(16)
+    await sweep()
+    const sent = pushes(calls).slice(before)
+    expect(sent.length).toBe(1)
+    expect(sent[0].body.aps['content-state'].status).toBe('blocked')
+    expect(sent[0].headers['apns-priority']).toBe('5')
+  })
+
+  it('judges a runner by its own promise, not the shipped beat', async () => {
+    // Ten-minute beats: quiet past 2 x 10 + 5 = 25 minutes, and not at 21,
+    // where a rule of three beats, or of fifteen minutes flat, would say so.
+    const calls = watchFetch()
+    await card()
+    await post('/v1/heartbeat', { beatEvery: 600 }, 'mine')
+    const before = pushes(calls).length
+    await silence(21)
+    await sweep()
+    expect(updates(calls, before)).toEqual([])
+    await silence(26)
+    await sweep()
+    expect(updates(calls, before).map(state => state.quiet)).toEqual([['Studio Mac']])
+  })
+
+  it('stops sweeping a card with no rows left, once it has said so', async () => {
+    // The card named a runner, then every row went (retired, or a day old).
+    // The sweep records that there's nothing to name rather than reading the
+    // fleet again every five minutes for good.
+    const calls = watchFetch()
+    await card()
+    await silence(16)
+    await sweep()
+    await env.DB.prepare(`DELETE FROM live_activities`).run()
+    await sweep()
+    const stored = await env.DB.prepare(`SELECT quiet FROM install_cards`).first<{ quiet: string }>()
+    expect(stored?.quiet).toBe('[]')
   })
 
   it('runs every five minutes, on all four relays', () => {

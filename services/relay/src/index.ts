@@ -165,10 +165,22 @@ async function refreshSession(request: Request, env: Env): Promise<Response> {
 /// refresh token IS the authorization, and requiring a valid access token would
 /// mean the one case that most needs to work — a session already going wrong —
 /// is the one that cannot.
+///
+/// **And the device's pulse token, when the phone sends it** (ov-71). The phone
+/// deletes its own copy at sign-out, but it has handed one to the watch, and
+/// WatchConnectivity holds the last context it delivered; forgetting the hash
+/// here is what makes every copy read nothing. Possession of the token is the
+/// authority, as it is for the refresh token.
 async function logout(request: Request, env: Env): Promise<Response> {
-  const body = await request.json<{ refreshToken?: unknown }>()
+  const body = await request.json<{ refreshToken?: unknown; pulseToken?: unknown }>()
+  const pulseToken = typeof body.pulseToken === 'string' && body.pulseToken ? body.pulseToken : null
+  if (pulseToken) {
+    await env.DB.prepare(`UPDATE devices SET pulse_hash = NULL WHERE pulse_hash = ?`)
+      .bind(await sha256(pulseToken))
+      .run()
+  }
   if (typeof body.refreshToken !== 'string' || !body.refreshToken) {
-    return json({ error: 'refreshToken' }, 400)
+    return pulseToken ? json({ ok: true }) : json({ error: 'refreshToken' }, 400)
   }
 
   await fetch('https://api.workos.com/user_management/sessions/logout', {
@@ -2927,10 +2939,16 @@ function startAlert(fleet: Fleet, body: Notification): { title: string; body: st
 ///
 /// `worth`, when given, is asked of the headline before anything is pushed,
 /// so a caller whose change may not reach the card can skip the push.
+///
+/// `routine` sends it at APNs priority 5 whatever the headline says: the
+/// sweep's pushes carry no alert and nothing time-critical, and priority 10
+/// spends the budget a blocked alert depends on (`apns-priority` in
+/// `push.ts`).
 async function refreshCard(
   env: Env,
   account: string,
   worth?: (headline: AgentRow) => boolean,
+  routine = false,
 ): Promise<void> {
   const running = await env.DB.prepare(
     `SELECT update_token, environment, leader_terminal, leader_status, updated_at
@@ -2955,7 +2973,15 @@ async function refreshCard(
   // has nothing to headline, and the next agent notice will either give it one
   // or take it down.
   const headline = fleet.shown[0] ?? fleet.all[0]
-  if (!headline) return
+  if (!headline) {
+    // Nothing to headline, so nothing to push; but the card has now said
+    // everything it can about quiet runners, and recording that is what stops
+    // the sweep reading this fleet again every five minutes for good.
+    await env.DB.prepare(`UPDATE install_cards SET quiet = ? WHERE account_id = ?`)
+      .bind(JSON.stringify(fleet.quiet), account)
+      .run()
+    return
+  }
   if (worth && !worth(headline)) return
 
   const state: ActivityState = {
@@ -2975,6 +3001,7 @@ async function refreshCard(
   await deliverActivity(env, account, running.update_token, running.environment, {
     event: 'update',
     state,
+    ...(routine ? { routine: true } : {}),
   })
   // The headline it now shows, remembered the way `pushActivity` remembers
   // it: the dismissal rule reads `leader_status` to know what the card says,
@@ -3030,7 +3057,7 @@ export async function sweepQuiet(env: Env): Promise<void> {
     try {
       const { quiet } = await readFleet(env, card.account_id, Date.now())
       if (JSON.stringify(quiet.names) === (card.quiet ?? '[]')) continue
-      await refreshCard(env, card.account_id)
+      await refreshCard(env, card.account_id, undefined, true)
     } catch (error) {
       console.error(error)
     }
