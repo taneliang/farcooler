@@ -4215,8 +4215,12 @@ impl Watcher {
         let mut change_sets = tokio::time::interval(CHANGE_SET_INTERVAL);
         change_sets.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         // Its first tick is immediate, so a runner says it's alive the moment
-        // it starts rather than five minutes later. Skip, so a laptop waking
-        // from a night's sleep beats once rather than a night's worth.
+        // it starts rather than five minutes later. Skip only matters when the
+        // runtime stalls. It does NOT fire across a Mac's sleep: tokio's clock
+        // is the monotonic uptime clock there, which stops while the Mac
+        // sleeps, so after waking the interval simply resumes and the first
+        // beat can be up to `BEAT_EVERY` later. A just-woken Mac may read as
+        // quiet until then.
         let mut beats = tokio::time::interval(crate::push::BEAT_EVERY);
         beats.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         // The first tick of an interval completes immediately, and comparing

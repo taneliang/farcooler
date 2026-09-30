@@ -1129,8 +1129,14 @@ async fn push(runner: Option<&str>, cmd: PushCmd) -> Fallible {
             None => println!("not paired"),
         },
         PushCmd::Forget => {
-            Pairing::forget_in(&dir);
-            println!("forgotten · this runner will not notify anything");
+            // Withdrawn first, so the phone's widget drops this runner instead
+            // of saying it lost touch with it. The local unpair happens either
+            // way; see `push::forget_and_withdraw`.
+            if farcooler_daemon::push::forget_and_withdraw(&dir).await {
+                println!("forgotten · this runner will not notify anything");
+            } else {
+                println!("forgotten · this runner will not notify anything (the relay drops it within a day)");
+            }
         }
     }
     Ok(())

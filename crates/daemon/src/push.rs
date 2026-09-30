@@ -618,19 +618,87 @@ pub async fn retire(client: &reqwest::Client, pairing: &Pairing, terminals: &[St
 pub const BEAT_EVERY: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 /// What a heartbeat carries: that this runner is alive, which runner it is,
-/// what it runs, and how often to expect the next one. Nothing else — no
-/// count, no agent, no card.
+/// what it's called, what it runs, and how often to expect the next one.
+/// Nothing else — no count, no agent, no card.
 #[derive(Debug, serde::Serialize)]
 struct Beat<'a> {
     #[serde(rename = "beatEvery")]
     beat_every: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     install: Option<&'a str>,
+    name: &'a str,
     version: &'a str,
 }
 
 fn beat_body(install: Option<&str>) -> Beat<'_> {
-    Beat { beat_every: BEAT_EVERY.as_secs(), install, version: farcooler_protocol::BUILD }
+    Beat { beat_every: BEAT_EVERY.as_secs(), install, name: runner_name(), version: farcooler_protocol::BUILD }
+}
+
+/// What this runner calls itself on a phone: the computer's name on a Mac
+/// (what System Settings ▸ Sharing shows, and what the Mac app labels this
+/// device with), and the short hostname elsewhere. At most 64 characters.
+///
+/// Sent on every beat because the pairing label names nothing on a phone:
+/// the Mac pairs its own runner as "This Mac". Read once: it changes only
+/// when someone renames the computer, and a restart picks that up.
+pub fn runner_name() -> &'static str {
+    static NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    NAME.get_or_init(|| {
+        let name = computer_name().unwrap_or_else(|| short_host(&crate::hostname()).to_string());
+        let name = if name.is_empty() { "Runner".to_string() } else { name };
+        name.chars().take(64).collect()
+    })
+}
+
+/// The Mac's computer name, or `None` anywhere else or when `scutil` can't
+/// say. A process spawn, once per daemon.
+fn computer_name() -> Option<String> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let output = std::process::Command::new("/usr/sbin/scutil").args(["--get", "ComputerName"]).output().ok()?;
+    let name = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    (output.status.success() && !name.is_empty()).then_some(name)
+}
+
+/// A hostname cut at its first dot: `studio.local` is `studio`.
+fn short_host(host: &str) -> &str {
+    host.split('.').next().unwrap_or(host)
+}
+
+/// Tell the relay this runner is being unpaired on purpose, so the phone's
+/// widget drops it rather than calling it lost. `true` once it has landed.
+///
+/// A short timeout of its own: this runs from `push forget`, where a person
+/// is waiting, and the local unpair must not wait on an unreachable relay.
+pub async fn withdraw(pairing: &Pairing) -> bool {
+    let Ok(client) = reqwest::Client::builder().timeout(std::time::Duration::from_secs(5)).build() else {
+        return false;
+    };
+    let url = format!("{}/v1/heartbeat", pairing.relay.trim_end_matches('/'));
+    let body = serde_json::json!({ "withdrawn": true });
+    match client.post(&url).bearer_auth(&pairing.token).json(&body).send().await {
+        Ok(response) => response.status().is_success(),
+        Err(e) => {
+            tracing::warn!(error = %e, "could not reach the relay to withdraw this runner");
+            false
+        }
+    }
+}
+
+/// Unpair: withdraw from the relay if it answers, then forget the pairing
+/// whatever it said. `true` when the relay heard the withdrawal.
+///
+/// When it didn't, the runner still stops beating, and the relay drops it
+/// from the phone's pulse a day after its last beat; until then the widget
+/// may say it lost touch with it.
+pub async fn forget_and_withdraw(runtime_dir: &Path) -> bool {
+    let withdrawn = match Pairing::load_in(runtime_dir) {
+        Some(pairing) => withdraw(&pairing).await,
+        None => false,
+    };
+    Pairing::forget_in(runtime_dir);
+    withdrawn
 }
 
 /// Tell the relay this runner is alive.
@@ -665,7 +733,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_beat_carries_its_promise_its_runner_and_nothing_else() {
+    fn a_beat_carries_its_promise_its_runner_its_name_and_nothing_else() {
         // Three programs read this body. The relay reads `beatEvery` in
         // seconds and clamps it; a rename or a unit change here is a runner
         // the phone judges by the wrong clock.
@@ -673,8 +741,74 @@ mod tests {
         assert_eq!(sent["beatEvery"], 300, "{sent}");
         assert_eq!(sent["install"], "0190-abc", "{sent}");
         assert_eq!(sent["version"], farcooler_protocol::BUILD, "{sent}");
+        // The name the phone says "lost touch with" — never "This Mac".
+        assert_eq!(sent["name"], runner_name(), "{sent}");
         let keys: Vec<&str> = sent.as_object().expect("an object").keys().map(String::as_str).collect();
-        assert_eq!(keys.len(), 3, "a beat says nothing else: {sent}");
+        assert_eq!(keys.len(), 4, "a beat says nothing else: {sent}");
+    }
+
+    #[test]
+    fn a_runner_has_a_name_and_it_is_not_a_domain() {
+        let name = runner_name();
+        assert!(!name.is_empty(), "a runner with no name would be named by its pairing label");
+        assert!(name.chars().count() <= 64, "{name}");
+        // A bare hostname is cut at its first dot: `studio.local` is Studio's.
+        assert_eq!(short_host("studio.local"), "studio");
+        assert_eq!(short_host("studio"), "studio");
+    }
+
+    /// Accept one request on `listener`, answer `status`, and hand back its
+    /// request line and body.
+    async fn one_request(listener: tokio::net::TcpListener, status: &'static str) -> (String, serde_json::Value) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut seen = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            let n = socket.read(&mut buf).await.unwrap();
+            seen.extend_from_slice(&buf[..n]);
+            let text = String::from_utf8_lossy(&seen).to_string();
+            if let Some(end) = text.find("\r\n\r\n") {
+                let length = text[..end]
+                    .lines()
+                    .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap()))
+                    .unwrap_or(0);
+                if seen.len() >= end + 4 + length {
+                    let reply = format!("HTTP/1.1 {status}\r\ncontent-length: 2\r\n\r\n{{}}");
+                    socket.write_all(reply.as_bytes()).await.unwrap();
+                    let line = text.lines().next().unwrap_or_default().to_string();
+                    return (line, serde_json::from_slice(&seen[end + 4..end + 4 + length]).unwrap());
+                }
+            }
+            assert!(n != 0, "the relay's socket closed before a whole request");
+        }
+    }
+
+    #[tokio::test]
+    async fn forgetting_a_pairing_withdraws_the_runner_first() {
+        // Stop Notifying: the runner is fine, and must leave the phone's pulse
+        // rather than read as "lost touch" for a day.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        Pairing { relay: format!("http://{}", listener.local_addr().unwrap()), token: "t".into() }
+            .save_in(dir.path())
+            .expect("save");
+        let relay = tokio::spawn(one_request(listener, "200 OK"));
+        assert!(forget_and_withdraw(dir.path()).await, "the withdrawal landed");
+        let (line, body) = relay.await.unwrap();
+        assert!(line.starts_with("POST /v1/heartbeat "), "{line}");
+        assert_eq!(body["withdrawn"], true, "{body}");
+        assert!(Pairing::load_in(dir.path()).is_none(), "forget means forgotten");
+    }
+
+    #[tokio::test]
+    async fn forgetting_still_forgets_when_the_relay_is_unreachable() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // A port nobody listens on: bound, then dropped.
+        let addr = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap();
+        Pairing { relay: format!("http://{addr}"), token: "t".into() }.save_in(dir.path()).expect("save");
+        assert!(!forget_and_withdraw(dir.path()).await, "nothing landed");
+        assert!(Pairing::load_in(dir.path()).is_none(), "the local unpair happens anyway");
     }
 
     #[test]
