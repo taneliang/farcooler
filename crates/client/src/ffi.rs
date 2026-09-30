@@ -1549,6 +1549,24 @@ fn task_note_of(args: &Value) -> Result<farcooler_protocol::v1::TaskNoteAppend, 
     Ok(crate::session::task_note_append(task, kind, body))
 }
 
+/// `task.create`'s arguments: `{repository, workspace?, title, intent?,
+/// acceptance?}`, as New Task… sends them. `workspace` absent or null is the
+/// repository's Main, as for `task.list`; `acceptance` is a list of lines.
+/// See `session::new_task` for the rest of the rule.
+fn task_create_of(args: &Value) -> Result<farcooler_protocol::v1::TaskCreate, SessionError> {
+    const METHOD: &str = "task.create";
+    let repository = optional_id(args, "repository", METHOD)?
+        .ok_or_else(|| SessionError::Protocol(format!("{METHOD} needs a repository")))?;
+    let workspace = optional_id(args, "workspace", METHOD)?;
+    let text = |key: &str| args.get(key).and_then(|v| v.as_str()).unwrap_or_default();
+    let acceptance: Vec<String> = args
+        .get("acceptance")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+    crate::session::new_task(repository, workspace, text("title"), text("intent"), &acceptance)
+}
+
 /// `workspace.start_orchestrator`'s arguments: `{workspace, harness,
 /// replace?}`. `replace` absent is false: a second orchestrator is refused
 /// (`orchestrator_taken`) unless the person asked to replace the first.
@@ -1957,11 +1975,10 @@ async fn dispatch(
 
         // ---- the board ----
         //
-        // Read-only, and deliberately so for now: a phone shows a repository's
-        // board and goes from a card to the agent on it. Moving a card and
-        // answering a question are writes with their own rules — a note can
-        // never be edited, a status change is a note — and they get arms when
-        // a phone has a screen that makes them.
+        // A phone reads a board, goes from a card to the agent on it, answers
+        // a decision (`task.note`) and files a task (`task.create`). Moving a
+        // card is a write with its own rules — a status change is a note —
+        // and it gets an arm when a phone has a screen that makes it.
         //
         // Both answer in the CLI's shapes (`tasks_json`), because AgentKit has
         // ONE decoder for a board and the Mac feeds it the CLI's output. Both
@@ -1987,6 +2004,12 @@ async fn dispatch(
         // `{task, kind: "answer", body}`, which takes the decision off Needs
         // You. Always as `user`; see `task_note_of`.
         "task.note" => Ok(session.task_note(task_note_of(args)?).await?),
+
+        // New Task…: a task filed on a board, as `user`. `{repository,
+        // workspace?, title, intent?, acceptance?}`; see `task_create_of`.
+        "task.create" => {
+            Ok(session.create_task(task_create_of(args)?).await?)
+        }
 
         // Ruling 8: a phone may start a workspace's orchestrator. `{workspace,
         // harness, replace?}`; `replace` stops a live one first.
@@ -2630,6 +2653,62 @@ mod tests {
             assert!(refused.is_err(), "{forged:?} was accepted");
         }
         assert!(task_note_of(&json!({ "kind": "answer", "body": "x" })).is_err(), "no task");
+    }
+
+    /// New Task… on a phone sends what `farcooler task create` sends: the
+    /// title trimmed, the details as the intent, acceptance lines the runner
+    /// mints ids for, the board it was chosen from, and `user` as the actor.
+    #[test]
+    fn task_create_files_a_title_on_its_board_as_the_user() {
+        let (repository, billing) = (uuid::Uuid::now_v7(), uuid::Uuid::now_v7());
+        let create = task_create_of(&json!({
+            "repository": repository.to_string(),
+            "workspace": billing.to_string(),
+            "title": "  Fix the flaky test \n",
+            "intent": "It fails one run in ten.",
+            "acceptance": ["CI is green ten times running"],
+        }))
+        .expect("a create");
+        assert_eq!(create.repository_id.as_ref(), repository.as_bytes());
+        assert_eq!(create.workspace_id.as_deref(), Some(billing.as_bytes().as_slice()));
+        assert_eq!(create.title, "Fix the flaky test");
+        assert_eq!(create.intent, "It fails one run in ten.");
+        assert_eq!(create.acceptance.len(), 1);
+        assert_eq!(create.acceptance[0].text, "CI is green ten times running");
+        assert!(create.acceptance[0].id.is_empty(), "a new line; the runner mints its id");
+        assert_eq!(create.actor, "user", "a phone files as the person holding it");
+        assert!(create.worktree_id.is_none() && create.constraints.is_empty() && create.labels.is_empty());
+
+        // Only a title: Main's board, no intent, no acceptance.
+        for workspace in [None, Some(Value::Null)] {
+            let mut args = json!({ "repository": repository.to_string(), "title": "t" });
+            if let Some(null) = workspace {
+                args["workspace"] = null;
+            }
+            let plain = task_create_of(&args).expect("a plain create");
+            assert!(plain.workspace_id.is_none(), "absent is Main, which the runner picks");
+            assert_eq!((plain.intent.as_str(), plain.acceptance.len()), ("", 0));
+        }
+
+        // Refused as the runner would refuse it: `invalid-argument`, `title`.
+        let title_refused = |title: String| {
+            match task_create_of(&json!({ "repository": repository.to_string(), "title": title })) {
+                Err(SessionError::Refused { code, what, .. }) => {
+                    code == farcooler_protocol::v1::ErrorCode::InvalidArgument as i32 && what == "title"
+                }
+                _ => false,
+            }
+        };
+        assert!(title_refused("   ".into()), "a blank title");
+        assert!(title_refused(String::new()), "no title");
+        assert!(title_refused("a".repeat(201)), "201 scalars");
+        assert!(!title_refused(format!("  {}  ", "a".repeat(200))), "200, once trimmed");
+        // Scalars, as `checked_title` counts: a flag is two.
+        assert!(title_refused("\u{1F1F8}\u{1F1EC}".repeat(101)), "202 scalars in 101 flags");
+
+        assert!(task_create_of(&json!({ "title": "t" })).is_err(), "no repository");
+        let malformed = json!({ "repository": repository.to_string(), "workspace": "billing", "title": "t" });
+        assert!(task_create_of(&malformed).is_err(), "never widened to Main");
     }
 
     #[test]

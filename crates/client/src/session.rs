@@ -1826,6 +1826,28 @@ impl Session {
         }
     }
 
+    /// File a task on a board, as `farcooler task create` does: New Task… on
+    /// a phone. `create` is `new_task`'s, so its actor is `user`. Gated like
+    /// `tasks`; a board named by workspace also requires `workstreams`, so a
+    /// runner too old to read the field refuses rather than filing on Main.
+    /// Answers with the task, in `task list --json`'s row shape.
+    pub async fn create_task(
+        &mut self,
+        create: farcooler_protocol::v1::TaskCreate,
+    ) -> Result<serde_json::Value, SessionError> {
+        require(self.capabilities(), farcooler_protocol::capability::TASKS, "task.create")?;
+        let repository = uuid_of(&create.repository_id);
+        let required = match create.workspace_id {
+            Some(_) => vec![farcooler_protocol::capability::WORKSTREAMS.to_string()],
+            None => Vec::new(),
+        };
+        let payload = request::Payload::TaskCreate(create);
+        match self.value_requiring("task.create", Some(repository), Some(payload), required).await? {
+            result::Value::Task(t) => Ok(crate::tasks_json::task_json(&t, now_millis())),
+            other => Err(wrong("task", &other)),
+        }
+    }
+
     /// Open a workspace's orchestrator (ruling 8: a workspace with none was a
     /// dead end on the phone). Refused without a round trip on a runner
     /// without `workstreams`, which has no orchestrators.
@@ -2130,6 +2152,52 @@ pub fn task_note_append(
         supersedes: None,
         actor: "user".to_string(),
     }
+}
+
+/// A task a phone files: New Task…'s title and details, on `repository`'s
+/// board or `workspace`'s, as `user`, the only actor a phone can be.
+///
+/// The fields `farcooler task create` sends, with its rule for them: the
+/// title trimmed, the intent and acceptance lines as given. A title the
+/// runner would refuse (`checked_title`: empty once trimmed, or over 200
+/// Unicode scalars) is refused here the way the runner would refuse it,
+/// `invalid-argument` naming `title`, without the round trip.
+pub fn new_task(
+    repository: Uuid,
+    workspace: Option<Uuid>,
+    title: &str,
+    intent: &str,
+    acceptance: &[String],
+) -> Result<farcooler_protocol::v1::TaskCreate, SessionError> {
+    let title = title.trim();
+    if title.is_empty() || title.chars().count() > 200 {
+        return Err(SessionError::Refused {
+            code: farcooler_protocol::v1::ErrorCode::InvalidArgument as i32,
+            retryable: false,
+            message: "a task needs a title of at most 200 characters".to_string(),
+            what: "title".to_string(),
+        });
+    }
+    let id = |u: Uuid| bytes::Bytes::copy_from_slice(u.as_bytes());
+    Ok(farcooler_protocol::v1::TaskCreate {
+        repository_id: id(repository),
+        workspace_id: workspace.map(id),
+        title: title.to_string(),
+        intent: intent.to_string(),
+        // An empty id is a new line, and the runner mints one.
+        acceptance: acceptance
+            .iter()
+            .map(|text| farcooler_protocol::v1::TaskAcceptanceItem {
+                id: bytes::Bytes::new(),
+                text: text.clone(),
+                met: false,
+            })
+            .collect(),
+        constraints: Vec::new(),
+        labels: Vec::new(),
+        worktree_id: None,
+        actor: "user".to_string(),
+    })
 }
 
 /// Refuse `method` on a runner that cannot serve it, as the runner itself
