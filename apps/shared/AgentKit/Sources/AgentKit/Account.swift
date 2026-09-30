@@ -337,8 +337,9 @@ public final class Account: NSObject, ObservableObject {
         label: String,
         environment: String,
         liveActivityStartToken: String? = nil,
-        notifyOnDone: Bool = true
-    ) async -> Result<Void, AccountError> {
+        notifyOnDone: Bool = true,
+        pulse: Bool = false
+    ) async -> Result<String?, AccountError> {
         var payload: [String: Any] = [
             "pushToken": pushToken, "platform": platform, "label": label,
             // "When an agent finishes or fails", so the toggle reaches the
@@ -370,7 +371,14 @@ public final class Account: NSObject, ObservableObject {
         if let liveActivityStartToken {
             payload["liveActivityStartToken"] = liveActivityStartToken
         }
-        return await authenticatedPost("/v1/devices", payload).map { _ in () }
+        // A pulse token, for the widget to ask the relay which runners are
+        // still beating (ov-53). Only the phone asks: nothing on the Mac reads
+        // one. Answered once, as `pulseToken`; a relay too old to mint one
+        // answers without it, and that is nil here.
+        if pulse { payload["pulse"] = true }
+        return await authenticatedPost("/v1/devices", payload).map { body in
+            body["pulseToken"] as? String
+        }
     }
 
     /// File the push token for one running Live Activity, or clear it.
@@ -720,6 +728,9 @@ public final class Account: NSObject, ObservableObject {
         defaults.removeObject(forKey: "account.email")
         TokenStore.delete(Self.accessKey)
         TokenStore.delete(Self.refreshKey)
+        // The widget's pulse credential reads this account's runners, so it
+        // goes with the account. See `PulseStore`.
+        PulseStore.clear()
     }
 
     private func authenticate(_ url: URL) async throws -> URL {

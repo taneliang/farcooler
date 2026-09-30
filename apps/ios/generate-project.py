@@ -380,6 +380,10 @@ AGENTKIT_SOURCES = [
     # three share.
     "FleetSnapshot.swift",
     "SnapshotStore.swift",
+    # The runner heartbeat's phone half (ov-53): the app files the pulse token
+    # the relay hands over, and the widget reads it to ask which runners are
+    # still beating. In both, like `SnapshotStore.swift`, for the same reason.
+    "RunnerPulse.swift",
     # The markdown renderer, shared for the same reason the reducer is: the
     # phone drew agent replies as plain `Text`, so a table arrived as a wall of
     # pipes and a heading as a line beginning with a hash. Same conversation,
@@ -783,6 +787,9 @@ activity_build_ids = {
         # `FleetSnapshot.swift` compiles this beside it; it's plain Foundation.
         "NeedsYou.swift",
         "SnapshotStore.swift",
+        # Which runners the relay says are still beating, and the credential
+        # to ask with. The widget's footer names a quiet one (ov-53).
+        "RunnerPulse.swift",
         # The card's buttons. `AnswerPermissionIntent` is what a button is wired
         # to and `GlancePermissions` is where its labels come from — the
         # extension can reach no runner, so the agent's own option names arrive

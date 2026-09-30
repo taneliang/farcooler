@@ -44,6 +44,11 @@ public final class PushRegistration: ObservableObject {
     /// every install has always had.
     public var notifyOnDone: () -> Bool = { true }
 
+    /// Whether to ask the relay for a pulse token at registration, and keep it
+    /// in the App Group for the widget (ov-53). Set by the phone at launch; the
+    /// Mac has no widget that reads one.
+    public var wantsPulse = false
+
     /// ActivityKit's push-to-start token, when the app has one.
     ///
     /// Filed with the device rather than on a route of its own because it is
@@ -88,9 +93,17 @@ public final class PushRegistration: ObservableObject {
             label: label(),
             environment: Self.environment,
             liveActivityStartToken: liveActivityStartToken,
-            notifyOnDone: notifyOnDone())
+            notifyOnDone: notifyOnDone(),
+            pulse: wantsPulse)
         {
-        case .success:
+        case .success(let pulseToken):
+            // Every registration that asks gets a new token and the relay
+            // forgets the old one, so this is written each time. Nil is a
+            // relay too old to mint one: the file is left as it is, and the
+            // widget's fetch with an old token fails into today's hedge.
+            if let pulseToken {
+                PulseStore.write(PulseCredential(relay: Account.shared.relay, token: pulseToken))
+            }
             registered = true
             lastError = nil
         case .failure(let why):

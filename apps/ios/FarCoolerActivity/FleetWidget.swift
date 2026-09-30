@@ -38,6 +38,10 @@ struct FleetWidget: Widget {
 struct FleetEntry: TimelineEntry {
     let date: Date
     let snapshot: FleetSnapshot
+    /// The runners the relay says have gone quiet, by name: named in the
+    /// footer beside the ones the app lost touch with. Empty when the relay
+    /// said nothing, which draws today's hedge. See `RunnerPulse`.
+    var quiet: [String] = []
 
     /// Whether a snapshot has ever been written.
     ///
@@ -85,13 +89,31 @@ struct FleetProvider: TimelineProvider {
         // moment every render says the same thing, and asking the system for
         // wake-ups that change nothing spends a budget the reloads from the app
         // and the extension need.
-        let entries =
-            [FleetEntry(date: now, snapshot: snapshot)]
-            + Self.wakes(for: snapshot, after: now).map {
-                FleetEntry(date: $0, snapshot: snapshot)
-            }
-
-        completion(Timeline(entries: entries, policy: .never))
+        //
+        // **Except the relay's word on which runners are beating** (ov-53). A
+        // suspended app can't see its links, so this asks the relay, with the
+        // pulse token the app filed, and names a runner that's gone quiet in
+        // the footer. While any runner beats, the timeline asks to be looked
+        // at again (`RunnerPulse.nextLook`), since that is the only way this
+        // widget can learn one stopped. No credential, a failed fetch, or no
+        // runner that beats: `.never` and today's hedge, exactly as before.
+        Task {
+            let pulses: [RunnerPulse]? =
+                if let credential = PulseStore.read() {
+                    await RunnerPulse.fetch(credential)
+                } else {
+                    nil
+                }
+            let quiet = RunnerPulse.quiet(pulses ?? [])
+            let entries =
+                [FleetEntry(date: now, snapshot: snapshot, quiet: quiet)]
+                + Self.wakes(for: snapshot, after: now).map {
+                    FleetEntry(date: $0, snapshot: snapshot, quiet: quiet)
+                }
+            let policy: TimelineReloadPolicy =
+                RunnerPulse.nextLook(after: now, pulses: pulses).map { .after($0) } ?? .never
+            completion(Timeline(entries: entries, policy: policy))
+        }
     }
 
     /// How many staleness entries one timeline may carry.
@@ -829,8 +851,9 @@ private struct StaleFooter: View {
         // A snapshot assembled only from pushes knows about the agents that
         // happened to notify. Saying so is the difference between "these are
         // your agents" and "these are the ones I have heard from". A runner
-        // the phone lost touch with is named instead: see `FleetSnapshot.hedge`.
-        let source = entry.snapshot.hedge.map { " · \($0.footer)" } ?? ""
+        // the phone lost touch with is named instead, and so is one the relay
+        // says has stopped beating: see `FleetSnapshot.hedge(quiet:)`.
+        let source = entry.snapshot.hedge(quiet: entry.quiet).map { " · \($0.footer)" } ?? ""
         if entry.hasSnapshot {
             // **A figure, not a running clock.** This was
             // `Text(_, style: .relative)`, which ticks: a widget counting

@@ -500,9 +500,21 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
 
     /// Why these may not be the whole fleet. A lost runner comes first: when
     /// the phone has lost touch with a runner, that's the reason worth
-    /// saying, whatever else is missing.
-    public var hedge: Hedge? {
-        if let lost = lostRunners, !lost.isEmpty { return .lostTouch(lost) }
+    /// saying, whatever else is missing. `hedge(quiet:)` is the rule; this is
+    /// it with no word from the relay.
+    public var hedge: Hedge? { hedge(quiet: []) }
+
+    /// `hedge`, with the runners the relay says have gone quiet named beside
+    /// the ones the app lost touch with (ov-50's words). A quiet runner
+    /// outranks "from notifications" the way a lost one already does.
+    ///
+    /// Empty `quiet` is exactly `hedge`: a runner too old to beat never
+    /// reaches the pulse (`RunnerPulse`), and a failed fetch hands over
+    /// nothing, so either keeps today's hedge.
+    public func hedge(quiet: [String]) -> Hedge? {
+        var seen = Set<String>()
+        let lost = ((lostRunners ?? []) + quiet).filter { seen.insert($0).inserted }
+        if !lost.isEmpty { return .lostTouch(lost) }
         return complete ? nil : .fromNotifications
     }
 
