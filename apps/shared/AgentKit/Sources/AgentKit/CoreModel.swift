@@ -78,11 +78,6 @@ struct Fleet: Decodable {
     /// workspace per repository — today's layout. Empty is a runner that has
     /// them and nothing registered. `Session::fleet` sends no key for the
     /// first and `[]` for the second.
-    ///
-    /// **Not `RunnerDirectory`'s `"workspaces"`.** That key is older, is on
-    /// disk, and holds WORKTREES under their name from before the rename; it
-    /// is frozen. This is the fleet envelope's list of workstreams, which is a
-    /// different thing under the same word. `FleetDecodeTests` pins both.
     var workspaces: [WorkspaceSummary]?
 
     enum CodingKeys: String, CodingKey {

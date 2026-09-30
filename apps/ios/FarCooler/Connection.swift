@@ -69,9 +69,9 @@ final class Connection: ObservableObject {
     /// this link. Every claim about now — a card's marks, a heading, a
     /// "Working…" — asks this, not `phase`: for a round trip after a
     /// reconnect the fleet is the last link's. See
-    /// `ShellRunnerLabel.answering`.
+    /// `RunnerLink.answering`.
     var isAnswering: Bool {
-        ShellRunnerLabel.answering(connected: phase == .connected, fleetReadOnThisLink: fleetOnThisLink)
+        RunnerLink.answering(connected: phase == .connected, fleetReadOnThisLink: fleetOnThisLink)
     }
     @Published private(set) var repositories: [Repository] = []
 
@@ -834,8 +834,8 @@ final class Connection: ObservableObject {
     /// Once per LINK, which is the half that was missing: nothing cleared it,
     /// so the first answer stood for the life of the process. A runner
     /// upgraded while this app was running reconnected and went on being
-    /// described by its old build, and every gate on its capabilities (a drag
-    /// in the overview, `watching`) stayed shut until the app was relaunched.
+    /// described by its old build, and every gate on its capabilities (such as
+    /// `watching`) stayed shut until the app was relaunched.
     @Published private(set) var daemon: DaemonBuild?
 
     /// Drop the build read over the previous link, so the next `refresh`
@@ -857,7 +857,7 @@ final class Connection: ObservableObject {
     /// The last build any link to this runner reported, kept through a
     /// reconnect.
     ///
-    /// For LAYOUT only — whether the overview draws this runner's Board rows —
+    /// For LAYOUT only — whether a workspace draws its Board rows —
     /// and never for a capability gate on a call: `daemon` is what those ask,
     /// and its clear is what makes a reconnected runner prove itself again.
     /// A Board row that vanished for the round trip after every reconnect
@@ -952,9 +952,8 @@ final class Connection: ObservableObject {
             if link == daemonLink { fleetOnThisLink = true }
 
             // What this daemon can do, asked once per connection, on its first
-            // fleet. The overview reads it to decide whether a runner's cards
-            // can be dragged — `worktree_order` — and until now nothing on
-            // the phone asked unless somebody opened Settings. A no-op once
+            // fleet. Screens read it to gate what a runner can do, and nothing
+            // on the phone asked unless somebody opened Settings. A no-op once
             // answered, and it swallows its own failure.
             if daemon == nil { await loadDaemonBuild() }
 
@@ -995,14 +994,6 @@ final class Connection: ObservableObject {
             FleetSnapshotWriter.write(
                 fleet: fleet, inbox: inboxRead ? inbox : nil, machine: hostLabel,
                 runner: host?.id.uuidString ?? "", hostRunner: lastDaemon?.runnerId)
-
-            // And the same fleet again, in the one shape a runner you are NOT
-            // looking at can still be drawn from. See `RunnerDirectory`, and
-            // note that this is not a second copy of `fleet.json`: that file
-            // is agents-only, single, and rewritten whole by whichever
-            // connection polled last, so it cannot answer "what worktrees does
-            // the runner I am not on have".
-            recordDirectory(at: Date())
 
             // Announce anything worth announcing, from the fleet we just read.
             //
@@ -1274,11 +1265,11 @@ final class Connection: ObservableObject {
     /// every time the Wi-Fi blinked would be a count nobody could trust.
     @Published private(set) var boards: [String: TaskBoardModel] = [:]
 
-    /// Boards, by workspace id, whose last read failed. The overview's row
+    /// Boards, by workspace id, whose last read failed. The workspace's list
     /// keeps the last good board; the board itself says it could not read.
     @Published private(set) var unreadBoards: Set<String> = []
 
-    /// Every board this runner keeps, in the order the overview draws them:
+    /// Every board this runner keeps, in the order the screens draw them:
     /// each repository's workspaces, or its one implicit board on a runner
     /// that names none. What a sweep reads; see `RunnerBoards.boards`.
     var boardList: [WorkspaceSummary] {
@@ -2132,37 +2123,6 @@ final class Connection: ObservableObject {
         }
     }
 
-    func hideWorktree(_ worktree: Worktree) async {
-        _ = try? await core.call("worktree.hide", ["worktree": worktree.id])
-        await refresh()
-    }
-
-    func unhideWorktree(_ worktree: Worktree) async {
-        _ = try? await core.call("worktree.unhide", ["worktree": worktree.id])
-        await refresh()
-    }
-
-    /// Put these worktrees in this order on THIS runner, first one first.
-    ///
-    /// The whole section the overview drew, by the daemon's own ids — never
-    /// "move this one to N", and never another runner's ids: the runner
-    /// permutes exactly the rows it is named among the ranks they already hold
-    /// (`Store::reorder_worktrees`), and each runner keeps its own table. The
-    /// Mac's `DaemonClient.reorderWorktrees` is the same call over the CLI.
-    /// Which ids go here is decided in AgentKit — see `ShellReorderRequest`.
-    ///
-    /// Refreshed on the way out whether it worked or not, and that is what the
-    /// overview's pending order relies on: when this returns, the fleet on
-    /// this connection is the runner's answer, so dropping the drawn order then
-    /// shows either the drop or — for a refusal — the card back where it was.
-    /// A refusal is otherwise swallowed, like `hideWorktree`'s: the card going
-    /// back IS the sentence.
-    func reorderWorktrees(_ worktrees: [String]) async {
-        guard worktrees.count > 1 else { return }
-        _ = try? await core.call("worktree.reorder", ["worktrees": worktrees])
-        await refresh()
-    }
-
     /// What asking to remove a worktree came back with — mirrors macOS's
     /// `DaemonClient.RemoveWorktreeResult` so both apps' UIs make the same
     /// three-way distinction.
@@ -2241,64 +2201,6 @@ final class Connection: ObservableObject {
         fleet.worktrees.first { $0.id == worktree }?.terminals.first { $0.id == id }
     }
 
-    /// Write down what this runner has, for the grid to draw when you are
-    /// looking at a different one.
-    ///
-    /// **Derived from `ShellFleetMap`, not from `fleet` directly**, and that
-    /// is the whole reason this is three lines rather than thirty. The order
-    /// of a worktree's tabs, which terminal is a Changes pane, what a mark
-    /// means and how a tail is chosen are all decided once, in the file that
-    /// draws them — a cache that mapped a fleet a second way would be a grid
-    /// where a cached card and a live one disagree about the same worktree.
-    ///
-    /// **At most once a minute, and that is a THROTTLE rather than a change
-    /// test.** A poll lands every three seconds; a preferences key rewritten
-    /// at that rate for a screen nobody is looking at is churn. A change test
-    /// alone would not have stopped it — the tails are the last few lines an
-    /// agent said, so on a runner that is actually working they change on
-    /// nearly every poll, and "write when it changes" would have been a write
-    /// every three seconds with a comment claiming otherwise.
-    ///
-    /// A minute is the resolution the only reader needs: a header that says
-    /// "Last seen 2 hours ago". What it costs is that a worktree created in
-    /// the last minute can be missing from the cache when somebody switches
-    /// away — from a grid that is explicitly a memory, with the age on the
-    /// heading.
-    private func recordDirectory(at now: Date) {
-        guard let host else { return }
-        // Before the mapping, not after it: the point of the throttle is to
-        // not do this work either.
-        if let last = lastDirectory, now.timeIntervalSince(last.seenAt) < 60 { return }
-        let map = ShellFleetMap.of(self, host: host, now: now)
-        let worktrees = map.fleet.worktrees.map { worktree in
-            RunnerDirectory.Worktree(
-                // The DAEMON's own id, read back off the entry the map carries.
-                // `ShellWorktree.id` is the shell's composite —
-                // `"\(runner)/\(worktree)"`, see `ShellIdentity` — and the
-                // cache must hold what the wire holds: `RunnerDirectory.group()`
-                // composes its own ids from these, and a crossing note names
-                // one. Falls back to the shell's, which cannot happen — the map
-                // built this worktree from that very entry — and would be a
-                // stale grid rather than a wrong RPC if it did.
-                id: map.entries[worktree.id]?.worktree.id ?? worktree.id,
-                name: worktree.name, isHidden: worktree.isHidden,
-                tabs: worktree.tabs.map {
-                    RunnerDirectory.Tab(
-                        title: $0.title, mark: RunnerDirectory.word(for: $0.mark))
-                },
-                tail: worktree.tail)
-        }
-        let directory = RunnerDirectory(
-            runner: host.id.uuidString, label: host.label, seenAt: now,
-            worktrees: worktrees)
-        lastDirectory = directory
-        RunnerDirectoryStore.record(directory)
-    }
-
-    /// The last directory this connection wrote, so the next poll can tell
-    /// "nothing has changed" from "nothing has been written yet".
-    private var lastDirectory: RunnerDirectory?
-
     /// Remember the tab somebody chose in a worktree.
     ///
     /// Called from one place — `ShellScreen.remember(_:leaving:)`, when a pane
@@ -2322,13 +2224,11 @@ final class Connection: ObservableObject {
     /// `fleet` and `phase` are `private(set)` because nothing outside this file
     /// may claim to know what a runner said. A harness is the one caller that
     /// has to, and it has to because of what mounting the REAL screens costs:
-    /// the shell reads this fleet for the bar's name, the ribbon's marks, the
-    /// column's rows and every card in the overview, and a harness that skipped
-    /// them was a harness that drew none of that chrome. See
-    /// `AgentLayoutHarness`.
+    /// the shell reads this fleet for the bar's name, the ribbon's marks and
+    /// the column's rows, and a harness that skipped them was a harness that
+    /// drew none of that chrome. See `AgentLayoutHarness`.
     ///
-    /// `.connected` deliberately: the runner's heading in the overview says
-    /// how its link is, and a harness left `.connecting` would put
+    /// `.connected` deliberately: a harness left `.connecting` would put
     /// "Connecting" over every screenshot of a screen whose runner is fine.
     func standIn(on fleet: Fleet) {
         self.fleet = fleet

@@ -42,7 +42,7 @@
 # deployment target) that does not name the OS has proved the newest one.
 # Name it with SIMULATOR_OS (not a bare OS, which other tools set):
 #
-#   SIMULATOR_OS=26.5 ./scripts/ios-ui-tests.sh FarCoolerUITests/ShellRunnerHeadingTests
+#   SIMULATOR_OS=26.5 ./scripts/ios-ui-tests.sh FarCoolerUITests/ShellGestureTests
 #
 # Unset, the destination is exactly what it always was.
 set -euo pipefail

@@ -33,8 +33,8 @@ extension ShellRootView {
     /// runs: the column unfurls upward, so the bar's own origin rises by
     /// exactly the lift being measured. Measured locally, `up` came out as
     /// `drag - lift`, which settles at half the distance the finger actually
-    /// travelled — a column that stops at 30 points for a 60-point drag and an
-    /// overview that needs twice its documented reach. Nothing about it looks
+    /// travelled — a column that stops at 30 points for a 60-point drag and a
+    /// page that needs twice its documented reach. Nothing about it looks
     /// like a bug; it just feels heavy.
     func barGesture(page: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .global)
@@ -162,7 +162,6 @@ extension ShellRootView {
         case .horizontal:
             trackX = ShellGesture.translation(
                 dx: frame.sideways, rubberBanding: rubberBands(frame.sideways))
-            crossing = crossProgress(trackX)
         case .vertical:
             lift = frame.lift
             // WHERE THE FINGER IS, not how far it has come, because the row it
@@ -193,9 +192,6 @@ extension ShellRootView {
             // said the page should already be rising with the fingertip
             // still short of the topmost row.
             pageAbove = frame.above
-            reveal =
-                reachesOverview
-                ? ShellGesture.overviewProgress(up: frame.above, tabCount: tabCount) : 0
             // The other axis, and only once there is something in your hand to
             // move. This is not a redirection — the gesture is still the
             // vertical one and `lean` has stopped being asked — it is the lift
@@ -370,7 +366,6 @@ extension ShellRootView {
                 // and a spring over them is lag over a page turn.
                 trackX = ShellGesture.translation(
                     dx: carried, rubberBanding: rubberBands(carried))
-                crossing = crossProgress(trackX)
                 // The peak, kept because the defect is a transient: a shell
                 // that moves and then puts itself back reads as a shell that
                 // held still at every moment a test can sample. See
@@ -518,10 +513,9 @@ extension ShellRootView {
             // finger is not moving the thing it moves. Snapped it reads as a
             // twitch; eased it reads as the pane taking its drag back, which
             // is what happened.
-            if trackX != 0 || crossing != 0 {
+            if trackX != 0 {
                 withAnimation(Self.tracking) {
                     trackX = 0
-                    crossing = 0
                 }
             }
             return 0
@@ -607,9 +601,8 @@ extension ShellRootView {
     /// There is no arm for a page in your hand, because there cannot be one:
     /// `ShellGesture.lean` answers `.vertical` unconditionally once
     /// `ShellBarDrag.holdingPage` is latched, so a held page is never handed
-    /// anywhere. That is also why nothing here puts back `reveal` or
-    /// `carryX`: both are zero for the whole stretch in which a handover can
-    /// happen at all.
+    /// anywhere. That is also why nothing here puts back `carryX`: it is
+    /// zero for the whole stretch in which a handover can happen at all.
     private func handOver(to claimed: ShellAxis) {
         switch claimed {
         case .horizontal:
@@ -629,7 +622,6 @@ extension ShellRootView {
         case .vertical:
             withAnimation(Self.tracking) {
                 trackX = 0
-                crossing = 0
             }
         }
     }
@@ -670,15 +662,11 @@ extension ShellRootView {
     /// the one it fixes, so the lift wants what the terminal already has:
     /// its own stepped physics rather than a SwiftUI spring.
     ///
-    /// `trackX` is deliberately NOT reset here, and neither are `crossing`,
-    /// `carryX` or `reveal`. They are the shell's translation and the shell's
-    /// SHAPE rather than facts about the gesture, every arm of `apply`
-    /// resolves all four exactly once, and zeroing them here would make a
-    /// commit animate from the center as a full-bleed page — the page jumping
-    /// back and flattening before it goes. `reveal` in particular has to
-    /// survive this call: it is what holds the grid in the view tree across
-    /// the frame where the lift has been zeroed and the overview has not yet
-    /// been opened.
+    /// `trackX` is deliberately NOT reset here, and neither is `carryX`. They
+    /// are the shell's translation rather than facts about the gesture, every
+    /// arm of `apply` resolves both exactly once, and zeroing them here would
+    /// make a commit animate from the center as a full-bleed page — the page
+    /// jumping back and flattening before it goes.
     private func rest() {
         gestureActive = false
         axis = nil
@@ -698,8 +686,8 @@ extension ShellRootView {
         barDrag = ShellBarDrag()
         // `settled`, not `settle`: the thumb went UP and the page falls DOWN,
         // so there is no momentum here to reward. See `ShellRootView.settled`,
-        // which carries the trace — the bounce was thirteen frames of the
-        // whole overview kept mounted behind a worktree.
+        // which carries the trace — the bounce was thirteen frames of a page
+        // that had already finished.
         //
         // `pageAbove` falls the same way and on the same spring as `lift`:
         // it is what `ShellPageLayer.pageRise` now reads to draw the fall,
@@ -732,19 +720,13 @@ extension ShellRootView {
     }
 
     private func apply(_ release: ShellRelease, dx: CGFloat, page: CGFloat, wasOpen: Bool) {
-        // A shell with no overview to reach puts a lift that would have
-        // reached it back down, as it does one that fell short.
-        var release = release
-        if !reachesOverview {
-            switch release {
-            case .openOverview, .carry: release = .springBack
-            default: break
-            }
-        }
         switch release {
         case .commit(let step):
             commit(step, dx: dx, page: page)
-        case .springBack, .abandon:
+        case .springBack, .abandon, .openOverview, .carry:
+            // A shell over one worktree has no overview to reach and no
+            // neighbor to carry a page to, so a lift the model says would have
+            // gone to either is put back down, as one that fell short is.
             withAnimation(Self.settle) { flatten() }
         case .land(let tab):
             // `settled`, for the reason a tapped menu is: choosing a row has
@@ -772,10 +754,6 @@ extension ShellRootView {
                 touchedRow = nil
                 flatten()
             }
-        case .openOverview:
-            flyToCell()
-        case .carry(let step):
-            flyToCell(carrying: step)
         case .toggleColumn:
             withAnimation(Self.settle) {
                 columnPinned = !wasOpen
@@ -787,154 +765,15 @@ extension ShellRootView {
         }
     }
 
-    /// Everything the page's shape and position are made of, back to a
-    /// full-bleed page on the display.
+    /// The page's position, back to a full-bleed page on the display.
     ///
     /// Called INSIDE the animation of whichever arm of `apply` ran, never
     /// before the release has decided — see `rest()`. One function rather than
     /// four copies because the failure mode of a copy is silent: a new arm
-    /// that forgets `reveal` leaves the grid mounted at half strength over a
-    /// worktree nobody is looking at.
+    /// that forgets `carryX` leaves the page held off to one side.
     private func flatten() {
         trackX = 0
-        crossing = 0
         carryX = 0
-        reveal = 0
-        // Zero for every arm that does not fly, and written here rather than
-        // left implicit: a page that never left the display is already 0, and
-        // one that came back down from a carried lift has to be told.
-        cropped = 0
-    }
-
-    /// The page lets go of the finger and flies into its cell.
-    ///
-    /// One spring, from wherever the page was last drawn — carrying whatever
-    /// velocity the finger left on it — to the tile, and the destination only
-    /// becomes a destination here. Everything the drag did stays where the
-    /// drag left it; nothing about the cell reached backwards into it.
-    ///
-    /// The count goes up before the flight and comes down when it lands,
-    /// because the grid is holding an empty cell open for the whole journey
-    /// and the page is what is in the air above it.
-    ///
-    /// `carrying` is the sideways half of the same release: the page was moved
-    /// far enough toward a neighbor to be handed to it, so the worktree is
-    /// re-seated in the SAME animation that flies the card. Not silently, and
-    /// this is the one re-seat in this file that is deliberately animated. The
-    /// card that leaves your thumb is the one you were holding and the card
-    /// that lands is the one you asked for, and those are different
-    /// worktrees; on one spring the pane inside it dissolves from the first
-    /// to the second while it travels, and the cell it came from fills back in
-    /// behind it over exactly the same stretch. Re-seating it silently instead
-    /// puts both of those changes in one frame at the instant of release —
-    /// a card whose contents snap and a card that pops into an empty slot
-    /// somewhere else in the grid.
-    private func flyToCell(carrying step: ShellStep? = nil) {
-        flights += 1
-        withAnimation(Self.settle, completionCriteria: .logicallyComplete) {
-            if let step { position = step.position }
-            overview = true
-            reveal = 1
-            // The page becomes a card ON THIS SPRING and not before it. The
-            // crop, the last of the shrink, the corner and the card's own face
-            // all hang off this one number, so all four travel with the
-            // translation instead of stepping the moment `flights` changed.
-            cropped = 1
-            columnPinned = false
-            // With the report the column carried. See `.land`: the trailing
-            // edge of a press is not something to wait for once the rows have
-            // stopped being composed.
-            touchedRow = nil
-            trackX = 0
-            crossing = 0
-            // Not read at all once `overview` is true — the offset takes its
-            // tile branch — so this costs nothing to look at and leaves the
-            // channel at rest for the next gesture.
-            carryX = 0
-        } completion: {
-            land()
-        }
-    }
-
-    /// The page is on its cell, and stops being the page.
-    ///
-    /// The order here is the whole of the fix for "it vanishes into the hole,
-    /// then the card fades in", and it is three steps that must not be two.
-    ///
-    /// 1. The card becomes real, UNANIMATED. The page is opaque and sitting
-    ///    exactly on the cell, so a card appearing underneath it is a change
-    ///    nobody can see — there is no frame in which it is half there.
-    /// 2. The flight is over, also unanimated, and for the same reason: the
-    ///    only thing `flights` still gates is the grid's mount.
-    /// 3. Only then does the page dissolve, over `handover`, revealing the
-    ///    card that has been fully present underneath it the whole time.
-    ///
-    /// What it used to do was step 3 alone, with the card fading IN on the
-    /// same 0.16 seconds. Two layers crossing at 50% each is a rectangle you
-    /// can see the floor through, and the eye reads that as the page falling
-    /// into the hole rather than as one thing becoming another.
-    private func land() {
-        var silent = Transaction()
-        silent.disablesAnimations = true
-        withTransaction(silent) { flights -= 1 }
-        // A landing that has been overtaken hands nothing over.
-        //
-        // Tapping a card before the flight that opened the overview has
-        // finished starts a second flight the other way, and this completion
-        // still arrives — from an animation whose destination the shell has
-        // already left. That is what the count is for, and it is why this
-        // decides on the state rather than on having been called: with
-        // anything still in the air, or the overview no longer where we are,
-        // the page is not a card and must not be dissolved. It used to be
-        // safe by accident, because the page's opacity was a ternary that
-        // read `!overview` and could not be wrong; a stored alpha can be, and
-        // the way it is wrong is a page faded to nothing over a worktree —
-        // a blank screen with no gesture that brings it back.
-        guard flights == 0, overview else { return }
-        withTransaction(silent) { cellIsHole = false }
-        withAnimation(Self.handover) { pageAlpha = 0 }
-    }
-
-    /// The page takes its cell back and grows into the screen.
-    ///
-    /// The reverse journey, and the handover happens at the START of it: the
-    /// card hands the page back before the page moves, so what grows out of
-    /// the grid is the worktree rather than a second drawing of it.
-    private func flyOut(_ change: @escaping () -> Void) {
-        flights += 1
-        // A page growing back out of a cell has no finger on it, so it grows
-        // about its own center. Set before the animation and invisible there:
-        // `overview` is still true, so the offset is taking its tile branch
-        // and nothing reads this until the branch changes.
-        liftOrigin = nil
-        // The same handover, run the other way and with the same rule: the
-        // arriving layer dissolves in over a departing layer that is still
-        // FULLY drawn, and the departing one is taken away only once the
-        // arriving one is opaque. The page starts at exactly the card's
-        // rectangle, so for those 0.16 seconds the card is covered by the
-        // thing fading in over it and the pair is never less than solid.
-        withAnimation(Self.handover, completionCriteria: .logicallyComplete) {
-            pageAlpha = 1
-        } completion: {
-            var silent = Transaction()
-            silent.disablesAnimations = true
-            withTransaction(silent) { cellIsHole = true }
-        }
-        withAnimation(Self.settleOpen, completionCriteria: .logicallyComplete) {
-            // The same number the outbound flight rides, run backwards: the
-            // card unwraps into a page — crop, scale, corner and face
-            // together — over exactly the travel that carries it back to the
-            // display. This read `isFlying` once, and because `flights` is
-            // raised outside this animation the page grew into the bottom
-            // third of the screen and the rest of it appeared in one frame at
-            // the end.
-            cropped = 0
-            change()
-        } completion: {
-            // Unanimated: the page is full-bleed and opaque by now, so the
-            // grid behind it is going away where nothing can see it go.
-            flights -= 1
-        }
     }
 
     /// Animate to the neighbor, then re-seat on it without animating.
@@ -954,41 +793,9 @@ extension ShellRootView {
     /// with the animation and would sometimes land early.
     private func commit(_ step: ShellStep, dx: CGFloat, page: CGFloat) {
         let sign: CGFloat = dx < 0 ? -1 : 1
-        withAnimation(
-            step.crossesWorktree ? Self.settleAcross : Self.settle,
-            completionCriteria: .logicallyComplete
-        ) {
+        withAnimation(Self.settle, completionCriteria: .logicallyComplete) {
             trackX = sign * page
-            // The card grows back into the screen AS IT TRAVELS, in this same
-            // animation — not afterwards.
-            //
-            // This used to unwind in the completion handler, on a second
-            // spring, and the comment there claimed `.logicallyComplete` made
-            // the two overlap into one motion. It does not, or not visibly:
-            // what you see is the slide arriving, everything stopping, and
-            // only then the shrunken page growing back. Two motions where the
-            // gesture is one.
-            //
-            // Animating them together is also the honest description of what
-            // is happening. The card becoming a screen again IS the arrival;
-            // it is not a thing that happens to the card once it has arrived.
-            crossing = 0
-            // A commit can now also arrive from a LIFT — a page held off the
-            // display and flicked sideways hard enough to change worktree
-            // without going all the way into the overview. The page falls back
-            // onto the display as it crosses, on this one spring, which is the
-            // same rule the line above states for a crossing: the card
-            // becoming a screen again is the arrival.
             carryX = 0
-            reveal = 0
-            cropped = 0
-            // The column belongs to the worktree it lists, so a crossing
-            // furls it. A swipe within one worktree leaves it alone: the same
-            // list is still the right list.
-            if step.crossesWorktree {
-                columnPinned = false
-                touchedRow = nil
-            }
         } completion: {
             // Only the re-seat is silent, and it is invisible for the reason
             // it always was: the pane that was arriving is already the pane in
@@ -1004,201 +811,7 @@ extension ShellRootView {
         }
     }
 
-    func open(worktree index: Int) {
-        guard fleet.worktrees.indices.contains(index) else { return closeOverview() }
-        // On the tab you last had open there, not on tab 0. Tapping a card is
-        // going to a worktree by name, which is the same kind of arrival a
-        // bar swipe is — see `ShellWorktree.resume` for the line between that
-        // and the content swipe's continuum.
-        open(at: ShellPosition(worktree: index, tab: fleet.worktrees[index].resumeTab))
-    }
-
-    /// Leave the overview by growing the page out of one particular cell.
-    ///
-    /// Split out of `open(worktree:)` so a deep link takes exactly the same
-    /// journey as a tap — see `honorRequest`. Two copies of this would be two
-    /// answers to "where does the page come from", and the answer is the whole
-    /// of what makes the flight read as the card you touched opening.
-    private func open(at target: ShellPosition) {
-        // Two turns, and the split is what makes the page grow out of the card
-        // you TAPPED rather than out of the one you came from.
-        //
-        // The page is invisible while the grid holds its card, so re-seating
-        // it on the tapped worktree costs nothing to look at — but a flight
-        // interpolates from what was last DRAWN, and a re-seat in the same
-        // update as the flight is never drawn at all. So it gets its own turn.
-        //
-        // This is not the frame-boundary guess `commit` refuses to make: there
-        // is no animation being raced here, only a render being waited for,
-        // and the worst a late turn can do is what this code did before it —
-        // start the flight from the cell you came from.
-        var silent = Transaction()
-        silent.disablesAnimations = true
-        withTransaction(silent) { position = target }
-        DispatchQueue.main.async {
-            flyOut {
-                overview = false
-                reveal = 0
-                overviewSearch = ""
-            }
-        }
-    }
-
     // MARK: - The way back out, under a thumb
-
-    /// One frame of the pull-down that takes the page back out of the grid.
-    ///
-    /// **`flyOut`, with the clock taken off it.** Everything the release
-    /// spring does — the handover, the crop unwrapping, the corner, the card's
-    /// face dissolving, the page finding the display — is a function of
-    /// `cropped` and `pullOut`, and this hands both of them to a thumb. There
-    /// is no second motion here and no second set of numbers: a tracked
-    /// dismissal and a sprung one draw the same frames in the same order, and
-    /// only the thing advancing them differs.
-    ///
-    /// **Not inside an animation, which is the whole of "one point for one
-    /// point".** Every value written is already the answer for where the
-    /// finger is right now, so there is nothing for a spring to interpolate
-    /// toward except a target the thumb has since left — the rule
-    /// `ShellDrag.barMoved` states for the lift, applied to the lift's
-    /// reverse. Wrapped in `tracking` this would be the same 43-point lag
-    /// measured on the way up, felt on the way down.
-    func overviewPulled(_ down: CGFloat) {
-        guard overview else { return }
-        if !pullingOut { beginPullOut() }
-        notePullMovement(down)
-        let along = ShellGesture.pullProgress(down: down)
-        pullOut = along
-        // The page unwraps out of the card as it comes: crop, scale, corner
-        // and the card's own face all hang off this one number, the same way
-        // they do on the flight. See `ShellFlight` — none of the four is
-        // computed twice.
-        cropped = 1 - along
-        // And the grid goes as the page covers it, which is `reveal` run
-        // backwards. It is the same fade the lift brought it up on.
-        reveal = 1 - along
-    }
-
-    /// The page takes its cell back before it has moved a point.
-    ///
-    /// The handover half of `flyOut`, run once on the first frame of a pull
-    /// rather than at the start of a spring. It is invisible when it happens
-    /// and that is by construction: at zero progress the page is drawn at
-    /// exactly the cell's rectangle with `cropped` still 1, so what fades in
-    /// over the card is a picture of the card, in its place, at its size.
-    /// `ShellFlight.returning`'s zero end is what guarantees that, and it is
-    /// asserted in `ShellFlightTests`.
-    private func beginPullOut() {
-        pullingOut = true
-        flights += 1
-        // A page a finger is pulling out of the grid still has no grab point
-        // ON it — the thumb is on the cards — so it grows about its own
-        // center, the same as one a spring is growing. See
-        // `ShellFlight.returning`.
-        liftOrigin = nil
-        withAnimation(Self.handover, completionCriteria: .logicallyComplete) {
-            pageAlpha = 1
-        } completion: {
-            var silent = Transaction()
-            silent.disablesAnimations = true
-            withTransaction(silent) { cellIsHole = true }
-        }
-    }
-
-    /// The pull let go of.
-    ///
-    /// Two arms and one rule between them: the ESCAPE is decided on where the
-    /// gesture was going — `ShellGesture.pullCommits`, which projects the
-    /// finger's momentum the way every other release in this shell now does —
-    /// and whichever arm runs, it starts from what is on the screen rather
-    /// than from a state the release invented.
-    func overviewPullReleased(_ down: CGFloat, velocity: CGFloat) {
-        guard pullingOut else { return }
-        pullingOut = false
-        let thrown = pullReleaseVelocity(velocity)
-        pullMoved = nil
-        // Nothing to close onto: see `closeOverview`.
-        guard ShellGesture.pullCommits(down: down, velocity: thrown), !fleet.isEmpty else {
-            return abandonPullOut()
-        }
-        withAnimation(Self.settleOpen, completionCriteria: .logicallyComplete) {
-            // `overview` goes here and not a frame earlier, for the reason
-            // `flyToCell` sets it inside its own spring: it is what chooses
-            // which end of `ShellFlight`'s journey the page is being drawn
-            // against, so a spring that owns the change interpolates from
-            // whatever was last drawn to the display with nothing in between.
-            overview = false
-            reveal = 0
-            cropped = 0
-            overviewSearch = ""
-        } completion: {
-            flights -= 1
-            var silent = Transaction()
-            silent.disablesAnimations = true
-            withTransaction(silent) { pullOut = 0 }
-        }
-    }
-
-    /// Half a point of slop, because the question is whether the finger is
-    /// travelling and not whether the digitizer jittered. `noteMovement`, for
-    /// the gesture that does not go through it — see `ShellRootView.pullMoved`.
-    private func notePullMovement(_ down: CGFloat) {
-        guard let last = pullMoved else {
-            pullMoved = (down: down, at: Date())
-            return
-        }
-        guard abs(down - last.down) > 0.5 else { return }
-        pullMoved = (down: down, at: Date())
-    }
-
-    /// The velocity a pull's release is entitled to: what it reports while it
-    /// was still moving, and flatly zero once it had stopped.
-    ///
-    /// `releaseVelocity`, for the same reason and with the same number. A
-    /// finger parked on a half-open overview is not going anywhere, and a
-    /// projection is a claim about where it was going.
-    private func pullReleaseVelocity(_ velocity: CGFloat) -> CGFloat {
-        guard let last = pullMoved, Date().timeIntervalSince(last.at) <= Self.stillFor
-        else { return 0 }
-        return velocity
-    }
-
-    /// The page goes back into its cell, because the finger changed its mind.
-    ///
-    /// **The half a threshold cannot have.** A gesture you can see is a
-    /// gesture you can abandon, and abandoning is the thing this whole change
-    /// buys: the dismissal it replaced moved nothing until the release, so
-    /// there was never a moment at which there was something to put back.
-    ///
-    /// `settle` rather than `settleOpen`: what runs this IS a finger, with
-    /// real downward momentum that the shell is now refusing — the page has to
-    /// climb back against it — which is the case the talk says to reward with
-    /// a little overshoot. `settleOpen` is fully damped because everything
-    /// that reaches it is a tap.
-    private func abandonPullOut() {
-        withAnimation(Self.settle, completionCriteria: .logicallyComplete) {
-            pullOut = 0
-            cropped = 1
-            reveal = 1
-        } completion: {
-            land()
-        }
-    }
-
-    /// Close the grid onto the pane at rest.
-    ///
-    /// Not onto nothing. With an empty fleet — a runner switched to that has
-    /// not answered yet, or answered with no worktrees — this showed the
-    /// theme's ground and a bar naming nothing, and the runner's status stayed
-    /// in the grid it had just closed. Done is disabled then as well.
-    func closeOverview() {
-        guard !fleet.isEmpty else { return }
-        flyOut {
-            overview = false
-            reveal = 0
-            overviewSearch = ""
-        }
-    }
 
     /// Go where something outside the shell asked to go, once.
     ///
@@ -1212,21 +825,15 @@ extension ShellRootView {
     /// request that blocks the next card naming the same pane — the same trap
     /// the pane host's `honorRequest` cleared first for, and the reason it did.
     ///
-    /// Two ways in, because there are two places the shell can be. From the
-    /// overview it grows the page back out of the tapped worktree's cell,
-    /// which is the same journey a tapped card makes — the deep link is a card
-    /// tapped from outside the app, and it should not arrive differently. From
-    /// a page it is a silent re-seat: no animation, because there is no gesture
-    /// and nothing on screen moved toward it. That is the pane host's
-    /// retarget, arrived at from the shell's side, and it is what keeps every
-    /// mounted pane exactly where it was.
+    /// A silent re-seat: no animation, because there is no gesture and nothing
+    /// on screen moved toward it. That is the pane host's retarget, arrived at
+    /// from the shell's side, and it is what keeps every mounted pane exactly
+    /// where it was.
     func honorRequest() {
         guard let id = request else { return }
         request = nil
         guard let target = fleet.position(ofTab: id) else { return }
-        if overview {
-            open(at: target)
-        } else if target != position {
+        if target != position {
             var silent = Transaction()
             silent.disablesAnimations = true
             withTransaction(silent) {

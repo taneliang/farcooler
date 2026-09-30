@@ -18,8 +18,10 @@ import XCTest
 /// reason: a gesture's outcome is a transform and two indices, and nothing on
 /// screen spells either out. See `ShellRootView.probe`.
 ///
-/// No runner and no daemon — `-shell-harness` stands the shell on a canned
-/// fleet, so unlike `TerminalScrollTests` this suite never skips.
+/// No runner and no daemon — `-shell-harness` stands the shell on one canned
+/// worktree, so unlike `TerminalScrollTests` this suite never skips. The shell
+/// is the one the phone mounts: over one worktree, with the column its bar
+/// opens and nowhere to lift to.
 final class ShellGestureTests: XCTestCase {
     /// `ShellMetrics.rowHeight`, restated.
     ///
@@ -31,9 +33,8 @@ final class ShellGestureTests: XCTestCase {
     /// written into it with a comment explaining where the 102 came from.
     private let rowHeight = 44
 
-    /// The default fixture: ten worktrees, tab counts `[3, 2, 5, 1, 4]`
-    /// cycling. Worktree 0 therefore has three tabs, which is what every
-    /// number below is counted against.
+    /// The fixture: one worktree with three tabs — Changes, `codex` and
+    /// `shell` — which is what every number below is counted against.
     private func launch(_ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-shell-harness"] + extra
@@ -41,7 +42,7 @@ final class ShellGestureTests: XCTestCase {
         return app
     }
 
-    /// `ws`, `tab`, `worktrees`, `tabs`, `column`, `pinned`, `overview`.
+    /// `ws`, `tab`, `worktrees`, `tabs`, `column`, `pinned`.
     private func state(_ app: XCUIApplication) throws -> [String: Int] {
         let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
         guard probe.waitForExistence(timeout: 30) else {
@@ -118,7 +119,7 @@ final class ShellGestureTests: XCTestCase {
             withVelocity: XCUIGestureVelocity(rawValue: 12000), thenHoldForDuration: 0)
     }
 
-    /// A swipe on the content walks the flat sequence, and the opposite swipe
+    /// A swipe on the content walks the worktree's tabs, and the opposite swipe
     /// walks back to exactly where it started.
     ///
     /// The round trip is the assertion that matters. A commit that re-seats on
@@ -130,8 +131,8 @@ final class ShellGestureTests: XCTestCase {
         let start = try state(app)
         XCTAssertEqual(start["ws"], 0)
         XCTAssertEqual(start["tab"], 0)
-        XCTAssertEqual(start["worktrees"], 10)
-        XCTAssertEqual(start["tabs"], 3, "worktree 0 of the canned fleet has three tabs")
+        XCTAssertEqual(start["worktrees"], 1)
+        XCTAssertEqual(start["tabs"], 3, "the canned worktree has three tabs")
 
         swipeContent(app, toward: -1)
         let forward = try state(app)
@@ -142,38 +143,6 @@ final class ShellGestureTests: XCTestCase {
         let back = try state(app)
         XCTAssertEqual(back["ws"], 0)
         XCTAssertEqual(back["tab"], 0, "the return swipe did not land where it started")
-    }
-
-    /// Walking forward off the last tab of a worktree lands on the NEXT
-    /// worktree's first tab — the flat sequence, on a real screen.
-    func testSwipingOffTheEndOfAWorktreeCrossesIntoTheNext() throws {
-        let app = launch()
-        for _ in 0..<3 { swipeContent(app, toward: -1) }
-        let crossed = try state(app)
-        XCTAssertEqual(crossed["ws"], 1, "three swipes off a three-tab worktree never crossed")
-        XCTAssertEqual(crossed["tab"], 0)
-        XCTAssertEqual(crossed["tabs"], 2, "worktree 1 of the canned fleet has two tabs")
-    }
-
-    /// The bar walks WORKTREES, not tabs: one swipe on it from anywhere in a
-    /// worktree lands on the neighbor's first tab.
-    func testASwipeOnTheBarChangesWorktree() throws {
-        let app = launch()
-        // Somewhere in the middle of worktree 0, so "tab 0" afterwards is a
-        // fact about the bar's step rather than about where we started.
-        swipeContent(app, toward: -1)
-        XCTAssertEqual(try state(app)["tab"], 1)
-
-        let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
-        XCTAssertTrue(bar.waitForExistence(timeout: 30))
-        let from = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5))
-        let to = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5))
-        from.press(
-            forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.4)
-
-        let after = try state(app)
-        XCTAssertEqual(after["ws"], 1, "the bar swipe did not change worktree")
-        XCTAssertEqual(after["tab"], 0, "the bar lands on the next worktree's first tab")
     }
 
     /// A lift too small to open the column costs nothing.
@@ -196,39 +165,17 @@ final class ShellGestureTests: XCTestCase {
         XCTAssertEqual(after["pinned"], 0, "an abandoned drag pinned the column")
     }
 
-    /// Lifting past the last row and then some reaches the overview.
-    ///
-    /// Worktree 0 has three tabs, so the column runs out at three rows and
-    /// the overview arrives 76 further up. 320 is well past both, and past is
-    /// the only thing being asserted — the exact arrival point is
-    /// `ShellNavigationTests.theOverviewBeginsWhereTheColumnRunsOut`.
-    func testALongLiftReachesTheOverview() throws {
-        let app = launch()
-        liftBar(app, by: 320)
-
-        XCTAssertEqual(try state(app)["overview"], 1, "the long lift never reached the overview")
-        XCTAssertTrue(
-            app.descendants(matching: .any).matching(identifier: "shell-overview").firstMatch
-                .waitForExistence(timeout: 5),
-            "the overview reported itself open but drew nothing")
-
-        // And it is a place you can leave, which is the other half of a
-        // gesture that has no button to open it.
-        app.buttons["shell-overview-done"].tap()
-        XCTAssertEqual(try state(app)["overview"], 0, "Done did not close the overview")
-    }
-
-    /// **A flick up from over a menu row reaches the overview, and a
-    /// deliberate lift from the same place stays in the worktree.** The
-    /// owner's complaint, and the whole of the momentum projection on one
-    /// screen.
+    /// **A deliberate lift lands on the row under the finger, and a flick up
+    /// from the same place lands on nothing.** The owner's complaint, and the
+    /// whole of the momentum projection on one screen.
     ///
     /// The talk's PIP example reproduced as the *before* case — *"the issue
     /// here is that we're only looking at position, we're completely ignoring
-    /// the momentum"*. The overview used to be reachable only by dragging a
-    /// full 76 points past the last row and stopping there, so a flick, which
-    /// is how anybody who has used a task switcher asks for a grid of cards,
-    /// landed on whichever row the thumb happened to be passing.
+    /// the momentum"*. A flick is how anybody who has used a task switcher
+    /// asks to leave, so a release with that much throw is not a choice of the
+    /// row the thumb happened to be passing. This shell has nowhere to fly to
+    /// (the stack under it is the way out), so the flick is put back down: the
+    /// tab stays where the last deliberate lift left it.
     ///
     /// **The distances are chosen for what they prove, and they differ.** 60
     /// points pins the ROW, because that is where the two mappings disagree:
@@ -238,10 +185,9 @@ final class ShellGestureTests: XCTestCase {
     /// read the 60 rather than the 38 and answered tab 1, a whole row above
     /// the thumb, and the further down the bar a drag began the worse it got.
     /// 140 pins the ESCAPE, because it leaves the fingertip 118 points up —
-    /// squarely on the TOP row, with the column's last 14 points and the
-    /// overview's whole 76-point run still ahead of it. A release there is a
-    /// release from over a menu item by any reading, and it is the one the
-    /// owner reported landing on the item.
+    /// squarely on the TOP row, with the column's last 14 points still ahead
+    /// of it. A release there is a release from over a menu item by any
+    /// reading.
     ///
     /// 140 rather than 60 for the flick because a synthesized flick's velocity
     /// is not repeatable: the same `.fast` drag measured 284 points per second
@@ -249,15 +195,14 @@ final class ShellGestureTests: XCTestCase {
     /// needs 136, so the slower of those two still clears it twice over; from
     /// 60 it needs 297 and the test would be a coin toss on the machine rather
     /// than a statement about the app.
-    func testAFlickUpFromOverAMenuRowReachesTheOverview() throws {
+    func testAFlickUpFromOverAMenuRowChoosesNoRow() throws {
         let app = launch()
-        XCTAssertEqual(try state(app)["tabs"], 3, "worktree 0 of the canned fleet has three tabs")
+        XCTAssertEqual(try state(app)["tabs"], 3, "the canned worktree has three tabs")
         XCTAssertEqual(try state(app)["tab"], 0)
 
         // The row, off the finger's position rather than off its travel.
         liftBar(app, by: 60)
         let landed = try state(app)
-        XCTAssertEqual(landed["overview"], 0, "a deliberate 60-point lift left the worktree")
         XCTAssertEqual(
             landed["tab"], 2,
             "the row under the finger is the one nearest the bar, which is the last tab")
@@ -266,13 +211,17 @@ final class ShellGestureTests: XCTestCase {
         // held still before the finger leaves, projects nowhere.
         liftBar(app, by: 140)
         let held = try state(app)
-        XCTAssertEqual(held["overview"], 0, "a lift that stopped before letting go still escaped")
-        XCTAssertEqual(held["tab"], 0, "and it chose the top row, which is where the finger was")
+        XCTAssertEqual(held["tab"], 0, "a lift that stopped before letting go chose the top row, where the finger was")
 
+        // Then the flick from a different tab, so a release that landed on a
+        // row would have moved it.
+        swipeContent(app, toward: -1)
+        XCTAssertEqual(try state(app)["tab"], 1, "could not get to the second tab")
         flickBar(app, by: 140)
-        XCTAssertEqual(
-            try state(app)["overview"], 1,
-            "a flick from the same 140 points stayed in the worktree")
+        let flicked = try state(app)
+        XCTAssertEqual(flicked["tab"], 1, "a flick chose the row it passed over")
+        XCTAssertEqual(flicked["column"], 0, "the column stayed open after the flick")
+        XCTAssertEqual(flicked["pinned"], 0, "a flick pinned the column")
     }
 
     /// A tap holds the column open, and a second tap closes it.
@@ -301,106 +250,23 @@ final class ShellGestureTests: XCTestCase {
         XCTAssertEqual(closed["column"], 0)
     }
 
-    /// A lift that also travels sideways lands in the NEIGHBOR's cell.
+    /// A lift far past the last row puts the page back, on the same worktree
+    /// and the same tab.
     ///
-    /// **The mechanism the rest of the redirection generalises**, and it was
-    /// here first. Past the last row the page is off the display and the two
-    /// axes stop competing: the lift decides whether you stay up, sideways
-    /// decides which cell you land in, and `ShellGesture.lean` stops being
-    /// asked for the rest of the gesture — `ShellBarDrag.holdingPage` latches
-    /// and answers `.vertical` whatever the thumb does sideways. That is the
-    /// one thing the axis lock was genuinely protecting, and it is protected
-    /// by a narrower rule now rather than by refusing to look.
-    ///
-    /// The offsets are chosen so the lean cannot be in doubt anywhere along
-    /// the path: this is a straight line at 130 across to 320 up, so its
-    /// running ratio is 0.41 for every frame of it and no threshold in
-    /// `lean` is anywhere near. 130 is also well past the 70-point commit.
-    func testALiftedPageFlickedSidewaysCarriesToTheNeighbor() throws {
+    /// Past the column there is no row left to choose and, over one worktree,
+    /// nowhere to fly to: the page follows the finger up and falls back on
+    /// release, costing nothing.
+    func testALongLiftPutsThePageBack() throws {
         let app = launch()
-        XCTAssertEqual(try state(app)["ws"], 0)
+        swipeContent(app, toward: -1)
+        XCTAssertEqual(try state(app)["tab"], 1, "could not get to the second tab")
 
-        let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
-        XCTAssertTrue(bar.waitForExistence(timeout: 30), "the bar never appeared")
-        let from = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        from.press(
-            forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: -130, dy: -320)),
-            withVelocity: .slow, thenHoldForDuration: 0.5)
-
-        let carried = try state(app)
-        XCTAssertEqual(carried["overview"], 1, "the lift did not reach the overview")
-        XCTAssertEqual(carried["ws"], 1, "the sideways half of the lift was ignored")
-        XCTAssertEqual(carried["tab"], 0, "a carry lands on the neighbor's first tab")
-    }
-
-    /// **A fast, slightly angled fling up reaches the overview and does NOT
-    /// carry.** The owner's report, on a finger.
-    ///
-    /// *"when I fling the worktree up, quite often it animates the worktree
-    /// to the n-1th or n+1th grid square… if my fling is angled too much it
-    /// picks either the previous or next worktree to land on, seemingly
-    /// assuming I already switched to it (clearly I didn't)."*
-    ///
-    /// Sixty points across 320 up is a ratio of 0.19 — a thumb's arc, and
-    /// nowhere near the 70 points that commit a page turn on translation
-    /// alone. What carried it was the momentum: at a scroll view's
-    /// deceleration rate the sideways component of a hard fling projects
-    /// hundreds of points, and `barRelease` mixed that into the sideways
-    /// channel without ever asking which way the thumb was going. Nothing in
-    /// this suite asserted the negative, which is why it shipped.
-    ///
-    /// **The second half is the control that matters**: the same fling, same
-    /// speed, same angle-ish path, but 130 points across — genuinely into the
-    /// neighbor's cell — still carries. The fix narrows a PREDICTION and
-    /// never the drawing, so a card actually moved sideways still goes.
-    ///
-    /// An explicit 12000 rather than `.fast`, for the reason `flickBar`
-    /// gives: a synthesized flick's velocity is not repeatable, and the
-    /// assertion has to survive the slow reading.
-    func testAFastAngledFlingUpDoesNotCarryToANeighbor() throws {
-        let app = launch()
-        XCTAssertEqual(try state(app)["ws"], 0)
-
-        let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
-        XCTAssertTrue(bar.waitForExistence(timeout: 30), "the bar never appeared")
-        func fling(across: CGFloat) throws -> [String: Int] {
-            let from = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            from.press(
-                forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: -across, dy: -320)),
-                withVelocity: XCUIGestureVelocity(rawValue: 12000), thenHoldForDuration: 0)
-            return try state(app)
-        }
-
-        let flung = try fling(across: 60)
-        XCTAssertEqual(flung["overview"], 1, "a hard fling did not reach the overview")
-        XCTAssertEqual(
-            flung["ws"], 0,
-            "a fling angled 60 points across 320 landed in a neighbor's cell")
-
-        // Back to the worktree, then the control: genuinely sideways still
-        // carries, at the same speed.
-        app.buttons["shell-card-ws-0"].tap()
-        XCTAssertEqual(try state(app)["overview"], 0, "the tap did not leave the overview")
-
-        let carried = try fling(across: 130)
-        XCTAssertEqual(carried["overview"], 1, "the deliberate carry did not reach the overview")
-        XCTAssertEqual(carried["ws"], 1, "a page flicked 130 points sideways no longer carries")
-    }
-
-    /// The same lift with no sideways travel still opens the overview on the
-    /// worktree you were in.
-    ///
-    /// The other side of the rule, and the one that would break first: a
-    /// carry read out of the sideways wander every long drag has would move
-    /// the worktree under somebody who only ever swiped up. It is also the
-    /// negative control for the redirection — a gesture with no sideways
-    /// component has nothing to redirect INTO, so the lean must never fire.
-    func testAStraightLiftStaysOnTheWorktreeItStartedOn() throws {
-        let app = launch()
         liftBar(app, by: 320)
         let after = try state(app)
-        XCTAssertEqual(after["overview"], 1)
         XCTAssertEqual(after["ws"], 0, "a straight lift changed worktree")
+        XCTAssertEqual(after["tab"], 1, "a lift past the last row chose a tab")
+        XCTAssertEqual(after["column"], 0, "the column stayed open after the finger left")
+        XCTAssertEqual(after["pinned"], 0, "a long lift pinned the column")
     }
 
     /// **A diagonal drag on the bar resolves by which way it leans, and it
@@ -418,13 +284,13 @@ final class ShellGestureTests: XCTestCase {
     /// proves that for every angle in five-degree steps; this proves the
     /// finger reaches it.
     ///
-    /// **The same two numbers, swapped.** 80 across against 52 up is a
-    /// worktree crossing; 52 across against 80 up is a tab chosen off the
-    /// column. Both are well inside the 19° band `redirect` would hold a
-    /// gesture through if either of them ever got there — they are 33° and
-    /// 57° — and both are unambiguous outcomes rather than two flavours of
-    /// nothing: the first changes worktree, the second changes tab while
-    /// leaving the worktree alone.
+    /// **The same two numbers, swapped.** 52 across against 80 up is a tab
+    /// chosen off the column; 80 across against 52 up leans the other way, and
+    /// over one worktree there is no neighbor for it to change to. Both are
+    /// well inside the 19° band `redirect` would hold a gesture through if
+    /// either of them ever got there — they are 57° and 33° — and both are
+    /// unambiguous outcomes rather than two flavours of nothing: the first
+    /// changes tab, the second changes nothing.
     ///
     /// 52 across is also deliberately SHORT of the 70-point commit, so a
     /// gesture that leaned the wrong way would spring back and change no tab,
@@ -432,7 +298,7 @@ final class ShellGestureTests: XCTestCase {
     /// second row from the bar, which on a three-tab column is tab 1.
     func testADiagonalDragOnTheBarResolvesByWhichWayItLeans() throws {
         let app = launch()
-        XCTAssertEqual(try state(app)["tabs"], 3, "worktree 0 of the canned fleet has three tabs")
+        XCTAssertEqual(try state(app)["tabs"], 3, "the canned worktree has three tabs")
         XCTAssertEqual(try state(app)["ws"], 0)
         XCTAssertEqual(try state(app)["tab"], 0)
 
@@ -443,14 +309,13 @@ final class ShellGestureTests: XCTestCase {
         XCTAssertEqual(
             lifted["tab"], 1,
             "the fingertip was over the second row from the bar, which is tab 1")
-        XCTAssertEqual(lifted["overview"], 0)
 
         // Leaning horizontal: the same two numbers the other way round.
         dragBar(app, by: CGVector(dx: -80, dy: -52))
-        let crossed = try state(app)
-        XCTAssertEqual(crossed["ws"], 1, "a drag that leans horizontal did not change worktree")
-        XCTAssertEqual(crossed["tab"], 0, "the bar lands on the next worktree's first tab")
-        XCTAssertEqual(crossed["overview"], 0)
+        let sideways = try state(app)
+        XCTAssertEqual(sideways["ws"], 0, "a drag that leans horizontal left the worktree")
+        XCTAssertEqual(sideways["tab"], 1, "a drag that leans horizontal chose a tab")
+        XCTAssertEqual(sideways["column"], 0, "the column stayed open after the finger left")
     }
 
     /// One straight drag from the bar's center, held before release so it
@@ -519,26 +384,6 @@ final class ShellGestureTests: XCTestCase {
         XCTAssertEqual(try state(app)["tab"], 0)
         XCTAssertEqual(try pane(app, "ws-0-tab-0")["born"], here, "the return swipe rebuilt a pane")
         XCTAssertEqual(try pane(app, "ws-0-tab-1")["born"], neighbor)
-    }
-
-    /// The same, for the release that used to be worst: `.carry` re-seats the
-    /// position INSIDE the flight animation, so a rebuild there is one you
-    /// watch happen rather than one you find afterwards.
-    func testACarriedLiftRebuildsNothing() throws {
-        let app = launch()
-        let leaving = try pane(app, "ws-0-tab-0")["born"]
-
-        let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
-        XCTAssertTrue(bar.waitForExistence(timeout: 30), "the bar never appeared")
-        let from = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        from.press(
-            forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: -130, dy: -320)),
-            withVelocity: .slow, thenHoldForDuration: 0.5)
-
-        XCTAssertEqual(try state(app)["ws"], 1, "the carry did not cross")
-        XCTAssertEqual(
-            try pane(app, "ws-0-tab-0")["born"], leaving,
-            "the worktree the carry left was rebuilt mid-flight")
     }
 
     /// **Exactly one pane is `isVisible`, at rest and mid-gesture.**
@@ -777,239 +622,7 @@ final class ShellGestureTests: XCTestCase {
         return nil
     }
 
-    /// **Scrolling the grid back to its top does not close it.**
-    ///
-    /// The pull-down that dismisses the overview read `atTop` at the moment
-    /// the finger LEFT, so any scroll that finished at the top of the grid —
-    /// which is every scroll back up through forty cards — was indistinguish-
-    /// able from a deliberate pull-down and threw you back onto the worktree
-    /// you came from.
-    func testScrollingTheGridBackToItsTopDoesNotCloseIt() throws {
-        let app = launch(["-shell-40"])
-        liftBar(app, by: 320)
-        XCTAssertEqual(try state(app)["overview"], 1, "the lift never reached the overview")
-
-        // Down through the grid…
-        let low = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.62))
-        let high = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.22))
-        low.press(
-            forDuration: 0.05, thenDragTo: high, withVelocity: .slow, thenHoldForDuration: 0.3)
-        XCTAssertEqual(try state(app)["overview"], 1, "scrolling down the grid closed it")
-
-        // …and back up, in one drag that ends at the top.
-        high.press(
-            forDuration: 0.05, thenDragTo: low, withVelocity: .slow, thenHoldForDuration: 0.3)
-        XCTAssertEqual(
-            try state(app)["overview"], 1, "scrolling the grid back to its top closed it")
-    }
-
-    /// **The grid moves DURING the pull, not only at the end of it — and it
-    /// comes back if you change your mind.**
-    ///
-    /// The way into the overview is a continuous, tracked, abandonable lift.
-    /// The way out was a `DragGesture(minimumDistance: 20)` whose `onChanged`
-    /// recorded one boolean and whose `onEnded` either dismissed or did not:
-    /// the path was symmetric and the TRACKING was not, and tracking is what
-    /// makes a path readable. WWDC 2018 803: *"avoid methods that are only
-    /// detected at the end of the gesture"*, and, on why it matters, *"you
-    /// actually wouldn't know the difference between a frozen phone, and phone
-    /// that's just at the top of the edge of the screen."*
-    ///
-    /// **Asserted on the probe and not on pixels**, and that is the whole
-    /// design of this test. Pixels change mid-pull either way: the grid is a
-    /// scroll view at its top, so a downward drag rubberbands the cards down
-    /// whether or not anything else is happening, and a screenshot comparison
-    /// would have passed on the bounce alone — the same trap the card and
-    /// column tests each had to be rewritten to get out of. `pull=` is the
-    /// tracked value itself, in hundredths, and nothing but the reverse reveal
-    /// can move it.
-    ///
-    /// The drag is held for two seconds so the probe can be read while the
-    /// finger is still down, and it is released from a standstill on purpose:
-    /// 38 points is inside the 40 that commits, so this is the ABANDON, and
-    /// the assertion after it is that everything went back.
-    func testThePullOutOfTheGridTracksTheFingerAndCanBeAbandoned() throws {
-        let app = launch(["-shell-40"])
-        liftBar(app, by: 320)
-        XCTAssertEqual(try state(app)["overview"], 1, "the lift never reached the overview")
-        XCTAssertEqual(try state(app)["pull"], 0, "the overview opened part way out of itself")
-
-        // 58 points: twenty of hysteresis the gesture subtracts before it
-        // tracks anything, and thirty-eight of travel after it — which is half
-        // of `overRun` and two points inside the throw that commits.
-        let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.30))
-        let to = from.withOffset(CGVector(dx: 0, dy: 58))
-
-        var midPull: [String: Int]?
-        let read = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 1.0) {
-            midPull = try? self.state(app)
-            read.signal()
-        }
-        from.press(
-            forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 2.0)
-        XCTAssertEqual(read.wait(timeout: .now() + 15), .success, "the probe was never read")
-
-        let during = try XCTUnwrap(midPull, "the shell never answered mid-pull")
-        XCTAssertGreaterThan(
-            during["pull"] ?? 0, 20,
-            "the grid was \(during["pull"] ?? -1)% of the way out with a thumb 58 points down "
-                + "it — the pull-down moves nothing until the finger lifts")
-        XCTAssertEqual(
-            during["overview"], 1,
-            "the overview left before the finger did")
-
-        // And the release puts it back, because it was abandoned.
-        let after = try state(app)
-        XCTAssertEqual(after["overview"], 1, "a pull released short of the threshold dismissed")
-        XCTAssertEqual(after["pull"], 0, "the page never went back into its cell")
-    }
-
-    /// The other half of the same rule: a pull-down that BEGINS at the top is
-    /// still the way out by touch, and the fix must not have removed it.
-    func testAPullDownFromTheTopOfTheGridStillClosesIt() throws {
-        let app = launch(["-shell-40"])
-        liftBar(app, by: 320)
-        XCTAssertEqual(try state(app)["overview"], 1)
-
-        let high = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.30))
-        let low = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.70))
-        high.press(
-            forDuration: 0.05, thenDragTo: low, withVelocity: .slow, thenHoldForDuration: 0.3)
-        XCTAssertEqual(
-            try state(app)["overview"], 0, "the pull-down out of the grid stopped working")
-    }
-
     // MARK: - Touch-down feedback
-
-    /// **The control, and it comes first.**
-    ///
-    /// The assertions below are of the form "these two renders differ", and
-    /// such an assertion passes for free if the screen simply does not render
-    /// the same way twice. This is the one that fails in that case: an
-    /// untouched card, left alone for exactly as long as the press below
-    /// lasts, has to come out byte for byte the same at the end of it. The
-    /// same argument `GlanceMarkTests` makes about `ImageRenderer` one package
-    /// over, made here about a simulator's glass.
-    ///
-    /// **Two seconds apart and not back to back**, because back to back is
-    /// the interval the press test does NOT use. A pair of screenshots taken
-    /// in the same breath can agree for reasons that have nothing to do with
-    /// the screen holding still — the same frame served twice would do it —
-    /// and the claim the press test needs is about a gap of exactly this
-    /// length. So the control waits it out.
-    func testACardLeftAloneRendersTheSameBytes() throws {
-        let app = launch(["-shell-overview", "-shell-4"])
-        let card = try firstCard(app)
-        let rect = card.frame
-        let settled = try settledFingerprint(in: rect)
-        XCTAssertNotEqual(settled, "no such rectangle", "the card's frame is off the screenshot")
-        Thread.sleep(forTimeInterval: pressHold)
-        XCTAssertEqual(
-            settled, fingerprint(XCUIScreen.main.screenshot().image, in: rect),
-            "a card nobody touched rendered differently \(pressHold) seconds later")
-    }
-
-    /// **A card lights UP under a thumb — it does not fade.** The defect, as
-    /// an assertion, and the direction is the whole of it.
-    ///
-    /// The audit this came from expected to find no pressed treatment at all:
-    /// `.buttonStyle(.plain)` has historically rendered custom label content
-    /// with nothing. Measured on iOS 26 that is not what happens, and it is
-    /// worth knowing before writing the assertion — a first draft of this test
-    /// asked only whether the pixels CHANGED, and it passed with the style
-    /// removed. A plain card does answer a touch, and it answers it by
-    /// DIMMING, fill and text together, from `#494E59` to `#42474F`: mean
-    /// brightness over the whole card 84.9 at rest and 76.9 under the thumb.
-    ///
-    /// Which is the thing this app already has a written rule against, one
-    /// file over: *"Pressed is one step UP the hierarchy, not a lower opacity:
-    /// a key that fades under a finger looks like a key that did not take the
-    /// press"* — `TerminalKeyStyle`. So the assertion is not that something
-    /// changed, which `.plain` would satisfy; it is that the card got
-    /// BRIGHTER, which only a treatment that adds a fill can. `ShellCardStyle`
-    /// takes it to `#626771`, twenty-five levels up.
-    ///
-    /// **Pixels, and not the tap.** A test that only checked that tapping a
-    /// card opens its worktree would have passed on either treatment and on
-    /// none at all, which is why nobody noticed: the tap always worked. The
-    /// only thing that can go red is a comparison of what is on screen.
-    ///
-    /// The screenshots are taken from another queue while the press is still
-    /// being synthesized on this one, because there is no XCTest call that
-    /// puts a finger down and returns.
-    ///
-    /// **The whole press is sampled and the BRIGHTEST frame kept**, where this
-    /// used to take one picture half way in. Two things forced that and they
-    /// pull in opposite directions. The delay before a synthesized touch
-    /// actually lands is not something this side can know — a shot 0.18
-    /// seconds in caught the card before the finger had arrived, byte for byte
-    /// identical to the one at rest. And the card carries a `.contextMenu` now
-    /// (Hide, and Remove Worktree… — see `ShellOverviewCard.menu`), so from
-    /// touch-down there is only about half a second before the menu takes the
-    /// screen: the old shot at one second photographed the MENU's own
-    /// presentation, the card lifted into a preview over a dimmed screen, and
-    /// reported 81.6 against 84.6 at rest. That reading was right about the
-    /// picture and wrong about the app.
-    ///
-    /// No single instant is inside both windows. Sampling is, and it is the
-    /// honest form of the claim anyway: a card that fades under a finger is
-    /// never brighter at any moment of the press, and one that lights up is
-    /// brighter at some of them. The menu's own frames are DARKER than rest —
-    /// which is what the failure above measured — so they cannot be the
-    /// maximum and cannot carry this assertion.
-    func testACardLightsUpUnderAThumb() throws {
-        let app = launch(["-shell-overview", "-shell-4"])
-        let card = try firstCard(app)
-        let rect = card.frame
-        // Belt and braces on a shared simulator: `waitForExistence` says an
-        // element is in the tree, not that the navigation bar has finished
-        // arriving over it, and a shot of a screen still settling compared
-        // with one taken two seconds later measures the arrival rather than
-        // the press.
-        _ = try settledFingerprint(in: rect)
-        let rest = XCUIScreen.main.screenshot().image
-
-        var shot: XCUIScreenshot?
-        var brightest = -Double.infinity
-        let taken = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .userInitiated).async { [self] in
-            // Back to back for the whole press. A screenshot costs about a
-            // tenth of a second on this simulator, so the press is covered by
-            // roughly twenty frames — enough that the highlighted stretch
-            // between the finger landing and the menu opening cannot be
-            // stepped over.
-            let deadline = Date().addingTimeInterval(pressHold)
-            while Date() < deadline {
-                let frame = XCUIScreen.main.screenshot()
-                guard let value = try? meanBrightness(frame.image, in: rect) else { continue }
-                if value > brightest {
-                    brightest = value
-                    shot = frame
-                }
-            }
-            taken.signal()
-        }
-        card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .press(forDuration: pressHold)
-        XCTAssertEqual(taken.wait(timeout: .now() + 30), .success, "no screenshot was taken")
-        let pressed = try XCTUnwrap(shot).image
-
-        XCTAssertNotEqual(
-            fingerprint(rest, in: rect), fingerprint(pressed, in: rect),
-            "the card renders identically with a thumb on it and at rest — a touch on "
-                + "it says nothing until it opens")
-        // The MEAN over the whole card rather than one sampled point, so the
-        // claim does not depend on finding a spot the fixture's own text never
-        // reaches. The fill is most of a card either way.
-        let atRest = try meanBrightness(rest, in: rect)
-        let underThumb = try meanBrightness(pressed, in: rect)
-        XCTAssertGreaterThan(
-            underThumb, atRest + 8,
-            "the card is \(String(format: "%.1f", atRest)) bright at rest and "
-                + "\(String(format: "%.1f", underThumb)) under a thumb — a card that fades "
-                + "under a finger looks like a card that did not take the press")
-    }
 
     /// **A pinned column highlights the row under the thumb, not the tab you
     /// are already on.** The second half of the touch-down defect, on the
@@ -1096,19 +709,6 @@ final class ShellGestureTests: XCTestCase {
         throw XCTSkip("The card never stopped changing with nothing touching it.")
     }
 
-    /// The first worktree card in the grid, which is the one both assertions
-    /// above are made about.
-    private func firstCard(_ app: XCUIApplication) throws -> XCUIElement {
-        let card = app.descendants(matching: .any).matching(identifier: "shell-card-ws-0")
-            .firstMatch
-        guard card.waitForExistence(timeout: 30) else {
-            print(app.debugDescription)
-            throw XCTSkip("The grid never drew a card.")
-        }
-        XCTAssertTrue(card.isHittable, "the card is on screen but not touchable")
-        return card
-    }
-
     /// One rectangle of a screenshot, in the app's own POINTS, as RGBA bytes.
     ///
     /// A screenshot is in pixels and a frame is in points, so the scale is
@@ -1159,7 +759,7 @@ final class ShellGestureTests: XCTestCase {
     /// How bright that rectangle is on average, 0…255.
     ///
     /// The plain mean of the three color channels and not a weighted
-    /// luminance: this card's fill is a near-neutral slate and both treatments
+    /// luminance: a row's fill is a near-neutral slate and both treatments
     /// move all three channels together, so a perceptual weighting would be
     /// arithmetic that changes no answer and one more thing to be wrong.
     private func meanBrightness(_ shot: UIImage, in rect: CGRect) throws -> Double {
@@ -1171,111 +771,4 @@ final class ShellGestureTests: XCTestCase {
         }
         return Double(total) / Double(read.width * read.height * 3)
     }
-
-    // MARK: - A grid that spans runners
-
-    /// **The grid lists worktrees across all servers, grouped by runner.**
-    ///
-    /// The owner's ask. What makes it possible without a second live
-    /// connection is that the other runners are CACHED — see
-    /// `RunnerDirectory`, and `ShellServerGroup` for why N live connections is
-    /// worse than N times the cost — so the assertions here are about a grid
-    /// that draws three sections, one of which you are connected to and two of
-    /// which are memories.
-    ///
-    /// `-shell-4` so the whole grid fits on one screen: the cached sections
-    /// come after the live one, and a ten-worktree fixture puts them below
-    /// the fold where `exists` is still true but nothing has been shown.
-    func testTheGridGroupsEveryRunnersWorktreesUnderItsOwnHeading() throws {
-        let app = launch(["-shell-servers", "-shell-overview", "-shell-4"])
-        XCTAssertEqual(try state(app)["overview"], 1, "the harness did not open on the grid")
-
-        // By runner id, not label: `harness` is labeled this-mac, `runner-eu`
-        // eu-runner-1 and `runner-gpu` gpu-box-2. See `ShellHarness.elsewhere`.
-        for runner in ["harness", "runner-eu", "runner-gpu"] {
-            let header = app.descendants(matching: .any)
-                .matching(identifier: "shell-section-\(runner)").firstMatch
-            XCTAssertTrue(
-                header.waitForExistence(timeout: 10),
-                "no heading for \(runner): \(app.debugDescription)")
-        }
-
-        // A card from another runner, which is a card that cannot be swiped
-        // to — it is not in the fleet at all.
-        XCTAssertTrue(
-            app.buttons["shell-elsewhere-spike/watch-sync"].waitForExistence(timeout: 5),
-            "the cached runner's worktree is not in the grid")
-
-        // And one that must not be: hiding is honored on the runner the
-        // worktree is on, and this grid is not that runner.
-        XCTAssertFalse(
-            app.buttons["shell-elsewhere-chore/put-away"].exists,
-            "a hidden worktree on another runner was drawn anyway")
-    }
-
-    /// The other runners' sections are ordered by how recently this app saw
-    /// them, so the runner you were on ten minutes ago is not below the one
-    /// you last opened in March.
-    ///
-    /// Asserted on the frames rather than on the order of the accessibility
-    /// tree, which is not the order things are drawn in.
-    func testTheMostRecentlySeenRunnerComesFirst() throws {
-        let app = launch(["-shell-servers", "-shell-overview", "-shell-4"])
-        let recent = app.descendants(matching: .any)
-            .matching(identifier: "shell-section-runner-eu").firstMatch
-        let older = app.descendants(matching: .any)
-            .matching(identifier: "shell-section-runner-gpu").firstMatch
-        XCTAssertTrue(recent.waitForExistence(timeout: 10))
-        XCTAssertTrue(older.waitForExistence(timeout: 10))
-        XCTAssertLessThan(
-            recent.frame.minY, older.frame.minY,
-            "eu-runner-1 was seen 9 minutes ago and gpu-box-2 two hours ago, so eu-runner-1 "
-                + "belongs above it — they are at \(recent.frame.minY) and \(older.frame.minY)")
-    }
-
-    /// **A hidden worktree is out of the grid until you ask for it.**
-    ///
-    /// `Worktree.isHidden` has existed in the model the whole time and iOS
-    /// had no consumer for it, so a worktree somebody put away on the Mac came
-    /// back as an ordinary card on the phone. A filter alone would be the
-    /// other bug — hiding is reversible and the way back must not be a
-    /// settings screen — so both halves are asserted here.
-    func testHiddenWorktreesLeaveTheGridUntilTheSectionIsOpened() throws {
-        let app = launch(["-shell-hidden", "-shell-overview", "-shell-4"])
-        XCTAssertEqual(try state(app)["overview"], 1)
-
-        // The fixture hides every fifth worktree from index 3, so `ws-3` is
-        // the one out of four that goes.
-        let hiddenCard = app.buttons["shell-card-ws-3"]
-        let shownCard = app.buttons["shell-card-ws-0"]
-        XCTAssertTrue(shownCard.waitForExistence(timeout: 10), "the grid never drew")
-        XCTAssertFalse(hiddenCard.exists, "a hidden worktree was drawn as an ordinary card")
-
-        let section = app.descendants(matching: .any)
-            .matching(identifier: "shell-hidden-section").firstMatch
-        XCTAssertTrue(section.waitForExistence(timeout: 5), "no way back from hiding")
-        section.tap()
-        XCTAssertTrue(
-            hiddenCard.waitForExistence(timeout: 5),
-            "opening the hidden section did not reveal the worktree in it")
-    }
-
-    // `testCrossingToAnotherRunnerAsksFirstAndCancelChangesNothing` stood here
-    // and asserted the alert's wording: "the panes open on <runner> will
-    // close." It was true, and it stopped being true. The app holds a
-    // connection per runner, `RootView` no longer keys the tree `.id(host)`,
-    // and a card in the grid is a place to swipe to rather than a reconnect --
-    // so there is no alert to assert and nothing for it to warn about. See
-    // `FarCoolerApp.ConnectedRoot`.
-
-    /// Forty worktrees is the number the design was chosen for, so the
-    /// harness has to reach it and the overview has to hold it.
-    func testTheOverviewHoldsFortyWorktrees() throws {
-        let app = launch(["-shell-40"])
-        XCTAssertEqual(try state(app)["worktrees"], 40)
-        liftBar(app, by: 320)
-        XCTAssertEqual(try state(app)["overview"], 1)
-        XCTAssertTrue(app.staticTexts["40 Worktrees"].waitForExistence(timeout: 5))
-    }
 }
-

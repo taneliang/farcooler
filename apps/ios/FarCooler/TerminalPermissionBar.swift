@@ -30,7 +30,6 @@ struct TerminalPermissionBar: View {
 
     @StateObject private var stream: AgentStream
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.shellOverviewShowing) private var overviewShowing
 
     init(terminalID: String, core: ClientCore, blocked: Bool, isVisible: Bool) {
         self.blocked = blocked
@@ -38,7 +37,7 @@ struct TerminalPermissionBar: View {
         _stream = StateObject(wrappedValue: AgentStream(terminal: terminalID, core: core))
     }
 
-    private var onScreen: Bool { isVisible && !overviewShowing && scenePhase == .active }
+    private var onScreen: Bool { isVisible && scenePhase == .active }
 
     private var held: PendingPermission? { stream.transcript.pendingPermission }
 

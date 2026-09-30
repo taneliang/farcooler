@@ -62,14 +62,13 @@ SOURCES = [
     # look like now.
     "Pane.swift",
     "PaneFocus.swift",
-    # The navigation shell: one bar that IS the worktree, the column of its
-    # tabs, and the all-worktrees view. It IS the app's navigation now —
-    # `-shell-harness` stands it on a canned fleet and is the only flag left.
+    # The navigation shell: one bar that IS the worktree, and the column of its
+    # tabs. It is what a worktree looks like once the phone's stack pushes one
+    # (`ShellScope`); `-shell-harness` stands it on a canned worktree.
     # Its pure model lives in AgentKit so `swift test` can reach it — only the
     # views are here.
     "ShellBar.swift",
-    "ShellOverview.swift",
-    # One repository's board, opened from a Board row in the overview.
+    # The board's rows: a workspace's list on its screen, and a task's card.
     "TaskBoardView.swift",
     "ShellRootView.swift",
     # The other two thirds of what `ShellRootView.swift` used to be. One type,
@@ -168,17 +167,14 @@ AGENTKIT_SOURCES = [
     # the iOS UI suite is compiled by CI and never executed. See
     # `ShellIdentityTests`.
     "ShellIdentity.swift",
-    # The overview sectioned by runner, and what a drag inside one section
-    # sends: which ids go to which runner, what a cached section allows, and
-    # the order drawn while a drop is in flight. Here for `ShellNavigation`'s
-    # reason — a drop sent to the wrong runner looks fine on screen. See
-    # `ShellRunnerSectionsTests`.
-    "ShellRunnerSections.swift",
-    # Inside a runner's section, a heading per workspace — its Board row, its
-    # orchestrator, its worktrees — and an Unclaimed heading per repository.
-    # Here for the same reason: a card under the wrong workspace, or an
-    # orchestrator drawn twice, looks fine on screen. See
-    # `ShellWorkspacesTests`.
+    # How a pane came to rest, whether that follows the selected runner, and
+    # whether a runner is answering. Here for `ShellNavigation`'s reason — a
+    # selection that follows the wrong rest outlives the process. See
+    # `ShellArrivalTests`.
+    "ShellArrival.swift",
+    # What an orchestrator's tab is called on the bar: its workspace's name.
+    # Here for the same reason: an orchestrator drawn as one more terminal of
+    # the worktree it runs in looks fine on screen. See `ShellWorkspacesTests`.
     "ShellWorkspaces.swift",
     # What a phone says before it closes a terminal, and the rule for when it
     # says anything at all. Here for `ShellNavigation.swift`'s reason and for
@@ -188,8 +184,8 @@ AGENTKIT_SOURCES = [
     # target has no unit tests to read it with. Android says the same three
     # sentences from `model/ShellClose.kt`. See `ShellCloseTests`.
     "ShellClose.swift",
-    # What the shell draws before anybody has swiped it, and what an empty grid
-    # says. Here for `ShellNavigation.swift`'s reason and for one of its own:
+    # What the shell draws before anybody has swiped it. Here for
+    # `ShellNavigation.swift`'s reason and for one of its own:
     # the branch this replaces chose a permanent spinner for a connected runner
     # with no worktrees, which is a defect that looks exactly like a slow
     # network from a screenshot and can only be told apart by asking the rule.
@@ -637,10 +633,6 @@ UI_TEST_SOURCES = [
     # cannot skip itself green when the demo daemon is down.
     "AgentDraftTests.swift",
     "ShellGestureTests.swift",
-    # The overview's runner headings and a drag inside a runner's section.
-    # Needs no runner: the harness answers a drop in the runner's place, so it
-    # cannot skip itself green when the demo daemon is down.
-    "ShellRunnerHeadingTests.swift",
     # The phone's workspace screen: its Orchestrator, Board and Worktrees
     # segments, Start Orchestrator, and the board's empty statuses. Needs no
     # runner: `-phone-harness` stands the stack on a canned one whose answers
@@ -674,14 +666,6 @@ UI_TEST_SOURCES = [
     # one, like TerminalScrollTests: the capability being tested is a wire call,
     # and a fixture cannot refuse it or make a tmux window.
     "NewTerminalTests.swift",
-    # The overview card's long press. Needs no runner — it presses a card in
-    # the canned fleet and reads the menu — so it cannot skip itself green when
-    # the demo daemon is down.
-    "ShellWorktreeMenuTests.swift",
-    # Where the overview's cards actually land, measured off the running app.
-    # `ShellGridTests` proves the arithmetic; this proves the grid is laid out
-    # by it. Needs no runner either.
-    "ShellGridLayoutTests.swift",
     # The swipe that closes a terminal, in the column a tap on the bar opens.
     # Needs no runner — the fixture's tab 0 is a diff and its others are
     # terminals, which is the whole of what these assert — so it cannot skip

@@ -20,7 +20,6 @@ import XCTest
 /// | the tab strip's frame | `shell-bar`'s frame |
 /// | `worktree-tab-changes`'s `value == "current"` | `shell-state`'s `tab=` |
 /// | a lift is a tap on a chip | a lift on the bar, which is how a tab is chosen |
-/// | the switcher sheet's `fleet-terminal-<id>` row | an overview card, `shell-card-<id>` |
 ///
 /// **Two of the old assertions have no equivalent and are not replaced.** The
 /// changes pane's "Review options" menu and the "Switch worktree" button were
@@ -131,32 +130,6 @@ final class KeyboardTabStripTests: XCTestCase {
         toolbarPost.name = "shell-bar-after-keyboard"
         toolbarPost.lifetime = .keepAlways
         add(toolbarPost)
-
-        // The cross-worktree jump, which used to be the switcher sheet in the
-        // toolbar and is the overview now. Same shape of assertion: reach every
-        // worktree on the runner from inside a pane, and land in one.
-        try XCTSkipUnless(
-            (field("worktrees") ?? 0) > 1, "One worktree: there is nowhere to cross to.")
-        let ws = try XCTUnwrap(field("ws"))
-        lift(bar, by: 320)
-        let opened = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in field("overview") == 1 }, object: nil)
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [opened], timeout: 5), .completed,
-            "The long lift never reached the overview: \(probe.value ?? "")")
-
-        let other = app.descendants(matching: .any).matching(
-            NSPredicate(format: "identifier BEGINSWITH %@", "shell-card-")
-        ).allElementsBoundByIndex.first { $0.isHittable }
-        let card = try XCTUnwrap(other, "The overview drew no cards")
-        card.tap()
-        let arrived = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in field("overview") == 0 }, object: nil)
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [arrived], timeout: 5), .completed,
-            "Tapping a card did not leave the overview: \(probe.value ?? "")")
-        XCTAssertNotNil(field("ws"), "The shell stopped reporting where it was")
-        _ = ws
     }
 
     /// Lift the bar by `points`, and hold there so the column is at that height

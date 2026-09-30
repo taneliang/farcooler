@@ -14,12 +14,11 @@ private func tab(_ id: String) -> ShellTab {
 
 private let fleet = ShellFleet(worktrees: [
     ShellWorktree(id: "w1", name: "one", tabs: [tab("w1-changes"), tab("w1-t1")]),
-    ShellWorktree(id: "w2", name: "two", isHidden: true, tabs: [tab("w2-changes"), tab("w2-t1")]),
+    ShellWorktree(id: "w2", name: "two", tabs: [tab("w2-changes"), tab("w2-t1")]),
 ])
 
-/// A terminal whose tab the fleet has lands on it, hidden worktree or not:
-/// the shell draws hidden worktrees too (the overview's Hidden section), so
-/// "hidden" is not a place a board jump can fail to reach.
+/// A terminal whose tab the fleet has lands on it, in whichever worktree that
+/// tab is.
 @Test func aTerminalWithATabLandsOnIt() {
     let tabs = ["t1": "w1-t1", "t2": "w2-t1"]
     #expect(fleet.landing(forTerminal: "t1", tabOfTerminal: tabs) == "w1-t1")

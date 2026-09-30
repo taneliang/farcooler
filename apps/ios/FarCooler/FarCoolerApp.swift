@@ -89,10 +89,8 @@ func UIDeviceName() -> String {
 /// is not a home screen.
 ///
 /// So the host list appears exactly when it is the thing to do: when there are
-/// no hosts. Once there is one, the app lands on it, and switching runners
-/// moves to where you already go to switch terminals — the shell overview,
-/// sectioned by runner with each runner's actions on its heading, which is the
-/// phone's equivalent of the Mac's sidebar.
+/// no hosts. Once there is one, the app lands on Needs You, with the runners'
+/// workspaces one tap away.
 struct RootView: View {
     @StateObject private var hosts = RunnerStore()
 
@@ -178,13 +176,6 @@ struct ConnectedRoot: View {
             // `PhoneMigration`.
             PhoneMigration.run()
             WatchLinkHost.shared.adopt(fleet)
-            // Worktrees remembered for a runner nobody has any more are
-            // worktrees the grid would offer to cross to and then could not.
-            // Here rather than in `RunnerStore.remove`, because a runner can
-            // also simply stop being passed at launch — the demo host is one —
-            // and this is the one place that sees the whole list. See
-            // `RunnerDirectory`.
-            RunnerDirectoryStore.forget(runners: Set(hosts.hosts.map(\.id.uuidString)))
             _ = Identity.publicKey
             // Asked for at launch, alongside the device key.
             //

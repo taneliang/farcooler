@@ -12,8 +12,8 @@ import XCTest
 /// pure test while leaving a column nobody can close a terminal from.
 ///
 /// No runner and no daemon. `-shell-harness` stands the shell on a canned
-/// fleet whose tab 0 is the diff and whose other tabs are terminals — the same
-/// split `ShellFleetMap.one(_:naming:now:)` makes over a real one — so this
+/// worktree whose tab 0 is Changes and whose other tabs are terminals — the
+/// same split `ShellFleetMap.one(_:naming:now:)` makes over a real one — so this
 /// suite never skips, the way `ShellGestureTests` never does and for the same
 /// reason.
 ///
@@ -26,10 +26,8 @@ import XCTest
 /// `ShellCloseTests` holds the sentence; `Connection.close` is the pair of
 /// calls, in the order the daemon requires.
 final class ShellColumnCloseTests: XCTestCase {
-    /// The default fixture's first worktree has three tabs — `Changes`, then
-    /// `codex` and `shell`. Ten worktrees, tab counts `[3, 2, 5, 1, 4]`
-    /// cycling, agent names cycling `[claude, codex, shell, aider]` from tab 0,
-    /// whose title is overwritten with `Changes`.
+    /// The fixture's one worktree has three tabs — `Changes`, then `codex` and
+    /// `shell`.
     private func launch() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-shell-harness"]
@@ -164,7 +162,7 @@ final class ShellColumnCloseTests: XCTestCase {
         XCTAssertEqual(try state(app)["ws"], 0, "tapping Close changed worktree")
     }
 
-    /// **The Diff row has no Close, and it is absent rather than disabled.**
+    /// **The Changes row has no Close, and it is absent rather than disabled.**
     ///
     /// The Mac's rule, kept: a daemon-side refusal is a safety net, and the
     /// button should not be there to press. A diff is synthesized by the shell,
@@ -175,7 +173,7 @@ final class ShellColumnCloseTests: XCTestCase {
     /// control: a column that built no swipe action at all — or one whose rows
     /// no longer reach the swipe recognizer — would satisfy the assertion below
     /// by drawing nothing, and this is what stops it.
-    func testTheDiffRowIsNotOfferedClose() throws {
+    func testTheChangesRowIsNotOfferedClose() throws {
         // The control FIRST, and on its own launch. A revealed swipe action is
         // modal in a table: once one row's actions are open, the next touch
         // anywhere is spent dismissing them rather than starting a new swipe —
@@ -196,12 +194,12 @@ final class ShellColumnCloseTests: XCTestCase {
         let app = launch()
         try pinColumn(app)
         let diff = app.buttons["shell-column-row-0"]
-        XCTAssertTrue(diff.waitForExistence(timeout: 10), "the column drew no Diff row")
-        XCTAssertEqual(diff.label, "Changes", "row 0 of every worktree is the diff")
+        XCTAssertTrue(diff.waitForExistence(timeout: 10), "the column drew no Changes row")
+        XCTAssertEqual(diff.label, "Changes", "row 0 of every worktree is Changes")
         swipe(diff)
         XCTAssertFalse(
             app.buttons["Close"].waitForExistence(timeout: 3),
-            "the Diff row offered to close a terminal it does not have: \(app.debugDescription)")
+            "the Changes row offered to close a terminal it does not have: \(app.debugDescription)")
         // And the swipe did not change worktree.
         //
         // This is the assertion that keeps the one above from passing for the
@@ -220,8 +218,8 @@ final class ShellColumnCloseTests: XCTestCase {
         // swiped over the same sixty points on the same list, keeps its column
         // open and shows a Close — which is the difference this test is about.
         let after = try state(app)
-        XCTAssertEqual(after["ws"], 0, "the swipe on the Diff row changed worktree")
-        XCTAssertEqual(after["tab"], 0, "the swipe on the Diff row landed on some other tab")
+        XCTAssertEqual(after["ws"], 0, "the swipe on the Changes row changed worktree")
+        XCTAssertEqual(after["tab"], 0, "the swipe on the Changes row landed on some other tab")
     }
 
     /// **Neither the drag-up path nor a chosen row leaves a Close standing.**
@@ -252,7 +250,7 @@ final class ShellColumnCloseTests: XCTestCase {
         XCTAssertTrue(bar.waitForExistence(timeout: 30), "the bar never appeared")
 
         // Enough to clear `ShellMetrics.openMin` and open the column, short of
-        // the lift that hands the page to the overview.
+        // the lift that carries the page off the display.
         let from = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         from.press(
             forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: -60)),

@@ -14,9 +14,9 @@ import Foundation
 /// whatever unmounted it, and a relaunch counts — cost nothing that was not
 /// already costless.
 ///
-/// `UserDefaults` and not the App Group container, for `RunnerDirectoryStore`'s
-/// reason: nothing outside the app reads this. A widget has no composer, and a
-/// notification extension has no keyboard.
+/// `UserDefaults` and not the App Group container: nothing outside the app
+/// reads this. A widget has no composer, and a notification extension has no
+/// keyboard.
 public struct PaneDraft: Codable, Sendable, Equatable {
     public var text: String
     /// When it was last typed into, which is what both bounds below are
@@ -39,9 +39,9 @@ public struct PaneDraft: Codable, Sendable, Equatable {
 /// prune would delete the drafts of every pane on it. Age and count need no
 /// knowledge of who is awake, which is the only kind of knowledge this has.
 ///
-/// One key holding one dictionary, written whole — `RunnerDirectoryStore`'s
-/// shape, for its reason: a key per pane cannot be enumerated without already
-/// knowing every pane id, which is exactly what pruning needs to ask.
+/// One key holding one dictionary, written whole: a key per pane cannot be
+/// enumerated without already knowing every pane id, which is exactly what
+/// pruning needs to ask.
 public enum PaneDraftStore {
     /// Spelled out, because it names a slot on disk that installs already have.
     private static let key = "paneDrafts"

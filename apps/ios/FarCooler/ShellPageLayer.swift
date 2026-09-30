@@ -4,11 +4,10 @@ import SwiftUI
 // carries it, and the transforms that put it where a finger or a spring says.
 //
 // Split out of `ShellRootView` because that file had become the whole shell —
-// the state, the finger, the motion, the layering and the overview's lifecycle
-// in one type — and these are the part that is about a PICTURE. What is here
-// is only what SwiftUI itself makes true: the order the clip, the scale and
-// the shadow have to compose in, and the fact that the card the page becomes
-// has to be drawn ON the page rather than arriving separately.
+// the state, the finger, the motion and the layering in one type — and these
+// are the part that is about a PICTURE. What is here is only what SwiftUI
+// itself makes true: the order the clip, the scale and the shadow have to
+// compose in.
 //
 // The arithmetic is NOT here. Every number below comes out of
 // `AgentKit/ShellFlight.swift`, which is where `swift test` can reach it —
@@ -16,31 +15,17 @@ import SwiftUI
 // the same reason: a transform written inside a `View` can be checked by
 // nothing but a person swiping at it, and each of these has been wrong at
 // least once in a way that reads as the page vanishing.
+//
+// The shell is over one worktree, so a lifted page has nowhere to fly to: it
+// is held under the finger, shrunk and shadowed, and put back on release.
 
-/// The shape the flying page is clipped to: a rounded rectangle over the
+/// The shape the lifted page is clipped to: a rounded rectangle over the
 /// BOTTOM `height` of whatever it is handed.
 ///
-/// It exists because a page and a card are not the same shape and no scale can
-/// make them one. The page is the display — 402 by 874 here — and a card is
-/// 168 by 132, so a page shrunk until it is a card's WIDTH is still nearly
-/// three times a card's height. Scaled to the height instead it is too narrow;
-/// scaled to both it is a squashed picture of a terminal. What is left is what
-/// the system itself does when a snapshot has to land in a frame that is not
-/// its aspect: keep the picture honest and CROP it, so the page arrives at
-/// exactly the rectangle the grid is holding open and the handover is a change
-/// of content rather than a change of shape.
-///
-/// The BOTTOM of the page and not the top, for two reasons that agree. It is
-/// the half your thumb was holding all the way up — the crop should take away
-/// the end of the page you had already let go of — and it is where a terminal
-/// keeps its most recent lines, which is exactly what the card is about to
-/// show in its tail. Cropped the other way the page would land showing the top
-/// of a screen and then cross-fade to the bottom of it.
-///
-/// `Animatable` on purpose and not incidentally. The crop and the corner both
-/// have to travel with the spring that carries the page — a clip that jumped
-/// to the card's shape on the first frame of the flight would be the page
-/// arriving before it left — and a shape only interpolates if it says how.
+/// `Animatable` on purpose and not incidentally. The corner has to travel
+/// with the spring that carries the page — a clip that jumped to its final
+/// shape on the first frame would be the page arriving before it left — and a
+/// shape only interpolates if it says how.
 private struct ShellFlightShape: Shape {
     /// How much of the page is drawn, in the page's own coordinates.
     var height: CGFloat
@@ -85,13 +70,6 @@ extension ShellRootView {
     /// just gets smaller.
     func pageLayer(page: CGFloat, safeArea: EdgeInsets) -> some View {
         paneTrack(page: page, safeArea: safeArea)
-            // The page carries the CARD it is turning into, and that is the
-            // whole of the landing.
-            //
-            // See `cardFace`. Drawn inside the clip and inside the scale, so
-            // it travels as part of the page rather than as a second thing
-            // arriving at the same address.
-            .overlay(alignment: .bottom) { cardFace }
             .clipShape(ShellFlightShape(height: flightHeight, radius: flightRadius))
             // Anchored top-leading so the scale and the offset compose
             // predictably: with a center anchor the offset would have to carry
@@ -107,16 +85,6 @@ extension ShellRootView {
                 radius: ShellMotion.liftShadowRadius, x: 0,
                 y: ShellMotion.liftShadowY * offGlass)
             .offset(x: flightOffset.width, y: flightOffset.height)
-            // Drawn all the way in, and only handed over once it has landed.
-            //
-            // The page is the current worktree's card for as long as it is in
-            // the air — the grid is holding an empty cell open for it — so it
-            // cannot fade out on the way: a page that dissolved as it arrived
-            // would land in a hole and leave one. What it does instead is
-            // change places with the card, at rest, in the same rectangle, on
-            // `handover`, over a card that is already opaque. See `land()`.
-            .opacity(pageAlpha)
-            .allowsHitTesting(!overview)
     }
 
     /// How far past the last row the finger has gone, which is the only part
@@ -128,133 +96,44 @@ extension ShellRootView {
     /// and `ShellGesture.pageRise`'s, for the drag that starts low in the
     /// bar this used to get wrong.
     private var pageRise: CGFloat {
-        overview ? 0 : ShellGesture.pageRise(up: pageAbove, tabCount: tabCount)
+        ShellGesture.pageRise(up: pageAbove, tabCount: tabCount)
     }
 
-    /// How far off the display the page is, 0…1, whichever half of the journey
-    /// it is in — under a finger, or in the air. See `ShellFlight.offGlass`.
+    /// How far off the display the page is, 0…1. See `ShellFlight.offGlass`.
     private var offGlass: CGFloat {
-        ShellFlight.offGlass(rise: pageRise, cropped: cropped)
-    }
-
-    /// The card the page is turning into, drawn on the page itself.
-    ///
-    /// **The landing is not a handover between two objects; it is one object
-    /// arriving as what it becomes.** What used to land in the cell was the
-    /// bottom of a terminal — a gray rectangle — and the finished card faded
-    /// in over it once everything had stopped. Putting an opaque card
-    /// underneath first and dissolving the page over it removed the see-through
-    /// dip but not the sequence: the card still resolved after the arrival,
-    /// and two steps is what the owner keeps seeing.
-    ///
-    /// So the flying page carries a real `ShellCardFace` — the same view the
-    /// grid draws, not one that looks like it — and it fades in on `cropped`,
-    /// which is the flight's own progress. By the time the page is on the cell
-    /// it IS the card: name, tail, ribbon and subtitle, at the cell's size, in
-    /// the cell's place. The handover in `land()` is then a cross-fade between
-    /// two identical drawings of one worktree in one rectangle, which is a
-    /// cross-fade nobody can see.
-    ///
-    /// Laid out at the card's own size and SCALED, never re-laid-out. The
-    /// drawn region shrinks from a whole page to a card over the flight, and a
-    /// card asked to fill it at every intermediate height would spring its
-    /// tail away from its ribbon on every frame. Bottom-anchored inside that
-    /// region for the same reason the crop keeps the page's bottom: the edge
-    /// the flight is written against is the bottom edge, so the card sits
-    /// perfectly still against it while the band above it closes.
-    ///
-    /// The band is filled rather than left open — the card's own ground over
-    /// an opaque one — because a partly-faded card over a page that is being
-    /// cropped away would show the grid through the gap, which is the dip
-    /// again wearing a different hat.
-    @ViewBuilder
-    private var cardFace: some View {
-        // Mounted from the moment the grid has measured a cell, and NOT gated
-        // on `cropped > 0`. A view inserted into the tree at the start of an
-        // animation has no previous opacity to interpolate from, so gating it
-        // would make the card pop in whole on the first frame of the flight —
-        // which is the exact failure this exists to remove, moved to the other
-        // end of the journey.
-        if let tile, tile.width > 0, tile.height > 0, pageFrame.width > 0,
-            let worktree = currentWorktree
-        {
-            let magnify = pageFrame.width / tile.width
-            // The card at the size the crop is currently drawing, said in the
-            // card's own coordinates — the whole thing is scaled back up by
-            // `magnify` below, so a height of `flightHeight / magnify` draws
-            // as exactly `flightHeight`, which is the rectangle the clip
-            // keeps. The corner travels the same way and for the same reason.
-            ShellCardFace(
-                worktree: worktree, isCurrent: true,
-                // The CELL's width, measured, and not the design's 168. The
-                // whole thing is scaled by `magnify` — `pageFrame.width /
-                // tile.width` — so laying it out at the tile's own width is
-                // what draws it exactly page-wide on the way. The two were the
-                // same number until the grid started stretching its cards to
-                // the display; see `ShellGrid`.
-                width: tile.width,
-                height: flightHeight / magnify, radius: flightRadius / magnify,
-                opaqueGround: true)
-                .scaleEffect(magnify, anchor: .bottom)
-                .opacity(cropped)
-                // The page underneath is what answers a finger. This is a
-                // picture of where the page is going.
-                .allowsHitTesting(false)
-        }
+        ShellFlight.offGlass(rise: pageRise, cropped: 0)
     }
 
     /// How much smaller the page is drawn than the display, at this moment.
-    /// See `ShellFlight.scale`, which is where the two shrinks are written out.
+    /// See `ShellFlight.scale`, which is where the shrink is written out.
     private var flightScale: CGFloat {
-        ShellFlight.scale(page: pageFrame, tile: tile, rise: pageRise, cropped: cropped)
+        ShellFlight.scale(page: pageFrame, tile: nil, rise: pageRise, cropped: 0)
     }
 
     /// The point of the page the shrink is anchored at, in page coordinates.
     ///
-    /// The middle of the display until a finger says otherwise, which is what
-    /// the reverse journey wants: a page growing back out of a cell has no
-    /// finger on it, and growing about its own center is the only unbiased
-    /// answer.
+    /// Where the finger that lifted it went down, and the middle of the
+    /// display until one has.
     private var shrinkAnchorX: CGFloat {
         liftOrigin ?? pageFrame.width / 2
     }
 
-    /// Where the page sits: under the finger, or on its way to the cell.
-    /// See `ShellFlight.offset`, which is where the two phases are written out.
-    ///
-    /// `overview` is what says which phase this is. It is the state a release
-    /// puts the shell into, so the spring that runs it interpolates from
-    /// whatever the page was last drawn at — including its velocity — to the
-    /// cell, with nothing in between for a mid-drag destination to bend.
+    /// Where the page sits, under the finger. See `ShellFlight.offset`.
     private var flightOffset: CGSize {
-        // In the overview the page is ON its cell — or on its way off it under
-        // a thumb, which is the same journey at a fraction of the way along.
-        //
-        // `ShellFlight.returning` at progress 0 is byte for byte the landing
-        // branch this used to pass `landing: overview` for, so a page sitting
-        // in the grid with nobody touching it is drawn in exactly the same
-        // place it always was. What is new is only that there is somewhere for
-        // it to be in between.
-        if overview {
-            return ShellFlight.returning(
-                page: pageFrame, tile: tile, scale: flightScale, progress: pullOut)
-        }
-        return ShellFlight.offset(
-            page: pageFrame, tile: tile, landing: false, scale: flightScale,
+        ShellFlight.offset(
+            page: pageFrame, tile: nil, landing: false, scale: flightScale,
             rise: pageRise, anchorX: shrinkAnchorX, carryX: carryX)
     }
 
-    /// A page has the display's corners and a tile has a card's, so the corner
-    /// travels too. See `ShellFlight.radius`.
+    /// A page has the display's corners, so the corner travels with the
+    /// shrink. See `ShellFlight.radius`.
     private var flightRadius: CGFloat {
-        ShellFlight.radius(scale: flightScale, rise: pageRise, cropped: cropped)
+        ShellFlight.radius(scale: flightScale, rise: pageRise, cropped: 0)
     }
 
-    /// How much of the page is drawn, in the page's own coordinates — a whole
-    /// screen while the finger is down, a card's rectangle by the end of the
-    /// flight. See `ShellFlight.height`.
+    /// How much of the page is drawn, in the page's own coordinates: all of
+    /// it. See `ShellFlight.height`.
     private var flightHeight: CGFloat {
-        ShellFlight.height(page: pageFrame, tile: tile, cropped: cropped)
+        ShellFlight.height(page: pageFrame, tile: nil, cropped: 0)
     }
-
 }

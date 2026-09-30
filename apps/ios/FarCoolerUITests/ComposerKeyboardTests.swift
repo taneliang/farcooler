@@ -30,98 +30,32 @@ final class ComposerKeyboardTests: XCTestCase {
         XCTAssertTrue(field.exists, "hiding the keyboard took the composer with it")
     }
 
-    /// **The composer is not docked over the grid** (ov-27 m1).
+    /// **The pane at rest is claimed as read** (ov-27, kept when the overview
+    /// it was written against went).
     ///
-    /// A composer is an input accessory, so it lives in the KEYBOARD's window
-    /// and hiding its pane does nothing to it: an agent pane at rest under the
-    /// open grid — B's first pane after a runner switch, say — went on
-    /// drawing its composer over the cards. Terminals were held back while
-    /// the grid is up; the chat composer was not.
-    ///
-    /// Opened ON the grid (`-shell-overview`) rather than lifted to it: with
-    /// the composer docked, the bar takes no touches in this harness.
-    func testTheComposerIsNotDockedOverTheGrid() throws {
+    /// `Notifier.visibleTerminal` is what suppresses a banner about the pane
+    /// you are looking at and what the poll's `markVisibleSeen` claims on the
+    /// runner and marks `terminal.seen` from. The agent layout harness mounts
+    /// the shell over one worktree, landing on the agent pane, so the claim
+    /// has to arrive without a finger touching anything: it is the shell's own
+    /// `markVisible` and the pane's own mount task saying the same thing.
+    func testTheAgentPaneAtRestIsClaimedAsRead() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-agent-layout-harness", "-plain", "-shell-overview"]
+        app.launchArguments = ["-agent-layout-harness", "-plain"]
         app.launch()
 
         let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
         XCTAssertTrue(probe.waitForExistence(timeout: 30), "the shell never stood up")
-        let state = probe.value as? String ?? ""
-        XCTAssertTrue(state.contains("overview=1"), "the harness did not open on the grid: \(state)")
-        XCTAssertTrue(state.contains("tab=1"), "the agent pane is not the one at rest: \(state)")
-
-        // Given the time a docked bar takes to appear, then asserted absent.
-        let send = app.buttons["agent-send"]
-        func docked() -> XCTNSPredicateExpectation {
-            XCTNSPredicateExpectation(
-                predicate: NSPredicate { _, _ in send.exists && send.isHittable }, object: nil)
-        }
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [docked()], timeout: 5), .timedOut,
-            "the composer is docked over the grid")
-
-        // And it docks when the grid closes onto the pane.
-        app.buttons["shell-overview-done"].tap()
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [docked()], timeout: 10), .completed,
-            "closing the grid onto the agent pane left it with no composer")
-    }
-
-    /// **A pane that mounts under the grid is not claimed as read** (ov-27,
-    /// the case reported). B's first pane after a runner switch mounts at
-    /// rest while the grid is up, and a pane's own mount task claimed it —
-    /// `Notifier.visibleTerminal`, which the poll's `markVisibleSeen` claims
-    /// on the runner and marks `terminal.seen` from — whatever was over it.
-    ///
-    /// The agent layout harness, opened on the grid with `-late-pane`, is
-    /// that mount: a seat, an empty fleet, then the real `TerminalView` and
-    /// `AgentView` arriving at rest under the open grid. (Opened on the grid
-    /// with the pane already there, the screen's own "nothing is read" lands
-    /// after the pane's claim and hides it; that was tried, and it passed
-    /// without the fix.) The claim arrives when the grid closes onto the pane.
-    func testAPaneThatMountsUnderTheGridIsNotRead() throws {
-        let app = XCUIApplication()
-        app.launchArguments = [
-            "-agent-layout-harness", "-plain", "-shell-overview", "-late-pane",
-        ]
-        app.launch()
-
-        let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
-        XCTAssertTrue(probe.waitForExistence(timeout: 30), "the shell never stood up")
-        XCTAssertTrue(
-            (probe.value as? String ?? "").contains("overview=1"),
-            "the harness did not open on the grid: \(probe.value ?? "")")
         let watch = app.descendants(matching: .any).matching(identifier: "shell-watch").firstMatch
         XCTAssertTrue(watch.waitForExistence(timeout: 10), "the screen has no watch probe")
 
-        // The pane has arrived: the shell rests on the agent tab (tab 1, after
-        // the Diff tab), under the grid.
-        let arrived = XCTNSPredicateExpectation(
+        let claimed = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in
-                let value = probe.value as? String ?? ""
-                return value.contains("tab=1") && value.contains("worktrees=1")
-                    && value.contains("overview=1")
+                (watch.value as? String ?? "") == "watch=harness"
             }, object: nil)
         XCTAssertEqual(
-            XCTWaiter.wait(for: [arrived], timeout: 15), .completed,
-            "the agent pane never came to rest under the grid: \(probe.value ?? "")")
-
-        // Given the time a mount and a poll take, then asserted unclaimed.
-        func claimed() -> XCTNSPredicateExpectation {
-            XCTNSPredicateExpectation(
-                predicate: NSPredicate { _, _ in
-                    let value = watch.value as? String ?? ""
-                    return value.hasPrefix("watch=") && value != "watch="
-                }, object: nil)
-        }
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [claimed()], timeout: 5), .timedOut,
-            "the pane under the grid is claimed as read: \(watch.value ?? "")")
-
-        app.buttons["shell-overview-done"].tap()
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [claimed()], timeout: 10), .completed,
-            "closing the grid onto the pane did not claim it: \(watch.value ?? "")")
+            XCTWaiter.wait(for: [claimed], timeout: 15), .completed,
+            "the pane at rest is not claimed as read: \(watch.value ?? "") "
+                + "(\(probe.value ?? ""))")
     }
 }

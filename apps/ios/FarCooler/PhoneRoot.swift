@@ -7,8 +7,8 @@ import SwiftUI
 // workspace, and a worktree over the task, so Back walks up the way you came
 // down. The shell is still what a worktree looks like once you're in one
 // (`WorktreeScreen`): the pane pager and the bottom bar, scoped to that one
-// worktree, with the overview it used to lift into retired. It covers the
-// stack rather than being pushed onto it (`PhoneNavigator.worktree`). Where a launch
+// worktree. It covers the stack rather than being pushed onto it
+// (`PhoneNavigator.worktree`). Where a launch
 // opens and where a link lands are `PhoneLaunch`'s rules, in AgentKit.
 
 extension EnvironmentValues {
@@ -378,7 +378,7 @@ extension Connection {
 ///
 /// Today's pane pager and bottom bar, over this worktree's panes alone:
 /// swiping the bar sideways moves between its terminals, not across the
-/// fleet, and the lift that reached the overview reaches only the column.
+/// fleet, and a lift reaches only the column.
 /// It covers the stack rather than being pushed onto it, since every pane
 /// has a navigation stack of its own for its bar; the pane's bar carries
 /// Back (`phoneBack`), which takes the cover away.

@@ -58,10 +58,9 @@ import SwiftUI
 // rather than stopping at it.
 //
 // **The shell itself still has no `NavigationStack`, and must not grow one.**
-// Phase 3 took the app's single stack out, and the overview has one of its own
-// (`ShellOverview.overviewBody`). What is added here is one stack per PANE,
-// inside the pane, so it travels with the pane on the track and no part of the
-// shell — bar, track, overview — is inside anybody's navigation. See
+// Phase 3 took the app's single stack out. What is added here is one stack per
+// PANE, inside the pane, so it travels with the pane on the track and no part
+// of the shell — bar, track — is inside anybody's navigation. See
 // `ShellScreen.ShellPaneRealView.body` for where it is mounted and what the
 // pane's own safe area is fed from.
 //
@@ -69,14 +68,12 @@ import SwiftUI
 //
 // A navigation bar reduces the safe area of what it is over, so a scroll view
 // treats it as a CONTENT inset — the diff's cards travel behind the material
-// and only come to REST below it, which is what the overview's own chrome
-// does. For the terminal the same inset is a real loss: a VT grid is not
+// and only come to REST below it. For the terminal the same inset is a real loss: a VT grid is not
 // scrollable content, so rows that ran under the bar would be rows you cannot
 // read, and the honest thing is for the grid to be a bar shorter.
 //
-// The measurement, because "a toolbar changes layout" is exactly the trap the
-// overview hit — hiding its navigation bar moved every card 184 points. An
-// inline navigation bar over a pane is **44 points**. The capsule this
+// The measurement, because "a toolbar changes layout" is a trap: an inline
+// navigation bar over a pane is **44 points**. The capsule this
 // replaced took `ShellMetrics.barRow` plus a 12-point gap, which is **56**, so
 // a pane is 12 points TALLER than it was yesterday and shorter than it was
 // before any of this by exactly one navigation bar. Nothing about the TRACK
@@ -114,14 +111,9 @@ import SwiftUI
 /// (`AgentView`), and a second one up here would be two doors to one action
 /// with different behavior behind them.
 ///
-/// **Remove worktree** — `Connection.removeWorktree` had no iOS caller at all
-/// after `FleetList` went. It is worktree-scoped, so the two candidate homes
-/// were this bar and the overview card's context menu; this bar won because
-/// the overview was being reworked into a multi-server grid by another lane
-/// and a destructive action landing in a file that is being rewritten
-/// underneath it is an action that quietly disappears again. It reads well
-/// here anyway: the moment you decide a worktree is finished with is the
-/// moment you are looking at it.
+/// **Remove worktree** — worktree-scoped, and it lives on this bar because the
+/// moment you decide a worktree is finished with is the moment you are looking
+/// at it.
 ///
 /// **The card's menu has it too now**, which is the Mac's own arrangement —
 /// the sidebar row and the worktree detail both carry it — and it is not two
@@ -132,10 +124,6 @@ import SwiftUI
 /// **Terminal ↔ chat** is here too, and that was the least obvious of the
 /// five. See `paneModeItem`.
 ///
-/// Hidden-worktree disclosure is deliberately NOT here. It is a question
-/// about which worktrees the fleet SHOWS, and a control on one pane that
-/// changes what a different screen lists is a control nobody will find twice.
-/// It belongs to the overview.
 struct ShellPaneChromeModifier: ViewModifier {
     /// The tab's own title, straight off the shell's model.
     ///
@@ -177,9 +165,7 @@ struct ShellPaneChromeModifier: ViewModifier {
     @State private var showPhotoPicker = false
     @State private var pickedImage: PhotosPickerItem?
     /// Where a removal started here has got to. The ceremony itself is
-    /// `RemoveWorktreeFlow`, shared with the overview card's menu so the two
-    /// doors into one destructive action cannot come to ask for different
-    /// amounts of confirmation.
+    /// `RemoveWorktreeFlow`.
     @State private var removing: RemoveWorktreeRequest?
     @State private var newTerminalFailure: NewTerminalFailure?
 
@@ -475,10 +461,10 @@ struct ShellPaneChromeModifier: ViewModifier {
     ///   selection mechanism, and hanging a create off it means an overshot
     ///   drag makes a tmux window. Selections are free to be wrong; this is not.
     /// - **`tabCount` is the column's arithmetic, not a list length.**
-    ///   `ShellGesture.columnFull`, `pageRise` and `overviewProgress` are all
-    ///   written against it, so a synthetic row moves the point where the
-    ///   overview begins by a whole `rowHeight` and re-tunes a gesture
-    ///   `ShellNavigationTests` and `ShellGestureTests` pin between them.
+    ///   `ShellGesture.columnFull` and `pageRise` are both written against it,
+    ///   so a synthetic row moves the point where the page starts to rise by a
+    ///   whole `rowHeight` and re-tunes a gesture `ShellNavigationTests` and
+    ///   `ShellGestureTests` pin between them.
     /// - **One dot per tab, in two places.** The ribbon and the column share
     ///   marks through a `matchedGeometryEffect` keyed on `tab.id`; a row with
     ///   no tab behind it has no dot to fly, and inventing one would put a mark

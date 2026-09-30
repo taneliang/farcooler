@@ -22,9 +22,9 @@ import Foundation
 /// worktree with this id and taking the first match — which is a lookup that
 /// silently picks one when the assumption it rests on fails, and makes
 /// cross-daemon uniqueness load-bearing for a SwiftUI identity with nothing
-/// anywhere enforcing it. `ShellPaneTrack` retains a mounted pane per tab id
-/// and `ShellOverview` gives each card `.id(_:)` off the worktree id: two
-/// entries sharing one identity resolve by drawing one of them, with no error.
+/// anywhere enforcing it. `ShellPaneTrack` retains a mounted pane per tab id:
+/// two entries sharing one identity resolve by drawing one of them, with no
+/// error.
 /// Carrying the runner means that outcome does not depend on a property of
 /// somebody else's random number generator.
 ///
@@ -47,10 +47,8 @@ import Foundation
 public enum ShellIdentity {
     /// The separator, spelled once.
     ///
-    /// A slash, matching what the cache next door already writes —
-    /// `RunnerDirectory.group()` has built `"\(runner)/\(worktree)/\(index)"`
-    /// since the grid first listed other runners. Two spellings of the same
-    /// composite would be two answers to "is this the same tab".
+    /// A slash. Two spellings of the same composite would be two answers to
+    /// "is this the same tab".
     private static let separator = "/"
 
     /// One worktree, named across the whole fleet.

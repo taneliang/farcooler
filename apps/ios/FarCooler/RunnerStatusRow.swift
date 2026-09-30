@@ -16,9 +16,8 @@ import SwiftUI
 /// (`unhealthyHosts`, `staleHosts`); iOS takes Android's answer for the reason
 /// the battery toggle already did, which is that both of them are phones.
 ///
-/// **Two screens draw a list of these**, and each decides for itself what
-/// "Authorize This Device" means: the shell overview, over the grid the rows
-/// are about, where the overview's own `NavigationStack` can push
+/// **More than one screen draws a list of these**, and each decides for itself
+/// what "Authorize This Device" means: Needs You, where the stack can push
 /// `AuthorizeView`; and `FleetView`'s pre-fleet screen, which is these rows and
 /// nothing else because there is nothing else to draw yet. That is why the
 /// moves are callbacks rather than links — a row has no idea what it is inside.

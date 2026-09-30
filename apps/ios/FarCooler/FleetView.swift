@@ -71,9 +71,9 @@ struct FleetView: View {
     /// Whether this device's own key is on screen.
     ///
     /// A flag here rather than a `NavigationLink` in the row, because a row has
-    /// no idea what it is inside: `RunnerStatusRow` is drawn both here, in a
-    /// stack, and over the shell's overview, which deliberately has none. Where
-    /// "Authorize This Device" goes is the placing screen's decision.
+    /// no idea what it is inside: `RunnerStatusRow` is drawn in stacks that
+    /// differ. Where "Authorize This Device" goes is the placing screen's
+    /// decision.
     @State private var authorizing = false
 
     var body: some View {
@@ -193,16 +193,13 @@ struct FleetView: View {
     /// the shape that survives N runners.
     ///
     /// So the branch is no longer a phase. It is whether ANY runner has said
-    /// what it has: with a fleet there is a shell, and the runners in trouble
-    /// are rows over the overview's grid. Without one there is nothing to draw
-    /// a shell from — see `ShellScreen.seed` — and this screen is the rows on
-    /// their own.
+    /// what it has: with a fleet there is the phone's stack, and the runners in
+    /// trouble are rows on Needs You. Without one there is nothing to draw a
+    /// stack from, and this screen is the rows on their own.
     ///
     /// The stack is around the second branch only. It is what gives it a title
     /// and what a row's "Authorize This Device" pushes into; the shell gets
-    /// none, deliberately, because its own navigation is a gesture and the only
-    /// navigation bar in it belongs to the overview, which declares a stack of
-    /// its own.
+    /// none, deliberately, because its own navigation is a gesture.
     ///
     /// **Once the shell has stood, it stays.** `hasFleet` is false again
     /// whenever every connection that had a fleet has been retired, and with
@@ -215,13 +212,8 @@ struct FleetView: View {
     /// switched from closed.
     ///
     /// The shell already knows what to draw over a fleet that empties under
-    /// it: `ShellBringUp.opening` keeps a seated shell seated, a retired
-    /// runner's panes draw nothing (`ShellScreen.connection(_:)`), its section
-    /// becomes the cached one every unreached runner gets, drawn as "can't
-    /// say" (`RunnerDirectory.decayed`), and the runner being dialed is a
-    /// status row over the grid with its retry and edit. That is also what a
-    /// runner that never answers leaves you with — the grid, its row, and a
-    /// "Switch to This Runner" on the heading of the one you left. So nothing
+    /// it: `ShellBringUp.opening` keeps a seated shell seated, and a retired
+    /// runner's panes draw nothing (`ShellScreen.connection(_:)`). So nothing
     /// here waits for the new runner, and the old one is not kept alive to
     /// cover the gap: its panes would go on looking live on a phone that has
     /// been told to stop talking to it.
@@ -398,9 +390,8 @@ struct FleetView: View {
     /// So the switcher came out of the connected screen and went under these
     /// three instead, in the same place with the same behavior. The bar is what
     /// makes each of them a screen you can leave. It is under these three and
-    /// nothing else now: the connected screen is the shell, which is full bleed
-    /// and puts each runner's actions on that runner's heading in the
-    /// overview. See `RunnerMenu`, and `ShellScreen.runnerActions`.
+    /// nothing else now: the connected screen is the phone's stack, which puts
+    /// each runner's actions in Runner Settings. See `RunnerMenu`.
     private func escapable<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         content()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -446,10 +437,7 @@ struct FleetView: View {
     ///
     /// This used to be the inbox — a list of what on this runner was waiting on
     /// a person — with the shell behind a debug flag beside it. Both are gone:
-    /// the shell's overview IS the fleet screen — searchable, a section per
-    /// runner in the order each runner keeps — and a second screen answering the
-    /// same question with rows instead of cards was a second thing to keep
-    /// true.
+    /// Needs You is the fleet screen.
     ///
     /// **It is the phone's stack now (ov-55), and the shell is one screen in
     /// it.** The app opens on Needs You, with workspaces, tasks and a
@@ -490,9 +478,8 @@ struct FleetView: View {
 /// escape hatch, and it was attached to the one screen you cannot reach when
 /// you need an escape hatch — the connected one. It is under the connecting,
 /// approval and failure screens now and under nothing else: the connected app
-/// is the shell, which is full bleed and has no room for a strip, and whose
-/// overview has a heading per runner that carries the same actions for that
-/// runner. See `RunnerMenu`, which is this bar's half.
+/// is the phone's stack, which has no room for a strip. See `RunnerMenu`, which
+/// is this bar's half.
 struct HostSwitcherBar: View {
     @ObservedObject var hosts: RunnerStore
     /// The connection whose state the chip shows, and which its tap retries.
@@ -532,16 +519,9 @@ struct HostSwitcherBar: View {
 /// Split out of `HostSwitcherBar` when the connected app stopped having a strip
 /// to put one on. The shell is full bleed: the only chrome it has is a piece of
 /// glass at the bottom that IS the worktree, and a second bar under it would
-/// be a second thing competing for the same edge. The connected app carried
-/// this menu as a toolbar item on the overview for a while, and no longer does:
-/// the overview lists every runner, a section each, so a selector choosing
-/// which runner the screen was "about" had nothing left to choose. Each runner's
-/// actions are on its own heading there (`ShellScreen.runnerActions`), and this
-/// menu is what the three pre-connected phases carry, because a screen with no
-/// fleet has no overview to put anything on.
-///
-/// The door out of a dead connection. If an entry is added here, the headings
-/// want the same one — they are the door out of a live one.
+/// be a second thing competing for the same edge. This menu is what the three
+/// pre-connected phases carry, because a screen with no fleet has nowhere else
+/// to put it: the door out of a dead connection.
 struct RunnerMenu: View {
     @ObservedObject var hosts: RunnerStore
     /// The runner this menu is standing over, for the settings sheet it opens.
@@ -807,8 +787,9 @@ struct SheetFailureSection: View {
 /// ceremony is the reason it came back rather than being rewritten: a typed
 /// name is the one thing standing between a thumb and a directory with
 /// uncommitted work in it, and a rewrite is a chance to make it one tap
-/// lighter by accident. Its caller now is `ShellPaneChromeModifier` — see that type
-/// for why the door is on the pane's bar rather than on an overview card.
+/// lighter by accident. Its caller now is `ShellPaneChromeModifier`, whose bar
+/// is where the door is: the moment you decide a worktree is finished with is
+/// the moment you are looking at it.
 struct RemoveWorktreeConfirmSheet: View {
     let worktree: Worktree
     let onRemove: (String) async -> Connection.RemoveWorktreeResult
@@ -889,19 +870,16 @@ struct RemoveWorktreeConfirmSheet: View {
 /// over a screen that has moved on. One optional is dismissed by writing `nil`
 /// to it, from anywhere, and there is nothing else to forget.
 ///
-/// Owned by the CALLER and not by the modifier below, for the reason
-/// `ShellScreen` gives about its own two sheets: the surface a menu item was
-/// tapped on can be unmounted before the answer comes back — the overview is
-/// mounted from the first point of a lift and gone again when nothing is
-/// touching it — so the presenter has to be something that outlives it.
+/// Owned by the CALLER and not by the modifier below: the surface a menu item
+/// was tapped on can be unmounted before the answer comes back, so the
+/// presenter has to be something that outlives it.
+///
 /// **The connection is part of the request**, and that is the multi-runner
 /// port's mark on this ceremony. A removal is a call to ONE daemon about a
-/// worktree only that daemon has, and the screen that starts it can be looking
-/// at a merged fleet: the overview's grid holds cards from every connected
-/// runner. Resolving the connection where the flow runs rather than where the
-/// menu was tapped would run `worktree.remove` against whichever
-/// runner the shell happened to be resting on, with an id that means something
-/// different over there.
+/// worktree only that daemon has. Resolving the connection where the flow runs
+/// rather than where the menu was tapped would run `worktree.remove` against
+/// whichever runner the app happened to be resting on, with an id that means
+/// something different over there.
 enum RemoveWorktreeRequest {
     /// "Remove worktree for X?", with a Remove and a Cancel.
     case confirming(Worktree, on: Connection)
@@ -924,11 +902,11 @@ enum RemoveWorktreeRequest {
 /// The whole of removing a worktree from this app: ask, try, and fall through
 /// to the typed name when the runner says the work is not finished with.
 ///
-/// **One copy, because it is a ceremony and ceremonies drift.** There are two
-/// doors into this now — the pane's own bar (`ShellPaneChromeModifier`) and
-/// the overview card's context menu — and the Mac has two as well. What must
-/// not vary between them is how much confirmation a destructive action gets,
-/// so the sequence lives here and the doors only decide when to open it.
+/// **One copy, because it is a ceremony and ceremonies drift.** The door into
+/// it is the pane's own bar (`ShellPaneChromeModifier`), and the Mac has two.
+/// What must not vary between them is how much confirmation a destructive
+/// action gets, so the sequence lives here and the doors only decide when to
+/// open it.
 ///
 /// The sequence mirrors macOS's: a plain confirmation first, and the typed
 /// name only when the daemon asks for one. `worktree.remove` is what

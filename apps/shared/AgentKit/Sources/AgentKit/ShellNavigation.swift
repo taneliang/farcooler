@@ -10,8 +10,7 @@ import Foundation
 // swiping at it. The rules below are the ones that are wrong in ways a
 // screenshot cannot show: stepping off the end of a worktree, which axis a
 // gesture is leaning toward,
-// which end of the fleet rubber-bands, and which runner's section a card and a
-// drag belong to (`ShellRunnerSections.swift`).
+// which end of the fleet rubber-bands.
 //
 // So the gesture state machine transcribed in
 // `.claude/agent/briefs/ios-shell-mechanics.md` is split in two. The numbers
@@ -203,25 +202,6 @@ enum ShellMetrics {
     static func railWidth(page: CGFloat = pageWidth) -> CGFloat { page - 2 * barInset }
 }
 
-/// Where a worktree sorts in the overview, and nowhere else.
-///
-/// The mechanics doc's `needsYou > unreadDiff > (all stale) > working`, as a
-/// number so it can be sorted on. `all stale` is the odd one because it is the
-/// only rank that is a property of the whole worktree rather than of some tab
-/// in it: one stale tab beside a working one is a worktree being worked in,
-/// and only a worktree where nothing has been heard from at all is a
-/// worktree that has gone quiet.
-enum ShellPrecedence: Int, Comparable {
-    case needsYou = 0
-    case unreadDiff = 1
-    case allStale = 2
-    case working = 3
-
-    static func < (a: ShellPrecedence, b: ShellPrecedence) -> Bool {
-        a.rawValue < b.rawValue
-    }
-}
-
 /// One tab, as the shell needs it: something to name and something to draw.
 ///
 /// Deliberately not a `Terminal`. The shell shows a worktree's tabs, and a
@@ -308,11 +288,9 @@ struct ShellTab: Identifiable, Hashable {
     ///
     /// The daemon opens every orchestrator in its repository's main checkout
     /// (`Service::start_orchestrator`), so Billing's orchestrator is a pane in
-    /// a worktree Main may own. The overview draws it once, as its
-    /// workspace's own row (`ShellWorkspaceHeading.orchestrator`), and leaves
-    /// it off that worktree's card — see `ShellWorktree.listedTabs`. It stays
-    /// a tab of the worktree it runs in, because that is where its pane is:
-    /// the row lands on it there.
+    /// a worktree Main may own. It is a tab of the worktree it runs in,
+    /// because that is where its pane is, and is titled for its workspace —
+    /// see `Fleet.orchestratorTitles`.
     var isOrchestrator: Bool
 
     init(
@@ -347,14 +325,6 @@ struct ShellWorktree: Identifiable, Hashable {
     /// nothing at all for the common case — a name that is always there stops
     /// being read, and this bar has one job before it has two.
     var server: String?
-    /// The last few lines of this worktree's most recent terminal.
-    ///
-    /// The overview card's reason to exist. A grid of forty names says which
-    /// worktrees you have; a grid of forty names each showing what its agent
-    /// last said is the thing you actually scan. Empty is fine and draws
-    /// nothing — a worktree whose terminal has said nothing has nothing to
-    /// show, and a placeholder there would be forty lies.
-    var tail: [String]
     /// Which tab this worktree should be REOPENED on, as an index into
     /// `tabs`.
     ///
@@ -388,86 +358,15 @@ struct ShellWorktree: Identifiable, Hashable {
     /// has since gone must not resolve to "index 0 by accident"; see
     /// `Route.Focus.rule(for:inbox:)`, which is what the caller falls back to.
     var resume: Int?
-    /// Whether this worktree has been told to stop showing.
-    ///
-    /// The daemon's own per-worktree view preference — `Worktree.isHidden`,
-    /// `state == "hidden"` — carried into the shell's vocabulary rather than
-    /// re-derived, because it is a preference somebody set on the runner and
-    /// every surface has to agree about it. The Mac has honored it in its
-    /// sidebar since the feature existed; this is the phone's half.
-    ///
-    /// It changes where a worktree is DRAWN and nothing else. A hidden
-    /// worktree keeps its place in `worktrees`, so its position, its tabs
-    /// and the bar's walk through the fleet are all exactly what they were —
-    /// hiding is a view preference, and a preference that silently made a
-    /// worktree unreachable would be a different feature. See
-    /// `overviewOrder` and `hiddenOrder`.
-    var isHidden: Bool
-    /// Whether this worktree IS the repository's own checkout.
-    ///
-    /// Carried for one reason: the overview card's menu must not offer to
-    /// remove it. `Worktree.isPrimaryCheckout` states the rule at length —
-    /// removing the primary checkout would offer to delete the directory the
-    /// repository itself lives in, the daemon refuses it independently, and
-    /// the flag exists so nobody is walked through a destructive confirmation
-    /// that cannot succeed.
-    ///
-    /// False is the offering answer, which is the same direction the model's
-    /// own `isPrimaryCheckout` defaults in and safe for the same reason: this
-    /// keeps a button off a menu, it is not what keeps the checkout safe.
-    /// `ShellHarness` sets it on one fixture worktree so the absent case is
-    /// reachable without a runner.
-    var isPrimaryCheckout: Bool
-    /// The runner this worktree is on, by the runner's id, or nil for a fleet
-    /// that has no runner behind it at all — `ShellHarness`'s canned one.
-    ///
-    /// Not `server`, which is a LABEL and is nil for the local machine on
-    /// purpose: two runners can share a label, and the overview's sections and
-    /// a drag's request both have to name the machine a worktree is actually
-    /// on. See `ShellFleet.runnerSections`.
-    var runner: String?
-    /// The workspace heading this worktree is drawn under, by
-    /// `ShellWorkspaceHeading.id`, or nil where the runner has no workspace
-    /// level — a runner without `workstreams`, or a fixture. See
-    /// `ShellFleet.runnerSections`.
-    var heading: String?
-
     init(
-        id: String, name: String, server: String? = nil,
-        tail: [String] = [], resume: Int? = nil, isHidden: Bool = false,
-        isPrimaryCheckout: Bool = false, runner: String? = nil,
-        heading: String? = nil, tabs: [ShellTab]
+        id: String, name: String, server: String? = nil, resume: Int? = nil,
+        tabs: [ShellTab]
     ) {
         self.id = id
         self.name = name
         self.tabs = tabs
         self.server = server
-        self.tail = tail
         self.resume = resume
-        self.isHidden = isHidden
-        self.isPrimaryCheckout = isPrimaryCheckout
-        self.runner = runner
-        self.heading = heading
-    }
-
-    /// The tabs this worktree's CARD shows: every tab but an orchestrator's,
-    /// which is drawn once, as its workspace's row, and not again among the
-    /// worktrees. The bar and the column still show it — it is a pane in this
-    /// worktree, and a pane you cannot swipe to is a pane you cannot reach.
-    var listedTabs: [ShellTab] { tabs.filter { !$0.isOrchestrator } }
-
-    /// The card's last line, `server · N tabs`, with the server left out when
-    /// it is the local one — the same rule the bar follows.
-    ///
-    /// N counts every tab, an orchestrator's too, because it is the bar's
-    /// count: open the card and that is how many tabs there are to swipe
-    /// through. The ribbon above it is `listedTabs`, since the orchestrator's
-    /// mark is its workspace's row's to show.
-    var cardSubtitle: String {
-        let count = tabs.count
-        let tabs = "\(count) \(count == 1 ? "tab" : "tabs")"
-        guard let server else { return tabs }
-        return "\(server) · \(tabs)"
     }
 
     /// The tab a deliberate arrival lands on: the remembered one where it
@@ -481,59 +380,14 @@ struct ShellWorktree: Identifiable, Hashable {
         guard let resume, tabs.indices.contains(resume) else { return 0 }
         return resume
     }
-
-    /// How loud this worktree is, as one rung.
-    ///
-    /// **Nothing sorts by this any more.** It was the overview's sort key, and
-    /// the overview is sectioned by runner in an order a person drags into
-    /// place now — a sort that lifted the loud ones would undo the drag the
-    /// next time an agent finished. The classification is kept, tested, because
-    /// it is the one place the attention rules below are written down and the
-    /// next surface that wants "which of these is asking for me" should read
-    /// it rather than restate it; delete it if nothing has by then.
-    ///
-    /// An empty worktree ranks as `working`, which is the "nothing to say"
-    /// rank: it is not waiting on anybody, has no diff to read, and has no
-    /// tabs that could have gone quiet.
-    ///
-    /// **The order is unchanged by the move to `GlanceMark`, and each rung is
-    /// the same set of worktrees it was before.** It is worth writing down why
-    /// the second rung did not silently widen when it started reading an
-    /// attention tier rather than a case name:
-    ///
-    ///   - The top rung sorts on `wantsAttention` and NOT on the amber ring.
-    ///     Under `ShellMark` those were the same set, because blocked and done
-    ///     both flattened into `needsYou`; now that `done` draws the review ring
-    ///     they are not, and sorting on the ring would drop every finished agent
-    ///     a rung. `AgentActivity.wantsAttention` is the app's single answer to
-    ///     "should this interrupt someone" and it is what belongs here.
-    ///   - The `unreadDiff` rung therefore still means a DIFF, even though
-    ///     `done` now also produces `.toReview`: a done tab has already been
-    ///     claimed by the rung above, so the only `.toReview` that can reach
-    ///     this line is `ShellScreen.diffMark`'s.
-    ///   - `allStale` is a property of the WHOLE worktree and stays one. The
-    ///     Diff tab is broken only where the runner isn't answering, so this
-    ///     rung is reached by the remembered worktrees `RunnerDirectory.decayed`
-    ///     builds and by a reconnecting runner's (`said(answering:)`), which is
-    ///     exactly what it is for.
-    ///
-    /// Android's `ShellWorktree.precedence` states the same split at length
-    /// and for the same reason.
-    var precedence: ShellPrecedence {
-        if tabs.contains(where: \.wantsAttention) { return .needsYou }
-        if tabs.contains(where: { $0.mark.attention == .toReview }) { return .unreadDiff }
-        if !tabs.isEmpty && tabs.allSatisfy({ $0.mark.link == .broken }) { return .allStale }
-        return .working
-    }
 }
 
 extension ShellWorktree {
     /// This worktree as it may be drawn while its runner is, or isn't,
     /// answering. Every tab's mark through `GlanceMark.said(answering:)`.
     ///
-    /// The Diff tab too, as `RunnerDirectory.decayed` has always done for a
-    /// remembered one: "nothing new to read" is a claim about now as well, and
-    /// an unread diff holds. `wantsAttention` is left alone, because blocked and
+    /// The Changes tab too: "nothing new to read" is a claim about now as
+    /// well, and an unread diff holds. `wantsAttention` is left alone, because blocked and
     /// done are the latched states and hold.
     func said(answering: Bool) -> ShellWorktree {
         guard !answering else { return self }
@@ -1953,244 +1807,6 @@ extension ShellFleet {
             let step = step(from: position, direction, along: .content)
         else { return .springBack }
         return .commit(step)
-    }
-}
-
-// MARK: - The overview
-
-extension ShellFleet {
-    /// The hidden worktrees, in fleet order, for the section that reveals
-    /// them, as indices into `worktrees`.
-    ///
-    /// A section rather than a filter, which is the Mac's rule stated again:
-    /// hiding is reversible, and something reversible needs a way back that is
-    /// not a settings screen. See `HiddenWorktrees` on the Mac, which this is
-    /// the phone's half of. The shown ones are each runner's section — see
-    /// `runnerSections`.
-    ///
-    /// **Fleet order, and never precedence.** Everything in the grid used to be
-    /// sorted by what needed you, with the fleet's order as the tiebreak. The
-    /// grid is sectioned by runner now and a runner's order is something a
-    /// person drags into place, so a sort that lifted the loud ones would undo
-    /// the drag the next time an agent finished. `ShellWorktree.precedence`
-    /// still classifies; nothing in the overview sorts by it.
-    func hiddenOrder() -> [Int] {
-        worktrees.indices.filter { worktrees[$0].isHidden }
-    }
-
-    /// The hidden ones a search matches.
-    ///
-    /// Searched as well as listed, and that is the point of a section rather
-    /// than a filter: somebody typing the name of a worktree they hid last
-    /// week is asking for it by name, and a grid that answered "No worktree
-    /// matches" would be lying about a worktree it is holding.
-    func hiddenOrder(matching query: String) -> [Int] {
-        ShellFleet.matching(query, in: hiddenOrder(), of: worktrees)
-    }
-
-    /// One needle, applied to a list of indices already in order.
-    ///
-    /// `static` and taking the worktrees so `ShellServerGroup` can search its
-    /// own the same way. Two substring rules over one grid is two grids that
-    /// answer differently to the same typing.
-    static func matching(
-        _ query: String, in order: [Int], of worktrees: [ShellWorktree]
-    ) -> [Int] {
-        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !needle.isEmpty else { return order }
-        return order.filter {
-            worktrees[$0].name.range(
-                of: needle, options: [.caseInsensitive, .diacriticInsensitive]) != nil
-        }
-    }
-}
-
-
-/// The worktrees on a runner this app is NOT talking to.
-///
-/// The owner's ask was "the worktrees grid should list all worktrees across all
-/// servers", and this was the shape of that answer while a second live
-/// connection was impossible: a connection claimed process-wide slots on
-/// `start`, so two of them would fight rather than cost twice as much, and the
-/// grid could only show another runner's worktrees as a memory.
-///
-/// **The phone holds a connection per runner now**, so with "Connect every
-/// runner at once" on — the default — every worktree in the grid is a LIVE card
-/// and nothing reaches this type at all: `ShellScreen.readElsewhere` excludes
-/// every runner that is live. What is left for it is the setting turned off,
-/// which is a phone on a train paying for one SSH session. Same job, fewer
-/// days.
-///
-/// So these are CACHED and say so: a runner's name, when this app last actually
-/// saw it, and the worktrees it had then. Everything in here is a claim about
-/// the past, which is why the marks on its cards are `.stale` — the shell's
-/// existing word for "the answer is old", drawn as the dashed ring
-/// `GlanceMark.Link.broken` already means throughout this app.
-///
-/// **Not a `ShellFleet`, and deliberately not part of one.** A `ShellFleet` is
-/// the NAVIGABLE fleet: `ShellPosition` indexes into it, the bar walks it, and
-/// `ShellPaneTrack` mounts a pane for every tab it steps onto. A worktree
-/// this app has no connection to has no pane to mount and no terminal behind
-/// it, so putting one in that array would make positions that resolve to
-/// nothing — the fifth way to break "a pane must never be rebuilt", arrived at
-/// from a direction none of the four comments about it is watching. These
-/// reach exactly one surface, the overview, and a tap on one is a change of
-/// runner rather than a move within a fleet.
-struct ShellServerGroup: Identifiable, Hashable {
-    /// The runner's id. What a tap has to name, so the app can select it —
-    /// not the label, which two runners on one box may share.
-    var id: String
-    /// What to call it on the header. The runner's own label.
-    var name: String
-    /// When this app last actually heard from this runner, or nil for a
-    /// runner it has never managed to reach.
-    ///
-    /// Nil is "not told" and must not be drawn as "just now" — the same rule
-    /// `FleetSnapshot.observedAt` states, for the same reason.
-    var lastSeen: Date?
-    var worktrees: [ShellWorktree]
-
-    init(id: String, name: String, lastSeen: Date? = nil, worktrees: [ShellWorktree]) {
-        self.id = id
-        self.name = name
-        self.lastSeen = lastSeen
-        self.worktrees = worktrees
-    }
-
-    /// This group's cards, in the order the runner gave them.
-    ///
-    /// The runner's own order and hidden ones left out — the same two rules a
-    /// live runner's section follows (`ShellFleet.runnerSections`), because a
-    /// grid where the sections sort differently is a grid you have to read
-    /// twice. Hidden ones are simply absent here rather than getting a section
-    /// of their own: the way back from hiding is on the runner the worktree is
-    /// on, and this section is not that runner.
-    func order(matching query: String = "") -> [Int] {
-        let shown = worktrees.indices.filter { !worktrees[$0].isHidden }
-        return ShellFleet.matching(query, in: shown, of: worktrees)
-    }
-
-    /// The groups worth drawing, most recently seen first.
-    ///
-    /// **Every group while nothing is being searched for**, even one with
-    /// nothing to show: its header carries that runner's actions — switching
-    /// to it, and editing it — and those were a menu in the toolbar before the
-    /// grid had a header per runner. **A search drops a group it emptied**,
-    /// because a header standing over no cards while somebody is typing reads
-    /// as a runner that has gone empty, which is a different and alarming
-    /// sentence. The same rule the live sections follow; see
-    /// `ShellFleet.runnerSections`.
-    ///
-    /// Most recently seen first, then by name, so the order is stable across
-    /// polls and puts the runner you were on ten minutes ago above the one you
-    /// last opened in March. A runner never reached sorts last, which is where
-    /// "nothing known" belongs.
-    static func arrange(_ groups: [ShellServerGroup], matching query: String = "")
-        -> [ShellServerGroup]
-    {
-        let searching = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return groups
-            .filter { !searching || !$0.order(matching: query).isEmpty }
-            .sorted { a, b in
-                switch (a.lastSeen, b.lastSeen) {
-                case let (x?, y?) where x != y: return x > y
-                case (nil, _?): return false
-                case (_?, nil): return true
-                default: return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
-                }
-            }
-    }
-}
-
-extension RunnerDirectory {
-    /// This directory as the overview's grid needs it, with every claim about
-    /// the present already decayed.
-    ///
-    /// **The decay is this app's existing rule, not a second one.**
-    /// `GlanceMark.Link` states it: *"decay applies only to claims about the
-    /// present. Blocked and to-review hold at any age; working and idle go
-    /// dashed."* So an agent that was waiting on you when this runner was last
-    /// seen is STILL waiting on you — that is a latched fact, and drawing it
-    /// as merely old would hide the one thing worth crossing a runner for —
-    /// while an agent that was working is drawn `stale`, because "working" is
-    /// a statement about right now and this is not right now.
-    ///
-    /// An unread diff holds for the same reason: nobody has read it, and time
-    /// passing does not read it.
-    func group() -> ShellServerGroup {
-        ShellServerGroup(
-            id: runner, name: label, lastSeen: seenAt,
-            worktrees: worktrees.map { worktree in
-                ShellWorktree(
-                    id: worktree.id,
-                    name: worktree.name,
-                    server: label,
-                    tail: worktree.tail,
-                    isHidden: worktree.isHidden,
-                    tabs: worktree.tabs.enumerated().map { index, tab in
-                        let aged = RunnerDirectory.decayed(tab.mark)
-                        return ShellTab(
-                            id: "\(runner)/\(worktree.id)/\(index)",
-                            title: tab.title,
-                            mark: aged.mark,
-                            wantsAttention: aged.wantsAttention)
-                    })
-            })
-    }
-
-    /// One remembered mark, aged.
-    ///
-    /// Returns the sort flag alongside the drawing, because the cache is the
-    /// one place they cannot be derived from each other: `wantsAttention` is
-    /// the live model's `AgentActivity`, and by the time a tab is a word on
-    /// disk that activity is gone. Writing the word for a DONE agent
-    /// separately from the word for an unread diff is what keeps a remembered
-    /// finished turn on the same rung it has always sorted on — see
-    /// `ShellWorktree.precedence`, and `word(for:)` below, which is the half
-    /// of the round trip that makes the two tellable apart.
-    static func decayed(_ mark: String) -> (mark: GlanceMark, wantsAttention: Bool) {
-        switch mark {
-        case "needsYou":
-            return (GlanceMark(attention: .needsYou, core: .atAPrompt), true)
-        case "done":
-            return (GlanceMark(attention: .toReview, core: .atAPrompt), true)
-        // A DIFF, and never an agent — `ShellTab.mark` carries the prohibition
-        // and the reason. `core: nil` because a diff has no agent side to
-        // state, which is also what tells this apart from `done` on the way
-        // back out.
-        case "unreadDiff":
-            return (GlanceMark(attention: .toReview, core: nil), false)
-        // Everything else is a claim about the present, and this is not the
-        // present. `core: nil` rather than a remembered one: we are not being
-        // told what it is doing, which is a different thing from being told it
-        // is at a prompt.
-        default:
-            return (.unsaid, false)
-        }
-    }
-
-    /// The word to write down for a mark. The inverse of `decayed` for the
-    /// three that survive it, and one string for everything that does not.
-    ///
-    /// **The words are the old four and are deliberately unchanged**, because
-    /// they are on disk. `RunnerDirectory.Tab.mark` is a String precisely so a
-    /// value from another build cannot take the cache down, and renaming what
-    /// this writes would have every already-cached runner read back as
-    /// `default` — a whole remembered fleet going dashed at once, on upgrade,
-    /// for no reason a person could see.
-    ///
-    /// `done` is the one addition, and it is a word the review tier needs
-    /// rather than a rename: a finished turn and an unread diff both draw
-    /// `.toReview`, and the cache has to tell them apart or a remembered
-    /// finished agent sorts a rung below where it always has. They are
-    /// distinguishable because a diff has no agent behind it and so states no
-    /// core — see `ShellScreen.diffMark`.
-    static func word(for mark: GlanceMark) -> String {
-        switch mark.attention {
-        case .needsYou: return "needsYou"
-        case .toReview: return mark.core == nil ? "unreadDiff" : "done"
-        case .quiet: return "working"
-        }
     }
 }
 

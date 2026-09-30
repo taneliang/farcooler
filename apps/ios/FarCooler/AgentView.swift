@@ -239,16 +239,10 @@ struct AgentView: View {
         isDocked ? max(keyboard.height, barHeight) : 0
     }
 
-    /// Whether the composer docks: this pane is the one at rest, and the
-    /// grid is not up over it. An input accessory lives in the keyboard's
-    /// window, over everything, so a pane at rest under the open grid — B's
-    /// first pane after a runner switch — drew its composer over the cards
-    /// (ov-27). Terminals hold their keyboard for the same reason; see
-    /// `EnvironmentValues.shellOverviewShowing`.
-    private var isDocked: Bool { isVisible && !overviewShowing }
-
-    /// Whether the shell's grid is up. See `isDocked`.
-    @Environment(\.shellOverviewShowing) private var overviewShowing
+    /// Whether the composer docks: this pane is the one at rest. An input
+    /// accessory lives in the keyboard's window, over everything, so only the
+    /// pane in front may have one.
+    private var isDocked: Bool { isVisible }
 
 
     /// Whether the scroll view is parked at the end of the conversation.
@@ -3396,11 +3390,10 @@ private struct WorkingRow: View {
 /// name and leaving somebody to find out later that no runner was involved. The
 /// glass around it is real; only the words are canned.
 ///
-/// The overview's runner headings stand on an empty `RunnerStore`, so the
-/// fixture's section offers nothing to switch to, which is the truth about
-/// this launch.
+/// The shell is scoped to the fixture's one worktree, as the phone's stack
+/// mounts it, and lands on the agent pane.
 ///
-/// The Diff tab shows no unread ring: that comes from `Connection.inbox`, which
+/// The Changes tab shows no unread ring: that comes from `Connection.inbox`, which
 /// is a separate round trip this stands nothing in for.
 struct AgentLayoutHarness: View {
     static var isRequested: Bool {
@@ -3408,27 +3401,18 @@ struct AgentLayoutHarness: View {
     }
 
     @StateObject private var connection = Connection()
-    /// No runners, and that is the fixture. The menu is real and its sheets
-    /// open; there is simply nothing on this device to switch to.
+    /// No runners, and that is the fixture: the shell reads this for its
+    /// selection only, and there is nothing on this device to select.
     @StateObject private var hosts = RunnerStore()
     /// The shell reads a `FleetStore` now, so the fixture needs one — standing
     /// on the canned connection above rather than on anything that dials. See
     /// `FleetStore.standIn(on:host:)`.
     ///
-    /// The runner behind it is canned too, and is NOT in `hosts`: the menu goes
-    /// on saying "No Runner", which is still the truth about this launch.
+    /// The runner behind it is canned too, and is NOT in `hosts`, which is still
+    /// the truth about this launch.
     @StateObject private var fleetStore: FleetStore
     private static let harnessRunner = Runner(
         label: "Layout harness", address: "harness.invalid", user: "harness")
-
-    /// The pane to open on, as the shell's own deep-link request.
-    ///
-    /// Set once `stand()` has filled the fixture in. The shell would land on
-    /// this pane anyway — `PaneFocus.rule` picks the top-ranked agent and the
-    /// fixture has one — but going through the request is the app's own path
-    /// for "open exactly this pane", so the harness cannot start passing
-    /// because the rule happened to agree.
-    @State private var open: String?
 
     init() {
         let connection = Connection()
@@ -3438,42 +3422,16 @@ struct AgentLayoutHarness: View {
     }
 
     var body: some View {
-        ShellScreen(fleet: fleetStore, hosts: hosts, pendingTerminal: $open)
-            .task {
-                if Self.arrivesUnderTheGrid { await arriveUnderTheGrid() } else { stand() }
-            }
+        ShellScreen(
+            fleet: fleetStore, hosts: hosts, pendingTerminal: .constant(nil),
+            scope: ShellScope(
+                runner: Self.harnessRunner.id, worktree: Self.worktree.id,
+                landing: .terminal(Self.agentPane.id))
+        )
+        .task { stand() }
     }
 
-    /// `-late-pane`, with `-shell-overview`: the agent pane arrives under the
-    /// open grid rather than being there from the first frame — the shape of
-    /// a runner switch, where A's fleet goes, nothing is left, and B's lands
-    /// with the grid still up and its first pane mounts under it. A worktree
-    /// with no panes seats the shell, the fleet then empties, and the fixture
-    /// lands after it, each a beat apart so the shell sees every step.
-    /// `ShellFleet.reseat(_:holding:after:)` then rests on the agent pane,
-    /// which mounts at rank 0 under the grid.
-    private static var arrivesUnderTheGrid: Bool {
-        opensOnTheGrid && CommandLine.arguments.contains("-late-pane")
-    }
-
-    private func arriveUnderTheGrid() async {
-        AgentView.fixture = Self.fixture
-        PaneDraftStore.clear(pane: Self.agentPane.id)
-        let seat = Worktree(
-            id: "harness-seat", short: "seat", task: "Seat", branch: "fixture · no runner",
-            state: "ready", terminals: [])
-        for fleet in [
-            Fleet(runtimeHealthy: true, livePanes: 0, worktrees: [seat]),
-            Fleet(runtimeHealthy: true, livePanes: 0, worktrees: []),
-            Fleet(runtimeHealthy: true, livePanes: 2, worktrees: [Self.worktree]),
-        ] {
-            connection.standIn(on: fleet)
-            fleetStore.republish()
-            try? await Task.sleep(for: .seconds(1))
-        }
-    }
-
-    /// Fill the fixture in, then point the shell at the pane.
+    /// Fill the fixture in. The shell lands on the agent pane through its scope.
     ///
     /// In this order, and in a `task` rather than in `body`: the fixture has to
     /// exist before `AgentView` mounts and reads it, and writing to an
@@ -3514,38 +3472,8 @@ struct AgentLayoutHarness: View {
         // this shell reads is empty for one body pass. Republishing here closes
         // it, the same way the app's first poll does.
         fleetStore.republish()
-        // Not under `-shell-overview`: a request with the grid up is a card
-        // tapped, and would close it. The shell rests on this pane anyway.
-        if !Self.opensOnTheGrid { open = Self.agentPane.id }
     }
 
-    /// `-shell-overview`, as the shell harness takes it: open with the grid
-    /// up over the agent pane, which is where a runner switch leaves a pane
-    /// and the state a lift cannot reach here, because the docked composer
-    /// takes the bar's touches (see `ComposerKeyboardTests`). False outside
-    /// this harness, and outside debug builds.
-    static var opensOnTheGrid: Bool {
-        #if DEBUG
-        isRequested && CommandLine.arguments.contains("-shell-overview")
-        #else
-        false
-        #endif
-    }
-
-    /// The canned pane, and the fleet it lives in.
-    ///
-    /// A chat-capable agent pane and a shell beside it, because the ribbon and
-    /// the column are drawn from the worktree's terminals and the content
-    /// swipe walks between them — a one-terminal fixture would have made every
-    /// screenshot a worktree with two tabs where the app usually has three or
-    /// four, and left the swipe with nowhere to go.
-    ///
-    /// The activity is the fleet's, not a flag on the pane: `AgentView.isWorking`
-    /// reads it from here the way it does in the app, so a fixture that says a
-    /// turn is running and a pane drawing "Working…" are one fact rather than
-    /// two that can disagree. Only the live conversation is working: a pane
-    /// with no session behind it — every `-empty-` screen, and `-ended` — is
-    /// not running a turn, and `idle` is the least any of them claims.
     private static var agentPane: Terminal {
         Terminal(
             id: "harness", short: "harness", title: "claude", preset: "claude", state: "running",

@@ -232,8 +232,6 @@ struct ShellPaneTrack<Pane: View>: View {
     let page: CGFloat
     /// The track's own translation, in points.
     let trackX: CGFloat
-    /// How much of a card the panes have become for a sideways crossing, 0…1.
-    let crossing: CGFloat
     /// The room the shell's own furniture takes out of every pane. See
     /// `ShellPaneSlot.chrome`.
     let chrome: EdgeInsets
@@ -271,23 +269,12 @@ struct ShellPaneTrack<Pane: View>: View {
         // the whole thing renders empty. A fixed frame is what a page is.
         .frame(width: page)
         .frame(maxHeight: .infinity)
-        // An opaque ground, INSIDE the transform, and it is what makes the
-        // shrink read as a page rather than as text getting smaller. The dim
-        // over it is the desk the cards sit on, and it only exists while they
-        // are crossing: each pane carries the same ground, so the gap a
-        // shrunken card opens beside it would otherwise reveal the exact color
-        // the card had been covering.
-        .background {
-            ZStack {
-                Themes.shared.current.backgroundColor
-                Color.black.opacity(ShellMotion.deskDim * crossing)
-            }
-        }
-        // And clipped, which is not optional once the page shrinks. The
-        // neighbors sit exactly one page off each edge, so they are off the
-        // display at rest — but a page scaled to a third of its size brings
-        // them back inside it, and a shrinking screen with two ghost pages
-        // beside it is not a screen.
+        // An opaque ground, INSIDE the transform, so the track is a page and
+        // not text on whatever is behind it.
+        .background { Themes.shared.current.backgroundColor }
+        // And clipped: the neighbors sit exactly one page off each edge, so
+        // they are off the display at rest, and this is what keeps a pane
+        // that overflows its slot from showing beside it.
         .clipped()
         .contentShape(.rect)
         // The retained set is state, so it is written in a change handler and
@@ -314,22 +301,10 @@ struct ShellPaneTrack<Pane: View>: View {
         pane(placed?.slot ?? offTrack(entry))
             .frame(width: page)
             .frame(maxHeight: .infinity)
-            // Each pane is a card, and the card treatment lives HERE rather
-            // than on the track as a whole. The whole point of a crossing is
-            // that there are two of them: rounding the track would round the
-            // SCREEN and leave two square pages sliding behind one rounded
-            // window, which is a window, not a pair of cards.
-            //
-            // At rest all three of these are identities: a radius of zero, a
-            // scale of one, and a ground the same color as the one behind it.
-            // That is what keeps a tab-to-tab swipe inside a worktree exactly
-            // as light as it was — `crossing` is zero for one of those, and so
-            // is all of this.
+            // Each pane carries the ground itself, and is clipped to its own
+            // slot, so two panes sliding past each other are two pages.
             .background(Themes.shared.current.backgroundColor)
-            .clipShape(
-                RoundedRectangle(
-                    cornerRadius: ShellMotion.screenCorner * crossing, style: .continuous))
-            .scaleEffect(1 - (1 - ShellMotion.crossingScale) * crossing)
+            .clipShape(Rectangle())
             // Where the pane IS, which is the whole of what a commit changes.
             // The prototype's `-PAGE_W + dx`, said once per pane instead of
             // once for a container whose children have to be kept in step with

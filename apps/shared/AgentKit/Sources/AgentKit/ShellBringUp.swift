@@ -1,7 +1,6 @@
 import Foundation
 
-// What the shell draws before anybody has swiped it, and what an empty grid
-// says.
+// What the shell draws before anybody has swiped it.
 //
 // Here rather than in `ShellScreen.body` for this package's usual reason: the
 // iOS target has no unit test bundle, so a branch chosen inside a `View` is a
@@ -77,61 +76,5 @@ enum ShellBringUp {
         if let seated { return .pane(seated) }
         if worktrees > 0 { return .waiting }
         return reports.contains(.pending) ? .waiting : .noWorktrees
-    }
-}
-
-/// Whether a tapped card on another runner is still worth landing on.
-///
-/// With "Connect every runner at once" off, a cached card's tap picks its
-/// runner and asks the shell to land on its worktree once that runner answers
-/// (`ShellScreen.select(runner:landingOn:)`). The request has to end somehow
-/// other than by landing, or the shell jumps to a worktree long after anybody
-/// tapped anything. Here rather than in the view for this file's reason.
-enum ShellCrossingRule {
-    /// Keep waiting, or give the crossing up.
-    ///
-    /// - `picked`: the runner the crossing names is still the selected one.
-    ///   Somebody who picked another runner since has left this one.
-    /// - `report`: what that runner has said, or nil while the store has not
-    ///   brought it up yet — the turn after the tap, which is not a reason to
-    ///   give up.
-    /// - `hasWorktree`: whether the runner's own fleet names the worktree,
-    ///   read off the same connection as `report` so the two agree.
-    ///
-    /// Given up when the runner is `.stalled` (failed, or holding a
-    /// fingerprint question): kept, it would fire whenever the runner next
-    /// answered — after a Retry, a network change or a trust — and close the
-    /// grid onto a worktree nobody had asked for since. And given up when the
-    /// runner answered without the worktree: it was removed while the card was
-    /// a memory.
-    static func keeps(picked: Bool, report: ShellBringUp.Report?, hasWorktree: Bool) -> Bool {
-        guard picked else { return false }
-        switch report {
-        case nil, .pending?: return true
-        case .stalled?: return false
-        case .answered?: return hasWorktree
-        }
-    }
-}
-
-/// What a fleet with no cards in it says.
-///
-/// One copy, two screens. The overview has said this since it was written and
-/// the bring-up screen says it now — and a second transcription of the same
-/// three strings is two sentences that drift, which on this one they would:
-/// the interesting half is that there are TWO of them and which is right
-/// depends on whether anything was typed.
-enum ShellEmptyCopy {
-    static let title = "No Worktrees"
-    static let symbol = "rectangle.on.rectangle.slash"
-
-    /// Nothing matched, versus nothing to match — and they are not the same
-    /// sentence. The hand-built empty state quoted the search either way, so a
-    /// runner with no worktrees at all was told that none of them matched the
-    /// empty string.
-    static func description(matching search: String) -> String {
-        search.isEmpty
-            ? "This runner has no worktrees yet."
-            : "No worktree matches “\(search)”."
     }
 }

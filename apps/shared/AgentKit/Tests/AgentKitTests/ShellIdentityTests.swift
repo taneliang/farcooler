@@ -68,12 +68,11 @@ struct ShellIdentityTests {
         #expect(tab.hasPrefix(worktree))
     }
 
-    /// The cache next door already spells a remembered tab
-    /// `"\(runner)/\(worktree)/\(index)"` — `RunnerDirectory.group()` — and
-    /// has since before any of this. A live tab and a cached one that named the
-    /// same worktree differently would be two answers to "is this the same
-    /// thing", which is the drift the composition is centralized to prevent.
-    @Test func theLiveSpellingMatchesTheCacheTheGridAlreadyWrites() {
+    /// The spelling is a slash between the parts, runner first: the string a
+    /// tab is keyed by everywhere the shell keeps a side table, and what every
+    /// reader of one must agree on. Pinned so a respelling is a decision and
+    /// not an accident.
+    @Test func aTabIDIsRunnerThenWorktreeThenPaneSeparatedBySlashes() {
         #expect(
             ShellIdentity.tab(runner: "RUNNER-A", worktree: "3f9a1c07", pane: "0")
                 == "RUNNER-A/3f9a1c07/0")

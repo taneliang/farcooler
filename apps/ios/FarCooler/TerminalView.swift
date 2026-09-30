@@ -795,12 +795,6 @@ struct TerminalView: View {
     @State private var altArmed = false
     @State private var focusRequest = 0
     @State private var dismissRequest = 0
-    /// An arrival's keyboard, held because the shell's grid was over this
-    /// pane when it appeared. See the `onAppear` at the end of `body`.
-    @State private var focusHeld = false
-    /// Whether the shell's grid is over this pane. See
-    /// `EnvironmentValues.shellOverviewShowing`.
-    @Environment(\.shellOverviewShowing) private var overviewShowing
     /// The URL a long press landed on, which is also what presents the dialog.
     ///
     /// One value rather than a flag plus a string: a dialog that can be shown
@@ -1076,24 +1070,16 @@ struct TerminalView: View {
         // the pane you are LOOKING at rather than about a tty, so it is true
         // of a chat as of a terminal, and a banner about the pane in front of
         // you is the same mistake either way.
-        //
-        // **Not while the grid is up.** A pane at rest under the open grid is
-        // visible by rank and read by nobody, and a pane MOUNTS there: B's
-        // first pane after a runner switch lands under the grid. This task
-        // claimed it on mount, after `ShellScreen.markVisible` had cleared the
-        // claim for the grid, and every poll re-sent it (`markVisibleSeen`
-        // reads `Notifier`), so a turn finishing there was marked seen. Keyed
-        // on the pair, so the grid closing onto this pane claims it.
-        .task(id: isVisible && !overviewShowing) {
-            guard isVisible, !overviewShowing, !Task.isCancelled else { return }
+        .task(id: isVisible) {
+            guard isVisible, !Task.isCancelled else { return }
             Notifier.shared.claim(terminal.id)
             await connection.markVisibleSeen()
-            // The grid came up, or the pane moved off, while that call was on
-            // the wire: the claim set above is stale, and this task has been
-            // replaced by one that makes no claim. Give it back rather than
-            // leave it for the next poll to re-send. Only if it is still ours:
-            // another pane may have claimed since.
-            if Task.isCancelled || overviewShowing || !isVisible {
+            // The pane moved off while that call was on the wire: the claim
+            // set above is stale, and this task has been replaced by one that
+            // makes no claim. Give it back rather than leave it for the next
+            // poll to re-send. Only if it is still ours: another pane may
+            // have claimed since.
+            if Task.isCancelled || !isVisible {
                 Notifier.shared.release(terminal.id)
             }
         }
@@ -1445,24 +1431,8 @@ struct TerminalView: View {
         // to switch to it did nothing at all.
         .frame(width: size.width, height: size.height)
         .clipped()
-        // The keyboard on arrival — but not while the shell's grid is over
-        // this pane. A pane mounted under an open overview (a runner switched
-        // to from its heading, whose fleet lands while the grid is up) raised
-        // the keyboard over the grid and covered half the cards. The request
-        // is held instead and made when the grid goes, so closing the grid
-        // onto the pane still arrives with a keyboard.
-        .onAppear {
-            if overviewShowing { focusHeld = true } else { focusRequest += 1 }
-        }
-        //
-        // Made only by the pane the grid closes ONTO. Every neighbor the
-        // track mounted under the grid held one too, and releasing them all
-        // would leave the keyboard with whichever asked last.
-        .onChange(of: overviewShowing) { _, showing in
-            guard !showing, focusHeld else { return }
-            focusHeld = false
-            if isVisible { focusRequest += 1 }
-        }
+        // The keyboard on arrival.
+        .onAppear { focusRequest += 1 }
     }
 
     // MARK: - Drawing

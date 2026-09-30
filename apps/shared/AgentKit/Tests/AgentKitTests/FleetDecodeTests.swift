@@ -200,25 +200,6 @@ struct FleetDecodeTests {
         #expect(terminal.isOrchestrator)
     }
 
-    /// Two keys spelled `workspaces`, meaning two different things, and both
-    /// frozen: the fleet envelope's list of workstreams, and the key
-    /// `RunnerDirectory` stores its WORKTREES under on disk, from before the
-    /// rename. Changing either to match the other would lose data — the
-    /// fleet's workstreams, or every cached runner's cards.
-    @Test func theFleetsWorkspacesAndTheDirectorysWorkspacesAreDifferentKeys() throws {
-        let fleet = try Self.decodeFleet()
-        #expect(fleet.workspaces?.map(\.name) == ["Billing"])
-
-        let directory = RunnerDirectory(
-            runner: "r", label: "box", seenAt: Date(timeIntervalSince1970: 0),
-            worktrees: [.init(id: "w1", name: "one", isHidden: false, tabs: [], tail: [])])
-        let written = try JSONSerialization.jsonObject(
-            with: JSONEncoder().encode(directory)) as? [String: Any]
-        let stored = try #require(written?["workspaces"] as? [[String: Any]])
-        #expect(stored.first?["id"] as? String == "w1", "the directory's worktrees moved key")
-        #expect(written?["worktrees"] == nil)
-    }
-
     /// The bug `07e75e8` fixed, standing as a test.
     ///
     /// `isMainCheckout` and not `is_main_checkout`. Respell the property the

@@ -163,7 +163,7 @@ public struct FleetPublication {
     /// down spends most of its outage reconnecting, which is what let the
     /// Mac's status bar count a dead runner's panes for most of an outage),
     /// and on the phone its fleet read on this link as well: see
-    /// `ShellRunnerLabel.answering`.
+    /// `RunnerLink.answering`.
     ///
     /// - Returns: what `keeping(runners:)` returns, and true as well when a
     ///   recorded runner has just been marked lost, which changes what the

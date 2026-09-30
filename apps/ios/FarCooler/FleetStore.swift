@@ -35,7 +35,7 @@ struct FleetEntry: Identifiable {
     ///
     /// The same composition `ShellIdentity.worktree` makes, deliberately: the
     /// store's merged list and the shell's fleet have to agree on what one
-    /// worktree is called, or a card tapped in the overview and the pane it
+    /// worktree is called, or a row tapped on a workspace and the pane it
     /// opens are two different lookups.
     var id: String {
         ShellIdentity.worktree(runner: host.id.uuidString, worktree: worktree.id)

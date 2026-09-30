@@ -117,8 +117,7 @@ final class WorktreeDrag: ObservableObject {
     ///   up, so the handle appears a moment late rather than a drag failing.
     ///
     /// Static and free of the view so it can be tested; `WorktreeSection`
-    /// holds only the answer. The phone asks the same capability through
-    /// `ShellRunnerLabel.keepsOrder(daemon:)`.
+    /// holds only the answer.
     nonisolated static func offersDrag(usable: Bool, runner: DaemonBuild?) -> Bool {
         usable && (runner?.keepsWorktreeOrder ?? false)
     }

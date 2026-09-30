@@ -43,9 +43,8 @@ enum ShellMotion {
     /// number only has to be close.
     static let screenCorner: CGFloat = 55
 
-    /// One overview card's corner. Shared with `ShellOverview` so the page
-    /// arrives at exactly the shape it is becoming, rather than at a second
-    /// number that happens to match today.
+    /// A card's corner: what a page's own corner is heading toward as it
+    /// shrinks (`ShellFlight.radius`).
     static let cardRadius: CGFloat = 16
 
     /// How far a page travels while it turns into a card.
@@ -61,24 +60,6 @@ enum ShellMotion {
     /// under your finger has left the glass, and it should have said it by the
     /// time you have moved far enough to mean it.
     static let cardReveal: CGFloat = 24
-
-    /// What a page is scaled to once it has become a card in the PLANE of the
-    /// screen — a sideways crossing, where it is not receding, just detached.
-    ///
-    /// Four percent, which on a 393-point page is a 16-point gap between the
-    /// card leaving and the card arriving. That gap is the whole reason the
-    /// number is not 1: two full-bleed pages sliding edge to edge are one
-    /// plane scrolling, and the same two with daylight between them are two
-    /// cards. Small enough that the text inside stays crisp.
-    static let crossingScale: CGFloat = 0.96
-
-    /// How far the ground behind the cards is darkened while they are crossing.
-    ///
-    /// Without it the shrink is invisible: the page's ground and the ground
-    /// behind it are the same color, so a card that pulls in from the edges
-    /// reveals more of exactly what it was already covering. The dim is what
-    /// turns the gap into a gap.
-    static let deskDim: CGFloat = 0.45
 
     /// How small a page gets while it is still IN YOUR HAND.
     ///
@@ -379,127 +360,5 @@ enum ShellFlight {
         return CGSize(
             width: anchorX * (1 - scale) + carryX,
             height: page.height * (1 - scale) - rise)
-    }
-
-    /// Where a page sits while a FINGER is taking it back out of the grid.
-    ///
-    /// **The straight line between `offset`'s two branches, walked by a
-    /// thumb.** Those branches are the two ends of this journey already — the
-    /// cell a card is drawn in, and the display a page fills — and the flight
-    /// that runs between them on release is a spring interpolating one into
-    /// the other. A pull-down is that same interpolation with the clock taken
-    /// off it, so this is the same arithmetic and not a second opinion about
-    /// where a returning page goes.
-    ///
-    /// `progress` 0 is the cell and 1 is the display. At 0 it is byte for byte
-    /// `offset(landing: true)` and at 1 it is the display's own origin, which
-    /// is the property that lets a pull begin and end without a step: the
-    /// first frame of a tracked pull draws the page exactly where the grid was
-    /// already drawing its card, and the last frame draws it exactly where a
-    /// finished flight leaves it.
-    ///
-    /// Only the PLACE. How big the page is drawn is `scale`'s job and how much
-    /// of it is drawn is `height`'s, and both of those already read `cropped`
-    /// — which the same thumb is driving. Three functions of one progress, and
-    /// no fourth thing to keep in step.
-    ///
-    /// The home end is anchored at the middle of the display rather than under
-    /// the finger, and that matches the release flight's own rule: a page
-    /// growing back out of a cell has no grab point on it — the finger is on
-    /// the grid, not on the page — so growing about its own center is the only
-    /// unbiased answer. See `ShellPageLayer.shrinkAnchorX`, which says the
-    /// same thing about the same journey run by a spring.
-    static func returning(
-        page: CGRect, tile: CGRect?, scale: CGFloat, progress: CGFloat
-    ) -> CGSize {
-        guard page.width > 0 else { return .zero }
-        let home = offset(
-            page: page, tile: tile, landing: false, scale: scale, rise: 0,
-            anchorX: page.width / 2, carryX: 0)
-        guard let tile else { return home }
-        let cell = offset(
-            page: page, tile: tile, landing: true, scale: scale, rise: 0, anchorX: 0,
-            carryX: 0)
-        let along = min(1, max(0, progress))
-        return CGSize(
-            width: cell.width + (home.width - cell.width) * along,
-            height: cell.height + (home.height - cell.height) * along)
-    }
-}
-
-/// How the overview's grid of cards divides a display.
-///
-/// **The gaps down each side of the grid were the biggest thing on it that
-/// nobody chose.** The columns were two `GridItem(.fixed(168))` with a
-/// 12-point gutter, in a `LazyVGrid` with no horizontal padding at all — and a
-/// `LazyVGrid` centers fixed columns in whatever width it is offered, so every
-/// point the display had over 348 was split between the two outer edges. On
-/// the phone this shell is tuned on that is `(402 - 348) / 2 = 27` points a
-/// side against a 12-point gutter and a 16-point padding above and below:
-/// three different numbers where the design has two, and the biggest of them
-/// arrived at by subtraction. It also moved with the device — 13.5 on a
-/// 375-point phone, 46 on a 440-point one, 243 on an iPad — so the one
-/// measurement a person actually reads off a grid was the one measurement
-/// nothing in the app had an opinion about.
-///
-/// This is that opinion. The MARGIN is fixed and the CARD is what stretches,
-/// which is the ordinary way a grid is laid out on this platform and the only
-/// arrangement where the outer gap can be stated rather than computed.
-///
-/// Pure, and in this package rather than beside the view, for the reason
-/// `ShellNavigation.swift`'s header gives: the iOS target has no unit test
-/// bundle, so arithmetic written inside a `View` can only be checked by
-/// somebody looking at it — and "the gaps look wrong" is precisely the kind of
-/// defect that survives being looked at.
-///
-/// The margin and the gutter are ARGUMENTS and not constants here. They belong
-/// to the app's spacing scale (`PaneMetrics.edge` and `PaneMetrics.card`),
-/// which lives in the iOS target; restating the numbers in this package would
-/// be a second copy of a scale, which is exactly the drift this file is
-/// otherwise about.
-enum ShellGrid {
-    /// The card the design specifies: 168 × 132, from the mechanics doc.
-    ///
-    /// The HEIGHT is the card's, everywhere and always. The WIDTH is now a
-    /// reference rather than a rule — it is the width a column has to be able
-    /// to hold before the grid will fit another one in, and the width a card
-    /// is drawn at when nothing says otherwise. What a card is actually drawn
-    /// at in the grid is `cardWidth`, and on the phone the shell was tuned on
-    /// that is 179 rather than 168: the eleven points are the ones that used
-    /// to be piled up against the edges of the screen.
-    static let card = CGSize(width: 168, height: 132)
-
-    /// How many cards fit across a display `width` wide.
-    ///
-    /// Never fewer than two, and the floor is the design's rather than the
-    /// arithmetic's: "two across on a phone" is what the card was sized for,
-    /// and the narrowest phone this app runs on is 375 points, where a
-    /// 168-point minimum and a 16-point margin admit exactly one. A grid of
-    /// one column is a list, and this screen is not a list.
-    ///
-    /// More than two only where there is honestly room — an iPad, which this
-    /// app is built for (`TARGETED_DEVICE_FAMILY = "1,2"`) and where two cards
-    /// stretched across 800 points would be two banners.
-    static func columns(width: CGFloat, margin: CGFloat, gutter: CGFloat) -> Int {
-        let available = width - margin * 2
-        guard available > 0 else { return 2 }
-        // `n` cards need `n * card + (n - 1) * gutter`, so the largest `n`
-        // that fits is `(available + gutter) / (card + gutter)`, floored.
-        let fits = (available + gutter) / (card.width + gutter)
-        return max(2, Int(fits.rounded(.down)))
-    }
-
-    /// How wide each card is drawn, so that a row of them fills the display
-    /// exactly between its two margins.
-    ///
-    /// The whole of the fix, and it is one line of division: the slack that
-    /// used to be split between the outer edges is divided among the cards
-    /// instead. `columns * cardWidth + (columns - 1) * gutter + 2 * margin`
-    /// is `width`, which is what makes the margin a number this app chose
-    /// rather than a remainder.
-    static func cardWidth(width: CGFloat, margin: CGFloat, gutter: CGFloat) -> CGFloat {
-        let count = CGFloat(columns(width: width, margin: margin, gutter: gutter))
-        let available = width - margin * 2 - gutter * (count - 1)
-        return max(0, available / count)
     }
 }

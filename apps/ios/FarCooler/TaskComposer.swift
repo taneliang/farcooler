@@ -341,8 +341,10 @@ enum PhoneMigration {
             if defaults.object(forKey: new) == nil { defaults.set(value, forKey: new) }
             defaults.removeObject(forKey: old)
         }
-        // The crossing note retired with the overview; a relaunch no longer
-        // reads it, so an old one would only linger.
-        defaults.removeObject(forKey: ShellScreen.crossingKey)
+        // The crossing note and the cache of other runners' worktrees retired
+        // with the overview; nothing reads either, so an old one would only
+        // linger.
+        defaults.removeObject(forKey: "shell.crossingTo")
+        defaults.removeObject(forKey: "runnerDirectories")
     }
 }

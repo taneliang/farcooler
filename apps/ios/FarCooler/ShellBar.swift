@@ -54,7 +54,7 @@ import SwiftUI
 /// the bar said nothing at all while a turn ran.
 struct ShellMarkView: View {
     let mark: GlanceMark
-    /// 6 in the bar's ribbon, 7 in the column, 5 on an overview card.
+    /// 6 in the bar's ribbon and 7 in the column.
     ///
     /// **Smaller than any of §03's six diameters, and deliberately kept.** The
     /// spec's ladder starts at an 8pt ribbon, but these three numbers are
@@ -107,8 +107,7 @@ struct ShellRibbon: View {
     /// second. A mark is a capsule six points across with no contents at all.
     /// There is nothing inside it to reflow.
     ///
-    /// Nil for a ribbon that is only ever in one place — the overview card's,
-    /// which draws the same marks at 5 points and has no menu to fly to.
+    /// Nil for a ribbon that is only ever in one place, with no menu to fly to.
     var marks: Namespace.ID?
     /// Whether the menu is open, and therefore whether the ribbon's slots or
     /// the menu's rows are the ones saying where the dots ARE.
@@ -702,10 +701,9 @@ struct ShellBar: View {
             // animates. It is a finish on the touch, not a motion — none of
             // the flight, the crossing or the lift changes by a point.
             //
-            // Only here. The cards in the overview are CONTENT, and content
-            // does not get glass at all, interactive or otherwise: "always
-            // avoid glass on glass", and a grid of forty flexing rectangles
-            // would be the same mistake this file already corrected once when
+            // Only here. Content does not get glass at all, interactive or
+            // otherwise: "always avoid glass on glass", and a page of flexing
+            // rectangles would be the same mistake this file already corrected once when
             // the column was its own sheet.
             .modifier(GlassSurface(radius: PaneMetrics.surfaceRadius, interactive: true))
             .glassEffectID(Self.surfaceID, in: glass)

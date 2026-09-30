@@ -22,9 +22,8 @@ import Foundation
 /// ## The order of authority, now that there are two answers rather than three
 ///
 /// The route was the third: a door that named the pane it meant. Every door in
-/// the shell is a gesture — a swipe along the bar, a carried lift, a tap on an
-/// overview card — and none of them names a tab, because none of them is about
-/// a tab. So what is left is:
+/// the shell is a gesture — a swipe along the bar, a lift — and none of them
+/// names a tab, because none of them is about a tab. So what is left is:
 ///
 /// 1. **The tab you were last on.** `Connection.lastFocus`, written only when a
 ///    person moves between the tabs of one worktree — see

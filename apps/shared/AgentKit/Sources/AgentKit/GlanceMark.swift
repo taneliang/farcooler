@@ -224,8 +224,7 @@ public struct GlanceMark: Hashable, Sendable {
     /// Not "idle" and not "gone". The ring is broken because the link is, and
     /// the core is withheld rather than drawn empty, because nobody is telling
     /// us what the agent is doing, which is different from being told it's at a
-    /// prompt. The remembered cards of a runner this app has no connection to
-    /// have drawn exactly this since `RunnerDirectory.decayed`.
+    /// prompt.
     public static let unsaid = GlanceMark(attention: .quiet, core: nil, link: .broken)
 
     /// This mark as it may still be drawn for a runner, answering or not.
@@ -422,9 +421,8 @@ public struct GlanceMarkView: View {
     /// and older than the spec.
     ///
     /// **This is the one caller allowed to name its own diameter, and it is not
-    /// a loophole being left open.** `ShellRibbon` draws at 6, `ShellColumn` at
-    /// 7 and `ShellOverview` at 5, and those three numbers are load-bearing
-    /// somewhere other than here: the column reserves an 18pt gutter around a
+    /// a loophole being left open.** `ShellRibbon` draws at 6 and `ShellColumn`
+    /// at 7, and those numbers are load-bearing somewhere other than here: the column reserves an 18pt gutter around a
     /// 7pt mark, and the flight between the ribbon and the menu is a
     /// `matchedGeometryEffect` whose source frame is literally `size` and
     /// `size * 2.5` (`ShellBar.swift`, `ShellRibbon.slot` and

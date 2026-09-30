@@ -187,13 +187,17 @@ public struct DaemonBuild: Equatable, Sendable {
     /// Whether this runner keeps an order a drag can write to: whether it
     /// advertises `worktree_order` (`farcooler_protocol::capability`).
     ///
-    /// On the build rather than on either app's view, so the Mac's sidebar and
-    /// the phone's overview ask the one question in the one spelling. The Mac
-    /// used to ask nothing and offered a drag to every runner; one too old to
-    /// store a rank answers the reorder with "unknown method", and the row
-    /// springs back on the next read with nothing said anywhere. See
-    /// `ShellRunnerLabel.keepsOrder(daemon:)` for why the capability and never
-    /// the ordinals.
+    /// On the build rather than on the view, so every app asks the one
+    /// question in the one spelling. The Mac used to ask nothing and offered a
+    /// drag to every runner; one too old to store a rank answers the reorder
+    /// with "unknown method", and the row springs back on the next read with
+    /// nothing said anywhere.
+    ///
+    /// **The capability and never the ordinals.** `ordinal` is a proto3 scalar
+    /// with no presence, prost decodes an old daemon's silence as 0, and
+    /// `Session::fleet` puts `"ordinal"` on every worktree regardless — so a
+    /// runner too old to store an order looks, on the wire, exactly like a new
+    /// one whose ranks happen to be 0.
     public var keepsWorktreeOrder: Bool { can("workspace_order") }
 
     /// The same build, spelled the way the app spells its own.

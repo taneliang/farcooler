@@ -1,33 +1,30 @@
 import SwiftUI
-import os
 
 #if DEBUG
 
-// The navigation shell over canned fleets, so it can be driven before it is
-// wired to anything.
+// The navigation shell over a canned worktree, so it can be driven with no
+// runner behind it.
 //
 // `-shell-harness`, alongside `-agent-layout-harness` and
 // `-changes-layout-harness` in `FarCoolerApp.swift`, and for the same reason
 // those two exist: a surface that has only ever been argued about from the
-// code is a surface nobody has looked at. This one has a second reason as
-// well — the shell is a GESTURE, and a gesture cannot be reviewed in a
-// screenshot at all. It has to be swiped, and swiping it needs a fleet, and a
-// fleet needs a runner, a daemon and some agents actually doing something.
+// code is a surface nobody has looked at. The shell is a GESTURE, and a
+// gesture cannot be reviewed in a screenshot at all. It has to be swiped, and
+// swiping it needs a worktree with tabs, and a worktree needs a runner, a
+// daemon and some agents actually doing something.
 //
-// So: three canned fleets, one flag each, and the shell is real from the first
-// commit. `ShellGestureTests` drives this same harness, which is the only way
-// the axis lock and the commit threshold get a test at all.
+// It is the shell as the phone mounts it (`ShellScreen`, scoped to one
+// worktree): one worktree, three tabs, the bar and its column. It used to
+// stand on a whole canned fleet, with an overview to lift into and a
+// neighbor worktree to cross to, and the app has no such shell any more —
+// see `ShellScope`. What is canned is only what a runner would supply: the
+// panes, which are placeholders that say so, or a scrolling pane under
+// `-shell-scroll` and the review pane over a canned diff under
+// `-shell-changes`.
 //
-// ## The three scales, and why 40 is not a stress test
-//
-// `-shell-4` is the common case, `-shell-10` a busy afternoon, and `-shell-40`
-// is the requirement that killed every other design. A bar that shows the
-// worktrees as a strip has to compress to fit them, and at forty a compressed
-// strip is forty illegible slivers — which is why the bar here shows exactly
-// ONE worktree and the fleet lives in the overview. 40 is therefore not an
-// edge case to survive; it is the case the design was chosen for, and a change
-// to the shell that has not been looked at with `-shell-40` has not been
-// looked at.
+// `ShellGestureTests`, `ShellColumnCloseTests` and `ShellPaneScrollTests`
+// drive this harness, which is the only way the axis lock, the commit
+// threshold and the page turn over a scrolling pane get a test at all.
 
 /// The shell, standing on a fixture.
 struct ShellHarness: View {
@@ -40,9 +37,9 @@ struct ShellHarness: View {
     /// the sake of the store hanging off it.
     @StateObject private var connection = Connection()
 
-    /// The canned fleet, held rather than rebuilt, so a drag in the overview
-    /// has something to change: `reordered` is what a runner does with the
-    /// request, applied here in its place.
+    /// The canned worktree, held rather than rebuilt, so a close has something
+    /// to change: `onCloseTab` is what a runner does with the request, applied
+    /// here in its place.
     @State private var fleet = Self.fleet
 
     @State private var request: String?
@@ -61,50 +58,7 @@ struct ShellHarness: View {
             ShellRootView(
                 fleet: fleet,
                 initial: ShellPosition(worktree: 0, tab: 0),
-                // `-shell-overview` lands straight on the all-worktrees view.
-                // Reaching it otherwise takes a drag past the last row, which
-                // is exactly the state a screenshot most wants and a script
-                // least reliably produces.
-                openingOnOverview: CommandLine.arguments.contains("-shell-overview"),
                 request: $request,
-                runnerSections: ShellOverviewRunners(
-                    live: [ShellRunnerLabel(id: Self.runner, name: "this-mac", keepsOrder: true)],
-                    // `-shell-board` puts a Board row over this runner's
-                    // cards; see `HarnessBoard`. `-shell-workspaces` splits
-                    // the runner into workspaces, a Board row each; see
-                    // `HarnessWorkspaces`.
-                    boards: { _ in
-                        HarnessWorkspaces.isRequested ? HarnessWorkspaces.rows : HarnessBoard.rows
-                    },
-                    // A board is a workspace's segment on the phone's stack
-                    // now (ov-55): the rows are drawn, and open nothing.
-                    headings: { _ in HarnessWorkspaces.headings },
-                    // The orchestrator's row hands back a harness TAB id,
-                    // which is what `request` takes; in the app it is a
-                    // terminal id and `ShellScreen.requestedTab` turns it
-                    // into one.
-                    onOpenOrchestrator: { _, row in request = row.id },
-                    elsewhere: Self.elsewhere,
-                    // A menu on each heading, so the heading is the height it
-                    // is in the app and the grid under it lands where it does
-                    // there. Nothing behind them: a fixture has no runner to
-                    // edit, and the one that would be reached is not this.
-                    liveActions: { _ in
-                        [ShellHeaderAction(title: "Edit Runner…", systemImage: "pencil") {}]
-                    },
-                    cachedActions: { _ in
-                        [ShellHeaderAction(
-                            title: "Switch to This Runner", systemImage: "arrow.left.arrow.right") {}]
-                    },
-                    // The runner's half of a drop, in the runner's place, and
-                    // a round trip's worth of waiting so the pending order is
-                    // what is on screen in between — the same wait a real
-                    // runner costs.
-                    onReorder: { request in
-                        try? await Task.sleep(for: .milliseconds(300))
-                        fleet = fleet.reordered(request)
-                    }),
-                onCross: { _, _ in },
                 // A close, done the way a runner does it: the tab leaves the
                 // fleet and the shell's vanish rule takes it from there. Only
                 // so `ShellColumnCloseTests` can see that a Close tap reached
@@ -142,465 +96,47 @@ struct ShellHarness: View {
         return store
     }
 
-    /// Which fixture this launch asked for.
+    /// The canned worktree: `add-retries`, with three tabs.
     ///
-    /// One BARE flag each — `-shell-40` — rather than `-shell 40`. The pair
-    /// form works under `simctl launch` and silently does nothing under
-    /// `XCUIApplication.launchArguments`, which is the trap `AgentLayoutHarness`
-    /// documents at length; a harness whose flags only work from one of the two
-    /// launchers is a harness the tests cannot use.
+    /// Tab 0 is Changes, as it is in every worktree the app shows, and only
+    /// a Changes tab is ever `unreadDiff`, which is a model rule rather than a
+    /// style choice. The other two are terminals and can be closed; Changes
+    /// cannot, and a fixture that marked all three alike would let
+    /// `ShellColumnCloseTests` pass against a column that offered Close on it.
     static var fleet: ShellFleet {
-        let args = CommandLine.arguments
-        let fleet: ShellFleet
-        if args.contains("-shell-4") {
-            fleet = canned(count: 4)
-        } else if args.contains("-shell-40") {
-            fleet = canned(count: 40)
-        } else {
-            fleet = canned(count: 10)
-        }
-        return HarnessWorkspaces.isRequested ? HarnessWorkspaces.split(fleet) : fleet
-    }
-
-    /// Whether this launch asked for some of the fleet to be put away.
-    private static var hides: Bool {
-        CommandLine.arguments.contains("-shell-hidden")
-    }
-
-    /// The one runner every canned worktree is on.
-    static let runner = "harness"
-
-    /// `count` worktrees, with tab counts and states that vary the way a real
-    /// fleet's do.
-    ///
-    /// Deliberately not `count` identical worktrees. The three things this
-    /// fixture has to be able to show wrong are the crossing rule (a swipe off
-    /// the end of a worktree), the ribbon (four different marks side by side)
-    /// and the overview's cards (four different tails in a row, and a drag that
-    /// has something to move) — and a fleet where every worktree has two
-    /// working tabs shows none of them. The numbers come off the index so the
-    /// fixture is reproducible: the same flag always produces the same fleet,
-    /// which is what makes a screenshot comparable to the last one.
-    static func canned(count: Int) -> ShellFleet {
         ShellFleet(
-            worktrees: (0..<count).map { index in
-                // Tab counts that vary, and NOT in ascending order: a fleet
-                // whose worktrees get steadily bigger reads as a pattern, and
-                // a fixture that looks designed stops being a stand-in for one
-                // that is not. Three at the front because that is the size the
-                // column and the overview threshold are usually looked at, and
-                // a one-tab worktree in the middle because the column's own
-                // ends and the overview's reach both depend on the count and
-                // both have to be reachable by flag alone.
-                let tabs = [3, 2, 5, 1, 4][index % 5]
-                return ShellWorktree(
-                    id: "ws-\(index)",
-                    name: Self.names[index % Self.names.count]
-                        + (index >= Self.names.count ? "-\(index / Self.names.count + 1)" : ""),
-                    // A server on some of them and not others, so the bar's
-                    // both-ways case is reachable by flag: the local runner
-                    // says nothing, the rest name themselves.
-                    //
-                    // **Except when the grid has real sections.** These
-                    // worktrees are the LIVE fleet, and a live card that
-                    // names `eu-runner-1` while sitting under a `this-mac`
-                    // heading is a fixture contradicting itself — which in the
-                    // app cannot happen, because `ShellFleetMap.of` leaves
-                    // `server` nil for every worktree on the runner it is
-                    // connected to. So the bar's fixture and the grid's
-                    // fixture take turns.
-                    server: CommandLine.arguments.contains("-shell-servers") || index % 3 == 0
-                        ? nil : Self.servers[index % Self.servers.count],
-                    // FIVE tails against a four-worktree mark cycle, and the
-                    // count is the point rather than the stride.
-                    //
-                    // `index % 4` put an identical tail on every card in a
-                    // precedence group, and the overview sorted BY precedence
-                    // then — so the grid read as forty cards all saying one
-                    // sentence. It keeps each runner's order now, and the
-                    // coprime cycles are still what keep neighbors distinct.
-                    // A different stride does not fix that: any linear
-                    // function of `index` is CONSTANT within a residue class
-                    // mod 4, so as long as the two cycles share a length the
-                    // tail is a restatement of the mark. Five and four are
-                    // coprime, so the pair walks all twenty combinations.
-                    tail: Self.tails[index % Self.tails.count],
-                    // `-shell-hidden`, and every fifth one rather than every
-                    // second: the section has to be a MINORITY of the grid or
-                    // the fixture stops looking like a fleet somebody put a
-                    // few things away in. Coprime with neither cycle above, so
-                    // it does not line up with the marks or the tails.
-                    isHidden: Self.hides && index % 5 == 3,
-                    // Worktree 0 is the repository's own checkout, in every
-                    // fixture and unconditionally.
-                    //
-                    // Unconditional because of what it makes reachable: the
-                    // card menu's `Remove Worktree…` is ABSENT for the primary
-                    // checkout and present for everything else, and a fixture
-                    // where every worktree answered the same way could show
-                    // neither half of that rule working. One in four (or ten,
-                    // or forty) is also what a real runner looks like — a
-                    // repository has one checkout and many worktrees.
-                    isPrimaryCheckout: index == 0,
-                    // One runner: the grid draws one section. It keeps an
-                    // order — see the label below — so a drag is offered.
-                    runner: Self.runner,
-                    tabs: (0..<tabs).map { tab in
+            worktrees: [
+                ShellWorktree(
+                    id: "ws-0",
+                    name: "add-retries",
+                    tabs: (0..<3).map { tab in
                         ShellTab(
-                            id: "ws-\(index)-tab-\(tab)",
+                            id: "ws-0-tab-\(tab)",
                             title: tab == 0 ? "Changes" : Self.agents[tab % Self.agents.count],
-                            // Tab 0 is the diff, in every worktree. "`Diff` is
-                            // a tab like any other, first in the list" — and
-                            // only a diff tab is ever `unreadDiff`, which is a
-                            // model rule rather than a style choice. A fixture
-                            // that put the diff last would also put its cyan
-                            // ring at the wrong end of every ribbon, and a
-                            // ribbon is only learnable because the marks do
-                            // not move.
-                            mark: mark(worktree: index, tab: tab).mark,
-                            wantsAttention: mark(worktree: index, tab: tab).wantsAttention,
-                            // Tab 0 is the diff and cannot be closed; every
-                            // other tab is a terminal and can. The SAME split
-                            // `ShellFleetMap.one(_:naming:now:)` makes over a
-                            // real fleet, and a fixture that marked all of them
-                            // alike would let `ShellColumnCloseTests` pass
-                            // against a column that offered Close on the diff.
+                            mark: mark(tab: tab).mark,
+                            wantsAttention: mark(tab: tab).wantsAttention,
                             closable: tab != 0)
                     })
-            })
+            ])
     }
 
-    /// Every state the bar can draw, spread so that each one is on screen at
-    /// the scales a person looks at.
-    ///
-    /// **Six now rather than four**, because the mark gained the axis it was
-    /// missing: a producing agent and an idle one are different drawings, and
-    /// a fixture that cannot produce both is a fixture in which the defect
-    /// this replaced would still not be visible.
-    ///
-    /// **Nothing asserts that every arm below is reachable**, and the paragraph
-    /// after this one is what that costs — the app has no unit-test target, so
-    /// this file is checked by being looked at. `-shell` with enough worktrees
-    /// is the check: the cycles are `% 4` on the diff and `% 5` on the agents
-    /// against tab counts of `[3, 2, 5, 1, 4]`, so ten worktrees show every
-    /// arm. If an arm is ever made unreachable again it will go unnoticed the
-    /// same way, which is an argument for the target and not for a comment.
-    ///
-    /// Tab 0 is the diff, so "the first AGENT" is tab 1. This read `tab == 0`
-    /// while the fixture put the diff last, and moving the diff to the front
-    /// left that arm unreachable — every worktree would have quietly
-    /// rendered as working, and the amber mark the whole ribbon exists for
-    /// would have been absent from every screenshot.
-    static func mark(worktree: Int, tab: Int) -> (mark: GlanceMark, wantsAttention: Bool) {
-        // The diff, which is never an agent and so never states a core.
-        if tab == 0 {
-            return (
-                GlanceMark(attention: worktree % 4 == 0 ? .toReview : .quiet, core: nil), false
-            )
-        }
-        // Five agent states over a cycle coprime with neither the tab counts
-        // (period 5 — hence the `+ tab`, which walks the residues) nor the
-        // four-worktree diff cycle above.
-        switch (worktree + tab) % 5 {
-        case 0: return (GlanceMark(attention: .needsYou, core: .atAPrompt), true)
-        // Done: the review tier, and it wants you even though it does not draw
-        // the amber ring. See `ShellTab.wantsAttention`.
-        case 1: return (GlanceMark(attention: .toReview, core: .atAPrompt), true)
-        case 2: return (GlanceMark(attention: .quiet, core: .producing), false)
-        case 3: return (GlanceMark(attention: .quiet, core: .atAPrompt), false)
-        default:
-            return (GlanceMark(attention: .quiet, core: .producing, link: .broken), false)
+    /// The marks the bar can draw, one per tab: the Changes tab with something
+    /// to review (which never states an agent core), an agent at a prompt for
+    /// a person, and an agent producing.
+    static func mark(tab: Int) -> (mark: GlanceMark, wantsAttention: Bool) {
+        switch tab {
+        case 0: return (GlanceMark(attention: .toReview, core: nil), false)
+        case 1: return (GlanceMark(attention: .needsYou, core: .atAPrompt), true)
+        default: return (GlanceMark(attention: .quiet, core: .producing), false)
         }
     }
-
-    private static let servers = ["gpu-box-2", "eu-runner-1"]
-
-    /// Two OTHER runners, as the app would have last seen them.
-    ///
-    /// `-shell-servers`, behind a flag rather than always on, for the reason
-    /// every flag in this harness is: it changes what the grid CONTAINS, and
-    /// the tests that were written against a one-runner grid are still the
-    /// tests for a one-runner grid. A fixture that quietly grew two extra
-    /// sections would have rewritten all of them.
-    ///
-    /// The marks are the interesting part and they are not uniform. A cached
-    /// runner is not uniformly gray: `RunnerDirectory.decayed` holds
-    /// `needsYou` and `unreadDiff` at any age and lets `working` go dashed, so
-    /// this fixture carries one of each — a fixture where every cached ring
-    /// was dashed could not show that rule working or failing.
-    ///
-    /// One of them is HIDDEN, which must not be drawn at all: the way back
-    /// from hiding is on the runner the worktree is on, and this is not that
-    /// runner.
-    ///
-    /// `-shell-twin-labels` gives the second runner the first one's label.
-    /// Two runners can share one — two daemons on a box, or two boxes named
-    /// alike — and the ids are what tell them apart, which is what a heading's
-    /// accessibility identifier has to be keyed by for a test to find each.
-    static var elsewhere: [ShellServerGroup] {
-        guard CommandLine.arguments.contains("-shell-servers") else { return [] }
-        let now = Date()
-        let twinLabels = CommandLine.arguments.contains("-shell-twin-labels")
-        return [
-            RunnerDirectory(
-                runner: "runner-gpu", label: "gpu-box-2",
-                seenAt: now.addingTimeInterval(-2 * 60 * 60),
-                worktrees: [
-                    directory("fix/token-refresh", mark: "needsYou"),
-                    directory("feat/queue-drain", mark: "working"),
-                    directory("chore/put-away", mark: "working", isHidden: true),
-                ]
-            ).group(),
-            RunnerDirectory(
-                runner: "runner-eu", label: twinLabels ? "gpu-box-2" : "eu-runner-1",
-                seenAt: now.addingTimeInterval(-9 * 60),
-                worktrees: [directory("spike/watch-sync", mark: "unreadDiff")]
-            ).group(),
-        ]
-    }
-
-    private static func directory(
-        _ name: String, mark: String, isHidden: Bool = false
-    ) -> RunnerDirectory.Worktree {
-        RunnerDirectory.Worktree(
-            id: name, name: name, isHidden: isHidden,
-            tabs: [
-                RunnerDirectory.Tab(title: "Changes", mark: mark),
-                RunnerDirectory.Tab(title: "claude", mark: "working"),
-            ],
-            tail: ["$ npm test", "142 passing, 0 failing"])
-    }
-
-    /// What a card's terminal last said. Four shapes rather than one, because
-    /// a grid where every card says the same thing cannot show whether the
-    /// tail is doing its job — and one of them is a question, which is the
-    /// case the amber mark exists for and the one a person is scanning for.
-    private static let tails: [[String]] = [
-        ["$ npm test", "142 passing, 0 failing", "$ ▌"],
-        ["Squashed 4 fixups into 9f30bb7.", "Push the rebased branch?", "▸ waiting for you · 4m"],
-        ["$ claude", "Drafting the migration guide…", "(no output for 1h)"],
-        ["$ git diff --stat", "Auth/TokenStore.swift  +61 -4", "4 commits ahead of origin"],
-        ["$ pytest -x tests/timer", "Isolated the flake to the shared clock.", "$ ▌"],
-    ]
-
-    private static let names = [
-        "add-retries", "feat/queue-drain", "fix/token-refresh", "chore/deps",
-        "spike/watch-sync", "feat/diff-folding", "fix/tmux-resize", "docs/handoff",
-        "feat/overview-grid", "fix/first-responder",
-    ]
 
     private static let agents = ["claude", "codex", "shell", "aider"]
 }
 
-/// A board for `-shell-board`: one repository's worth of cards, and the
-/// harness's tabs standing in for the panes working them.
+/// What a pane is here: a name, and nothing behind it.
 ///
-/// The Board row's counts come out of `RunnerBoards.rows` over these, not out
-/// of a literal, so what the harness draws is what the rule decides. An Agent
-/// button's id is a harness TAB id, which is what `ShellRootView.request`
-/// takes; in the app it is a terminal id and `ShellScreen.requestedTab` turns
-/// it into one.
-enum HarnessBoard {
-    static var isRequested: Bool { CommandLine.arguments.contains("-shell-board") }
-
-    /// The clock the cards read: the wall clock, or with `-board-clock-leap`
-    /// one that jumps a day ahead `leapAfter` seconds after the board first
-    /// reads it, and ticks twice a second.
-    ///
-    /// For `testAQuietCardTurnsStaleOnTheTick`: nothing on the harness board
-    /// ever changes, so the only thing that can turn a card stale there is the
-    /// cards' own tick — which is the thing under test. A real minute would
-    /// be a test that waits a minute; this is the same redraw, sooner.
-    static let clock: BoardClock = {
-        guard CommandLine.arguments.contains("-board-clock-leap") else { return .wall }
-        let firstRead = OSAllocatedUnfairLock<Date?>(initialState: nil)
-        return BoardClock(interval: 0.5) {
-            let now = Date()
-            let first = firstRead.withLock { first in
-                if first == nil { first = now }
-                return first ?? now
-            }
-            return now.timeIntervalSince(first) < leapAfter ? now : now.addingTimeInterval(86_400)
-        }
-    }()
-
-    /// Long enough for the test to read a card before the leap.
-    static let leapAfter: TimeInterval = 8
-
-    /// A pane in the harness fleet, working a task or not.
-    struct Pane: TaskBoardPane {
-        var boardTaskID: String?
-        var boardState = "running"
-        var runsAgent = true
-        var tab: String
-        var title: String
-    }
-
-    static let panes: [Pane] = [
-        Pane(boardTaskID: "t-19", tab: "ws-1-tab-1", title: "claude in feat/queue-drain"),
-        Pane(boardTaskID: "t-20", tab: "ws-2-tab-1", title: "claude in fix/token-refresh"),
-        Pane(boardTaskID: "t-20", tab: "ws-2-tab-2", title: "codex in fix/token-refresh"),
-        // Working -20 as far as the runner said, in a tab the fleet no longer
-        // has: the pane that closed while the board was open.
-        Pane(boardTaskID: "t-20", tab: "ws-gone-tab-1", title: "aider in chore/put-away"),
-        // Dispatched, and its agent has gone: back at a shell, still running.
-        Pane(boardTaskID: "t-21", runsAgent: false, tab: "ws-3-tab-0", title: "shell"),
-    ]
-
-    /// `age` is how long it has sat in its status, and so when it last
-    /// changed; `filed` is how long ago it was added. A card filed and never
-    /// moved passes the same for both and reads "Added".
-    private static func row(
-        _ n: Int, _ title: String, _ status: TaskStatus, _ acceptance: [Bool],
-        age: TimeInterval = 600, filed: TimeInterval = 3 * 24 * 60 * 60
-    ) -> TaskRow {
-        let now = Date()
-        return TaskRow(
-            id: "t-\(n)", key: "-\(n)", title: title, status: status,
-            statusSince: now.addingTimeInterval(-age),
-            intent: "Why task \(n) exists, in the words of whoever filed it.",
-            acceptance: acceptance.enumerated().map {
-                TaskAcceptanceLine(
-                    id: "a\(n)-\($0.offset)", text: "Line \($0.offset + 1) of task \(n) holds",
-                    met: $0.element)
-            },
-            createdAt: now.addingTimeInterval(-filed),
-            updatedAt: now.addingTimeInterval(-min(age, filed)))
-    }
-
-    static var board: TaskBoardModel {
-        let rows = [
-            row(19, "Board in the sidebar, cards that link to agents", .needsDecision,
-                [true, false, false]),
-            row(20, "A task board on iOS and Android", .inProgress,
-                [true, true, false, false, false]),
-            row(21, "Android’s board", .inProgress, [], age: 2 * 24 * 60 * 60),
-            row(18, "Acceptance progress on cards", .inReview, [true, true, true, true]),
-            // Filed five days ago and never touched: a backlog card is not
-            // expected to move, so it says when it was added and nothing
-            // about having stopped.
-            row(17, "A board across every repository", .backlog, [],
-                age: 5 * 24 * 60 * 60, filed: 5 * 24 * 60 * 60),
-        ]
-        return TaskBoardModel(
-            columns: TaskBoardModel.order.map { status in
-                TaskBoardColumn(status: status, rows: rows.filter { $0.status == status })
-            })
-    }
-
-    static var rows: [RunnerBoardRow] {
-        guard isRequested else { return [] }
-        return RunnerBoards.rows(
-            repositories: [(id: "repo-overnight", name: "overnight")],
-            boards: ["repo-overnight": board],
-            panes: panes,
-            build: DaemonBuild(
-                version: "harness", matches: true, platform: "",
-                capabilities: ["workspaces", "terminals", "tasks", "terminal_task"]),
-            connected: true)
-    }
-
-    static func agents(for row: TaskRow) -> [BoardAgent] {
-        let live = row.livePanes(in: panes)
-        let titles = TaskAgentLink.menuTitles(live.map(\.title), shorts: live.map(\.tab))
-        return zip(live, titles).map { pane, title in
-            BoardAgent(
-                id: pane.tab, title: title,
-                mark: GlanceMark(
-                    attention: row.status == .needsDecision ? .needsYou : .quiet,
-                    core: row.status == .needsDecision ? .atAPrompt : .producing))
-        }
-    }
-}
-
-/// A runner split into workspaces, for `-shell-workspaces`: Main and Billing
-/// in one repository, and a worktree neither has claimed.
-///
-/// What the workspace level looks like in the grid, and what
-/// `ShellBoardTests.testEachWorkspaceHasItsOwnBoardRow` drives. The layout is
-/// `ShellFleet.runnerSections`' and the rows are `RunnerBoards.rows`', over
-/// this fixture, so the harness draws what the rules decide.
-///
-/// Billing's orchestrator runs in `ws-0`, the repository's checkout, which
-/// Main owns — where the daemon opens every orchestrator. It is a tab there
-/// (`ws-0-orch`), off that card, and Billing's own row.
-enum HarnessWorkspaces {
-    static var isRequested: Bool { CommandLine.arguments.contains("-shell-workspaces") }
-
-    static let main = WorkspaceSummary(
-        id: "ws-main", name: "Main", taskPrefix: "ov", isMain: true, ordinal: 0,
-        repository: "repo-overnight")
-    static let billing = WorkspaceSummary(
-        id: "ws-billing", name: "Billing", taskPrefix: "bil", isMain: false, ordinal: 1,
-        repository: "repo-overnight", orchestrator: "ws-0-orch")
-
-    static let orchestrator = ShellOrchestratorRow(
-        id: "ws-0-orch", line: "Splitting the invoices work",
-        mark: GlanceMark(attention: .quiet, core: .producing))
-
-    static var headings: [ShellWorkspaceHeading] {
-        guard isRequested else { return [] }
-        return [
-            ShellWorkspaceHeading(id: main.id, name: main.name),
-            ShellWorkspaceHeading(id: billing.id, name: billing.name, orchestrator: orchestrator),
-            ShellWorkspaceHeading(
-                id: ShellWorkspaceHeading.unclaimedID(repository: "repo-overnight"),
-                name: "Unclaimed", isUnclaimed: true),
-        ]
-    }
-
-    /// `ws-0` and `ws-1` Main's, `ws-2` Billing's, the rest unclaimed — in
-    /// that order, which is the order the app builds a fleet in (see
-    /// `ShellFleetMap.of`) — and Billing's orchestrator a tab of `ws-0`.
-    static func split(_ fleet: ShellFleet) -> ShellFleet {
-        let unclaimed = ShellWorkspaceHeading.unclaimedID(repository: "repo-overnight")
-        var worktrees = fleet.worktrees.enumerated().map { index, worktree in
-            var worktree = worktree
-            worktree.heading = index < 2 ? main.id : index == 2 ? billing.id : unclaimed
-            return worktree
-        }
-        if !worktrees.isEmpty {
-            worktrees[0].tabs.append(
-                ShellTab(
-                    id: orchestrator.id, title: ShellTab.orchestratorTitle(workspace: billing.name),
-                    mark: orchestrator.mark,
-                    closable: true, isOrchestrator: true))
-        }
-        return ShellFleet(worktrees: worktrees)
-    }
-
-    /// A Board row each: Main's board is `HarnessBoard`'s, and Billing's has
-    /// one task waiting on a decision.
-    static var rows: [RunnerBoardRow] {
-        let now = Date()
-        let billingBoard = TaskBoardModel(
-            columns: TaskBoardModel.order.map { status in
-                TaskBoardColumn(
-                    status: status,
-                    rows: status == .needsDecision
-                        ? [TaskRow(
-                            id: "b-1", key: "bil-1", title: "Invoices by customer",
-                            status: .needsDecision, statusSince: now)]
-                        : [])
-            })
-        return RunnerBoards.rows(
-            boards: [main, billing], names: ["repo-overnight": "overnight"],
-            models: [main.id: HarnessBoard.board, billing.id: billingBoard],
-            panes: HarnessBoard.panes,
-            build: DaemonBuild(
-                version: "harness", matches: true, platform: "",
-                capabilities: ["workspaces", "terminals", "tasks", "terminal_task", "workstreams"]),
-            connected: true)
-    }
-}
-
-/// What a pane is in this commit: a name, and nothing behind it.
-///
-/// It stands in for a terminal and says so. The crossing note beside the title
-/// is not a placeholder, though — it is the real behavior: when the pane
-/// sliding in belongs to a DIFFERENT worktree, its title carries that
-/// worktree's name in muted text, so the crossing is visible while it is
-/// still abandonable rather than a surprise you find after committing to it.
+/// It stands in for a terminal and says so.
 struct ShellPanePlaceholder: View {
     let slot: ShellPaneSlot
     /// The canned review pane this slot draws instead of text, under
@@ -624,7 +160,6 @@ struct ShellPanePlaceholder: View {
 
     private var worktree: ShellWorktree { slot.worktree }
     private var tab: ShellTab { slot.tab }
-    private var isCrossing: Bool { slot.isCrossing }
 
     /// Whether this launch asked for panes that SCROLL.
     ///
@@ -728,11 +263,6 @@ struct ShellPanePlaceholder: View {
             ShellMarkView(mark: tab.mark, size: 7)
             Text(tab.title)
                 .font(.system(size: 17, weight: .medium))
-            if isCrossing {
-                Text(worktree.name)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-            }
         }
     }
 
