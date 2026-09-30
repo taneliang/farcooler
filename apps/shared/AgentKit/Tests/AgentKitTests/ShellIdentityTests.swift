@@ -85,8 +85,15 @@ struct ShellIdentityTests {
     /// A terminal is an agent or a terminal, and the pane, the tab and the
     /// session are this app's plumbing (spec §1). A source scrape over
     /// `apps/ios/FarCooler`, of every `accessibilityLabel` and
-    /// `accessibilityHint` given a string: the iOS target has no unit tests
-    /// to ask the rendered tree, and this is where the words are written.
+    /// `accessibilityHint`: the iOS target has no unit tests to ask the
+    /// rendered tree, and this is where the words are written.
+    ///
+    /// Given a string, that string. Given anything else — a ternary, a
+    /// `??`, a property or a function (`.accessibilityHint(opens)`, ov-66) —
+    /// every string in the argument, and every string in the body of each
+    /// `var` or `func` it names in the same file. What a label reads out of
+    /// the runner's data (a worktree's name) is the runner's words, not
+    /// this app's, and no scrape can read it.
     ///
     /// One exemption, by name: the key row's Tab key is called "Tab", which
     /// is what the key is, not a tab of the app.
@@ -97,6 +104,22 @@ struct ShellIdentityTests {
         let planted = #"x.accessibilityLabel("Close \(name) Pane").accessibilityHint("Switches tab")"#
         #expect(Self.offenders(in: planted).count == 2)
         #expect(Self.offenders(in: #".accessibilityLabel("Tab")"#).isEmpty)
+        // A variable hint, and a choice between two labels.
+        let variable = #"""
+            row.accessibilityHint(opens)
+            private var opens: String {
+                switch kind {
+                case .agent: "Opens the agent’s pane"
+                default: "Opens the task"
+                }
+            }
+            x.accessibilityLabel(more ? "Next tab" : "Next")
+            y.accessibilityLabel(spoken(count))
+            func spoken(_ n: Int) -> String { n == 1 ? "1 session" : "\(n) things" }
+            z.accessibilityLabel(worktree.name)
+            """#
+        #expect(
+            Self.offenders(in: variable) == ["Opens the agent’s pane", "Next tab", "1 session"])
 
         let root = try #require(Self.repositoryRoot(), "cannot find the repository")
         let app = root.appendingPathComponent("apps/ios/FarCooler")
@@ -115,20 +138,102 @@ struct ShellIdentityTests {
     }
 
     /// The labels and hints in `source` whose words include pane, tab or
-    /// session, except the Tab key's own name.
+    /// session, except the Tab key's own name: the strings in each call's
+    /// argument, and in the bodies of the properties and functions it names.
     static func offenders(in source: String) -> [String] {
-        let call = try! NSRegularExpression(
-            pattern: #"accessibility(?:Label|Hint)\(\s*(?:Text\(\s*)?"((?:[^"\\]|\\.)*)""#)
         let word = try! NSRegularExpression(
             pattern: #"\b(?:panes?|tabs?|sessions?)\b"#, options: .caseInsensitive)
-        let range = NSRange(source.startIndex..., in: source)
-        return call.matches(in: source, range: range).compactMap { match in
-            guard let text = Range(match.range(at: 1), in: source).map({ String(source[$0]) }),
-                text != "Tab"
-            else { return nil }
-            let words = NSRange(text.startIndex..., in: text)
-            return word.firstMatch(in: text, range: words) == nil ? nil : text
+        func says(_ text: String) -> Bool {
+            text != "Tab" && word.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
         }
+        var found: [String] = []
+        for argument in arguments(in: source) {
+            found += literals(in: argument).filter(says)
+            for name in names(in: argument) {
+                for body in bodies(of: name, in: source) {
+                    found += literals(in: body).filter(says)
+                }
+            }
+        }
+        return found
+    }
+
+    /// The text between the parentheses of every `accessibilityLabel(` and
+    /// `accessibilityHint(` call, strings skipped when counting parentheses.
+    private static func arguments(in source: String) -> [String] {
+        let call = try! NSRegularExpression(pattern: #"accessibility(?:Label|Hint)\("#)
+        let text = Array(source.unicodeScalars)
+        return call.matches(in: source, range: NSRange(source.startIndex..., in: source)).compactMap {
+            match in
+            guard let range = Range(match.range, in: source) else { return nil }
+            let open = source.unicodeScalars.distance(
+                from: source.unicodeScalars.startIndex, to: range.upperBound.samePosition(in: source.unicodeScalars)!)
+            return balanced(text, from: open, open: "(", close: ")")
+        }
+    }
+
+    /// The text from `start` to the bracket that closes the one before it.
+    private static func balanced(
+        _ text: [Unicode.Scalar], from start: Int, open: Unicode.Scalar, close: Unicode.Scalar
+    ) -> String {
+        var depth = 1
+        var inString = false
+        var index = start
+        while index < text.count {
+            let c = text[index]
+            if inString {
+                if c == "\\" { index += 1 } else if c == "\"" { inString = false }
+            } else if c == "\"" {
+                inString = true
+            } else if c == open {
+                depth += 1
+            } else if c == close {
+                depth -= 1
+                if depth == 0 { break }
+            }
+            index += 1
+        }
+        var out = String.UnicodeScalarView()
+        out.append(contentsOf: text[start..<min(index, text.count)])
+        return String(out)
+    }
+
+    /// The string literals in `code`.
+    private static func literals(in code: String) -> [String] {
+        let literal = try! NSRegularExpression(pattern: #""((?:[^"\\]|\\.)*)""#)
+        return literal.matches(in: code, range: NSRange(code.startIndex..., in: code)).compactMap {
+            Range($0.range(at: 1), in: code).map { String(code[$0]) }
+        }
+    }
+
+    /// The lower-case names in `code` outside its strings: what a property
+    /// or a function it calls could be called.
+    private static func names(in code: String) -> Set<String> {
+        let literal = try! NSRegularExpression(pattern: #""(?:[^"\\]|\\.)*""#)
+        let bare = literal.stringByReplacingMatches(
+            in: code, range: NSRange(code.startIndex..., in: code), withTemplate: " ")
+        let name = try! NSRegularExpression(pattern: #"\b[a-z][A-Za-z0-9_]*\b"#)
+        return Set(
+            name.matches(in: bare, range: NSRange(bare.startIndex..., in: bare)).compactMap {
+                Range($0.range, in: bare).map { String(bare[$0]) }
+            })
+    }
+
+    /// The bodies of every `var name` and `func name` in `source` that has
+    /// one.
+    private static func bodies(of name: String, in source: String) -> [String] {
+        let declaration = try! NSRegularExpression(
+            pattern: #"\b(?:var|func)\s+"# + NSRegularExpression.escapedPattern(for: name)
+                + #"\b[^{\n]*\{"#)
+        let text = Array(source.unicodeScalars)
+        return declaration.matches(in: source, range: NSRange(source.startIndex..., in: source))
+            .compactMap { match in
+                guard let range = Range(match.range, in: source) else { return nil }
+                let open = source.unicodeScalars.distance(
+                    from: source.unicodeScalars.startIndex,
+                    to: range.upperBound.samePosition(in: source.unicodeScalars)!)
+                return balanced(text, from: open, open: "{", close: "}")
+            }
     }
 
     private static func repositoryRoot() -> URL? {
