@@ -1558,13 +1558,32 @@ fn task_create_of(args: &Value) -> Result<farcooler_protocol::v1::TaskCreate, Se
     let repository = optional_id(args, "repository", METHOD)?
         .ok_or_else(|| SessionError::Protocol(format!("{METHOD} needs a repository")))?;
     let workspace = optional_id(args, "workspace", METHOD)?;
-    let text = |key: &str| args.get(key).and_then(|v| v.as_str()).unwrap_or_default();
-    let acceptance: Vec<String> = args
-        .get("acceptance")
-        .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
-        .unwrap_or_default();
-    crate::session::new_task(repository, workspace, text("title"), text("intent"), &acceptance)
+    // A key that is absent or null is left out; a key of the wrong type is a
+    // fault in the caller, not a task filed without what it tried to say.
+    let text = |key: &str| -> Result<&str, SessionError> {
+        match args.get(key) {
+            None | Some(Value::Null) => Ok(""),
+            Some(Value::String(s)) => Ok(s),
+            Some(_) => Err(SessionError::Protocol(format!("{METHOD} needs {key} as a string"))),
+        }
+    };
+    let acceptance: Vec<String> = match args.get("acceptance") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(lines)) => lines
+            .iter()
+            .map(|v| {
+                v.as_str().map(str::to_string).ok_or_else(|| {
+                    SessionError::Protocol(format!("{METHOD} needs acceptance as a list of strings"))
+                })
+            })
+            .collect::<Result<_, _>>()?,
+        Some(_) => {
+            return Err(SessionError::Protocol(format!(
+                "{METHOD} needs acceptance as a list of strings"
+            )));
+        }
+    };
+    crate::session::new_task(repository, workspace, text("title")?, text("intent")?, &acceptance)
 }
 
 /// `workspace.start_orchestrator`'s arguments: `{workspace, harness,
@@ -2707,6 +2726,18 @@ mod tests {
         assert!(title_refused("\u{1F1F8}\u{1F1EC}".repeat(101)), "202 scalars in 101 flags");
 
         assert!(task_create_of(&json!({ "title": "t" })).is_err(), "no repository");
+        // A wrong type is a Protocol error, never a task filed without it.
+        let repo = repository.to_string();
+        for (what, args) in [
+            ("intent", json!({ "repository": repo, "title": "t", "intent": 7 })),
+            ("acceptance", json!({ "repository": repo, "title": "t", "acceptance": "one line" })),
+            ("acceptance", json!({ "repository": repo, "title": "t", "acceptance": ["ok", 3] })),
+        ] {
+            assert!(
+                matches!(task_create_of(&args), Err(SessionError::Protocol(_))),
+                "a wrong-typed {what} was not refused"
+            );
+        }
         let malformed = json!({ "repository": repository.to_string(), "workspace": "billing", "title": "t" });
         assert!(task_create_of(&malformed).is_err(), "never widened to Main");
     }
