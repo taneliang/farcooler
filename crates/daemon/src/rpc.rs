@@ -1662,7 +1662,10 @@ impl Rpc {
 
             "terminal.stop" => {
                 let id = Self::target(&req)?;
+                let worktree = svc.store.get_terminal(id)?.worktree_id;
                 svc.stop_terminal(id).await?;
+                // Stopping kills the pane, so its window's grid just changed.
+                self.announce_layout(worktree).await;
                 self.terminal_result(id).await
             }
 
@@ -1710,7 +1713,11 @@ impl Rpc {
 
             "terminal.remove" => {
                 let id = Self::target(&req)?;
+                let worktree = svc.store.get_terminal(id)?.worktree_id;
                 svc.remove_terminal(id).await?;
+                // Removing takes an exited terminal's retained dead pane with
+                // it, which is a cell leaving the window's grid.
+                self.announce_layout(worktree).await;
                 // No terminal to return: it is gone. An empty worktree list is
                 // the honest shape for "this succeeded and there is nothing to
                 // show", rather than echoing back a record that no longer
@@ -2364,6 +2371,18 @@ impl Rpc {
                 tracing::error!(method = %other, "method passed the scope table but has no handler");
                 Err(DomainError::NotFound)
             }
+        }
+    }
+
+    /// Tell every client a worktree's layouts as they now stand.
+    ///
+    /// For a mutation that changes tmux's arrangement as a side effect rather
+    /// than as its purpose, like a pane being killed. When the pane was the
+    /// last in its window the window is gone, and the list simply no longer
+    /// holds it, which is exactly what a client needs to drop the tab.
+    async fn announce_layout(&self, worktree: Uuid) {
+        if let Ok(groups) = self.service.layout(worktree).await {
+            self.watcher.publish_layout(worktree, &groups);
         }
     }
 

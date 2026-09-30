@@ -4234,3 +4234,54 @@ async fn a_worktree_made_for_a_workspace_is_its_until_assigned_away() {
         Some(request::Payload::TerminalSetRole(farcooler_protocol::v1::TerminalSetRole { role: 0 }));
     assert_eq!(refusal(client.call(unspecified).await).0, "role");
 }
+
+#[tokio::test]
+async fn closing_a_pane_announces_the_layout_it_left_behind() {
+    // A pane closing changes its window's grid: the survivor grows into the
+    // space. Nothing else prompts a client to re-read, so without this event
+    // the Mac and the phones draw the old split until something unrelated
+    // touches the layout.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    let first = a_terminal(&mut client, &worktree.id, "one").await;
+    let split = layout_call(
+        &mut client,
+        "layout.split",
+        &worktree.id,
+        split(&first.id, farcooler_protocol::v1::SplitSide::Right),
+    )
+    .await;
+    let before = split.items[0].panes.iter().find(|p| p.terminal_id == first.id).expect("first");
+    let second = split.items[0]
+        .panes
+        .iter()
+        .find(|p| p.terminal_id != first.id)
+        .expect("the split pane")
+        .terminal_id
+        .clone();
+    assert!(before.columns < 120, "the split narrowed the first pane: {before:?}");
+
+    let mut events = h.watcher.subscribe();
+    let mut stop = request("terminal.stop");
+    stop.target_resource_id = Some(second);
+    client.call(stop).await.expect("terminal.stop");
+
+    let announced = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let event = events.recv().await.expect("the watcher is alive");
+            if let Some(farcooler_protocol::v1::event::Payload::LayoutChanged(list)) = event.payload {
+                return list;
+            }
+        }
+    })
+    .await
+    .expect("closing a pane announced the window's new layout");
+    assert_eq!(announced.worktree_id, worktree.id);
+    let window = &announced.items[0];
+    assert_eq!(window.panes.len(), 1, "one pane is left: {window:?}");
+    let survivor = &window.panes[0];
+    assert_eq!(survivor.terminal_id, first.id);
+    assert_eq!(survivor.columns, 120, "the survivor took the whole window: {survivor:?}");
+}
