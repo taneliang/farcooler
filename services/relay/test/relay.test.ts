@@ -6575,6 +6575,24 @@ describe('the runner heartbeat', () => {
     expect(await runners(token)).toEqual([])
   })
 
+  it("withdraws only the runner that asked, never another's", async () => {
+    // A runner's token withdraws its own row and nothing else: not another
+    // runner on the same account, not a runner on another account.
+    const mine = await pulseToken('user_1')
+    const theirs = phoneToken()
+    await register('user_2', { pushToken: 'their-phone', pulseToken: theirs })
+    await pair('user_1', 'leaving')
+    await pair('user_1', 'staying')
+    await pair('user_2', 'elsewhere')
+    for (const daemon of ['leaving', 'staying', 'elsewhere']) {
+      await post('/v1/heartbeat', { beatEvery: 300, install: daemon }, daemon)
+    }
+    await post('/v1/heartbeat', { withdrawn: true }, 'leaving')
+
+    expect(await runners(mine)).toHaveLength(1)
+    expect(await runners(theirs)).toHaveLength(1)
+  })
+
   it('forgets a runner silent for a day, as it forgets its rows', async () => {
     const token = await pulseToken('user_1')
     await pair('user_1', 'mine')
