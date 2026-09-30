@@ -514,9 +514,25 @@ private struct WorkspaceWorktrees: View {
         }
     }
 
+    /// A row, with the Mac's Hide and Unhide on its swipe: a worktree put away
+    /// stays in its workspace's Hidden section and this is the way back out.
+    /// Absent below a Control grant, like every other write on this screen.
     private func row(_ worktree: Worktree) -> some View {
         WorktreeRow(worktree: worktree, inbox: connection.inbox[worktree.id]) {
             navigator?.open(.worktree(runner: place.runner, worktree: worktree.id, landing: .resume))
+        }
+        .swipeActions(edge: .trailing) {
+            if connection.daemon?.mayAct ?? true {
+                if worktree.isHidden {
+                    Button("Unhide") { Task { await connection.unhideWorktree(worktree) } }
+                        .tint(.blue)
+                        .accessibilityIdentifier("unhide-\(worktree.task)")
+                } else {
+                    Button("Hide") { Task { await connection.hideWorktree(worktree) } }
+                        .tint(.gray)
+                        .accessibilityIdentifier("hide-\(worktree.task)")
+                }
+            }
         }
     }
 

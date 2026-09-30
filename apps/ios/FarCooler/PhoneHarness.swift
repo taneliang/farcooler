@@ -28,6 +28,7 @@ import SwiftUI
 //                            than forgetting it
 //   -phone-saved-gone        the last launch kept a stack whose task is gone
 //   -phone-billing-led       Billing has its orchestrator from the start
+//   -phone-webhooks-hidden   fc-3-webhooks is put away, in Billing's Hidden
 //
 // A Darwin notification from the test stands in for a notification tapped
 // while the app is open: `com.farcooler.harness.agent`, the blocked
@@ -208,6 +209,9 @@ final class HarnessRunner {
     /// Whether Billing has an orchestrator yet. It starts without one,
     /// unless `-phone-billing-led`.
     private var billingLed = CommandLine.arguments.contains("-phone-billing-led")
+    /// Whether fc-3-webhooks is put away, as the runner keeps it: starts so
+    /// under `-phone-webhooks-hidden`, and `worktree.unhide` clears it.
+    private var webhooksHidden = CommandLine.arguments.contains("-phone-webhooks-hidden")
     /// The items still waiting, by id.
     private var waiting: [String]
     /// Every write the screens made, as `harness-sent` shows it:
@@ -277,7 +281,8 @@ final class HarnessRunner {
                     openTasks: []),
                 Worktree(
                     id: Self.webhooks, short: "c002", repository: Self.repository,
-                    task: "fc-3-webhooks", branch: "feat/webhooks", state: "ready",
+                    task: "fc-3-webhooks", branch: "feat/webhooks",
+                    state: webhooksHidden ? "hidden" : "ready",
                     terminals: [
                         Terminal(
                             id: Self.agent, short: "d002", title: "claude", preset: "claude",
@@ -364,6 +369,14 @@ final class HarnessRunner {
                 connection.standIn(on: fleet())
             }
             return try json(["id": Self.billingOrchestrator])
+        case "worktree.hide", "worktree.unhide":
+            guard args["worktree"] as? String == Self.webhooks else {
+                throw ClientCore.CoreError.rejected("bad worktree", word: "invalid-argument")
+            }
+            webhooksHidden = method == "worktree.hide"
+            sent.append("\(method) fc-3-webhooks")
+            connection.standIn(on: fleet())
+            return try json([:])
         case "task.create":
             // Billing's board, as the user; the title held to 200 scalars
             // the way the client core holds it, refused by its word.

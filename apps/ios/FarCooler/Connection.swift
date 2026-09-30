@@ -2123,6 +2123,21 @@ final class Connection: ObservableObject {
         }
     }
 
+    /// Put a worktree away, or take it back out.
+    ///
+    /// Fire-and-refresh: hiding is a view preference the runner stores, and
+    /// the answer is the worktree moving into, or out of, its workspace's
+    /// Hidden section. Nothing about where the worktree is changes.
+    func hideWorktree(_ worktree: Worktree) async {
+        _ = try? await rpc("worktree.hide", ["worktree": worktree.id])
+        await refresh()
+    }
+
+    func unhideWorktree(_ worktree: Worktree) async {
+        _ = try? await rpc("worktree.unhide", ["worktree": worktree.id])
+        await refresh()
+    }
+
     /// What asking to remove a worktree came back with — mirrors macOS's
     /// `DaemonClient.RemoveWorktreeResult` so both apps' UIs make the same
     /// three-way distinction.

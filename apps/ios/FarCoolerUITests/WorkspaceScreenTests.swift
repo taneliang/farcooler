@@ -69,6 +69,52 @@ final class WorkspaceScreenTests: XCTestCase {
         XCTAssertTrue(app.buttons["segment-worktrees"].isSelected)
     }
 
+    /// **A worktree put away can be taken back out, and put away again**,
+    /// from its row's swipe, as the Mac's sidebar does with Hide and Unhide.
+    /// The runner keeps the preference; the row moves out of the workspace's
+    /// Hidden section on the runner's answer. fc-3-webhooks starts hidden.
+    func testAHiddenWorktreeCanBeUnhiddenAndHiddenAgain() throws {
+        let app = launch(["-phone-webhooks-hidden"])
+        openWorkspace(app, "Billing")
+        choose(app, "Worktrees")
+        let row = app.buttons["worktree-row-fc-3-webhooks"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "the hidden worktree isn't listed")
+        XCTAssertTrue(app.staticTexts["Hidden"].exists, "no Hidden section")
+
+        func swipe() {
+            let from = row.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
+            from.press(
+                forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: -120, dy: 0)),
+                withVelocity: .slow, thenHoldForDuration: 0.3)
+        }
+        swipe()
+        let unhide = app.buttons["unhide-fc-3-webhooks"]
+        XCTAssertTrue(unhide.waitForExistence(timeout: 5), "a hidden worktree offers no Unhide")
+        XCTAssertFalse(app.buttons["hide-fc-3-webhooks"].exists, "and offers Hide as well")
+        unhide.tap()
+
+        let sent = element(app, "harness-sent")
+        let unhid = NSPredicate { _, _ in
+            (sent.value as? String ?? "").contains("worktree.unhide fc-3-webhooks")
+        }
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: unhid, object: nil)], timeout: 10),
+            .completed, "Unhide sent nothing: \(sent.value ?? "")")
+        XCTAssertFalse(app.staticTexts["Hidden"].waitForExistence(timeout: 3), "the section stayed")
+
+        swipe()
+        let hide = app.buttons["hide-fc-3-webhooks"]
+        XCTAssertTrue(hide.waitForExistence(timeout: 5), "a shown worktree offers no Hide")
+        hide.tap()
+        let hid = NSPredicate { _, _ in
+            (sent.value as? String ?? "").contains("worktree.hide fc-3-webhooks")
+        }
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: hid, object: nil)], timeout: 10),
+            .completed, "Hide sent nothing: \(sent.value ?? "")")
+        XCTAssertTrue(app.staticTexts["Hidden"].waitForExistence(timeout: 5), "it did not go back")
+    }
+
     /// **The board says how many decisions are waiting, from the runner's
     /// list** (ov-69): the Mac's sentence, over the workspace's decision
     /// items. Billing has one, bil-7's, beside an ask that isn't one.
