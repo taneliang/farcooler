@@ -257,6 +257,43 @@ struct RunnerPulseTests {
         #expect(asked.quiet == ["Studio"])
     }
 
+    /// The phone's widget draws what `look` plans: with a credential, `look`
+    /// hands the account to `plan`, so only the quiet runner's working agent
+    /// is unstated and a live runner's keeps its word (ov-77). Without the
+    /// account every agent is unstated, which is the widget saying less than
+    /// it knows.
+    ///
+    /// Mutation: `look` not passing `credential?.account`. Red.
+    @Test func aLookUnstatesOnlyTheQuietRunnersAgents() async {
+        let quietId = "7537626F-0002-415E-1E11-000D48034210"
+        func agent(_ id: String, host: String) -> FleetSnapshot.Agent {
+            var agent = FleetSnapshot.Agent(
+                id: id, label: id, machine: "studio", status: "working", glyph: "", headline: id,
+                line: "", feed: [], rank: 0, turnFailed: false, activityChangedAt: now,
+                observedAt: now)
+            agent.hostRunner = host
+            return agent
+        }
+        let fleet = FleetSnapshot(
+            agents: [
+                agent("quiet-work", host: quietId),
+                agent("live-work", host: "11111111-2222-3333-4444-555555555555"),
+            ],
+            capturedAt: now.addingTimeInterval(-7200), complete: false)
+        let key = RunnerPulse.key(account: "user_1", runner: quietId)
+        StubbedRelay.answer = (
+            200,
+            #"{"runners":[{"label":"Studio","heardAgo":3600000,"beatEvery":300,"runner":"\#(key)"}]}"#
+        )
+        let credential = PulseCredential(relay: "https://pulse.test", token: "t", account: "user_1")
+        let plan = await RunnerPulse.look(
+            snapshot: fleet, credential: credential, at: now, session: StubbedRelay.session())
+        #expect(plan.unstated == ["quiet-work"])
+        let drawn = fleet.quietened(plan.unstated)
+        #expect(drawn.agents[0].runnerAnswering == false)
+        #expect(drawn.agents[1].runnerAnswering == nil)
+    }
+
     // MARK: - Review round (ov-71 M1, M3)
 
     /// Only the quiet runner's working agents stop being stated as now

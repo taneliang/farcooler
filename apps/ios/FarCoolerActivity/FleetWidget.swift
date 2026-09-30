@@ -98,17 +98,17 @@ struct FleetProvider: TimelineProvider {
         // failed fetch looks again later, and with nothing beating this stays
         // `.never` and today's hedge.
         Task {
-            let reading: RunnerPulse.Reading =
-                if let credential = PulseStore.read() {
-                    await RunnerPulse.fetch(credential)
-                } else {
-                    .noCredential
-                }
-            let plan = RunnerPulse.plan(snapshot: snapshot, reading: reading, at: now)
+            let plan = await RunnerPulse.look(
+                snapshot: snapshot, credential: PulseStore.read(), at: now)
+            // The quiet runners' working agents are no longer stated as now
+            // (`plan.unstated`, ov-77), as on the watch and the Live Activity:
+            // the timeline's moments come from the quietened snapshot, so an
+            // agent the relay has already silenced schedules no wake-up.
+            let drawn = snapshot.quietened(plan.unstated)
             let entries =
-                [FleetEntry(date: now, snapshot: snapshot, quiet: plan.quiet)]
-                + Self.wakes(for: snapshot, after: now).map {
-                    FleetEntry(date: $0, snapshot: snapshot, quiet: plan.quiet)
+                [FleetEntry(date: now, snapshot: drawn, quiet: plan.quiet)]
+                + Self.wakes(for: drawn, after: now).map {
+                    FleetEntry(date: $0, snapshot: drawn, quiet: plan.quiet)
                 }
             let policy: TimelineReloadPolicy = plan.nextLook.map { .after($0) } ?? .never
             completion(Timeline(entries: entries, policy: policy))
