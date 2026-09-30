@@ -192,6 +192,17 @@ struct OrchestratorReplacement: Identifiable {
     var id: String { "\(host)\u{1}\(workspace.id)" }
 }
 
+/// A running terminal waiting to replace `old` as `workspace`'s
+/// orchestrator, until the person confirms: Use as Orchestrator on a
+/// workspace that has one.
+struct OrchestratorAdoptionPending: Identifiable {
+    let host: String
+    let workspace: WorkspaceSummary
+    let pane: BoardPane
+    let old: BoardPane
+    var id: String { "\(host)\u{1}\(pane.terminal.id)" }
+}
+
 /// What choosing a harness from the header's menu does: Start goes to the
 /// runner, Replace only asks. It's the confirmation that sends `--replace`,
 /// because the orchestrator running now closes.
@@ -225,5 +236,92 @@ struct OrchestratorStarts {
 
     func isStarting(_ workspace: WorkspaceSummary, host: String) -> Bool {
         inFlight.contains(Self.key(workspace, host))
+    }
+}
+
+/// Making a terminal that's already running its workspace's orchestrator,
+/// and making it an ordinary terminal again: `farcooler terminal set-role`.
+///
+/// For the claude somebody started by hand in a shell in the main checkout:
+/// it runs the board, but its role says `shell`, so the column said "No
+/// orchestrator". The runner keeps the rules: at most one live orchestrator
+/// a workspace (`orchestrator_taken`), and only a terminal in a workspace
+/// can be one (`workspace`). This decides what to offer and in what order to
+/// ask, and says a refusal in this app's words.
+enum OrchestratorAdoption {
+    enum Offer: Equatable {
+        /// Use as Orchestrator.
+        case use
+        /// Stop Being Orchestrator.
+        case stepDown
+    }
+
+    /// What `terminal`'s menu offers, or nil for nothing: Stop Being
+    /// Orchestrator on an orchestrator, and Use as Orchestrator on a running
+    /// terminal of a workspace its runner lists. Never on a changes pane,
+    /// which runs `farcooler` and not anything that could run a board.
+    static func offer(for terminal: Terminal, host: String, in fleet: Fleet) -> Offer? {
+        if terminal.isOrchestrator { return .stepDown }
+        guard !terminal.isChangesPane, StateKind.parse(terminal.state) == .running,
+            let id = terminal.workspace, let listed = fleet.runnerWorkspaces[host],
+            let workspace = listed.first(where: { $0.id == id }), !workspace.isImplicit
+        else { return nil }
+        return .use
+    }
+
+    /// The terminals the conversation column's Use a Running Terminal…
+    /// lists for `workspace`: every running one of its own that could be
+    /// offered Use as Orchestrator, in the runner's order.
+    static func candidates(for workspace: WorkspaceSummary, host: String, in fleet: Fleet) -> [BoardPane] {
+        fleet.worktrees.filter { ($0.host ?? "") == host }.flatMap { worktree in
+            worktree.terminals
+                .filter { $0.workspace == workspace.id && offer(for: $0, host: host, in: fleet) == .use }
+                .map { BoardPane(terminal: $0, worktree: worktree) }
+        }
+    }
+
+    /// The orchestrator `pane` would replace, which has to step down first
+    /// and which the app names in a confirmation: `workspace`'s seat, unless
+    /// that's `pane` already. Nil with nobody to replace.
+    static func replacing(_ pane: BoardPane, in workspace: WorkspaceSummary, host: String, fleet: Fleet) -> BoardPane? {
+        guard let seat = WorkspaceScreen.orchestrator(of: workspace, host: host, in: fleet),
+            seat.terminal.id != pane.terminal.id
+        else { return nil }
+        return seat
+    }
+
+    /// The role an orchestrator steps down to: `agent` while an agent runs
+    /// in it, `shell` otherwise, as it would have been made.
+    static func steppedDown(_ terminal: Terminal) -> String {
+        terminal.runsAgent ? "agent" : "shell"
+    }
+
+    /// Why a role wasn't set, by the `code:` and `what:` words on the CLI's
+    /// stderr. `terminal` is the pane's name, `workspace` its workspace's.
+    static func refusal(_ message: String?, terminal: String, workspace: String) -> String {
+        switch (TaskFailure.code(in: message), TaskFailure.what(in: message)) {
+        case ("invalid-argument", "orchestrator_taken"):
+            return "\(workspace) has another orchestrator now. Try again to replace it."
+        case ("invalid-argument", "workspace"):
+            return "\(terminal) isn’t in a workspace, so it can’t be an orchestrator."
+        case ("not-found", _):
+            return "\(terminal) isn’t on this runner anymore."
+        case ("capability-unsupported", _):
+            return "This runner’s Far Cooler is too old to make a running terminal the orchestrator. Update it there, then try again."
+        case ("scope-denied", _):
+            return "This runner lets Far Cooler see its terminals but not change them."
+        case (.some, _):
+            return "This runner couldn’t change what \(terminal) is. That’s a problem in the app, not in anything you did."
+        case (nil, _):
+            return "Couldn’t change what \(terminal) is. Check that the runner is reachable, then try again."
+        }
+    }
+}
+
+extension DaemonClient {
+    /// `farcooler terminal set-role`, by the terminal's short id. `--json`
+    /// for the `code:` and `what:` lines a refusal carries.
+    static func setRoleArguments(terminal: String, role: String) -> [String] {
+        ["terminal", "set-role", terminal, role, "--json"]
     }
 }

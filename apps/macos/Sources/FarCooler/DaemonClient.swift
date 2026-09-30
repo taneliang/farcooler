@@ -2128,6 +2128,16 @@ final class DaemonClient: ObservableObject {
         return Self.orchestratorRefusal(message, workspace: workspace, replace: replace)
     }
 
+    /// Set a terminal's role: `setRoleArguments`. Whether the runner
+    /// refused, and the CLI's stderr to word that from
+    /// (`OrchestratorAdoption.refusal`). Followed by a refresh either way, so
+    /// the column and the rows follow the runner.
+    func setRole(_ terminal: Terminal, to role: String) async -> (refused: Bool, message: String?) {
+        let (data, message) = await runRaw(Self.setRoleArguments(terminal: terminal.short, role: role))
+        await refresh()
+        return (data == nil, message)
+    }
+
     /// `farcooler workspace create`: a workspace in `repository` (its uuid),
     /// with `prefix` for its task keys, or the runner's choice when empty.
     static func createWorkspaceArguments(repository: String, name: String, prefix: String) -> [String] {

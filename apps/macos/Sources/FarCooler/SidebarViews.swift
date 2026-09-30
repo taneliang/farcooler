@@ -124,6 +124,9 @@ struct WorktreeSection: View {
     /// `ContentView.moveTargets`.
     var moveTargets: [WorkspaceSummary] = []
     var onMove: (WorkspaceSummary) -> Void = { _ in }
+    /// What each terminal's menu offers about its workspace's orchestrator:
+    /// see `OrchestratorAdoption.offer`.
+    var roleOffer: (Terminal) -> OrchestratorAdoption.Offer? = { _ in nil }
 
     /// Diff status for this worktree, when the fleet inbox has been read.
     ///
@@ -167,7 +170,8 @@ struct WorktreeSection: View {
             onDropTogether: { onDropTogether($0, terminal) },
             onAction: { onTerminalAction(terminal, $0) },
             ordinal: ordinal,
-            usable: usable
+            usable: usable,
+            roleOffer: roleOffer(terminal)
         )
     }
 
@@ -749,6 +753,8 @@ struct TerminalRow: View {
     /// Whether this terminal's runner can be acted on right now. See
     /// `WorktreeSection.usable`, which this mirrors row by row.
     var usable: Bool = true
+    /// Use as Orchestrator, or Stop Being Orchestrator, or neither.
+    var roleOffer: OrchestratorAdoption.Offer?
 
     /// Whether the status is worth saying at all, which most of the time it
     /// is not. Asked OUTSIDE the row's clock, because it is a question about
@@ -968,6 +974,16 @@ struct TerminalRow: View {
             return true
         }
         .contextMenu {
+            switch roleOffer {
+            case .use?:
+                Button("Use as Orchestrator") { onAction(.useAsOrchestrator) }.disabled(!usable)
+                Divider()
+            case .stepDown?:
+                Button("Stop Being Orchestrator") { onAction(.stopBeingOrchestrator) }.disabled(!usable)
+                Divider()
+            case nil:
+                EmptyView()
+            }
             Button("Move to its own layout") { onMoveToLayout(nil) }
                 .disabled(!usable)
             if !layouts.isEmpty {

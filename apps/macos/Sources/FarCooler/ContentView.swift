@@ -127,6 +127,8 @@ struct ContentView: View {
     @State private var startingOrchestrators = OrchestratorStarts()
     /// A Replace Orchestrator waiting on its confirmation.
     @State private var orchestratorReplacement: OrchestratorReplacement?
+    /// Use as Orchestrator on a workspace that has one, until confirmed.
+    @State private var adoptionPending: OrchestratorAdoptionPending?
 
     /// The pane last clicked or focused, which the keyboard acts on while
     /// it's on screen. See `WorkspaceScreen.keyPane`: with a task open, the
@@ -706,6 +708,22 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) {}
         } message: { pending in
             Text("The orchestrator running now closes, and a new one starts with \(pending.harness.title).")
+        }
+        .confirmationDialog(
+            adoptionPending.map { "Replace \($0.old.terminal.label) as \($0.workspace.name)’s orchestrator?" } ?? "",
+            isPresented: Binding(
+                get: { adoptionPending != nil },
+                set: { if !$0 { adoptionPending = nil } }),
+            presenting: adoptionPending
+        ) { pending in
+            Button("Use \(pending.pane.terminal.label)") {
+                Task { await adopt(pending.pane, in: pending.workspace, host: pending.host, replacing: pending.old) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { pending in
+            Text(
+                "\(pending.old.terminal.label) keeps running as an ordinary terminal, and "
+                    + "\(pending.pane.terminal.label) runs \(pending.workspace.name)’s board.")
         }
         .sheet(item: $pendingPaneModeSwitch) { pending in
             PaneModeConfirmSheet(message: pending.message) {
@@ -1767,9 +1785,18 @@ struct ContentView: View {
             reorderable: WorktreeDrag.offersDrag(usable: usable, runner: client?.daemonBuild),
             moveTargets: Self.moveTargets(for: listed, in: store.fleet, assigns: Self.assigns(store)(listed)),
             onMove: { target in move(listed, to: target) },
+            roleOffer: roleOffer(on: ws.host ?? ""),
             changes: changesStatus(ws),
             countsWidth: countsWidth
         )
+    }
+
+    /// `OrchestratorAdoption.offer` on `host`, as the fleet has it when the
+    /// menu opens. Hoisted for `worktreeRow`'s type checker, as
+    /// `changesStatus` is.
+    private func roleOffer(on host: String) -> (Terminal) -> OrchestratorAdoption.Offer? {
+        let store = store
+        return { OrchestratorAdoption.offer(for: $0, host: host, in: store.fleet) }
     }
 
     /// The diff column's width, for every row in the sidebar at once.
@@ -2093,6 +2120,9 @@ struct ContentView: View {
                     },
                     onRestart: {
                         if let seat { Task { await run(.restart, on: seat.terminal, in: seat.worktree) } }
+                    },
+                    onStepDown: {
+                        if let seat { Task { await stepDown(seat) } }
                     })
                 Divider()
                 TimelineView(.periodic(from: .now, by: 5)) { context in
@@ -2131,7 +2161,9 @@ struct ContentView: View {
             onReplace: {
                 let harness = seat.flatMap { OrchestratorHarness(rawValue: Terminal.name(of: $0.terminal.preset)) } ?? .claude
                 orchestratorReplacement = OrchestratorReplacement(host: host, workspace: workspace, harness: harness)
-            })
+            },
+            candidates: OrchestratorAdoption.candidates(for: workspace, host: host, in: store.fleet),
+            onUse: { useAsOrchestrator($0) })
         switch state {
         case .live:
             if let shown {
@@ -2581,6 +2613,63 @@ struct ContentView: View {
         case .restart: await act(on: worktree) { c in await c.restart(terminal: term.short) }
         case .dismissLost: await act(on: worktree) { c in await c.dismissLost(term) }
         case .stop: await act(on: worktree) { c in await c.stop(terminal: term.short) }
+        case .useAsOrchestrator: useAsOrchestrator(BoardPane(terminal: term, worktree: worktree))
+        case .stopBeingOrchestrator: await stepDown(BoardPane(terminal: term, worktree: worktree))
+        }
+    }
+
+    /// Use as Orchestrator: make `pane`, already running, its workspace's
+    /// orchestrator. Asks first when that would replace one, naming it.
+    private func useAsOrchestrator(_ pane: BoardPane) {
+        let host = pane.worktree.host ?? ""
+        if let why = store.refusal(for: host) {
+            errorBanner = "Cannot do that: \(why)"
+            return
+        }
+        guard let id = pane.terminal.workspace,
+            let workspace = store.fleet.runnerWorkspaces[host]?.first(where: { $0.id == id })
+        else {
+            errorBanner = OrchestratorAdoption.refusal(
+                "code: invalid-argument\nwhat: workspace", terminal: pane.terminal.label, workspace: "")
+            return
+        }
+        if let old = OrchestratorAdoption.replacing(pane, in: workspace, host: host, fleet: store.fleet) {
+            adoptionPending = OrchestratorAdoptionPending(host: host, workspace: workspace, pane: pane, old: old)
+        } else {
+            Task { await adopt(pane, in: workspace, host: host, replacing: nil) }
+        }
+    }
+
+    /// Set the roles: `old` steps down first, since the runner allows one
+    /// live orchestrator a workspace, then `pane` takes the seat. If the
+    /// runner refuses `pane`, `old` is put back, so a refusal never leaves
+    /// the workspace with none. The column follows on the refresh.
+    private func adopt(_ pane: BoardPane, in workspace: WorkspaceSummary, host: String, replacing old: BoardPane?) async {
+        guard let client = store.clients[host] else { return }
+        if let old {
+            let (refused, message) = await client.setRole(old.terminal, to: OrchestratorAdoption.steppedDown(old.terminal))
+            if refused {
+                errorBanner = OrchestratorAdoption.refusal(message, terminal: old.terminal.label, workspace: workspace.name)
+                return
+            }
+        }
+        let (refused, message) = await client.setRole(pane.terminal, to: "orchestrator")
+        guard refused else { return }
+        errorBanner = OrchestratorAdoption.refusal(message, terminal: pane.terminal.label, workspace: workspace.name)
+        if let old { _ = await client.setRole(old.terminal, to: "orchestrator") }
+    }
+
+    /// Stop Being Orchestrator: `pane` goes back to what it would have been
+    /// made as (`OrchestratorAdoption.steppedDown`), and keeps running.
+    private func stepDown(_ pane: BoardPane) async {
+        guard let client = store.client(for: pane.worktree) else { return }
+        let workspace = pane.terminal.workspace.flatMap { id in
+            store.fleet.runnerWorkspaces[pane.worktree.host ?? ""]?.first { $0.id == id }
+        }
+        let (refused, message) = await client.setRole(pane.terminal, to: OrchestratorAdoption.steppedDown(pane.terminal))
+        if refused {
+            errorBanner = OrchestratorAdoption.refusal(
+                message, terminal: pane.terminal.label, workspace: workspace?.name ?? "This workspace")
         }
     }
 
@@ -3672,7 +3761,7 @@ struct ContentView: View {
 
 }
 
-enum TerminalAction { case restart, dismissLost, stop }
+enum TerminalAction { case restart, dismissLost, stop, useAsOrchestrator, stopBeingOrchestrator }
 
 /// Errors the app writes but nothing else shows.
 ///

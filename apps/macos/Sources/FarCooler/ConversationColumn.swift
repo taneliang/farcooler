@@ -80,6 +80,9 @@ struct ConversationHeader: View {
     var onShowCharter: (URL) -> Void
     var onTogglePaneMode: () -> Void
     var onRestart: () -> Void
+    /// Stop Being Orchestrator: the terminal keeps running as an ordinary
+    /// one (`OrchestratorAdoption.steppedDown`).
+    var onStepDown: () -> Void = {}
 
     @Environment(\.colorScheme) private var scheme
 
@@ -118,6 +121,7 @@ struct ConversationHeader: View {
                     }
                     Divider()
                     Button("Restart", action: onRestart)
+                    Button("Stop Being Orchestrator", action: onStepDown)
                 } label: {
                     Image(systemName: "ellipsis")
                 }
@@ -140,6 +144,11 @@ struct ConversationPlaceholder: View {
     var onStart: (OrchestratorHarness) -> Void
     var onRestart: () -> Void
     var onReplace: () -> Void
+    /// The workspace's running terminals Use a Running Terminal… lists,
+    /// with no orchestrator: `OrchestratorAdoption.candidates`. Offered
+    /// wherever Start Orchestrator is.
+    var candidates: [BoardPane] = []
+    var onUse: (BoardPane) -> Void = { _ in }
 
     var body: some View {
         VStack(spacing: 10) {
@@ -177,6 +186,16 @@ struct ConversationPlaceholder: View {
                         ForEach(starts) { harness in Button(harness.title) { onStart(harness) } }
                     }
                     .fixedSize()
+                    // For the claude already running in a shell here: it
+                    // becomes the orchestrator without starting another.
+                    if !candidates.isEmpty {
+                        Menu("Use a Running Terminal…") {
+                            ForEach(candidates, id: \.terminal.id) { pane in
+                                Button(pane.terminal.label) { onUse(pane) }
+                            }
+                        }
+                        .fixedSize()
+                    }
                 }
                 if offers.contains(.restart) { Button("Restart", action: onRestart) }
                 if offers.contains(.replace) { Button("Replace…", action: onReplace) }
