@@ -158,7 +158,7 @@ struct JoinView: View {
                 subtitle: "This shares the runners selected for this Mac.")
 
             if let problem = scanner.problem {
-                Text(problem).font(.callout).foregroundStyle(.orange)
+                Text(problem).font(.callout).foregroundStyle(.red)
             } else {
                 CameraPreview(session: scanner.session)
                     .frame(height: 260)

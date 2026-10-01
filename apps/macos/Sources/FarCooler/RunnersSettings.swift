@@ -196,7 +196,7 @@ struct RunnersSettings: View {
                         .font(.caption)
                         .foregroundStyle(
                             runner.lastError == nil
-                                ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
+                                ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.red))
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -209,6 +209,13 @@ struct RunnersSettings: View {
                     settingsButton(name: runner.target, target: runner.target)
                     actions(for: runner)
                 }
+            }
+
+            // What ssh said, behind a disclosure: a sentence in the row, and
+            // the raw output for whoever is debugging.
+            if let error = runner.lastError {
+                DisclosureGroup("Details") { DetailBox(text: error) }
+                    .font(.caption)
             }
 
             if let output = log[runner.target] {
@@ -282,7 +289,7 @@ struct RunnersSettings: View {
     }
 
     private func subtitle(for runner: Runner) -> String {
-        if let error = runner.lastError { return error }
+        if runner.lastError != nil { return "Couldn’t connect." }
         guard let probe = runner.probe else { return "Checking…" }
         return "\(probe.platformLabel) · \(probe.summary)"
     }

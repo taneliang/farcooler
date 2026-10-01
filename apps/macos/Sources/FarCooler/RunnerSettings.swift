@@ -85,7 +85,7 @@ struct RunnerSettingsSheet: View {
             if let failure = store.failure {
                 Label(failure, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(.red)
                     .lineLimit(2)
             }
             Spacer()

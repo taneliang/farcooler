@@ -223,7 +223,7 @@ struct NeedsYouItemRow: View {
             if case .refused(let line) = answering {
                 Text(line)
                     .font(.system(size: 11))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(.red)
             }
         }
         .padding(12)
