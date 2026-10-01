@@ -708,7 +708,7 @@ struct HostDot: View {
                 Circle().fill(Color.secondary).frame(width: 5, height: 5)
             }
             .buttonStyle(.plain)
-            .help("Far Cooler is not installed on this runner — open Settings ▸ Runners")
+            .help("Far Cooler is not installed on this runner — open Settings > Runners")
         }
     }
 }

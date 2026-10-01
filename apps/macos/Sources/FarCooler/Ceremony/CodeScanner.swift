@@ -162,7 +162,7 @@ final class CodeScanner: ObservableObject {
     func start() async {
         guard await granted() else {
             problem = "Camera access is off. Allow Far Cooler to use the camera in "
-                + "System Settings › Privacy & Security › Camera."
+                + "System Settings > Privacy & Security > Camera."
             return
         }
         guard configure() else { return }

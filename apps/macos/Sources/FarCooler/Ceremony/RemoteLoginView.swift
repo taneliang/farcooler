@@ -22,7 +22,7 @@ struct RemoteLoginView: View {
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
 
-            Text("Open System Settings › General › Sharing and turn on Remote Login.")
+            Text("Open System Settings > General > Sharing and turn on Remote Login.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

@@ -258,7 +258,7 @@ enum PaletteIndex {
             PaletteEntry(
                 id: "new-task",
                 action: .newWorktree(described),
-                title: described.isEmpty ? "New Worktree…" : "New Worktree “\(described)”",
+                title: described.isEmpty ? "New Worktree…" : "New Worktree “\(described)”…",
                 detail: "Describe it and go",
                 symbol: "sparkle",
                 kind: "action"))

@@ -54,6 +54,15 @@ struct PaletteWorkspaceTests {
         #expect(!PaletteIndex.matching("billing", in: [Self.lane]).contains { $0.id == "new-workspace" })
     }
 
+    /// Both creation items open something to fill in, so both say so with an
+    /// ellipsis; one of them used to leave it off.
+    @Test("Both creation items end in an ellipsis")
+    func creationItemsEndInAnEllipsis() {
+        let found = PaletteIndex.matching("billing", in: [Self.lane], workspaces: [Self.billing], offersNewWorkspace: true)
+        #expect(found.first { $0.id == "new-task" }?.title == "New Worktree “billing”…")
+        #expect(found.first { $0.id == "new-workspace" }?.title == "New Workspace “billing”…")
+    }
+
     /// Left empty, the prefix comes from the name, lowercase letters only,
     /// and never one the runner's workspaces use already: the runner
     /// requires one, and refuses a taken one.

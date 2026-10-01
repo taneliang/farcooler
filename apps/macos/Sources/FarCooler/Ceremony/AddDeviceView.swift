@@ -187,7 +187,7 @@ struct AddDeviceView: View {
 
                 Text(
                     "Far Cooler adds this device’s key to ~/.ssh/authorized_keys on each selected "
-                        + "runner. You can change its access later in Settings › Devices."
+                        + "runner. You can change its access later in Settings > Devices."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -375,7 +375,7 @@ struct AddDeviceView: View {
             Text(
                 "This device will only reach it on your current network. "
                     + "Install Tailscale on both, or give the runner an address that "
-                    + "resolves anywhere, in Settings › Runners."
+                    + "resolves anywhere, in Settings > Runners."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -521,7 +521,7 @@ struct AddDeviceView: View {
                 return await Enrollment.enroll(
                     keyA: keyA, keyB: keyB, label: name, clientID: clientID,
                     // `control`, per the design, and it applies to Key A only:
-                    // `read` is a narrowing set afterwards in Settings › Devices,
+                    // `read` is a narrowing set afterwards in Settings > Devices,
                     // and only for phones. Key B's scope is host_admin and is not
                     // passed from here, because a plain line cannot be held to a
                     // scope at all — `Enrollment` owns that, so no screen can

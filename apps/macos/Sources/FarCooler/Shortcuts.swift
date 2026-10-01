@@ -87,7 +87,7 @@ enum Shortcut {
             [
                 Item(keys: "⌃⇥", action: "Next layout"),
                 Item(keys: "⌃⇧⇥", action: "Previous layout"),
-                Item(keys: "⇧⌘]", action: "The same, on the other convention"),
+                Item(keys: "⇧⌘]", action: "Next layout"),
                 Item(keys: "⇧⌘[", action: "Previous layout"),
             ]
         ),
@@ -103,9 +103,9 @@ enum Shortcut {
                 Item(keys: "%  /  \"", action: "Split right / down — a new pane here"),
                 Item(keys: "!", action: "Move the focused pane out of the layout"),
                 Item(keys: "x", action: "Close the focused pane’s terminal"),
-                Item(keys: "c", action: "New group — several layouts per worktree"),
-                Item(keys: "n  /  p", action: "Next / previous group"),
-                Item(keys: "&", action: "Close this group"),
+                Item(keys: "c", action: "New layout — several per worktree"),
+                Item(keys: "n  /  p", action: "Next / previous layout"),
+                Item(keys: "&", action: "Close this layout"),
                 Item(keys: "a", action: "Toggle the focused pane between terminal and chat"),
                 Item(keys: prefix, action: "Send a literal \(prefix) to the program"),
             ]
@@ -132,9 +132,9 @@ enum Shortcut {
         (
             "App",
             [
-                Item(keys: "⌘P", action: "Go to a workspace, task or terminal, or start a worktree"),
+                Item(keys: "⌘P", action: "Go to a workspace, task, or terminal, or start a worktree"),
                 Item(keys: "⌘B", action: "Show or hide the sidebar"),
-                Item(keys: "⌘F", action: "Find a workspace, task or agent"),
+                Item(keys: "⌘F", action: "Find a workspace, task, or agent"),
                 Item(keys: "⌘,", action: "Settings"),
                 Item(keys: "⌘/", action: "Keyboard shortcuts"),
                 Item(keys: "⌘0", action: "Reload the fleet"),
@@ -167,7 +167,7 @@ struct ShortcutsSheet: View {
                                 HStack(spacing: 12) {
                                     Text(item.keys)
                                         .font(.system(.callout, design: .monospaced))
-                                        .frame(width: 78, alignment: .leading)
+                                        .frame(width: 112, alignment: .leading)
                                         .foregroundStyle(.primary)
                                     Text(item.action)
                                         .font(.callout)
@@ -194,6 +194,6 @@ struct ShortcutsSheet: View {
             .padding(.horizontal, 22)
             .padding(.vertical, 12)
         }
-        .frame(width: 420, height: 460)
+        .frame(width: 480, height: 460)
     }
 }

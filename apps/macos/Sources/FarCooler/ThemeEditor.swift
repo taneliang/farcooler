@@ -34,15 +34,8 @@ struct ThemeEditor: View {
                     TextField("Name", text: $draft.name)
                         .autocorrectionDisabled()
                     Toggle("Dark surfaces around the terminal", isOn: $draft.dark)
-                } footer: {
-                    // Why `dark` is a choice rather than something derived: this
-                    // is the reasoning the core's own Theme documents, said where
-                    // the person choosing can read it.
-                    Text(
-                        "Choose whether this theme uses dark surfaces around the terminal.")
                 }
-
-                Section("Ground") {
+                Section("Base Colors") {
                     well("Background", $draft.background)
                     well("Text", $draft.foreground)
                     well("Cursor", $draft.cursor)

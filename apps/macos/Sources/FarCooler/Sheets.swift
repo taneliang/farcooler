@@ -64,9 +64,7 @@ struct NewWorktreeSheet: View {
     }
 
     private func label(for entry: (host: String, repository: Repository)) -> String {
-        guard multipleHosts else { return entry.repository.displayName }
-        let host = entry.host.isEmpty ? "This Mac" : entry.host
-        return "\(entry.repository.displayName) — \(host)"
+        RepositoryChoice.label(entry, multipleHosts: multipleHosts)
     }
 
     /// Suggest a branch from the name, the way a person would write it.
@@ -777,7 +775,7 @@ struct AddRepositorySheet: View {
                     Callout(
                         icon: "exclamationmark.triangle.fill",
                         tone: .warning,
-                        text: "That folder is not a git repository. Choose the folder containing .git."
+                        text: "That folder isn’t a Git repository. Choose the folder containing .git."
                     )
                 } else if let rootToAdd {
                     // Naming the folder is the point. Granting access to a
@@ -807,7 +805,7 @@ struct AddRepositorySheet: View {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.prompt = "Choose"
-        panel.message = "Choose a git repository."
+        panel.message = "Choose a Git repository."
         if panel.runModal() == .OK {
             chosen = panel.url
             failure = nil
@@ -856,5 +854,43 @@ struct AddRepositorySheet: View {
         }
         dismiss()
         onRegistered(host)
+    }
+}
+
+/// How a repository is named in a picker: its name, and the runner it is on
+/// only when more than one runner is in play.
+///
+/// The New Worktree, quick-create, Resume Branch and New Workspace pickers each
+/// kept a copy of this, and one of them joined the two with "·" where the rest
+/// used a dash.
+enum RepositoryChoice {
+    static func label(
+        _ entry: (host: String, repository: Repository), multipleHosts: Bool
+    ) -> String {
+        guard multipleHosts else { return entry.repository.displayName }
+        let host = entry.host.isEmpty ? "This Mac" : entry.host
+        return "\(entry.repository.displayName) — \(host)"
+    }
+}
+
+/// The agent picker and the model picker beside it, which quick-create and
+/// Resume Branch both show. Choosing another agent resets the model, since a
+/// model belongs to one agent.
+struct AgentModelPickers: View {
+    @Binding var agent: String
+    @Binding var model: String
+
+    var body: some View {
+        Picker("", selection: $agent) {
+            ForEach(Agents.all) { Text($0.name).tag($0.id) }
+        }
+        .labelsHidden().fixedSize().controlSize(.small)
+        .onChange(of: agent) { _, _ in model = "" }
+
+        Picker("", selection: $model) {
+            Text("Default Model").tag("")
+            ForEach(Agents.agent(agent).models, id: \.self) { Text($0).tag($0) }
+        }
+        .labelsHidden().fixedSize().controlSize(.small)
     }
 }

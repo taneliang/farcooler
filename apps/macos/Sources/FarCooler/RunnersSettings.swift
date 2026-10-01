@@ -64,7 +64,7 @@ struct RunnersSettings: View {
 
             Section {
                 HStack {
-                    TextField("user@host, or an ssh alias", text: $newTarget)
+                    TextField("user@host, or an SSH alias", text: $newTarget)
                         .autocorrectionDisabled()
                         .onSubmit(addRunner)
                     Button("Add", action: addRunner)

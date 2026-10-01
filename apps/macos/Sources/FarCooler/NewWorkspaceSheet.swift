@@ -86,7 +86,7 @@ struct NewWorkspaceSheet: View {
     }
 
     private func label(_ entry: (host: String, repository: Repository)) -> String {
-        entry.host.isEmpty ? entry.repository.displayName : "\(entry.repository.displayName) — \(entry.host)"
+        RepositoryChoice.label(entry, multipleHosts: Set(repositories.map(\.host)).count > 1)
     }
 
     private func create() async {

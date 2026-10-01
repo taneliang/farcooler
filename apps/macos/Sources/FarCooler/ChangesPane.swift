@@ -143,7 +143,7 @@ struct ChangesPane: View {
                 .font(WorkspaceStyle.paneTitle)
             Text(
                 old
-                    ? "Its copy of Far Cooler is older than this. Update it in Settings › Runners."
+                    ? "Its copy of Far Cooler is older than this. Update it in Settings > Runners."
                     : "The command that reads it didn’t finish."
             )
             .font(.system(size: WorkspaceStyle.PaneText.body))

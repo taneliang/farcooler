@@ -151,7 +151,7 @@ final class ServiceRegistration: ObservableObject {
         case 1:  // kSMErrorInternalFailure / not signed acceptably
             return
                 "macOS refused the registration. A locally built, ad-hoc-signed app "
-                + "usually needs to be enabled by hand in System Settings › General › Login Items."
+                + "usually needs to be enabled by hand in System Settings > General > Login Items."
         case 2:
             return "The daemon is already registered by another copy of Far Cooler."
         default:

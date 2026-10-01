@@ -145,7 +145,7 @@ final class Runners: ObservableObject {
     /// helps with exactly one of them.
     func pairForNotifications(_ target: String) async -> String {
         guard Account.shared.isSignedIn else {
-            return "Sign in first — Settings ▸ Account."
+            return "Sign in first — Settings > Account."
         }
         let label = target.isEmpty ? "This Mac" : target
         // Down a pipe, never as an argument. `ps` is readable by every process
@@ -159,7 +159,7 @@ final class Runners: ObservableObject {
         switch await Account.shared.pairDaemon(label: label) {
         case .failure(let why):
             // What did not happen, then why — in the relay's own vocabulary,
-            // so this screen and Settings ▸ Account say the same thing about
+            // so this screen and Settings > Account say the same thing about
             // the same failure. The status code is not here; it is in the log
             // and behind Copy Details on the account screen.
             return "Couldn’t pair this runner. \(why.message)"

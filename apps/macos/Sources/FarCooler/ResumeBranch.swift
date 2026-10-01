@@ -95,9 +95,7 @@ struct ResumeBranch: View {
     }
 
     private func label(for entry: (host: String, repository: Repository)) -> String {
-        guard multipleHosts else { return entry.repository.displayName }
-        let host = entry.host.isEmpty ? "This Mac" : entry.host
-        return "\(entry.repository.displayName) — \(host)"
+        RepositoryChoice.label(entry, multipleHosts: multipleHosts)
     }
 
     /// The worktree the selected branch would be adopted into.
@@ -227,17 +225,7 @@ struct ResumeBranch: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            Picker("", selection: $agent) {
-                ForEach(Agents.all) { Text($0.name).tag($0.id) }
-            }
-            .labelsHidden().fixedSize().controlSize(.small)
-            .onChange(of: agent) { _, _ in model = "" }
-
-            Picker("", selection: $model) {
-                Text("Default Model").tag("")
-                ForEach(Agents.agent(agent).models, id: \.self) { Text($0).tag($0) }
-            }
-            .labelsHidden().fixedSize().controlSize(.small)
+            AgentModelPickers(agent: $agent, model: $model)
 
             Spacer()
             if let worktreePath {
