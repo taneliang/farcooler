@@ -100,9 +100,9 @@ struct NeedsYouView: View {
         Group {
             if items.isEmpty {
                 ContentUnavailableView {
-                    Label("Nothing needs you", systemImage: "tray")
+                    Label("Nothing Needs You", systemImage: "tray")
                 } description: {
-                    Text("Asks, decisions and reviews from every workspace show up here.")
+                    Text("Asks, decisions, and reviews from every workspace show up here.")
                 }
             } else {
                 ScrollView {

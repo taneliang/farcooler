@@ -147,14 +147,10 @@ struct ResumeBranch: View {
         if loading {
             centered { ProgressView().controlSize(.small) }
         } else if branches.isEmpty {
-            centered {
-                VStack(spacing: 5) {
-                    Text(self.branches.isEmpty ? "No branches" : "Nothing matches")
-                        .font(.callout.weight(.medium))
-                    if !self.branches.isEmpty {
-                        Text("“\(query)”").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
+            if self.branches.isEmpty {
+                ContentUnavailableView("No Branches", systemImage: "arrow.triangle.branch")
+            } else {
+                ContentUnavailableView.search(text: query)
             }
         } else {
             List(branches, selection: $selection) { branch in

@@ -228,16 +228,15 @@ struct CommandPalette: View {
         .padding(.vertical, 7)
     }
 
+    @ViewBuilder
     private var empty: some View {
-        VStack(spacing: 5) {
-            Text(isSwitcher ? "Nothing running" : "Nothing matches")
-                .font(.callout.weight(.medium))
-            Text(isSwitcher ? "Type to start something" : "“\(trimmed)”")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        if isSwitcher {
+            ContentUnavailableView(
+                "Nothing Running", systemImage: "terminal",
+                description: Text("Type to start something."))
+        } else {
+            ContentUnavailableView.search(text: trimmed)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 36)
     }
 
     // MARK: - Footer
