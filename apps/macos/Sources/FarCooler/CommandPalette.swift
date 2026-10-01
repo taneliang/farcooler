@@ -253,9 +253,9 @@ struct CommandPalette: View {
             }
 
             Spacer(minLength: 10)
-            Text(isSwitcher ? "↑↓←→ move" : "↑↓ move")
-            Text("↩ open")
-            Text("esc close")
+            KeyHint(keys: isSwitcher ? "↑↓←→" : "↑↓", label: "Move")
+            KeyHint(keys: "↩", label: "Open")
+            KeyHint(keys: "⎋", label: "Close")
         }
         .font(.system(size: 11))
         .foregroundStyle(.tertiary)
@@ -422,11 +422,16 @@ private struct PaletteRow: View {
             .frame(width: 14)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(entry.title).font(.system(size: 13)).lineLimit(1)
+                Text(entry.title)
+                    .font(.system(size: 13))
+                    .foregroundStyle(isHighlighted ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+                    .lineLimit(1)
                 if !entry.detail.isEmpty {
                     Text(entry.detail)
                         .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(
+                            isHighlighted ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.secondary)
+                        )
                         .lineLimit(1)
                 }
             }
@@ -435,17 +440,16 @@ private struct PaletteRow: View {
 
             Text(entry.kind)
                 .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(
+                    isHighlighted ? AnyShapeStyle(.white.opacity(0.7)) : AnyShapeStyle(.tertiary))
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
+        // One cue, the way a Mac list shows its selection: an accent fill and
+        // light text. It was a gray wash and an accent stroke at once.
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isHighlighted ? Color.primary.opacity(0.09) : .clear)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(isHighlighted ? Color.accentColor : .clear, lineWidth: 1)
+                .fill(isHighlighted ? Color.accentColor : .clear)
         )
         .contentShape(Rectangle())
     }

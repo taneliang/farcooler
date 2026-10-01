@@ -290,10 +290,10 @@ struct QuickCreate: View {
 
             HStack(spacing: 12) {
                 if canSubmit {
-                    Text("↩ Start")
-                    Text("⌥↩ Start and Keep Open")
+                    KeyHint(keys: "↩", label: "Start")
+                    KeyHint(keys: "⌥↩", label: "Start and Keep Open")
                 } else {
-                    Text("⇧↩ New Line")
+                    KeyHint(keys: "⇧↩", label: "New Line")
                 }
             }
             .foregroundStyle(.tertiary)

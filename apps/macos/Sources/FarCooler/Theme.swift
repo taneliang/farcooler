@@ -329,3 +329,16 @@ extension View {
         floatingPanel(in: RoundedRectangle(cornerRadius: 12))
     }
 }
+
+/// One keyboard hint in a footer: the keys, then what they do.
+///
+/// Every footer wrote its own, in lowercase here and title case there. The
+/// label is title case and the escape key is the ⎋ glyph, not the word "esc".
+struct KeyHint: View {
+    let keys: String
+    let label: String
+
+    var body: some View {
+        Text("\(keys) \(label)")
+    }
+}
