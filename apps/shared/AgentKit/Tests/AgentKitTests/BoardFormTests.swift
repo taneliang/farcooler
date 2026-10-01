@@ -113,3 +113,19 @@ func collapsedSectionsAreKeptPerBoard() throws {
     BoardForm.setCollapsed([], host: "mini", workspace: "w-1", in: defaults)
     #expect(BoardForm.collapsed(host: "mini", workspace: "w-1", from: defaults).isEmpty)
 }
+
+/// A board with no task anywhere is an empty state, not seven zero headers.
+@Test("A board with no task in any status is blank")
+func aBoardWithNothingOnItIsBlank() {
+    #expect(BoardForm.isBlank(TaskBoardModel.board(from: [])))
+}
+
+@Test("A board with one task, or one unplaceable row, is not blank")
+func aBoardWithAnyRowIsNotBlank() {
+    let task = TaskBoardColumn(
+        status: .todo,
+        rows: [TaskRow(id: "1", key: "-1", title: "t", status: .todo, statusSince: .now)])
+    #expect(!BoardForm.isBlank(TaskBoardModel(columns: [task], unreadable: [])))
+    let odd = UnreadableTaskRow(id: "2", key: "-2", title: "t", status: "someday")
+    #expect(!BoardForm.isBlank(TaskBoardModel(columns: [], unreadable: [odd])))
+}

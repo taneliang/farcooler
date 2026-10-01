@@ -103,7 +103,8 @@ struct WorkspaceScreen: View {
                     agents: connection.boardAgents(for:),
                     onOpen: { row in navigator?.open(.task(place, task: row.id)) },
                     onJump: { agent in openAgent(agent) },
-                    onRefresh: { await connection.readBoard(summary) })
+                    onRefresh: { await connection.readBoard(summary) },
+                    onNewTask: PhoneNewTask.offered(connection.daemon) ? { filing = true } : nil)
                 .task { await connection.readBoard(summary) }
             case .worktrees:
                 WorkspaceWorktrees(connection: connection, summary: summary, place: place)
@@ -153,28 +154,14 @@ private struct SegmentBar: View {
     let segments: [WorkspaceSegment]
     @Binding var selection: WorkspaceSegment
 
+    /// Side by side when the three titles fit on one line each, stacked when
+    /// they don't. A title is never allowed to wrap: at the larger Dynamic Type
+    /// sizes "Orchestrator" broke as "Orches-/trator" and "Worktrees" as
+    /// "Work-/trees", which is a control nobody can read at a glance.
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(segments, id: \.self) { segment in
-                let chosen = segment == selection
-                Button {
-                    selection = segment
-                } label: {
-                    Text(segment.title)
-                        .font(.subheadline.weight(chosen ? .semibold : .regular))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
-                        .background {
-                            if chosen {
-                                Capsule().fill(Color.primary.opacity(0.16))
-                            }
-                        }
-                        .contentShape(.capsule)
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(chosen ? .isSelected : [])
-                .accessibilityIdentifier("segment-\(segment.rawValue)")
-            }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 2) { buttons(stacked: false) }
+            VStack(spacing: 2) { buttons(stacked: true) }
         }
         .padding(3)
         .background(Capsule().fill(Color.primary.opacity(0.07)))
@@ -182,6 +169,34 @@ private struct SegmentBar: View {
         .padding(.vertical, 8)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("workspace-segments")
+    }
+
+    @ViewBuilder
+    private func buttons(stacked: Bool) -> some View {
+        ForEach(segments, id: \.self) { segment in
+            let chosen = segment == selection
+            Button {
+                selection = segment
+            } label: {
+                Text(segment.title)
+                    .font(.subheadline.weight(chosen ? .semibold : .regular))
+                    .lineLimit(1)
+                    // One line, always: the unstacked bar must report its
+                    // true width for `ViewThatFits` to see that it doesn't fit.
+                    .fixedSize(horizontal: !stacked, vertical: true)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .background {
+                        if chosen {
+                            Capsule().fill(Color.primary.opacity(0.16))
+                        }
+                    }
+                    .contentShape(.capsule)
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(chosen ? .isSelected : [])
+            .accessibilityIdentifier("segment-\(segment.rawValue)")
+        }
     }
 }
 
@@ -271,7 +286,7 @@ private struct OrchestratorSegment: View {
 
     private var none: some View {
         ContentUnavailableView {
-            Label("No Orchestrator", systemImage: "circle.dashed")
+            Label("No Orchestrator", systemImage: "person.crop.circle.badge.plus")
         } description: {
             Text(
                 "An orchestrator runs this workspace’s board. It reads the charter, dispatches "
@@ -423,6 +438,10 @@ private struct OrchestratorTerminal: View {
     var body: some View {
         TerminalView(terminal: terminal, isVisible: live, connection: connection, pastes: pastes)
             .background(TerminalPalette.background.ignoresSafeArea(edges: .bottom))
+            // A terminal surface in a screen whose chrome is the system's: its
+            // own text (the status states) reads against the theme's ground,
+            // so the scheme is the theme's from here down and no further.
+            .environment(\.colorScheme, Themes.shared.current.colorScheme)
             .accessibilityIdentifier("orchestrator-pane")
             .onChange(of: live) { _, now in
                 if !now { Notifier.shared.release(terminal.id) }

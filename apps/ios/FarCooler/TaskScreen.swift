@@ -39,7 +39,9 @@ struct TaskScreen: View {
                 }
             }
         }
-        .navigationTitle(row?.key ?? "Task")
+        // The key is in the heading card; saying it here as well put `bil-9`
+        // twice, one line apart.
+        .navigationTitle("Task")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .refreshable { await load() }
@@ -248,24 +250,48 @@ struct TaskScreen: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack {
-                Label(title, systemImage: systemImage)
-                    .foregroundStyle(.primary)
-                Spacer()
-                if let detail {
-                    Text(detail)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+            // One line while the label and its value both fit on it, the value
+            // under the label when they don't. The label used to be what broke
+            // ("Work-/tree") while the value kept its line.
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    Label(title, systemImage: systemImage)
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
+                        .fixedSize()
+                    Spacer()
+                    if let detail {
+                        Text(detail)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    chevron
                 }
-                Image(systemName: "chevron.forward")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label(title, systemImage: systemImage)
+                            .foregroundStyle(.primary)
+                        if let detail {
+                            Text(detail)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    chevron
+                }
             }
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(id)
+    }
+
+    private var chevron: some View {
+        Image(systemName: "chevron.forward")
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.tertiary)
     }
 
     /// Send an answer note, then read the record again: the question closes

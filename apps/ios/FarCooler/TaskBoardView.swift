@@ -56,6 +56,9 @@ struct WorkspaceBoardList: View {
     let onOpen: (TaskRow) -> Void
     let onJump: (BoardAgent) -> Void
     let onRefresh: () async -> Void
+    /// Files a task, where this runner lets a phone do that; nil draws the
+    /// empty board without the button.
+    let onNewTask: (() -> Void)?
 
     @State private var collapsed: Set<TaskStatus>
     /// Done shows its recent cards until this is asked for (`BoardDone`).
@@ -64,7 +67,8 @@ struct WorkspaceBoardList: View {
     init(
         board: TaskBoardModel?, unread: Bool, place: PhoneWorkspace, speaksOfAgents: Bool,
         waiting: Int, agents: @escaping (TaskRow) -> [BoardAgent], onOpen: @escaping (TaskRow) -> Void,
-        onJump: @escaping (BoardAgent) -> Void, onRefresh: @escaping () async -> Void
+        onJump: @escaping (BoardAgent) -> Void, onRefresh: @escaping () async -> Void,
+        onNewTask: (() -> Void)? = nil
     ) {
         self.board = board
         self.unread = unread
@@ -75,13 +79,29 @@ struct WorkspaceBoardList: View {
         self.onOpen = onOpen
         self.onJump = onJump
         self.onRefresh = onRefresh
+        self.onNewTask = onNewTask
         _collapsed = State(
             initialValue: BoardForm.collapsed(host: place.runner, workspace: place.workspace))
     }
 
     var body: some View {
         Group {
-            if let board {
+            if let board, BoardForm.isBlank(board), !unread {
+                // Seven headers each reading zero is a blank page. Say what
+                // the board is for, and offer the one move.
+                ContentUnavailableView {
+                    Label("No Tasks", systemImage: "checklist")
+                } description: {
+                    Text("Tasks on this workspace’s board appear here, grouped by status.")
+                } actions: {
+                    if let onNewTask {
+                        Button("New Task…", action: onNewTask)
+                            .buttonStyle(.borderedProminent)
+                            .accessibilityIdentifier("board-empty-new-task")
+                    }
+                }
+                .accessibilityIdentifier("board-empty")
+            } else if let board {
                 list(board)
             } else if unread {
                 ContentUnavailableView {
@@ -205,10 +225,15 @@ struct WorkspaceBoardList: View {
             BoardForm.setCollapsed(collapsed, host: place.runner, workspace: place.workspace)
         } label: {
             HStack(spacing: PaneMetrics.tight) {
+                // The same face and weight for the name and its count, and
+                // `.secondary` for an empty status: `.disabled` dimmed it to
+                // about a quarter contrast and left a big title beside a tiny
+                // monospaced digit.
                 Text(section.title)
+                    .foregroundStyle(expandable ? .primary : .secondary)
                 Text("\(section.count)")
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(.secondary)
                 Spacer()
                 if expandable {
                     Image(systemName: "chevron.forward")
@@ -220,7 +245,7 @@ struct WorkspaceBoardList: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .disabled(!expandable)
+        .allowsHitTesting(expandable)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(section.title) \(section.count)")
         .accessibilityValue(expandable ? (open ? "Expanded" : "Collapsed") : "Empty")

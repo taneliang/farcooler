@@ -288,9 +288,13 @@ private struct ConnectThisDeviceStep: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
+            // Centered on the card, not pinned to its first line: the row is
+            // top-aligned for the icon, and a flexible height lets the
+            // chevron take the whole of it and center itself.
             Image(systemName: "chevron.right")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.tertiary)
+                .frame(maxHeight: .infinity)
         }
         .padding(.vertical, 6)
         .contentShape(Rectangle())

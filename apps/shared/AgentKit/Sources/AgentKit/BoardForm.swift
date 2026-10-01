@@ -121,6 +121,13 @@ public enum BoardForm: String, Sendable, Hashable {
     /// "Backlog 0" and nothing under it, so it can't.
     public static func canExpand(_ section: TaskBoardColumn) -> Bool { section.count > 0 }
 
+    /// Whether a board has nothing on it at all: no task in any status, and no
+    /// row this build can't place. Seven headers each reading zero is not a
+    /// board, it's a blank page, so the list says "No Tasks" instead.
+    public static func isBlank(_ board: TaskBoardModel) -> Bool {
+        board.rows.isEmpty && board.unreadable.isEmpty
+    }
+
     /// Whether a section is drawn open, given the statuses this board has
     /// collapsed. An empty one never is.
     public static func isExpanded(_ section: TaskBoardColumn, collapsed: Set<TaskStatus>) -> Bool {

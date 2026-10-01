@@ -18,6 +18,10 @@ struct NeedsYouScreen: View {
     @State private var authorizing = false
     @State private var showSettings = false
     @State private var showAdd = false
+    /// The Unclaimed and Hidden groups open right now, by runner and title.
+    @State private var openGroups: Set<String> = []
+    /// The mark column, which grows with the text so the mark never touches the name.
+    @ScaledMetric private var markWidth: CGFloat = 14
 
     var body: some View {
         List {
@@ -307,35 +311,57 @@ struct NeedsYouScreen: View {
             })
         {
             ShellMarkView(mark: ShellFleetMap.mark(of: terminal, now: Date()), size: 8)
-                .frame(width: 14)
+                .frame(width: markWidth)
         } else {
             Image(systemName: "circle.dashed")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
-                .frame(width: 14)
+                .frame(width: markWidth)
         }
     }
 
+    /// Unclaimed and Hidden: a row that opens in place, drawn as the workspace
+    /// rows above it are. It was a `DisclosureGroup`, whose bold primary
+    /// chevron and unmarked, differently indented title sat beside the
+    /// workspaces' gray ones. Same mark column, same chevron, same count.
     private func worktreeGroup(
         _ title: String, ids: [String], count: Int, runner: String, connection: Connection
     ) -> some View {
-        DisclosureGroup {
-            ForEach(ids, id: \.self) { id in
-                if let worktree = connection.fleet.worktrees.first(where: { $0.id == id }) {
-                    WorktreeRow(worktree: worktree, inbox: connection.inbox[id]) {
-                        open([.worktree(runner: runner, worktree: id, landing: .resume)])
+        let key = "\(runner)/\(title)"
+        let isOpen = openGroups.contains(key)
+        return Group {
+            Button {
+                if isOpen { openGroups.remove(key) } else { openGroups.insert(key) }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: title == "Hidden" ? "eye.slash" : "tray")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .frame(width: markWidth)
+                    Text(title)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    CountBadge(count: count)
+                    Image(systemName: "chevron.forward")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(isOpen ? 90 : 0))
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(isOpen ? "Expanded" : "Collapsed")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier("worktrees-\(title.lowercased())")
+            if isOpen {
+                ForEach(ids, id: \.self) { id in
+                    if let worktree = connection.fleet.worktrees.first(where: { $0.id == id }) {
+                        WorktreeRow(worktree: worktree, inbox: connection.inbox[id]) {
+                            open([.worktree(runner: runner, worktree: id, landing: .resume)])
+                        }
                     }
                 }
             }
-        } label: {
-            HStack {
-                Text(title)
-                Spacer()
-                CountBadge(count: count)
-            }
-            // On the label, not the group: a group's identifier is handed to
-            // every row inside it, and each row names its own worktree.
-            .accessibilityIdentifier("worktrees-\(title.lowercased())")
         }
     }
 
