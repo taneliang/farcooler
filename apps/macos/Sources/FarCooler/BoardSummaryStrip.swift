@@ -59,7 +59,7 @@ struct BoardSummaryStrip: View {
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(WorkspaceStyle.document)
-            .task(id: NotesKey(since: (since.timeIntervalSince1970 / 60).rounded(.down), generation: store.generation, count: store.board.rows.count)) {
+            .task(id: Self.notesKey(since: since, generation: store.generation, count: store.board.rows.count, collapsed: collapsed)) {
                 guard !collapsed else { return }
                 await store.readSummaryNotes(since: since)
             }
@@ -68,10 +68,19 @@ struct BoardSummaryStrip: View {
         .accessibilityIdentifier("board-summary")
     }
 
-    private struct NotesKey: Hashable {
+    /// What a notes read is keyed on. `collapsed` is in it so a strip expanded
+    /// after launch reads its decisions and findings then, not at the next minute.
+    struct NotesKey: Hashable {
         var since: Double
         var generation: Int
         var count: Int
+        var collapsed: Bool
+    }
+
+    static func notesKey(since: Date, generation: Int, count: Int, collapsed: Bool) -> NotesKey {
+        NotesKey(
+            since: (since.timeIntervalSince1970 / 60).rounded(.down), generation: generation,
+            count: count, collapsed: collapsed)
     }
 
     private var header: some View {
@@ -115,7 +124,7 @@ struct BoardSummaryStrip: View {
                 Text("\(title) (\(items.count))")
                     .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
                     .foregroundStyle(.secondary)
-                ForEach(items) { item in
+                ForEach(BoardSummary.capped(items).shown) { item in
                     Button {
                         if let row = store.board.rows.first(where: { $0.id == item.taskID }) {
                             store.choose(row)
@@ -138,6 +147,11 @@ struct BoardSummaryStrip: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("board-summary-item-\(item.id)")
+                }
+                if BoardSummary.capped(items).more > 0 {
+                    Text("and \(BoardSummary.capped(items).more) more")
+                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                        .foregroundStyle(.secondary)
                 }
             }
         }

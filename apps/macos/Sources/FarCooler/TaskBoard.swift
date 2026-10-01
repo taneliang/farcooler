@@ -637,9 +637,10 @@ struct TaskBoardView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willResignActiveNotification)) { _ in
             store.markVisited(in: defaults)
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            store.beginVisit(in: defaults)
-        }
+        // Deliberately no re-read when the app comes back: a quick ⌘-Tab out and
+        // in would otherwise shrink "Since Last Visit" to seconds. The stamp
+        // written above is read at the next appear, after the person has
+        // left the workspace.
         .onChange(of: remembered) { old, key in
             BoardVisit.write(Date(), host: old.host, workspace: old.workspace, in: defaults)
             store.beginVisit(in: defaults)

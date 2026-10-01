@@ -94,7 +94,8 @@ func aPeriodStartsWhereItSaysItDoes() {
     #expect(BoardSummary.start(of: .sinceLastVisit, lastVisit: visit, now: now, calendar: cal) == visit)
     #expect(BoardSummary.start(of: .sinceLastVisit, lastVisit: nil, now: now, calendar: cal) == now.addingTimeInterval(-day))
     #expect(BoardSummary.start(of: .lastHour, lastVisit: visit, now: now, calendar: cal) == now.addingTimeInterval(-3600))
-    #expect(BoardSummary.start(of: .today, lastVisit: visit, now: now, calendar: cal) == cal.startOfDay(for: now))
+    // 1_800_000_000 is 2027-01-15 08:00 UTC; midnight UTC is 1_799_971_200.
+    #expect(BoardSummary.start(of: .today, lastVisit: visit, now: now, calendar: cal).timeIntervalSince1970 == 1_799_971_200)
     #expect(BoardSummary.Period.allCases.map(\.title) == ["Since Last Visit", "Last Hour", "Today"])
 }
 
@@ -116,4 +117,24 @@ func aVisitIsKeptPerRunnerAndWorkspace() {
     BoardVisit.write(now, host: "h", workspace: "w", in: defaults)
     #expect(BoardVisit.read(host: "h", workspace: "w", from: defaults) == now)
     #expect(BoardVisit.read(host: "h", workspace: "other", from: defaults) == nil)
+}
+
+@Test("Today starts at local midnight on a spring-forward day")
+func todayStartsAtLocalMidnightOnASpringForwardDay() {
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = TimeZone(identifier: "America/New_York")!
+    // 2027-03-14 15:00 EDT (19:00 UTC), after the 02:00 jump. Midnight that day was EST.
+    let at = Date(timeIntervalSince1970: 1_805_050_800)  // 2027-03-14 19:00 UTC
+    let start = BoardSummary.start(of: .today, lastVisit: nil, now: at, calendar: cal)
+    #expect(start.timeIntervalSince1970 == 1_805_000_400)  // 2027-03-14 05:00 UTC = 00:00 EST
+    #expect(at.timeIntervalSince(start) == 14 * 3600, "only 14 hours elapsed, not 15: an hour was skipped")
+}
+
+@Test("A group is cut to five lines and says how many it left out")
+func aGroupIsCutToFiveLines() {
+    let items = (0..<8).map { BoardSummary.Item(id: "\($0)", taskID: "t", key: "k", title: "T", at: now) }
+    let c = BoardSummary.capped(items)
+    #expect(c.shown.count == 5)
+    #expect(c.more == 3)
+    #expect(BoardSummary.capped(Array(items.prefix(5))).more == 0)
 }

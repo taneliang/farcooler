@@ -56,4 +56,24 @@ struct BoardSummaryStoreTests {
         let summary = BoardSummary.make(rows: store.board.rows, notes: store.summaryNotes, since: since)
         #expect(summary.notes.map(\.detail) == ["Decision: Use SQLite"])
     }
+
+    /// A strip expanded after launch reads its notes then: expanding changes the key.
+    @Test func expandingTheStripChangesWhatTheNotesReadIsKeyedOn() {
+        let at = Date(timeIntervalSince1970: 1_800_000_000)
+        let closed = BoardSummaryStrip.notesKey(since: at, generation: 1, count: 3, collapsed: true)
+        let open = BoardSummaryStrip.notesKey(since: at, generation: 1, count: 3, collapsed: false)
+        #expect(closed != open)
+    }
+
+    /// ⌘-Tab out and back: the stamp is written, the open strip's baseline is not.
+    @Test func leavingTheAppAndComingBackKeepsTheBaseline() {
+        let defaults = defaults()
+        let store = store()
+        let before = Date(timeIntervalSince1970: 1_000_000)
+        BoardVisit.write(before, host: store.hostKey, workspace: store.workspace.id, in: defaults)
+        store.beginVisit(in: defaults)
+        store.markVisited(in: defaults, now: before.addingTimeInterval(7200))
+        #expect(store.visitBaseline == before)
+        #expect(BoardVisit.read(host: store.hostKey, workspace: store.workspace.id, from: defaults) == before.addingTimeInterval(7200))
+    }
 }

@@ -67,6 +67,14 @@ public struct BoardSummary: Equatable, Sendable {
 
     public var isEmpty: Bool { finished.isEmpty && moved.isEmpty && created.isEmpty && notes.isEmpty }
 
+    /// How many lines of one group the strip draws before saying "and N more".
+    public static let groupLimit = 5
+
+    /// A group cut to `groupLimit`, and how many it left out.
+    public static func capped(_ items: [Item], limit: Int = groupLimit) -> (shown: [Item], more: Int) {
+        (Array(items.prefix(limit)), max(0, items.count - limit))
+    }
+
     /// What the strip says when it has nothing to list.
     public static let nothingNew = "Nothing new since you were last here."
 
