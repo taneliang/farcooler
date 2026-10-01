@@ -103,6 +103,54 @@ struct WorkspaceColumnsTests {
         }
     }
 
+    /// Drilling into a task and back doesn't take the board down: it stays
+    /// drawn, hidden, so Back finds it as it was, and leaving a workspace,
+    /// not opening a task, is what ends a visit to its board. The
+    /// conversation is taken down, so there's one view of its pane, the
+    /// rail's to pop open.
+    @MainActor
+    @Test("The board stays up while a task is open, and the conversation doesn't")
+    func theBoardStaysUpWhileATaskIsOpen() async {
+        final class Level: ObservableObject {
+            @Published var drilled = false
+            var boardGone = 0
+            var conversationGone = 0
+        }
+        let level = Level()
+        struct Hosted: View {
+            @ObservedObject var level: Level
+            var body: some View {
+                WorkspaceView(
+                    drilled: level.drilled, hasConversation: true, cell: WorkspaceColumns.defaultCell,
+                    focused: false, peek: false, pick: .constant(.orchestrator),
+                    conversation: { Color.clear.onDisappear { level.conversationGone += 1 } },
+                    rail: { Color.clear }, board: { Color.clear.onDisappear { level.boardGone += 1 } },
+                    opened: { Color.clear })
+                .frame(width: 1032, height: 400)
+            }
+        }
+        let host = NSHostingView(rootView: Hosted(level: level))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1032, height: 400), styleMask: [.borderless],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        func settle() async {
+            for _ in 0..<5 {
+                host.layoutSubtreeIfNeeded()
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        await settle()
+        level.drilled = true
+        await settle()
+        level.drilled = false
+        await settle()
+        window.close()
+        #expect(level.boardGone == 0)
+        #expect(level.conversationGone == 1)
+    }
+
     /// On screen means drawn: a conversation shrunk to its rail, left out
     /// in Focus, or behind Board in the one-column form isn't, so it isn't
     /// marked seen or watched and the keyboard doesn't act on it. Popped

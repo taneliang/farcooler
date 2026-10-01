@@ -33,46 +33,64 @@ struct WorkspaceView<Conversation: View, Rail: View, Board: View, Drilled: View>
             let arrangement = WorkspaceColumns.layout(
                 width: proxy.size.width, drilled: drilled, cell: cell, hasConversation: hasConversation,
                 focused: focused, peek: peek)
-            columns(arrangement, width: proxy.size.width)
-                .frame(width: proxy.size.width, height: proxy.size.height)
-                .preference(key: WorkspaceArrangementPreference.self, value: arrangement)
-                .preference(key: WorkspaceWidthPreference.self, value: proxy.size.width)
+            // The workspace level stays drawn, hidden, while drilled in, so
+            // the board keeps its place, its scroll and its visit (the
+            // summary's "last visit" is when you left the workspace, not a
+            // task) for Back. Never the conversation: one terminal view per
+            // pane, and it's the rail's to pop open.
+            let base = WorkspaceColumns.layout(
+                width: proxy.size.width, drilled: false, cell: cell, hasConversation: hasConversation)
+            ZStack {
+                workspaceLevel(base)
+                    .opacity(drilled ? 0 : 1)
+                    .allowsHitTesting(!drilled)
+                    .accessibilityHidden(drilled)
+                if arrangement.drilled {
+                    drilledLevel(arrangement, width: proxy.size.width)
+                }
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .preference(key: WorkspaceArrangementPreference.self, value: arrangement)
+            .preference(key: WorkspaceWidthPreference.self, value: proxy.size.width)
         }
     }
 
-    @ViewBuilder
-    private func columns(_ arrangement: WorkspaceColumns.Arrangement, width: CGFloat) -> some View {
-        if arrangement.drilled {
-            HStack(spacing: 0) {
-                if arrangement.conversation != .none {
-                    rail()
-                        .frame(width: WorkspaceColumns.rail)
-                        .frame(maxHeight: .infinity)
-                    Divider()
-                }
-                // Over what's opened, never beside it: popping the
-                // conversation open doesn't resize a task's terminals, or
-                // their tmux windows for every other client.
-                opened()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlay(alignment: .leading) {
-                        if arrangement.conversation == .peek {
-                            HStack(spacing: 0) {
-                                conversation()
-                                    .frame(width: WorkspaceColumns.peekWidth(in: width, cell: cell))
-                                    .frame(maxHeight: .infinity)
-                                    .background(WorkspaceStyle.canvas)
-                                Divider()
-                            }
-                            .compositingGroup()
-                            .shadow(color: .black.opacity(0.18), radius: 8, x: 2)
-                            .transition(.move(edge: .leading).combined(with: .opacity))
-                            .accessibilityIdentifier("workspace-conversation-peek")
-                        }
-                    }
-                    .accessibilityIdentifier("workspace-opened")
+    private func drilledLevel(_ arrangement: WorkspaceColumns.Arrangement, width: CGFloat) -> some View {
+        HStack(spacing: 0) {
+            if arrangement.conversation != .none {
+                rail()
+                    .frame(width: WorkspaceColumns.rail)
+                    .frame(maxHeight: .infinity)
+                Divider()
             }
-        } else if arrangement.switcher {
+            // Over what's opened, never beside it: popping the
+            // conversation open doesn't resize a task's terminals, or
+            // their tmux windows for every other client.
+            opened()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .leading) {
+                    if arrangement.conversation == .peek {
+                        HStack(spacing: 0) {
+                            conversation()
+                                .frame(width: WorkspaceColumns.peekWidth(in: width, cell: cell))
+                                .frame(maxHeight: .infinity)
+                                .background(WorkspaceStyle.canvas)
+                            Divider()
+                        }
+                        .compositingGroup()
+                        .shadow(color: .black.opacity(0.18), radius: 8, x: 2)
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                        .accessibilityIdentifier("workspace-conversation-peek")
+                    }
+                }
+                .accessibilityIdentifier("workspace-opened")
+        }
+        .background(WorkspaceStyle.canvas)
+    }
+
+    @ViewBuilder
+    private func workspaceLevel(_ arrangement: WorkspaceColumns.Arrangement) -> some View {
+        if arrangement.switcher {
             VStack(spacing: 0) {
                 Picker("Show", selection: $pick) {
                     ForEach(WorkspacePick.allCases) { Text($0.title).tag($0) }
@@ -85,14 +103,18 @@ struct WorkspaceView<Conversation: View, Rail: View, Board: View, Drilled: View>
                 .background(WorkspaceStyle.canvas)
                 Divider()
                 Group {
-                    if pick == .orchestrator { conversation() } else { board() }
+                    if pick == .board {
+                        board()
+                    } else if !drilled {
+                        conversation()
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .accessibilityIdentifier("workspace-one-column")
         } else {
             HSplitView {
-                if arrangement.conversation == .column {
+                if arrangement.conversation == .column && !drilled {
                     conversation()
                         .frame(
                             minWidth: WorkspaceColumns.conversationMinimum(cell: cell),
