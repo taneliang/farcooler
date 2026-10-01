@@ -45,7 +45,11 @@ enum Shortcut {
         let action: String
     }
 
-    static let groups: [(String, [Item])] = [
+    /// The sheet's rows, naming the prefix now in force.
+    static var groups: [(String, [Item])] { groups(prefix: PrefixKey.current) }
+
+    /// The rows for a given prefix, as `PrefixKey.display` writes it.
+    static func groups(prefix: String) -> [(String, [Item])] { [
         (
             "Terminals",
             [
@@ -88,7 +92,7 @@ enum Shortcut {
             ]
         ),
         (
-            "Tiling — press ⌃B, then",
+            "Tiling — press \(prefix), then",
             [
                 Item(keys: "z", action: "Zoom the focused pane; again to come back"),
                 Item(keys: "space", action: "Next arrangement"),
@@ -103,7 +107,7 @@ enum Shortcut {
                 Item(keys: "n  /  p", action: "Next / previous group"),
                 Item(keys: "&", action: "Close this group"),
                 Item(keys: "a", action: "Toggle the focused pane between terminal and chat"),
-                Item(keys: "⌃B", action: "Send a literal ⌃B to the program"),
+                Item(keys: prefix, action: "Send a literal \(prefix) to the program"),
             ]
         ),
         (
@@ -136,7 +140,7 @@ enum Shortcut {
                 Item(keys: "⌘0", action: "Reload the fleet"),
             ]
         ),
-    ]
+    ] }
 }
 
 struct ShortcutsSheet: View {

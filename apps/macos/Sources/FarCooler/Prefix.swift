@@ -275,6 +275,24 @@ extension View {
     }
 }
 
+/// The tiling prefix as a person reads it: `⌃B`, `⌃A` or `⌃Space`.
+///
+/// One place, because the prefix is a setting and four screens used to print
+/// ⌃B regardless. Uppercasing the stored value, as the hint once did, drew a
+/// blank after the ⌃ for the ⌃Space prefix, whose stored value is a space.
+enum PrefixKey {
+    /// `stored` is `Preferences.prefixKey`: one lowercase letter, or a space.
+    static func display(_ stored: String) -> String {
+        "\u{2303}" + (stored == " " ? "Space" : stored.uppercased())
+    }
+
+    /// The prefix now in force, read from the same defaults key
+    /// `Preferences.prefixKey` stores to, so it needs no actor.
+    static var current: String {
+        display(UserDefaults.standard.string(forKey: "tiling.prefixKey") ?? "b")
+    }
+}
+
 /// What the prefix is waiting for, shown while it waits.
 ///
 /// This is the discoverability story for a prefix key, and it is a better one
@@ -314,7 +332,7 @@ struct PrefixHint: View {
 
     private func row(_ bindings: [(String, String)]) -> some View {
         HStack(spacing: 11) {
-            Text("\u{2303}\(Preferences.shared.prefixKey.uppercased())")
+            Text(PrefixKey.current)
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.tint)
 

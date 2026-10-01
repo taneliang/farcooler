@@ -435,7 +435,7 @@ struct SettingsView: View {
                     Toggle("Remove terminals when they exit", isOn: $preferences.autoRemoveExited)
                 }
 
-                Setting("Available for recognized coding agents. Press ⌃B A to switch a pane.") {
+                Setting("Available for recognized coding agents. Press \(PrefixKey.current) A to switch a pane.") {
                     Toggle("Open coding agents as a chat", isOn: $preferences.preferChatMode)
                 }
 
