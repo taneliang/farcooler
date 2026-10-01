@@ -164,7 +164,7 @@ struct AgentView: View {
     /// reaches this view.**
     private var chatFailure: AgentFailureCopy? { paneTerminal?.chatFailure }
 
-    /// The agent behind this pane, capitalised for the placeholder.
+    /// The agent behind this pane, capitalized for the placeholder.
     private var harnessName: String {
         guard let preset = paneTerminal?.preset, !preset.isEmpty else { return "the agent" }
         return preset.capitalized
@@ -1323,7 +1323,10 @@ private struct ToolRowView: View {
                 label
             }
 
-            if showingDetail {
+            // Only when there is something to show: a call with no input and no
+            // diff, waiting on approval, drew an empty padded strip between two
+            // dividers.
+            if showingDetail && hasDetail {
                 Divider()
                 VStack(alignment: .leading, spacing: PaneMetrics.step) {
                     if let content = tool.content, !content.isEmpty {
@@ -1373,6 +1376,11 @@ private struct ToolRowView: View {
     /// the agent moves on, because a transcript of every command's full output
     /// is unreadable.
     private var showingDetail: Bool { expanded || pending != nil || (isLive && running) }
+
+    /// Whether the call has anything to put in its detail block.
+    private var hasDetail: Bool {
+        !(tool.content ?? "").isEmpty || tool.diff != nil
+    }
 
     /// Still going, as the agent last reported it.
     private var running: Bool { tool.status == .pending || tool.status == .inProgress }
@@ -1658,7 +1666,7 @@ private struct PlanPanel: View {
                     Image(systemName: "chevron.right")
                         .font(.caption2)
                         .rotationEffect(.degrees(expanded ? 90 : 0))
-                    Text("Tasks").font(.caption.weight(.semibold))
+                    Text("Plan").font(.caption.weight(.semibold))
                     Text("\(entries.doneCount) of \(entries.count)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1784,12 +1792,12 @@ private struct QueuedRow: View {
                 // A label and three actions, told apart.
                 //
                 // All four used to be `.caption` in `.secondary` with the
-                // buttons set `.plain`, so "Queued", "Send now", "Edit" and
+                // buttons set `.plain`, so "Queued", "Send Now", "Edit" and
                 // "Remove" were one line of identical gray words — three of
                 // which do something, with nothing saying which three.
                 //
                 // The correction to THAT was a full accent on all three, and
-                // it is what the owner photographed: "Send now", "Edit" and
+                // it is what the owner photographed: "Send Now", "Edit" and
                 // "Remove" side by side in bright blue on a dark card, which
                 // is the same failure with the contrast turned up. Three
                 // equally loud words say nothing about which one you want,
@@ -1818,24 +1826,13 @@ private struct QueuedRow: View {
                 // shim it is a promise nothing can keep, so the label says
                 // what actually happened to the message instead. See
                 // `hasAgent` for why none of the three would have worked.
-                HStack(spacing: PaneMetrics.card) {
-                    Text(hasAgent ? "Queued" : "Not sent")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("agent-queued-state")
-                    if hasAgent {
-                        Button("Send now", action: onSteer)
-                            .buttonStyle(QueuedActionStyle(prominent: true))
-                        Button(isEditing ? "Save" : "Edit") {
-                            if isEditing {
-                                commit()
-                            } else {
-                                draft = queued.text
-                                editing = true
-                            }
-                        }
-                        Button("Remove", action: onCancel)
-                    }
+                // On one line when it fits, stacked when it doesn't: at the
+                // larger Dynamic Type sizes the row broke mid-word ("Queu/ed",
+                // "Re-/move"), and a label that wraps is a button nobody can
+                // read at a glance.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: PaneMetrics.card) { queuedActions(stacked: false) }
+                    VStack(alignment: .leading, spacing: 0) { queuedActions(stacked: true) }
                 }
                 .buttonStyle(QueuedActionStyle())
             }
@@ -1855,6 +1852,37 @@ private struct QueuedRow: View {
                                 style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                     }
             }
+        }
+    }
+
+    /// The state word and the actions, one line each: `stacked` only says
+    /// whether the caller may let them be as wide as the card.
+    @ViewBuilder
+    private func queuedActions(stacked: Bool) -> some View {
+        Text(hasAgent ? "Queued" : "Not sent")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .fixedSize(horizontal: !stacked, vertical: true)
+            .accessibilityIdentifier("agent-queued-state")
+        if hasAgent {
+            Button("Send Now", action: onSteer)
+                .buttonStyle(QueuedActionStyle(prominent: true))
+                .lineLimit(1)
+                .fixedSize(horizontal: !stacked, vertical: true)
+            Button(isEditing ? "Save" : "Edit") {
+                if isEditing {
+                    commit()
+                } else {
+                    draft = queued.text
+                    editing = true
+                }
+            }
+            .lineLimit(1)
+            .fixedSize(horizontal: !stacked, vertical: true)
+            Button("Remove", action: onCancel)
+                .lineLimit(1)
+                .fixedSize(horizontal: !stacked, vertical: true)
         }
     }
 
@@ -2008,8 +2036,12 @@ struct ApprovalControls: View {
                 ForEach(secondary) { option in
                     Button(option.name) { onChoose(option.id) }
                         .buttonStyle(.plain)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        // In the accent at body-adjacent size: caption text in
+                        // gray read as a footnote under the buttons, not as
+                        // something you could press. Allow still carries the
+                        // one solid fill; these are quiet by weight.
+                        .font(.subheadline)
+                        .foregroundStyle(Color.accentColor)
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .frame(
@@ -2315,6 +2347,7 @@ private struct AgentComposer: View {
     /// Whether the message field is being typed in, which is when the
     /// keyboard is up for it and Hide Keyboard has something to do.
     @State private var typing = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var token: ComposerToken { activeToken(in: text, cursor: cursor) }
 
@@ -2383,6 +2416,11 @@ private struct AgentComposer: View {
                 // actually gets. Before this the row was a 22-point strip of
                 // targets, which is half the floor.
                 HStack(spacing: PaneMetrics.step) {
+                  // The chips scroll sideways rather than truncate: at the
+                  // larger Dynamic Type sizes four of them were "Ma… S… Hi…"
+                  // beside a badge that kept its full width.
+                  ScrollView(.horizontal, showsIndicators: false) {
+                   HStack(spacing: PaneMetrics.step) {
                     // A chip, like everything else in this row.
                     //
                     // It was a bare glyph centered in a 26-point box, which
@@ -2410,10 +2448,17 @@ private struct AgentComposer: View {
                     }
 
                     settingsMenu
+                   }
+                  }
+                  .scrollBounceBehavior(.basedOnSize)
 
-                    Spacer(minLength: PaneMetrics.step)
+                    Spacer(minLength: 0)
 
-                    adapterBadge
+                    // The least important thing in the row, so the first to
+                    // go when there is no room for it.
+                    if !dynamicTypeSize.isAccessibilitySize {
+                        adapterBadge
+                    }
 
                     // The terminal's key row ends in this key, and so does
                     // this row: the composer is docked above the keyboard, and
@@ -2586,7 +2631,7 @@ private struct AgentComposer: View {
     ///
     /// The WORDS are the Mac's, and the rule for choosing between them is the
     /// Mac's: anything that is not `acp` is a native backend. "ACP" stays
-    /// capitalised — it is an acronym, Agent Client Protocol, and lowercasing
+    /// capitalized — it is an acronym, Agent Client Protocol, and lowercasing
     /// it makes a proper noun look like a status word.
     ///
     /// The COLOR is not the Mac's, and that is a platform decision rather than

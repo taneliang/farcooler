@@ -223,3 +223,23 @@ extension TaskBoardModel {
         return count == 1 ? "An agent is on 1 task" : "Agents are on \(count) tasks"
     }
 }
+
+/// How an agent's harness is spelled where a person reads it.
+///
+/// The runner names a pane for the command in it, so a Claude pane is "claude".
+/// That is the right key and the wrong spelling for a title: the composer asks
+/// "Message Claude" under a header reading "claude". Only the harnesses this
+/// app launches are mapped, and only the first word, so a pane someone named
+/// "claude in fix-reconnect" or "claude 2" keeps its own words and "tmux" is not
+/// dressed up as a product.
+public enum HarnessName {
+    private static let known: [String: String] = [
+        "claude": "Claude", "codex": "Codex", "cursor": "Cursor",
+    ]
+
+    public static func display(_ name: String) -> String {
+        let first = name.prefix { $0 != " " }
+        guard let proper = known[String(first)] else { return name }
+        return proper + name.dropFirst(first.count)
+    }
+}

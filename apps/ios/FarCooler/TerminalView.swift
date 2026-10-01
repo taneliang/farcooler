@@ -880,7 +880,9 @@ struct TerminalView: View {
         currentWorktree?.ordinals()[terminal.id]
     }
 
-    private var currentName: String { terminal.displayName(ordinal: currentOrdinal) }
+    private var currentName: String {
+        HarnessName.display(terminal.displayName(ordinal: currentOrdinal))
+    }
 
     var body: some View {
         VStack(spacing: 0) {

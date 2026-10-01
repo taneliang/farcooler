@@ -244,7 +244,7 @@ struct ShellFleetMap {
                     // An orchestrator's by its workspace, so the bar says
                     // whose it is: in Main's checkout, Billing's manager is
                     // not one more terminal of Main's.
-                    title: orchestrators[terminal.id] ?? terminal.label,
+                    title: orchestrators[terminal.id] ?? HarnessName.display(terminal.label),
                     mark: mark(of: terminal, now: now),
                     // The rank's own question, kept separate from the
                     // drawing's. See `ShellTab.wantsAttention`.
@@ -1308,7 +1308,7 @@ extension Connection {
             return row.livePanes(in: worktree.terminals).map { terminal in
                 (
                     terminal: terminal,
-                    title: "\(terminal.displayName(ordinal: ordinals[terminal.id])) in \(worktree.task)"
+                    title: "\(HarnessName.display(terminal.displayName(ordinal: ordinals[terminal.id]))) in \(worktree.task)"
                 )
             }
         }

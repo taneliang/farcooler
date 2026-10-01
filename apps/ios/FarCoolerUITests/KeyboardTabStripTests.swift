@@ -600,7 +600,7 @@ final class AgentEndedSessionTests: XCTestCase {
         XCTAssertEqual(
             state.label, "Not sent",
             "A message nothing can send was still described as queued")
-        for action in ["Send now", "Edit", "Remove"] {
+        for action in ["Send Now", "Edit", "Remove"] {
             XCTAssertFalse(
                 app.buttons[action].exists,
                 "\(action) was offered on a queue nothing is reading")
@@ -612,7 +612,7 @@ final class AgentEndedSessionTests: XCTestCase {
         let state = app.staticTexts["agent-queued-state"]
         XCTAssertTrue(state.waitForExistence(timeout: 30), "The queued message was not drawn")
         XCTAssertEqual(state.label, "Queued", "A live queue did not say it was queued")
-        for action in ["Send now", "Edit", "Remove"] {
+        for action in ["Send Now", "Edit", "Remove"] {
             XCTAssertTrue(
                 app.buttons[action].exists,
                 "\(action) went missing from a queue that can still be acted on")

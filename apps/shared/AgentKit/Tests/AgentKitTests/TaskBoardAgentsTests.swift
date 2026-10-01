@@ -190,3 +190,14 @@ private func row(
         ["claude in lane", "claude in lane", "codex in lane"], shorts: ["aaa1", "bbb2", "ccc3"])
     #expect(titles == ["claude in lane (aaa1)", "claude in lane (bbb2)", "codex in lane"])
 }
+
+/// A pane is named for its command, and a title shouldn't read like one.
+@Test("A harness name is capitalized where it is read, and nothing else is")
+func harnessNamesAreDisplayedProperly() {
+    #expect(HarnessName.display("claude") == "Claude")
+    #expect(HarnessName.display("codex 2") == "Codex 2")
+    #expect(HarnessName.display("claude in fix-reconnect") == "Claude in fix-reconnect")
+    #expect(HarnessName.display("tmux") == "tmux")
+    #expect(HarnessName.display("shell") == "shell")
+    #expect(HarnessName.display("") == "")
+}

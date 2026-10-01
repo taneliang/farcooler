@@ -158,7 +158,7 @@ extension Worktree {
             .filter { $0.isAgentPane || $0.canSwitchPaneMode }
             .map {
                 ReviewAgentTarget(
-                    id: $0.id, name: $0.displayName(ordinal: numbering[$0.id]),
+                    id: $0.id, name: HarnessName.display($0.displayName(ordinal: numbering[$0.id])),
                     // Read by the Mac only, where a chat on screen is a
                     // composer a note can be dropped into. Filled in here
                     // anyway: a field one platform leaves at its default is a
