@@ -350,9 +350,7 @@ struct PrefixHint: View {
         .fixedSize()
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08)))
-        .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
+        .floatingPanel(in: Capsule())
     }
 }
 

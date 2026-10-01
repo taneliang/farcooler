@@ -112,10 +112,7 @@ struct CommandPalette: View {
             footer
         }
         .frame(width: Self.panelWidth)
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.08)))
-        .shadow(color: .black.opacity(0.22), radius: 26, y: 10)
+        .floatingPanel()
         .onAppear { highlight = openingHighlight }
         .onChange(of: trimmed) { _, _ in highlight = openingHighlight }
         // Keyed on the SET of terminals, not their order, so a tile changing

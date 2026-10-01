@@ -370,11 +370,7 @@ private struct ImagePasteChip: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator))
-            // Its own geometry, the app's one alpha. The default was black at
-            // 0.33 — see the banner in `OpenInEditor`.
-            .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+            .floatingPanel()
             .transition(.opacity)
         }
     }

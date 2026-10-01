@@ -192,10 +192,7 @@ struct QuickCreate: View {
             Divider()
             footer
         }
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.08)))
-        .shadow(color: .black.opacity(0.18), radius: 20, y: 8)
+        .floatingPanel()
         .frame(width: 560)
         .onAppear {
             submission.opened()

@@ -308,3 +308,24 @@ final class Themes: ObservableObject {
         }
     }
 }
+
+extension View {
+    /// The one look every floating overlay shares: regular material in `shape`,
+    /// a hairline stroke, and a soft shadow.
+    ///
+    /// The command palette, quick-create, both error banners, the prefix hint,
+    /// the image-paste progress and the workspaces tip each wrote this out by
+    /// hand, with five different shadows between them. Content is clipped to
+    /// the shape, so a highlighted row cannot square off a corner.
+    func floatingPanel<S: InsettableShape>(in shape: S) -> some View {
+        clipShape(shape)
+            .background(.regularMaterial, in: shape)
+            .overlay(shape.strokeBorder(Color.primary.opacity(0.08)))
+            .shadow(color: .black.opacity(0.18), radius: 18, y: 6)
+    }
+
+    /// `floatingPanel(in:)` as a 12-point rounded rectangle, the common case.
+    func floatingPanel() -> some View {
+        floatingPanel(in: RoundedRectangle(cornerRadius: 12))
+    }
+}
