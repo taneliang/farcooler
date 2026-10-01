@@ -90,6 +90,15 @@ extension WorkspaceSelection {
         }
         return place(a) == place(b)
     }
+
+    /// Whether going from `old` to `new` leaves `old`'s workspace: for
+    /// another workspace, Needs You, a loose worktree, or nothing. Drilling
+    /// into a task or a worktree, and back up, stays in it.
+    static func leaves(_ old: ContentView.Selection?, for new: ContentView.Selection?) -> Bool {
+        guard case .workspace(let host, let id, _)? = old else { return false }
+        if case .workspace(host, id, _)? = new { return false }
+        return true
+    }
 }
 
 /// One pane, on one runner, in the worktree its runner lists it in.

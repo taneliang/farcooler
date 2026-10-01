@@ -398,6 +398,12 @@ struct ContentView: View {
                 focusColumn = false
                 orchestratorPeek = false
             }
+            // Leaving a workspace ends a visit to it, whatever level it was
+            // at, and whether or not its board was drawn: the one-column
+            // form with Orchestrator picked has none.
+            if case .workspace(let host, let id, _)? = old, WorkspaceSelection.leaves(old, for: new) {
+                markVisited(host: host, workspace: id)
+            }
             keyboardOnBoard = false
             // The breadcrumb holds only while in the worktree it opened.
             if trail != nil, !WorkspaceNavigation.keeps(trail: trail, opened: trailWorktree, now: new) {
@@ -1980,6 +1986,20 @@ struct ContentView: View {
         return made
     }
 
+    /// Mark a visit to a workspace now (`TaskBoardStore.markVisited`): when
+    /// it's left, and when its orchestrator is taken up.
+    private func markVisited(host: String, workspace id: String) {
+        if let board = boardStores["\(host)/\(id)"] {
+            board.markVisited()
+            return
+        }
+        guard let client = store.clients[host],
+            let summary = WorkspaceScreen.workspace(
+                id, host: host, in: store.fleet, repositories: client.repositories.map(\.id))
+        else { return }
+        boardStore(for: summary, client: client, host: host).markVisited()
+    }
+
     /// Whether `existing` still serves `workspace`'s board on `client`.
     ///
     /// Compared by what the board shows — its name — and not the whole
@@ -3354,9 +3374,13 @@ struct ContentView: View {
     private func focus(_ pane: PaneRef) {
         changesFocus = nil
         keyboardOnBoard = false
+        let inConversation = shown.contains { $0.column == .conversation && $0.contains(pane) }
         // A click into what's opened puts the popped-open orchestrator away.
-        if orchestratorPeek, !shown.contains(where: { $0.column == .conversation && $0.contains(pane) }) {
-            orchestratorPeek = false
+        if orchestratorPeek, !inConversation { orchestratorPeek = false }
+        // Taking up the orchestrator is a visit to its workspace, as reading
+        // its board is: the board's "Since you were last here" starts there.
+        if inConversation, case .workspace(let host, let id, _)? = selection {
+            markVisited(host: host, workspace: id)
         }
         guard let next = WorkspaceScreen.focusing(pane, selection: selection, shown: shown, fleet: store.fleet)
         else {
