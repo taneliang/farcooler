@@ -36,6 +36,18 @@ struct BranchList: Decodable {
     var branches: [BranchInfo]
 }
 
+/// Lets a sheet act on a choice once, however many paths reach it.
+struct AdoptOnce {
+    private var done = false
+
+    /// True the first time, false after.
+    mutating func begin() -> Bool {
+        if done { return false }
+        done = true
+        return true
+    }
+}
+
 /// Pick up work that already exists.
 ///
 /// The other half of starting a task. Work arrives on a branch at least as often
@@ -77,6 +89,9 @@ struct ResumeBranch: View {
     @State private var query = ""
     @State private var loading = true
     @State private var selection: String?
+    /// Return reaches the default Resume button, and a double-click reaches
+    /// `adopt` directly; whichever comes first is the only one that counts.
+    @State private var adoption = AdoptOnce()
 
     /// The project `project` names, together with the runner it is on —
     /// same rule `QuickCreate.chosen` follows, and for the same reason: no
@@ -158,13 +173,6 @@ struct ResumeBranch: View {
                     .onTapGesture(count: 2) { adopt(branch) }
             }
             .listStyle(.inset)
-            .onKeyPress(.return) {
-                if let branch = branches.first(where: { $0.id == selection }) {
-                    adopt(branch)
-                    return .handled
-                }
-                return .ignored
-            }
         }
     }
 
@@ -262,7 +270,7 @@ struct ResumeBranch: View {
     }
 
     private func adopt(_ branch: BranchInfo) {
-        guard !branch.isCheckedOut, let chosen else { return }
+        guard !branch.isCheckedOut, let chosen, adoption.begin() else { return }
         onAdopt(branch, chosen.host, project, Agents.preset(agent: agent, model: model))
         dismiss()
     }

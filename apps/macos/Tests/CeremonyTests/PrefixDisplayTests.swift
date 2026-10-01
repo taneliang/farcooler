@@ -22,27 +22,40 @@ struct PrefixDisplayTests {
 }
 
 extension PrefixDisplayTests {
-    /// The Layout menu named ⌃B in every title whatever the setting said.
-    @Test("A Layout menu title names the prefix that is set")
-    func menuTitlesFollowThePrefix() {
-        #expect(PrefixKey.menuTitle("Split Right", keys: "%", stored: "b") == "Split Right (⌃B %)")
-        #expect(PrefixKey.menuTitle("Split Right", keys: "%", stored: "a") == "Split Right (⌃A %)")
-        #expect(PrefixKey.menuTitle("Zoom Pane", keys: "z", stored: " ") == "Zoom Pane (⌃Space z)")
-    }
-}
-
-extension PrefixDisplayTests {
-    /// A menu item that types ⌃B into its own title goes on saying ⌃B after the
-    /// setting changes, so Commands.swift may not contain the literal in a
-    /// button title.
-    @Test("No menu title hard-codes the default prefix")
+    /// A prefix chord cannot be a key equivalent, so a menu title stays plain.
+    @Test("Menu titles carry no chord")
     func noMenuTitleHardCodesThePrefix() throws {
         let url = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/FarCooler/Commands.swift")
         let titles = try String(contentsOf: url, encoding: .utf8)
             .split(separator: "\n")
-            .filter { $0.contains("Button(\"") && $0.contains("⌃B") }
+            .filter { $0.contains("Button(") && $0.contains("⌃") }
         #expect(titles.isEmpty, "\(titles)")
+    }
+}
+
+extension PrefixDisplayTests {
+    /// The HUD's label is `PrefixKey.current`, read from the stored prefix.
+    @Test("The HUD shows the configured prefix")
+    func hudShowsConfiguredPrefix() {
+        let key = "tiling.prefixKey"
+        let old = UserDefaults.standard.object(forKey: key)
+        defer { UserDefaults.standard.set(old, forKey: key) }
+        UserDefaults.standard.set(" ", forKey: key)
+        #expect(PrefixKey.current == "⌃Space")
+        UserDefaults.standard.set("a", forKey: key)
+        #expect(PrefixKey.current == "⌃A")
+    }
+}
+
+struct AdoptOnceTests {
+    /// Return and a double-click can both reach Resume Branch's adopt; the
+    /// second must be refused.
+    @Test("A choice is adopted once")
+    func adoptsOnce() {
+        var gate = AdoptOnce()
+        #expect(gate.begin())
+        #expect(!gate.begin())
     }
 }

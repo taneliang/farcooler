@@ -16,7 +16,7 @@ import SwiftUI
 ///   ⌘[ / ⌘]   back and forward through them
 ///   ⌃⇥ / ⇧⌘]  next tab, on both spellings the platform uses — and a layout
 ///             IS the tab here, which is why these walk the pill bar
-///   ⌘0        reload the fleet
+///   ⌘R        reload the fleet
 ///
 /// The brackets are the family: `[` and `]` always walk a list, and the modifier
 /// says which one. ⌘ is terminals, ⇧⌘ is layouts, ⌥⌘ is the files inside a diff

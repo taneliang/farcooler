@@ -64,9 +64,6 @@ enum AppCommand: String {
 struct FarCoolerCommands: Commands {
     /// Nil unless the main window is key. See `MainWindowFocus`.
     @FocusedValue(\.mainWindow) private var mainWindow
-    /// The tiling prefix as stored, so the Layout menu's titles follow the
-    /// setting rather than saying ⌃B whatever it is.
-    @AppStorage("tiling.prefixKey") private var prefixKey = "b"
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
@@ -181,15 +178,15 @@ struct FarCoolerCommands: Commands {
 
         // The menu is where a prefix binding becomes discoverable to someone who
         // has never used tmux, and where someone who has can confirm that the
-        // key they already know is the key here. Every item names its prefix
-        // sequence in the title — the prefix as set in Settings — because a menu
-        // item with no key equivalent teaches nothing about a prefix.
+        // key they already know is the key here. Titles stay plain:
+        // a prefix chord cannot be a key equivalent, so the HUD and the ⌘/ sheet
+        // show those keys, with the prefix as set in Settings.
         CommandMenu("Layout") {
             // Splitting leads, because it is now the only way a layout grows and
             // the one thing every other item here presupposes.
-            Button(PrefixKey.menuTitle("Split Right", keys: "%", stored: prefixKey)) { TileCommand.splitRight.post() }
-            Button(PrefixKey.menuTitle("Split Down", keys: "\"", stored: prefixKey)) { TileCommand.splitDown.post() }
-            Button(PrefixKey.menuTitle("Move Pane Out", keys: "!", stored: prefixKey)) { TileCommand.breakPane.post() }
+            Button("Split Right") { TileCommand.splitRight.post() }
+            Button("Split Down") { TileCommand.splitDown.post() }
+            Button("Move Pane Out") { TileCommand.breakPane.post() }
             Divider()
             // ⇧⌘↩ rather than ⇧⌘Z, which is Edit ▸ Redo on every Mac and was
             // bound here twice over: the menu bar showed ⇧⌘Z in two menus, and
@@ -198,16 +195,16 @@ struct FarCoolerCommands: Commands {
             // the same idea, and nothing standard holds it.
             // `ShortcutSheetTests` now refuses a chord the system's own menus
             // already use.
-            Button(PrefixKey.menuTitle("Zoom Pane", keys: "z", stored: prefixKey)) { TileCommand.zoom.post() }
+            Button("Zoom Pane") { TileCommand.zoom.post() }
                 .keyboardShortcut(.return, modifiers: [.command, .shift])
                 .disabled(!MainWindowFocus.zoomsPane(mainWindow))
-            Button(PrefixKey.menuTitle("Next Arrangement", keys: "space", stored: prefixKey)) { TileCommand.cycle.post() }
+            Button("Next Arrangement") { TileCommand.cycle.post() }
                 .keyboardShortcut(.space, modifiers: [.command, .shift])
             // Double-clicking a divider evens out the two panes it separates.
             // This is the same idea for the whole layout, and it is here rather
             // than only on the divider because a gesture nobody has been told
             // about needs somewhere to be discovered.
-            Button(PrefixKey.menuTitle("Even Out Panes", keys: "=", stored: prefixKey)) { TileCommand.evenPanes.post() }
+            Button("Even Out Panes") { TileCommand.evenPanes.post() }
             Menu("Arrangement") {
                 ForEach(TilePreset.allCases) { preset in
                     Button(preset.label) { TileCommand.preset(preset).post() }
@@ -217,15 +214,15 @@ struct FarCoolerCommands: Commands {
             // The prefix-less ones, and the only tiling bindings that get a real
             // key equivalent here: they are used constantly, and a menu item is
             // how someone finds out they exist.
-            Button("Pane Left (⌃H)") { TileCommand.focus(.left).post() }
-            Button("Pane Right (⌃L)") { TileCommand.focus(.right).post() }
-            Button("Pane Above (⌃K)") { TileCommand.focus(.top).post() }
-            Button("Pane Below (⌃J)") { TileCommand.focus(.bottom).post() }
+            Button("Pane Left") { TileCommand.focus(.left).post() }
+            Button("Pane Right") { TileCommand.focus(.right).post() }
+            Button("Pane Above") { TileCommand.focus(.top).post() }
+            Button("Pane Below") { TileCommand.focus(.bottom).post() }
             Divider()
-            Button(PrefixKey.menuTitle("Next Pane", keys: "o", stored: prefixKey)) { TileCommand.focusNext.post() }
-            Button(PrefixKey.menuTitle("Previous Pane", keys: ";", stored: prefixKey)) { TileCommand.focusPrevious.post() }
+            Button("Next Pane") { TileCommand.focusNext.post() }
+            Button("Previous Pane") { TileCommand.focusPrevious.post() }
             Divider()
-            Button(PrefixKey.menuTitle("New Layout", keys: "c", stored: prefixKey)) { TileCommand.newGroup.post() }
+            Button("New Layout") { TileCommand.newGroup.post() }
             // A layout IS a tab here — the pill bar across the top of a worktree
             // is a tab strip, and these are the two verbs that walk it. So they
             // carry what every tabbed app on this machine binds for that:
@@ -236,16 +233,16 @@ struct FarCoolerCommands: Commands {
             // terminal has a claim on, so it is intercepted where every other
             // prefix-less ⌃ binding already is, rather than being taken from
             // the whole app by a menu key equivalent.
-            Button(PrefixKey.menuTitle("Next Layout", keys: "n", stored: prefixKey)) { TileCommand.nextGroup.post() }
+            Button("Next Layout") { TileCommand.nextGroup.post() }
                 .keyboardShortcut("]", modifiers: [.command, .shift])
-            Button(PrefixKey.menuTitle("Previous Layout", keys: "p", stored: prefixKey)) { TileCommand.previousGroup.post() }
+            Button("Previous Layout") { TileCommand.previousGroup.post() }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
             Divider()
             // Not really a layout verb — nothing about the arrangement
             // changes — but it is scoped to the focused pane exactly the way
             // zoom and the splits are, and there is no chrome on the pane
             // itself left to put a button on.
-            Button(PrefixKey.menuTitle("Switch Between Terminal and Chat", keys: "a", stored: prefixKey)) {
+            Button("Switch Between Terminal and Chat") {
                 TileCommand.toggleAgentPane.post()
             }
         }
