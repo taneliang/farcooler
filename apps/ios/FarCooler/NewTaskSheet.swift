@@ -25,8 +25,18 @@ struct NewTaskSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Title", text: $title)
+                    // Up to three lines, growing, rather than one that scrolls
+                    // sideways and loses the start of what was typed. A vertical
+                    // field takes Return as a newline, so the newline is turned
+                    // back into the submit it was asked to be.
+                    TextField("Title", text: $title, axis: .vertical)
+                        .lineLimit(1...3)
                         .focused($titleFocused)
+                        .onChange(of: title) { _, now in
+                            guard now.contains("\n") else { return }
+                            title = now.replacingOccurrences(of: "\n", with: "")
+                            send()
+                        }
                         .submitLabel(.done)
                         .onSubmit(send)
                         .accessibilityIdentifier("new-task-title")
@@ -36,6 +46,10 @@ struct NewTaskSheet: View {
                             .foregroundStyle(.secondary)
                             .accessibilityIdentifier("new-task-too-long")
                     }
+                } header: {
+                    // Where the task is going: nothing else in the sheet said.
+                    Text("On \(workspace.name)")
+                        .accessibilityIdentifier("new-task-workspace")
                 }
                 Section {
                     TextField("Details (optional)", text: $details, axis: .vertical)
@@ -71,6 +85,7 @@ struct NewTaskSheet: View {
             }
         }
         .interactiveDismissDisabled(sending)
+        .presentationDetents([.medium, .large])
         .onAppear { titleFocused = true }
     }
 

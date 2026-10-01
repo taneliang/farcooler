@@ -91,4 +91,17 @@ enum PaneReconnect {
 
     /// The same, for an agent's conversation.
     static let sessionFailureTitle = "Couldn’t Load This Session"
+
+    /// What the core says, as an error's message, when the link is down. A
+    /// string because that is all that crosses the FFI on a call.
+    static let disconnectedMessage = "not connected"
+
+    /// Whether an error is the link being down rather than the runner refusing.
+    static func isDisconnected(_ error: Error) -> Bool {
+        error.localizedDescription == disconnectedMessage
+    }
+
+    /// What a screen that reads a worktree says when the link is down, in place
+    /// of "The request that reads it didn’t finish" over the raw word.
+    static let notConnectedSentence = "This runner isn’t connected."
 }

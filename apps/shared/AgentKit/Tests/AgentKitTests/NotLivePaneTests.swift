@@ -87,4 +87,12 @@ struct PaneReconnectTests {
         #expect(PaneReconnect.sessionFailureTitle == "Couldn’t Load This Session")
         #expect(PaneReconnect.title == "Reconnecting…")
     }
+
+    @Test func theCoresNotConnectedIsTheLinkBeingDown() {
+        struct Dropped: LocalizedError { var errorDescription: String? { "not connected" } }
+        struct Other: LocalizedError { var errorDescription: String? { "timed out" } }
+        #expect(PaneReconnect.isDisconnected(Dropped()))
+        #expect(!PaneReconnect.isDisconnected(Other()))
+        #expect(PaneReconnect.notConnectedSentence == "This runner isn’t connected.")
+    }
 }

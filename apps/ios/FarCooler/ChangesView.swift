@@ -227,11 +227,16 @@ struct ChangesView: View {
             // between sets. It also stays put while the diff scrolls behind it,
             // so "how far in am I" is answerable without scrolling anywhere.
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                ReviewBar(
-                    store: store,
-                    comments: store.comments,
-                    onIndex: { showingIndex = true },
-                    onComments: { showingComments = true })
+                // Not while there is nothing to move through: a Files control
+                // that is disabled and a position label of zero was a bar of
+                // chrome over an empty screen.
+                if !store.files.isEmpty {
+                    ReviewBar(
+                        store: store,
+                        comments: store.comments,
+                        onIndex: { showingIndex = true },
+                        onComments: { showingComments = true })
+                }
             }
             // A sheet, not a push. Choosing a commit is a detour off the thing on
             // screen and it ends by coming straight back to it — the same shape as
@@ -513,10 +518,12 @@ struct ChangesView: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
+            if local || !store.changeSet.baseRef.isEmpty || shown.0 + shown.1 > 0 {
             Text("+\(shown.0)")
                 .font(.caption.monospaced()).foregroundStyle(.green)
             Text("−\(shown.1)")
                 .font(.caption.monospaced()).foregroundStyle(.red)
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spokenComparison(insertions: shown.0, deletions: shown.1))
@@ -793,6 +800,10 @@ struct ChangesView: View {
             .padding(.top, 6)
         }
 
+        // Not until there is a commit to read: a disabled row at about a fifth
+        // contrast, saying "No commits yet", is a row you can barely see and
+        // cannot press. The toolbar's History appears with the first commit too.
+        if count > 0 {
         Button {
             store.showingHistory = true
         } label: {
@@ -820,8 +831,8 @@ struct ChangesView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(count == 0)
         .padding(.top, 4)
+        }
     }
 
     /// Which commit is on screen, what it said it was doing, and the ways on.

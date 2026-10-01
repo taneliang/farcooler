@@ -1477,6 +1477,11 @@ final class ChangesStore: ObservableObject {
         if ClientCore.refusalWord(of: error) == RunnerRefusal.capabilityUnsupported.rawValue {
             return Trouble(sentence: "This runner’s Far Cooler is too old to review changes.")
         }
+        // A dropped link is a sentence of its own, and nothing more: the core's
+        // "not connected" in a monospaced box under it only said it twice.
+        if PaneReconnect.isDisconnected(error) {
+            return Trouble(sentence: PaneReconnect.notConnectedSentence)
+        }
         return ClientCore.trouble(
             error,
             otherwise: "Couldn’t read this worktree. The request that reads it didn’t finish.")
