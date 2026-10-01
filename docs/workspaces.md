@@ -104,26 +104,31 @@ hand. It's there when the runner lets this Mac write to the board.
 
 ## Following a task to its changes
 
-Select a task to open it in a third column: its key and title, its status, the
-agent working on it, and that worktree's **Changes** beneath the agent. When the
-task is In Review, the changes take the larger share. The status menu in the
-header moves the task; expand the header (**Show the Card**) to read the whole
-card (what the task is for, what counts as done, and its notes) and, when it's
-waiting on a decision, to answer it.
+Select a task, from the board, the sidebar, Needs You or ⌘P, to open it. The task
+takes the window, under a breadcrumb back to its workspace: its key, title and
+status first, then everything on its card, never collapsed: what it's for, what
+counts as done, its notes, and, when it's waiting on a decision, the question
+with its answers. The status menu in the header moves the task.
 
-- **Open Worktree** shows the worktree itself, with all its terminals and
-  layouts. The breadcrumb at the top leads back to the task.
+Beneath the task, past a divider you can drag, is its work: a line naming its
+worktree and how many terminals it has, the agent working on it, and that
+worktree's **Changes**. When the task is In Review, the changes take the larger
+share. A task with nothing started is just that line.
+
+- **Open Worktree** shows the worktree itself, full size, with all its terminals
+  and layouts. The breadcrumb leads back to the task.
 - A task with no agent still reaches its worktree and changes, so a finished
   task in review is one click from its diff.
-- Back (⌃⌘←, in the Workspace menu) closes the task column. Focus Column (⌃⌘↩)
-  widens it over the conversation and board for full-size terminal work; press
-  it again to bring them back.
+- While a task or worktree is open, the orchestrator shrinks to a thin rail on
+  the left, with its status and its dot. Click the rail (or press ⌥⌘1) to pop the
+  orchestrator open over the task without leaving it; click back into the task
+  to put it away.
+- Back (⌃⌘←, in the Workspace menu, or Esc when no terminal has the keyboard)
+  goes up one level. Focus (⌃⌘↩) gives the agent and changes the whole view;
+  press it again to bring the rest back.
 
-When the window is too narrow for all three columns, the conversation folds
-into a thin rail while a task is open (click the rail to close the task and
-bring the conversation back). Narrower still, the task column takes the whole
-view. With no task open in a narrow window, an **Orchestrator | Board** control
-in the header switches between the two.
+With nothing open in a narrow window, an **Orchestrator | Board** control in the
+header switches between the two.
 
 ## Worktrees
 

@@ -18,7 +18,8 @@ These are binding. The rest of this document works them out.
    - The Mac sidebar lists workspaces, per repository. Each workspace is one row, with its orchestrator's status
      and a needs-you count. A "Needs You" row sits at the top.
    - Selecting a workspace shows its orchestrator's conversation beside its board.
-   - Selecting a task opens its agent's terminal and changes in a third column.
+   - Selecting a task opens its agent's terminal and changes in a third column. (Since ov-79 it drills in
+     instead: the task takes the detail, with the conversation as a rail. See §4.3.)
 2. **A worktree is no longer a place of its own.** It's one click under a task, or under a workspace's
    disclosure of its worktrees, which also holds a shell in a branch that has no task. (The review called this
    disclosure "Helpers"; it's labeled "Worktrees", per ruling 9 in §12.)
@@ -373,13 +374,28 @@ enum Focus: Hashable {
 
 ### 4.3 The workspace view
 
-The detail becomes an `HSplitView` of up to three columns, left to right:
+**Two levels, never four columns** (ov-79, the owner's "Drill in"). This replaced a third column, which with
+the sidebar made sidebar | orchestrator | tasks | worktree.
 
-| Column | Holds | Min | Ideal |
+- **Workspace level** (`focus` nil): an `HSplitView` of the conversation and the board, below.
+- **Drilled in** (`focus` set): the task (§4.4) or the worktree opened takes the whole detail, under a
+  breadcrumb: Workspace › Task, Workspace › Task › Worktree, or Workspace › Worktree for a worktree opened from
+  the sidebar. Each crumb but the last goes back there; Back (⌃⌘←), and Esc when no terminal or field has the
+  keyboard, go up one level. The board is out of sight; ⌥⌘2 goes back up to it.
+- **The conversation shrinks to a 36 pt rail** at the leading edge, at every width, with its status glyph and
+  needs-you dot. Clicking the rail, or ⌥⌘1, pops the conversation open *over* what's opened (its minimum width,
+  or what the rail leaves), so the task's terminals and their tmux windows keep their size. Clicking into what's
+  opened, the rail again, Esc, or going anywhere else puts it away. It counts as on screen only while popped
+  open.
+- **Focus** (⌃⌘↩) shows what's opened alone: no rail, and a task's terminals and changes at full height
+  without its text. Esc or ⌃⌘↩ again puts the rest back.
+- `WorkspaceColumns.layout(width:drilled:cell:hasConversation:focused:peek:)` decides all of this as a value;
+  only the workspace level depends on the width.
+
+| Column (workspace level) | Holds | Min | Ideal |
 |---|---|---|---|
-| **Conversation** | The orchestrator: its layout as `detailFrame` frames it today (`WorkspaceSidebar.swift:327-340`: its own layout, no bar), drawn as a terminal, or as chat when the pane is in agent mode | 48 columns: 412 pt | fills; with a task open, its minimum |
+| **Conversation** | The orchestrator: its layout as `detailFrame` frames it today (`WorkspaceSidebar.swift:327-340`: its own layout, no bar), drawn as a terminal, or as chat when the pane is in agent mode | 48 columns: 412 pt | fills |
 | **Board** | The board (§5) | 280 pt | 340 pt |
-| **Task** | Present only while `focus` is set. See §4.4 | 58 columns: 489 pt | fills |
 
 **Where the minimums come from.** Measured on 2026-09-28 (ov-55, 2A) against the app's own code, not estimated:
 - **A cell is 7.727 pt wide** at the default terminal font (SF Mono, 12.5 pt; `TerminalMetrics.cell`), not 7.5.
@@ -423,26 +439,14 @@ The detail becomes an `HSplitView` of up to three columns, left to right:
   426 and 507 pt, and all three no longer fit at 1440 pt. `layout(width:taskOpen:)` takes the cell width, and
   its tests use the default font.
 
-**When the columns don't fit**, they give way in a fixed order. `W` is the detail's width.
+**When the two don't fit** (`W < 412 + 280 + 1 = 693`, `W` the detail's width), the workspace level is one
+column, with a segmented **Orchestrator | Board** control in the header: the phone form. It may be narrower than
+its minimum: the window's minimum is 600 pt, so the detail can be 352 pt, which is 40 columns. The old rules for a
+third column (the rail below 1183 pt, the task column alone below 807 pt, Focus Column) are retired.
 
-| Detail width | Shown |
-|---|---|
-| `W ≥ 412 + 280 + 489 + 2 = 1183` | All three |
-| `W < 1183`, task open | **The conversation collapses to a 36 pt rail** at the leading edge. The rail shows the orchestrator's status glyph and its needs-you dot. Clicking the rail, Back (⌃⌘←), or Esc when no terminal has focus closes the task column, which brings the conversation back. The task column is navigation, not an arrangement to fit |
-| `W < 36 + 280 + 489 + 2 = 807`, task open | The task column alone, with Back. The board comes back when it closes |
-| `W < 412 + 280 + 1 = 693`, no task | One column, with a segmented **Orchestrator \| Board** control in the header: the phone form |
-
-In the one-column forms, a column may be narrower than its minimum: the window's minimum is 600 pt, so the detail
-can be 352 pt, which is 40 columns.
-
-**At a 13-inch laptop's widths** (measured by hosting a real `NavigationSplitView` in a window of each width: the
-detail is the window's width less the sidebar's, with no gap):
-
-| Screen | Window | Sidebar | Detail | Result |
-|---|---|---|---|---|
-| MacBook Air 13" (M2 and later) | Full width, 1470 pt | 248 pt | 1222 pt | All three columns, 39 pt to spare. The task column gets it: 528 pt, 63 columns |
-| MacBook Air 13" (M1) | Full width, 1440 pt | 248 pt | 1192 pt | All three columns, 9 pt to spare. Widening the sidebar past 257 pt collapses the conversation to its rail |
-| Either | A 1280 pt window | 248 pt | 1032 pt | Conversation and board. Opening a task collapses the conversation to its rail, and the task column gets 714 pt: 87 columns, but only 52 characters of diff, since the file column takes 220 pt of it. Hiding the sidebar (⌃⌘S) gives 1280 pt, and all three fit |
+At a 13-inch laptop's widths (the detail is the window less a 248 pt sidebar: 1222 pt full screen on an M2 Air,
+1192 pt on an M1, 1032 pt in a 1280 pt window), the workspace level shows both columns, and a task or worktree
+opened gets the detail less the 37 pt rail: 1185, 1155 or 995 pt.
 
 The sidebar narrows to min 220, ideal 248, max 360 (from 268/320/440, `ContentView.swift:1205`). It has to: at
 today's ideal of 320, a full-screen 1470 pt window leaves a 1150 pt detail, and all three columns don't fit even
@@ -453,58 +457,47 @@ there. Its rows are now workspaces, and a worktree row shows up only under Workt
 - At the 220 pt minimum, the same row has about 100 pt, which is `fc-3-webhooks` and no key. Names truncate, as
   they do today, so the narrower sidebar still works.
 
-**Wireframe, at 1440 pt** (sidebar 248; conversation 412, board 280 and task 498 fill the 1192 pt detail, each near its minimum):
+**Wireframe, drilled into a task** (the workspace level is the conversation and board columns above):
 
 ```
-┌ Sidebar ──────────┬ Billing · overnight ────────────────────────────────────────────────────────────┐
-│ ◉ Needs You     3 │ ● Orchestrator  claude  ⋯ │ Board  bil   [≡|▦] ＋ │ bil-9 Invoice PDF export  In Progress ▾│
-│                   │                           │ ▾ Needs Decision   2  │ agent · claude   Open Worktree    ✕   │
-│ overnight         │ Moved fc-3 and fc-4 here. │   bil-7 Approve th…   │ ────────────────────────────────────── │
-│   Main        ●  1│ The webhook agent is on   │   fc-3 Handle Stri…   │ ❯ writing render_invoice()…            │
-│ ▸ Billing  ●  2   │ fc-3.                     │ ▸ Backlog          0  │   tests: 14 passed                     │
-│   Relay   ◌       │ > Hold fc-4 until the     │ ▾ To Do            3  │                                        │
-│ ＋ New Workspace… │   Stripe keys land.       │ ▾ In Progress      1  │ ── Changes  +42 −7 ─────────────────── │
-│ ▸ Unclaimed  1    │ Done. fc-4 is blocked…    │ ▸ In Review        0  │ + fn render_invoice(…)                 │
-│                   │                           │ ▸ Done            12  │ − // TODO pdf                          │
-│ verdela           │ ❯ _                       │ ▸ Canceled         0  │                                        │
-└───────────────────┴───────────────────────────┴───────────────────────┴────────────────────────────────────────┘
+┌ Sidebar ──────────┬ ‹ Billing › bil-9 Invoice PDF export ─────────────────────────────────────────┐
+│ ◉ Needs You     3 │● │ bil-9 Invoice PDF export                                   In Progress ▾ │
+│                   │• │ Intent  Customers can download any invoice as a PDF.                     │
+│ overnight         │  │ Acceptance  ◉ renders line items  ○ matches the HTML  ○ under 1 s         │
+│   Main        ●  1│  │ Record  Plan · agent · 2 h ago  …                                        │
+│ ▸ Billing  ●  2   │  ├──────────────────────────────────────────────────────────────────────────┤
+│   Relay   ◌       │  │ ⑂ Worktree fc-3-webhooks  2 terminals      agent · claude  Open Worktree │
+│ ＋ New Workspace… │  │ ❯ writing render_invoice()…                                              │
+│                   │  │ ── Changes  +42 −7 ──────────────────────────────────────────────────── │
+│                   │› │ + fn render_invoice(…)                                                   │
+└───────────────────┴──┴──────────────────────────────────────────────────────────────────────────┘
 ```
 
-(`●` is the orchestrator's status; `◌` means no orchestrator; the number is the workspace's needs-you count;
-`[≡|▦]` is the list/kanban toggle.)
+(The rail's `●` is the orchestrator's status and `•` its needs-you dot; `›` pops it open.)
 
-### 4.4 The task column
+### 4.4 The task view
 
-- **Header:**
-  - the key and title;
-  - a status pop-up that replaces the card's "Move To" menu (`TaskBoard.swift:651`);
-  - the agent, or a picker when several agents are on the task;
-  - **Open Worktree**;
-  - a close button (✕).
+A task drilled into is the task first, whole, and its work beneath. A task need not have a worktree or a
+terminal at all (ov-79).
 
-  A disclosure expands the header into the card: intent, acceptance, the notes timeline, and, in Needs Decision,
-  the question with its **Answer** buttons.
-  - The card starts expanded when the task is in Needs Decision.
-  - This replaces the modal card sheet (`TaskBoard.swift:423`, at least 560×480 at `:855`).
-- **Agent:** the tmux layout holding the agent's terminal, drawn exactly as selecting that terminal draws it
-  today (`ContentView.swift:1815-1823`). This is usually a layout of one pane.
-  - With no live agent, it reads "No agent is working on this task." When the task has a worktree, **Open Worktree**
-    is shown. Otherwise the line is "Nothing has started on this task yet."
-- **Changes:** the worktree's `ChangesPane`, under the agent, with a draggable divider whose position is
-  remembered per window. **Today's Changes view, reused as it is** (ruling 6). Today it's a SwiftUI view,
-  `ChangesPane`, that `TileView` draws in the rectangle of a tmux pane whose preset is `changes`
-  (`TileView.swift:416`; the pane is made by `toggleChangesPane`, `ContentView.swift:1670-1689`). So the diff is
-  drawn natively, and tmux only reserves its space. The cheapest embedding is the same call without the tmux pane:
-  `ChangesPane(changes: changesStore(for: worktree, client:), isFocused:, agents: reviewTargets)`. There's no new
-  renderer and no runner call, and the agent's tmux window keeps its size on every client. See R3.
-- **Which part leads:**
-  - In Review: the changes take the larger share.
-  - Otherwise: the agent does.
+- **Header:** the key and title, and a status pop-up that replaces the card's "Move To" menu.
+- **The task's text,** never collapsed: its blocked line and times, intent, acceptance (each line met or not, as
+  the runner records it; the Mac has no write to tick one), constraints, the record of notes, and, in Needs
+  Decision, the question with its **Answer** buttons. This replaces the modal card sheet.
+- **Its work, beneath a draggable divider** whose place is remembered per window (the text starts at 40%):
+  - a line naming the worktree and its terminal count ("Worktree fc-3-webhooks · 2 terminals"), the agent or a
+    picker when several are on the task, and **Open Worktree**;
+  - the tmux layout holding the agent's terminal, drawn as selecting it draws it;
+  - the worktree's `ChangesPane`, under the agent, with a divider of its own (ruling 6: today's Changes view,
+    reused without a tmux pane, so the agent's window keeps its size on every client; see R3). In Review the
+    changes take the larger share; otherwise the agent does.
+- **With no agent,** the line says "No agent is working on this task.", and the changes fill the work area when
+  the task has a worktree. With neither an agent nor changes to show, the work area is that one line ("Nothing
+  has started on this task yet."), and the text takes the rest. Never a full-height placeholder.
 
-**Open Worktree** replaces the column's contents with the worktree's own layouts: a `TileView` and `GroupBar`,
-the same view `.worktree` draws today. A breadcrumb reads "bil-9 › fc-3-webhooks", and Back (⌃⌘←) goes back
-along it. **Focus Column** (⌃⌘↩) widens the task column over the conversation and board, for tmux work at full size;
-pressing it again restores them.
+**Open Worktree** drills into the worktree, full size, with its own layouts (a `TileView` and `GroupBar`, as a
+worktree opened from the sidebar draws). The breadcrumb reads Workspace › bil-9 … › fc-3-webhooks, and Back goes
+along it.
 
 ### 4.5 The sidebar
 
@@ -595,8 +588,9 @@ filters workspace rows and Worktrees.
 - **⇧⌘B, Show Board:** selects the current workspace and focuses its board column. With nothing selected and one
   repository, it opens Main. The refusal copy "choose a project's Board" (`ContentView.swift:2693`) becomes
   "Select a workspace first."
-- **Focus shortcuts for the three columns:** ⌥⌘1, ⌥⌘2, ⌥⌘3. ⌘digits are taken by terminals.
-- **Back** is ⌃⌘← and **Focus Column** is ⌃⌘↩. The usual chords are taken: ⌘[ is Previous Terminal
+- **Focus shortcuts:** ⌥⌘1 the orchestrator (popped open from its rail when drilled in), ⌥⌘2 the board (going
+  back up to it), ⌥⌘3 the task or worktree opened. ⌘digits are taken by terminals.
+- **Back** is ⌃⌘← and **Focus** is ⌃⌘↩. The usual chords are taken: ⌘[ is Previous Terminal
   (`Commands.swift:136-137`) and ⇧⌘↩ is Zoom Pane (`:170-171`). ⌃⌘←, ⌃⌘↩ and ⌥⌘1–3 are unused in `Commands.swift`
   and aren't in `ShortcutSheetTests.systemChords`. Esc also goes back, but only when no terminal has focus, since a
   terminal needs its Esc.
