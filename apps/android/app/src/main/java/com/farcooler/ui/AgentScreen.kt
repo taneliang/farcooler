@@ -23,6 +23,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Stop
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.outlined.AddPhotoAlternate
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Check
@@ -963,15 +969,21 @@ private fun AgentComposer(
                     ) {
                         Text("Image ${index + 1}", style = MaterialTheme.typography.labelSmall)
                         Spacer(Modifier.width(4.dp))
-                        Icon(
-                            Icons.Filled.Close,
-                            contentDescription = "Remove",
-                            modifier = Modifier
-                                .size(14.dp)
+                        // 48 dp to hit, 14 dp to look at.
+                        Box(
+                            Modifier
+                                .minimumInteractiveComponentSize()
                                 .clickable {
                                     attachments = attachments.filterIndexed { i, _ -> i != index }
                                 },
-                        )
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Outlined.Close,
+                                contentDescription = "Remove",
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -1020,7 +1032,7 @@ private fun AgentComposer(
                 modifier = Modifier.size(32.dp),
             ) {
                 Icon(
-                    Icons.Filled.AddPhotoAlternate,
+                    Icons.Outlined.AddPhotoAlternate,
                     contentDescription = "Attach an image",
                     modifier = Modifier.size(18.dp),
                 )
@@ -1050,7 +1062,7 @@ private fun AgentComposer(
                         modifier = Modifier.size(32.dp),
                     ) {
                         Icon(
-                            Icons.Filled.MoreHoriz,
+                            Icons.Outlined.MoreHoriz,
                             contentDescription = "More settings",
                             modifier = Modifier.size(18.dp),
                         )
@@ -1075,7 +1087,7 @@ private fun AgentComposer(
                                     trailingIcon = {
                                         if (choice.id == option.currentValue) {
                                             Icon(
-                                                Icons.Filled.Check,
+                                                Icons.Outlined.Check,
                                                 contentDescription = "Selected",
                                                 modifier = Modifier.size(16.dp),
                                             )
@@ -1138,7 +1150,7 @@ private fun AgentComposer(
             // unnecessary.
             if (isWorking) {
                 IconButton(onClick = onCancel) {
-                    Icon(Icons.Filled.Stop, contentDescription = "Stop this turn")
+                    Icon(Icons.Outlined.Stop, contentDescription = "Stop this turn")
                 }
             }
 
@@ -1246,6 +1258,7 @@ private fun SelectorChip(option: ConfigOption, onSetConfig: (String, String) -> 
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
+                .minimumInteractiveComponentSize()
                 .clip(RoundedCornerShape(50))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                 .clickable { open = true }

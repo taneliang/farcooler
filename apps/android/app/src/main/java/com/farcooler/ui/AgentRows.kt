@@ -20,10 +20,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.ContentCut
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.outlined.ContentCut
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.PanTool
+import androidx.compose.material.icons.outlined.PanTool
 import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material.icons.outlined.DonutLarge
 import androidx.compose.material3.Button
@@ -407,7 +407,7 @@ private fun GapRow(reason: GapReason) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                if (reason.isInformational) Icons.Filled.Info else Icons.Filled.ContentCut,
+                if (reason.isInformational) Icons.Outlined.Info else Icons.Outlined.ContentCut,
                 contentDescription = null,
                 tint = tint,
                 modifier = Modifier.size(16.dp),
@@ -501,7 +501,7 @@ fun ApprovalCard(pending: PendingPermission, onChoose: (String) -> Unit) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                Icons.Filled.PanTool,
+                Icons.Outlined.PanTool,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onTertiaryContainer,
                 modifier = Modifier.size(16.dp),

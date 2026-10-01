@@ -1,5 +1,6 @@
 package com.farcooler.ui
 
+import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -153,7 +154,12 @@ fun WorkspaceListRow(row: WorkspaceRow, answering: Boolean, onOpen: () -> Unit) 
                         answering = answering,
                     )
                 } else {
-                    Text("◌", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(
+                        Icons.Outlined.Circle,
+                        contentDescription = null,
+                        modifier = Modifier.size(12.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         },

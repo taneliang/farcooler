@@ -50,6 +50,7 @@ import androidx.compose.foundation.background
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.core.CoreException
@@ -482,23 +483,11 @@ private fun Reassurance(
     val silent = runners.count { it.link != RunnerLink.ANSWERING }
     val where = if (connections.size == 1) " on ${connections[0].host.displayLabel}" else ""
 
-    Column(
-        Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 40.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+    EmptyState(
+        title = "Nothing needs you",
+        detail = reassurance(runners, where, worktrees),
+        icon = Icons.Outlined.CheckCircleOutline,
     ) {
-        Icon(
-            Icons.Outlined.CheckCircleOutline,
-            contentDescription = null,
-            modifier = Modifier.size(34.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-        )
-        Text("Nothing needs you", style = MaterialTheme.typography.titleMedium)
-        Text(
-            reassurance(runners, where, worktrees),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
         // Only beside a count. With nothing answering, the line above has
         // already said it can't say, and this would say it twice.
         if (silent > 0 && runners.any { it.link == RunnerLink.ANSWERING }) {
@@ -507,6 +496,7 @@ private fun Reassurance(
                 else "$silent runners haven’t answered, so this isn’t the whole fleet.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
             )
         }
     }

@@ -20,10 +20,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.filled.ContentPaste
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Keyboard
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.outlined.ContentPaste
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Keyboard
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.AlertDialog
@@ -299,13 +299,13 @@ fun TerminalPane(
             }
             Box {
                 IconButton(onClick = { showMenu = true }) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                    Icon(Icons.Outlined.MoreVert, contentDescription = "More")
                 }
                 DropdownMenu(showMenu, onDismissRequest = { showMenu = false }) {
                     if (terminal?.isAgentPane != true) {
                         DropdownMenuItem(
                             text = { Text("Paste") },
-                            leadingIcon = { Icon(Icons.Filled.ContentPaste, null) },
+                            leadingIcon = { Icon(Icons.Outlined.ContentPaste, null) },
                             onClick = {
                                 showMenu = false
                                 scope.launch {
@@ -315,7 +315,7 @@ fun TerminalPane(
                         )
                         DropdownMenuItem(
                             text = { Text("Send image") },
-                            leadingIcon = { Icon(Icons.Filled.Image, null) },
+                            leadingIcon = { Icon(Icons.Outlined.Image, null) },
                             onClick = {
                                 showMenu = false
                                 onPickImage()
@@ -323,7 +323,7 @@ fun TerminalPane(
                         )
                         DropdownMenuItem(
                             text = { Text("Show keyboard") },
-                            leadingIcon = { Icon(Icons.Filled.Keyboard, null) },
+                            leadingIcon = { Icon(Icons.Outlined.Keyboard, null) },
                             onClick = {
                                 showMenu = false
                                 focusRequest += 1

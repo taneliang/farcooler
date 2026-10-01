@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -390,6 +391,7 @@ private fun SectionHeader(header: BoardListEntry.Header, onToggle: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .then(if (header.expandable) Modifier.clickable(onClick = onToggle) else Modifier)
+            .heightIn(min = 48.dp)
             .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp)
             .testTag("board-section-${header.status.wire}")
             .semantics(mergeDescendants = true) {
@@ -443,15 +445,7 @@ private fun boardJump(
 
 @Composable
 private fun Empty(title: String, detail: String) {
-    Column(
-        Modifier.fillMaxSize().padding(32.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(title, style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.size(8.dp))
-        Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
+    EmptyState(title, detail, Modifier.fillMaxSize())
 }
 
 /** One card: key, title, what it asks, how long it has sat, acceptance, and its agent. */
