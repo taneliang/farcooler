@@ -349,7 +349,7 @@ struct WorktreeSection: View {
                             worktree: worktree, onError: onEditorError,
                             showsSettingsItem: false)
                         Divider()
-                        Button("New terminal", action: onNewTerminal)
+                        Button("New Terminal", action: onNewTerminal)
                         if let onShowChanges { Button("Show Changes", action: onShowChanges) }
                         Divider()
                         if worktree.isHidden {
@@ -1007,7 +1007,7 @@ struct TerminalRow: View {
             case nil:
                 EmptyView()
             }
-            Button("Move to its own layout") { onMoveToLayout(nil) }
+            Button("Move to Its Own Layout") { onMoveToLayout(nil) }
                 .disabled(!usable)
             if !layouts.isEmpty {
                 Divider()
@@ -1149,7 +1149,7 @@ struct WorktreeDetail: View {
 
             HStack(spacing: 8) {
                 Button(action: onNewTerminal) {
-                    Label("New terminal", systemImage: "plus")
+                    Label("New Terminal", systemImage: "plus")
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut("t", modifiers: .command)

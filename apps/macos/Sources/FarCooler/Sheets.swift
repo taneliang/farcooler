@@ -394,7 +394,7 @@ struct RemoveRepositorySheet: View {
                     // `String?` — they used to be set into the same line and
                     // drawn identically, which is what made the arm below read
                     // as the app talking.
-                    failure = SheetFailure(sentence: "That did not match — try again.")
+                    failure = SheetFailure(sentence: "That name doesn’t match. Try again.")
                 case .failed(let message):
                     // Anything else the daemon refused over — a repository
                     // still holding worktrees, a root it no longer has. Its
@@ -751,7 +751,7 @@ struct AddRepositorySheet: View {
 
                 if host.isEmpty {
                     HStack(spacing: 10) {
-                        Button("Choose folder…") { choose() }
+                        Button("Choose Folder…") { choose() }
                         if let chosen {
                             Text(chosen.lastPathComponent)
                                 .font(.callout.weight(.medium))

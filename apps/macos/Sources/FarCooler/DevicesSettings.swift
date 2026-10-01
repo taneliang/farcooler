@@ -34,7 +34,7 @@ struct DevicesSettings: View {
                 // adding a runner, which lived as a bare text field under
                 // Runners and is the answer when there is no other device to
                 // scan.
-                Button("Add…") { adding = true }
+                Button("Add Device or Runner…") { adding = true }
             } header: {
                 Text("Devices")
             } footer: {

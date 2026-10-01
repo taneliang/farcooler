@@ -717,7 +717,7 @@ struct QueuedRow: View {
 
                 HStack(spacing: 8) {
                     Text("Queued")
-                    Button("Send now", action: onSteer)
+                    Button("Send Now", action: onSteer)
                         .buttonStyle(.plain)
                     Button(editing ? "Save" : "Edit") {
                         if editing {

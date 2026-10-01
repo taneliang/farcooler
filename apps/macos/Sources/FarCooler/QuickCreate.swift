@@ -241,7 +241,7 @@ struct QuickCreate: View {
                 Text("Started \(created)").foregroundStyle(.secondary)
             } else if text.isEmpty {
                 Button(action: onResume) {
-                    Label("Resume a branch", systemImage: "arrow.uturn.backward")
+                    Label("Resume Branch…", systemImage: "arrow.uturn.backward")
                         .font(.system(size: 11))
                 }
                 .buttonStyle(.plain)
@@ -286,7 +286,7 @@ struct QuickCreate: View {
             .onChange(of: agent) { _, _ in model = "" }
 
             Picker("", selection: $model) {
-                Text("Default model").tag("")
+                Text("Default Model").tag("")
                 ForEach(Agents.agent(agent).models, id: \.self) { Text($0).tag($0) }
             }
             .labelsHidden().fixedSize().controlSize(.small)

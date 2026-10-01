@@ -168,7 +168,7 @@ struct RunnerSettingsSheet: View {
                     // that on a Mac tells you this is a destination when it is
                     // an action on the row you are standing in. Nine buttons in
                     // Settings claimed to be links; not one of them was.
-                    Button("Edit") { editingTheme = row.theme }
+                    Button("Edit…") { editingTheme = row.theme }
                         .buttonStyle(.borderless)
                     // Only what the file owns can be removed. A built-in has no
                     // table to delete, so offering it would be a button that
@@ -190,7 +190,7 @@ struct RunnerSettingsSheet: View {
                 copy.name = Self.unusedName(like: copy.name, taken: Set(allThemes.map(\.theme.name)))
                 editingTheme = copy
             } label: {
-                Label("Duplicate the Current Theme", systemImage: "plus")
+                Label("Duplicate Current Theme…", systemImage: "plus")
             }
             .buttonStyle(.borderless)
         } header: {
@@ -236,7 +236,7 @@ struct RunnerSettingsSheet: View {
                             .truncationMode(.middle)
                     }
                     Spacer()
-                    Button("Edit") { editingAdapter = adapter }
+                    Button("Edit…") { editingAdapter = adapter }
                         .buttonStyle(.borderless)
                     if adapter.origin == .override || adapter.origin == .user {
                         Button(adapter.origin == .override ? "Revert to Default" : "Delete") {
@@ -257,7 +257,7 @@ struct RunnerSettingsSheet: View {
                 }
                 editingAdapter = AdapterInfo(preset: name)
             } label: {
-                Label("Add an Agent", systemImage: "plus")
+                Label("Add Agent…", systemImage: "plus")
             }
             .buttonStyle(.borderless)
         } header: {

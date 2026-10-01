@@ -19,7 +19,7 @@ final class Reachability {
     var onShouldRetry: (() -> Void)?
 
     /// The same signal wake and network-regain send, for a person asking for
-    /// it directly — the Settings window's own "Reconnect all".
+    /// it directly — the Settings window's own "Reconnect All".
     ///
     /// Goes through `onShouldRetry` rather than a second, parallel path to
     /// `FleetStore`, because `HostsSettings` lives in a separate `Settings`

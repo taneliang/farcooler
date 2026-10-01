@@ -148,7 +148,7 @@ struct ShortcutsSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Keyboard shortcuts").font(.title2.weight(.semibold))
+            Text("Keyboard Shortcuts").font(.title2.weight(.semibold))
             .padding(.horizontal, 22)
             .padding(.top, 20)
             .padding(.bottom, 14)

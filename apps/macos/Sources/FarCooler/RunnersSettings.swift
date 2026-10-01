@@ -52,7 +52,7 @@ struct RunnersSettings: View {
                     // them at once — the escape hatch for "I fixed the VPN"
                     // without waiting out however many backoffs are
                     // currently ticking down, or clicking each dot in turn.
-                    Button("Reconnect all") { Reachability.shared.retryNow() }
+                    Button("Reconnect All") { Reachability.shared.retryNow() }
                         .font(.caption)
                         .buttonStyle(.borderless)
                 }
@@ -173,8 +173,8 @@ struct RunnersSettings: View {
             // route — being local buys it no special path.
             settingsButton(name: "This Mac", target: "")
             Menu {
-                Button("Notify me from this runner") { Task { await pair("") } }
-                Button("Stop notifications from this runner") { Task { await unpair("") } }
+                Button("Notify Me from This Runner") { Task { await pair("") } }
+                Button("Stop Notifications from This Runner") { Task { await unpair("") } }
             } label: {
                 Image(systemName: "bell")
             }
@@ -254,12 +254,12 @@ struct RunnersSettings: View {
             }
 
             Menu {
-                Button("Check again") { Task { await probe(runner.target) } }
+                Button("Check Again") { Task { await probe(runner.target) } }
                 Section {
-                    Button("Notify me from this runner") {
+                    Button("Notify Me from This Runner") {
                         Task { await pair(runner.target) }
                     }
-                    Button("Stop notifications from this runner") {
+                    Button("Stop Notifications from This Runner") {
                         Task { await unpair(runner.target) }
                     }
                 }

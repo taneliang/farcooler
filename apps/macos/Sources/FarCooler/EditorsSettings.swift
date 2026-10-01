@@ -82,7 +82,7 @@ struct EditorsSettings: View {
                     .foregroundStyle(.green)
                     .help("Opens when you click the button")
             } else {
-                Button("Make default") { editors.remember(editor) }
+                Button("Make Default") { editors.remember(editor) }
             }
 
             if editor.id.hasPrefix("custom:") {

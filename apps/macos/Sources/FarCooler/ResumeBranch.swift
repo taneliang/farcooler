@@ -181,7 +181,7 @@ struct ResumeBranch: View {
     private var header: some View {
         VStack(spacing: 9) {
             HStack {
-                Text("Resume a branch").font(.headline)
+                Text("Resume Branch").font(.title2.weight(.semibold))
                 Spacer()
                 if projects.count > 1 {
                     Picker("", selection: $project) {
@@ -244,7 +244,7 @@ struct ResumeBranch: View {
             .onChange(of: agent) { _, _ in model = "" }
 
             Picker("", selection: $model) {
-                Text("Default model").tag("")
+                Text("Default Model").tag("")
                 ForEach(Agents.agent(agent).models, id: \.self) { Text($0).tag($0) }
             }
             .labelsHidden().fixedSize().controlSize(.small)
