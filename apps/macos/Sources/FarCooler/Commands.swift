@@ -34,7 +34,8 @@ enum AppCommand: String {
     /// Back along a workspace: from an opened worktree to its task, from a
     /// task to the workspace (spec §4.9).
     case back
-    /// Widen the third column over the other two, or put them back.
+    /// Focus: a task's or worktree's terminals alone, at full size, or the
+    /// rest put back.
     case focusColumn
     case focusConversation
     case focusBoard
@@ -313,13 +314,13 @@ struct FarCoolerCommands: Commands {
                     .keyboardShortcut("0", modifiers: .command)
             }
 
-            // A workspace's columns. ⌃⌘ and ⌥⌘ because the usual chords are
+            // A workspace's levels and panes. ⌃⌘ and ⌥⌘ because the usual chords are
             // taken: ⌘[ is Previous Terminal, ⇧⌘↩ is Zoom Pane, and ⌘digits
             // are the terminals (spec §4.9).
             CommandMenu("Workspace") {
                 Button("Back") { AppCommand.back.post() }
                     .keyboardShortcut(.leftArrow, modifiers: [.command, .control])
-                Button("Focus Column") { AppCommand.focusColumn.post() }
+                Button("Focus") { AppCommand.focusColumn.post() }
                     .keyboardShortcut(.return, modifiers: [.command, .control])
                 Divider()
                 Button("Orchestrator") { AppCommand.focusConversation.post() }

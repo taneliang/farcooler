@@ -4,8 +4,8 @@ import Foundation
 // What the window is showing, now that a workspace is a place (spec §4.2).
 //
 // The sidebar lists workspaces, and selecting one shows its orchestrator's
-// conversation beside its board; a task, or one of its worktrees, opens in a
-// third column. So a selection names a workspace and what's focused in it,
+// conversation beside its board; a task, or one of its worktrees, drills in,
+// taking the detail. So a selection names a workspace and what's focused in it,
 // and a worktree is a place only when no workspace owns it.
 //
 // Worked out here, as values, so the rules are the ones
@@ -24,7 +24,7 @@ extension ContentView {
         /// Everything waiting on you, from every workspace (spec §4.6).
         case needsYou
         /// A workspace: its orchestrator's conversation beside its board,
-        /// and `focus` in a third column. On a runner without `workstreams`
+        /// or `focus`, drilled into. On a runner without `workstreams`
         /// the workspace is a repository's implicit one, whose id is the
         /// repository's (`WorkspaceSummary.implicit`).
         case workspace(host: String, workspace: String, focus: Focus?)
@@ -48,21 +48,22 @@ extension ContentView {
             return nil
         }
 
-        /// What the third column shows, or nil for none.
+        /// The task or worktree drilled into, or nil at the workspace's own
+        /// level.
         var focus: Focus? {
             if case .workspace(_, _, let focus) = self { return focus }
             return nil
         }
 
-        /// The same selection with its third column closed: what Back and
-        /// the column's ✕ go to.
+        /// The same selection at the workspace's own level: where Back goes
+        /// from a task, and the breadcrumb's first step.
         var closed: Selection {
             if case .workspace(let host, let id, _) = self { return .workspace(host: host, workspace: id, focus: nil) }
             return self
         }
     }
 
-    /// What a workspace's third column is showing.
+    /// What a workspace has drilled into.
     enum Focus: Hashable {
         /// A task, by its id: its card, its agent and its changes (spec §4.4).
         case task(String)
@@ -211,8 +212,8 @@ extension ContentView {
     }
 
     /// Where choosing `worktree`, or a terminal in it, from its row goes: the
-    /// third column of the workspace that owns it, or the worktree alone when
-    /// none does. Never a task's column: the row was the worktree's.
+    /// workspace that owns it, drilled into, or the worktree alone when none
+    /// does. Never its task: the row was the worktree's.
     nonisolated static func opening(_ worktree: Worktree, terminal: String?, in fleet: Fleet) -> Selection {
         let host = worktree.host ?? ""
         guard let owner = WorkspaceSelection.owner(of: worktree, in: fleet) else {

@@ -6,7 +6,7 @@ import Testing
 
 @testable import Far_Cooler
 
-/// A workspace's task column (spec §4.4).
+/// A task, drilled into (spec §4.4).
 @MainActor
 struct TaskColumnTests {
     private static func row(_ status: TaskStatus, worktree: String? = nil) -> TaskRow {
@@ -25,9 +25,56 @@ struct TaskColumnTests {
         #expect(TaskColumnModel.agentShare(status: .needsDecision, stored: nil) > 0.5)
         #expect(TaskColumnModel.agentShare(status: .inReview, stored: 0.6) == 0.6)
         #expect(TaskColumnModel.agentShare(status: .inReview, stored: 0.99) == 1 - TaskColumnModel.minimumShare)
-        // And the card starts open where its question is.
-        #expect(TaskColumnModel.startsExpanded(.needsDecision))
-        #expect(!TaskColumnModel.startsExpanded(.inReview))
+    }
+
+    /// The task's own text leads: it's never collapsed, and with no agent
+    /// and no changes to show, what's beneath it is one line, never a
+    /// placeholder the height of the view (ov-79). The text's share is 40%
+    /// until its divider is dragged, and never past the edge.
+    @Test("With nothing working on a task, the space beneath its text is one line")
+    func withNothingWorkingOnATaskTheSpaceBeneathItsTextIsOneLine() {
+        let nothing = TaskColumnModel.work(.none(openWorktree: false), showsChanges: false)
+        let noChanges = TaskColumnModel.work(.none(openWorktree: true), showsChanges: false)
+        let changes = TaskColumnModel.work(.none(openWorktree: true), showsChanges: true)
+        let live = TaskColumnModel.work(.live, showsChanges: false)
+        #expect(nothing == .compact)
+        #expect(noChanges == .compact)
+        #expect(changes == .full)
+        #expect(live == .full)
+        #expect(TaskColumnModel.contentShare(stored: nil) == 0.4)
+        #expect(TaskColumnModel.contentShare(stored: 0.7) == 0.7)
+        #expect(TaskColumnModel.contentShare(stored: 0.01) == TaskColumnModel.minimumShare)
+        #expect(TaskColumnModel.terminalCount(0) == "No terminals")
+        #expect(TaskColumnModel.terminalCount(1) == "1 terminal")
+        #expect(TaskColumnModel.terminalCount(2) == "2 terminals")
+    }
+
+    /// The breadcrumb names each level down to the one you're at, and each
+    /// above it goes back there: Workspace › Task, Workspace › Task ›
+    /// Worktree for a worktree opened from its task, Workspace › Worktree
+    /// for one opened from the sidebar. Nothing at the workspace's own level.
+    @Test("The breadcrumb leads back up each level")
+    func theBreadcrumbLeadsBackUpEachLevel() {
+        let top = ContentView.Selection.workspace(host: "", workspace: "ws", focus: nil)
+        let task = ContentView.Selection.workspace(host: "", workspace: "ws", focus: .task("t-9"))
+        let lane = ContentView.Selection.workspace(host: "", workspace: "ws", focus: .worktree("w-3", terminal: "s"))
+        func crumbs(_ selection: ContentView.Selection, trail: ContentView.Selection?) -> [WorkspaceNavigation.Crumb] {
+            WorkspaceNavigation.crumbs(
+                selection, trail: trail, workspace: "Main", task: { "bil-9 \($0)" }, worktree: { "wt \($0)" })
+        }
+        typealias Crumb = WorkspaceNavigation.Crumb
+        let atTask = crumbs(task, trail: nil)
+        let fromTask = crumbs(lane, trail: task)
+        let fromSidebar = crumbs(lane, trail: nil)
+        let atTop = crumbs(top, trail: nil)
+        #expect(atTask == [Crumb(title: "Main", target: top), Crumb(title: "bil-9 t-9", target: nil)])
+        #expect(
+            fromTask == [
+                Crumb(title: "Main", target: top), Crumb(title: "bil-9 t-9", target: task),
+                Crumb(title: "wt w-3", target: nil),
+            ])
+        #expect(fromSidebar == [Crumb(title: "Main", target: top), Crumb(title: "wt w-3", target: nil)])
+        #expect(atTop.isEmpty)
     }
 
     /// A task in review with no live agent can still reach its changes: its
@@ -89,10 +136,10 @@ struct TaskColumnTests {
         #expect(toolbar.calls.contains { $0.starts(with: ["layout", "split"]) && $0.contains("changes") }, "\(toolbar.calls)")
     }
 
-    /// Open Worktree puts the worktree whole in the third column, its own
+    /// Open Worktree drills from a task into its worktree, whole, its own
     /// layouts in the bar, and Back returns to the task it came from. From
-    /// its row under the workspace, with no task behind it, Back closes the
-    /// column.
+    /// its row under the workspace, with no task behind it, Back goes up to
+    /// the workspace.
     @Test("Open Worktree shows the worktree's own layouts, and Back returns to the task")
     func openWorktreeShowsTheWorktreesOwnLayoutsAndBackReturnsToTheTask() {
         let task = ContentView.Selection.workspace(host: "", workspace: "ws", focus: .task("t-9"))

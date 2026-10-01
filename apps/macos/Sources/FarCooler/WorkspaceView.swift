@@ -1,37 +1,39 @@
 import SwiftUI
 
-/// A workspace in the detail: its orchestrator's conversation beside its
-/// board, and a task (or a worktree opened whole) in a third column
-/// (spec §4.3).
+/// A workspace in the detail, at one of two levels (spec §4.3): its
+/// orchestrator's conversation beside its board, or, drilled into a task or
+/// a worktree, that alone with the conversation shrunk to a rail beside it.
 ///
-/// Which columns are drawn is `WorkspaceColumns.layout`'s answer for the
-/// detail's own width, measured here and never read from the window, which
-/// the detail shares with the sidebar. The columns' contents are the
-/// window's: each is handed in whole, so this view decides where things go
-/// and nothing about what they are.
-struct WorkspaceView<Conversation: View, Rail: View, Board: View, Third: View>: View {
-    /// Whether the third column is open.
-    let taskOpen: Bool
+/// Which is drawn is `WorkspaceColumns.layout`'s answer for the detail's own
+/// width, measured here and never read from the window, which the detail
+/// shares with the sidebar. The contents are the window's: each is handed in
+/// whole, so this view decides where things go and nothing about what they
+/// are.
+struct WorkspaceView<Conversation: View, Rail: View, Board: View, Drilled: View>: View {
+    /// Whether a task or a worktree is open: the drilled level.
+    let drilled: Bool
     /// Whether this workspace has a conversation column at all: not a
     /// repository's implicit workspace on a runner without `workstreams`.
     let hasConversation: Bool
     /// The terminal font's cell width: the minimums are in columns.
     let cell: CGFloat
-    /// Focus Column (⌃⌘↩): the third column over the other two.
+    /// Focus (⌃⌘↩): what's opened alone, without the rail.
     let focused: Bool
+    /// The conversation popped open over what's opened.
+    let peek: Bool
     /// Which column the one-column form shows.
     @Binding var pick: WorkspacePick
     @ViewBuilder let conversation: () -> Conversation
     @ViewBuilder let rail: () -> Rail
     @ViewBuilder let board: () -> Board
-    @ViewBuilder let third: () -> Third
+    @ViewBuilder let opened: () -> Drilled
 
     var body: some View {
         GeometryReader { proxy in
             let arrangement = WorkspaceColumns.layout(
-                width: proxy.size.width, taskOpen: taskOpen, cell: cell, hasConversation: hasConversation,
-                focused: focused)
-            columns(arrangement)
+                width: proxy.size.width, drilled: drilled, cell: cell, hasConversation: hasConversation,
+                focused: focused, peek: peek)
+            columns(arrangement, width: proxy.size.width)
                 .frame(width: proxy.size.width, height: proxy.size.height)
                 .preference(key: WorkspaceArrangementPreference.self, value: arrangement)
                 .preference(key: WorkspaceWidthPreference.self, value: proxy.size.width)
@@ -39,8 +41,38 @@ struct WorkspaceView<Conversation: View, Rail: View, Board: View, Third: View>: 
     }
 
     @ViewBuilder
-    private func columns(_ arrangement: WorkspaceColumns.Arrangement) -> some View {
-        if arrangement.switcher {
+    private func columns(_ arrangement: WorkspaceColumns.Arrangement, width: CGFloat) -> some View {
+        if arrangement.drilled {
+            HStack(spacing: 0) {
+                if arrangement.conversation != .none {
+                    rail()
+                        .frame(width: WorkspaceColumns.rail)
+                        .frame(maxHeight: .infinity)
+                    Divider()
+                }
+                // Over what's opened, never beside it: popping the
+                // conversation open doesn't resize a task's terminals, or
+                // their tmux windows for every other client.
+                opened()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .leading) {
+                        if arrangement.conversation == .peek {
+                            HStack(spacing: 0) {
+                                conversation()
+                                    .frame(width: WorkspaceColumns.peekWidth(in: width, cell: cell))
+                                    .frame(maxHeight: .infinity)
+                                    .background(WorkspaceStyle.canvas)
+                                Divider()
+                            }
+                            .compositingGroup()
+                            .shadow(color: .black.opacity(0.18), radius: 8, x: 2)
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                            .accessibilityIdentifier("workspace-conversation-peek")
+                        }
+                    }
+                    .accessibilityIdentifier("workspace-opened")
+            }
+        } else if arrangement.switcher {
             VStack(spacing: 0) {
                 Picker("Show", selection: $pick) {
                     ForEach(WorkspacePick.allCases) { Text($0.title).tag($0) }
@@ -59,45 +91,65 @@ struct WorkspaceView<Conversation: View, Rail: View, Board: View, Third: View>: 
             }
             .accessibilityIdentifier("workspace-one-column")
         } else {
-            HStack(spacing: 0) {
-                if arrangement.conversation == .rail {
-                    rail()
-                        .frame(width: WorkspaceColumns.rail)
-                        .frame(maxHeight: .infinity)
-                    Divider()
+            HSplitView {
+                if arrangement.conversation == .column {
+                    conversation()
+                        .frame(
+                            minWidth: WorkspaceColumns.conversationMinimum(cell: cell),
+                            maxWidth: .infinity, maxHeight: .infinity)
+                        .layoutPriority(1)
+                        .accessibilityIdentifier("workspace-conversation")
                 }
-                HSplitView {
-                    if arrangement.conversation == .column {
-                        conversation()
-                            .frame(
-                                minWidth: WorkspaceColumns.conversationMinimum(cell: cell),
-                                idealWidth: arrangement.task ? WorkspaceColumns.conversationMinimum(cell: cell) : nil,
-                                maxWidth: .infinity, maxHeight: .infinity)
-                            // It fills while nothing is open beside it; with a
-                            // task open, the task does.
-                            .layoutPriority(arrangement.task ? 0 : 1)
-                            .accessibilityIdentifier("workspace-conversation")
-                    }
-                    if arrangement.board {
-                        board()
-                            .frame(
-                                minWidth: WorkspaceColumns.boardMinimum,
-                                idealWidth: WorkspaceColumns.boardIdeal,
-                                maxWidth: arrangement.conversation == .none && !arrangement.task ? .infinity : nil,
-                                maxHeight: .infinity)
-                            .accessibilityIdentifier("workspace-board")
-                    }
-                    if arrangement.task {
-                        third()
-                            .frame(
-                                minWidth: arrangement == .taskAlone ? nil : WorkspaceColumns.taskMinimum(cell: cell),
-                                maxWidth: .infinity, maxHeight: .infinity)
-                            .layoutPriority(1)
-                            .accessibilityIdentifier("workspace-task")
-                    }
-                }
+                board()
+                    .frame(
+                        minWidth: WorkspaceColumns.boardMinimum,
+                        idealWidth: WorkspaceColumns.boardIdeal,
+                        maxWidth: arrangement.conversation == .none ? .infinity : nil,
+                        maxHeight: .infinity)
+                    .accessibilityIdentifier("workspace-board")
             }
         }
+    }
+}
+
+/// The breadcrumb over a task or a worktree opened: Back, then each level up
+/// to the one you're at, every one but that a way back to it.
+struct DrillBreadcrumb: View {
+    let crumbs: [WorkspaceNavigation.Crumb]
+    var onGo: (ContentView.Selection) -> Void
+    var onBack: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button(action: onBack) {
+                Image(systemName: "chevron.left")
+            }
+            .buttonStyle(.borderless)
+            .help("Back (⌃⌘←)")
+            .accessibilityLabel("Back")
+            ForEach(Array(crumbs.enumerated()), id: \.offset) { index, crumb in
+                if index > 0 { Text("›").foregroundStyle(.tertiary) }
+                if let target = crumb.target {
+                    Button(crumb.title) { onGo(target) }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .help("Go to \(crumb.title)")
+                } else {
+                    Text(crumb.title)
+                        .fontWeight(.semibold)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 12))
+        .padding(.horizontal, 12)
+        .frame(height: 30)
+        .background(WorkspaceStyle.canvas)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Breadcrumb")
     }
 }
 

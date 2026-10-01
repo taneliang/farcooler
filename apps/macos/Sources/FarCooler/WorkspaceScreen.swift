@@ -4,7 +4,8 @@ import Foundation
 // Which panes the detail puts on screen for a selection, column by column.
 //
 // A workspace shows up to two tmux layouts at once: its orchestrator's, in the
-// conversation column, and a task's agent or an opened worktree in the third.
+// conversation column or popped open over what's opened, and a task's agent or
+// an opened worktree, drilled into.
 // Everything that asks "what is on screen" asks this, so the layout commands,
 // ⌘] and ⌘[, "seen", and the drawing itself can't come to disagree about it:
 // the one mistake worse than not marking a pane seen is marking one that isn't
@@ -144,11 +145,11 @@ enum WorkspaceScreen {
     }
 
     /// The worktree the toolbar's Changes acts on for `selection` (ov-78):
-    /// the worktree opened whole, in the third column or on its own, whether
+    /// the worktree opened whole, drilled into or on its own, whether
     /// or not it has a terminal; with none opened, the main checkout the
-    /// workspace's orchestrator runs in, whose changes open in the third
-    /// column, never in the orchestrator's window. None with a task open,
-    /// whose column shows its changes already (spec R3), or with no
+    /// workspace's orchestrator runs in, whose changes open in it, drilled
+    /// into, never in the orchestrator's window. None with a task open,
+    /// whose view shows its changes already (spec R3), or with no
     /// orchestrator seated.
     static func changesTarget(
         _ selection: ContentView.Selection?, in fleet: Fleet, repositories: [String] = []
@@ -220,7 +221,7 @@ enum WorkspaceScreen {
     /// Every layout the detail draws for `selection`, conversation first.
     ///
     /// `layouts` answers a worktree's layouts on its runner, nil before the
-    /// first read; `chosen` is the agent picked in a task column's picker.
+    /// first read; `chosen` is the agent picked in a task's agent picker.
     static func shown(
         _ selection: ContentView.Selection?, in fleet: Fleet,
         layouts: (_ host: String, _ worktree: String) -> [PaneGroup]?,
@@ -309,14 +310,15 @@ enum WorkspaceScreen {
     }
 
     /// Of `shown`, the layouts a workspace actually draws in `arrangement`:
-    /// the conversation only in a column of its own, and in the one-column
-    /// form only while Orchestrator is picked; the third column only when
-    /// it's drawn. Nothing while the detail hasn't been measured yet
-    /// (`arrangement` nil).
+    /// the conversation in a column of its own (in the one-column form only
+    /// while Orchestrator is picked) or popped open over what's opened, and
+    /// what's opened only when drilled in. Nothing while the detail hasn't
+    /// been measured yet (`arrangement` nil).
     ///
     /// What "on screen" means for seen marks, the watching claim and the
-    /// keyboard: a railed or hidden orchestrator marked seen would lose the
-    /// notification it was about to send, for a pane nobody can see.
+    /// keyboard: an orchestrator shrunk to its rail or hidden, marked seen,
+    /// would lose the notification it was about to send, for a pane nobody
+    /// can see.
     static func visible(
         _ shown: [ShownLayout], arrangement: WorkspaceColumns.Arrangement?, pick: WorkspacePick
     ) -> [ShownLayout] {
@@ -324,9 +326,13 @@ enum WorkspaceScreen {
         return shown.filter { layout in
             switch layout.column {
             case .conversation:
-                return arrangement.conversation == .column && (!arrangement.switcher || pick == .orchestrator)
+                switch arrangement.conversation {
+                case .column: return !arrangement.switcher || pick == .orchestrator
+                case .peek: return true
+                case .rail, .none: return false
+                }
             case .task, .worktree:
-                return arrangement.task
+                return arrangement.drilled
             }
         }
     }
@@ -337,8 +343,8 @@ enum WorkspaceScreen {
     ///
     /// A pane in the conversation leaves the selection as it is, even with
     /// the main checkout open whole beside it, where the orchestrator runs:
-    /// naming it there would draw the orchestrator's window in the third
-    /// column too. A pane in a worktree opened whole names it, so its row
+    /// naming it there would draw the orchestrator's window in the opened
+    /// checkout too. A pane in a worktree opened whole names it, so its row
     /// lights, staying in the workspace it was opened from.
     static func focusing(
         _ pane: PaneRef, selection: ContentView.Selection?, shown: [ShownLayout], fleet: Fleet
@@ -382,11 +388,11 @@ enum WorkspaceScreen {
     }
 
     /// The pane the keyboard acts on: `key`, the pane last clicked or
-    /// focused, while it's on screen; else the third column's focused pane,
-    /// else the conversation's.
+    /// focused, while it's on screen; else the focused pane of the task or
+    /// worktree opened, else the conversation's.
     ///
     /// Picked from what's shown so ⌃B, ⌘W and ⌘] act on a pane you can see.
-    /// The third column leads when there is one, because opening a task or a
+    /// What's opened leads when there is one, because opening a task or a
     /// worktree is going there.
     static func keyPane(_ key: PaneRef?, in shown: [ShownLayout], selection: ContentView.Selection?) -> PaneRef? {
         if let key, shown.contains(where: { $0.contains(key) }) { return key }

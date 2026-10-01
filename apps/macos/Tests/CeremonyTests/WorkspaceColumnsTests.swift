@@ -5,72 +5,66 @@ import Testing
 
 @testable import Far_Cooler
 
-/// The workspace's columns at the widths 2A measured (spec §4.3). The detail
-/// is the window less a 248 pt sidebar: 1222 pt at a full-screen 1470, 1192 at
+/// A workspace's levels at the widths 2A measured (spec §4.3). The detail is
+/// the window less a 248 pt sidebar: 1222 pt at a full-screen 1470, 1192 at
 /// 1440, and 1032 in a 1280 pt window.
 struct WorkspaceColumnsTests {
     private typealias Columns = WorkspaceColumns
 
-    /// Each minimum is the narrowest width holding its columns: one point
-    /// less loses one. That's 48 columns for the conversation and 58 for the
-    /// task at the default font.
-    @Test("The minimums hold their measured columns and no more")
-    func theMinimumsHoldTheirMeasuredColumns() {
+    /// The conversation's minimum is the narrowest width holding its
+    /// columns: one point less loses one. That's 48 at the default font.
+    @Test("The conversation's minimum holds its measured columns and no more")
+    func theMinimumHoldsItsMeasuredColumns() {
         func columns(_ width: CGFloat) -> Int { Int((width - Columns.chrome) / Columns.defaultCell) }
         #expect(columns(Columns.conversationMinimum()) == 48)
         #expect(columns(Columns.conversationMinimum() - 1) == 47)
-        #expect(columns(Columns.taskMinimum()) == 58)
-        #expect(columns(Columns.taskMinimum() - 1) == 57)
-        #expect(Columns.taskMinimum() == 489)
-        // At 13 pt they're 426 and 507, and three no longer fit at 1440.
+        // At 13 pt it's 426.
         let thirteen: CGFloat = 8.0361328125
         #expect(Columns.conversationMinimum(cell: thirteen) == 426)
-        #expect(Columns.taskMinimum(cell: thirteen) == 507)
-        #expect(Columns.layout(width: 1192, taskOpen: true, cell: thirteen) == .railed)
+        let two = Columns.conversationMinimum(cell: thirteen) + Columns.boardMinimum + 1
+        #expect(Columns.layout(width: two, drilled: false, cell: thirteen) == .two)
+        #expect(Columns.layout(width: two - 1, drilled: false, cell: thirteen) == .one)
     }
 
-    @Test("All three fit at the measured full-screen 13-inch width")
-    func allThreeFitAtTheMeasuredFullScreenWidth() {
-        #expect(Columns.layout(width: 1222, taskOpen: true) == .all)
-        #expect(Columns.layout(width: 1192, taskOpen: true) == .all)
-        // Hiding the sidebar in a 1280 pt window.
-        #expect(Columns.layout(width: 1280, taskOpen: true) == .all)
-    }
-
-    /// And a 1280 pt window with its sidebar has the conversation and the
-    /// board until a task opens. Focus Column puts the task over both.
-    @Test("Below it, opening a task collapses the conversation to its rail")
-    func belowItOpeningATaskCollapsesTheConversationToItsRail() {
-        #expect(Columns.layout(width: 1032, taskOpen: false) == .two)
-        #expect(Columns.layout(width: 1032, taskOpen: true) == .railed)
-        let three = Columns.conversationMinimum() + Columns.boardMinimum + Columns.taskMinimum() + 2
-        #expect(Columns.layout(width: three, taskOpen: true) == .all)
-        #expect(Columns.layout(width: three - 1, taskOpen: true) == .railed)
-        let railed = Columns.rail + Columns.boardMinimum + Columns.taskMinimum() + 2
-        #expect(Columns.layout(width: railed, taskOpen: true) == .railed)
-        #expect(Columns.layout(width: railed - 1, taskOpen: true) == .taskAlone)
-        #expect(Columns.layout(width: 1222, taskOpen: true, focused: true) == .taskAlone)
+    /// Never four columns (ov-79): a task or a worktree opened takes the
+    /// detail at every width, from the measured full screen down to the
+    /// window's 600 pt minimum, where the detail is 352 pt, with the
+    /// conversation a rail beside it and the board out of sight.
+    @Test("Opening a task drills in at every width, with the conversation as a rail")
+    func openingATaskDrillsInAtEveryWidth() {
+        for width: CGFloat in [1600, 1222, 1192, 1032, 807, 600, 352] {
+            let drilled = Columns.layout(width: width, drilled: true)
+            #expect(drilled == .drilledIn, "at \(width)")
+            #expect(!drilled.board && drilled.drilled && drilled.conversation == .rail)
+        }
+        #expect(Columns.layout(width: 1032, drilled: true, peek: true) == .peeked)
+        // Focus is what's opened alone, without the rail, popped open or not.
+        #expect(Columns.layout(width: 1222, drilled: true, focused: true) == .drilledAlone)
+        #expect(Columns.layout(width: 1222, drilled: true, focused: true, peek: true) == .drilledAlone)
+        // The popped-open conversation is its minimum, or what the rail leaves.
+        #expect(Columns.peekWidth(in: 1032) == Columns.conversationMinimum())
+        #expect(Columns.peekWidth(in: 300) == 300 - Columns.rail - Columns.divider)
     }
 
     /// Down to the window's 600 pt minimum, where the detail is 352 pt.
     @Test("Below the two-column minimum it's one column with Orchestrator | Board")
     func belowTheTwoColumnMinimumItsOneColumn() {
         let two = Columns.conversationMinimum() + Columns.boardMinimum + 1
-        #expect(Columns.layout(width: two, taskOpen: false) == .two)
-        #expect(Columns.layout(width: two - 1, taskOpen: false) == .one)
-        #expect(Columns.layout(width: 352, taskOpen: false).switcher)
+        #expect(Columns.layout(width: 1032, drilled: false) == .two)
+        #expect(Columns.layout(width: two, drilled: false) == .two)
+        #expect(Columns.layout(width: two - 1, drilled: false) == .one)
+        #expect(Columns.layout(width: 352, drilled: false).switcher)
         // A workspace with no conversation, on a runner without workstreams:
-        // the board, then the task beside it, or alone.
-        let implicit = Columns.layout(width: 352, taskOpen: false, hasConversation: false)
-        #expect(implicit.board && !implicit.switcher && implicit.conversation == .none)
-        #expect(Columns.layout(width: 1000, taskOpen: true, hasConversation: false).board)
-        #expect(Columns.layout(width: 700, taskOpen: true, hasConversation: false) == .taskAlone)
+        // the board, or what's opened, alone.
+        #expect(Columns.layout(width: 352, drilled: false, hasConversation: false) == .boardAlone)
+        #expect(Columns.layout(width: 1000, drilled: true, hasConversation: false) == .drilledAlone)
+        #expect(Columns.layout(width: 1000, drilled: true, hasConversation: false, peek: true) == .drilledAlone)
     }
 
-    /// The drawn view, hosted in a detail 1032 pt wide inside a 1600 pt
-    /// window: it lays out by its own width, so a task collapses the
-    /// conversation to its rail. A view that read the window would draw all
-    /// three and clip.
+    /// The drawn view, hosted in a detail 600 pt wide inside a 1600 pt
+    /// window: it lays out by its own width, so the workspace level is one
+    /// column with Orchestrator | Board. A view that read the window would
+    /// draw both and clip. Drilled in, it's a rail and what's opened.
     @MainActor
     @Test("The workspace lays out by its own width, not the window's")
     func theWorkspaceLaysOutByItsOwnWidth() async {
@@ -78,23 +72,23 @@ struct WorkspaceColumnsTests {
         let seen = Seen()
         struct Hosted: View {
             let seen: Seen
-            let taskOpen: Bool
+            let drilled: Bool
             var body: some View {
                 WorkspaceView(
-                    taskOpen: taskOpen, hasConversation: true, cell: WorkspaceColumns.defaultCell, focused: false,
-                    pick: .constant(.orchestrator),
+                    drilled: drilled, hasConversation: true, cell: WorkspaceColumns.defaultCell, focused: false,
+                    peek: false, pick: .constant(.orchestrator),
                     conversation: { Color.clear }, rail: { Color.clear }, board: { Color.clear },
-                    third: { Color.clear })
-                .frame(width: 1032, height: 400)
+                    opened: { Color.clear })
+                .frame(width: 600, height: 400)
                 .frame(width: 1600, height: 400, alignment: .leading)
                 .onPreferenceChange(WorkspaceArrangementPreference.self) { value in
                     MainActor.assumeIsolated { seen.arrangement = value }
                 }
             }
         }
-        for (taskOpen, expected) in [(true, WorkspaceColumns.Arrangement.railed), (false, .two)] {
+        for (drilled, expected) in [(true, WorkspaceColumns.Arrangement.drilledIn), (false, .one)] {
             seen.arrangement = nil
-            let host = NSHostingView(rootView: Hosted(seen: seen, taskOpen: taskOpen))
+            let host = NSHostingView(rootView: Hosted(seen: seen, drilled: drilled))
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 1600, height: 400), styleMask: [.borderless],
                 backing: .buffered, defer: false)
@@ -109,11 +103,12 @@ struct WorkspaceColumnsTests {
         }
     }
 
-    /// On screen means drawn: a conversation collapsed to its rail, left out
-    /// beside a task alone, or behind Board in the one-column form isn't,
-    /// so it isn't marked seen or watched and the keyboard doesn't act on
-    /// it. Nothing is, before the detail has been measured.
-    @Test("A railed or hidden conversation isn't on screen")
+    /// On screen means drawn: a conversation shrunk to its rail, left out
+    /// in Focus, or behind Board in the one-column form isn't, so it isn't
+    /// marked seen or watched and the keyboard doesn't act on it. Popped
+    /// open over a task, it is. Nothing is, before the detail has been
+    /// measured, and no task is at the workspace's own level.
+    @Test("A conversation on its rail or hidden isn't on screen")
     func aRailedOrHiddenConversationIsntOnScreen() {
         let worktree = Worktree(
             id: "w", short: "w", task: "w", branch: "b", repository: nil, host: "", path: "/tmp/w",
@@ -126,9 +121,9 @@ struct WorkspaceColumnsTests {
         func columns(_ arrangement: WorkspaceColumns.Arrangement?, _ pick: WorkspacePick = .orchestrator) -> [ShownLayout.Column] {
             WorkspaceScreen.visible(shown, arrangement: arrangement, pick: pick).map(\.column)
         }
-        #expect(columns(.all) == [.conversation, .task])
-        #expect(columns(.railed) == [.task])
-        #expect(columns(.taskAlone) == [.task])
+        #expect(columns(.peeked) == [.conversation, .task])
+        #expect(columns(.drilledIn) == [.task])
+        #expect(columns(.drilledAlone) == [.task])
         #expect(columns(.two) == [.conversation])
         #expect(columns(.one, .orchestrator) == [.conversation])
         #expect(columns(.one, .board) == [])

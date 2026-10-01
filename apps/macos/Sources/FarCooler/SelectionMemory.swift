@@ -102,7 +102,7 @@ enum SelectionMemory {
 
     /// `last` as the fleet has it now: its workspace still there, with a
     /// worktree it opened closed again when that's gone. A task is kept: the
-    /// task column says so when it's gone. Nil when the workspace or the
+    /// task's view says so when it's gone. Nil when the workspace or the
     /// loose worktree is gone.
     static func restored(_ last: Selection, in fleet: Fleet) -> Selection? {
         switch last {

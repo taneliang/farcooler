@@ -146,8 +146,12 @@ struct ContentView: View {
     @State private var lastAttention: String?
     /// Which column a workspace's one-column form shows, by `host|workspace`.
     @State private var workspacePicks: [String: WorkspacePick] = [:]
-    /// Focus Column (⌃⌘↩): the third column widened over the other two.
+    /// Focus (⌃⌘↩): a task or worktree opened, alone, without the
+    /// orchestrator's rail or the task's own text.
     @State private var focusColumn = false
+    /// The orchestrator popped open from its rail, over the task or
+    /// worktree opened. Closed on going anywhere else.
+    @State private var orchestratorPeek = false
     /// The detail's width, as the workspace view last measured it: which of
     /// a workspace's columns are on screen. Nil until one has been drawn.
     @State private var detailWidth: CGFloat?
@@ -156,8 +160,6 @@ struct ContentView: View {
     @State private var trail: Selection?
     /// The worktree Open Worktree opened from `trail`.
     @State private var trailWorktree: String?
-    /// Whether each task's card is expanded, by task id, once toggled.
-    @State private var cardExpanded: [String: Bool] = [:]
     /// The task whose changes the keyboard is in: the Diff menu's
     /// shortcuts are for the diff you clicked into.
     @State private var changesFocus: String?
@@ -305,7 +307,9 @@ struct ContentView: View {
                 guard event.keyCode == 53, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
                     let window = event.window, window === windowBox.window, window.attachedSheet == nil,
                     !showPalette, !showQuickCreate,
-                    EscapeBack.goesBack(responder: window.firstResponder, selection: selection, focusColumn: focusColumn)
+                    EscapeBack.goesBack(
+                        responder: window.firstResponder, selection: selection,
+                        focusColumn: focusColumn || orchestratorPeek)
                 else { return event }
                 goBack()
                 return nil
@@ -355,6 +359,7 @@ struct ContentView: View {
         .onChange(of: detailWidth) { _, _ in markVisibleSeen() }
         .onChange(of: workspacePicks) { _, _ in markVisibleSeen() }
         .onChange(of: focusColumn) { _, _ in markVisibleSeen() }
+        .onChange(of: orchestratorPeek) { _, _ in markVisibleSeen() }
         .onChange(of: store.needsYouSettled) { _, _ in settleLaunch() }
         .onChange(of: selection) { _, now in
             if let saved = SelectionMemory.encode(now) { lastSelection = saved }
@@ -385,11 +390,14 @@ struct ContentView: View {
             // through, which makes it the narrowest point that sees every one
             // of them.
             errorBanner = nil
-            // Focus Column and a board holding the keyboard are about the
-            // view that was on screen, not the next one.
-            // Focus Column stays while the same thing is open, whichever of
-            // its panes is selected.
-            if !WorkspaceSelection.samePlace(old, new) { focusColumn = false }
+            // Focus, the orchestrator popped open, and a board holding the
+            // keyboard are about the view that was on screen, not the next
+            // one. Focus and the popped-open orchestrator stay while the
+            // same thing is open, whichever of its panes is selected.
+            if !WorkspaceSelection.samePlace(old, new) {
+                focusColumn = false
+                orchestratorPeek = false
+            }
             keyboardOnBoard = false
             // The breadcrumb holds only while in the worktree it opened.
             if trail != nil, !WorkspaceNavigation.keeps(trail: trail, opened: trailWorktree, now: new) {
@@ -1841,7 +1849,7 @@ struct ContentView: View {
     }
 
     /// This worktree's changes pane, if it has one open in the layout the
-    /// third column draws for it (or the detail, for a loose worktree).
+    /// detail draws for it, drilled into or loose.
     ///
     /// Asked of that layout rather than of the worktree's terminals,
     /// because that is the question the toolbar button is answering: whether
@@ -1856,8 +1864,8 @@ struct ContentView: View {
         return ws.terminals.first { inGroup.contains($0.id) && $0.isChangesPane }
     }
 
-    /// The layout the detail draws for `ws` opened whole: in a workspace's
-    /// third column, or on its own. Nil when it draws none, which is the
+    /// The layout the detail draws for `ws` opened whole: drilled into in a
+    /// workspace, or on its own. Nil when it draws none, which is the
     /// case for a worktree with no terminal.
     private func worktreeColumn(of ws: Worktree) -> ShownLayout? {
         shown.first { $0.column == .worktree && $0.host == (ws.host ?? "") && $0.worktree.id == ws.id }
@@ -1879,13 +1887,13 @@ struct ContentView: View {
     /// Show Changes: the toolbar's, a worktree row's menus' and its card's
     /// (ov-78). Reachable whether or not the worktree has a terminal open.
     ///
-    /// With the worktree's layout in the third column, a split of its
+    /// With the worktree's layout drilled into, a split of its
     /// focused pane, exactly as `⌃B %` and a drop on an edge are: the daemon
     /// has one verb for "a new pane, here, running this", and a changes pane
     /// is that verb with a different preset. With no layout there (no
     /// terminal, or the main checkout named from the Orchestrator column),
     /// its changes pane, one it has or a new one in a window of its own,
-    /// opened in the third column. Never a split of the orchestrator's
+    /// opened, drilled into. Never a split of the orchestrator's
     /// window.
     private func showChanges(in ws: Worktree) {
         if let open = changesPane(in: ws) {
@@ -2078,8 +2086,9 @@ struct ContentView: View {
             id, host: host, in: store.fleet, repositories: store.clients[host]?.repositories.map(\.id) ?? [])
         let arrangement = detailWidth.map { width in
             WorkspaceColumns.layout(
-                width: width, taskOpen: focus != nil, cell: TerminalMetrics.cell(preferences.terminalFont()).width,
-                hasConversation: summary.map { !$0.isImplicit } ?? false, focused: focusColumn)
+                width: width, drilled: focus != nil, cell: TerminalMetrics.cell(preferences.terminalFont()).width,
+                hasConversation: summary.map { !$0.isImplicit } ?? false, focused: focusColumn,
+                peek: orchestratorPeek)
         }
         return WorkspaceScreen.visible(all, arrangement: arrangement, pick: workspacePicks["\(host)|\(id)"] ?? .orchestrator)
     }
@@ -2129,17 +2138,19 @@ struct ContentView: View {
         }
     }
 
-    /// A workspace's columns: its conversation, its board, and what's open.
+    /// A workspace: its conversation and its board, or, drilled in, the
+    /// task or worktree opened, under the breadcrumb back.
     private func workspaceDetail(host: String, id: String, focus: Focus?) -> some View {
         let summary = WorkspaceScreen.workspace(
             id, host: host, in: store.fleet, repositories: store.clients[host]?.repositories.map(\.id) ?? [])
         let layouts = shown
         let key = "\(host)|\(id)"
         return WorkspaceView(
-            taskOpen: focus != nil,
+            drilled: focus != nil,
             hasConversation: summary.map { !$0.isImplicit } ?? false,
             cell: TerminalMetrics.cell(preferences.terminalFont()).width,
             focused: focusColumn,
+            peek: orchestratorPeek,
             pick: Binding(
                 get: { workspacePicks[key] ?? .orchestrator }, set: { workspacePicks[key] = $0 }),
             conversation: {
@@ -2147,8 +2158,21 @@ struct ContentView: View {
             },
             rail: { conversationRail(host: host, workspace: summary) },
             board: { boardColumn(host: host, id: id) },
-            third: { thirdColumn(host: host, focus: focus, shown: layouts.last { $0.column != .conversation }) }
+            opened: {
+                VStack(spacing: 0) {
+                    DrillBreadcrumb(
+                        crumbs: crumbs(host: host, workspace: summary),
+                        onGo: { target in
+                            if target == trail { trail = nil }
+                            selection = target
+                        },
+                        onBack: { goBack(unfocusFirst: false) })
+                    Divider()
+                    openedView(host: host, focus: focus, shown: layouts.last { $0.column != .conversation })
+                }
+            }
         )
+        .animation(.snappy(duration: 0.2), value: orchestratorPeek)
         .onPreferenceChange(WorkspaceWidthPreference.self) { width in
             MainActor.assumeIsolated {
                 if let width, width != detailWidth { detailWidth = width }
@@ -2279,12 +2303,13 @@ struct ContentView: View {
         }
     }
 
-    /// The conversation collapsed beside an open task: its status, and a
-    /// click that closes the task column.
+    /// The conversation shrunk to a rail beside a task or a worktree: its
+    /// status and its dot, and a click that pops it open over what's opened,
+    /// or closes it again.
     private func conversationRail(host: String, workspace: WorkspaceSummary?) -> some View {
         let seat = workspace.flatMap { WorkspaceScreen.orchestrator(of: $0, host: host, in: store.fleet) }
         return Button {
-            selection = selection?.closed
+            if orchestratorPeek { orchestratorPeek = false } else { focusWorkspaceColumn(.focusConversation) }
         } label: {
             VStack {
                 if let seat {
@@ -2300,59 +2325,67 @@ struct ContentView: View {
                     Circle().fill(GlancePalette.amber(colorScheme)).frame(width: 6, height: 6)
                 }
                 Spacer()
+                Image(systemName: orchestratorPeek ? "chevron.left" : "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 12)
             }
             .padding(.top, 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(WorkspaceStyle.canvas)
-        .help("Show the orchestrator")
-        .accessibilityLabel("Show the orchestrator")
+        .background(orchestratorPeek ? Color.primary.opacity(0.06) : WorkspaceStyle.canvas)
+        .help(orchestratorPeek ? "Hide the orchestrator" : "Show the orchestrator (⌥⌘1)")
+        .accessibilityLabel(orchestratorPeek ? "Hide the Orchestrator" : "Show the Orchestrator")
     }
 
-    /// The third column: a task, or a worktree opened whole.
+    /// The breadcrumb over a task or a worktree opened: Workspace › Task, or
+    /// Workspace › Task › Worktree, or Workspace › Worktree.
+    private func crumbs(host: String, workspace: WorkspaceSummary?) -> [WorkspaceNavigation.Crumb] {
+        let repository = workspace.flatMap { w in
+            store.clients[host]?.repositories.first { $0.id == (w.repository ?? w.id) }?.displayName
+        } ?? ""
+        return WorkspaceNavigation.crumbs(
+            selection, trail: trail,
+            workspace: workspace.map { $0.isImplicit ? repository : $0.name } ?? "Workspace",
+            task: { id in
+                taskRow(host: host, workspace: workspace, id: id).map { "\($0.key) \($0.title)" } ?? "Task"
+            },
+            worktree: { id in worktree(host: host, id: id)?.task ?? "Worktree" })
+    }
+
+    /// What's drilled into: a task, or a worktree opened whole.
     @ViewBuilder
-    private func thirdColumn(host: String, focus: Focus?, shown: ShownLayout?) -> some View {
+    private func openedView(host: String, focus: Focus?, shown: ShownLayout?) -> some View {
         switch focus {
         case .task(let id)?:
-            taskColumn(host: host, id: id, shown: shown)
+            taskView(host: host, id: id, shown: shown)
         case .worktree(let wt, _)?:
-            VStack(spacing: 0) {
-                OpenedWorktreeHeader(
-                    task: trailTask(host: host), worktree: worktree(host: host, id: wt)?.task ?? "Worktree",
-                    onBack: { goBack(unfocusFirst: false) })
-                Divider()
-                if let shown {
-                    tiled(shown, titled: false)
-                } else if let ws = worktree(host: host, id: wt) {
-                    worktreeDetail(ws)
-                } else {
-                    ContentUnavailableView("This worktree isn’t here anymore", systemImage: "folder")
-                }
+            if let shown {
+                tiled(shown, titled: false)
+            } else if let ws = worktree(host: host, id: wt) {
+                worktreeDetail(ws)
+            } else {
+                ContentUnavailableView("This worktree isn’t here anymore", systemImage: "folder")
             }
         case nil:
             EmptyView()
         }
     }
 
-    /// The key of the task the opened worktree came from, while Back goes
-    /// there.
-    private func trailTask(host: String) -> String? {
-        guard case .workspace(_, _, .task(let id)?)? = WorkspaceNavigation.back(from: selection, trail: trail)
-        else { return nil }
-        let workspace = selection?.workspace.flatMap {
-            WorkspaceScreen.workspace($0, host: host, in: store.fleet, repositories: store.clients[host]?.repositories.map(\.id) ?? [])
-        }
-        return taskRow(host: host, workspace: workspace, id: id)?.key ?? "Task"
-    }
-
-    /// Back (⌃⌘←, the column's ✕, the breadcrumb): along the breadcrumb to
-    /// a task, else the third column closes.
+    /// Back (⌃⌘←, Esc, the breadcrumb's chevron): up one level, along the
+    /// breadcrumb to a task a worktree was opened from, else to the
+    /// workspace.
     ///
-    /// Esc and ⌃⌘← leave Focus Column first; the column's ✕ and breadcrumb
-    /// (`unfocusFirst` false) close it as they do anywhere else.
+    /// Esc and ⌃⌘← close the popped-open orchestrator, then leave Focus,
+    /// first; the breadcrumb's chevron (`unfocusFirst` false) goes up as it
+    /// does anywhere else.
     private func goBack(unfocusFirst: Bool = true) {
+        if orchestratorPeek {
+            orchestratorPeek = false
+            if unfocusFirst { return }
+        }
         if focusColumn {
             focusColumn = false
             if unfocusFirst { return }
@@ -2362,16 +2395,17 @@ struct ContentView: View {
         selection = back
     }
 
-    /// A task's column (spec §4.4): its card, its agent and its changes.
+    /// A task, drilled into (spec §4.4): its text first, whole, and its
+    /// agent and changes beneath.
     @ViewBuilder
-    private func taskColumn(host: String, id: String, shown: ShownLayout?) -> some View {
+    private func taskView(host: String, id: String, shown: ShownLayout?) -> some View {
         let summary = selection?.workspace.flatMap {
             WorkspaceScreen.workspace($0, host: host, in: store.fleet, repositories: store.clients[host]?.repositories.map(\.id) ?? [])
         }
         if let client = store.clients[host], let summary {
             let board = boardStore(for: summary, client: client, host: host)
             if let row = board.board.columns.flatMap(\.rows).first(where: { $0.id == id }) {
-                taskColumn(row: row, board: board, client: client, host: host, shown: shown)
+                taskView(row: row, board: board, client: client, host: host, shown: shown)
             } else if !board.hasRead {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2380,7 +2414,7 @@ struct ContentView: View {
                 ContentUnavailableView {
                     Label("This task isn’t on the board anymore", systemImage: "checklist")
                 } actions: {
-                    Button("Close") { goBack(unfocusFirst: false) }
+                    Button("Back to the Board") { goBack(unfocusFirst: false) }
                 }
             }
         } else {
@@ -2388,7 +2422,7 @@ struct ContentView: View {
         }
     }
 
-    private func taskColumn(
+    private func taskView(
         row: TaskRow, board: TaskBoardStore, client: DaemonClient, host: String, shown: ShownLayout?
     ) -> some View {
         let agents = WorkspaceScreen.agents(of: row.id, host: host, in: store.fleet)
@@ -2396,9 +2430,8 @@ struct ContentView: View {
         let worktreeID = TaskColumnModel.worktree(of: row, agent: chosen)
         let lane = worktreeID.flatMap { worktree(host: host, id: $0) }
         let agent = TaskColumnModel.agent(hasAgent: chosen != nil, worktree: lane?.id)
-        let expanded = Binding(
-            get: { cardExpanded[row.id] ?? TaskColumnModel.startsExpanded(row.status) },
-            set: { cardExpanded[row.id] = $0 })
+        let showsChanges = lane != nil && client.changesSupported != false
+        let work = TaskColumnModel.work(agent, showsChanges: showsChanges)
         let openWorktree = {
             guard let lane, let current = selection else { return }
             let opened = WorkspaceNavigation.openWorktree(lane.id, from: current)
@@ -2407,40 +2440,45 @@ struct ContentView: View {
             selection = opened.next
         }
         return VStack(spacing: 0) {
-            TaskColumnHeader(
-                row: row, store: board, agents: agents, chosen: chosen, worktree: lane?.id, expanded: expanded,
-                onChooseAgent: { pane in chosenAgents[row.id] = pane.terminal.id },
-                onOpenWorktree: openWorktree,
-                onClose: { goBack(unfocusFirst: false) })
-            if expanded.wrappedValue {
-                Divider()
+            TaskViewHeader(row: row, store: board)
+            Divider()
+            TaskViewSplit(work: work, focused: focusColumn) {
                 ScrollView {
                     TaskColumnCard(row: row, store: board)
-                        .padding(12)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
                 }
-                .frame(maxHeight: 280)
                 .background(WorkspaceStyle.document)
+            } workArea: {
+                VStack(spacing: 0) {
+                    TaskWorkHeader(
+                        agent: agent, worktree: lane.map { WorkspaceScreen.ownTerminals(of: $0, fleet: store.fleet) },
+                        agents: agents, chosen: chosen,
+                        onChooseAgent: { pane in chosenAgents[row.id] = pane.terminal.id },
+                        onOpenWorktree: openWorktree)
+                    if work == .full {
+                        Divider()
+                        TaskColumnSplit(
+                            status: row.status, showsChanges: showsChanges, showsAgent: chosen != nil,
+                            agent: {
+                                if let shown {
+                                    tiled(shown, titled: false)
+                                } else if let chosen {
+                                    // Working the task, and in no layout read yet.
+                                    bareTerminal(chosen)
+                                }
+                            },
+                            changes: {
+                                if let lane {
+                                    TaskColumnChanges(
+                                        changes: changesStore(for: lane, client: client),
+                                        isFocused: changesFocus == row.id,
+                                        agents: lane.reviewAgentTargets(), onFocus: { changesFocus = row.id })
+                                }
+                            })
+                    }
+                }
             }
-            Divider()
-            TaskColumnSplit(
-                status: row.status, showsChanges: lane != nil && client.changesSupported != false,
-                agent: {
-                    if let shown {
-                        tiled(shown, titled: false)
-                    } else if let chosen {
-                        // Working the task, and in no layout read yet.
-                        bareTerminal(chosen)
-                    } else {
-                        TaskColumnNoAgent(agent: agent, onOpenWorktree: openWorktree)
-                    }
-                },
-                changes: {
-                    if let lane {
-                        TaskColumnChanges(
-                            changes: changesStore(for: lane, client: client), isFocused: changesFocus == row.id,
-                            agents: lane.reviewAgentTargets(), onFocus: { changesFocus = row.id })
-                    }
-                })
         }
         // The card's record and question, read for the task on screen.
         .task(id: row.id) { await board.open(row) }
@@ -3006,7 +3044,7 @@ struct ContentView: View {
         }()
         // The orchestrator is one pane (ov-78): with the keyboard in its
         // column, what would add a pane there opens a shell in the main
-        // checkout instead, beside it in the third column.
+        // checkout instead, which the workspace drills into.
         if WorkspaceScreen.opensShellInstead(command, key: selectedPane, in: self.shown) {
             await openShell(besideOrchestratorIn: worktree)
             return
@@ -3316,6 +3354,10 @@ struct ContentView: View {
     private func focus(_ pane: PaneRef) {
         changesFocus = nil
         keyboardOnBoard = false
+        // A click into what's opened puts the popped-open orchestrator away.
+        if orchestratorPeek, !shown.contains(where: { $0.column == .conversation && $0.contains(pane) }) {
+            orchestratorPeek = false
+        }
         guard let next = WorkspaceScreen.focusing(pane, selection: selection, shown: shown, fleet: store.fleet)
         else {
             land(on: pane)
@@ -3325,8 +3367,12 @@ struct ContentView: View {
         keyPane = pane
     }
 
-    /// ⌥⌘1, ⌥⌘2, ⌥⌘3: the conversation, the board or the task column,
-    /// brought on screen and given the keyboard.
+    /// ⌥⌘1, ⌥⌘2, ⌥⌘3: the conversation, the board, or the task or
+    /// worktree opened, brought on screen and given the keyboard.
+    ///
+    /// Drilled in, ⌥⌘1 pops the orchestrator open over what's opened, and
+    /// ⌥⌘2 goes back up to the board: neither leaves a task you're reading
+    /// for the conversation (ov-79).
     private func focusWorkspaceColumn(_ command: AppCommand) {
         guard case .workspace(let host, let id, let focus)? = selection else { return }
         let key = "\(host)|\(id)"
@@ -3334,13 +3380,7 @@ struct ContentView: View {
         case .focusConversation:
             workspacePicks[key] = .orchestrator
             focusColumn = false
-            if focus != nil, let width = detailWidth,
-                WorkspaceColumns.layout(width: width, taskOpen: true, cell: TerminalMetrics.cell(preferences.terminalFont()).width).conversation != .column
-            {
-                // The conversation only shows beside a task when there's room:
-                // go back to it.
-                selection = selection?.closed
-            }
+            if focus != nil { orchestratorPeek = true }
             if let pane = shownLayouts(for: selection).first(where: { $0.column == .conversation })
                 .flatMap(WorkspaceScreen.columnPane)
             {
@@ -3350,11 +3390,24 @@ struct ContentView: View {
             workspacePicks[key] = .board
             focusColumn = false
             // Beside the others, the board has no text to type into: the
-            // terminals let go of the keyboard.
-            keyboardOnBoard = true
-            windowBox.window?.makeFirstResponder(nil)
+            // terminals let go of the keyboard. After going up, which clears
+            // it as every navigation does.
+            if focus != nil {
+                trail = nil
+                selection = selection?.closed
+                DispatchQueue.main.async {
+                    keyboardOnBoard = true
+                    windowBox.window?.makeFirstResponder(nil)
+                }
+            } else {
+                keyboardOnBoard = true
+                windowBox.window?.makeFirstResponder(nil)
+            }
         case .focusTask:
-            if let pane = shown.last(where: { $0.column != .conversation }).flatMap(WorkspaceScreen.columnPane) {
+            orchestratorPeek = false
+            if let pane = shownLayouts(for: selection).last(where: { $0.column != .conversation })
+                .flatMap(WorkspaceScreen.columnPane)
+            {
                 step(to: pane)
             }
         default:
@@ -3362,7 +3415,7 @@ struct ContentView: View {
         }
     }
 
-    /// Open a task in its workspace's task column.
+    /// Open a task: its workspace, drilled into it.
     private func openTask(_ id: String, host: String, workspace: String) {
         trail = nil
         selection = .workspace(host: host, workspace: workspace, focus: .task(id))
@@ -3497,7 +3550,10 @@ struct ContentView: View {
             }
         case .back: goBack()
         case .focusColumn:
-            if selection?.focus != nil { focusColumn.toggle() }
+            if selection?.focus != nil {
+                focusColumn.toggle()
+                if focusColumn { orchestratorPeek = false }
+            }
         case .focusConversation, .focusBoard, .focusTask:
             focusWorkspaceColumn(command)
         case .openInEditor: openInPreferredEditor()
@@ -3769,8 +3825,8 @@ struct ContentView: View {
     }
 
     /// ⌃B %, ⌃B " or ⌃B c with the keyboard in the Orchestrator column: a
-    /// shell in the main checkout, in a window of its own, opened in the
-    /// third column of the workspace on screen. Never a split of the
+    /// shell in the main checkout, in a window of its own, drilled into in
+    /// the workspace on screen. Never a split of the
     /// orchestrator's window, which would make a checkout terminal only the
     /// column could draw (ov-78).
     private func openShell(besideOrchestratorIn checkout: Worktree) async {
@@ -3879,7 +3935,7 @@ struct ContentView: View {
         case .needsYou: return selection
         // A workspace with nothing opened has nothing to heal either: a
         // runner that loses it draws the column's sentence until you choose.
-        // A task is the task column's to say it's gone.
+        // A task is its own view's to say it's gone.
         case .workspace(_, _, nil), .workspace(_, _, .task): return selection
         case .workspace(let h, _, .worktree(let w, let t)): (host, worktreeID, terminalID) = (h, w, t)
         case .looseWorktree(let h, let w, let t): (host, worktreeID, terminalID) = (h, w, t)
