@@ -55,7 +55,9 @@ struct AdoptOnceTests {
     @Test("A choice is adopted once")
     func adoptsOnce() {
         var gate = AdoptOnce()
-        #expect(gate.begin())
-        #expect(!gate.begin())
+        let first = gate.begin()
+        let second = gate.begin()
+        #expect(first)
+        #expect(!second)
     }
 }
