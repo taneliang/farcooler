@@ -19,6 +19,20 @@ import SwiftUI
 /// buttons do not justify a second product with its own login, and everyone who
 /// needs this already has the app open.
 public struct AccountDevicesView: View {
+    public init() {}
+
+    public var body: some View {
+        Form { AccountDevicesSections() }
+            .formStyle(.grouped)
+    }
+}
+
+/// The same two lists as `AccountDevicesView`, as bare `Section`s.
+///
+/// For a screen that already has a grouped `Form` and wants these inside it:
+/// two grouped Forms stacked in a scroll view nest scroll views and double the
+/// spacing where they meet.
+public struct AccountDevicesSections: View {
     @ObservedObject private var account = Account.shared
 
     @State private var registrations: Registrations?
@@ -40,7 +54,7 @@ public struct AccountDevicesView: View {
     public init() {}
 
     public var body: some View {
-        Form {
+        Group {
             if !account.isSignedIn {
                 Section {
                     Text("Sign in to view the devices and runners on your account.")
@@ -97,7 +111,6 @@ public struct AccountDevicesView: View {
                 }
             }
         }
-        .formStyle(.grouped)
         .task { await load() }
     }
 

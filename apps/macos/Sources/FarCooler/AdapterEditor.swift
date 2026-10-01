@@ -89,7 +89,7 @@ struct AdapterEditor: View {
             Divider()
             footer
         }
-        .frame(width: 600, height: 680)
+        .frame(width: SettingsSheetSize.editor.width, height: SettingsSheetSize.editor.height)
     }
 
     private var launchSection: some View {
@@ -203,6 +203,7 @@ struct AdapterEditor: View {
 
                 Spacer()
                 Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
                 Button("Save") {
                     onSave(assembled)
                     dismiss()

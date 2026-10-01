@@ -125,7 +125,7 @@ final class Preferences: ObservableObject {
     /// Stored rather than passed because Settings is a scene, not a sheet —
     /// nothing that opens it can hand it a parameter. Anything that wants to
     /// send someone to a specific tab sets this first.
-    @AppStorage("settings.tab") var settingsTab = "terminal"
+    @AppStorage("settings.tab") var settingsTab = SettingsTab.general
 
     /// The editor the "Open in…" control uses on a click, by `Editor.id`.
     ///
@@ -222,6 +222,41 @@ private struct Setting<Control: View>: View {
     }
 }
 
+/// The tabs Settings can open on, as stored values.
+enum SettingsTab {
+    static let general = "general"
+
+    /// What `settings.tab` held before General existed: Behavior and Startup
+    /// were tabs of their own, and both are sections of General now. Someone who
+    /// last left Settings on either lands on General rather than on no tab.
+    static func normalized(_ stored: String) -> String {
+        switch stored {
+        case "behavior", "startup": return general
+        default: return stored
+        }
+    }
+
+    /// A binding that reads the stored value through `normalized`.
+    static func binding(_ stored: Binding<String>) -> Binding<String> {
+        Binding(get: { normalized(stored.wrappedValue) }, set: { stored.wrappedValue = $0 })
+    }
+}
+
+/// How big Settings and the sheets it opens are allowed to be.
+///
+/// A sheet is never larger than the window it opens from: it either forces the
+/// window to grow or hangs off its edge. The two editors open over the runner
+/// sheet, which is itself a sheet over Settings, so each step is smaller than
+/// the one under it.
+enum SettingsSheetSize {
+    /// Settings itself. Tall enough for General, the longest pane.
+    static let window = CGSize(width: 560, height: 560)
+    /// One runner's themes and agents.
+    static let runner = CGSize(width: 520, height: 500)
+    /// The theme and agent editors, which open over `runner`.
+    static let editor = CGSize(width: 500, height: 480)
+}
+
 struct SettingsView: View {
     @ObservedObject private var preferences = Preferences.shared
     @ObservedObject private var themes = Themes.shared
@@ -229,9 +264,12 @@ struct SettingsView: View {
     @StateObject private var cliTools = CommandLineTools()
 
     var body: some View {
-        TabView(selection: $preferences.settingsTab) {
+        TabView(selection: SettingsTab.binding($preferences.settingsTab)) {
+            // General first, as on every Mac settings window. Startup's two
+            // switches live in it rather than in a tab of their own: a tab with
+            // two rows is a window that is mostly empty.
+            general.tabItem { Label("General", systemImage: "gearshape") }.tag(SettingsTab.general)
             terminal.tabItem { Label("Terminal", systemImage: "terminal") }.tag("terminal")
-            behavior.tabItem { Label("Behavior", systemImage: "gearshape") }.tag("behavior")
             RunnersSettings().tabItem { Label("Runners", systemImage: "server.rack") }
                 // The tag is a stored value, not a word anyone reads: it is what
                 // `settings.tab` already holds on disk, and changing it would
@@ -247,12 +285,12 @@ struct SettingsView: View {
                 .tabItem { Label("Devices", systemImage: "iphone.gen3") }
                 .tag("devices")
             account.tabItem { Label("Account", systemImage: "person.crop.circle") }.tag("account")
-            startup.tabItem { Label("Startup", systemImage: "bolt") }.tag("startup")
         }
-        // Tall enough for the longest tab. Behavior is five settings and a
-        // notification group, and at 400 it clipped the last group mid-row —
-        // a settings window that scrolls to reach a checkbox reads as broken.
-        .frame(width: 520, height: 520)
+        // One size for every tab, and the ceiling for every sheet Settings
+        // opens: a sheet larger than the window it comes from hangs off it
+        // (`SettingsSheetSize`). Tall enough for General, which is the longest
+        // pane; every other pane is a grouped form that scrolls.
+        .frame(width: SettingsSheetSize.window.width, height: SettingsSheetSize.window.height)
     }
 
     /// Signing in, which buys notifications and nothing else.
@@ -261,27 +299,22 @@ struct SettingsView: View {
     /// person, and a runner list is about runners. Pairing — which runner may
     /// notify you — stays in Runners, where the runners are.
     private var account: some View {
-        // The sign-in row on top of the two lists it makes meaningful. One
-        // scroll rather than a tab and a sheet: signing in, being notified, and
-        // seeing what can notify you are one subject.
-        ScrollView {
-            VStack(spacing: 0) {
-                Form {
-                    AccountSection()
-                    // Under the account rather than in its own tab: which relay
-                    // this build talks to is the answer to "why is nothing
-                    // notifying me", and that question starts here.
-                    RelaySection()
-                    // And under that, the tunnel's own rendezvous. Same shape
-                    // of question, rarer day: this is the one for when the
-                    // service tunneled runners meet at stops answering.
-                    RendezvousSection()
-                }
-                .formStyle(.grouped)
-                AccountDevicesView()
-            }
+        // One Form for the sign-in row and the two lists it makes meaningful:
+        // two grouped Forms in a ScrollView nested scroll views and doubled the
+        // spacing at the seam between them.
+        Form {
+            AccountSection()
+            // Under the account rather than in its own tab: which relay
+            // this build talks to is the answer to "why is nothing
+            // notifying me", and that question starts here.
+            RelaySection()
+            // And under that, the tunnel's own rendezvous. Same shape
+            // of question, rarer day: this is the one for when the
+            // service tunneled runners meet at stops answering.
+            RendezvousSection()
+            AccountDevicesSections()
         }
-        .padding(.vertical, 4)
+        .formStyle(.grouped)
     }
 
     /// Whether this Mac stays reachable when nobody is at it.
@@ -290,7 +323,7 @@ struct SettingsView: View {
     /// sidebar's status bar, where a piece of configuration read as live
     /// information about the fleet.
     private var startup: some View {
-        Form {
+        Section("Startup") {
             Setting("Keeps this Mac available to your other devices while Far Cooler is closed.") {
                 switch service.state {
                 case .registered, .notRegistered:
@@ -332,8 +365,6 @@ struct SettingsView: View {
                 }
             }
         }
-        .formStyle(.grouped)
-        .padding()
         .onAppear {
             service.refresh()
             cliTools.refresh()
@@ -363,14 +394,16 @@ struct SettingsView: View {
                 .truncationMode(.tail)
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(nsColor: .textBackgroundColor))
+                // The theme's own colors: a font previewed on plain white or
+                // black says nothing about how it will look in the terminal.
+                .foregroundStyle(Color(nsColor: themes.current.foregroundColor))
+                .background(Color(nsColor: themes.current.backgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
         }
         .formStyle(.grouped)
-        .padding()
     }
 
-    private var behavior: some View {
+    private var general: some View {
         Form {
             Section {
                 Setting("⌘T opens a plain shell.") {
@@ -445,9 +478,10 @@ struct SettingsView: View {
             } footer: {
                 Text("Far Cooler doesn’t send notifications while an agent is working.")
             }
+
+            startup
         }
         .formStyle(.grouped)
-        .padding()
     }
 }
 

@@ -40,7 +40,7 @@ struct RunnerSettingsSheet: View {
             Divider()
             footer
         }
-        .frame(width: 620, height: 560)
+        .frame(width: SettingsSheetSize.runner.width, height: SettingsSheetSize.runner.height)
         .task {
             await store.load()
             prefixDraft = store.branchPrefix

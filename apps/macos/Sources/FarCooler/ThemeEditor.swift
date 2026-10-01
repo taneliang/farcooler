@@ -73,7 +73,7 @@ struct ThemeEditor: View {
         // than its own host, which either forces the window to grow or hangs
         // off it. The `Form` is `.grouped` and scrolls, so the height was
         // never load-bearing; only the preview strip above it is.
-        .frame(width: 560, height: 520)
+        .frame(width: SettingsSheetSize.editor.width, height: SettingsSheetSize.editor.height)
     }
 
     private var footer: some View {
@@ -82,6 +82,7 @@ struct ThemeEditor: View {
                 .disabled(draft == original)
             Spacer()
             Button("Cancel") { dismiss() }
+            .keyboardShortcut(.cancelAction)
             Button("Save") {
                 onSave(draft)
                 dismiss()
