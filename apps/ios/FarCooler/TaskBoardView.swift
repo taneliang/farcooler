@@ -58,6 +58,8 @@ struct WorkspaceBoardList: View {
     let onRefresh: () async -> Void
 
     @State private var collapsed: Set<TaskStatus>
+    /// Done shows its recent cards until this is asked for (`BoardDone`).
+    @State private var showingAllDone = false
 
     init(
         board: TaskBoardModel?, unread: Bool, place: PhoneWorkspace, speaksOfAgents: Bool,
@@ -141,7 +143,7 @@ struct WorkspaceBoardList: View {
                 let open = BoardForm.isExpanded(section, collapsed: collapsed)
                 Section {
                     if open {
-                        ForEach(section.rows) { row in
+                        ForEach(section.visibleRows(showingAllDone: showingAllDone, now: Date())) { row in
                             let live = speaksOfAgents ? agents(row) : []
                             TaskBoardCardRow(
                                 row: row,
@@ -150,6 +152,16 @@ struct WorkspaceBoardList: View {
                                     livePanes: live.count, runnerRecordsTasks: speaksOfAgents),
                                 onOpen: { onOpen(row) },
                                 onJump: onJump)
+                        }
+                        if section.status == .done,
+                            showingAllDone || section.hidesDone(showingAllDone: false, now: Date())
+                        {
+                            Button(
+                                showingAllDone
+                                    ? "Show Recent Done Only" : BoardDone.showAllTitle(total: section.count)
+                            ) { showingAllDone.toggle() }
+                            .font(.footnote)
+                            .accessibilityIdentifier("board-show-all-done")
                         }
                     }
                 } header: {

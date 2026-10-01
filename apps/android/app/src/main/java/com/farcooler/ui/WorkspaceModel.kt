@@ -1,5 +1,6 @@
 package com.farcooler.ui
 
+import com.farcooler.model.BoardDone
 import com.farcooler.model.Fleet
 import com.farcooler.model.Repository
 import com.farcooler.model.StateKind
@@ -31,6 +32,12 @@ sealed interface BoardListEntry {
     data class Card(val row: TaskRow) : BoardListEntry {
         override val key: String get() = "task/${row.id}"
     }
+
+    /** Under an open Done that is hiding older work: reveals it, or puts it away again. */
+    data class ShowAllDone(val total: Int, val showingAll: Boolean) : BoardListEntry {
+        override val key: String get() = "show-all-done"
+        val title: String get() = if (showingAll) "Show Recent Done Only" else BoardDone.showAllTitle(total)
+    }
 }
 
 object BoardList {
@@ -43,12 +50,29 @@ object BoardList {
      * Canceled, which start collapsed; [toggled] are the statuses the person
      * flipped from that. An empty one is a collapsed header with a 0.
      */
-    fun entries(board: TaskBoard, toggled: Set<TaskStatus>): List<BoardListEntry> =
+    fun entries(
+        board: TaskBoard,
+        toggled: Set<TaskStatus>,
+        nowMs: Long = System.currentTimeMillis(),
+        showAllDone: Boolean = false,
+    ): List<BoardListEntry> =
         board.sections.flatMap { section ->
             val count = section.rows.size
             val expanded = count > 0 && ((section.status !in COLLAPSED_AT_FIRST) != (section.status in toggled))
+            // Done draws the recent work, newest first; the rest is a tap away.
+            val rows = if (section.status == TaskStatus.DONE) {
+                BoardDone.visible(section.rows, showAllDone, nowMs)
+            } else {
+                section.rows
+            }
+            val more = section.status == TaskStatus.DONE && (showAllDone || rows.size < count)
             listOf(BoardListEntry.Header(section.status, count, expanded)) +
-                if (expanded) section.rows.map(BoardListEntry::Card) else emptyList()
+                if (expanded) {
+                    rows.map(BoardListEntry::Card) +
+                        if (more) listOf(BoardListEntry.ShowAllDone(count, showAllDone)) else emptyList()
+                } else {
+                    emptyList()
+                }
         }
 }
 

@@ -627,3 +627,28 @@ class BoardSweep {
  */
 fun landingWorktree(terminalId: String, worktrees: List<Worktree>): String? =
     worktrees.firstOrNull { worktree -> worktree.terminals.any { it.id == terminalId } }?.id
+
+/**
+ * What the Done section shows: the work finished lately, newest first.
+ * AgentKit's `BoardDone`, rule for rule: everything finished in the last
+ * seven days, or the newest ten, whichever is more. Canceled is its own
+ * status and is not shortened.
+ */
+object BoardDone {
+    const val RECENT_WINDOW_MS = 7L * 24 * 60 * 60 * 1000
+    const val MINIMUM_SHOWN = 10
+
+    /** The button that reveals the rest; [total] is every done task. */
+    fun showAllTitle(total: Int): String = "Show All Done ($total)"
+
+    /** Done tasks, newest finished first; a tie keeps the runner's order. */
+    fun newestFirst(rows: List<TaskRow>): List<TaskRow> = rows.sortedByDescending { it.statusSince }
+
+    /** The rows to draw: [newestFirst], cut to the recent ones unless [showingAll]. */
+    fun visible(rows: List<TaskRow>, showingAll: Boolean, nowMs: Long): List<TaskRow> {
+        val sorted = newestFirst(rows)
+        if (showingAll) return sorted
+        val recent = sorted.takeWhile { it.statusSince >= nowMs - RECENT_WINDOW_MS }.size
+        return sorted.take(maxOf(recent, MINIMUM_SHOWN))
+    }
+}

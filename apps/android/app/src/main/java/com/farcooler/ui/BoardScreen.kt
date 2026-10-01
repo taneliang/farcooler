@@ -148,6 +148,8 @@ fun BoardTab(
     // The statuses flipped from their first state, per workspace, for as long
     // as the screen's saved state is kept.
     var toggled by rememberSaveable(workspace.id) { mutableStateOf(emptyList<String>()) }
+    // Done draws its recent cards until this is asked for (BoardDone).
+    var showAllDone by rememberSaveable(workspace.id) { mutableStateOf(false) }
 
     // Read on opening, whatever was last read: the row that opened this may
     // be showing a count from before the last reconnect. While it is open, a
@@ -218,13 +220,19 @@ fun BoardTab(
                             )
                         }
                     }
-                    for (entry in BoardList.entries(board, flipped)) {
+                    for (entry in BoardList.entries(board, flipped, showAllDone = showAllDone)) {
                         when (entry) {
                             is BoardListEntry.Header -> item(key = entry.key) {
                                 SectionHeader(entry) {
                                     val word = entry.status.wire
                                     toggled = if (word in toggled) toggled - word else toggled + word
                                 }
+                            }
+                            is BoardListEntry.ShowAllDone -> item(key = entry.key) {
+                                TextButton(
+                                    onClick = { showAllDone = !showAllDone },
+                                    modifier = Modifier.padding(start = 8.dp).testTag("board-show-all-done"),
+                                ) { Text(entry.title) }
                             }
                             is BoardListEntry.Card -> item(key = entry.key) {
                                 val row = entry.row
