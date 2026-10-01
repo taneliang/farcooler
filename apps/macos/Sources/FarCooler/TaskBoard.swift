@@ -54,6 +54,45 @@ final class TaskBoardStore: ObservableObject {
     func choose(_ row: TaskRow) {
         if let onChoose { onChoose(row) } else { Task { await open(row) } }
     }
+    // MARK: - Since you were last here
+
+    /// When this person last left this workspace's board, as it stood when
+    /// they came back to it. Held still while they read: `markVisited` writes
+    /// the new moment to disk, and this changes only at `beginVisit`, so the
+    /// summary doesn't empty itself under their eyes.
+    @Published private(set) var visitBaseline: Date?
+    /// Decisions and findings read for the summary, by task id.
+    @Published private(set) var summaryNotes: [String: [TaskNoteRow]] = [:]
+    private var noteCache: [String: (updatedAt: Date?, notes: [TaskNoteRow])] = [:]
+
+    /// A visit begins: the last one's end is the summary's "last visit".
+    func beginVisit(in defaults: UserDefaults = .standard) {
+        visitBaseline = BoardVisit.read(host: hostKey, workspace: workspace.id, from: defaults)
+    }
+
+    /// A visit ends — the person left the workspace or the app. Called then,
+    /// never continuously. Anything that counts as using the orchestrator or
+    /// board (typing into its pane, acting on a card) can call it too.
+    func markVisited(in defaults: UserDefaults = .standard, now: Date = Date()) {
+        BoardVisit.write(now, host: hostKey, workspace: workspace.id, in: defaults)
+    }
+
+    /// Read the records of the few tasks that moved since `since`, so the
+    /// summary can list their decisions and findings. One `task show` each,
+    /// remembered until the task's `updatedAt` moves.
+    func readSummaryNotes(since: Date) async {
+        let picked = BoardSummary.noteCandidates(rows: board.rows, since: since)
+        for row in picked where noteCache[row.id]?.updatedAt != row.updatedAt {
+            let (data, _) = await client.taskDetail(key: row.key, repository: repositoryID)
+            guard let data, let read = try? TaskDetailModel.decode(data) else { continue }
+            noteCache[row.id] = (row.updatedAt, read.notes)
+        }
+        summaryNotes = Dictionary(
+            uniqueKeysWithValues: picked.compactMap { row in
+                noteCache[row.id].map { (row.id, $0.notes) }
+            })
+    }
+
     /// Whether a read has ever come back.
     ///
     /// Separate from "the board is empty", which is a real and different
@@ -558,6 +597,11 @@ struct TaskBoardView: View {
         VStack(spacing: 0) {
             header
             Divider()
+            if store.hasRead {
+                BoardSummaryStrip(store: store, defaults: defaults)
+                    .id(ObjectIdentifier(store))
+                Divider()
+            }
             if !store.hasRead && store.reading {
                 centered { ProgressView() }
             } else if let trouble = store.trouble, !store.hasRead {
@@ -584,7 +628,21 @@ struct TaskBoardView: View {
         .task(id: ObjectIdentifier(store)) { await store.readIfNeverRead() }
         // This board's choices, read again whenever the view is handed
         // another board.
-        .onChange(of: remembered) { _, key in
+        // A visit begins when the board comes up and ends when the person
+        // leaves it: the workspace, the window, or the app. The summary's
+        // baseline is read at the start and written at the end, so it holds
+        // still while they read.
+        .onAppear { store.beginVisit(in: defaults) }
+        .onDisappear { store.markVisited(in: defaults) }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willResignActiveNotification)) { _ in
+            store.markVisited(in: defaults)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            store.beginVisit(in: defaults)
+        }
+        .onChange(of: remembered) { old, key in
+            BoardVisit.write(Date(), host: old.host, workspace: old.workspace, in: defaults)
+            store.beginVisit(in: defaults)
             choice = BoardForm.Choice.read(host: key.host, workspace: key.workspace, from: defaults)
             collapsed = BoardForm.collapsed(host: key.host, workspace: key.workspace, from: defaults)
         }
@@ -916,6 +974,7 @@ private struct TaskListSection: View {
     @ObservedObject var store: TaskBoardStore
     let agents: BoardAgents
     let onGoTo: (BoardPane) -> Void
+    @State private var showingAllDone = false
 
     /// Needs Decision is the one status waiting on the person reading, and
     /// the only one drawn in the accent color, as in the kanban.
@@ -952,14 +1011,37 @@ private struct TaskListSection: View {
             .accessibilityIdentifier("board-section-\(section.id)")
             if expanded {
                 VStack(spacing: 6) {
-                    ForEach(section.rows) { row in
+                    ForEach(section.visibleRows(showingAllDone: showingAllDone, now: Date())) { row in
                         TaskListRow(
                             row: row, prominent: leads, store: store,
                             live: agents.live(for: row), presence: agents.presence(for: row),
                             onGoTo: onGoTo)
                     }
+                    ShowAllDoneButton(section: section, showingAll: $showingAllDone)
                 }
             }
+        }
+    }
+}
+
+/// The quiet button under a Done column that is showing only the recent work.
+/// Nothing for another status, or for a Done with nothing hidden.
+private struct ShowAllDoneButton: View {
+    let section: TaskBoardColumn
+    @Binding var showingAll: Bool
+
+    var body: some View {
+        if section.status == .done, section.count > 0,
+            showingAll || section.hidesDone(showingAllDone: false, now: Date())
+        {
+            Button(showingAll ? "Show Recent Done Only" : BoardDone.showAllTitle(total: section.count)) {
+                showingAll.toggle()
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: WorkspaceStyle.PaneText.secondary))
+            .foregroundStyle(.secondary)
+            .padding(.vertical, 2)
+            .accessibilityIdentifier("board-show-all-done")
         }
     }
 }
@@ -1066,6 +1148,7 @@ private struct TaskColumnView: View {
     @ObservedObject var store: TaskBoardStore
     let agents: BoardAgents
     let onGoTo: (BoardPane) -> Void
+    @State private var showingAllDone = false
 
     /// The only state waiting on the person looking at the board, so it is the
     /// only one drawn in the accent color. Everything competing for
@@ -1084,12 +1167,13 @@ private struct TaskColumnView: View {
             }
             ScrollView {
                 LazyVStack(spacing: 8) {
-                    ForEach(column.rows) { row in
+                    ForEach(column.visibleRows(showingAllDone: showingAllDone, now: Date())) { row in
                         TaskCardRow(
                             row: row, prominent: leads, store: store,
                             live: agents.live(for: row), presence: agents.presence(for: row),
                             onGoTo: onGoTo)
                     }
+                    ShowAllDoneButton(section: column, showingAll: $showingAllDone)
                 }
             }
         }
