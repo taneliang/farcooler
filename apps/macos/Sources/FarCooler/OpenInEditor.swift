@@ -138,50 +138,6 @@ struct OpenInEditorButton: View {
     }
 }
 
-/// What the editor said when it would not start.
-///
-/// Its own surface rather than `client.lastError`. That property is rendered in
-/// exactly one place — the placeholder shown while no fleet has loaded
-/// (`ContentView.fleetPlaceholder`) — so once you have a worktree on screen,
-/// which is the only time this control exists, writing to it displays nothing.
-/// Three existing messages already go there and are already invisible; adding a
-/// fourth would be writing a failure into a channel with no reader.
-///
-/// A banner rather than an alert, matching quick-create: this is information,
-/// not a decision, and a modal sheet for "code: command not found" stops the
-/// window to say something you can act on at your leisure.
-struct EditorErrorBanner: View {
-    let message: String
-    let onClose: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-
-            // The launcher's own words, not a paraphrase. It is the thing that
-            // knows what went wrong — "Remote-SSH is not installed" is a
-            // sentence the user can act on, and "could not open" is not.
-            Text(message)
-                .font(.callout)
-                .textSelection(.enabled)
-                .lineLimit(4)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .semibold))
-            }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(maxWidth: 460, alignment: .leading)
-        .floatingPanel()
-    }
-}
-
 extension View {
     /// Put the editor control in the window's title bar.
     ///

@@ -15,23 +15,8 @@ import SwiftUI
 /// next to its name) or race it, and "what am I running" — the question this
 /// window answers — is a question about the app in your hand, which runs on
 /// exactly one Mac regardless of how many runners it is talking to.
-struct AboutSheet: View {
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(spacing: 0) {
-            AboutContent()
-            HStack {
-                Spacer()
-                Button("Done") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
-            }
-            .padding(16)
-        }
-    }
-}
-
-/// About Far Cooler as a window of its own, the way a Mac shows it: it opens
+///
+/// It is a window of its own, the way a Mac shows it: it opens
 /// from the menu whether or not a main window exists, blocks nothing, and has
 /// no button, because Esc and ⌘W close it.
 struct AboutView: View {

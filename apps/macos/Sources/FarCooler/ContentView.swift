@@ -73,7 +73,6 @@ struct ContentView: View {
     @State private var showAddRepository = false
     @State private var showAdd = false
     @State private var showShortcuts = false
-    @State private var showAbout = false
     @State private var query = ""
     @State private var showQuickCreate = false
     /// The ⌘N panel's start in flight, kept here so it survives the panel
@@ -112,7 +111,7 @@ struct ContentView: View {
     /// Its own state rather than routed through `errorBanner`, which is
     /// rendered only by `fleetPlaceholder`'s error branch and by the general
     /// banner below — the opposite of when this control exists. See
-    /// `EditorErrorBanner`.
+    /// `ErrorBanner`, which shows it.
     @State private var editorError: String?
     /// What a refused or failed action said, shown by the banner over the
     /// detail pane.
@@ -497,7 +496,6 @@ struct ContentView: View {
                 return made.refusal
             }
         }
-        .sheet(isPresented: $showAbout) { AboutSheet() }
         .sheet(isPresented: $showResumeBranch) {
             ResumeBranch(
                 projects: store.repositories,
@@ -540,7 +538,7 @@ struct ContentView: View {
         // land on top of each other in the rare moment both are up.
         .overlay(alignment: .top) {
             if let editorError {
-                EditorErrorBanner(message: editorError) { self.editorError = nil }
+                ErrorBanner(message: editorError) { self.editorError = nil }
                     .padding(.top, 14)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -758,14 +756,28 @@ struct ContentView: View {
                 "\(pending.old.terminal.label) keeps running as an ordinary terminal, and "
                     + "\(pending.pane.terminal.label) runs \(pending.workspace.name)’s board.")
         }
-        .sheet(item: $pendingPaneModeSwitch) { pending in
-            PaneModeConfirmSheet(message: pending.message) {
-                await act(
-                    on: pending.worktree, default: .failed("This runner can’t be reached right now.")
-                ) { c in
-                    await c.setPaneMode(pending.terminal, mode: pending.mode, force: true)
+        // A dialog rather than a sheet: it is one yes-or-no question, and the
+        // replacement orchestrator confirmations above are dialogs already.
+        .confirmationDialog(
+            "Stop this turn and switch modes?",
+            isPresented: Binding(
+                get: { pendingPaneModeSwitch != nil },
+                set: { if !$0 { pendingPaneModeSwitch = nil } }),
+            presenting: pendingPaneModeSwitch
+        ) { pending in
+            Button("Stop Turn and Switch", role: .destructive) {
+                Task {
+                    await act(
+                        on: pending.worktree,
+                        default: .failed("This runner can’t be reached right now.")
+                    ) { c in
+                        await c.setPaneMode(pending.terminal, mode: pending.mode, force: true)
+                    }
                 }
             }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("This pane has a turn in flight. Switching modes stops it.")
         }
     }
 
@@ -1364,13 +1376,8 @@ struct ContentView: View {
                 fleetPlaceholder
                 Spacer(minLength: 0)
             } else if entries.isEmpty {
-                VStack(spacing: 6) {
-                    Text("Nothing matches").font(.callout.weight(.medium))
-                    Text("\u{201c}\(query)\u{201d}")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 32)
+                ContentUnavailableView.search(text: query)
+                    .padding(.vertical, 32)
                 Spacer(minLength: 0)
             } else {
                 ScrollView {
@@ -1427,12 +1434,11 @@ struct ContentView: View {
     private var searchField: some View {
         SidebarRow {
             HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-            TextField("Find a workspace, task or agent", text: $query)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12.5))
+            // The system's own field and focus ring, in place of a plain field
+            // drawn into a rounded rectangle with a ring of its own.
+            TextField("Find a workspace, task, or agent", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .font(.callout)
                 .focused($searchFocused)
                 // Esc clears the search, and on an empty one leaves the
                 // field (checklist F3). The window's Esc monitor passes Esc
@@ -1451,22 +1457,6 @@ struct ContentView: View {
                 .buttonStyle(.plain)
             }
         }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.055)))
-            // The field is hand-rolled — a `.plain` `TextField` in a styled box
-            // — so it gets no focus ring from AppKit, and `searchFocused` was
-            // bound and then read by nobody. ⌘F moved the keyboard into this
-            // field and changed not one pixel, which is indistinguishable from
-            // a shortcut that did nothing.
-            .overlay(
-                RoundedRectangle(cornerRadius: 7)
-                    .strokeBorder(
-                        Color.accentColor.opacity(searchFocused ? 0.8 : 0),
-                        lineWidth: 2)
-            )
-            .animation(Motion.snap, value: searchFocused)
-
         }
         .padding(.bottom, 6)
     }
@@ -1481,7 +1471,7 @@ struct ContentView: View {
             // header naming one would be naming the wrong thing, or picking
             // a favorite among rows that are not ranked.
             Text("Fleet")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.title3.weight(.semibold))
             if store.clients.values.contains(where: \.busy) { ProgressView().controlSize(.mini) }
 
             Spacer()
@@ -1508,7 +1498,7 @@ struct ContentView: View {
                     // only the typing road, when the shorter one is to scan a
                     // code from a device that already knows the address, the
                     // user, the port and the host key.
-                    SidebarMenuItem(title: "Add…") { showAdd = true },
+                    SidebarMenuItem(title: "Add Device or Runner…") { showAdd = true },
                 ])
             }
         }
@@ -1538,7 +1528,7 @@ struct ContentView: View {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.system(size: 26))
                     .foregroundStyle(.orange)
-                Text("Could not read the fleet").font(.callout.weight(.medium))
+                Text("Couldn’t Read the Fleet").font(.callout.weight(.medium))
                 // The heading, then a sentence, then the box — the shape
                 // `ChangesPane` settled on for this exact string, and the
                 // wording it uses, because it is the same event: the command
@@ -1559,7 +1549,7 @@ struct ContentView: View {
                     .multilineTextAlignment(.center)
                 DetailBox(text: error)
                     .frame(maxWidth: 420)
-                Button("Try again") {
+                Button("Try Again") {
                     Task { await local?.refresh() }
                 }
                 .padding(.top, 4)
@@ -2285,7 +2275,7 @@ struct ContentView: View {
             }
         } else {
             ContentUnavailableView {
-                Label("This workspace isn’t here", systemImage: "square.stack.3d.up")
+                Label("Workspace Not Found", systemImage: "square.stack.3d.up")
             } description: {
                 Text(missingBoardSentence(host: host))
             }
@@ -2389,7 +2379,7 @@ struct ContentView: View {
             } else if let ws = worktree(host: host, id: wt) {
                 worktreeDetail(ws)
             } else {
-                ContentUnavailableView("This worktree isn’t here anymore", systemImage: "folder")
+                ContentUnavailableView("Worktree Not Found", systemImage: "folder")
             }
         case nil:
             EmptyView()
@@ -2466,13 +2456,13 @@ struct ContentView: View {
                     .task(id: ObjectIdentifier(board)) { await board.readIfNeverRead() }
             } else {
                 ContentUnavailableView {
-                    Label("This task isn’t on the board anymore", systemImage: "checklist")
+                    Label("Task Not on Board", systemImage: "checklist")
                 } actions: {
                     Button("Back to the Board") { goBack(unfocusFirst: false) }
                 }
             }
         } else {
-            ContentUnavailableView("This task isn’t here", systemImage: "checklist")
+            ContentUnavailableView("Task Not Found", systemImage: "checklist")
         }
     }
 
@@ -2643,7 +2633,7 @@ struct ContentView: View {
             // A runner too old for boards: said, rather than a board that
             // can't be read.
             ContentUnavailableView {
-                Label("No board on this runner", systemImage: "checklist")
+                Label("No Board on This Runner", systemImage: "checklist")
             } description: {
                 Text("This runner’s Far Cooler is too old for boards. Update it there to see this workspace’s tasks.")
             }
@@ -2665,7 +2655,7 @@ struct ContentView: View {
             // Said, rather than the generic "Select a worktree": this
             // was a board, and the reader should know where it went.
             ContentUnavailableView {
-                Label("This board isn’t here", systemImage: "checklist")
+                Label("Board Not Found", systemImage: "checklist")
             } description: {
                 Text(missingBoardSentence(host: host))
             }
@@ -2745,13 +2735,13 @@ struct ContentView: View {
 
     private var placeholder: some View {
         ContentUnavailableView {
-            Label("Select a workspace", systemImage: "square.stack.3d.up")
+            Label("No Workspace Selected", systemImage: "square.stack.3d.up")
         } description: {
             Text("A workspace shows its orchestrator beside its board.")
         } actions: {
-            if !store.repositories.isEmpty {
-                Button("New Worktree…") {
-                    newWorktreeIntent = NewWorktreeIntent()
+            if !workspaceRepositories.isEmpty {
+                Button("New Workspace…") {
+                    newWorkspaceName = NewWorkspaceName(name: "")
                 }
             }
         }
@@ -3621,7 +3611,6 @@ struct ContentView: View {
         case .openInEditor: openInPreferredEditor()
         case .reload: Task { for client in store.clients.values { await client.refresh() } }
         case .showShortcuts: showShortcuts = true
-        case .about: showAbout = true
         case .search: searchFocused = true
 
         // Toggles rather than opens. ⌘P on an open palette is what a hand
@@ -4089,7 +4078,7 @@ enum TerminalAction { case restart, dismissLost, stop, useAsOrchestrator, stopBe
 /// `lastError` — see that property's doc comment for why a single client's
 /// field stopped being able to answer "what should this banner say" once
 /// there was more than one client to have said it.
-private struct ErrorBanner: View {
+struct ErrorBanner: View {
     let message: String?
     let onDismiss: () -> Void
 
@@ -4112,9 +4101,7 @@ private struct ErrorBanner: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.08)))
-            .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
+            .floatingPanel()
             .padding(.horizontal, 16)
             .padding(.top, 10)
             .transition(.opacity.combined(with: .move(edge: .top)))

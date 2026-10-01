@@ -19,7 +19,6 @@ enum AppCommand: String {
     case openInEditor
     case reload
     case showShortcuts
-    case about
     case search
     case commandPalette
     case toggleSidebar
