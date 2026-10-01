@@ -153,7 +153,7 @@ struct CommandPalette: View {
     private var field: some View {
         HStack(spacing: 9) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 12))
+                .font(.callout)
                 .foregroundStyle(.tertiary)
 
             PaletteField(
@@ -257,7 +257,7 @@ struct CommandPalette: View {
             KeyHint(keys: "↩", label: "Open")
             KeyHint(keys: "⎋", label: "Close")
         }
-        .font(.system(size: 11))
+        .font(.subheadline)
         .foregroundStyle(.tertiary)
         .padding(.horizontal, Self.gutter)
         .padding(.vertical, 7)
@@ -332,7 +332,7 @@ private struct SwitcherTile: View {
             HStack(spacing: 5) {
                 StatusGlyph(status: status)
                 Text(entry.title)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.callout.weight(.medium))
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 // A snapshot, not a clock. This row exists for as long as the
@@ -342,14 +342,14 @@ private struct SwitcherTile: View {
                 // question.
                 if let duration = entry.terminal?.displayDuration(at: .now) {
                     Text(duration)
-                        .font(.system(size: 10))
+                        .font(.footnote)
                         .foregroundStyle(.tertiary)
                         .monospacedDigit()
                 }
             }
 
             Text(entry.detail)
-                .font(.system(size: 10))
+                .font(.footnote)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
@@ -415,7 +415,7 @@ private struct PaletteRow: View {
                     StatusGlyph(status: terminal.status)
                 } else if let symbol = entry.symbol {
                     Image(systemName: symbol)
-                        .font(.system(size: 11))
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -423,12 +423,12 @@ private struct PaletteRow: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(entry.title)
-                    .font(.system(size: 13))
+                    .font(.body)
                     .foregroundStyle(isHighlighted ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
                     .lineLimit(1)
                 if !entry.detail.isEmpty {
                     Text(entry.detail)
-                        .font(.system(size: 11))
+                        .font(.subheadline)
                         .foregroundStyle(
                             isHighlighted ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.secondary)
                         )
@@ -439,7 +439,7 @@ private struct PaletteRow: View {
             Spacer(minLength: 8)
 
             Text(entry.kind)
-                .font(.system(size: 10))
+                .font(.footnote)
                 .foregroundStyle(
                     isHighlighted ? AnyShapeStyle(.white.opacity(0.7)) : AnyShapeStyle(.tertiary))
         }

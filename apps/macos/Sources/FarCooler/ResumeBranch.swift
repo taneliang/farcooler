@@ -190,10 +190,10 @@ struct ResumeBranch: View {
             }
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11)).foregroundStyle(.tertiary)
+                    .font(.subheadline).foregroundStyle(.tertiary)
                 TextField("Filter branches", text: $query)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
+                    .font(.callout)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
@@ -207,14 +207,14 @@ struct ResumeBranch: View {
             // Remote-only is the handoff case, so it is the one that gets a
             // distinct symbol — it is about to be pulled down, not just opened.
             Image(systemName: branch.isLocal ? "arrow.triangle.branch" : "arrow.down.circle")
-                .font(.system(size: 12))
+                .font(.callout)
                 .foregroundStyle(branch.isLocal ? .tertiary : .secondary)
                 .frame(width: 15)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(branch.name).font(.system(size: 13)).lineLimit(1)
+                Text(branch.name).font(.body).lineLimit(1)
                 Text((branch.subject?.isEmpty ?? true) ? branch.origin : branch.subject!)
-                    .font(.system(size: 11))
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -224,7 +224,7 @@ struct ResumeBranch: View {
             // git refuses a second checkout of the same branch, so this has to
             // be visible before someone picks it, not an error afterwards.
             Text(branch.isCheckedOut ? "checked out" : branch.age)
-                .font(.system(size: 10))
+                .font(.footnote)
                 .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 2)
@@ -249,7 +249,7 @@ struct ResumeBranch: View {
             if let worktreePath {
                 Image(systemName: "folder").font(.system(size: 11)).foregroundStyle(.tertiary)
                 Text(worktreePath)
-                    .font(.system(size: 11))
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.head)

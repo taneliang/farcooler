@@ -162,26 +162,26 @@ struct NeedsYouItemRow: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(item.workspaceName.isEmpty ? "Unclaimed" : item.workspaceName)
-                    .font(.system(size: 10.5, weight: .semibold))
+                    .font(.footnote.weight(.semibold))
                     .textCase(.uppercase)
                     .foregroundStyle(.secondary)
                 Text(NeedsYouRowModel.subject(item))
-                    .font(.system(size: 11))
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
                 if let since = item.since {
                     Text(since, style: .relative)
-                        .font(.system(size: 10.5))
+                        .font(.footnote)
                         .foregroundStyle(.tertiary)
                 }
             }
             Text(item.question)
-                .font(.system(size: 13, weight: .medium))
+                .font(.body.weight(.medium))
                 .lineLimit(2)
             if let detail = item.detail, !detail.isEmpty {
                 Text(detail)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.subheadline.monospaced())
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .textSelection(.enabled)
@@ -222,7 +222,7 @@ struct NeedsYouItemRow: View {
             }
             if case .refused(let line) = answering {
                 Text(line)
-                    .font(.system(size: 11))
+                    .font(.subheadline)
                     .foregroundStyle(.red)
             }
         }

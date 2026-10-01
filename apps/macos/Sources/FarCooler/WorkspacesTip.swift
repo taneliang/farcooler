@@ -24,9 +24,9 @@ struct WorkspacesTipView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(WorkspacesTip.title).font(.system(size: 12.5, weight: .semibold))
+            Text(WorkspacesTip.title).font(.callout.weight(.semibold))
             Text(WorkspacesTip.message)
-                .font(.system(size: 11.5))
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {

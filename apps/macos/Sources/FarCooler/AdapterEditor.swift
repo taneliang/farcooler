@@ -262,7 +262,7 @@ struct AdapterEditor: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(.callout)
             TextEditor(text: text)
-                .font(.system(size: 11, design: .monospaced))
+                .font(.subheadline.monospaced())
                 .frame(height: 54)
                 .overlay(
                     RoundedRectangle(cornerRadius: 5)
@@ -270,7 +270,7 @@ struct AdapterEditor: View {
                 .overlay(alignment: .topLeading) {
                     if text.wrappedValue.isEmpty {
                         Text(prompt)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.subheadline.monospaced())
                             .foregroundStyle(.tertiary)
                             .padding(.leading, 5)
                             .padding(.top, 3)

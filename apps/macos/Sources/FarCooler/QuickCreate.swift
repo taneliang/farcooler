@@ -165,7 +165,7 @@ struct QuickCreate: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "sparkle")
-                    .font(.system(size: 13))
+                    .font(.body)
                     .foregroundStyle(.tertiary)
                     .padding(.top, 4)
 
@@ -182,7 +182,7 @@ struct QuickCreate: View {
 
             if let failure = submission.failure {
                 Label(failure, systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11))
+                    .font(.subheadline)
                     .foregroundStyle(.red)
                     .padding(.horizontal, 14)
                     .padding(.bottom, 8)
@@ -239,7 +239,7 @@ struct QuickCreate: View {
             } else if text.isEmpty {
                 Button(action: onResume) {
                     Label("Resume Branch…", systemImage: "arrow.uturn.backward")
-                        .font(.system(size: 11))
+                        .font(.subheadline)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
@@ -298,7 +298,7 @@ struct QuickCreate: View {
             }
             .foregroundStyle(.tertiary)
         }
-        .font(.system(size: 11))
+        .font(.subheadline)
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
     }

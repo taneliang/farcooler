@@ -36,7 +36,7 @@ struct DiffView: View {
                     expanded = true
                 } label: {
                     Text("Show \(rows.count) lines")
-                        .font(.system(size: 11))
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
@@ -51,7 +51,7 @@ struct DiffView: View {
         let removed = rows.filter { $0.kind == .removed }.count
         return HStack(spacing: 6) {
             Text(diff.path)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(.subheadline.weight(.medium).monospaced())
                 .lineLimit(1)
             Spacer(minLength: 8)
             if added > 0 {
@@ -61,7 +61,7 @@ struct DiffView: View {
                 Text(DiffCounts.removed(removed)).foregroundStyle(.red)
             }
         }
-        .font(.system(size: 10.5, design: .monospaced))
+        .font(.footnote.monospaced())
         .foregroundStyle(.secondary)
     }
 
@@ -91,7 +91,7 @@ struct DiffView: View {
                     }
                     .padding(.horizontal, 4)
                 }
-                .font(.system(size: 11, design: .monospaced))
+                .font(.subheadline.monospaced())
                 .foregroundStyle(line.kind == .context ? .secondary : .primary)
                 .padding(.vertical, 1)
                 .background(line.kind.wash)
