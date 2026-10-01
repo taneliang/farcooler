@@ -35,6 +35,8 @@ struct RunnersSettings: View {
     /// has no install button at all, because its daemon comes out of the app
     /// bundle rather than over ssh.
     @State private var confirmingReinstall: String?
+    /// The runner waiting on a yes to Remove.
+    @State private var confirmingRemoval: String?
 
     var body: some View {
         Form {
@@ -101,6 +103,19 @@ struct RunnersSettings: View {
                 "Reinstalling restarts Far Cooler on \(target). "
                     + DaemonRestartCost.sentence
             )
+        }
+        .confirmationDialog(
+            "Remove this runner?",
+            isPresented: Binding(
+                get: { confirmingRemoval != nil },
+                set: { if !$0 { confirmingRemoval = nil } }
+            ),
+            presenting: confirmingRemoval
+        ) { target in
+            Button("Remove", role: .destructive) { runners.remove(target) }
+            Button("Cancel", role: .cancel) {}
+        } message: { target in
+            Text("Far Cooler stops using \(target). Nothing on it is deleted.")
         }
         .task {
             // Everything at once. These are independent ssh round trips and a
@@ -270,7 +285,7 @@ struct RunnersSettings: View {
                         Task { await unpair(runner.target) }
                     }
                 }
-                Button("Remove", role: .destructive) { runners.remove(runner.target) }
+                Button("Remove…", role: .destructive) { confirmingRemoval = runner.target }
             } label: {
                 Image(systemName: "ellipsis.circle")
             }

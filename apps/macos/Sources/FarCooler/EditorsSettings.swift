@@ -14,6 +14,8 @@ struct EditorsSettings: View {
     @State private var name = ""
     @State private var local = ""
     @State private var remote = ""
+    /// The custom editor waiting on a yes to Remove.
+    @State private var confirmingRemoval: Editor?
 
     var body: some View {
         Form {
@@ -60,6 +62,17 @@ struct EditorsSettings: View {
             }
         }
         .formStyle(.grouped)
+        .confirmationDialog(
+            "Remove \(confirmingRemoval?.name ?? "this editor")?",
+            isPresented: Binding(
+                get: { confirmingRemoval != nil },
+                set: { if !$0 { confirmingRemoval = nil } }
+            ),
+            presenting: confirmingRemoval
+        ) { editor in
+            Button("Remove", role: .destructive) { editors.removeCustom(editor) }
+            Button("Cancel", role: .cancel) {}
+        }
         // Someone who came here because their editor was missing has very often
         // just installed it.
         .onAppear { editors.refresh() }
@@ -86,13 +99,14 @@ struct EditorsSettings: View {
             }
 
             if editor.id.hasPrefix("custom:") {
-                Button {
-                    editors.removeCustom(editor)
+                Menu {
+                    Button("Remove…", role: .destructive) { confirmingRemoval = editor }
                 } label: {
-                    Image(systemName: "trash")
+                    Image(systemName: "ellipsis.circle")
                 }
-                .buttonStyle(.borderless)
-                .help("Remove \(editor.name)")
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("More actions for \(editor.name)")
             }
         }
         .padding(.vertical, 2)

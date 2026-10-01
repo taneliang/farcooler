@@ -18,6 +18,43 @@ struct RunnerSettingsSheet: View {
     /// with nothing to edit is a sheet that eventually will be.
     @State private var editingTheme: Theme?
     @State private var editingAdapter: AdapterInfo?
+    /// The deletion waiting on a yes. Nothing here is undone by anything but
+    /// retyping it, so none goes through on the first click.
+    @State private var pendingRemoval: PendingRemoval?
+
+    /// A theme or an agent that is about to be deleted, or reverted to its
+    /// shipped definition.
+    enum PendingRemoval: Identifiable {
+        case theme(name: String, reverts: Bool)
+        case adapter(name: String, reverts: Bool)
+
+        var id: String {
+            switch self {
+            case .theme(let name, _): return "theme:\(name)"
+            case .adapter(let name, _): return "adapter:\(name)"
+            }
+        }
+
+        private var reverts: Bool {
+            switch self {
+            case .theme(_, let reverts), .adapter(_, let reverts): return reverts
+            }
+        }
+
+        private var name: String {
+            switch self {
+            case .theme(let name, _), .adapter(let name, _): return name
+            }
+        }
+
+        /// The question the dialog asks.
+        var title: String {
+            reverts ? "Revert “\(name)” to its default?" : "Delete “\(name)”?"
+        }
+
+        /// The destructive button, which names the act.
+        var confirmTitle: String { reverts ? "Revert to Default" : "Delete" }
+    }
     /// What is in the branch-prefix field, which is not what the runner says
     /// until it is committed — otherwise every keystroke would be a write.
     @State private var prefixDraft = ""
@@ -44,6 +81,22 @@ struct RunnerSettingsSheet: View {
         .task {
             await store.load()
             prefixDraft = store.branchPrefix
+        }
+        .confirmationDialog(
+            pendingRemoval?.title ?? "",
+            isPresented: Binding(
+                get: { pendingRemoval != nil },
+                set: { if !$0 { pendingRemoval = nil } }
+            ),
+            presenting: pendingRemoval
+        ) { removal in
+            Button(removal.confirmTitle, role: .destructive) {
+                switch removal {
+                case .theme(let name, _): Task { await store.delete(themeNamed: name) }
+                case .adapter(let name, _): Task { await store.delete(adapterNamed: name) }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
         }
         .sheet(item: $editingTheme) { theme in
             ThemeEditor(theme: theme) { edited in
@@ -150,6 +203,23 @@ struct RunnerSettingsSheet: View {
         }
     }
 
+    /// The ellipsis menu a row keeps its removal in: one pattern for every
+    /// list in Settings, with the destructive item last and the click that
+    /// follows it a confirmation rather than the deletion itself.
+    private func rowMenu(
+        edit: @escaping () -> Void, removeTitle: String, remove: @escaping () -> Void
+    ) -> some View {
+        Menu {
+            Button("Edit…", action: edit)
+            Divider()
+            Button(removeTitle, role: .destructive, action: remove)
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
     private var themesSection: some View {
         Section {
             ForEach(allThemes, id: \.theme.name) { row in
@@ -174,11 +244,25 @@ struct RunnerSettingsSheet: View {
                     // table to delete, so offering it would be a button that
                     // does nothing.
                     if row.isRunnerDefined {
-                        Button(row.shadowsBuiltIn ? "Revert to Default" : "Delete") {
-                            Task { await store.delete(themeNamed: row.theme.name) }
+                        rowMenu(
+                            edit: { editingTheme = row.theme },
+                            removeTitle: row.shadowsBuiltIn ? "Revert to Default…" : "Delete…",
+                            remove: {
+                                pendingRemoval = .theme(
+                                    name: row.theme.name, reverts: row.shadowsBuiltIn)
+                            })
+                    }
+                }
+                .contextMenu {
+                    Button("Edit…") { editingTheme = row.theme }
+                    if row.isRunnerDefined {
+                        Button(
+                            row.shadowsBuiltIn ? "Revert to Default…" : "Delete…",
+                            role: .destructive
+                        ) {
+                            pendingRemoval = .theme(
+                                name: row.theme.name, reverts: row.shadowsBuiltIn)
                         }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(.red)
                     }
                 }
             }
@@ -239,11 +323,25 @@ struct RunnerSettingsSheet: View {
                     Button("Edit…") { editingAdapter = adapter }
                         .buttonStyle(.borderless)
                     if adapter.origin == .override || adapter.origin == .user {
-                        Button(adapter.origin == .override ? "Revert to Default" : "Delete") {
-                            Task { await store.delete(adapterNamed: adapter.preset) }
+                        rowMenu(
+                            edit: { editingAdapter = adapter },
+                            removeTitle: adapter.origin == .override ? "Revert to Default…" : "Delete…",
+                            remove: {
+                                pendingRemoval = .adapter(
+                                    name: adapter.preset, reverts: adapter.origin == .override)
+                            })
+                    }
+                }
+                .contextMenu {
+                    Button("Edit…") { editingAdapter = adapter }
+                    if adapter.origin == .override || adapter.origin == .user {
+                        Button(
+                            adapter.origin == .override ? "Revert to Default…" : "Delete…",
+                            role: .destructive
+                        ) {
+                            pendingRemoval = .adapter(
+                                name: adapter.preset, reverts: adapter.origin == .override)
                         }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(.red)
                     }
                 }
             }
