@@ -188,16 +188,10 @@ struct ResumeBranch: View {
                     .labelsHidden().fixedSize().controlSize(.small)
                 }
             }
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .font(.subheadline).foregroundStyle(.tertiary)
-                TextField("Filter branches", text: $query)
-                    .textFieldStyle(.plain)
-                    .font(.callout)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
+            // The system's own field, with its focus ring, rather than a plain
+            // one drawn into a rounded rectangle with a ring of its own.
+            TextField("Filter branches", text: $query)
+                .textFieldStyle(.roundedBorder)
         }
         .padding(14)
     }
