@@ -20,3 +20,29 @@ struct PrefixDisplayTests {
         #expect(!sheet.contains { $0.contains("⌃B") }, "\(sheet.filter { $0.contains("⌃B") })")
     }
 }
+
+extension PrefixDisplayTests {
+    /// The Layout menu named ⌃B in every title whatever the setting said.
+    @Test("A Layout menu title names the prefix that is set")
+    func menuTitlesFollowThePrefix() {
+        #expect(PrefixKey.menuTitle("Split Right", keys: "%", stored: "b") == "Split Right (⌃B %)")
+        #expect(PrefixKey.menuTitle("Split Right", keys: "%", stored: "a") == "Split Right (⌃A %)")
+        #expect(PrefixKey.menuTitle("Zoom Pane", keys: "z", stored: " ") == "Zoom Pane (⌃Space z)")
+    }
+}
+
+extension PrefixDisplayTests {
+    /// A menu item that types ⌃B into its own title goes on saying ⌃B after the
+    /// setting changes, so Commands.swift may not contain the literal in a
+    /// button title.
+    @Test("No menu title hard-codes the default prefix")
+    func noMenuTitleHardCodesThePrefix() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/FarCooler/Commands.swift")
+        let titles = try String(contentsOf: url, encoding: .utf8)
+            .split(separator: "\n")
+            .filter { $0.contains("Button(\"") && $0.contains("⌃B") }
+        #expect(titles.isEmpty, "\(titles)")
+    }
+}

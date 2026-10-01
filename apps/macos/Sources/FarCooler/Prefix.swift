@@ -286,6 +286,16 @@ enum PrefixKey {
         "\u{2303}" + (stored == " " ? "Space" : stored.uppercased())
     }
 
+    /// A Layout menu title that names its prefix sequence: "Split Right (⌃B %)".
+    ///
+    /// In the title because a menu item with no key equivalent teaches nothing
+    /// about a prefix. Built from the stored prefix, so choosing ⌃A in Settings
+    /// changes the menu, and from one separator, so the sequence does not
+    /// double as a second shortcut column.
+    static func menuTitle(_ name: String, keys: String, stored: String) -> String {
+        "\(name) (\(display(stored)) \(keys))"
+    }
+
     /// The prefix now in force, read from the same defaults key
     /// `Preferences.prefixKey` stores to, so it needs no actor.
     static var current: String {

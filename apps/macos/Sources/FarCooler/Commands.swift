@@ -64,6 +64,10 @@ enum AppCommand: String {
 struct FarCoolerCommands: Commands {
     /// Nil unless the main window is key. See `MainWindowFocus`.
     @FocusedValue(\.mainWindow) private var mainWindow
+    /// The tiling prefix as stored, so the Layout menu's titles follow the
+    /// setting rather than saying ⌃B whatever it is.
+    @AppStorage("tiling.prefixKey") private var prefixKey = "b"
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
         // About Far Cooler, saying which build this is.
@@ -74,7 +78,7 @@ struct FarCoolerCommands: Commands {
         // could not. This one names the channel too, and the daemon it is
         // driving, which is the pair that has to match.
         CommandGroup(replacing: .appInfo) {
-            Button("About Far Cooler") { AppCommand.about.post() }
+            Button("About Far Cooler") { openWindow(id: AboutView.windowID) }
         }
 
         // Greyed out rather than absent on a feedless build — `local` and any
@@ -139,6 +143,23 @@ struct FarCoolerCommands: Commands {
                 .keyboardShortcut("e", modifiers: [.command, .shift])
         }
 
+        // A workspace's levels and panes. ⌃⌘ and ⌥⌘ because the usual chords are
+        // taken: ⌘[ is Previous Terminal, ⇧⌘↩ is Zoom Pane, and ⌘digits
+        // are the terminals (spec §4.9).
+        CommandMenu("Workspace") {
+            Button("Back") { AppCommand.back.post() }
+                .keyboardShortcut(.leftArrow, modifiers: [.command, .control])
+            Button("Focus") { AppCommand.focusColumn.post() }
+                .keyboardShortcut(.return, modifiers: [.command, .control])
+            Divider()
+            Button("Orchestrator") { AppCommand.focusConversation.post() }
+                .keyboardShortcut("1", modifiers: [.command, .option])
+            Button("Board") { AppCommand.focusBoard.post() }
+                .keyboardShortcut("2", modifiers: [.command, .option])
+            Button("Task") { AppCommand.focusTask.post() }
+                .keyboardShortcut("3", modifiers: [.command, .option])
+        }
+
         CommandMenu("Terminal") {
             Button("Next Terminal") { AppCommand.nextTerminal.post() }
                 .keyboardShortcut("]", modifiers: .command)
@@ -148,7 +169,7 @@ struct FarCoolerCommands: Commands {
             // The one shortcut that is not a convention from elsewhere, because
             // nothing else has this idea: go straight to whatever is waiting on
             // you. It is the reason to open the app at all.
-            Button("Next Needing Attention") { AppCommand.nextAttention.post() }
+            Button("Next Item That Needs You") { AppCommand.nextAttention.post() }
                 .keyboardShortcut("n", modifiers: [.command, .control])
                 .disabled(!MainWindowFocus.stepsToAttention(mainWindow))
             Divider()
@@ -160,15 +181,15 @@ struct FarCoolerCommands: Commands {
 
         // The menu is where a prefix binding becomes discoverable to someone who
         // has never used tmux, and where someone who has can confirm that the
-        // key they already know is the key here. Every item names its ⌃B
-        // sequence in the title, because a menu item with no key equivalent
-        // teaches nothing about a prefix.
+        // key they already know is the key here. Every item names its prefix
+        // sequence in the title — the prefix as set in Settings — because a menu
+        // item with no key equivalent teaches nothing about a prefix.
         CommandMenu("Layout") {
             // Splitting leads, because it is now the only way a layout grows and
             // the one thing every other item here presupposes.
-            Button("Split Right  ⌃B %") { TileCommand.splitRight.post() }
-            Button("Split Down  ⌃B \"") { TileCommand.splitDown.post() }
-            Button("Move Pane Out  ⌃B !") { TileCommand.breakPane.post() }
+            Button(PrefixKey.menuTitle("Split Right", keys: "%", stored: prefixKey)) { TileCommand.splitRight.post() }
+            Button(PrefixKey.menuTitle("Split Down", keys: "\"", stored: prefixKey)) { TileCommand.splitDown.post() }
+            Button(PrefixKey.menuTitle("Move Pane Out", keys: "!", stored: prefixKey)) { TileCommand.breakPane.post() }
             Divider()
             // ⇧⌘↩ rather than ⇧⌘Z, which is Edit ▸ Redo on every Mac and was
             // bound here twice over: the menu bar showed ⇧⌘Z in two menus, and
@@ -177,16 +198,16 @@ struct FarCoolerCommands: Commands {
             // the same idea, and nothing standard holds it.
             // `ShortcutSheetTests` now refuses a chord the system's own menus
             // already use.
-            Button("Zoom Pane  ⌃B z") { TileCommand.zoom.post() }
+            Button(PrefixKey.menuTitle("Zoom Pane", keys: "z", stored: prefixKey)) { TileCommand.zoom.post() }
                 .keyboardShortcut(.return, modifiers: [.command, .shift])
                 .disabled(!MainWindowFocus.zoomsPane(mainWindow))
-            Button("Next Arrangement  ⌃B space") { TileCommand.cycle.post() }
+            Button(PrefixKey.menuTitle("Next Arrangement", keys: "space", stored: prefixKey)) { TileCommand.cycle.post() }
                 .keyboardShortcut(.space, modifiers: [.command, .shift])
             // Double-clicking a divider evens out the two panes it separates.
             // This is the same idea for the whole layout, and it is here rather
             // than only on the divider because a gesture nobody has been told
             // about needs somewhere to be discovered.
-            Button("Even Out Panes  ⌃B =") { TileCommand.evenPanes.post() }
+            Button(PrefixKey.menuTitle("Even Out Panes", keys: "=", stored: prefixKey)) { TileCommand.evenPanes.post() }
             Menu("Arrangement") {
                 ForEach(TilePreset.allCases) { preset in
                     Button(preset.label) { TileCommand.preset(preset).post() }
@@ -196,15 +217,15 @@ struct FarCoolerCommands: Commands {
             // The prefix-less ones, and the only tiling bindings that get a real
             // key equivalent here: they are used constantly, and a menu item is
             // how someone finds out they exist.
-            Button("Pane Left  ⌃H") { TileCommand.focus(.left).post() }
-            Button("Pane Right  ⌃L") { TileCommand.focus(.right).post() }
-            Button("Pane Above  ⌃K") { TileCommand.focus(.top).post() }
-            Button("Pane Below  ⌃J") { TileCommand.focus(.bottom).post() }
+            Button("Pane Left (⌃H)") { TileCommand.focus(.left).post() }
+            Button("Pane Right (⌃L)") { TileCommand.focus(.right).post() }
+            Button("Pane Above (⌃K)") { TileCommand.focus(.top).post() }
+            Button("Pane Below (⌃J)") { TileCommand.focus(.bottom).post() }
             Divider()
-            Button("Next Pane  ⌃B o") { TileCommand.focusNext.post() }
-            Button("Previous Pane  ⌃B ;") { TileCommand.focusPrevious.post() }
+            Button(PrefixKey.menuTitle("Next Pane", keys: "o", stored: prefixKey)) { TileCommand.focusNext.post() }
+            Button(PrefixKey.menuTitle("Previous Pane", keys: ";", stored: prefixKey)) { TileCommand.focusPrevious.post() }
             Divider()
-            Button("New Layout  ⌃B c") { TileCommand.newGroup.post() }
+            Button(PrefixKey.menuTitle("New Layout", keys: "c", stored: prefixKey)) { TileCommand.newGroup.post() }
             // A layout IS a tab here — the pill bar across the top of a worktree
             // is a tab strip, and these are the two verbs that walk it. So they
             // carry what every tabbed app on this machine binds for that:
@@ -215,16 +236,18 @@ struct FarCoolerCommands: Commands {
             // terminal has a claim on, so it is intercepted where every other
             // prefix-less ⌃ binding already is, rather than being taken from
             // the whole app by a menu key equivalent.
-            Button("Next Layout  ⌃B n  ⌃⇥") { TileCommand.nextGroup.post() }
+            Button(PrefixKey.menuTitle("Next Layout", keys: "n", stored: prefixKey)) { TileCommand.nextGroup.post() }
                 .keyboardShortcut("]", modifiers: [.command, .shift])
-            Button("Previous Layout  ⌃B p  ⌃⇧⇥") { TileCommand.previousGroup.post() }
+            Button(PrefixKey.menuTitle("Previous Layout", keys: "p", stored: prefixKey)) { TileCommand.previousGroup.post() }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
             Divider()
             // Not really a layout verb — nothing about the arrangement
             // changes — but it is scoped to the focused pane exactly the way
             // zoom and the splits are, and there is no chrome on the pane
             // itself left to put a button on.
-            Button("Terminal ⟷ Chat  ⌃B a") { TileCommand.toggleAgentPane.post() }
+            Button(PrefixKey.menuTitle("Switch Between Terminal and Chat", keys: "a", stored: prefixKey)) {
+                TileCommand.toggleAgentPane.post()
+            }
         }
 
         // The diff pane had not one shortcut in this file, which made the only
@@ -306,29 +329,19 @@ struct FarCoolerCommands: Commands {
                 // key for the two questions this app is always being asked.
                 Button("Go to Anything…") { AppCommand.commandPalette.post() }
                     .keyboardShortcut("p", modifiers: .command)
-                // Search is navigation here, not a nicety: worktrees are unbounded
-                // and typing is the fastest way to any of them, on any runner.
-                Button("Find Workspace, Task or Agent") { AppCommand.search.post() }
-                    .keyboardShortcut("f", modifiers: .command)
+                // ⌘R, which is Reload everywhere else. ⌘0 is Actual Size.
                 Button("Reload Fleet") { AppCommand.reload.post() }
-                    .keyboardShortcut("0", modifiers: .command)
+                    .keyboardShortcut("r", modifiers: .command)
             }
 
-            // A workspace's levels and panes. ⌃⌘ and ⌥⌘ because the usual chords are
-            // taken: ⌘[ is Previous Terminal, ⇧⌘↩ is Zoom Pane, and ⌘digits
-            // are the terminals (spec §4.9).
-            CommandMenu("Workspace") {
-                Button("Back") { AppCommand.back.post() }
-                    .keyboardShortcut(.leftArrow, modifiers: [.command, .control])
-                Button("Focus") { AppCommand.focusColumn.post() }
-                    .keyboardShortcut(.return, modifiers: [.command, .control])
-                Divider()
-                Button("Orchestrator") { AppCommand.focusConversation.post() }
-                    .keyboardShortcut("1", modifiers: [.command, .option])
-                Button("Board") { AppCommand.focusBoard.post() }
-                    .keyboardShortcut("2", modifiers: [.command, .option])
-                Button("Task") { AppCommand.focusTask.post() }
-                    .keyboardShortcut("3", modifiers: [.command, .option])
+            // In Edit, beside the other kinds of find, and with the ellipsis a
+            // command that asks for more input takes.
+            //
+            // Search is navigation here, not a nicety: worktrees are unbounded
+            // and typing is the fastest way to any of them, on any runner.
+            CommandGroup(after: .textEditing) {
+                Button("Find Workspace, Task, or Agent…") { AppCommand.search.post() }
+                    .keyboardShortcut("f", modifiers: .command)
             }
 
             CommandGroup(replacing: .help) {

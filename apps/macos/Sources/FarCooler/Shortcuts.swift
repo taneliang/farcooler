@@ -137,7 +137,7 @@ enum Shortcut {
                 Item(keys: "⌘F", action: "Find a workspace, task, or agent"),
                 Item(keys: "⌘,", action: "Settings"),
                 Item(keys: "⌘/", action: "Keyboard shortcuts"),
-                Item(keys: "⌘0", action: "Reload the fleet"),
+                Item(keys: "⌘R", action: "Reload the fleet"),
             ]
         ),
     ] }
