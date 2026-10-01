@@ -218,10 +218,17 @@ struct AddDeviceView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Allow Zed, Git, and Terminal on that Mac to connect to these runners.")
                     .font(.callout)
-                Toggle(isOn: .constant(true)) { Text("New key: \(shell.name)") }
-                    .disabled(true)
-                Toggle(isOn: .constant(shell.addToConfig)) { Text("Add to ~/.ssh/config") }
-                    .disabled(true)
+                // Plain statements, not disabled switches: this end reports what
+                // the other Mac chose and cannot change it, and a switch that
+                // does nothing when clicked reads as broken.
+                Label("New key: \(shell.name)", systemImage: "checkmark.circle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                if shell.addToConfig {
+                    Label("Adds to ~/.ssh/config", systemImage: "checkmark.circle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
                 Text("\(confirmation.offer.name) selected this before showing its code.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
