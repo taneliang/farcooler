@@ -66,35 +66,17 @@ struct DiffView: View {
     }
 
     private func diffBody(_ rows: [DiffComputation.Line]) -> some View {
-        // A fixed-width gutter for line numbers, so the code column lines up
-        // whether a number is one digit or four.
-        let gutterWidth: CGFloat = 34
+        // Wide enough for the longest number, so the code column lines up
+        // whether a number is one digit or four. Drawn by the same row the
+        // Changes pane uses, so a diff reads the same in both.
+        let digits = String(rows.compactMap { max($0.oldNumber ?? 0, $0.newNumber ?? 0) }.max() ?? 0).count
+        let gutterWidth = max(26, CGFloat(digits) * 7 + 10)
+        let font = Font.system(size: WorkspaceStyle.PaneText.body, design: .monospaced)
 
         return VStack(alignment: .leading, spacing: 0) {
             ForEach(rows) { line in
-                HStack(spacing: 0) {
-                    // The stripe the Changes pane draws, for the reason it
-                    // draws it — see `DiffComputation.Kind.accent`.
-                    Rectangle()
-                        .fill(line.kind.accent)
-                        .frame(width: 2)
-                    HStack(spacing: 0) {
-                        Text(line.oldNumber.map(String.init) ?? "")
-                            .frame(width: gutterWidth, alignment: .trailing)
-                        Text(line.newNumber.map(String.init) ?? "")
-                            .frame(width: gutterWidth, alignment: .trailing)
-                        Text(line.kind.marker)
-                            .frame(width: 14, alignment: .center)
-                        Text(line.text.isEmpty ? " " : line.text)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .lineLimit(1)
-                    }
-                    .padding(.horizontal, 4)
-                }
-                .font(.subheadline.monospaced())
-                .foregroundStyle(line.kind == .context ? .secondary : .primary)
-                .padding(.vertical, 1)
-                .background(line.kind.wash)
+                DiffLineRow(line: line, gutter: gutterWidth, font: font, clipsLongLines: true)
+                    .foregroundStyle(line.kind == .context ? .secondary : .primary)
             }
         }
         .textSelection(.enabled)

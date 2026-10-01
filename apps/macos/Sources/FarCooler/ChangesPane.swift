@@ -1678,17 +1678,35 @@ struct ChangesPane: View {
 /// would move every line of every file sideways for a control used on two of
 /// them, and the old number is the one number a note never quotes: an anchor is
 /// stated in new-file lines, and those stay visible under the pointer.
-private struct DiffLineRow: View {
+///
+/// Also what the chat's `DiffView` draws its lines with, so the two cannot look
+/// different. There it has no anchor and no queue, so no note control, and it
+/// clips a long line rather than letting it run on for a scroll view to carry.
+struct DiffLineRow: View {
     let line: DiffComputation.Line
     let gutter: CGFloat
     let font: Font
-    let anchor: ReviewAnchor
+    let anchor: ReviewAnchor?
     /// Passed, NOT observed, for the reason `TileView.changes` gives: this view
     /// exists once per visible line, and none of them draw the queue. The
     /// composer this hands it to does, and it exists one at a time.
-    let comments: ReviewCommentQueue
+    let comments: ReviewCommentQueue?
+    /// Cut a line off at the row's width instead of running past it.
+    let clipsLongLines: Bool
 
     @State private var hovering = false
+
+    init(
+        line: DiffComputation.Line, gutter: CGFloat, font: Font, anchor: ReviewAnchor? = nil,
+        comments: ReviewCommentQueue? = nil, clipsLongLines: Bool = false
+    ) {
+        self.line = line
+        self.gutter = gutter
+        self.font = font
+        self.anchor = anchor
+        self.comments = comments
+        self.clipsLongLines = clipsLongLines
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -1709,9 +1727,15 @@ private struct DiffLineRow: View {
             Text(line.kind.marker)
                 .foregroundStyle(line.kind.accent)
                 .frame(width: 12)
-            Text(line.text.isEmpty ? " " : line.text)
-                .fixedSize(horizontal: true, vertical: false)
-            Spacer(minLength: 0)
+            if clipsLongLines {
+                Text(line.text.isEmpty ? " " : line.text)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(line.text.isEmpty ? " " : line.text)
+                    .fixedSize(horizontal: true, vertical: false)
+                Spacer(minLength: 0)
+            }
         }
         .font(font)
         .padding(.vertical, 0.5)
@@ -1737,7 +1761,7 @@ private struct DiffLineRow: View {
     /// contains the removal.
     @ViewBuilder
     private var note: some View {
-        if hovering, anchor.firstLine != nil {
+        if hovering, let anchor, let comments, anchor.firstLine != nil {
             ReviewNoteButton(
                 anchor: anchor, comments: comments,
                 box: CGSize(width: 15, height: 13), onGutter: true)
