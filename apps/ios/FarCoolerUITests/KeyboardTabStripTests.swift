@@ -456,8 +456,12 @@ final class AgentEmptyStateTests: XCTestCase {
         for state in ["opening", "starting", "waiting", "trying"] {
             let said = words(launch(state))
             XCTAssertFalse(
-                said.localizedCaseInsensitiveContains("could not load"),
+                said.localizedCaseInsensitiveContains("couldn’t load"),
                 "‘\(state)’ is still trying and called itself a failure: \(said)")
+            if state == "trying" {
+                XCTAssertTrue(
+                    said.hasPrefix("Reconnecting"), "a dropped link is a calm wait: \(said)")
+            }
         }
     }
 
@@ -465,7 +469,7 @@ final class AgentEmptyStateTests: XCTestCase {
     /// deletion: a wait that has genuinely gone on too long still says so.
     func testAWaitThatWentOnTooLongStillSaysItFailed() {
         XCTAssertTrue(
-            words(launch("failed")).localizedCaseInsensitiveContains("could not load"),
+            words(launch("failed")).localizedCaseInsensitiveContains("couldn’t load"),
             "A poll that has been failing past the alarm said nothing about it")
     }
 

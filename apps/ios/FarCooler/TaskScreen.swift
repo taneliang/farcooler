@@ -24,6 +24,7 @@ struct TaskScreen: View {
 
     @Environment(\.phoneNavigator) private var navigator
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         Group {
@@ -250,36 +251,41 @@ struct TaskScreen: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            // One line while the label and its value both fit on it, the value
-            // under the label when they don't. The label used to be what broke
-            // ("Work-/tree") while the value kept its line.
-            ViewThatFits(in: .horizontal) {
-                HStack {
-                    Label(title, systemImage: systemImage)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .fixedSize()
-                    Spacer()
-                    if let detail {
-                        Text(detail)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+            // One line at the ordinary sizes, with a long value cut in the
+            // middle rather than pushing the row onto two lines. The value
+            // goes under the label only at the accessibility sizes, where
+            // there is no room beside it.
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label(title, systemImage: systemImage)
+                                .foregroundStyle(.primary)
+                            if let detail {
+                                Text(detail)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        chevron
                     }
-                    chevron
-                }
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
+                } else {
+                    HStack {
                         Label(title, systemImage: systemImage)
                             .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .fixedSize()
+                        Spacer(minLength: 8)
                         if let detail {
                             Text(detail)
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
                         }
+                        chevron
                     }
-                    Spacer()
-                    chevron
                 }
             }
             .contentShape(.rect)

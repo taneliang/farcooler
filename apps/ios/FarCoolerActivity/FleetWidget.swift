@@ -723,7 +723,7 @@ private struct ItemLine: View {
                     .foregroundStyle(GlancePalette.ink1(scheme))
                     .lineLimit(1)
                 if row.hedged {
-                    Text("older runner")
+                    Text("Older runner")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

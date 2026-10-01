@@ -129,3 +129,19 @@ func aBoardWithAnyRowIsNotBlank() {
     let odd = UnreadableTaskRow(id: "2", key: "-2", title: "t", status: "someday")
     #expect(!BoardForm.isBlank(TaskBoardModel(columns: [], unreadable: [odd])))
 }
+
+/// Empty statuses are said once, not drawn as a header each.
+@Test("The empty statuses are named in one sentence")
+func emptyStatusesAreNamedOnce() {
+    let todo = TaskBoardColumn(
+        status: .todo,
+        rows: [TaskRow(id: "1", key: "-1", title: "t", status: .todo, statusSince: .now)])
+    let one = TaskBoardModel(columns: [todo, TaskBoardColumn(status: .backlog, rows: [])])
+    #expect(BoardForm.emptyNote(one) == "Backlog is empty.")
+    let three = TaskBoardModel(columns: [
+        todo, TaskBoardColumn(status: .backlog, rows: []),
+        TaskBoardColumn(status: .inReview, rows: []), TaskBoardColumn(status: .cancelled, rows: []),
+    ])
+    #expect(BoardForm.emptyNote(three) == "Backlog, In Review and Canceled are empty.")
+    #expect(BoardForm.emptyNote(TaskBoardModel(columns: [todo])) == nil)
+}

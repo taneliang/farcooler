@@ -70,6 +70,7 @@ SOURCES = [
     "ShellBar.swift",
     # The board's rows: a workspace's list on its screen, and a task's card.
     "TaskBoardView.swift",
+    "EmptyState.swift",
     "ShellRootView.swift",
     # The other two thirds of what `ShellRootView.swift` used to be. One type,
     # three files: the container, the page's own layer, and the finger. The
@@ -649,6 +650,7 @@ UI_TEST_SOURCES = [
     # its worktrees that every live-runner suite starts with.
     "LiveRunner.swift",
     "WorkspaceScreenTests.swift",
+    "DynamicTypeTests.swift",
     # A task's agent and back, a notification landing with its workspace and
     # task under it, and a decision answered from Needs You. Needs no runner,
     # for the same reason.

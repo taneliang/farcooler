@@ -121,6 +121,20 @@ public enum BoardForm: String, Sendable, Hashable {
     /// "Backlog 0" and nothing under it, so it can't.
     public static func canExpand(_ section: TaskBoardColumn) -> Bool { section.count > 0 }
 
+    /// One line naming the statuses with no task, or nil when none is empty.
+    ///
+    /// Four headers each reading zero were most of a quiet board, drawn as dim
+    /// rows nothing could be done with. They are said once, at the end.
+    public static func emptyNote(_ board: TaskBoardModel) -> String? {
+        let names = board.columns.filter { $0.count == 0 }.map(\.title)
+        switch names.count {
+        case 0: return nil
+        case 1: return "\(names[0]) is empty."
+        default:
+            return names.dropLast().joined(separator: ", ") + " and \(names.last!) are empty."
+        }
+    }
+
     /// Whether a board has nothing on it at all: no task in any status, and no
     /// row this build can't place. Seven headers each reading zero is not a
     /// board, it's a blank page, so the list says "No Tasks" instead.

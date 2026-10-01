@@ -508,7 +508,7 @@ struct NeedsYouRow: View {
                 .font(.subheadline)
                 .foregroundStyle(.primary)
                 .lineLimit(3)
-            if let detail = item.detail, !detail.isEmpty {
+            if let detail = item.distinctDetail {
                 Text(detail)
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)

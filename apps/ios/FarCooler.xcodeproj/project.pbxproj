@@ -29,6 +29,7 @@
 		FBB03184D76053019BBD361D /* PaneFocus.swift in Sources */ = {isa = PBXBuildFile; fileRef = C511F65FD6265262A3071BF0; };
 		3FF0E180D9AF5212BADB9C3C /* ShellBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 712BFC5C6B4F5D0E80562C7F; };
 		53CF1F7F5C955DFBB5181DC6 /* TaskBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24C349F60D2257EBB5921A6F; };
+		E870D08B3761500CA4A69FD0 /* EmptyState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72D99EC83EC9508D887E6544; };
 		D6F4A14A2101594794EE0A52 /* ShellRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A851CC8EA9C75506AE04F139; };
 		63D66DDDF0BD52CAA8453980 /* ShellPageLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61077DACD2095CB0AFC13BEB; };
 		CF32D24A552255B581EA21A0 /* ShellDrag.swift in Sources */ = {isa = PBXBuildFile; fileRef = 826701E3E41D5FF195AC59AA; };
@@ -188,6 +189,7 @@
 		CE9D8C98D7B35135944F6088 /* PhoneHarnessLaunch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3901F5708C765B9281DDD3C9; };
 		B726FE60E6E65B02A1A2395C /* LiveRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59E51511E9C7529495920A96; };
 		CB742AFCE4CC587F846E7346 /* WorkspaceScreenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5951CB89F4FA52438238F13D; };
+		2232A3951E945F7A908424FF /* DynamicTypeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C87B55135D175AF3A39B2978; };
 		D7BFEA1F317D5A418F93A1C3 /* TaskScreenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD1F3CC700F95FB48294AB37; };
 		9FE140CA75A9558496196D4A /* PhoneReopenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70571C4EE1465283B9786587; };
 		19B7EA784E635D98BE09B664 /* TerminalPermissionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23895DE7BEE35D69A0A6AEF3; };
@@ -226,6 +228,7 @@
 		C511F65FD6265262A3071BF0 /* PaneFocus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneFocus.swift; sourceTree = "<group>"; };
 		712BFC5C6B4F5D0E80562C7F /* ShellBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellBar.swift; sourceTree = "<group>"; };
 		24C349F60D2257EBB5921A6F /* TaskBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskBoardView.swift; sourceTree = "<group>"; };
+		72D99EC83EC9508D887E6544 /* EmptyState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyState.swift; sourceTree = "<group>"; };
 		A851CC8EA9C75506AE04F139 /* ShellRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellRootView.swift; sourceTree = "<group>"; };
 		61077DACD2095CB0AFC13BEB /* ShellPageLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellPageLayer.swift; sourceTree = "<group>"; };
 		826701E3E41D5FF195AC59AA /* ShellDrag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellDrag.swift; sourceTree = "<group>"; };
@@ -349,6 +352,7 @@
 		3901F5708C765B9281DDD3C9 /* PhoneHarnessLaunch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneHarnessLaunch.swift; sourceTree = "<group>"; };
 		59E51511E9C7529495920A96 /* LiveRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveRunner.swift; sourceTree = "<group>"; };
 		5951CB89F4FA52438238F13D /* WorkspaceScreenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceScreenTests.swift; sourceTree = "<group>"; };
+		C87B55135D175AF3A39B2978 /* DynamicTypeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicTypeTests.swift; sourceTree = "<group>"; };
 		FD1F3CC700F95FB48294AB37 /* TaskScreenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskScreenTests.swift; sourceTree = "<group>"; };
 		70571C4EE1465283B9786587 /* PhoneReopenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneReopenTests.swift; sourceTree = "<group>"; };
 		23895DE7BEE35D69A0A6AEF3 /* TerminalPermissionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalPermissionTests.swift; sourceTree = "<group>"; };
@@ -431,6 +435,7 @@
 				C511F65FD6265262A3071BF0 /* PaneFocus.swift */,
 				712BFC5C6B4F5D0E80562C7F /* ShellBar.swift */,
 				24C349F60D2257EBB5921A6F /* TaskBoardView.swift */,
+				72D99EC83EC9508D887E6544 /* EmptyState.swift */,
 				A851CC8EA9C75506AE04F139 /* ShellRootView.swift */,
 				61077DACD2095CB0AFC13BEB /* ShellPageLayer.swift */,
 				826701E3E41D5FF195AC59AA /* ShellDrag.swift */,
@@ -518,6 +523,7 @@
 				3901F5708C765B9281DDD3C9 /* PhoneHarnessLaunch.swift */,
 				59E51511E9C7529495920A96 /* LiveRunner.swift */,
 				5951CB89F4FA52438238F13D /* WorkspaceScreenTests.swift */,
+				C87B55135D175AF3A39B2978 /* DynamicTypeTests.swift */,
 				FD1F3CC700F95FB48294AB37 /* TaskScreenTests.swift */,
 				70571C4EE1465283B9786587 /* PhoneReopenTests.swift */,
 				23895DE7BEE35D69A0A6AEF3 /* TerminalPermissionTests.swift */,
@@ -925,6 +931,7 @@
 				FBB03184D76053019BBD361D /* PaneFocus.swift in Sources */,
 				3FF0E180D9AF5212BADB9C3C /* ShellBar.swift in Sources */,
 				53CF1F7F5C955DFBB5181DC6 /* TaskBoardView.swift in Sources */,
+				E870D08B3761500CA4A69FD0 /* EmptyState.swift in Sources */,
 				D6F4A14A2101594794EE0A52 /* ShellRootView.swift in Sources */,
 				63D66DDDF0BD52CAA8453980 /* ShellPageLayer.swift in Sources */,
 				CF32D24A552255B581EA21A0 /* ShellDrag.swift in Sources */,
@@ -1113,6 +1120,7 @@
 				CE9D8C98D7B35135944F6088 /* PhoneHarnessLaunch.swift in Sources */,
 				B726FE60E6E65B02A1A2395C /* LiveRunner.swift in Sources */,
 				CB742AFCE4CC587F846E7346 /* WorkspaceScreenTests.swift in Sources */,
+				2232A3951E945F7A908424FF /* DynamicTypeTests.swift in Sources */,
 				D7BFEA1F317D5A418F93A1C3 /* TaskScreenTests.swift in Sources */,
 				9FE140CA75A9558496196D4A /* PhoneReopenTests.swift in Sources */,
 				19B7EA784E635D98BE09B664 /* TerminalPermissionTests.swift in Sources */,

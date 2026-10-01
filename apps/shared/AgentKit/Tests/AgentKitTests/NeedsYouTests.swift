@@ -315,3 +315,16 @@ func anOlderPaneWithNoActivityTimeHasNoSince() {
     #expect(item.count == 1)
     #expect(item.first?.since == nil)
 }
+
+/// A command is said once on an ask: in the question, or under it, not both.
+@Test("The detail is dropped when the question already says it")
+func detailRepeatingTheQuestionIsDropped() {
+    var ask = NeedsYouItem(
+        id: "ask:a", kind: .ask, rank: 1, since: .now, question: "Allow touch x")
+    ask.detail = "touch x"
+    #expect(ask.distinctDetail == nil)
+    ask.detail = "rm -rf build"
+    #expect(ask.distinctDetail == "rm -rf build")
+    ask.detail = ""
+    #expect(ask.distinctDetail == nil)
+}

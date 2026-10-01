@@ -1248,45 +1248,9 @@ struct TerminalView: View {
         message: String? = nil, transcript: String? = nil,
         actionTitle: String? = nil, action: (() -> Void)? = nil
     ) -> some View {
-        VStack(spacing: 0) {
-            if spinner {
-                // The spinner is the mark in this state, so it is sized like
-                // one rather than left at the 20pt a row would use.
-                ProgressView()
-                    .controlSize(.large)
-                    .padding(.bottom, 22)
-            } else if let symbol {
-                Image(systemName: symbol)
-                    .font(.system(size: 42, weight: .thin))
-                    .foregroundStyle(mark)
-                    .padding(.bottom, 22)
-            }
-            Text(title)
-                .font(.title2.weight(.semibold))
-                .multilineTextAlignment(.center)
-                .padding(.bottom, 8)
-            if let message {
-                Text(message)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 320)
-            }
-            if let transcript, !transcript.isEmpty {
-                DetailBox(text: transcript)
-                    .frame(maxWidth: 320)
-                    .padding(.top, 14)
-            }
-            // Under the sentence that explains it, which is where a screen full
-            // of prose puts its one move. Bordered rather than prominent: this
-            // is a way out of a state that is not an error, and an accented
-            // button would read as the app asking to be tapped.
-            if let actionTitle, let action {
-                Button(actionTitle, action: action)
-                    .buttonStyle(.bordered)
-                    .padding(.top, 22)
-            }
-        }
+        EmptyState(
+            spinner: spinner, symbol: symbol, mark: mark, title: title, message: message,
+            transcript: transcript, actionTitle: actionTitle, action: action)
         .padding(.horizontal, 32)
     }
 

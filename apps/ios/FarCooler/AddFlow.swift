@@ -97,8 +97,10 @@ struct AddView: View {
     ) -> some View {
         if let blocker {
             VStack(alignment: .leading, spacing: 10) {
+                // The row is dimmed as a whole, and the reason beneath it is
+                // not: the explanation was brighter than the title it explained.
                 label(icon: icon, title: title, detail: detail)
-                    .foregroundStyle(.secondary)
+                    .opacity(0.55)
                 Text(blocker.reason)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -291,7 +293,7 @@ private struct ConnectThisDeviceStep: View {
             // Centered on the card, not pinned to its first line: the row is
             // top-aligned for the icon, and a flexible height lets the
             // chevron take the whole of it and center itself.
-            Image(systemName: "chevron.right")
+            Image(systemName: "chevron.forward")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.tertiary)
                 .frame(maxHeight: .infinity)

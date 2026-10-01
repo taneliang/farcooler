@@ -201,6 +201,11 @@ struct ChangesView: View {
             // path, offered rather than applied. See `ReviewPosition` for why
             // an anchor and not an offset, and `resumeCard` for why it asks.
             .background(TerminalPalette.background)
+            // The diff reads against the theme's ground, so the text on it
+            // resolves in the theme's scheme: system `.primary` on a dark theme
+            // under system Light was dark on dark. Scoped to the scroll view;
+            // the bar below it and the sheets are the system's.
+            .environment(\.colorScheme, Themes.shared.current.colorScheme)
             // Pull to refresh asks the daemon to recompute rather than answer from
             // its cache: it is the affordance that exists because no watcher is
             // perfect, and the user must always have a way to be certain.
@@ -790,7 +795,7 @@ struct ChangesView: View {
                     Text("Review Commit by Commit")
                         .font(.footnote.weight(.medium))
                     Spacer(minLength: 4)
-                    Image(systemName: "chevron.right")
+                    Image(systemName: "chevron.forward")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -823,7 +828,7 @@ struct ChangesView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if count > 0 {
-                    Image(systemName: "chevron.right")
+                    Image(systemName: "chevron.forward")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -928,7 +933,7 @@ struct ChangesView: View {
                 Button {
                     Task { await store.showNextCommit() }
                 } label: {
-                    Image(systemName: "chevron.right")
+                    Image(systemName: "chevron.forward")
                 }
                 .disabled(store.nextCommit == nil)
                 .accessibilityLabel("Next commit")
@@ -1078,7 +1083,7 @@ private struct ReviewBar: View {
                         Text("Review and Send")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Image(systemName: "chevron.right")
+                        Image(systemName: "chevron.forward")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     }
@@ -1577,7 +1582,7 @@ private struct ChangesFileHeading: View {
                 }
             }
 
-            Image(systemName: expanded ? "chevron.down" : "chevron.right")
+            Image(systemName: expanded ? "chevron.down" : "chevron.forward")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }

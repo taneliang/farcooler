@@ -162,6 +162,13 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
     public var question: String
     /// An ask's command, or a review's `+18 −40`. Absent below Control scope.
     public var detail: String?
+    /// The detail, unless the question already says it. "Allow touch x" over
+    /// a monospaced `touch x` printed the command twice; a review's `+18 −40`
+    /// is not in its question and stays.
+    public var distinctDetail: String? {
+        guard let detail, !detail.isEmpty else { return nil }
+        return question.localizedCaseInsensitiveContains(detail) ? nil : detail
+    }
     /// What `terminal.agent_answer` takes. Absent below Control scope.
     public var askID: String?
     /// Empty below Control scope, where the only button is Open.

@@ -159,7 +159,7 @@ struct WorkspaceBoardList: View {
                     .accessibilityIdentifier("board-waiting")
                 }
             }
-            ForEach(board.sections) { section in
+            ForEach(board.sections.filter { BoardForm.canExpand($0) }) { section in
                 let open = BoardForm.isExpanded(section, collapsed: collapsed)
                 Section {
                     if open {
@@ -186,6 +186,16 @@ struct WorkspaceBoardList: View {
                     }
                 } header: {
                     header(section, open: open)
+                }
+            }
+            // The statuses with nothing in them, once, rather than a dim header
+            // each.
+            if let note = BoardForm.emptyNote(board) {
+                Section {
+                    Text(note)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("board-empty-statuses")
                 }
             }
             // Rows this build has no status for: carried and shown under a

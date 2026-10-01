@@ -274,7 +274,7 @@ struct RunnerSettingsView: View {
                             ThemeStrip(theme: theme)
                             Text(theme.name).foregroundStyle(.primary)
                             Spacer()
-                            Image(systemName: "chevron.right")
+                            Image(systemName: "chevron.forward")
                                 .font(.caption)
                                 .foregroundStyle(.tertiary)
                         }
@@ -334,7 +334,7 @@ struct RunnerSettingsView: View {
                                     .truncationMode(.middle)
                             }
                             Spacer()
-                            Image(systemName: "chevron.right")
+                            Image(systemName: "chevron.forward")
                                 .font(.caption)
                                 .foregroundStyle(.tertiary)
                         }

@@ -1097,43 +1097,12 @@ struct AgentView: View {
         spinner: Bool = false, symbol: String? = nil, mark: Color = .secondary, title: String,
         message: String? = nil, transcript: String? = nil
     ) -> some View {
-        VStack(spacing: 0) {
-            if spinner {
-                // The spinner is the mark in this state, so it is sized like
-                // one rather than left at the 20pt a row would use.
-                ProgressView()
-                    .controlSize(.large)
-                    .padding(.bottom, 22)
-            } else if let symbol {
-                Image(systemName: symbol)
-                    .font(.system(size: 42, weight: .thin))
-                    .foregroundStyle(mark)
-                    .padding(.bottom, 22)
-            }
-            Text(title)
-                .font(.title2.weight(.semibold))
-                .multilineTextAlignment(.center)
-                .padding(.bottom, PaneMetrics.step)
-                // Named rather than combined into one element. Combining
-                // swallowed the identifier — a synthesized element does not
-                // keep it — and it would also have folded the host's own words
-                // in the box below into this app's sentence, which is the one
-                // thing everything about this composition exists to keep apart.
-                .accessibilityIdentifier("agent-empty-title")
-            if let message {
-                Text(message)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 320)
-                    .accessibilityIdentifier("agent-empty-message")
-            }
-            if let transcript, !transcript.isEmpty {
-                DetailBox(text: transcript)
-                    .frame(maxWidth: 320)
-                    .padding(.top, 14)
-            }
-        }
+        // Named identifiers rather than one combined element: combining
+        // swallowed the identifier, and would have folded the host's own words
+        // in the box into this app's sentence.
+        EmptyState(
+            spinner: spinner, symbol: symbol, mark: mark, title: title, message: message,
+            transcript: transcript, titleID: "agent-empty-title", messageID: "agent-empty-message")
     }
 }
 
@@ -1397,7 +1366,7 @@ private struct ToolRowView: View {
     private var label: some View {
         HStack(spacing: PaneMetrics.step) {
             if expandable {
-                Image(systemName: "chevron.right")
+                Image(systemName: "chevron.forward")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .rotationEffect(.degrees(expanded ? 90 : 0))
@@ -1548,7 +1517,7 @@ private struct SubagentBlockView: View {
     /// block, and it was 32.
     private var header: some View {
         HStack(spacing: PaneMetrics.step) {
-            Image(systemName: "chevron.right")
+            Image(systemName: "chevron.forward")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .rotationEffect(.degrees(showing ? 90 : 0))
@@ -1663,7 +1632,7 @@ private struct PlanPanel: View {
                 }
             } label: {
                 HStack(spacing: PaneMetrics.step) {
-                    Image(systemName: "chevron.right")
+                    Image(systemName: "chevron.forward")
                         .font(.caption2)
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                     Text("Plan").font(.caption.weight(.semibold))
@@ -3307,7 +3276,7 @@ private struct ThoughtRow: View {
                 // is 44 and runs the width of the row, because there is
                 // nothing else on this line to hit by accident.
                 HStack(spacing: PaneMetrics.step) {
-                    Image(systemName: "chevron.right")
+                    Image(systemName: "chevron.forward")
                         .font(.caption2)
                         .rotationEffect(.degrees(showing ? 90 : 0))
                     Text(isLive ? "Thinking…" : "Thought")

@@ -337,18 +337,20 @@ final class WorkspaceScreenTests: XCTestCase {
             element(app, "harness-sent").value as? String, "task.create billing Email the invoice")
     }
 
-    /// **An empty status is a header reading its zero, and it doesn't open.**
-    /// A status with tasks opens; Done starts collapsed.
-    func testAnEmptyStatusIsACollapsedZeroHeader() throws {
+    /// **Empty statuses are said once, in a line at the end, and aren't
+    /// headers.** A status with tasks opens; Done starts collapsed.
+    func testEmptyStatusesAreOneLineAndDoneStartsCollapsed() throws {
         let app = launch()
         openWorkspace(app, "Billing")
         choose(app, "Board")
-        let todo = element(app, "board-section-todo")
-        XCTAssertTrue(todo.waitForExistence(timeout: 10), "an empty status is not on the board")
-        XCTAssertEqual(todo.label, "To Do 0")
-        XCTAssertEqual(todo.value as? String, "Empty")
-        for status in ["backlog", "in_review", "cancelled"] {
-            XCTAssertTrue(element(app, "board-section-\(status)").exists, "\(status) is missing")
+        let note = element(app, "board-empty-statuses")
+        XCTAssertTrue(note.waitForExistence(timeout: 10), "the empty statuses are not named")
+        for name in ["Backlog", "To Do", "In Review", "Canceled"] {
+            XCTAssertTrue(note.label.contains(name), "\(name) is missing from \(note.label)")
+        }
+        for status in ["backlog", "todo", "in_review", "cancelled"] {
+            XCTAssertFalse(
+                element(app, "board-section-\(status)").exists, "\(status) still has a header")
         }
 
         // Done has a task, and starts collapsed.
@@ -359,10 +361,6 @@ final class WorkspaceScreenTests: XCTestCase {
         done.tap()
         XCTAssertTrue(element(app, "board-card-bil-5").waitForExistence(timeout: 5))
         XCTAssertEqual(element(app, "board-section-done").value as? String, "Expanded")
-
-        // Tapping the empty one opens nothing.
-        todo.tap()
-        XCTAssertEqual(element(app, "board-section-todo").value as? String, "Empty")
     }
 }
 
