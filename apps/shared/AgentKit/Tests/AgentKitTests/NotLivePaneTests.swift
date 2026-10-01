@@ -68,3 +68,23 @@ struct NotLivePaneTests {
         #expect(NotLivePane.action == "Try Again")
     }
 }
+
+/// A dropped link is a wait, and must never be drawn as the failure that needs
+/// the person.
+struct PaneReconnectTests {
+    @Test func theDroppedLinkSentenceIsAWait() {
+        #expect(PaneReconnect.isReconnecting("The connection to this runner dropped. Reconnecting…"))
+    }
+
+    @Test func aRealFailureIsNotAWait() {
+        #expect(!PaneReconnect.isReconnecting("The request that reads this pane didn’t finish."))
+        #expect(!PaneReconnect.isReconnecting(nil))
+    }
+
+    /// Apple-style: title case and a contraction, so nothing reads "Could not".
+    @Test func failureTitlesAreTitleCaseWithContractions() {
+        #expect(PaneReconnect.paneFailureTitle == "Couldn’t Load This Pane")
+        #expect(PaneReconnect.sessionFailureTitle == "Couldn’t Load This Session")
+        #expect(PaneReconnect.title == "Reconnecting…")
+    }
+}

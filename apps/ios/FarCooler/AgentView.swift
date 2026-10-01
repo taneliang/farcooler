@@ -1004,10 +1004,15 @@ struct AgentView: View {
 
                 case .failing:
                     let trouble = stream.connectionError
-                    if stream.waited == .tooLong {
+                    if PaneReconnect.isReconnecting(trouble?.sentence) {
+                        // A dropped link being re-dialed is a wait at every
+                        // length: never the red "couldn't load" that asks the
+                        // person for something there is nothing to do about.
+                        status(spinner: true, title: PaneReconnect.title)
+                    } else if stream.waited == .tooLong {
                         status(
                             symbol: "exclamationmark.triangle", mark: .red,
-                            title: "Could not load this session",
+                            title: PaneReconnect.sessionFailureTitle,
                             // The core's own words, below a sentence rather than
                             // standing in for one. Under this headline, in this
                             // face, they used to read as Far Cooler's account of
@@ -3521,7 +3526,7 @@ struct AgentLayoutHarness: View {
             return (
                 .failing, .aWhile,
                 AgentStream.Trouble(
-                    sentence: "The connection to this runner dropped. Reconnecting…")
+                    sentence: PaneReconnect.sentence)
             )
         }
         if args.contains("-empty-failed") {

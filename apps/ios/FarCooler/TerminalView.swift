@@ -1202,9 +1202,14 @@ struct TerminalView: View {
                 symbol: "moon.zzz", mark: .secondary, title: NotLivePane.title,
                 message: NotLivePane.message(for: currentName),
                 actionTitle: NotLivePane.action, action: { session.askAgain() })
+        case .failed(let message, _) where PaneReconnect.isReconnecting(message):
+            // A dropped link that `Connection` is already re-dialing: a wait,
+            // drawn as one. Red is for a failure the person has to act on.
+            status(spinner: true, title: PaneReconnect.title)
         case .failed(let message, let transcript):
             status(
-                symbol: "exclamationmark.triangle", mark: .red, title: "Could not load",
+                symbol: "exclamationmark.triangle", mark: .red,
+                title: PaneReconnect.paneFailureTitle,
                 message: message, transcript: transcript)
         case .live:
             if let grid = session.grid {

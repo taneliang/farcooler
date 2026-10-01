@@ -360,7 +360,7 @@ final class AgentStream: ObservableObject {
             // about it, which is what clearing on the next good batch does.
             if let core = error as? ClientCore.CoreError, case .disconnected = core {
                 connectionError = Trouble(
-                    sentence: "The connection to this runner dropped. Reconnecting…")
+                    sentence: PaneReconnect.sentence)
             } else {
                 // The one arm with nothing written about it, so the sentence
                 // says only what is known — that the read did not finish — and

@@ -61,3 +61,34 @@ enum NotLivePane {
     /// same move, and it is a sentence rather than a verb stub.
     static let action = "Try Again"
 }
+
+/// A pane whose link dropped and is being put back: a wait, not a failure.
+///
+/// Any ssh hiccup empties the slot a pane polls through, and `Connection`
+/// re-dials on its own. Between the two the pane has one sentence to say, and
+/// it used to be drawn under a red triangle headed "Could not load", which
+/// announced a failure in the middle of a recovery that needed nothing from
+/// the person. Red is for a failure they have to act on. The sentence and the
+/// decision to read it as a wait live here so `swift test` can pin both; the
+/// phone's two screens (a terminal pane and an agent session) and Android's
+/// both use the same words.
+enum PaneReconnect {
+    /// The sentence a dropped link is recorded as.
+    static let sentence = "The connection to this runner dropped. Reconnecting…"
+
+    /// The headline of the calm state.
+    static let title = "Reconnecting…"
+
+    /// Whether a pane's recorded sentence is this wait rather than a failure.
+    static func isReconnecting(_ sentence: String?) -> Bool {
+        sentence == Self.sentence
+    }
+
+    /// The headline for a pane that could not be loaded: "Couldn’t Load This
+    /// Pane", in the case and the contraction every other empty-state title in
+    /// the app uses.
+    static let paneFailureTitle = "Couldn’t Load This Pane"
+
+    /// The same, for an agent's conversation.
+    static let sessionFailureTitle = "Couldn’t Load This Session"
+}

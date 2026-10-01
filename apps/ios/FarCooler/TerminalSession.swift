@@ -1751,7 +1751,7 @@ final class TerminalSession: ObservableObject {
             return
         }
         if message == "not connected" {
-            phase = .failed("The connection to this runner dropped. Reconnecting…", transcript: nil)
+            phase = .failed(PaneReconnect.sentence, transcript: nil)
             return
         }
         let trouble = ClientCore.trouble(
