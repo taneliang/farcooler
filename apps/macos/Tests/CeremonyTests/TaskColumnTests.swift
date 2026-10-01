@@ -49,6 +49,108 @@ struct TaskColumnTests {
         #expect(TaskColumnModel.terminalCount(2) == "2 terminals")
     }
 
+    /// Drawn, not only decided: with no worktree and no agent, what's
+    /// beneath a task's text is its one line, and the text has the rest of
+    /// the height, Focus or not.
+    @Test("With no worktree, the task's work is drawn as one line")
+    func withNoWorktreeTheWorkIsDrawnAsOneLine() async {
+        final class Seen { var content: CGFloat = 0 }
+        struct Height: PreferenceKey {
+            static let defaultValue: CGFloat = 0
+            static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+        }
+        for focused in [false, true] {
+            let seen = Seen()
+            let agent = TaskColumnModel.agent(hasAgent: false, worktree: nil)
+            let view = TaskViewSplit(work: TaskColumnModel.work(agent, showsChanges: false), focused: focused) {
+                GeometryReader { proxy in Color.clear.preference(key: Height.self, value: proxy.size.height) }
+            } workArea: {
+                TaskWorkHeader(
+                    agent: agent, worktree: nil, agents: [], chosen: nil, onChooseAgent: { _ in },
+                    onOpenWorktree: {})
+            }
+            .frame(width: 600, height: 500)
+            .onPreferenceChange(Height.self) { value in MainActor.assumeIsolated { seen.content = value } }
+            let host = NSHostingView(rootView: view)
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 600, height: 500), styleMask: [.borderless],
+                backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = host
+            for _ in 0..<5 {
+                host.layoutSubtreeIfNeeded()
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            window.close()
+            // 500, less the 30 pt line and its 1 pt divider.
+            #expect(seen.content == 469, "focused \(focused): the text got \(seen.content) of 500")
+        }
+    }
+
+    /// Back goes up one level at a time: from a worktree opened from its
+    /// task to the task, from the task to the workspace, and from there
+    /// nowhere. Esc and ⌃⌘← put a popped-open orchestrator away first, then
+    /// leave Focus; the breadcrumb's chevron does all three at once.
+    @Test("Back goes worktree, task, workspace, after the orchestrator and Focus")
+    func backGoesUpOneLevelAtATime() {
+        let top = ContentView.Selection.workspace(host: "", workspace: "ws", focus: nil)
+        let task = ContentView.Selection.workspace(host: "", workspace: "ws", focus: .task("t-9"))
+        let lane = WorkspaceNavigation.openWorktree("w-3", from: task)
+        typealias Step = WorkspaceNavigation.BackStep
+        func back(_ from: ContentView.Selection?, trail: ContentView.Selection?, peek: Bool = false, focus: Bool = false,
+                  oneAtATime: Bool = true) -> Step {
+            WorkspaceNavigation.backStep(peek: peek, focus: focus, oneAtATime: oneAtATime, from: from, trail: trail)
+        }
+        let fromLane = back(lane.next, trail: lane.trail)
+        let fromTask = back(fromLane.goesTo, trail: nil)
+        let fromTop = back(fromTask.goesTo, trail: nil)
+        #expect(fromLane == Step(goesTo: task))
+        #expect(fromTask == Step(goesTo: top))
+        #expect(fromTop == Step(goesTo: nil))
+        let peeked = back(task, trail: nil, peek: true, focus: true)
+        let focused = back(task, trail: nil, focus: true)
+        let chevron = back(task, trail: nil, peek: true, focus: true, oneAtATime: false)
+        #expect(peeked == Step(closesPeek: true))
+        #expect(focused == Step(leavesFocus: true))
+        #expect(chevron == Step(closesPeek: true, leavesFocus: true, goesTo: top))
+    }
+
+    /// Where the keyboard lands after Back: the task's terminal, when the
+    /// level it lands on shows one, else nothing, which is the view itself.
+    @Test("After Back, the keyboard goes to the task's terminal, else the view")
+    func afterBackTheKeyboardGoesToTheTasksTerminal() {
+        let worktree = Worktree(
+            id: "w-3", short: "w3", task: "fc-3", branch: "b", repository: nil, host: "", path: "/tmp/w3",
+            state: "active", terminals: [])
+        func rect(_ id: String, focused: Bool) -> PaneRect {
+            PaneRect(id: id, short: id, title: nil, left: 0, top: 0, columns: 40, rows: 24, focused: focused, zoomed: false)
+        }
+        let group = PaneGroup(
+            id: "@2", name: "", active: true, columns: 80, rows: 24, layout: "@2",
+            panes: [rect("a1", focused: false), rect("a2", focused: true)])
+        let agent = ShownLayout(column: .task, worktree: worktree, group: group, groups: [group])
+        let task = ContentView.Selection.workspace(host: "", workspace: "ws", focus: .task("t-9"))
+        let keyed = WorkspaceScreen.keyPane(nil, in: [agent], selection: task)
+        let none = WorkspaceScreen.keyPane(nil, in: [], selection: task)
+        #expect(keyed == PaneRef(host: "", worktree: "w-3", terminal: "a2"))
+        #expect(none == nil)
+    }
+
+    /// ⌥⌘2 from a task goes up to the workspace and leaves the keyboard on
+    /// the board; any other change takes it back, as every navigation does.
+    @Test("⌥⌘2 from a task keeps the keyboard on the board")
+    func optionCommandTwoFromATaskKeepsTheKeyboardOnTheBoard() {
+        let top = ContentView.Selection.workspace(host: "", workspace: "ws", focus: nil)
+        let task = ContentView.Selection.workspace(host: "", workspace: "ws", focus: .task("t-9"))
+        let other = ContentView.Selection.workspace(host: "", workspace: "billing", focus: nil)
+        let kept = WorkspaceNavigation.boardKeepsKeyboard(pending: true, from: task, to: top)
+        let notAsked = WorkspaceNavigation.boardKeepsKeyboard(pending: false, from: task, to: top)
+        let elsewhere = WorkspaceNavigation.boardKeepsKeyboard(pending: true, from: task, to: other)
+        let fromTop = WorkspaceNavigation.boardKeepsKeyboard(pending: true, from: top, to: top)
+        #expect(kept)
+        #expect(!notAsked && !elsewhere && !fromTop)
+    }
+
     /// The breadcrumb names each level down to the one you're at, and each
     /// above it goes back there: Workspace › Task, Workspace › Task ›
     /// Worktree for a worktree opened from its task, Workspace › Worktree
@@ -100,7 +202,7 @@ struct TaskColumnTests {
         #expect(TaskColumnModel.worktree(of: Self.row(.todo, worktree: ""), agent: nil) == nil)
     }
 
-    /// The task column's changes, drawn as the column draws them
+    /// A task's changes, drawn as the task view draws them
     /// (`TaskColumnChanges`), read the worktree's changes and split no pane,
     /// so nothing resizes the agent's window for other clients (ruling 6).
     /// The toolbar's Changes button in an opened worktree still splits one,

@@ -210,8 +210,9 @@ struct TaskWorkHeader: View {
 
 /// A task's text over its agent and changes, with a divider between them
 /// whose place is remembered per window. With nothing beneath but a line
-/// (`.compact`), the text takes the rest; with Focus, the work takes all of
-/// it.
+/// (`.compact`), the text takes the rest, Focus or not; with Focus, the work
+/// takes all of it, in the same views, so the agent and the changes keep
+/// their place.
 struct TaskViewSplit<Content: View, WorkArea: View>: View {
     let work: TaskColumnModel.Work
     /// Focus (⌃⌘↩): the agent and changes at full height.
@@ -229,10 +230,10 @@ struct TaskViewSplit<Content: View, WorkArea: View>: View {
                 Divider()
                 workArea()
             }
-        case .full where focused:
-            workArea()
         case .full:
-            ShareSplit(stored: $contentShare, fallback: TaskColumnModel.contentShare(stored: nil)) {
+            ShareSplit(
+                stored: $contentShare, fallback: TaskColumnModel.contentShare(stored: nil), collapsed: focused
+            ) {
                 content()
             } bottom: {
                 workArea()
@@ -280,6 +281,8 @@ struct ShareSplit<Top: View, Bottom: View>: View {
     @Binding var stored: Double
     /// The top's share before anything is stored.
     let fallback: Double
+    /// The top folded away, and the divider with it: the bottom has it all.
+    var collapsed = false
     @ViewBuilder let top: () -> Top
     @ViewBuilder let bottom: () -> Bottom
 
@@ -291,8 +294,12 @@ struct ShareSplit<Top: View, Bottom: View>: View {
             let share = dragging ?? (stored > 0 ? Self.clamped(stored) : fallback)
             let height = proxy.size.height
             VStack(spacing: 0) {
-                top().frame(height: max(0, height * share - 3))
-                divider(height: height)
+                top()
+                    .frame(height: collapsed ? 0 : max(0, height * share - 3))
+                    .clipped()
+                    .opacity(collapsed ? 0 : 1)
+                    .accessibilityHidden(collapsed)
+                if !collapsed { divider(height: height) }
                 bottom().frame(maxHeight: .infinity)
             }
             .coordinateSpace(name: space)
@@ -381,6 +388,34 @@ enum WorkspaceNavigation {
             }
             return [top, here]
         }
+    }
+
+    /// What one Back does, in order: put the popped-open orchestrator away,
+    /// then leave Focus, then go up a level. Esc and ⌃⌘← (`oneAtATime`) stop
+    /// after the first that applies; the breadcrumb's chevron does all.
+    struct BackStep: Equatable {
+        var closesPeek = false
+        var leavesFocus = false
+        var goesTo: Selection?
+    }
+
+    static func backStep(
+        peek: Bool, focus: Bool, oneAtATime: Bool, from selection: Selection?, trail: Selection?
+    ) -> BackStep {
+        var step = BackStep(closesPeek: peek, leavesFocus: false, goesTo: nil)
+        if peek && oneAtATime { return step }
+        step.leavesFocus = focus
+        if focus && oneAtATime { return step }
+        step.goesTo = back(from: selection, trail: trail)
+        return step
+    }
+
+    /// Whether the board keeps the keyboard across a selection change:
+    /// ⌥⌘2 from a task (`pending`) goes up to the workspace and gives it the
+    /// board, where any other change would take it back.
+    static func boardKeepsKeyboard(pending: Bool, from old: Selection?, to new: Selection?) -> Bool {
+        guard pending, let old, old.focus != nil else { return false }
+        return new == old.closed
     }
 
     /// Where Back goes: along the breadcrumb to the task a worktree was

@@ -18,8 +18,8 @@ These are binding. The rest of this document works them out.
    - The Mac sidebar lists workspaces, per repository. Each workspace is one row, with its orchestrator's status
      and a needs-you count. A "Needs You" row sits at the top.
    - Selecting a workspace shows its orchestrator's conversation beside its board.
-   - Selecting a task opens its agent's terminal and changes in a third column. (Since ov-79 it drills in
-     instead: the task takes the detail, with the conversation as a rail. See §4.3.)
+   - Selecting a task opens it: since ov-79 it drills in, taking the detail, with its agent's terminal and
+     changes beneath it and the conversation as a rail. See §4.3.
 2. **A worktree is no longer a place of its own.** It's one click under a task, or under a workspace's
    disclosure of its worktrees, which also holds a shell in a branch that has no task. (The review called this
    disclosure "Helpers"; it's labeled "Worktrees", per ruling 9 in §12.)
@@ -249,10 +249,10 @@ message NeedsYouAction {
 
 | Kind | Buttons (Mac, phone) | Sends | Where Open lands |
 |---|---|---|---|
-| ask | **Deny**, **Allow** (the ask's own options, in its order) | `terminal.agent_answer(terminal, ask_id, option)`: the existing path (`rpc.rs:2090`), which refuses a stale or second answer | The workspace, with the task's third column open (or the orchestrator's conversation) |
+| ask | **Deny**, **Allow** (the ask's own options, in its order) | `terminal.agent_answer(terminal, ask_id, option)`: the existing path (`rpc.rs:2090`), which refuses a stale or second answer | The task, drilled into (or the orchestrator's conversation) |
 | blocked | **Open** | nothing; the answer is typed in the terminal | The same |
 | decision | The question's options, when the note has some (at most three as buttons; more go in a menu). **Answer…** when there are none | `task.note` of kind `ANSWER` (Control scope, `rpc.rs:428-432`), with the option's text, as the user | The task, with its card expanded |
-| review | **Review** only. The inbox opens a review; it never approves one (ruling 2) | nothing | The task's third column, with its changes |
+| review | **Review** only. The inbox opens a review; it never approves one (ruling 2) | nothing | The task, drilled into, with its changes |
 
 **Read-scoped clients** see the items without buttons, except Open. That is the same rule the board uses.
 
@@ -312,14 +312,14 @@ A runner without `needs_you` still contributes items, derived in the app from wh
 
    This is a rule, `TaskLink.task(of:in:)`, stated once in AgentKit and once in Kotlin against one fixture. It
    draws as a chip in the pane's header: "bil-9 Invoice PDF export". The chip opens the task.
-   - Mac: the task column's header, and a worktree layout's `GroupBar`.
+   - Mac: the task view's work line, and a worktree layout's `GroupBar`.
    - iOS: the pane bar.
    - Android: the worktree screen's top bar.
 3. **A task reaches its worktree and changes** through `worktree_id`, with or without a live agent.
-   - Mac: **Open Worktree** in the task column.
+   - Mac: **Open Worktree** in the task view.
    - Phones: **Changes** and **Worktree** rows on the task screen.
    - Android's decoded-but-unused `worktreeId` gets its first reader here.
-4. **Back from a task's agent to the task.** The Mac keeps the task column open while you're in its agent. The
+4. **Back from a task's agent to the task.** The Mac keeps the task open while you're in its agent. The
    phones push the agent onto the workspace's stack, so Back returns to the task. This removes the iOS dead end
    where "Go to Agent" closes the board (`ios/ShellScreen.swift:1150-1166`, `:2259`).
 
@@ -374,8 +374,8 @@ enum Focus: Hashable {
 
 ### 4.3 The workspace view
 
-**Two levels, never four columns** (ov-79, the owner's "Drill in"). This replaced a third column, which with
-the sidebar made sidebar | orchestrator | tasks | worktree.
+**Two levels, never four columns** (ov-79, the owner's "Drill in"). Nothing is ever drawn beside the
+conversation and the board; sidebar | orchestrator | tasks | worktree is gone.
 
 - **Workspace level** (`focus` nil): an `HSplitView` of the conversation and the board, below.
 - **Drilled in** (`focus` set): the task (§4.4) or the worktree opened takes the whole detail, under a
@@ -384,11 +384,17 @@ the sidebar made sidebar | orchestrator | tasks | worktree.
   keyboard, go up one level. The board is out of sight; ⌥⌘2 goes back up to it.
 - **The conversation shrinks to a 36 pt rail** at the leading edge, at every width, with its status glyph and
   needs-you dot. Clicking the rail, or ⌥⌘1, pops the conversation open *over* what's opened (its minimum width,
-  or what the rail leaves), so the task's terminals and their tmux windows keep their size. Clicking into what's
-  opened, the rail again, Esc, or going anywhere else puts it away. It counts as on screen only while popped
-  open.
+  or what the rail leaves), so the task's terminals and their tmux windows keep their size, and gives it the
+  keyboard. A click on the rail, a click anywhere outside it, ⌥⌘1 again, or going anywhere else puts it away,
+  and the keyboard goes back to the task's terminal, or to the view when it has none. Esc stays with the
+  terminal: it's never taken from one. It counts as on screen only while popped open.
 - **Focus** (⌃⌘↩) shows what's opened alone: no rail, and a task's terminals and changes at full height
-  without its text. Esc or ⌃⌘↩ again puts the rest back.
+  without its text, in the same views, so the changes keep their place. A task with nothing beneath its text
+  keeps it: there Focus only hides the rail. ⌃⌘↩ again, or Esc when no terminal has the keyboard, puts the
+  rest back.
+- **The workspace level stays drawn, hidden, while drilled in,** the conversation's slot in its split
+  included (empty: the conversation's one view is the rail's to pop open). Back finds the board as it was,
+  and the divider where it was.
 - `WorkspaceColumns.layout(width:drilled:cell:hasConversation:focused:peek:)` decides all of this as a value;
   only the workspace level depends on the width.
 
@@ -412,7 +418,7 @@ the sidebar made sidebar | orchestrator | tasks | worktree.
     columns. Narrowing the orchestrator to its minimum barely changes a phone that's showing it. See R2.
   - In chat mode, 412 pt leaves the transcript about 60 characters of 13 pt body text a line, and the composer
     shows one selector inline and folds the rest into its `⋯` menu (`AgentComposer.inlineCount`).
-- **The task column's 58 columns.** That's the width at which no fixed line of a permission prompt wraps, for all
+- **The task's 58 columns** (measured for the old third column; drilled in, a task has the detail). That's the width at which no fixed line of a permission prompt wraps, for all
   three harnesses:
 
   | Harness | Widest fixed line in its permission prompt | Columns, with its indent |
@@ -432,17 +438,16 @@ the sidebar made sidebar | orchestrator | tasks | worktree.
   `ChangesPane` compact below about 840 pt.
 - **The board's 280 pt** is one kanban column's outer width: the 260 pt card that has always held a task, plus its
   10 pt padding each side (`TaskBoard.swift:517-518`).
-- **The dividers cost 1 pt each.** An `HSplitView` of three children at their minimums needs their sum plus 2 pt.
-  Below that it doesn't collapse or hide anything: it overflows the window, clipped. The collapse has to be
-  done by `layout(width:taskOpen:)`.
-- **The minimums are in columns.** At a larger font they're wider in points: at 13 pt, 48 and 58 columns are
-  426 and 507 pt, and all three no longer fit at 1440 pt. `layout(width:taskOpen:)` takes the cell width, and
-  its tests use the default font.
+- **The dividers cost 1 pt each.** An `HSplitView` of children at their minimums needs their sum plus a point a
+  divider. Below that it doesn't collapse or hide anything: it overflows the window, clipped. The collapse has
+  to be done by `layout(width:drilled:…)`.
+- **The minimums are in columns.** At a larger font they're wider in points: at 13 pt, the conversation's 48
+  columns are 426 pt. `layout(width:drilled:…)` takes the cell width, and its tests use the default font.
 
 **When the two don't fit** (`W < 412 + 280 + 1 = 693`, `W` the detail's width), the workspace level is one
 column, with a segmented **Orchestrator | Board** control in the header: the phone form. It may be narrower than
-its minimum: the window's minimum is 600 pt, so the detail can be 352 pt, which is 40 columns. The old rules for a
-third column (the rail below 1183 pt, the task column alone below 807 pt, Focus Column) are retired.
+its minimum: the window's minimum is 600 pt, so the detail can be 352 pt, which is 40 columns. Drilled in, the
+width decides nothing: the rail below 1183 pt, a task alone below 807 pt and Focus Column are retired.
 
 At a 13-inch laptop's widths (the detail is the window less a 248 pt sidebar: 1222 pt full screen on an M2 Air,
 1192 pt on an M1, 1032 pt in a 1280 pt window), the workspace level shows both columns, and a task or worktree
@@ -527,7 +532,7 @@ Charter. It stays a drop target for dragging a worktree onto it (`SidebarViews.s
 **Worktrees** lists the workspace's worktrees in the runner's order (`worktree.reorder`, unchanged).
 - A row is: the worktree's name, then its task key(s) from §3.2's `tasks`, its +/− counts, and its attention dot.
 - Expanding a worktree lists its terminals, as today.
-- Selecting either opens it in the third column (`focus: .worktree`).
+- Selecting either drills into it (`focus: .worktree`): Workspace › Worktree.
 - Worktrees opens by itself when the selection is inside it.
 - Its rows are draggable to another workspace row, as today. They also gain a **Move to Workspace ▸** menu item,
   so the drag has a menu equivalent.
@@ -553,7 +558,7 @@ This replaces `selectFirstRunningTerminal` (`ContentView.swift:2100`).
 Nothing on the runner changes.
 - A worktree is still a tmux session, and a layout is still a tmux window (`Layout.swift:3-15`).
 - The Layout menu, `⌃B` verbs, split, zoom and drag-to-place keep working in whichever `TileView` has focus: the
-  task column's agent, an opened worktree, or the conversation.
+  task's agent, an opened worktree, or the conversation.
 
 What changes is where a layout is reached from:
 - A worktree's layouts move one click down, under its task or Worktrees.
@@ -645,9 +650,9 @@ choosing the selected one again returns to Automatic, which is also in its menu.
   remembered per workspace.
 - **Card rows:** the iPhone's row (key, title, call to action, time, acceptance, agent control), ported from
   `ios/TaskBoardView.swift` to the shared view layer where it can be shared.
-- **Selecting a row** opens the task column (§4.4).
+- **Selecting a row** opens the task, drilled into (§4.4).
 
-**The kanban form:** unchanged, except that opening a card opens the task column instead of a sheet.
+**The kanban form:** unchanged, except that opening a card opens the task instead of a sheet.
 
 **Every form, on every platform:**
 - `TaskBoardModel.sections` keeps every status with its count. It's added beside `listed`, which drops empty
@@ -826,7 +831,7 @@ sessions, windows, worktree order and claims are untouched.
   collapse.
 - Expanded worktree rows were `@State` (`ContentView.swift:11`) and never persisted, so nothing is lost.
   - Worktrees disclosure state is new: `sidebar.openWorktrees`, empty by default.
-- New: `board.form.*` (§5), and the task column's divider.
+- New: `board.form.*` (§5), and the task view's dividers.
 - **The first launch after the update** shows a one-time tip over the sidebar:
   - "Workspaces are now in the sidebar."
   - "Select one to see its orchestrator and board side by side. Its worktrees are one click down."

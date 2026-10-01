@@ -164,11 +164,11 @@ struct HealSelectionTests {
         #expect(fleetFirst == sheetFirst)
     }
 
-    // MARK: - A workspace's third column
+    // MARK: - A worktree drilled into
 
-    /// A worktree opened in a workspace's third column stays in that
-    /// workspace when a terminal in it closes, and closes the column, back
-    /// to the workspace, when the worktree itself goes. A workspace with
+    /// A worktree drilled into in a workspace stays in that workspace when a
+    /// terminal in it closes, and goes back up to the workspace when the
+    /// worktree itself goes. A workspace with
     /// nothing open, or a task, has nothing to heal.
     @Test("A workspace's opened worktree heals within the workspace")
     func aWorkspacesOpenedWorktreeHealsWithinTheWorkspace() {

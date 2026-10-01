@@ -170,6 +170,9 @@ struct ContentView: View {
     /// ⌥⌘2 gave the board the keyboard: no terminal takes typed keys until
     /// a pane is clicked or chosen again.
     @State private var keyboardOnBoard = false
+    /// ⌥⌘2 from a task, going up to the board: the selection's change
+    /// leaves the keyboard on the board this once.
+    @State private var boardKeyboardPending = false
     /// This window, for the Esc monitor, which hears every window's keys.
     @State private var windowBox = WindowBox()
     /// New Workspace…, with the name typed into the palette, while its
@@ -404,7 +407,9 @@ struct ContentView: View {
             if case .workspace(let host, let id, _)? = old, WorkspaceSelection.leaves(old, for: new) {
                 markVisited(host: host, workspace: id)
             }
-            keyboardOnBoard = false
+            keyboardOnBoard = WorkspaceNavigation.boardKeepsKeyboard(
+                pending: boardKeyboardPending, from: old, to: new)
+            boardKeyboardPending = false
             // The breadcrumb holds only while in the worktree it opened.
             if trail != nil, !WorkspaceNavigation.keeps(trail: trail, opened: trailWorktree, now: new) {
                 trail = nil
@@ -2178,21 +2183,18 @@ struct ContentView: View {
             },
             rail: { conversationRail(host: host, workspace: summary) },
             board: { boardColumn(host: host, id: id) },
-            opened: {
-                VStack(spacing: 0) {
-                    DrillBreadcrumb(
-                        crumbs: crumbs(host: host, workspace: summary),
-                        onGo: { target in
-                            if target == trail { trail = nil }
-                            selection = target
-                        },
-                        onBack: { goBack(unfocusFirst: false) })
-                    Divider()
-                    openedView(host: host, focus: focus, shown: layouts.last { $0.column != .conversation })
-                }
-            }
+            breadcrumb: {
+                DrillBreadcrumb(
+                    crumbs: crumbs(host: host, workspace: summary),
+                    onGo: { target in
+                        if target == trail { trail = nil }
+                        selection = target
+                    },
+                    onBack: { goBack(unfocusFirst: false) })
+            },
+            opened: { openedView(host: host, focus: focus, shown: layouts.last { $0.column != .conversation }) },
+            onDismissPeek: { closePeek() }
         )
-        .animation(.snappy(duration: 0.2), value: orchestratorPeek)
         .onPreferenceChange(WorkspaceWidthPreference.self) { width in
             MainActor.assumeIsolated {
                 if let width, width != detailWidth { detailWidth = width }
@@ -2329,7 +2331,7 @@ struct ContentView: View {
     private func conversationRail(host: String, workspace: WorkspaceSummary?) -> some View {
         let seat = workspace.flatMap { WorkspaceScreen.orchestrator(of: $0, host: host, in: store.fleet) }
         return Button {
-            if orchestratorPeek { orchestratorPeek = false } else { focusWorkspaceColumn(.focusConversation) }
+            focusWorkspaceColumn(.focusConversation)
         } label: {
             VStack {
                 if let seat {
@@ -2402,17 +2404,49 @@ struct ContentView: View {
     /// first; the breadcrumb's chevron (`unfocusFirst` false) goes up as it
     /// does anywhere else.
     private func goBack(unfocusFirst: Bool = true) {
-        if orchestratorPeek {
-            orchestratorPeek = false
-            if unfocusFirst { return }
+        let step = WorkspaceNavigation.backStep(
+            peek: orchestratorPeek, focus: focusColumn, oneAtATime: unfocusFirst, from: selection, trail: trail)
+        if step.leavesFocus { focusColumn = false }
+        if let back = step.goesTo {
+            // Gone with the level, at once: not animated away over the
+            // workspace level's own conversation.
+            var quiet = Transaction()
+            quiet.disablesAnimations = true
+            withTransaction(quiet) { orchestratorPeek = false }
+            if back == trail { trail = nil }
+            // The keyboard follows to the level it lands on, by the
+            // selection's own rule (`WorkspaceScreen.keyPane`), or, with no
+            // terminal there, to the view itself.
+            selection = back
+            if WorkspaceScreen.keyPane(nil, in: shownLayouts(for: back), selection: back) == nil {
+                windowBox.window?.makeFirstResponder(nil)
+            }
+        } else if step.closesPeek {
+            closePeek()
+        } else if step.leavesFocus {
+            keyOpened()
         }
-        if focusColumn {
-            focusColumn = false
-            if unfocusFirst { return }
+    }
+
+    /// Put the popped-open orchestrator away, and give the keyboard back to
+    /// what's opened.
+    private func closePeek() {
+        guard orchestratorPeek else { return }
+        orchestratorPeek = false
+        keyOpened()
+    }
+
+    /// The keyboard to the task's or worktree's terminal, if it has one on
+    /// screen, else to the view itself, so Esc and the arrows reach it.
+    private func keyOpened() {
+        if let pane = shownLayouts(for: selection).last(where: { $0.column != .conversation })
+            .flatMap(WorkspaceScreen.columnPane)
+        {
+            step(to: pane)
+        } else {
+            keyPane = nil
+            windowBox.window?.makeFirstResponder(nil)
         }
-        guard let back = WorkspaceNavigation.back(from: selection, trail: trail) else { return }
-        if back == trail { trail = nil }
-        selection = back
     }
 
     /// A task, drilled into (spec §4.4): its text first, whole, and its
@@ -3402,9 +3436,15 @@ struct ContentView: View {
         let key = "\(host)|\(id)"
         switch command {
         case .focusConversation:
-            workspacePicks[key] = .orchestrator
+            // Pressed again, or the rail clicked again: it closes.
+            if focus != nil, orchestratorPeek {
+                closePeek()
+                return
+            }
             focusColumn = false
-            if focus != nil { orchestratorPeek = true }
+            // Drilled in, it pops open: the one-column form's tab is left
+            // as it was, for Back.
+            if focus != nil { orchestratorPeek = true } else { workspacePicks[key] = .orchestrator }
             if let pane = shownLayouts(for: selection).first(where: { $0.column == .conversation })
                 .flatMap(WorkspaceScreen.columnPane)
             {
@@ -3416,17 +3456,15 @@ struct ContentView: View {
             // Beside the others, the board has no text to type into: the
             // terminals let go of the keyboard. After going up, which clears
             // it as every navigation does.
+            // Going up first: the selection's change keeps it on the board
+            // (`boardKeepsKeyboard`) rather than taking it back.
             if focus != nil {
                 trail = nil
+                boardKeyboardPending = true
                 selection = selection?.closed
-                DispatchQueue.main.async {
-                    keyboardOnBoard = true
-                    windowBox.window?.makeFirstResponder(nil)
-                }
-            } else {
-                keyboardOnBoard = true
-                windowBox.window?.makeFirstResponder(nil)
             }
+            keyboardOnBoard = true
+            windowBox.window?.makeFirstResponder(nil)
         case .focusTask:
             orchestratorPeek = false
             if let pane = shownLayouts(for: selection).last(where: { $0.column != .conversation })

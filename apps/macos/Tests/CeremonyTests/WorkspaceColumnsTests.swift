@@ -35,7 +35,7 @@ struct WorkspaceColumnsTests {
         for width: CGFloat in [1600, 1222, 1192, 1032, 807, 600, 352] {
             let drilled = Columns.layout(width: width, drilled: true)
             #expect(drilled == .drilledIn, "at \(width)")
-            #expect(!drilled.board && drilled.drilled && drilled.conversation == .rail)
+            #expect(drilled.drilled && drilled.conversation == .rail)
         }
         #expect(Columns.layout(width: 1032, drilled: true, peek: true) == .peeked)
         // Focus is what's opened alone, without the rail, popped open or not.
@@ -78,7 +78,7 @@ struct WorkspaceColumnsTests {
                     drilled: drilled, hasConversation: true, cell: WorkspaceColumns.defaultCell, focused: false,
                     peek: false, pick: .constant(.orchestrator),
                     conversation: { Color.clear }, rail: { Color.clear }, board: { Color.clear },
-                    opened: { Color.clear })
+                    breadcrumb: { Color.clear }, opened: { Color.clear })
                 .frame(width: 600, height: 400)
                 .frame(width: 1600, height: 400, alignment: .leading)
                 .onPreferenceChange(WorkspaceArrangementPreference.self) { value in
@@ -125,7 +125,7 @@ struct WorkspaceColumnsTests {
                     focused: false, peek: false, pick: .constant(.orchestrator),
                     conversation: { Color.clear.onDisappear { level.conversationGone += 1 } },
                     rail: { Color.clear }, board: { Color.clear.onDisappear { level.boardGone += 1 } },
-                    opened: { Color.clear })
+                    breadcrumb: { Color.clear }, opened: { Color.clear })
                 .frame(width: 1032, height: 400)
             }
         }
@@ -149,6 +149,79 @@ struct WorkspaceColumnsTests {
         window.close()
         #expect(level.boardGone == 0)
         #expect(level.conversationGone == 1)
+    }
+
+    /// Back puts the columns back where they were: the conversation's slot
+    /// in the split stays while drilled in, empty, so a divider dragged
+    /// before opening a task is where it was after Back, a resize in
+    /// between included. Torn out, the split holds the board alone.
+    @MainActor
+    @Test("Back finds the columns at the widths they had")
+    func backFindsTheColumnsAtTheWidthsTheyHad() async {
+        final class Level: ObservableObject {
+            @Published var drilled = false
+            @Published var width: CGFloat = 1200
+        }
+        let level = Level()
+        struct Hosted: View {
+            @ObservedObject var level: Level
+            var body: some View {
+                WorkspaceView(
+                    drilled: level.drilled, hasConversation: true, cell: WorkspaceColumns.defaultCell,
+                    focused: false, peek: false, pick: .constant(.orchestrator),
+                    conversation: { Color.clear }, rail: { Color.clear }, board: { Color.clear },
+                    breadcrumb: { Color.clear }, opened: { Color.clear })
+                .frame(width: level.width, height: 400)
+            }
+        }
+        let host = NSHostingView(rootView: Hosted(level: level))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 400), styleMask: [.borderless],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        func settle() async {
+            for _ in 0..<5 {
+                host.layoutSubtreeIfNeeded()
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        func split(_ view: NSView) -> NSSplitView? {
+            if let split = view as? NSSplitView { return split }
+            for child in view.subviews { if let found = split(child) { return found } }
+            return nil
+        }
+        func widths() -> [CGFloat] {
+            split(host)?.arrangedSubviews.map { $0.frame.width.rounded() } ?? []
+        }
+        await settle()
+        guard let view = split(host) else {
+            Issue.record("no split view drawn")
+            window.close()
+            return
+        }
+        // Dragged somewhere no default would put it.
+        view.setPosition(460, ofDividerAt: 0)
+        await settle()
+        let before = widths()
+        level.drilled = true
+        await settle()
+        level.width = 1000
+        await settle()
+        level.width = 1200
+        await settle()
+        let during = widths()
+        level.drilled = false
+        await settle()
+        let after = widths()
+        window.close()
+        #expect(before.count == 2 && before.first == 460, "\(before)")
+        // Held while drilled in, through a resize, not rebuilt on Back. A
+        // hosted split rebuilt from one pane happens to come back at the old
+        // widths too, so what's pinned is the slot itself: two panes, as
+        // they were, the whole time.
+        #expect(during == before, "the split lost the conversation's slot: \(during)")
+        #expect(after == before)
     }
 
     /// On screen means drawn: a conversation shrunk to its rail, left out

@@ -9,7 +9,7 @@ import SwiftUI
 /// shares with the sidebar. The contents are the window's: each is handed in
 /// whole, so this view decides where things go and nothing about what they
 /// are.
-struct WorkspaceView<Conversation: View, Rail: View, Board: View, Drilled: View>: View {
+struct WorkspaceView<Conversation: View, Rail: View, Board: View, Crumbs: View, Drilled: View>: View {
     /// Whether a task or a worktree is open: the drilled level.
     let drilled: Bool
     /// Whether this workspace has a conversation column at all: not a
@@ -26,7 +26,12 @@ struct WorkspaceView<Conversation: View, Rail: View, Board: View, Drilled: View>
     @ViewBuilder let conversation: () -> Conversation
     @ViewBuilder let rail: () -> Rail
     @ViewBuilder let board: () -> Board
+    /// The breadcrumb, across the top of the drilled level, over the rail
+    /// and what's opened alike.
+    @ViewBuilder let breadcrumb: () -> Crumbs
     @ViewBuilder let opened: () -> Drilled
+    /// A click outside the popped-open conversation: it closes.
+    var onDismissPeek: () -> Void = {}
 
     var body: some View {
         GeometryReader { proxy in
@@ -36,8 +41,9 @@ struct WorkspaceView<Conversation: View, Rail: View, Board: View, Drilled: View>
             // The workspace level stays drawn, hidden, while drilled in, so
             // the board keeps its place, its scroll and its visit (the
             // summary's "last visit" is when you left the workspace, not a
-            // task) for Back. Never the conversation: one terminal view per
-            // pane, and it's the rail's to pop open.
+            // task), and the split its dividers, for Back. Never the
+            // conversation itself: one terminal view per pane, and it's the
+            // rail's to pop open.
             let base = WorkspaceColumns.layout(
                 width: proxy.size.width, drilled: false, cell: cell, hasConversation: hasConversation)
             ZStack {
@@ -56,36 +62,57 @@ struct WorkspaceView<Conversation: View, Rail: View, Board: View, Drilled: View>
     }
 
     private func drilledLevel(_ arrangement: WorkspaceColumns.Arrangement, width: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            if arrangement.conversation != .none {
-                rail()
-                    .frame(width: WorkspaceColumns.rail)
-                    .frame(maxHeight: .infinity)
-                Divider()
-            }
-            // Over what's opened, never beside it: popping the
-            // conversation open doesn't resize a task's terminals, or
-            // their tmux windows for every other client.
-            opened()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay(alignment: .leading) {
-                    if arrangement.conversation == .peek {
-                        HStack(spacing: 0) {
-                            conversation()
-                                .frame(width: WorkspaceColumns.peekWidth(in: width, cell: cell))
-                                .frame(maxHeight: .infinity)
-                                .background(WorkspaceStyle.canvas)
-                            Divider()
-                        }
-                        .compositingGroup()
-                        .shadow(color: .black.opacity(0.18), radius: 8, x: 2)
-                        .transition(.move(edge: .leading).combined(with: .opacity))
-                        .accessibilityIdentifier("workspace-conversation-peek")
-                    }
+        VStack(spacing: 0) {
+            breadcrumb()
+            Divider()
+            HStack(spacing: 0) {
+                if arrangement.conversation != .none {
+                    rail()
+                        .frame(width: WorkspaceColumns.rail)
+                        .frame(maxHeight: .infinity)
+                    Divider()
                 }
-                .accessibilityIdentifier("workspace-opened")
+                // Over what's opened, never beside it: popping the
+                // conversation open doesn't resize a task's terminals, or
+                // their tmux windows for every other client.
+                opened()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .leading) {
+                        // Animated here alone: going anywhere else takes the
+                        // drilled level down at once, so the conversation is
+                        // never drawn twice while one fades.
+                        ZStack(alignment: .leading) {
+                            if arrangement.conversation == .peek {
+                                peekPanel(width: width)
+                            }
+                        }
+                        .animation(.snappy(duration: 0.2), value: arrangement.conversation == .peek)
+                    }
+                    .accessibilityIdentifier("workspace-opened")
+            }
         }
         .background(WorkspaceStyle.canvas)
+    }
+
+    private func peekPanel(width: CGFloat) -> some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 0) {
+                conversation()
+                    .frame(width: WorkspaceColumns.peekWidth(in: width, cell: cell))
+                    .frame(maxHeight: .infinity)
+                    .background(WorkspaceStyle.canvas)
+                Divider()
+            }
+            .compositingGroup()
+            .shadow(color: .black.opacity(0.18), radius: 8, x: 2)
+            .accessibilityIdentifier("workspace-conversation-peek")
+            // A click anywhere else over what's opened puts it away.
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onDismissPeek)
+                .accessibilityHidden(true)
+        }
+        .transition(.move(edge: .leading).combined(with: .opacity))
     }
 
     @ViewBuilder
@@ -114,13 +141,17 @@ struct WorkspaceView<Conversation: View, Rail: View, Board: View, Drilled: View>
             .accessibilityIdentifier("workspace-one-column")
         } else {
             HSplitView {
-                if arrangement.conversation == .column && !drilled {
-                    conversation()
-                        .frame(
-                            minWidth: WorkspaceColumns.conversationMinimum(cell: cell),
-                            maxWidth: .infinity, maxHeight: .infinity)
-                        .layoutPriority(1)
-                        .accessibilityIdentifier("workspace-conversation")
+                if arrangement.conversation == .column {
+                    // The slot stays while drilled in, empty, so the split
+                    // keeps its divider where it was for Back.
+                    ZStack {
+                        if !drilled { conversation() }
+                    }
+                    .frame(
+                        minWidth: WorkspaceColumns.conversationMinimum(cell: cell),
+                        maxWidth: .infinity, maxHeight: .infinity)
+                    .layoutPriority(1)
+                    .accessibilityIdentifier("workspace-conversation")
                 }
                 board()
                     .frame(

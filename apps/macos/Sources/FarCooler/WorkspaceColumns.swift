@@ -73,20 +73,20 @@ enum WorkspaceColumns {
         }
 
         var conversation: Conversation
-        var board: Bool
-        /// A task or a worktree, drilled into: the detail is its.
+        /// A task or a worktree, drilled into: the detail is its. The board
+        /// is drawn exactly when it isn't.
         var drilled: Bool
         /// One column at a time, chosen by a segmented Orchestrator | Board
         /// control in the header: the phone's form, for a detail too narrow
         /// for both.
         var switcher: Bool
 
-        static let two = Arrangement(conversation: .column, board: true, drilled: false, switcher: false)
-        static let one = Arrangement(conversation: .column, board: true, drilled: false, switcher: true)
-        static let boardAlone = Arrangement(conversation: .none, board: true, drilled: false, switcher: false)
-        static let drilledIn = Arrangement(conversation: .rail, board: false, drilled: true, switcher: false)
-        static let peeked = Arrangement(conversation: .peek, board: false, drilled: true, switcher: false)
-        static let drilledAlone = Arrangement(conversation: .none, board: false, drilled: true, switcher: false)
+        static let two = Arrangement(conversation: .column, drilled: false, switcher: false)
+        static let one = Arrangement(conversation: .column, drilled: false, switcher: true)
+        static let boardAlone = Arrangement(conversation: .none, drilled: false, switcher: false)
+        static let drilledIn = Arrangement(conversation: .rail, drilled: true, switcher: false)
+        static let peeked = Arrangement(conversation: .peek, drilled: true, switcher: false)
+        static let drilledAlone = Arrangement(conversation: .none, drilled: true, switcher: false)
     }
 
     /// What a detail `width` pt wide draws (spec §4.3).

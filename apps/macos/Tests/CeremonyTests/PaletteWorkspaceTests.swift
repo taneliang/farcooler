@@ -13,7 +13,7 @@ struct PaletteWorkspaceTests {
         path: "/tmp/w1", state: "active", terminals: [])
 
     /// A task key, and its title, find the task on a board already read,
-    /// which opens in its workspace's task column.
+    /// which opens drilled into, in its workspace.
     @Test("Typing a task key finds the task")
     func typingATaskKeyFindsTheTask() {
         let task = PaletteTask(

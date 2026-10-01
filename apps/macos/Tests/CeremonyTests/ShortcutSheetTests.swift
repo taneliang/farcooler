@@ -180,7 +180,7 @@ struct ShortcutSheetTests {
 
     /// One chord, one menu item. Two items on one chord reach whichever the
     /// menu bar finds first, and which that is changes with what's enabled.
-    /// It would have caught Back on ⌘[ (Previous Terminal) or Focus Column on
+    /// It would have caught Back on ⌘[ (Previous Terminal) or Focus on
     /// ⇧⌘↩ (Zoom Pane), which is why they're on ⌃⌘← and ⌃⌘↩.
     @Test("No two menu bar items share a chord")
     func noTwoMenuBarItemsShareAChord() {

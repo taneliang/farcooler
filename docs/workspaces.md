@@ -121,11 +121,13 @@ share. A task with nothing started is just that line.
   task in review is one click from its diff.
 - While a task or worktree is open, the orchestrator shrinks to a thin rail on
   the left, with its status and its dot. Click the rail (or press ⌥⌘1) to pop the
-  orchestrator open over the task without leaving it; click back into the task
-  to put it away.
+  orchestrator open over the task without leaving it. Click the rail again,
+  click anywhere outside it, or press ⌥⌘1 again to put it away. Esc stays with
+  the terminal you're typing in.
 - Back (⌃⌘←, in the Workspace menu, or Esc when no terminal has the keyboard)
-  goes up one level. Focus (⌃⌘↩) gives the agent and changes the whole view;
-  press it again to bring the rest back.
+  goes up one level, and the breadcrumb across the top goes straight to any
+  level. Focus (⌃⌘↩) gives the agent and changes the whole view; press it again
+  to bring the rest back.
 
 With nothing open in a narrow window, an **Orchestrator | Board** control in the
 header switches between the two.
