@@ -42,6 +42,12 @@ struct FarCoolerApp: App {
         // A real Settings scene, so ⌘, works the way it does in every other Mac
         // app without anyone wiring it up.
         Settings { SettingsView() }
+
+        // About is its own small window, so the menu item works with no main
+        // window open, and nothing is dimmed behind it.
+        Window("About Far Cooler", id: AboutView.windowID) { AboutView() }
+            .windowResizability(.contentSize)
+            .windowStyle(.hiddenTitleBar)
     }
 
     /// Catches the person who never opens Settings. Fires at most once, ever,

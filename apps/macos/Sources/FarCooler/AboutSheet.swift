@@ -18,6 +18,42 @@ import SwiftUI
 struct AboutSheet: View {
     @Environment(\.dismiss) private var dismiss
 
+    var body: some View {
+        VStack(spacing: 0) {
+            AboutContent()
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(16)
+        }
+    }
+}
+
+/// About Far Cooler as a window of its own, the way a Mac shows it: it opens
+/// from the menu whether or not a main window exists, blocks nothing, and has
+/// no button, because Esc and ⌘W close it.
+struct AboutView: View {
+    @Environment(\.dismissWindow) private var dismissWindow
+
+    var body: some View {
+        AboutContent()
+            .padding(.bottom, 8)
+            .background(
+                // Esc, with no visible button to carry it.
+                Button("Close") { dismissWindow(id: AboutView.windowID) }
+                    .keyboardShortcut(.cancelAction)
+                    .opacity(0)
+                    .accessibilityHidden(true))
+    }
+
+    /// The scene's id, which the menu item opens by.
+    static let windowID = "about"
+}
+
+/// What About says, with no chrome around it.
+private struct AboutContent: View {
     @State private var daemon: DaemonBuild?
 
     var body: some View {
@@ -53,13 +89,6 @@ struct AboutSheet: View {
             }
             .formStyle(.grouped)
             .scrollDisabled(true)
-
-            HStack {
-                Spacer()
-                Button("Done") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
-            }
-            .padding(16)
         }
         .frame(width: 420)
         .task { await load() }
