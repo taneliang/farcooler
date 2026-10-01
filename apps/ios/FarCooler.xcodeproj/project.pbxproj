@@ -99,6 +99,8 @@
 		4ADB499B0FBF529681F23EFB /* NeedsYou.swift in Sources */ = {isa = PBXBuildFile; fileRef = B85E58C2F8205636AE768473; };
 		7A0AAA1C167C5EA286E5B2F6 /* TaskLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F6F350DBB7A5AB1A429C7EB; };
 		3DA98AFFA80C58618902B78F /* BoardForm.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72395EE8F7DA58FAAFBC24C2; };
+		A31CC17F343B57C3B532D9F1 /* BoardDone.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BAC14D29B0B5DBE9B9FB0AE; };
+		4C3CD0F960B7524FA5619B00 /* BoardSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6132E232926E5F7FB034A767; };
 		1B3502FCAE5F53CB82081845 /* TaskQuestion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DDE0F8DF3F581BAA36C97A; };
 		7085A89CB40151A38D5558EA /* WatchLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 516D0CB825B4559CA317F71C; };
 		632171FFBA8F5CDF8F083C43 /* DiffComputation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15A666CD6FD525982BAC34F; };
@@ -293,6 +295,8 @@
 		B85E58C2F8205636AE768473 /* NeedsYou.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeedsYou.swift; sourceTree = "<group>"; };
 		9F6F350DBB7A5AB1A429C7EB /* TaskLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskLink.swift; sourceTree = "<group>"; };
 		72395EE8F7DA58FAAFBC24C2 /* BoardForm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardForm.swift; sourceTree = "<group>"; };
+		2BAC14D29B0B5DBE9B9FB0AE /* BoardDone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardDone.swift; sourceTree = "<group>"; };
+		6132E232926E5F7FB034A767 /* BoardSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardSummary.swift; sourceTree = "<group>"; };
 		13DDE0F8DF3F581BAA36C97A /* TaskQuestion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskQuestion.swift; sourceTree = "<group>"; };
 		516D0CB825B4559CA317F71C /* WatchLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchLink.swift; sourceTree = "<group>"; };
 		B15A666CD6FD525982BAC34F /* DiffComputation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffComputation.swift; sourceTree = "<group>"; };
@@ -586,6 +590,8 @@
 				B85E58C2F8205636AE768473 /* NeedsYou.swift */,
 				9F6F350DBB7A5AB1A429C7EB /* TaskLink.swift */,
 				72395EE8F7DA58FAAFBC24C2 /* BoardForm.swift */,
+				2BAC14D29B0B5DBE9B9FB0AE /* BoardDone.swift */,
+				6132E232926E5F7FB034A767 /* BoardSummary.swift */,
 				13DDE0F8DF3F581BAA36C97A /* TaskQuestion.swift */,
 				516D0CB825B4559CA317F71C /* WatchLink.swift */,
 				B15A666CD6FD525982BAC34F /* DiffComputation.swift */,
@@ -986,6 +992,8 @@
 				4ADB499B0FBF529681F23EFB /* NeedsYou.swift in Sources */,
 				7A0AAA1C167C5EA286E5B2F6 /* TaskLink.swift in Sources */,
 				3DA98AFFA80C58618902B78F /* BoardForm.swift in Sources */,
+				A31CC17F343B57C3B532D9F1 /* BoardDone.swift in Sources */,
+				4C3CD0F960B7524FA5619B00 /* BoardSummary.swift in Sources */,
 				1B3502FCAE5F53CB82081845 /* TaskQuestion.swift in Sources */,
 				7085A89CB40151A38D5558EA /* WatchLink.swift in Sources */,
 				632171FFBA8F5CDF8F083C43 /* DiffComputation.swift in Sources */,

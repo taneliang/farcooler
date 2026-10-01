@@ -355,6 +355,8 @@ AGENTKIT_SOURCES = [
     # The board's list-form rules and a decision's open question, which the
     # phone's workspace and task screens draw (ov-55 4A).
     "BoardForm.swift",
+    "BoardDone.swift",
+    "BoardSummary.swift",
     "TaskQuestion.swift",
     # In this list AND in `WATCH_AGENTKIT_SOURCES` below: the phone and the
     # watch are two binaries that have to agree about these messages down to the
