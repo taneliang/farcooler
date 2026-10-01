@@ -42,14 +42,19 @@ struct NewWorkspaceSheet: View {
     @State private var prefix = ""
     @State private var chosen = 0
     @State private var working = false
-    @State private var refusal: String?
+    @State private var failure: SheetFailure?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("New Workspace").font(.title3.weight(.semibold))
-            Text("A workspace has its own board, task prefix and orchestrator.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+        SheetFrame(
+            title: "New Workspace",
+            subtitle: "A workspace has its own board, task prefix, and orchestrator.",
+            confirmTitle: "Create Workspace",
+            canConfirm: !working && !trimmed.isEmpty && !repositories.isEmpty,
+            working: working,
+            failure: failure,
+            onCancel: { dismiss() },
+            onConfirm: { await create() }
+        ) {
             Form {
                 if repositories.count > 1 {
                     Picker("Repository", selection: $chosen) {
@@ -66,19 +71,9 @@ struct NewWorkspaceSheet: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            if let refusal {
-                Text(refusal).font(.callout).foregroundStyle(.orange)
-            }
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Create Workspace") { create() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(working || trimmed.isEmpty || repositories.isEmpty)
-            }
+            .formStyle(.grouped)
+            .scrollDisabled(true)
         }
-        .padding(20)
-        .frame(width: 420)
         .onAppear { typed = name }
     }
 
@@ -91,19 +86,25 @@ struct NewWorkspaceSheet: View {
     }
 
     private func label(_ entry: (host: String, repository: Repository)) -> String {
-        entry.host.isEmpty ? entry.repository.displayName : "\(entry.repository.displayName) · \(entry.host)"
+        entry.host.isEmpty ? entry.repository.displayName : "\(entry.repository.displayName) — \(entry.host)"
     }
 
-    private func create() {
+    private func create() async {
         guard repositories.indices.contains(chosen) else { return }
         let target = repositories[chosen]
         working = true
-        Task {
-            let typedPrefix = prefix.trimmingCharacters(in: .whitespaces)
-            refusal = await onCreate(
-                target.host, target.repository.id, trimmed, typedPrefix.isEmpty ? derived : typedPrefix)
-            working = false
-            if refusal == nil { dismiss() }
+        failure = nil
+        let typedPrefix = prefix.trimmingCharacters(in: .whitespaces)
+        let refusal = await onCreate(
+            target.host, target.repository.id, trimmed, typedPrefix.isEmpty ? derived : typedPrefix)
+        working = false
+        if let refusal {
+            // The runner's words go in the transcript, under a sentence of
+            // this app's own, rather than on screen as if Far Cooler wrote them.
+            failure = SheetFailure(
+                sentence: "Couldn’t create the workspace.", transcript: refusal)
+        } else {
+            dismiss()
         }
     }
 }

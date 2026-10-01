@@ -57,8 +57,7 @@ struct AddView: View {
 
     private var chooser: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Add")
-                .font(.title2.weight(.semibold))
+            SheetHeader(title: "Add a Device or Runner")
 
             choice(
                 icon: "desktopcomputer.and.arrow.down",
@@ -168,16 +167,10 @@ private struct RunnerAddressStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Add a Runner")
-                .font(.title2.weight(.semibold))
-
-            Text(
-                "Far Cooler runs farcooler over SSH, so anything you can already reach "
-                    + "works: a user@host, or an alias from your ~/.ssh/config."
-            )
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+            SheetHeader(
+                title: "Add a Runner",
+                subtitle: "Far Cooler runs farcooler over SSH, so anything you can already reach "
+                    + "works: a user@host, or an alias from your ~/.ssh/config.")
 
             TextField("user@host, or an SSH alias", text: $target)
                 .autocorrectionDisabled()

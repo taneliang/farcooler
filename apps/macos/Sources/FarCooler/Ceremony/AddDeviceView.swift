@@ -78,16 +78,11 @@ struct AddDeviceView: View {
     /// only place that failure can still be named where it lives.
     private var toolsFirst: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Install the command-line tools first")
-                .font(.headline)
-            Text(
-                "A device you add reaches this Mac by running "
+            SheetHeader(
+                title: "Install the Command-Line Tools First",
+                subtitle: "A device you add reaches this Mac by running "
                     + "\(CommandLineTools.tools.map(\.link).joined(separator: " and ")) over SSH, "
-                    + "so it can’t connect until Far Cooler has added them to ~/.local/bin."
-            )
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+                    + "so it can’t connect until Far Cooler has added them to ~/.local/bin.")
 
             if let obstacle {
                 Text(obstacle)
@@ -120,15 +115,10 @@ struct AddDeviceView: View {
 
     private var scanning: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Scan the new device’s code")
-                .font(.headline)
-            Text(
-                "On the new device, open Far Cooler and choose Add This Device. Then hold its "
-                    + "code up to this Mac’s camera."
-            )
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+            SheetHeader(
+                title: "Scan the New Device’s Code",
+                subtitle: "On the new device, open Far Cooler and choose Add This Device. Then hold its "
+                    + "code up to this Mac’s camera.")
 
             if let problem = scanner.problem {
                 Text(problem)
@@ -160,12 +150,10 @@ struct AddDeviceView: View {
 
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text(
-                    isMac
+                SheetHeader(
+                    title: isMac
                         ? "Add “\(name)”?"
-                        : "Add “\(name)” to \(account.email)?"
-                )
-                .font(.title3.weight(.semibold))
+                        : "Add “\(name)” to \(account.email)?")
 
                 if isMac {
                     VStack(alignment: .leading, spacing: 10) {
@@ -273,10 +261,9 @@ struct AddDeviceView: View {
     @ViewBuilder
     private func reply(_ manifest: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Scan this code with the new device").font(.headline)
-            Text("This shares the runners you selected.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            SheetHeader(
+                title: "Scan This Code with the New Device",
+                subtitle: "This shares the runners you selected.")
 
             if let image = qrImage(manifest) {
                 Image(nsImage: image)

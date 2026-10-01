@@ -47,10 +47,8 @@ struct JoinView: View {
     private var choosing: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Add This Mac").font(.title3.weight(.semibold))
-
-                Text("Use Far Cooler with the runners you select.")
-                    .font(.callout)
+                SheetHeader(
+                    title: "Add This Mac", subtitle: "Use Far Cooler with the runners you select.")
 
                 VStack(alignment: .leading, spacing: 8) {
                     Toggle(isOn: $shell.wanted) {
@@ -127,14 +125,10 @@ struct JoinView: View {
 
     private func showing(_ offer: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Scan this code with another device").font(.headline)
-            Text(
-                "On a device you’ve already added, open Far Cooler and choose Add Device. "
-                    + "Then scan this code."
-            )
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+            SheetHeader(
+                title: "Scan This Code with Another Device",
+                subtitle: "On a device you’ve already added, open Far Cooler and choose Add Device. "
+                    + "Then scan this code.")
 
             if let image = qrImage(offer) {
                 Image(nsImage: image)
@@ -159,10 +153,9 @@ struct JoinView: View {
 
     private var scanningTheReply: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Scan the code on the other device").font(.headline)
-            Text("This shares the runners selected for this Mac.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            SheetHeader(
+                title: "Scan the Code on the Other Device",
+                subtitle: "This shares the runners selected for this Mac.")
 
             if let problem = scanner.problem {
                 Text(problem).font(.callout).foregroundStyle(.orange)
@@ -181,7 +174,7 @@ struct JoinView: View {
 
     private func finished(_ sentence: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(joined?.headline ?? Joined.ready).font(.headline)
+            SheetHeader(title: joined?.headline ?? Joined.ready)
             if !sentence.isEmpty {
                 Text(sentence)
                     .font(.callout)

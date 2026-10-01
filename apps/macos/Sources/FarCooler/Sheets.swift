@@ -527,6 +527,28 @@ struct SheetFailure {
     var transcript: String?
 }
 
+/// The title of a sheet, or of one step of a flow that spans several: a
+/// `.title2` semibold title, title case, and an optional line under it.
+///
+/// Separate from `SheetFrame` so the add and pairing flows, whose steps each
+/// bring their own buttons, still head every step the same way.
+struct SheetHeader: View {
+    let title: String
+    var subtitle: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.title2.weight(.semibold))
+            if let subtitle {
+                Text(subtitle)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
 /// One frame for every sheet, so padding, button order and rhythm match.
 struct SheetFrame<Content: View>: View {
     let title: String
@@ -542,12 +564,7 @@ struct SheetFrame<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.title2.weight(.semibold))
-                if let subtitle {
-                    Text(subtitle).font(.callout).foregroundStyle(.secondary)
-                }
-            }
+            SheetHeader(title: title, subtitle: subtitle)
             .padding(.horizontal, 24)
             .padding(.top, 22)
             .padding(.bottom, 16)
