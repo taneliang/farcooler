@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import Testing
 
 @testable import Far_Cooler
@@ -26,5 +27,19 @@ struct SettingsLayoutTests {
         let editor = SettingsSheetSize.editor
         #expect(runner.width <= window.width && runner.height <= window.height)
         #expect(editor.width <= runner.width && editor.height <= runner.height)
+    }
+
+    /// Esc closes an editor sheet: its Cancel is the cancel action. A keyboard
+    /// shortcut is not reachable without a window, so this reads the one line
+    /// that carries it.
+    @Test("The theme and agent editors close on Esc", arguments: ["ThemeEditor.swift", "AdapterEditor.swift"])
+    func editorsCloseOnEscape(file: String) throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/FarCooler/\(file)")
+        let text = try String(contentsOf: url, encoding: .utf8)
+        let cancel = try #require(text.range(of: "Button(\"Cancel\") { dismiss() }"))
+        let after = text[cancel.upperBound...].prefix(80)
+        #expect(after.contains(".keyboardShortcut(.cancelAction)"), "\(file): Cancel has no Esc")
     }
 }
