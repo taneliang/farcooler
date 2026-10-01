@@ -2,6 +2,7 @@ package com.farcooler.ui
 
 import com.farcooler.model.Trouble
 import com.farcooler.net.AgentPhase
+import com.farcooler.net.PaneReconnect
 import com.farcooler.net.Waited
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -43,7 +44,8 @@ class AgentEmptyStateTest {
 
     /** Every state above that has been failing long enough to be called one. */
     private fun isLongFailure(phase: AgentPhase) =
-        phase is AgentPhase.Failing && phase.waited == Waited.TOO_LONG
+        phase is AgentPhase.Failing && phase.waited == Waited.TOO_LONG &&
+            !PaneReconnect.isReconnecting(phase.trouble.sentence)
 
     /**
      * The report itself: only a real failure that has been failing for thirty
@@ -124,10 +126,12 @@ class AgentEmptyStateTest {
      */
     @Test
     fun `nothing spins past patience`() {
+        // A real failure stops spinning. A dropped link is the exception on
+        // purpose: it is a calm "Reconnecting…" wait at every length.
         for (waited in listOf(Waited.A_WHILE, Waited.TOO_LONG)) {
             assertFalse(
                 waited.toString(),
-                agentEmptyState(AgentPhase.Failing(dropped, waited)).mark ==
+                agentEmptyState(AgentPhase.Failing(timedOut, waited)).mark ==
                     AgentEmptyState.Mark.SPINNER,
             )
         }
@@ -148,7 +152,7 @@ class AgentEmptyStateTest {
     @Test
     fun `the runner's own words reach the failure screen unchanged`() {
         val state = agentEmptyState(AgentPhase.Failing(timedOut, Waited.TOO_LONG))
-        assertEquals("Could not load this session", state.title)
+        assertEquals("Couldn’t load this session", state.title)
         assertEquals(timedOut.sentence, state.message)
         assertEquals(timedOut.transcript, state.transcript)
     }
@@ -169,11 +173,10 @@ class AgentEmptyStateTest {
      * box underneath is absent, because there is nothing true to put in it.
      */
     @Test
-    fun `a link down this long is a failure even with no host output to show`() {
+    fun `a link down this long is still a calm wait, never the alarm`() {
         val state = agentEmptyState(AgentPhase.Failing(dropped, Waited.TOO_LONG))
-        assertEquals(AgentEmptyState.Mark.ALARM, state.mark)
-        assertEquals("Could not load this session", state.title)
-        assertEquals(dropped.sentence, state.message)
+        assertEquals(AgentEmptyState.Mark.SPINNER, state.mark)
+        assertEquals("Reconnecting…", state.title)
         assertNull(state.transcript)
     }
 

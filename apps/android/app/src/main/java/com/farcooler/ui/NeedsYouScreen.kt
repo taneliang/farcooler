@@ -119,7 +119,7 @@ fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Needs you") },
+                title = { Text("Needs You") },
                 navigationIcon = {
                     IconButton(onClick = onOpenDrawer) {
                         Icon(Icons.Outlined.Menu, contentDescription = "Show workspaces")
@@ -430,10 +430,10 @@ private fun subject(row: NeedsYouRow): String? {
 
 private fun kindTitle(kind: NeedsYouKind): String = when (kind) {
     NeedsYouKind.ASK -> "Asking to use a tool"
-    NeedsYouKind.BLOCKED -> "Needs you"
+    NeedsYouKind.BLOCKED -> "Needs You"
     NeedsYouKind.DECISION -> "Needs a decision"
     NeedsYouKind.REVIEW -> "Ready for review"
-    NeedsYouKind.UNKNOWN -> "Needs you"
+    NeedsYouKind.UNKNOWN -> "Needs You"
 }
 
 /** Amber for what waits on you, the review ink for a review. */

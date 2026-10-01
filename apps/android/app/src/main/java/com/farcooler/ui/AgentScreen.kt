@@ -82,6 +82,7 @@ import com.farcooler.model.activeToken
 import com.farcooler.net.AgentPhase
 import com.farcooler.net.AgentStream
 import com.farcooler.net.Connection
+import com.farcooler.net.PaneReconnect
 import com.farcooler.net.TerminalRef
 import com.farcooler.net.Waited
 import kotlinx.coroutines.delay
@@ -547,14 +548,18 @@ internal fun agentEmptyState(
     is AgentPhase.Live ->
         AgentEmptyState(AgentEmptyState.Mark.NONE, "Say something to begin.")
 
-    is AgentPhase.Failing -> when (phase.waited) {
+    // A dropped link being re-dialed is a wait at every length: never the alarm
+    // that asks for something there is nothing to do about.
+    is AgentPhase.Failing -> if (PaneReconnect.isReconnecting(phase.trouble.sentence)) {
+        AgentEmptyState(AgentEmptyState.Mark.SPINNER, PaneReconnect.TITLE)
+    } else when (phase.waited) {
         // Where the alarm finally belongs, with the runner's own output
         // unchanged beneath it. Those words are the whole diagnosis of a runner
         // nobody can reach, so they stay — under a sentence rather than
         // standing in for one, which is what [DetailBox] is for.
         Waited.TOO_LONG -> AgentEmptyState(
             AgentEmptyState.Mark.ALARM,
-            "Could not load this session",
+            "Couldn’t load this session",
             phase.trouble.sentence,
             phase.trouble.transcript,
         )
@@ -867,7 +872,7 @@ private fun AgentComposer(
             context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
         }.getOrNull()
         if (bytes == null || bytes.isEmpty()) {
-            attachmentError = "That image could not be read."
+            attachmentError = "That image couldn’t be read."
             return@rememberLauncherForActivityResult
         }
         // PNG only when it really is one — a picker hands back HEIC as often as

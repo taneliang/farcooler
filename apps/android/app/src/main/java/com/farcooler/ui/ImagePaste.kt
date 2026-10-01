@@ -215,7 +215,7 @@ private fun ImagePasteChip(job: ImagePasteJob, onDismiss: () -> Unit) {
             val failure = job.failure
             if (failure != null) {
                 Text(failure, style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = { job.retry?.invoke() }) { Text("Retry") }
+                TextButton(onClick = { job.retry?.invoke() }) { Text("Try Again") }
                 TextButton(onClick = onDismiss) { Text("Cancel") }
             } else {
                 Text("Sending…", style = MaterialTheme.typography.bodySmall)

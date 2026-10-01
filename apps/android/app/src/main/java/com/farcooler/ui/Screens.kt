@@ -136,7 +136,7 @@ fun OnboardingScreen(
             )
             Spacer(Modifier.height(32.dp))
             Button(onClick = onAuthorize, modifier = Modifier.fillMaxWidth()) {
-                Text("Authorize this device")
+                Text("Connect This Device")
             }
             Spacer(Modifier.height(12.dp))
             TextButton(onClick = { adding = true }) { Text("Add a runner") }
@@ -185,7 +185,7 @@ fun AuthorizeScreen(onJoin: () -> Unit, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Authorize") },
+                title = { Text("Connect This Device") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -246,7 +246,7 @@ fun AuthorizeScreen(onJoin: () -> Unit, onBack: () -> Unit) {
                 ) {
                     Icon(Icons.Filled.ContentCopy, contentDescription = null, Modifier.size(16.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Copy public key")
+                    Text("Copy Public Key")
                 }
                 Text("On the runner, run:")
                 Mono("echo '<paste>' >> ~/.ssh/authorized_keys")
@@ -376,7 +376,7 @@ fun SettingsScreen(
                         Text("Devices and runners")
                     }
                     TextButton(onClick = { scope.launch { model.account.signOut() } }) {
-                        Text("Sign out")
+                        Text("Sign Out")
                     }
                 }
 
@@ -386,7 +386,7 @@ fun SettingsScreen(
                 // exist.
                 HorizontalDivider()
                 SectionTitle("Devices")
-                Button(onClick = { model.navigate(Route.AddDevice) }) { Text("Add a device") }
+                Button(onClick = { model.navigate(Route.AddDevice) }) { Text("Add a Device") }
                 Text(
                     "Adding a device shows a code for it to scan, and grants only the runners " +
                         "you pick.",

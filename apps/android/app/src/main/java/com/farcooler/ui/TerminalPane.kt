@@ -73,6 +73,7 @@ import com.farcooler.model.Terminal
 import com.farcooler.model.WorkspaceSummary
 import com.farcooler.model.Worktree
 import com.farcooler.net.Connection
+import com.farcooler.net.PaneReconnect
 import com.farcooler.net.TerminalRef
 import com.farcooler.net.TerminalSession
 import kotlinx.coroutines.launch
@@ -679,8 +680,11 @@ private fun TerminalSurface(
             message = "$name has no running pane right now.",
         )
 
-        is TerminalSession.Phase.Failed -> Status(
-            title = "Could not load",
+        is TerminalSession.Phase.Failed ->
+            if (PaneReconnect.isReconnecting(current.message)) {
+                Status(spinner = true, title = PaneReconnect.TITLE)
+            } else Status(
+            title = "Couldn’t load this pane",
             message = current.message,
             transcript = current.transcript,
         )

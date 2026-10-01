@@ -930,7 +930,7 @@ private fun SendControls(
         return
     }
 
-    val sendLabel = if (state.failure == null) "Send" else "Try again"
+    val sendLabel = if (state.failure == null) "Send" else "Try Again"
     // Only the panes with a composer on screen. A pane showing its raw terminal
     // is a perfectly good target for a SEND and has no field to put anything in
     // — see `ReviewAgentTarget.showsChat`.

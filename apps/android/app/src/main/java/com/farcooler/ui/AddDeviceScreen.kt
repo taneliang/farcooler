@@ -118,7 +118,7 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Add a device") },
+                title = { Text("Add a Device") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")

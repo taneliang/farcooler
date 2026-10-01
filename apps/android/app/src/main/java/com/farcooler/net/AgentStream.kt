@@ -173,7 +173,7 @@ class AgentStream(
             // then goes quiet, which is what clearing on the next good batch
             // does.
             val trouble = if (e is DisconnectedException) {
-                Trouble("The connection to this runner dropped. Reconnecting…")
+                Trouble(PaneReconnect.SENTENCE)
             } else {
                 // The one arm with nothing written about it, so the sentence
                 // says only what is known — that the read did not finish — and

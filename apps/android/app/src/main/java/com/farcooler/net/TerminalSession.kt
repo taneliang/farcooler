@@ -801,7 +801,7 @@ class TerminalSession(
         revision = response.revision
         val bytes = runCatching { Base64.decode(response.contents, Base64.DEFAULT) }.getOrNull()
         if (bytes == null) {
-            _phase.value = Phase.Failed("The host sent a screen this device could not decode.")
+            _phase.value = Phase.Failed("This runner sent a screen this device couldn’t decode.")
             return
         }
         // Where the reader was looking, so rebuilding does not yank them back
@@ -951,7 +951,7 @@ class TerminalSession(
      */
     private fun humanFailure(message: String): Phase =
         if (message == "not connected") {
-            Phase.Failed("The connection to this runner dropped. Reconnecting…")
+            Phase.Failed(PaneReconnect.SENTENCE)
         } else {
             Phase.Failed("The request that reads this pane didn’t finish.", message)
         }

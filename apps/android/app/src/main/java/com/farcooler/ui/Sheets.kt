@@ -460,7 +460,7 @@ fun QuickTaskSheet(
                         }
                         if (!ready) {
                             failure = Trouble(
-                                "$agentName was not ready within a minute. Nothing was sent — " +
+                                "$agentName wasn’t ready within a minute. Nothing was sent — " +
                                     "open it to check on it.")
                             phase = null
                             working = false

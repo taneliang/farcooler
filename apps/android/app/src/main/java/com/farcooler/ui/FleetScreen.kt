@@ -126,7 +126,7 @@ fun FleetDrawer(
             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 8.dp)) {
                 item(key = "needs-you") {
                     ListItem(
-                        headlineContent = { Text("Needs you") },
+                        headlineContent = { Text("Needs You") },
                         trailingContent = {
                             if (rows.isNotEmpty()) {
                                 Text(
@@ -158,7 +158,7 @@ fun FleetDrawer(
                     Text("This device")
                 }
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = onAuthorize) { Text("Authorize") }
+                TextButton(onClick = onAuthorize) { Text("Connect This Device") }
             }
         }
     }
@@ -533,7 +533,7 @@ internal fun RunnerStatusRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Row {
-                    TextButton(onClick = onReconnectNow) { Text("Reconnect now") }
+                    TextButton(onClick = onReconnectNow) { Text("Reconnect Now") }
                     TextButton(onClick = onEdit) { Text("Edit") }
                 }
             }
@@ -630,7 +630,7 @@ internal fun RunnerStatusRow(
                         // works, which is this device asking to be added again.
                         Connection.Failure.NO_NODE_KEY -> Unit
 
-                        else -> TextButton(onClick = onRetry) { Text("Try again") }
+                        else -> TextButton(onClick = onRetry) { Text("Try Again") }
                     }
                     TextButton(onClick = onEdit) { Text("Edit") }
                 }
@@ -903,7 +903,7 @@ private fun WorktreeHeader(
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(
-                    text = { Text("New terminal…") },
+                    text = { Text("New Terminal…") },
                     onClick = {
                         menu = false
                         onNewTerminal()

@@ -380,7 +380,7 @@ private fun OrchestratorEmpty(
                     var picking by remember { mutableStateOf(false) }
                     Box {
                         Button(onClick = { picking = true }, modifier = Modifier.testTag("start-orchestrator")) {
-                            Text("Start orchestrator")
+                            Text("Start Orchestrator")
                         }
                         HarnessMenu(expanded = picking, onDismiss = { picking = false }, onPick = onStart)
                     }

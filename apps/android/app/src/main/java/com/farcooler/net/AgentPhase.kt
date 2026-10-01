@@ -3,6 +3,22 @@ package com.farcooler.net
 import com.farcooler.model.Trouble
 
 /**
+ * A pane whose link dropped and is being put back: a wait, never a failure.
+ * Shared by the agent screen and the terminal pane, and word for word with
+ * iOS's `PaneReconnect`.
+ */
+object PaneReconnect {
+    /** The sentence a dropped link is recorded as. */
+    const val SENTENCE = "The connection to this runner dropped. Reconnecting…"
+
+    /** The headline of the calm state. */
+    const val TITLE = "Reconnecting…"
+
+    /** Whether a recorded sentence is this wait rather than a failure. */
+    fun isReconnecting(sentence: String?): Boolean = sentence == SENTENCE
+}
+
+/**
  * What an agent pane can honestly say about itself.
  *
  * It had no such state, and that is the whole of "'Could not load this session'
