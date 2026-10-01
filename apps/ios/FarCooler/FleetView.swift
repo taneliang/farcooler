@@ -564,7 +564,7 @@ struct RunnerMenu: View {
             // address, user, port and host key without anybody typing was
             // reachable only from a screen this device stopped showing the
             // moment it had its first runner.
-            Button("Add…") { showAdd = true }
+            Button("Add Device or Runner…") { showAdd = true }
             if let selected = hosts.selected {
                 // Editing and removing were unreachable from anywhere in the
                 // app: `RunnerStore.remove` existed and had no caller, so a

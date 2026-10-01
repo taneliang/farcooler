@@ -35,7 +35,7 @@ public struct AccountSection: View {
                     ProgressView().controlSize(.small)
                 }
             } else {
-                Button("Sign in") {
+                Button("Sign In") {
                     Task {
                         await account.signIn()
                         // Pairs a token that arrived before the account did.

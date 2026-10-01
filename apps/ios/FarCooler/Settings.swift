@@ -202,7 +202,7 @@ struct SettingsView: View {
             // is always present and explains itself when it cannot be used.
             Section {
                 if let runners {
-                    Button("Add…") { showAdd = true }
+                    Button("Add Device or Runner…") { showAdd = true }
                 }
                 if Account.shared.isSignedIn {
                     NavigationLink("Devices and runners") { AccountDevicesView() }
@@ -259,6 +259,17 @@ struct SettingsView: View {
             // everything but the selected runner.
             Section {
                 Toggle("Connect every runner at once", isOn: $allRunnersAtOnce)
+                // Editing the runner's own file, rather than telling someone to
+                // go and edit it. That instruction used to be the theme
+                // section's footer — reasonable advice, and not something
+                // anybody does from a phone over ssh. It lives with the
+                // runners because it is about one.
+                if let connection {
+                    NavigationLink("Runner Settings") {
+                        RunnerSettingsView(
+                            name: connection.hostLabel, connection: connection)
+                    }
+                }
             } header: {
                 Text("Runners")
             } footer: {
@@ -266,37 +277,25 @@ struct SettingsView: View {
                 // "saves battery", which promises a number nobody measured.
                 Text(
                     allRunnersAtOnce
-                        ? "Every runner's worktrees are in one grid, and an agent "
+                        ? "Every runner’s worktrees are listed together, and an agent "
                             + "anywhere can reach you. Each runner is an SSH session "
                             + "this phone keeps open."
-                        : "Only the runner you've picked is connected. The others "
+                        : "Only the runner you’ve picked is connected. The others "
                             + "show what Far Cooler last saw, and nothing on them "
                             + "updates until you switch.")
             }
 
+            // One section for how the terminal looks: the theme, the typeface,
+            // the size, and what they add up to. These were four (a Theme
+            // section holding a Theme row, a font section, a Preview section
+            // with a card inside a card) for one decision.
             Section {
                 Picker("Theme", selection: themeBinding) {
                     ForEach(themes.available) { theme in
                         Text(theme.name).tag(theme.name)
                     }
                 }
-                // Editing the runner's own file, rather than telling someone to
-                // go and edit it. That instruction used to be this section's
-                // footer — reasonable advice, and not something anybody does from
-                // a phone over ssh.
-                if let connection {
-                    NavigationLink("Settings on this runner") {
-                        RunnerSettingsView(
-                            name: connection.hostLabel, connection: connection)
-                    }
-                }
-            } header: {
-                Text("Theme")
-            } footer: {
-                Text("Applies to the terminal and the app.")
-            }
 
-            Section("Terminal font") {
                 Picker("Typeface", selection: $fontChoice) {
                     ForEach(TerminalFontChoice.allCases) { choice in
                         Text(choice.label).tag(choice)
@@ -327,21 +326,22 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .frame(width: 22, alignment: .trailing)
                 }
-            }
 
-            Section("Preview") {
                 // The glyphs a coding agent actually prints — box drawing and
                 // a couple of Nerd Font icons — not lorem ipsum. Lorem ipsum
                 // in a monospaced regular weight looks identical whichever
-                // font failed to load; this does not.
+                // font failed to load; this does not. The row IS the terminal's
+                // ground, so it is one surface and not a card inside a card.
                 Text("┌─ \u{f126} claude · \u{e0a0} main\n│ 12 files changed")
                     .font(.terminal(fontChoice, size: fontSize))
                     .foregroundStyle(.white)
                     .lineSpacing(4)
-                    .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(TerminalPalette.background)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .listRowBackground(TerminalPalette.background)
+            } header: {
+                Text("Appearance")
+            } footer: {
+                Text("The theme colors the terminal. The rest of the app follows the system.")
             }
 
             // Last, because it is the thing you scroll to when something has
@@ -405,10 +405,5 @@ struct SettingsView: View {
                 Button("Done") { dismiss() }
             }
         }
-        // A settings screen over a terminal app is still, in effect, a
-        // terminal screen: it exists to preview one. See FarCoolerApp's
-        // reasoning for forcing dark everywhere rather than just over the
-        // grid itself.
-        .preferredColorScheme(Themes.shared.current.colorScheme)
     }
 }

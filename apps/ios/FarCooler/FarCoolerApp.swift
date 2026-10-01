@@ -9,28 +9,18 @@ struct FarCoolerApp: App {
 
     var body: some Scene {
         WindowGroup {
+            // The app's chrome follows the system's Light and Dark, and
+            // nothing else does.
+            //
+            // This used to force the terminal theme's scheme and ground
+            // onto the whole window, so Needs You was black, a workspace's
+            // orchestrator was Nord's slate and its board black again: two
+            // apps stitched together, and a system appearance setting that
+            // did nothing. The theme colors terminal surfaces only: the
+            // grid, the worktree cover (a full-screen cover, so its own
+            // `preferredColorScheme` stays inside it), and a workspace's
+            // orchestrator pane. Everything else is the system's.
             harnessOrRoot
-                // Whichever way the theme goes, everywhere.
-                //
-                // This was an unconditional `.dark`, and the reasoning was
-                // sound as far as it went: half the app is a terminal, a
-                // terminal is dark whatever the phone is set to, and a white
-                // list handing off to a black screen looked like two
-                // applications. Choosing one beat reconciling two.
-                //
-                // What it could not survive is a light TERMINAL. Now that the
-                // palette is a choice, the same argument points at following
-                // it: the chrome and the grid go the same way because they are
-                // one theme, which is exactly the join that had to be
-                // protected. Still one decision, just no longer a constant.
-                .preferredColorScheme(themes.current.colorScheme)
-                // The theme's own ground, not just its light/dark leaning.
-                //
-                // The scheme alone gives the SYSTEM's black, which is the
-                // color the complaint that started this was about — picking
-                // Nord and still getting `#000000` chrome around a `#2E3440`
-                // terminal is the theme applying to half the screen.
-                .background(themes.current.backgroundColor)
         }
     }
 
@@ -119,6 +109,8 @@ struct RootView: View {
 struct ConnectedRoot: View {
     @ObservedObject var hosts: RunnerStore
     @StateObject private var fleet: FleetStore
+    /// Whether the notification explainer is up, after the first runner.
+    @State private var explainingNotifications = false
 
     init(hosts: RunnerStore) {
         self.hosts = hosts
@@ -154,6 +146,17 @@ struct ConnectedRoot: View {
                 HostOnboardingView(hosts: hosts)
             }
         }
+        .onChange(of: hosts.hosts.isEmpty) { was, now in
+            if NotificationAsk.explainsAfterFirstRunner(hadRunners: !was, hasRunners: !now) {
+                explainingNotifications = true
+            }
+        }
+        .alert(NotificationAsk.title, isPresented: $explainingNotifications) {
+            Button(NotificationAsk.allow) { Notifier.shared.requestAuthorization() }
+            Button(NotificationAsk.decline, role: .cancel) {}
+        } message: {
+            Text(NotificationAsk.message)
+        }
         // Generate the device key at launch rather than the first time
         // something asks for it.
         //
@@ -177,13 +180,22 @@ struct ConnectedRoot: View {
             PhoneMigration.run()
             WatchLinkHost.shared.adopt(fleet)
             _ = Identity.publicKey
-            // Asked for at launch, alongside the device key.
+            // Asked for at launch, alongside the device key, but only on a
+            // phone that already has a runner.
             //
             // Not on the first notification: the point of this feature is being
             // told about an agent while you are not looking at the app, and a
             // permission prompt that only appears once you ARE looking has
-            // already missed it.
-            Notifier.shared.requestAuthorization()
+            // already missed it. Not on a first launch either, where the
+            // system's alert covered the onboarding screen before the person
+            // had seen what the app was, and a refusal then is permanent: that
+            // run asks when the first runner arrives, after a line saying what
+            // it's for (`NotificationAsk`).
+            if NotificationAsk.asksAtLaunch(hasRunners: !hosts.hosts.isEmpty) {
+                Notifier.shared.requestAuthorization()
+            } else {
+                Notifier.shared.listen()
+            }
             PushRegistration.shared.label = { UIDevice.current.name }
             // Beside the label and for the same reason: AgentKit files this
             // with the device so the relay can honor it while the app is
@@ -246,7 +258,7 @@ struct HostOnboardingView: View {
                     .padding(.bottom, 8)
 
                 Text(
-                    "Far Cooler runs coding agents on machines you reach over SSH. "
+                    "Far Cooler runs coding agents on runners you reach over SSH. "
                         + "Connect this device to one to get started."
                 )
                 .font(.callout)

@@ -397,6 +397,9 @@ AGENTKIT_SOURCES = [
     # The half of push registration that is not platform-specific. Both apps
     # had it verbatim; only the device label differs.
     "PushRegistration.swift",
+    # When the phone asks for notification permission, and the line it says
+    # first. See `NotificationAskTests`.
+    "NotificationAsk.swift",
     "RelaySection.swift",
     # Beside `RelaySection.swift` because it is the same screen and the same
     # shape of setting: which rendezvous tunneled runners and this phone meet

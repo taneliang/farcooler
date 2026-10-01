@@ -59,7 +59,7 @@ public struct VersionSection: View {
             // One tap, because the moment this matters is when someone is
             // typing it into a bug report and would otherwise transcribe a
             // commit hash by hand.
-            Button("Copy version details") { onCopy(details) }
+            Button("Copy Version Details") { onCopy(details) }
         } header: {
             Text("Version")
         }
@@ -205,7 +205,7 @@ public struct DaemonBuild: Equatable, Sendable {
     /// The daemon reports `0.1.0+d8c3877-dirty` while the app says
     /// `0.1.0 (dev d8c3877)` — the same information in two idioms, which makes
     /// two rows sitting next to each other look like two different builds. The
-    /// raw form is still what "Copy version details" writes, because that is
+    /// raw form is still what "Copy Version Details" writes, because that is
     /// what someone compares against.
     public var readable: String {
         let parts = version.split(separator: "+", maxSplits: 1)
