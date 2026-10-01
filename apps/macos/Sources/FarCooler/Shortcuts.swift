@@ -144,11 +144,7 @@ struct ShortcutsSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Keyboard shortcuts").font(.title2.weight(.semibold))
-                Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
-            }
+            Text("Keyboard shortcuts").font(.title2.weight(.semibold))
             .padding(.horizontal, 22)
             .padding(.top, 20)
             .padding(.bottom, 14)
@@ -182,11 +178,17 @@ struct ShortcutsSheet: View {
             }
 
             Divider()
-            Text("Every shortcut here is also in the menu bar.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .padding(.horizontal, 22)
-                .padding(.vertical, 12)
+            // Done at the bottom right with the footnote, where a Mac sheet
+            // keeps its buttons, rather than in the title row.
+            HStack {
+                Text("Every shortcut here is also in the menu bar.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 12)
         }
         .frame(width: 420, height: 460)
     }

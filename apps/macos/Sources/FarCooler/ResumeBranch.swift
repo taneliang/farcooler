@@ -114,6 +114,10 @@ struct ResumeBranch: View {
         return WorktreeName.path(repository: chosen.repository.displayName, name: leaf)
     }
 
+    private var selected: BranchInfo? {
+        branches.first { $0.id == selection }
+    }
+
     private var visible: [BranchInfo] {
         guard !query.isEmpty else { return branches }
         let q = query.lowercased()
@@ -255,8 +259,12 @@ struct ResumeBranch: View {
                     .truncationMode(.head)
                     .layoutPriority(-1)
             }
-            Text("↩ resume").font(.system(size: 11)).foregroundStyle(.tertiary)
             Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+            // The default button, so the sheet has a visible way to say yes: a
+            // plain "↩ resume" hint read as text, not as the thing to press.
+            Button("Resume") { if let selected { adopt(selected) } }
+                .keyboardShortcut(.defaultAction)
+                .disabled(selected.map(\.isCheckedOut) ?? true)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
