@@ -69,6 +69,16 @@ enum SidebarGrid {
     /// vertically inflated. Secondary rows such as Hidden remain denser.
     static let rowVerticalPadding: CGFloat = 4
 
+    /// Hidden and Unclaimed headings, denser than a primary row on purpose:
+    /// they are secondary, and a fleet of them should not inflate the list.
+    static let headerVerticalPadding: CGFloat = 3
+
+    /// The rows inside a Hidden group, denser still.
+    static let secondaryRowVerticalPadding: CGFloat = 2
+
+    /// A row's fill while the pointer is over it.
+    static let hoverFill = Color.primary.opacity(0.045)
+
     /// Project labels separate groups, so the space before one is deliberately
     /// larger than the space after it. That makes each heading belong to the
     /// worktrees below instead of floating halfway between two projects.

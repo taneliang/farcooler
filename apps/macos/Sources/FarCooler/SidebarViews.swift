@@ -392,7 +392,7 @@ struct WorktreeSection: View {
                 .fill(
                     isSelected
                         ? WorkspaceStyle.navigatorSelection(active: windowActive)
-                        : (hovering ? Color.primary.opacity(0.045) : .clear))
+                        : (hovering ? SidebarGrid.hoverFill : .clear))
         )
         .padding(.horizontal, SidebarGrid.highlightInset)
         .animation(Motion.snap, value: hovering)
@@ -567,7 +567,7 @@ struct ProjectHeader: View {
                         .font(WorkspaceStyle.sectionTitle)
                         .foregroundStyle(.secondary)
                     if showHost {
-                        Text(host.isEmpty ? "this Mac" : host)
+                        Text(host.isEmpty ? "This Mac" : host)
                             .font(.system(size: 10.5))
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
@@ -962,7 +962,7 @@ struct TerminalRow: View {
                 .fill(
                     isSelected
                         ? WorkspaceStyle.navigatorSelection(active: windowActive)
-                        : (hovering ? Color.primary.opacity(0.045) : .clear))
+                        : (hovering ? SidebarGrid.hoverFill : .clear))
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
                         .strokeBorder(Color.accentColor, lineWidth: targeted ? 2 : 0))
@@ -1316,29 +1316,12 @@ struct HiddenWorktrees: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SidebarRow(indent: 0) {
-                Button(action: onToggle) {
-                    HStack(spacing: SidebarGrid.gap) {
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.tertiary)
-                            .frame(width: SidebarGrid.gutter - SidebarGrid.gap, alignment: .leading)
-                        Text("Hidden")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
-                        Text("\(worktrees.count)")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.tertiary)
-                        if let waiting = attentionStatus {
-                            StatusGlyph(status: waiting, inAppDiameter: 5)
-                                .help("\(attention) waiting on you, inside a hidden worktree")
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                SidebarDisclosureHeader(
+                    title: "Hidden", count: worktrees.count, attention: attentionStatus,
+                    attentionHelp: "\(attention) waiting on you, inside a hidden worktree",
+                    isExpanded: isExpanded, onToggle: onToggle)
             }
-            .padding(.vertical, 3)
+            .padding(.vertical, SidebarGrid.headerVerticalPadding)
 
             if isExpanded {
                 ForEach(worktrees) { ws in
@@ -1360,7 +1343,7 @@ struct HiddenWorktrees: View {
                         }
                         .contentShape(Rectangle())
                     }
-                    .padding(.vertical, 2)
+                    .padding(.vertical, SidebarGrid.secondaryRowVerticalPadding)
                 }
             }
         }
@@ -1469,7 +1452,7 @@ struct WorkspaceRow: View {
                         ? Color.accentColor.opacity(0.2)
                         : isSelected
                             ? WorkspaceStyle.navigatorSelection(active: windowActive)
-                            : (hovering ? Color.primary.opacity(0.045) : .clear))
+                            : (hovering ? SidebarGrid.hoverFill : .clear))
         )
         .padding(.horizontal, SidebarGrid.highlightInset)
         .animation(Motion.snap, value: hovering)
@@ -1508,7 +1491,7 @@ struct NoWorktreesRow: View {
                 .lineLimit(1)
                 .help(Self.help)
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, SidebarGrid.headerVerticalPadding)
     }
 }
 
@@ -1545,7 +1528,7 @@ struct NeedsYouRow: View {
                 .fill(
                     isSelected
                         ? WorkspaceStyle.navigatorSelection(active: controlActiveState == .key)
-                        : (hovering ? Color.primary.opacity(0.045) : .clear)))
+                        : (hovering ? SidebarGrid.hoverFill : .clear)))
         .padding(.horizontal, SidebarGrid.highlightInset)
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
@@ -1638,38 +1621,64 @@ struct UnclaimedWorktrees<Row: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SidebarRow(indent: 0) {
-                Button(action: onToggle) {
-                    HStack(spacing: SidebarGrid.gap) {
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.tertiary)
-                            .frame(width: SidebarGrid.gutter - SidebarGrid.gap, alignment: .leading)
-                        Text("Unclaimed")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
-                        Text("\(worktrees.count)")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.tertiary)
-                        if let waiting = attentionStatus {
-                            StatusGlyph(status: waiting, inAppDiameter: 5)
-                                .help(
-                                    attention == 1
-                                        ? "1 waiting on you, in a worktree no workspace owns"
-                                        : "\(attention) waiting on you, in worktrees no workspace owns")
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                SidebarDisclosureHeader(
+                    title: "Unclaimed", count: worktrees.count, attention: attentionStatus,
+                    attentionHelp: attention == 1
+                        ? "1 waiting on you, in a worktree no workspace owns"
+                        : "\(attention) waiting on you, in worktrees no workspace owns",
+                    isExpanded: isExpanded, onToggle: onToggle)
                 .help("Worktrees no workspace owns yet")
             }
             .padding(.top, 6)
-            .padding(.bottom, 3)
+            .padding(.bottom, SidebarGrid.headerVerticalPadding)
 
             if isExpanded {
                 ForEach(worktrees) { worktree in row(worktree) }
             }
         }
+    }
+}
+
+/// The collapsible heading of a group of rows below a repository: Hidden and
+/// Unclaimed.
+///
+/// One view because they were two copies of the same header, and the copies
+/// had drifted from the rows above them: they swapped between two chevron
+/// symbols instead of rotating one, as `WorktreeSection` and `WorkspaceRow` do,
+/// and set their label in a size of their own. The label is
+/// `WorkspaceStyle.sectionTitle`, the project heading's own style.
+struct SidebarDisclosureHeader: View {
+    let title: String
+    let count: Int
+    /// The most urgent status inside, when something in the group wants you.
+    let attention: Status?
+    let attentionHelp: String
+    let isExpanded: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: SidebarGrid.gap) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .animation(.snappy(duration: 0.15), value: isExpanded)
+                    .frame(width: SidebarGrid.gutter - SidebarGrid.gap, alignment: .leading)
+                Text(title)
+                    .font(WorkspaceStyle.sectionTitle)
+                    .foregroundStyle(.secondary)
+                Text("\(count)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                if let attention {
+                    StatusGlyph(status: attention, inAppDiameter: 5)
+                        .help(attentionHelp)
+                }
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
