@@ -123,7 +123,7 @@ struct TaskScreen: View {
 
             if let notes = record?.notes, !notes.isEmpty {
                 Section("Record") {
-                    ForEach(notes.reversed()) { note in
+                    ForEach(TaskNoteFeed.newestFirst(notes)) { note in
                         VStack(alignment: .leading, spacing: 2) {
                             HStack {
                                 Text(note.kind.title)
