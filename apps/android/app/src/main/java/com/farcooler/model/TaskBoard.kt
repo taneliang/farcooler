@@ -141,6 +141,10 @@ data class TaskRow(
      * a card nothing has happened to.
      */
     fun timeNote(nowMs: Long): String? {
+        // A finished card says the fact that matters: "Done 2h ago".
+        if (status == TaskStatus.DONE || status == TaskStatus.CANCELLED) {
+            return "${status.title} ${ago(nowMs - statusSince)}"
+        }
         if (stalenessNote(nowMs) != null) return null
         val created = createdAt ?: return null
         val updated = updatedAt

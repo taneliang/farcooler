@@ -232,6 +232,17 @@ class TaskBoardTest {
     }
 
     @Test
+    fun aFinishedCardSaysWhenItWasDoneOrCanceled() {
+        val hour = 3_600_000L
+        val now = 12 * hour + 60_000
+        val done = row(status = TaskStatus.DONE, since = 10 * hour, createdAt = 1, updatedAt = 10 * hour)
+        assertEquals("Done 2h ago", done.timeNote(now))
+        val canceled = row(status = TaskStatus.CANCELLED, since = 10 * hour, createdAt = 1, updatedAt = now)
+        assertEquals("Canceled 2h ago", canceled.timeNote(now))
+        assertEquals("Done 2h ago", row(status = TaskStatus.DONE, since = 10 * hour).timeNote(now))
+    }
+
+    @Test
     fun aCardWithOnlyOneClockSaysWhatItCan() {
         // `updated_at` alone cannot tell an update from a creation.
         assertNull(row(status = TaskStatus.BACKLOG, updatedAt = 5).timeNote(10))
