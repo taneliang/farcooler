@@ -3,9 +3,9 @@ import Foundation
 
 // Which panes the detail puts on screen for a selection, column by column.
 //
-// A workspace shows up to two tmux layouts at once: its orchestrator's, in the
-// conversation column or popped open over what's opened, and a task's agent or
-// an opened worktree, beside the board.
+// A workspace shows up to two tmux layouts at once: its orchestrator's, filling
+// the main area or popped open from its rail over what's opened, and a task's
+// agent or an opened worktree, in the main area beside the board.
 // Everything that asks "what is on screen" asks this, so the layout commands,
 // ⌘] and ⌘[, "seen", and the drawing itself can't come to disagree about it:
 // the one mistake worse than not marking a pane seen is marking one that isn't
@@ -310,9 +310,9 @@ enum WorkspaceScreen {
     }
 
     /// Of `shown`, the layouts a workspace actually draws in `arrangement`:
-    /// the conversation only while it's popped open from its rail, and
-    /// what's opened only while it's open. Nothing while the detail hasn't
-    /// been measured yet (`arrangement` nil).
+    /// the conversation while it fills the main area or is popped open from
+    /// its rail, and what's opened while it's open. Nothing while the detail
+    /// hasn't been measured yet (`arrangement` nil).
     ///
     /// What "on screen" means for seen marks, the watching claim and the
     /// keyboard: an orchestrator shrunk to its rail or hidden, marked seen,
@@ -322,7 +322,7 @@ enum WorkspaceScreen {
         guard let arrangement else { return [] }
         return shown.filter { layout in
             switch layout.column {
-            case .conversation: return arrangement.conversation == .peek
+            case .conversation: return [.main, .peek].contains(arrangement.conversation)
             case .task, .worktree: return arrangement.opened
             }
         }

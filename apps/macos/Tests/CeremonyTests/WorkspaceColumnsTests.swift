@@ -5,9 +5,9 @@ import Testing
 
 @testable import Far_Cooler
 
-/// A workspace's levels at the widths 2A measured (spec §4.3). The detail is
-/// the window less a 248 pt sidebar: 1222 pt at a full-screen 1470, 1192 at
-/// 1440, and 1032 in a 1280 pt window.
+/// A workspace's layout at the widths 2A measured (spec §4.3, ov-89). The
+/// detail is the window less a 248 pt sidebar: 1222 pt at a full-screen 1470,
+/// 1192 at 1440, and 1032 in a 1280 pt window.
 struct WorkspaceColumnsTests {
     private typealias Columns = WorkspaceColumns
 
@@ -22,90 +22,158 @@ struct WorkspaceColumnsTests {
         #expect(columns(Columns.openedMinimum()) == 58)
         #expect(columns(Columns.openedMinimum() - 1) == 57)
         #expect(Columns.openedMinimum() == 489)
-        // At 13 pt the conversation is 426, and what's opened needs a wider
-        // detail to keep the board beside it.
+        // At 13 pt the conversation is 426, and the board needs a wider
+        // detail to stay a sidebar.
         let thirteen: CGFloat = 8.0361328125
         #expect(Columns.conversationMinimum(cell: thirteen) == 426)
-        let beside = Columns.rail + 1 + Columns.boardMinimum + 1 + Columns.openedMinimum(cell: thirteen)
-        #expect(Columns.layout(width: beside, opened: true, cell: thirteen).board)
-        #expect(!Columns.layout(width: beside - 1, opened: true, cell: thirteen).board)
+        let side = Columns.rail + 1 + Columns.openedMinimum(cell: thirteen) + 1 + Columns.boardMinimum
+        #expect(Columns.layout(width: side, opened: true, cell: thirteen).board == .side)
+        #expect(Columns.layout(width: side - 1, opened: true, cell: thirteen).board == .strip)
     }
 
-    /// The chain at every width the spec measured, from a full-screen 1470
-    /// pt window's 1222 pt detail down to the 600 pt window's 352: the rail,
-    /// then the board filling the rest with nothing open.
-    @Test("With nothing open, the board fills the content beside the rail", arguments: [1600, 1222, 1192, 1032, 778, 600, 352] as [CGFloat])
-    func theBoardFillsTheContent(width: CGFloat) {
+    /// With nothing open, the orchestrator fills the main area and the board
+    /// is a sidebar on the right, from a full-screen 1470 pt window's 1222
+    /// pt detail down to the narrowest that keeps it (ov-89).
+    @Test("With nothing open, the orchestrator fills the main area beside the board", arguments: [1600, 1222, 1192, 1032, 779] as [CGFloat])
+    func theOrchestratorFillsTheMainArea(width: CGFloat) {
         let arrangement = Columns.layout(width: width, opened: false)
         #expect(arrangement == .workspace)
         let frames = Columns.frames(width: width, arrangement: arrangement, list: 300)
-        #expect(frames.content == 29)
-        #expect(frames.board == width - 29)
-        // Popped open, the conversation is over the board, which stays put.
-        let peeked = Columns.layout(width: width, opened: false, peek: true)
-        #expect(peeked == .peeked)
-        #expect(Columns.frames(width: width, arrangement: peeked, list: 300) == frames)
-        // No conversation: no rail, and the board from the edge.
-        let alone = Columns.layout(width: width, opened: false, hasConversation: false)
-        #expect(alone == .boardAlone)
-        #expect(Columns.frames(width: width, arrangement: alone, list: 300).board == width)
+        // 300 pt, or what leaves the rail and a task their own.
+        let board = min(300, width - 29 - 1 - Columns.openedMinimum())
+        #expect(frames.boardX == width - board && frames.board == board)
+        #expect(frames.main == width - board - 1)
+        #expect(frames.conversationX == 0 && frames.conversation == frames.main)
+        // A peek means nothing with the orchestrator out already.
+        #expect(Columns.layout(width: width, opened: false, peek: true) == .workspace)
+        // No conversation: nothing fills it, and the board is where it was.
+        let bare = Columns.layout(width: width, opened: false, hasConversation: false)
+        #expect(bare.conversation == .none && bare.board == .side)
+        #expect(Columns.frames(width: width, arrangement: bare, list: 300).boardX == width - board)
     }
 
-    /// Opening a task narrows the board to the list and puts the task
-    /// beside it, with the widest pane the work's: at a 13-inch laptop's
-    /// widths, a 300 pt list and 700–900 pt for the task. Where both don't
-    /// fit at their minimums, the task covers the board instead.
-    @Test("A task open narrows the board to a list beside it, or covers it")
-    func aTaskOpenNarrowsTheBoard() {
-        func at(_ width: CGFloat, list: CGFloat = 300, focused: Bool = false, conversation: Bool = true)
-            -> (Columns.Arrangement, Columns.Frames)
-        {
-            let arrangement = Columns.layout(width: width, opened: true, hasConversation: conversation, focused: focused)
-            return (arrangement, Columns.frames(width: width, arrangement: arrangement, list: list))
-        }
-        // Full screen on an M2 Air, an M1, and a 1280 pt window.
+    /// Opening a task springs the orchestrator to its rail and puts the task
+    /// in the main area: at a 13-inch laptop's widths, a 300 pt board and
+    /// 700–890 pt for the task, the same as ov-85 gave it.
+    @Test("A task open takes the main area, past the rail")
+    func aTaskOpenTakesTheMainArea() {
         for (width, opened) in [(1222, 892), (1192, 862), (1032, 702)] as [(CGFloat, CGFloat)] {
-            let (arrangement, frames) = at(width)
+            let arrangement = Columns.layout(width: width, opened: true)
             #expect(arrangement == .beside, "at \(width)")
-            #expect(frames.board == 300, "at \(width)")
-            #expect(frames.openedX == 330, "at \(width)")
-            #expect(frames.opened == opened, "at \(width)")
-            #expect(frames.openedX + frames.opened == width)
+            let frames = Columns.frames(width: width, arrangement: arrangement, list: 300)
+            #expect(frames.openedX == 29 && frames.opened == opened, "at \(width)")
+            #expect(frames.openedX + frames.opened + 1 == frames.boardX, "at \(width)")
+            // On its rail, the conversation keeps the width it had.
+            #expect(frames.conversation == nil)
+            // Popped open over the task: its minimum, past the rail.
+            let peeked = Columns.layout(width: width, opened: true, peek: true)
+            #expect(peeked == .besidePeeked)
+            let over = Columns.frames(width: width, arrangement: peeked, list: 300)
+            #expect(over.conversationX == 29 && over.conversation == Columns.conversationMinimum())
+            #expect(over.openedX == frames.openedX && over.opened == frames.opened, "the peek resized the task")
         }
-        // The narrowest that keeps both: the list gives way to its minimum
-        // first, so what's opened keeps its 58 columns.
-        let edge = 29 + Columns.boardMinimum + 1 + Columns.openedMinimum()
-        #expect(edge == 779)
-        let (kept, keptFrames) = at(edge)
-        #expect(kept == .beside)
-        #expect(keptFrames.board == Columns.boardMinimum && keptFrames.opened == Columns.openedMinimum())
-        // A point narrower, what's opened covers the board, which keeps
-        // its width underneath rather than reflowing.
-        for width in [edge - 1, 600, 352] {
-            let (covering, frames) = at(width)
-            #expect(covering == .covering, "at \(width)")
-            #expect(frames.openedX == 29 && frames.opened == width - 29, "at \(width)")
-            #expect(frames.board == Columns.boardMinimum, "at \(width)")
-        }
-        // A list dragged wide stops where what's opened would lose a column;
-        // dragged narrow, at its minimum.
-        #expect(at(1222, list: 900).1.board == 1222 - 29 - 1 - Columns.openedMinimum())
-        #expect(at(1222, list: 100).1.board == Columns.boardMinimum)
-        #expect(at(1222, list: 420).1.board == 420)
-        // Focus: what's opened alone, from the edge, popped open or not.
-        let (focus, focusFrames) = at(1222, focused: true)
+        // Focus: what's opened alone, from edge to edge.
+        let focus = Columns.layout(width: 1222, opened: true, focused: true, peek: true, boardOver: true)
         #expect(focus == .alone)
+        let focusFrames = Columns.frames(width: 1222, arrangement: focus, list: 300)
         #expect(focusFrames.openedX == 0 && focusFrames.opened == 1222)
-        #expect(Columns.layout(width: 1222, opened: true, focused: true, peek: true) == .alone)
         // Focus means nothing with nothing open.
         #expect(Columns.layout(width: 1222, opened: false, focused: true) == .workspace)
-        // No conversation: no rail, and the list from the edge.
-        let (bare, bareFrames) = at(1222, conversation: false)
-        #expect(bare.conversation == .none && bare.board)
-        #expect(bareFrames.content == 0 && bareFrames.openedX == 301 && bareFrames.opened == 921)
-        // The popped-open conversation is its minimum, or what the rail leaves.
-        #expect(Columns.peekWidth(in: 1032) == Columns.conversationMinimum())
-        #expect(Columns.peekWidth(in: 300) == 300 - Columns.rail - Columns.divider)
+        // No conversation: no rail, and the task from the edge.
+        let bare = Columns.layout(width: 1222, opened: true, hasConversation: false)
+        #expect(bare.conversation == .none)
+        #expect(Columns.frames(width: 1222, arrangement: bare, list: 300).openedX == 0)
+        // No board: the main area runs to the trailing edge.
+        let boardless = Columns.layout(width: 1222, opened: true, hasBoard: false)
+        #expect(boardless.board == .none)
+        let boardlessFrames = Columns.frames(width: 1222, arrangement: boardless, list: 300)
+        #expect(boardlessFrames.main == 1222 && boardlessFrames.opened == 1222 - 29, "\(boardlessFrames)")
+    }
+
+    /// The board never moves between states (ov-89): its leading edge and
+    /// width are the same with nothing open, a task open, the orchestrator
+    /// popped open over it, and Focus left again, at every width that keeps
+    /// it and every width it was dragged to.
+    @Test("The board's width and place are the same in every state", arguments: [1600, 1222, 1032, 900, 779] as [CGFloat])
+    func theBoardStaysPut(width: CGFloat) {
+        for list in [100, 260, 300, 420, 900] as [CGFloat] {
+            let states = [
+                Columns.layout(width: width, opened: false),
+                Columns.layout(width: width, opened: true),
+                Columns.layout(width: width, opened: true, peek: true),
+                Columns.layout(width: width, opened: false, peek: true),
+            ]
+            let boards = states.map { arrangement in
+                let frames = Columns.frames(width: width, arrangement: arrangement, list: list)
+                return [frames.boardX, frames.board, frames.main]
+            }
+            #expect(Set(boards).count == 1, "at \(width), dragged to \(list): \(boards)")
+            let board = boards[0][1]
+            #expect(board >= Columns.boardMinimum)
+            #expect(board == min(max(list, Columns.boardMinimum), width - 29 - 1 - Columns.openedMinimum()))
+            // What's opened keeps its 58 columns beside it, at any drag.
+            let opened = Columns.frames(width: width, arrangement: states[1], list: list).opened
+            #expect(opened >= Columns.openedMinimum(), "at \(width), dragged to \(list)")
+        }
+    }
+
+    /// Below the width where the rail, what's opened at its 58 columns and
+    /// the board at its 260 pt all fit, the board collapses to a strip at
+    /// the trailing edge, in every state, so the main area never drops below
+    /// a usable terminal; the strip pops it open over the main area.
+    @Test("The board collapses to its strip below 779 pt, and pops open over the main area")
+    func theBoardCollapses() {
+        #expect(Columns.sidebarMinimum() == 779)
+        #expect(!Columns.collapses(width: 779))
+        #expect(Columns.collapses(width: 778))
+        for width in [778, 700, 600, 352] as [CGFloat] {
+            let closed = Columns.layout(width: width, opened: false)
+            #expect(closed == .narrow, "at \(width)")
+            let open = Columns.layout(width: width, opened: true)
+            #expect(open == .narrowOpened, "at \(width)")
+            let frames = Columns.frames(width: width, arrangement: open, list: 300)
+            #expect(frames.main == width - 29, "at \(width)")
+            #expect(frames.openedX == 29 && frames.opened == width - 58, "at \(width)")
+            // Tucked under the strip, out of sight.
+            #expect(frames.boardX >= width - 28, "at \(width)")
+            #expect(Columns.frames(width: width, arrangement: closed, list: 300).conversation == width - 29)
+            // Popped open: over the main area, against the strip.
+            let over = Columns.layout(width: width, opened: true, boardOver: true)
+            #expect(over.board == .over && over.boardInSight)
+            let overFrames = Columns.frames(width: width, arrangement: over, list: 300)
+            #expect(overFrames.boardX + overFrames.board == width - 29, "at \(width)")
+            #expect(overFrames.board == min(300, width - 29), "at \(width)")
+            #expect(overFrames.opened == frames.opened, "popping the board resized the task")
+        }
+        // Wide enough, a popped board means nothing: it's the sidebar.
+        #expect(Columns.layout(width: 779, opened: true, boardOver: true) == .beside)
+        #expect(!Columns.Arrangement.narrow.boardInSight)
+        #expect(Columns.Arrangement.workspace.boardInSight)
+    }
+
+    /// The window's state through a session: nothing open, a task, another
+    /// one glanced at, the orchestrator popped open over it, closed; and
+    /// twenty toggles inside a frame end where the last one says.
+    @Test("Nothing open, a task, a switch, a peek and a close")
+    func theLayoutFollowsTheSession() {
+        var opened: String?
+        var peek = false
+        func now() -> Columns.Arrangement { Columns.layout(width: 1032, opened: opened != nil, peek: peek) }
+        #expect(now() == .workspace)
+        opened = "bil-3"
+        #expect(now() == .beside)
+        opened = "bil-7"
+        #expect(now() == .beside)
+        peek = true
+        #expect(now() == .besidePeeked)
+        // Closing what's opened puts the peek away with it (`closeOpened`).
+        opened = nil
+        peek = false
+        #expect(now() == .workspace)
+        for index in 0..<20 { opened = index.isMultiple(of: 3) ? nil : "bil-\(index)" }
+        #expect(now() == .beside)
+        opened = nil
+        #expect(now() == .workspace)
     }
 
     /// The motion's state, apart from the window's (ov-85): opening,
@@ -147,9 +215,9 @@ struct WorkspaceColumnsTests {
     }
 
     /// The drawn view, hosted in a detail 600 pt wide inside a 1600 pt
-    /// window, lays out by its own width: a task covers the board there,
-    /// where a view that read the window would put them side by side and
-    /// clip. At 1032 they're side by side.
+    /// window, lays out by its own width: the board collapses to its strip
+    /// there, where a view that read the window would keep the sidebar and
+    /// clip. At 1032 it's the sidebar.
     @MainActor
     @Test("The workspace lays out by its own width, not the window's")
     func theWorkspaceLaysOutByItsOwnWidth() async {
@@ -163,7 +231,7 @@ struct WorkspaceColumnsTests {
                     opened: "t" as String?, hasConversation: true, cell: WorkspaceColumns.defaultCell,
                     focused: false, peek: false, listWidth: .constant(300),
                     conversation: { Color.clear }, rail: { Color.clear }, board: { Color.clear },
-                    breadcrumb: { _ in Color.clear }, detail: { _, _ in Color.clear })
+                    strip: { Color.clear }, breadcrumb: { _ in Color.clear }, detail: { _, _ in Color.clear })
                 .frame(width: width, height: 400)
                 .frame(width: 1600, height: 400, alignment: .leading)
                 .onPreferenceChange(WorkspaceArrangementPreference.self) { value in
@@ -171,7 +239,7 @@ struct WorkspaceColumnsTests {
                 }
             }
         }
-        for (width, expected) in [(600, WorkspaceColumns.Arrangement.covering), (1032, .beside)] as [(CGFloat, WorkspaceColumns.Arrangement)] {
+        for (width, expected) in [(600, WorkspaceColumns.Arrangement.narrowOpened), (1032, .beside)] as [(CGFloat, WorkspaceColumns.Arrangement)] {
             seen.arrangement = nil
             let host = NSHostingView(rootView: Hosted(seen: seen, width: width))
             let window = NSWindow(
@@ -190,9 +258,9 @@ struct WorkspaceColumnsTests {
 
     /// On screen means drawn: a conversation on its rail, or left out in
     /// Focus, isn't, so it isn't marked seen or watched and the keyboard
-    /// doesn't act on it. Popped open, over the board or a task, it is.
-    /// What's opened is on screen while it's open. Nothing is, before the
-    /// detail has been measured.
+    /// doesn't act on it. Filling the main area, at any width, or popped
+    /// open over a task, it is (ov-89). What's opened is on screen while
+    /// it's open. Nothing is, before the detail has been measured.
     @Test("A conversation on its rail or hidden isn't on screen")
     func aRailedOrHiddenConversationIsntOnScreen() {
         let worktree = Worktree(
@@ -208,10 +276,14 @@ struct WorkspaceColumnsTests {
         }
         #expect(columns(.besidePeeked) == [.conversation, .task])
         #expect(columns(.beside) == [.task])
-        #expect(columns(.covering) == [.task])
+        #expect(columns(.narrowOpened) == [.task])
         #expect(columns(.alone) == [.task])
-        #expect(columns(.workspace) == [])
-        #expect(columns(.peeked) == [.conversation])
+        #expect(columns(.workspace) == [.conversation])
+        #expect(columns(.narrow) == [.conversation])
+        // The board popped open over it leaves what's under it on screen,
+        // dimmed, as a peek does.
+        #expect(columns(Columns.layout(width: 600, opened: true, boardOver: true)) == [.task])
+        #expect(columns(Columns.layout(width: 600, opened: false, boardOver: true)) == [.conversation])
         #expect(columns(nil) == [])
     }
 

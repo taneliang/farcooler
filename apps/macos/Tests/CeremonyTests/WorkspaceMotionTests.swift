@@ -38,21 +38,22 @@ extension MotionTally {
     @MainActor static var current: MotionTally?
 }
 
-/// Opening a task beside the board, glancing through others and closing it
-/// (ov-85): the board is never taken down or rebuilt, each task's view is
-/// made once while it's open, and what takes a click follows the window's
-/// state at once, never the motion.
+/// Opening a task in the main area, glancing through others and closing it
+/// (ov-85, ov-89): neither the board nor the orchestrator is ever taken down
+/// or rebuilt, each task's view is made once while it's open, and what takes
+/// a click follows the window's state at once, never the motion.
 @MainActor
 @Suite(.serialized)
 struct WorkspaceMotionTests {
     @MainActor
     final class Level: ObservableObject {
         @Published var opened: String?
+        @Published var boardOver = false
     }
 
-    /// A workspace 1032 pt wide: the rail at 0–28, the board's list at
-    /// 29–329 beside a task, and the task from 330. With nothing open, the
-    /// board runs to the trailing edge.
+    /// A workspace 1032 pt wide: the board at 732–1032 in every state
+    /// (ov-89). With nothing open, the orchestrator fills 0–731; with a task
+    /// open, the rail is at 0–28 and the task at 29–731.
     @MainActor
     final class Harness {
         let level = Level()
@@ -64,12 +65,15 @@ struct WorkspaceMotionTests {
             @ObservedObject var level: Level
             let tally: MotionTally
             let motion: Animation
+            let width: CGFloat
             var body: some View {
                 WorkspaceView(
                     opened: level.opened, hasConversation: true, cell: WorkspaceColumns.defaultCell,
-                    focused: false, peek: false, listWidth: .constant(300),
-                    conversation: { Color.clear }, rail: { MotionMarkerView(name: "rail", tally: tally) },
+                    focused: false, peek: false, boardOver: level.boardOver, listWidth: .constant(300),
+                    conversation: { MotionMarkerView(name: "conversation", tally: tally) },
+                    rail: { MotionMarkerView(name: "rail", tally: tally) },
                     board: { MotionMarkerView(name: "board", tally: tally) },
+                    strip: { MotionMarkerView(name: "strip", tally: tally) },
                     breadcrumb: { _ in Color.clear.frame(height: 30) },
                     detail: { item, settled in
                         ZStack {
@@ -81,16 +85,16 @@ struct WorkspaceMotionTests {
                                     .task { tally.fetches[item, default: 0] += 1 }
                             }
                         }
-                    }, motion: motion)
-                .frame(width: 1032, height: 400)
+                    }, onDismissBoard: { level.boardOver = false }, motion: motion)
+                .frame(width: width, height: 400)
             }
         }
 
-        init(motion: Animation) {
+        init(motion: Animation, width: CGFloat = 1032) {
             MotionTally.current = tally
-            host = NSHostingView(rootView: Hosted(level: level, tally: tally, motion: motion))
+            host = NSHostingView(rootView: Hosted(level: level, tally: tally, motion: motion, width: width))
             window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 1032, height: 400), styleMask: [.borderless],
+                contentRect: NSRect(x: 0, y: 0, width: width, height: 400), styleMask: [.borderless],
                 backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
             window.contentView = host
@@ -124,50 +128,59 @@ struct WorkspaceMotionTests {
     func theBoardIsNeverRebuilt() async {
         let harness = Harness(motion: Self.quick)
         await harness.settle()
+        #expect(harness.hit(400) == "conversation")
+        #expect(harness.hit(10) == "conversation")
         #expect(harness.hit(900) == "board")
         harness.level.opened = "bil-3"
         await harness.settle(10)
-        #expect(harness.hit(100) == "board")
-        #expect(harness.hit(900) == "bil-3")
+        #expect(harness.hit(10) == "rail")
+        #expect(harness.hit(400) == "bil-3")
+        #expect(harness.hit(900) == "board")
         // Glancing: the next one in place, the board untouched.
         harness.level.opened = "bil-7"
         await harness.settle(10)
-        #expect(harness.hit(900) == "bil-7")
-        #expect(harness.hit(100) == "board")
+        #expect(harness.hit(400) == "bil-7")
+        #expect(harness.hit(900) == "board")
         harness.level.opened = nil
         await harness.settle(10)
+        #expect(harness.hit(400) == "conversation")
         #expect(harness.hit(900) == "board")
         harness.close()
         #expect(harness.tally.made["board"] == 1, "the board was rebuilt")
         #expect(harness.tally.gone["board"] == nil, "the board was taken down")
+        // The orchestrator's view is moved, never made again.
+        #expect(harness.tally.made["conversation"] == 1, "the orchestrator was rebuilt")
+        #expect(harness.tally.gone["conversation"] == nil, "the orchestrator was taken down")
         #expect(harness.tally.made["rail"] == 1)
         #expect(harness.tally.made["bil-3"] == 1 && harness.tally.made["bil-7"] == 1)
         // Let go of once each: switched away from, and closed and settled.
         #expect(harness.tally.gone["bil-3"] == 1 && harness.tally.gone["bil-7"] == 1)
     }
 
-    /// Mid-flight, on a spring slowed to three seconds: a close is a close
-    /// at once, the board takes the click where the task still is on
-    /// screen, and opening again picks the motion up rather than waiting.
+    /// Mid-flight, on a spring slowed to three seconds: an open is an open
+    /// at once, the task taking the click where the orchestrator is still
+    /// sliding away; a close is a close at once, the orchestrator taking it
+    /// back; and opening again picks the motion up rather than waiting.
     @Test("Nothing waits on the motion, and rapid toggles end where they're last sent")
     func nothingWaitsOnTheMotion() async {
         let harness = Harness(motion: Self.slow)
         await harness.settle()
         harness.level.opened = "bil-3"
         await harness.settle(2)
-        // Barely moving, and already open: the board list beside it is
-        // clickable where it will be.
-        #expect(harness.hit(100) == "board")
-        // Still off to the trailing side, sliding in: not already where the
-        // motion ends, fading in there (frames, ov-85).
-        #expect(harness.hit(900) != "bil-3", "it appeared where the motion ends")
+        // Barely moving, and already open: the orchestrator, still over the
+        // task, takes no click, and the board stays where it was.
+        #expect(harness.hit(400) == "bil-3", "the orchestrator sliding away took the click")
+        #expect(harness.hit(900) == "board")
         try? await Task.sleep(for: .seconds(3.5))
         await harness.settle()
-        #expect(harness.hit(900) == "bil-3")
-        // Closed: still on screen, sliding, and it takes no click.
+        #expect(harness.hit(400) == "bil-3")
+        #expect(harness.hit(10) == "rail")
+        // Closed: the task is still on screen, the orchestrator sliding back
+        // over it, and it takes no click.
         harness.level.opened = nil
         await harness.settle(2)
-        #expect(harness.hit(900) != "bil-3", "a closing task took the click")
+        #expect(harness.hit(400) != "bil-3", "a closing task took the click")
+        #expect(harness.hit(900) == "board")
         // Five more inside a tenth of a second.
         for next in ["bil-7", nil, "bil-9", nil, "bil-11"] as [String?] {
             harness.level.opened = next
@@ -175,11 +188,12 @@ struct WorkspaceMotionTests {
         }
         try? await Task.sleep(for: .seconds(3.5))
         await harness.settle()
-        #expect(harness.hit(900) == "bil-11")
-        #expect(harness.hit(100) == "board")
+        #expect(harness.hit(400) == "bil-11")
+        #expect(harness.hit(900) == "board")
         harness.close()
         #expect(harness.tally.made["board"] == 1)
         #expect(harness.tally.gone["board"] == nil)
+        #expect(harness.tally.made["conversation"] == 1)
     }
     /// Closed and, mid-flight, opened again: the same view slides back,
     /// never taken down and made again. (Fails when what's drawn follows
@@ -199,7 +213,7 @@ struct WorkspaceMotionTests {
         harness.level.opened = "bil-3"
         try? await Task.sleep(for: .seconds(3.5))
         await harness.settle()
-        let hit = harness.hit(900)
+        let hit = harness.hit(400)
         harness.close()
         #expect(hit == "bil-3", "\(hit)")
         #expect(harness.tally.made["bil-3"] == 1, "bil-3 was made \(harness.tally.made["bil-3"] ?? 0) times")
@@ -232,5 +246,37 @@ struct WorkspaceMotionTests {
         #expect(mounted == Array(repeating: 0, count: 9) + [1], "mounted \(mounted)")
         #expect(fetched == 1, "read \(fetched) records")
     }
-}
 
+    /// A detail 700 pt wide, under the 779 that keeps the sidebar: the
+    /// board is a 28 pt strip at 671–699 in every state, the orchestrator
+    /// fills 0–670, and the strip pops the board open over the main area at
+    /// 371–670, where a click outside puts it away. The board is the same
+    /// view throughout (ov-89).
+    @Test("At a narrow width the board is a strip that pops open over the main area")
+    func aNarrowBoardIsAStrip() async {
+        let harness = Harness(motion: Self.quick, width: 700)
+        await harness.settle()
+        #expect(harness.hit(690) == "strip")
+        #expect(harness.hit(500) == "conversation")
+        harness.level.opened = "bil-3"
+        await harness.settle(10)
+        #expect(harness.hit(690) == "strip")
+        #expect(harness.hit(500) == "bil-3")
+        harness.level.boardOver = true
+        await harness.settle(10)
+        #expect(harness.hit(500) == "board")
+        #expect(harness.hit(690) == "strip")
+        // Outside it, the dimming takes the click and puts it away.
+        let outside = harness.host.hitTest(NSPoint(x: 200, y: 200))
+        #expect(!(outside is MotionMarker), "a click outside the board reached \(String(describing: outside))")
+        harness.level.boardOver = false
+        await harness.settle(10)
+        #expect(harness.hit(500) == "bil-3")
+        harness.level.opened = nil
+        await harness.settle(10)
+        #expect(harness.hit(500) == "conversation")
+        harness.close()
+        #expect(harness.tally.made["board"] == 1, "the board was rebuilt")
+        #expect(harness.tally.made["conversation"] == 1, "the orchestrator was rebuilt")
+    }
+}

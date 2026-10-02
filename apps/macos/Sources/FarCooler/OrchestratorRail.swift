@@ -151,6 +151,86 @@ struct OrchestratorRailView: View {
     }
 }
 
+/// The board collapsed to a strip at the trailing edge (ov-89), where the
+/// detail is too narrow for the sidebar: the rail's mirror, with the board's
+/// icon, "Board" set sideways and how many of its items wait on you.
+enum BoardStrip {
+    /// What VoiceOver says: "Board", and what waits.
+    static func accessibilityLabel(waiting: Int) -> String {
+        switch waiting {
+        case 0: "Board"
+        case 1: "Board, 1 needs you"
+        default: "Board, \(waiting) need you"
+        }
+    }
+
+    static func help(open: Bool) -> String {
+        open ? "Hide Board (⌥⌘2)" : "Show Board (⌥⌘2)"
+    }
+
+    static func action(open: Bool) -> String { open ? "Hide" : "Show" }
+}
+
+/// The strip itself. A click, or its accessibility action, pops the board
+/// open over the main area, or puts it away, at any time.
+struct BoardStripView: View {
+    let waiting: Int
+    let open: Bool
+    var onToggle: () -> Void
+
+    @Environment(\.colorScheme) private var scheme
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: onToggle) {
+            VStack(spacing: 10) {
+                Image(systemName: "checklist")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20, height: 18)
+                if waiting > 0 {
+                    Text("\(waiting)")
+                        .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(.black.opacity(0.75))
+                        .padding(.horizontal, 4)
+                        .frame(minWidth: 16, minHeight: 14)
+                        .background(Capsule().fill(GlancePalette.amber(scheme)))
+                }
+                Sideways {
+                    Text("Board")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+                .frame(maxHeight: .infinity, alignment: .top)
+                .clipped()
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(open ? 180 : 0))
+                    .animation(WorkspaceMotion.spring, value: open)
+            }
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background {
+            Rectangle().fill(.quaternary).opacity(hovering ? 1 : open ? 0.5 : 0)
+        }
+        .background(WorkspaceStyle.canvas)
+        .onHover { hovering = $0 }
+        .pointerStyle(.link)
+        .help(BoardStrip.help(open: open))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(BoardStrip.accessibilityLabel(waiting: waiting))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(named: BoardStrip.action(open: open), onToggle)
+        .accessibilityIdentifier("board-strip")
+    }
+}
+
 /// Its one subview turned a quarter clockwise, laid out as it then stands:
 /// as wide as the text is tall, and as tall as it's long.
 private struct Sideways<Content: View>: View {

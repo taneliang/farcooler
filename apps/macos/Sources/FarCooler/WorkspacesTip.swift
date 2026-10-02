@@ -1,16 +1,18 @@
 import SwiftUI
 
-/// The one-time tip over the sidebar: how a task opens beside its board
-/// (ov-85). It said once that workspaces had become places in the sidebar
-/// (spec §9), under `tips.workspaces`; the layout it described then is gone,
-/// so this one has a key of its own, and shows once even to whoever
-/// dismissed that.
+/// The one-time tip over the sidebar: the orchestrator fills the workspace,
+/// with the board on the right (ov-89). It said once that workspaces had
+/// become places in the sidebar (spec §9), under `tips.workspaces`, then that
+/// tasks opened beside the board (ov-85), under `tips.tasksBesideBoard`; the
+/// layouts those described are gone, so this one has a key of its own, and
+/// shows once even to whoever dismissed them.
 enum WorkspacesTip {
     /// Set once the tip has been dismissed; never cleared.
-    static let key = "tips.tasksBesideBoard"
+    static let key = "tips.orchestratorFillsWorkspace"
 
-    static let title = "Tasks now open beside the board."
-    static let message = "Click one to open it. Press ↑ or ↓ to look through the others, and Esc to close it."
+    static let title = "The orchestrator now fills the workspace."
+    static let message =
+        "Your board is on the right. Click a task to open it here, press ↑ or ↓ to look through the others, and Esc to go back to the orchestrator."
 
     static func shouldShow(_ defaults: UserDefaults = .standard) -> Bool {
         !defaults.bool(forKey: key)
