@@ -478,12 +478,47 @@ enum WorkspaceNavigation {
         return step
     }
 
-    /// Whether the board keeps the keyboard across a selection change:
-    /// ⌥⌘2 from a task (`pending`) goes up to the workspace and gives it the
-    /// board, where any other change would take it back.
+    /// Whether the board keeps the keyboard across a selection change: one
+    /// the board asked for (`pending`), within the workspace whose board it
+    /// is (⌥⌘2 going up to it, a row chosen or glanced at, a close), where
+    /// any other change would take it back.
     static func boardKeepsKeyboard(pending: Bool, from old: Selection?, to new: Selection?) -> Bool {
-        guard pending, let old, old.focus != nil else { return false }
-        return new == old.closed
+        guard pending, let old, let new, old != new, case .workspace(let host, let id, _) = new else { return false }
+        switch old {
+        case .workspace(host, id, _), .looseWorktree(host, _, _): return true
+        default: return false
+        }
+    }
+
+    /// What closing what's opened goes to: the workspace's own level, the
+    /// board alone; for a loose worktree, the workspace whose board is beside
+    /// it (`board`). Nil with nothing to close.
+    static func closing(_ selection: Selection, board: String?) -> Selection? {
+        switch selection {
+        case .workspace(let host, let id, _?): return .workspace(host: host, workspace: id, focus: nil)
+        case .looseWorktree(let host, _, _): return board.map { .workspace(host: host, workspace: $0, focus: nil) }
+        default: return nil
+        }
+    }
+
+    /// A task chosen on its board (ov-85): opened beside the board, or, with
+    /// `toggles` (a click), closed when it's the one open already. A glance
+    /// (↑ or ↓) only opens.
+    static func choosing(
+        task: String, host: String, workspace: String, from selection: Selection?, toggles: Bool
+    ) -> Selection {
+        let open = Selection.workspace(host: host, workspace: workspace, focus: .task(task))
+        return toggles && selection == open ? .workspace(host: host, workspace: workspace, focus: nil) : open
+    }
+
+    /// The task the board `board` draws selected: the one open beside it,
+    /// or the one a worktree open beside it was opened from (`trail`).
+    static func selectedTask(_ selection: Selection?, trail: Selection?, board: String) -> String? {
+        if case .workspace(_, board, .task(let id)?)? = selection { return id }
+        if case .workspace(_, board, .worktree?)? = selection, case .workspace(_, board, .task(let id)?)? = trail {
+            return id
+        }
+        return nil
     }
 
     /// Where Back goes: along the breadcrumb to the task a worktree was
@@ -508,10 +543,12 @@ enum EscapeBack {
     }
 
     /// Whether an Esc in the main window goes back: something to go back
-    /// from (a task or a worktree opened, Focus, or the orchestrator popped
-    /// open, which `focusColumn` stands for), and nobody else wanting it.
+    /// from (a task or a worktree opened beside the board, a loose one
+    /// included, Focus, or the orchestrator popped open, which
+    /// `focusColumn` stands for), and nobody else wanting it.
     static func goesBack(responder: NSResponder?, selection: ContentView.Selection?, focusColumn: Bool) -> Bool {
         guard !keepsEscape(responder) else { return false }
+        if case .looseWorktree? = selection { return true }
         return focusColumn || selection?.focus != nil
     }
 }

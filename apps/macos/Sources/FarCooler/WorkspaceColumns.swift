@@ -1,17 +1,18 @@
 import CoreGraphics
 import Foundation
 
-// How a workspace's detail is drawn, level by level (spec §4.3).
+// How a workspace's detail is drawn (spec §4.3), as a chain of control read
+// left to right: the orchestrator, the board, the work (ov-85).
 //
-// Two levels, never four columns (ov-79). At the workspace level the
-// conversation and the board share the detail's width, each with a minimum
-// measured in 2A against the app's own code
-// (`.claude/agent/reports/ui/2a-report.md`). `HSplitView` never collapses a
-// child on its own: below the sum of its children's minimums it overflows the
-// window and clips. So the collapse is decided here, as a value, before the
-// split view is drawn. Opening a task or a worktree drills in: what's opened
-// takes the detail, and the conversation shrinks to a rail at its leading
-// edge, which pops it open over what's opened without leaving it.
+// The orchestrator is a rail at the leading edge at every level, and pops
+// open over the rest. With nothing open, the board fills the content. A
+// task or a worktree opened narrows the board to a list column, its width
+// remembered and its divider draggable, and opens beside it: the widest pane
+// goes to the work. Where the two don't fit, what's opened covers the board,
+// which stays drawn underneath for when it closes.
+//
+// All of that is decided here, as values, so the view only places what these
+// say, and a test can read the widths at any window width.
 
 enum WorkspaceColumns {
     /// A cell's width at the default terminal font, SF Mono 12.5
@@ -24,21 +25,24 @@ enum WorkspaceColumns {
     /// counts the same.
     static let chrome: CGFloat = 40
 
-    /// The conversation's minimum, in terminal columns: every fixed line an
-    /// orchestrator shows fits, and it's what an iPhone shows.
+    /// The conversation's width popped open, in terminal columns: every
+    /// fixed line an orchestrator shows fits, and it's what an iPhone shows.
     static let conversationColumns = 48
-    /// The board's minimum: room for a list card's key, a short title and
-    /// its agent pill. It was one kanban column's outer width, a 260 pt card
-    /// plus its 10 pt padding each side, before the kanban was removed
-    /// (ov-83), and still fits the list.
-    static let boardMinimum: CGFloat = 280
-    /// The board's width when there's room: a list with room for its rows'
-    /// titles, and not so wide the conversation loses a column for it.
-    static let boardIdeal: CGFloat = 340
-    /// What the conversation shrinks to with a task or a worktree open: as
-    /// wide as its icon and its sideways label need (ov-84).
+    /// What's opened beside the board, at the least, in terminal columns:
+    /// the width at which no fixed line of any harness's permission prompt
+    /// wraps (spec §4.3, measured for the old task column). Narrower, what's
+    /// opened covers the board instead of sharing the width with it.
+    static let openedColumns = 58
+    /// The board list's narrowest: room for a list card's key, a short title
+    /// and its agent pill (ov-85).
+    static let boardMinimum: CGFloat = 260
+    /// The board list's width beside what's opened until its divider is
+    /// dragged.
+    static let boardListDefault: CGFloat = 300
+    /// The orchestrator's rail: as wide as its icon and its sideways label
+    /// need (ov-84).
     static let rail: CGFloat = 28
-    /// Each `HSplitView` divider.
+    /// Each divider: the rail's, and the board list's.
     static let divider: CGFloat = 1
 
     /// The narrowest a tile column holding `columns` terminal columns can be
@@ -52,68 +56,106 @@ enum WorkspaceColumns {
         width(columns: conversationColumns, cell: cell)
     }
 
-    /// How wide the conversation pops open over a task or a worktree in a
-    /// detail `width` pt wide: its minimum, or what's left past the rail when
-    /// that's less.
+    static func openedMinimum(cell: CGFloat = defaultCell) -> CGFloat {
+        width(columns: openedColumns, cell: cell)
+    }
+
+    /// How wide the conversation pops open in a detail `width` pt wide: its
+    /// minimum, or what's left past the rail when that's less.
     static func peekWidth(in width: CGFloat, cell: CGFloat = defaultCell) -> CGFloat {
         max(0, min(conversationMinimum(cell: cell), width - rail - divider))
     }
 
-    /// What's drawn, and how.
+    /// What's drawn.
     struct Arrangement: Equatable {
         enum Conversation: Equatable {
-            /// Its own column, beside the board.
-            case column
-            /// Shrunk to a 28 pt rail at the leading edge: its status and its
-            /// dot. Clicking it pops the conversation open.
+            /// The 28 pt rail at the leading edge: its status and its dot.
+            /// Clicking it pops the conversation open.
             case rail
-            /// The rail, with the conversation popped open over what's
-            /// opened, which stays where it is underneath.
+            /// The rail, with the conversation popped open over the board
+            /// and what's opened, which stay where they are underneath.
             case peek
             /// Not drawn: Focus, or a workspace with no conversation (a
-            /// runner without `workstreams`).
+            /// runner without `workstreams`, or a loose worktree).
             case none
         }
 
         var conversation: Conversation
-        /// A task or a worktree, drilled into: the detail is its. The board
-        /// is drawn exactly when it isn't.
-        var drilled: Bool
-        /// One column at a time, chosen by a segmented Orchestrator | Board
-        /// control in the header: the phone's form, for a detail too narrow
-        /// for both.
-        var switcher: Bool
+        /// A task or a worktree is open beside the board, or over it.
+        var opened: Bool
+        /// The board is in sight: alone, or as the list beside what's
+        /// opened. Covered by what's opened, it's still drawn, but not this.
+        var board: Bool
 
-        static let two = Arrangement(conversation: .column, drilled: false, switcher: false)
-        static let one = Arrangement(conversation: .column, drilled: false, switcher: true)
-        static let boardAlone = Arrangement(conversation: .none, drilled: false, switcher: false)
-        static let drilledIn = Arrangement(conversation: .rail, drilled: true, switcher: false)
-        static let peeked = Arrangement(conversation: .peek, drilled: true, switcher: false)
-        static let drilledAlone = Arrangement(conversation: .none, drilled: true, switcher: false)
+        static let workspace = Arrangement(conversation: .rail, opened: false, board: true)
+        static let peeked = Arrangement(conversation: .peek, opened: false, board: true)
+        static let beside = Arrangement(conversation: .rail, opened: true, board: true)
+        static let besidePeeked = Arrangement(conversation: .peek, opened: true, board: true)
+        static let covering = Arrangement(conversation: .rail, opened: true, board: false)
+        static let alone = Arrangement(conversation: .none, opened: true, board: false)
+        static let boardAlone = Arrangement(conversation: .none, opened: false, board: true)
     }
 
     /// What a detail `width` pt wide draws (spec §4.3).
     ///
-    /// - At the workspace level (`drilled` false): the conversation and the
-    ///   board when both fit, else one of them at a time, with
-    ///   Orchestrator | Board in the header.
-    /// - Drilled into a task or a worktree, at any width: it, with the
-    ///   conversation as a rail; `peek` pops the conversation open over it.
-    /// - `focused` is Focus (⌃⌘↩): what's opened alone, without the rail.
-    /// - A workspace with no conversation (`hasConversation` false) has the
-    ///   board, or what's opened, alone.
+    /// - The rail, at every level, unless the workspace has no conversation
+    ///   (`hasConversation` false) or it's Focus; `peek` pops it open.
+    /// - Nothing open: the board, filling the content.
+    /// - Something open (`opened`): the board as a list beside it when both
+    ///   fit at their minimums, else what's opened over the board.
+    /// - `focused` is Focus (⌃⌘↩): what's opened alone, with neither the rail
+    ///   nor the board. It means nothing with nothing open.
     ///
-    /// `cell` is the terminal font's cell width: the conversation's minimum
-    /// is in columns, so a larger font needs a wider detail for both.
+    /// `cell` is the terminal font's cell width: what's opened has a minimum
+    /// in columns, so a larger font needs a wider detail to keep the board.
     static func layout(
-        width: CGFloat, drilled: Bool, cell: CGFloat = defaultCell, hasConversation: Bool = true,
+        width: CGFloat, opened: Bool, cell: CGFloat = defaultCell, hasConversation: Bool = true,
         focused: Bool = false, peek: Bool = false
     ) -> Arrangement {
-        guard drilled else {
-            guard hasConversation else { return .boardAlone }
-            return width >= conversationMinimum(cell: cell) + boardMinimum + divider ? .two : .one
+        let focused = focused && opened
+        let conversation: Arrangement.Conversation =
+            !hasConversation || focused ? .none : peek ? .peek : .rail
+        guard opened else { return Arrangement(conversation: conversation, opened: false, board: true) }
+        let content = width - (conversation == .none ? 0 : rail + divider)
+        let fits = !focused && content >= boardMinimum + divider + openedMinimum(cell: cell)
+        return Arrangement(conversation: conversation, opened: true, board: fits)
+    }
+
+    /// The board list's width beside what's opened in a content `content`
+    /// pt wide: the remembered width, held between the list's minimum and
+    /// what leaves what's opened its own.
+    static func listWidth(_ remembered: CGFloat, content: CGFloat, cell: CGFloat = defaultCell) -> CGFloat {
+        let most = content - divider - openedMinimum(cell: cell)
+        return max(boardMinimum, min(remembered, most))
+    }
+
+    /// Where each part sits, in points from the detail's leading edge.
+    struct Frames: Equatable {
+        /// The board's leading edge: past the rail and its divider, or 0.
+        var content: CGFloat
+        /// The board's width: the content's alone, or the list's beside
+        /// what's opened. Covered, it keeps the list's, so it doesn't reflow
+        /// under what covers it.
+        var board: CGFloat
+        /// What's opened: its leading edge open, and its width.
+        var openedX: CGFloat
+        var opened: CGFloat
+    }
+
+    /// The frames `arrangement` puts its parts at in a detail `width` pt
+    /// wide, with the list `list` pt wide when it can be.
+    static func frames(
+        width: CGFloat, arrangement: Arrangement, list: CGFloat, cell: CGFloat = defaultCell
+    ) -> Frames {
+        let content = arrangement.conversation == .none ? 0 : rail + divider
+        let room = width - content
+        let listed = listWidth(list, content: room, cell: cell)
+        if !arrangement.opened {
+            return Frames(content: content, board: room, openedX: content + listed + divider, opened: room - listed - divider)
         }
-        if !hasConversation || focused { return .drilledAlone }
-        return peek ? .peeked : .drilledIn
+        if arrangement.board {
+            return Frames(content: content, board: listed, openedX: content + listed + divider, opened: room - listed - divider)
+        }
+        return Frames(content: content, board: listed, openedX: content, opened: room)
     }
 }

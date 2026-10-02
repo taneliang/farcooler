@@ -1,158 +1,301 @@
 import AppKit
 import SwiftUI
 
-/// A workspace in the detail, at one of two levels (spec §4.3): its
-/// orchestrator's conversation beside its board, or, drilled into a task or
-/// a worktree, that alone with the conversation shrunk to a rail beside it.
+/// A workspace in the detail (spec §4.3), as a chain of control left to
+/// right (ov-85): the orchestrator's rail, the board, and what's opened from
+/// it, a task or a worktree, beside the board as a list.
 ///
-/// Which is drawn is `WorkspaceColumns.layout`'s answer for the detail's own
-/// width, measured here and never read from the window, which the detail
-/// shares with the sidebar. The contents are the window's: each is handed in
-/// whole, so this view decides where things go and nothing about what they
-/// are.
-struct WorkspaceView<Conversation: View, Rail: View, Board: View, Crumbs: View, Drilled: View>: View {
-    /// Whether a task or a worktree is open: the drilled level.
-    let drilled: Bool
-    /// Whether this workspace has a conversation column at all: not a
-    /// repository's implicit workspace on a runner without `workstreams`.
+/// Nothing here is navigation. The window says what's open (`opened`) and
+/// this view places it, by `WorkspaceColumns`' values for its own measured
+/// width, never the window's, which the detail shares with the sidebar.
+///
+/// Every structural change moves on one spring (`WorkspaceMotion.spring`):
+/// the board narrowing and widening, what's opened sliding in and out, a
+/// task switched for another cross-fading in place, the rail leaving for
+/// Focus and coming back, and the orchestrator popping open. Every part stays
+/// mounted while it moves, positions and widths are driven from state, and
+/// nothing waits on the motion: a click mid-flight retargets it, and what
+/// takes clicks and the keyboard follows the window's state at once, not the
+/// motion's (`WorkspaceStage`).
+struct WorkspaceView<
+    Item: Hashable, Conversation: View, Rail: View, Board: View, Crumbs: View, Opened: View
+>: View {
+    /// What's open beside the board: a task or a worktree, or nil for the
+    /// board alone. Its identity is what's switched: a new one cross-fades
+    /// in, the same one with another pane named stays.
+    let opened: Item?
+    /// Whether this workspace has a conversation at all: not a repository's
+    /// implicit workspace on a runner without `workstreams`, nor a loose
+    /// worktree.
     let hasConversation: Bool
+    /// Whether there's a board to draw beside what's opened: not for a loose
+    /// worktree whose board can't be found.
+    var hasBoard = true
     /// The terminal font's cell width: the minimums are in columns.
     let cell: CGFloat
-    /// Focus (⌃⌘↩): what's opened alone, without the rail.
+    /// Focus (⌃⌘↩): what's opened alone, without the rail or the board.
     let focused: Bool
-    /// The conversation popped open over what's opened.
+    /// The conversation popped open over the rest.
     let peek: Bool
-    /// Which column the one-column form shows.
-    @Binding var pick: WorkspacePick
+    /// The board list's width beside what's opened, as its divider was last
+    /// dropped. Kept per device by the window.
+    @Binding var listWidth: Double
     @ViewBuilder let conversation: () -> Conversation
     @ViewBuilder let rail: () -> Rail
     @ViewBuilder let board: () -> Board
-    /// The breadcrumb, across the top of the drilled level, over the rail
-    /// and what's opened alike.
-    @ViewBuilder let breadcrumb: () -> Crumbs
-    @ViewBuilder let opened: () -> Drilled
+    /// The path over what's opened: Workspace › Task › Worktree, and its
+    /// close button.
+    @ViewBuilder let breadcrumb: (Item) -> Crumbs
+    /// What's opened, drawn for `Item`: the one the window has open, or the
+    /// one leaving, which takes no keyboard and isn't seen.
+    @ViewBuilder let detail: (Item) -> Opened
     /// A click outside the popped-open conversation: it closes.
     var onDismissPeek: () -> Void = {}
-    /// How the popped-open conversation moves: `OrchestratorPeek.spring`,
-    /// slowed only by a test that reads it mid-flight.
-    var peekMotion: Animation = OrchestratorPeek.spring
+    /// How everything moves: `WorkspaceMotion.spring`, slowed only by a test
+    /// that reads it mid-flight.
+    var motion: Animation = WorkspaceMotion.spring
+
+    /// What the motion is drawing, a step behind the window's state. See
+    /// `WorkspaceStage`.
+    @State private var stage: WorkspaceStage<Item>
+    /// The detail's width, as last measured: what a closing detail's width
+    /// is worked out from.
+    @State private var measured: CGFloat = 0
+    /// The width of what's opened as it leaves: held, so its terminals and
+    /// their tmux windows keep their size on the way out.
+    @State private var leavingWidth: CGFloat?
+    /// The board list's width while its divider is dragged.
+    @State private var dragging: CGFloat?
+    /// The list's width when the drag began.
+    @State private var dragStart: CGFloat?
+
+    init(
+        opened: Item?, hasConversation: Bool, hasBoard: Bool = true, cell: CGFloat, focused: Bool, peek: Bool,
+        listWidth: Binding<Double>,
+        @ViewBuilder conversation: @escaping () -> Conversation, @ViewBuilder rail: @escaping () -> Rail,
+        @ViewBuilder board: @escaping () -> Board, @ViewBuilder breadcrumb: @escaping (Item) -> Crumbs,
+        @ViewBuilder detail: @escaping (Item) -> Opened, onDismissPeek: @escaping () -> Void = {},
+        motion: Animation = WorkspaceMotion.spring
+    ) {
+        self.opened = opened
+        self.hasConversation = hasConversation
+        self.hasBoard = hasBoard
+        self.cell = cell
+        self.focused = focused
+        self.peek = peek
+        _listWidth = listWidth
+        self.conversation = conversation
+        self.rail = rail
+        self.board = board
+        self.breadcrumb = breadcrumb
+        self.detail = detail
+        self.onDismissPeek = onDismissPeek
+        self.motion = motion
+        // Drawn as it is from the first frame: a window reopening on a task
+        // doesn't slide it in.
+        _stage = State(initialValue: WorkspaceStage(open: opened, focused: focused))
+    }
+
+    private func arrangement(width: CGFloat, open: Bool, focused: Bool) -> WorkspaceColumns.Arrangement {
+        var arrangement = WorkspaceColumns.layout(
+            width: width, opened: open, cell: cell, hasConversation: hasConversation, focused: focused, peek: peek)
+        if !hasBoard && open { arrangement.board = false }
+        return arrangement
+    }
 
     var body: some View {
         GeometryReader { proxy in
-            let arrangement = WorkspaceColumns.layout(
-                width: proxy.size.width, drilled: drilled, cell: cell, hasConversation: hasConversation,
-                focused: focused, peek: peek)
-            // The workspace level stays drawn, hidden, while drilled in, so
-            // the board keeps its place, its scroll and its visit (the
-            // summary's "last visit" is when you left the workspace, not a
-            // task), and the split its dividers, for Back. Never the
-            // conversation itself: one terminal view per pane, and it's the
-            // rail's to pop open.
-            let base = WorkspaceColumns.layout(
-                width: proxy.size.width, drilled: false, cell: cell, hasConversation: hasConversation)
-            ZStack {
-                workspaceLevel(base)
-                    .opacity(drilled ? 0 : 1)
-                    .allowsHitTesting(!drilled)
-                    .accessibilityHidden(drilled)
-                if arrangement.drilled {
-                    drilledLevel(arrangement, width: proxy.size.width)
-                }
-            }
-            .frame(width: proxy.size.width, height: proxy.size.height)
-            .preference(key: WorkspaceArrangementPreference.self, value: arrangement)
-            .preference(key: WorkspaceWidthPreference.self, value: proxy.size.width)
-        }
-    }
-
-    private func drilledLevel(_ arrangement: WorkspaceColumns.Arrangement, width: CGFloat) -> some View {
-        VStack(spacing: 0) {
-            breadcrumb()
-            Divider()
-            HStack(spacing: 0) {
-                if arrangement.conversation != .none {
-                    rail()
-                        .frame(width: WorkspaceColumns.rail)
-                        .frame(maxHeight: .infinity)
-                    Divider()
-                }
-                // Over what's opened, never beside it: popping the
-                // conversation open doesn't resize a task's terminals, or
-                // their tmux windows for every other client.
-                opened()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlay(alignment: .leading) {
-                        // Animated here alone: going anywhere else takes the
-                        // drilled level down at once, so the conversation is
-                        // never drawn twice while one fades.
-                        if arrangement.conversation != .none {
-                            OrchestratorPeekPanel(
-                                open: arrangement.conversation == .peek,
-                                width: WorkspaceColumns.peekWidth(in: width, cell: cell),
-                                motion: peekMotion, content: conversation, onDismiss: onDismissPeek)
-                        }
-                    }
-                    .accessibilityIdentifier("workspace-opened")
-            }
-        }
-        .background(WorkspaceStyle.canvas)
-    }
-
-    @ViewBuilder
-    private func workspaceLevel(_ arrangement: WorkspaceColumns.Arrangement) -> some View {
-        if arrangement.switcher {
-            VStack(spacing: 0) {
-                Picker("Show", selection: $pick) {
-                    ForEach(WorkspacePick.allCases) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-                .padding(.vertical, 6)
-                .frame(maxWidth: .infinity)
-                .background(WorkspaceStyle.canvas)
-                Divider()
-                Group {
-                    if pick == .board {
-                        board()
-                    } else if !drilled {
-                        conversation()
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .accessibilityIdentifier("workspace-one-column")
-        } else {
-            HSplitView {
-                if arrangement.conversation == .column {
-                    // The slot stays while drilled in, empty, so the split
-                    // keeps its divider where it was for Back.
-                    ZStack {
-                        if !drilled { conversation() }
-                    }
-                    .frame(
-                        minWidth: WorkspaceColumns.conversationMinimum(cell: cell),
-                        maxWidth: .infinity, maxHeight: .infinity)
-                    .layoutPriority(1)
-                    .accessibilityIdentifier("workspace-conversation")
-                }
+            let width = proxy.size.width
+            let height = proxy.size.height
+            // The window's state: what takes clicks, the keyboard and the
+            // accessibility tree's notice, and what's on screen.
+            let now = arrangement(width: width, open: opened != nil, focused: focused)
+            // The motion's: where things are drawn.
+            let drawn = arrangement(width: width, open: stage.open != nil, focused: stage.focused)
+            let list = dragging ?? CGFloat(listWidth)
+            let frames = WorkspaceColumns.frames(width: width, arrangement: drawn, list: list, cell: cell)
+            let edge = hasConversation ? WorkspaceColumns.rail + WorkspaceColumns.divider : 0
+            ZStack(alignment: .topLeading) {
                 board()
-                    .frame(
-                        minWidth: WorkspaceColumns.boardMinimum,
-                        idealWidth: WorkspaceColumns.boardIdeal,
-                        maxWidth: arrangement.conversation == .none ? .infinity : nil,
-                        maxHeight: .infinity)
+                    .frame(width: max(0, frames.board), height: height)
+                    .offset(x: frames.content)
+                    .allowsHitTesting(now.board)
+                    .accessibilityHidden(!now.board)
                     .accessibilityIdentifier("workspace-board")
+                listDivider(
+                    height: height, at: frames.content + frames.board, current: frames.board,
+                    shown: drawn.opened && drawn.board, live: now.opened && now.board, content: width - frames.content)
+                openedPane(height: height)
+                    .frame(width: max(0, stage.open == nil ? (leavingWidth ?? frames.opened) : frames.opened), height: height)
+                    .offset(x: stage.open == nil ? width + WorkspaceMotion.overhang : frames.openedX)
+                    .allowsHitTesting(opened != nil)
+                    .accessibilityHidden(opened == nil)
+                if hasConversation {
+                    HStack(spacing: 0) {
+                        rail()
+                            .frame(width: WorkspaceColumns.rail)
+                            .frame(maxHeight: .infinity)
+                        Divider()
+                    }
+                    .frame(height: height)
+                    .background(WorkspaceStyle.canvas)
+                    .offset(x: drawn.conversation == .none ? -edge : 0)
+                    .allowsHitTesting(now.conversation != .none)
+                    .accessibilityHidden(now.conversation == .none)
+                    // Over the board and what's opened, never beside them:
+                    // popping the conversation open resizes nothing under it,
+                    // a task's terminals and their tmux windows included.
+                    OrchestratorPeekPanel(
+                        open: now.conversation == .peek,
+                        width: WorkspaceColumns.peekWidth(in: width, cell: cell),
+                        motion: motion, content: conversation, onDismiss: onDismissPeek)
+                    .frame(width: max(0, width - edge), height: height)
+                    .offset(x: edge)
+                }
+            }
+            .frame(width: width, height: height, alignment: .topLeading)
+            .clipShape(Rectangle())
+            .contentShape(Rectangle())
+            .background(WorkspaceStyle.canvas)
+            .preference(key: WorkspaceArrangementPreference.self, value: now)
+            .preference(key: WorkspaceWidthPreference.self, value: width)
+            .onChange(of: width, initial: true) { _, width in measured = width }
+        }
+        .onChange(of: opened) { _, next in
+            if next == nil, stage.open != nil {
+                // Held at the width it has now, for the way out.
+                let leaving = arrangement(width: measured, open: true, focused: stage.focused)
+                leavingWidth = WorkspaceColumns.frames(
+                    width: measured, arrangement: leaving, list: dragging ?? CGFloat(listWidth), cell: cell
+                ).opened
+            } else if next != nil {
+                leavingWidth = nil
+            }
+            let generation = stage.generation + 1
+            withAnimation(motion) {
+                stage.show(next)
+            } completion: {
+                stage.settle(generation)
             }
         }
+        .onChange(of: focused) { _, focused in
+            withAnimation(motion) { stage.focused = focused }
+        }
+    }
+
+    /// What's opened, under its breadcrumb: the window's, or the one
+    /// leaving. Another one switched in cross-fades over it, on the spring.
+    private func openedPane(height: CGFloat) -> some View {
+        ZStack {
+            if let shown = stage.drawn {
+                VStack(spacing: 0) {
+                    breadcrumb(shown)
+                    Divider()
+                    detail(shown)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .background(WorkspaceStyle.canvas)
+                .id(shown)
+                .transition(.opacity)
+                // Leaving, nothing in it takes the keyboard.
+                .environment(\.outOfSight, opened != shown)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(WorkspaceStyle.canvas)
+        .accessibilityIdentifier("workspace-opened")
+    }
+
+    /// The board list's trailing edge beside what's opened, dragged to set
+    /// its width, kept once dropped.
+    private func listDivider(
+        height: CGFloat, at x: CGFloat, current: CGFloat, shown: Bool, live: Bool, content: CGFloat
+    ) -> some View {
+        Rectangle()
+            .fill(Color(nsColor: .separatorColor))
+            .frame(width: WorkspaceColumns.divider, height: height)
+            // A grip wider than the line, centered on it.
+            .padding(.horizontal, WorkspaceMotion.grip)
+            .contentShape(Rectangle())
+            .pointerStyle(.columnResize)
+            .gesture(
+                // Measured in the window: the divider moves with the drag,
+                // so its own coordinates would chase it.
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { value in
+                        if dragStart == nil { dragStart = current }
+                        dragging = WorkspaceColumns.listWidth(
+                            (dragStart ?? current) + value.translation.width, content: content, cell: cell)
+                    }
+                    .onEnded { _ in
+                        if let dragging { listWidth = Double(dragging) }
+                        dragging = nil
+                        dragStart = nil
+                    })
+            .offset(x: x - WorkspaceMotion.grip)
+            .opacity(shown ? 1 : 0)
+            .allowsHitTesting(live)
+            .accessibilityHidden(true)
     }
 }
 
-/// The orchestrator popped open over a task or a worktree, from the rail.
+/// The one spring a workspace's structure moves on (ov-85), and what the
+/// view needs to keep its parts in reach while they move.
+enum WorkspaceMotion {
+    /// One spring for the board narrowing and widening, what's opened
+    /// sliding in, out and switching, the rail, and the orchestrator popping
+    /// open (ov-84's, which every one of them now shares).
+    static let spring = Animation.spring(response: 0.32, dampingFraction: 0.86)
+    /// Past the trailing edge when closed, so a shadow or a divider is out
+    /// of sight too.
+    static let overhang: CGFloat = 24
+    /// Each side of the board list's divider that takes a drag.
+    static let grip: CGFloat = 3
+}
+
+/// What a workspace's detail draws, as the window opens a task, switches to
+/// another and closes it, kept apart from the window's state so the motion
+/// can run a step behind it without ever holding it up (ov-85).
 ///
-/// Mounted on its first open and kept while drilled in, closed or not, so
-/// each open slides the same terminal view in rather than building a new
-/// one; it goes with the drilled level, and in Focus. It moves on an offset,
+/// `open` is what the motion is heading for, set in the same transaction as
+/// the spring; `drawn` is what's drawn in the detail, which outlives `open`
+/// while it slides away and is let go only when that close settles. A close
+/// that settles after something else has opened lets go of nothing: each
+/// `show` counts a generation, and `settle` acts only on the latest.
+struct WorkspaceStage<Item: Hashable>: Equatable {
+    private(set) var open: Item?
+    private(set) var drawn: Item?
+    private(set) var generation = 0
+    /// Focus, as the motion is drawing it.
+    var focused: Bool
+
+    init(open: Item?, focused: Bool = false) {
+        self.open = open
+        self.drawn = open
+        self.focused = focused
+    }
+
+    /// The window opened `item`, switched to it, or, with nil, closed.
+    mutating func show(_ item: Item?) {
+        generation += 1
+        open = item
+        if let item { drawn = item }
+    }
+
+    /// The motion `generation` started has finished: a close lets go of
+    /// what it was drawing, unless something has opened since.
+    mutating func settle(_ generation: Int) {
+        guard generation == self.generation, open == nil else { return }
+        drawn = nil
+    }
+}
+
+/// The orchestrator popped open from the rail, over the board and what's
+/// opened beside it.
+///
+/// Mounted on its first open and kept, closed or not, so each open slides
+/// the same terminal view in rather than building a new one; it stays
+/// through Focus, and goes with the workspace. It moves on an offset,
 /// on one spring, never by inserting and removing it: a press mid-flight
 /// retargets the spring from wherever the panel is.
 ///
@@ -171,7 +314,7 @@ struct OrchestratorPeekPanel<Content: View>: View {
     let open: Bool
     /// The conversation's width open (`WorkspaceColumns.peekWidth`).
     let width: CGFloat
-    var motion: Animation = OrchestratorPeek.spring
+    var motion: Animation = WorkspaceMotion.spring
     @ViewBuilder let content: () -> Content
     var onDismiss: () -> Void
 
@@ -246,8 +389,8 @@ enum KeyboardFence {
 /// is now, at once, with nothing waiting on the motion (ov-84).
 enum OrchestratorPeek {
     /// One spring for the panel, its shadow and the dimming, retargeted from
-    /// where it is by a press mid-flight.
-    static let spring = Animation.spring(response: 0.32, dampingFraction: 0.86)
+    /// where it is by a press mid-flight: the workspace's one spring.
+    static let spring = WorkspaceMotion.spring
     /// What's opened, dimmed under it.
     static let dimming = 0.08
     static let shadow = 0.18
@@ -264,20 +407,19 @@ enum OrchestratorPeek {
     /// while it's open, whatever the motion is doing.
     static func takesClicks(open: Bool) -> Bool { open }
 
-    /// The state after a press of the rail or ⌥⌘1, drilled in.
+    /// The state after a press of the rail or ⌥⌘1.
     static func pressed(open: Bool) -> Bool { !open }
 
     /// The layout the conversation's view draws, and whether it's on
-    /// screen. Drilled in, the panel draws the conversation's layout open
-    /// or closed, so it's one terminal view; it's on screen, seen, watched
-    /// and given the keyboard only when `visible` (`WorkspaceScreen.visible`)
-    /// has it, which is while it's popped open.
+    /// screen. The panel draws the conversation's layout open or closed, so
+    /// it's one terminal view; it's on screen, seen, watched and given the
+    /// keyboard only when `visible` (`WorkspaceScreen.visible`) has it,
+    /// which is while it's popped open.
     static func conversation(
-        drilled: Bool, visible: [ShownLayout], drawable: [ShownLayout]
+        visible: [ShownLayout], drawable: [ShownLayout]
     ) -> (layout: ShownLayout?, onScreen: Bool) {
-        let shown = visible.first { $0.column == .conversation }
-        guard drilled else { return (shown, shown != nil) }
-        return (drawable.first { $0.column == .conversation }, shown != nil)
+        let shown = visible.contains { $0.column == .conversation }
+        return (drawable.first { $0.column == .conversation }, shown)
     }
 
     /// Whether a terminal view drawing `layout` has the keyboard: never
@@ -287,21 +429,17 @@ enum OrchestratorPeek {
     }
 }
 
-/// The breadcrumb over a task or a worktree opened: Back, then each level up
-/// to the one you're at, every one but that a way back to it.
+/// The breadcrumb over what's opened: each level down to the one you're at,
+/// every one but that a way back to it, and the close button at the far end,
+/// beside the board rather than across the window from it (ov-85).
 struct DrillBreadcrumb: View {
     let crumbs: [WorkspaceNavigation.Crumb]
     var onGo: (ContentView.Selection) -> Void
-    var onBack: () -> Void
+    /// Close: what's opened goes, and the board widens back.
+    var onClose: () -> Void
 
     var body: some View {
         HStack(spacing: 6) {
-            Button(action: onBack) {
-                Image(systemName: "chevron.left")
-            }
-            .buttonStyle(.borderless)
-            .help("Back (⌃⌘←)")
-            .accessibilityLabel("Back")
             ForEach(Array(crumbs.enumerated()), id: \.offset) { index, crumb in
                 if index > 0 { Text("›").foregroundStyle(.tertiary) }
                 if let target = crumb.target {
@@ -318,21 +456,25 @@ struct DrillBreadcrumb: View {
                 }
             }
             Spacer(minLength: 0)
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .frame(width: SidebarGrid.control, height: SidebarGrid.control)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .help("Close (Esc)")
+            .accessibilityLabel("Close")
+            .accessibilityIdentifier("workspace-close")
         }
         .font(.system(size: 12))
-        .padding(.horizontal, 12)
+        .padding(.leading, 12)
+        .padding(.trailing, 6)
         .frame(height: 30)
         .background(WorkspaceStyle.canvas)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Breadcrumb")
     }
-}
-
-/// The one-column form's Orchestrator | Board control.
-enum WorkspacePick: String, CaseIterable, Identifiable {
-    case orchestrator, board
-    var id: String { rawValue }
-    var title: String { self == .orchestrator ? "Orchestrator" : "Board" }
 }
 
 /// The arrangement a `WorkspaceView` drew, published from the value it

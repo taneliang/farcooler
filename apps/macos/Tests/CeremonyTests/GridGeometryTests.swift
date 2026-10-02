@@ -234,7 +234,7 @@ struct GridGeometryTests {
         defaults.set(collapsedSummary, forKey: "board.summary.collapsed.\(store.hostKey).\(store.workspace.id)")
         let board = TaskBoardView(
             store: store, client: store.client, agents: .none, onGoTo: { _ in }, defaults: defaults)
-        let found = await marks(board, width: WorkspaceColumns.boardIdeal)
+        let found = await marks(board, width: WorkspaceColumns.boardListDefault)
         var expect: [String: CGFloat] = [
             "header.text": ColumnGrid.b,
             "summary.chevron": ColumnGrid.a,
@@ -263,7 +263,7 @@ struct GridGeometryTests {
         let defaults = UserDefaults(suiteName: "strip-\(UUID().uuidString)")!
         defaults.set(true, forKey: "board.summary.collapsed.\(store.hostKey).\(store.workspace.id)")
         let host = NSHostingController(rootView: BoardSummaryStrip(store: store, defaults: defaults))
-        for width in [WorkspaceColumns.boardMinimum, WorkspaceColumns.boardIdeal] {
+        for width in [WorkspaceColumns.boardMinimum, WorkspaceColumns.boardListDefault] {
             let height = host.sizeThatFits(in: CGSize(width: width, height: 400)).height
             #expect(height == ColumnGrid.rowHeight + 2 * ColumnGrid.rhythm, "\(height) tall at \(width)")
         }

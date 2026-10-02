@@ -78,17 +78,20 @@ extension WorkspaceSelection {
     /// the same task or worktree open, or the same loose worktree, whichever
     /// of its panes is named.
     static func samePlace(_ a: ContentView.Selection?, _ b: ContentView.Selection?) -> Bool {
-        func place(_ s: ContentView.Selection?) -> ContentView.Selection? {
-            switch s {
-            case .workspace(let h, let w, .worktree(let wt, _)?):
-                return .workspace(host: h, workspace: w, focus: .worktree(wt, terminal: nil))
-            case .looseWorktree(let h, let wt, _):
-                return .looseWorktree(host: h, worktree: wt, terminal: nil)
-            default:
-                return s
-            }
+        a.map(place) == b.map(place)
+    }
+
+    /// `selection` with the pane it names left out: what's open, whichever
+    /// of its panes is selected.
+    static func place(_ selection: ContentView.Selection) -> ContentView.Selection {
+        switch selection {
+        case .workspace(let h, let w, .worktree(let wt, _)?):
+            return .workspace(host: h, workspace: w, focus: .worktree(wt, terminal: nil))
+        case .looseWorktree(let h, let wt, _):
+            return .looseWorktree(host: h, worktree: wt, terminal: nil)
+        default:
+            return selection
         }
-        return place(a) == place(b)
     }
 
     /// Whether going from `old` to `new` leaves `old`'s workspace: for

@@ -310,29 +310,20 @@ enum WorkspaceScreen {
     }
 
     /// Of `shown`, the layouts a workspace actually draws in `arrangement`:
-    /// the conversation in a column of its own (in the one-column form only
-    /// while Orchestrator is picked) or popped open over what's opened, and
-    /// what's opened only when drilled in. Nothing while the detail hasn't
+    /// the conversation only while it's popped open from its rail, and
+    /// what's opened only while it's open. Nothing while the detail hasn't
     /// been measured yet (`arrangement` nil).
     ///
     /// What "on screen" means for seen marks, the watching claim and the
     /// keyboard: an orchestrator shrunk to its rail or hidden, marked seen,
     /// would lose the notification it was about to send, for a pane nobody
     /// can see.
-    static func visible(
-        _ shown: [ShownLayout], arrangement: WorkspaceColumns.Arrangement?, pick: WorkspacePick
-    ) -> [ShownLayout] {
+    static func visible(_ shown: [ShownLayout], arrangement: WorkspaceColumns.Arrangement?) -> [ShownLayout] {
         guard let arrangement else { return [] }
         return shown.filter { layout in
             switch layout.column {
-            case .conversation:
-                switch arrangement.conversation {
-                case .column: return !arrangement.switcher || pick == .orchestrator
-                case .peek: return true
-                case .rail, .none: return false
-                }
-            case .task, .worktree:
-                return arrangement.drilled
+            case .conversation: return arrangement.conversation == .peek
+            case .task, .worktree: return arrangement.opened
             }
         }
     }

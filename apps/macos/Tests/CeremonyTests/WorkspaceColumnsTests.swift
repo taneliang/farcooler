@@ -13,58 +13,143 @@ struct WorkspaceColumnsTests {
 
     /// The conversation's minimum is the narrowest width holding its
     /// columns: one point less loses one. That's 48 at the default font.
-    @Test("The conversation's minimum holds its measured columns and no more")
-    func theMinimumHoldsItsMeasuredColumns() {
+    /// What's opened keeps 58 the same way, and both grow with the font.
+    @Test("The minimums hold their measured columns and no more")
+    func theMinimumsHoldTheirMeasuredColumns() {
         func columns(_ width: CGFloat) -> Int { Int((width - Columns.chrome) / Columns.defaultCell) }
         #expect(columns(Columns.conversationMinimum()) == 48)
         #expect(columns(Columns.conversationMinimum() - 1) == 47)
-        // At 13 pt it's 426.
+        #expect(columns(Columns.openedMinimum()) == 58)
+        #expect(columns(Columns.openedMinimum() - 1) == 57)
+        #expect(Columns.openedMinimum() == 489)
+        // At 13 pt the conversation is 426, and what's opened needs a wider
+        // detail to keep the board beside it.
         let thirteen: CGFloat = 8.0361328125
         #expect(Columns.conversationMinimum(cell: thirteen) == 426)
-        let two = Columns.conversationMinimum(cell: thirteen) + Columns.boardMinimum + 1
-        #expect(Columns.layout(width: two, drilled: false, cell: thirteen) == .two)
-        #expect(Columns.layout(width: two - 1, drilled: false, cell: thirteen) == .one)
+        let beside = Columns.rail + 1 + Columns.boardMinimum + 1 + Columns.openedMinimum(cell: thirteen)
+        #expect(Columns.layout(width: beside, opened: true, cell: thirteen).board)
+        #expect(!Columns.layout(width: beside - 1, opened: true, cell: thirteen).board)
     }
 
-    /// Never four columns (ov-79): a task or a worktree opened takes the
-    /// detail at every width, from the measured full screen down to the
-    /// window's 600 pt minimum, where the detail is 352 pt, with the
-    /// conversation a rail beside it and the board out of sight.
-    @Test("Opening a task drills in at every width, with the conversation as a rail")
-    func openingATaskDrillsInAtEveryWidth() {
-        for width: CGFloat in [1600, 1222, 1192, 1032, 807, 600, 352] {
-            let drilled = Columns.layout(width: width, drilled: true)
-            #expect(drilled == .drilledIn, "at \(width)")
-            #expect(drilled.drilled && drilled.conversation == .rail)
+    /// The chain at every width the spec measured, from a full-screen 1470
+    /// pt window's 1222 pt detail down to the 600 pt window's 352: the rail,
+    /// then the board filling the rest with nothing open.
+    @Test("With nothing open, the board fills the content beside the rail", arguments: [1600, 1222, 1192, 1032, 778, 600, 352] as [CGFloat])
+    func theBoardFillsTheContent(width: CGFloat) {
+        let arrangement = Columns.layout(width: width, opened: false)
+        #expect(arrangement == .workspace)
+        let frames = Columns.frames(width: width, arrangement: arrangement, list: 300)
+        #expect(frames.content == 29)
+        #expect(frames.board == width - 29)
+        // Popped open, the conversation is over the board, which stays put.
+        let peeked = Columns.layout(width: width, opened: false, peek: true)
+        #expect(peeked == .peeked)
+        #expect(Columns.frames(width: width, arrangement: peeked, list: 300) == frames)
+        // No conversation: no rail, and the board from the edge.
+        let alone = Columns.layout(width: width, opened: false, hasConversation: false)
+        #expect(alone == .boardAlone)
+        #expect(Columns.frames(width: width, arrangement: alone, list: 300).board == width)
+    }
+
+    /// Opening a task narrows the board to the list and puts the task
+    /// beside it, with the widest pane the work's: at a 13-inch laptop's
+    /// widths, a 300 pt list and 700–900 pt for the task. Where both don't
+    /// fit at their minimums, the task covers the board instead.
+    @Test("A task open narrows the board to a list beside it, or covers it")
+    func aTaskOpenNarrowsTheBoard() {
+        func at(_ width: CGFloat, list: CGFloat = 300, focused: Bool = false, conversation: Bool = true)
+            -> (Columns.Arrangement, Columns.Frames)
+        {
+            let arrangement = Columns.layout(width: width, opened: true, hasConversation: conversation, focused: focused)
+            return (arrangement, Columns.frames(width: width, arrangement: arrangement, list: list))
         }
-        #expect(Columns.layout(width: 1032, drilled: true, peek: true) == .peeked)
-        // Focus is what's opened alone, without the rail, popped open or not.
-        #expect(Columns.layout(width: 1222, drilled: true, focused: true) == .drilledAlone)
-        #expect(Columns.layout(width: 1222, drilled: true, focused: true, peek: true) == .drilledAlone)
+        // Full screen on an M2 Air, an M1, and a 1280 pt window.
+        for (width, opened) in [(1222, 892), (1192, 862), (1032, 702)] as [(CGFloat, CGFloat)] {
+            let (arrangement, frames) = at(width)
+            #expect(arrangement == .beside, "at \(width)")
+            #expect(frames.board == 300, "at \(width)")
+            #expect(frames.openedX == 330, "at \(width)")
+            #expect(frames.opened == opened, "at \(width)")
+            #expect(frames.openedX + frames.opened == width)
+        }
+        // The narrowest that keeps both: the list gives way to its minimum
+        // first, so what's opened keeps its 58 columns.
+        let edge = 29 + Columns.boardMinimum + 1 + Columns.openedMinimum()
+        #expect(edge == 779)
+        let (kept, keptFrames) = at(edge)
+        #expect(kept == .beside)
+        #expect(keptFrames.board == Columns.boardMinimum && keptFrames.opened == Columns.openedMinimum())
+        // A point narrower, what's opened covers the board, which keeps
+        // its width underneath rather than reflowing.
+        for width in [edge - 1, 600, 352] {
+            let (covering, frames) = at(width)
+            #expect(covering == .covering, "at \(width)")
+            #expect(frames.openedX == 29 && frames.opened == width - 29, "at \(width)")
+            #expect(frames.board == Columns.boardMinimum, "at \(width)")
+        }
+        // A list dragged wide stops where what's opened would lose a column;
+        // dragged narrow, at its minimum.
+        #expect(at(1222, list: 900).1.board == 1222 - 29 - 1 - Columns.openedMinimum())
+        #expect(at(1222, list: 100).1.board == Columns.boardMinimum)
+        #expect(at(1222, list: 420).1.board == 420)
+        // Focus: what's opened alone, from the edge, popped open or not.
+        let (focus, focusFrames) = at(1222, focused: true)
+        #expect(focus == .alone)
+        #expect(focusFrames.openedX == 0 && focusFrames.opened == 1222)
+        #expect(Columns.layout(width: 1222, opened: true, focused: true, peek: true) == .alone)
+        // Focus means nothing with nothing open.
+        #expect(Columns.layout(width: 1222, opened: false, focused: true) == .workspace)
+        // No conversation: no rail, and the list from the edge.
+        let (bare, bareFrames) = at(1222, conversation: false)
+        #expect(bare.conversation == .none && bare.board)
+        #expect(bareFrames.content == 0 && bareFrames.openedX == 301 && bareFrames.opened == 921)
         // The popped-open conversation is its minimum, or what the rail leaves.
         #expect(Columns.peekWidth(in: 1032) == Columns.conversationMinimum())
         #expect(Columns.peekWidth(in: 300) == 300 - Columns.rail - Columns.divider)
     }
 
-    /// Down to the window's 600 pt minimum, where the detail is 352 pt.
-    @Test("Below the two-column minimum it's one column with Orchestrator | Board")
-    func belowTheTwoColumnMinimumItsOneColumn() {
-        let two = Columns.conversationMinimum() + Columns.boardMinimum + 1
-        #expect(Columns.layout(width: 1032, drilled: false) == .two)
-        #expect(Columns.layout(width: two, drilled: false) == .two)
-        #expect(Columns.layout(width: two - 1, drilled: false) == .one)
-        #expect(Columns.layout(width: 352, drilled: false).switcher)
-        // A workspace with no conversation, on a runner without workstreams:
-        // the board, or what's opened, alone.
-        #expect(Columns.layout(width: 352, drilled: false, hasConversation: false) == .boardAlone)
-        #expect(Columns.layout(width: 1000, drilled: true, hasConversation: false) == .drilledAlone)
-        #expect(Columns.layout(width: 1000, drilled: true, hasConversation: false, peek: true) == .drilledAlone)
+    /// The motion's state, apart from the window's (ov-85): opening,
+    /// switching and closing, in any order and at any speed, end where the
+    /// window's state says, and a close that settles late never takes away
+    /// what opened after it.
+    @Test("Open, switch and close end in the state last asked for")
+    func theStageEndsInTheStateLastAskedFor() {
+        var stage = WorkspaceStage<String>(open: nil)
+        #expect(stage.open == nil && stage.drawn == nil)
+        stage.show("bil-3")
+        #expect(stage.open == "bil-3" && stage.drawn == "bil-3")
+        // Glancing: the next one, in place.
+        stage.show("bil-7")
+        #expect(stage.open == "bil-7" && stage.drawn == "bil-7")
+        // Closed: drawn until its motion settles, then let go.
+        stage.show(nil)
+        let closing = stage.generation
+        #expect(stage.open == nil && stage.drawn == "bil-7")
+        stage.settle(closing)
+        #expect(stage.drawn == nil)
+        // Opened again mid-close: the late settle takes nothing away.
+        stage.show("bil-3")
+        stage.show(nil)
+        let late = stage.generation
+        stage.show("bil-9")
+        stage.settle(late)
+        #expect(stage.open == "bil-9" && stage.drawn == "bil-9")
+        // Twenty toggles inside a frame: the last one decides.
+        for index in 0..<20 { stage.show(index.isMultiple(of: 2) ? "bil-\(index)" : nil) }
+        #expect(stage.open == nil && stage.drawn == "bil-18")
+        stage.settle(stage.generation - 1)
+        #expect(stage.drawn == "bil-18", "a superseded settle let go")
+        stage.settle(stage.generation)
+        #expect(stage.drawn == nil)
+        // Reopened on launch: drawn from the first frame, no motion.
+        let launched = WorkspaceStage<String>(open: "bil-3", focused: true)
+        #expect(launched.drawn == "bil-3" && launched.focused)
     }
 
     /// The drawn view, hosted in a detail 600 pt wide inside a 1600 pt
-    /// window: it lays out by its own width, so the workspace level is one
-    /// column with Orchestrator | Board. A view that read the window would
-    /// draw both and clip. Drilled in, it's a rail and what's opened.
+    /// window, lays out by its own width: a task covers the board there,
+    /// where a view that read the window would put them side by side and
+    /// clip. At 1032 they're side by side.
     @MainActor
     @Test("The workspace lays out by its own width, not the window's")
     func theWorkspaceLaysOutByItsOwnWidth() async {
@@ -72,23 +157,23 @@ struct WorkspaceColumnsTests {
         let seen = Seen()
         struct Hosted: View {
             let seen: Seen
-            let drilled: Bool
+            let width: CGFloat
             var body: some View {
                 WorkspaceView(
-                    drilled: drilled, hasConversation: true, cell: WorkspaceColumns.defaultCell, focused: false,
-                    peek: false, pick: .constant(.orchestrator),
+                    opened: "t" as String?, hasConversation: true, cell: WorkspaceColumns.defaultCell,
+                    focused: false, peek: false, listWidth: .constant(300),
                     conversation: { Color.clear }, rail: { Color.clear }, board: { Color.clear },
-                    breadcrumb: { Color.clear }, opened: { Color.clear })
-                .frame(width: 600, height: 400)
+                    breadcrumb: { _ in Color.clear }, detail: { _ in Color.clear })
+                .frame(width: width, height: 400)
                 .frame(width: 1600, height: 400, alignment: .leading)
                 .onPreferenceChange(WorkspaceArrangementPreference.self) { value in
                     MainActor.assumeIsolated { seen.arrangement = value }
                 }
             }
         }
-        for (drilled, expected) in [(true, WorkspaceColumns.Arrangement.drilledIn), (false, .one)] {
+        for (width, expected) in [(600, WorkspaceColumns.Arrangement.covering), (1032, .beside)] as [(CGFloat, WorkspaceColumns.Arrangement)] {
             seen.arrangement = nil
-            let host = NSHostingView(rootView: Hosted(seen: seen, drilled: drilled))
+            let host = NSHostingView(rootView: Hosted(seen: seen, width: width))
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 1600, height: 400), styleMask: [.borderless],
                 backing: .buffered, defer: false)
@@ -99,136 +184,15 @@ struct WorkspaceColumnsTests {
                 try? await Task.sleep(for: .milliseconds(20))
             }
             window.close()
-            #expect(seen.arrangement == expected)
+            #expect(seen.arrangement == expected, "at \(width)")
         }
     }
 
-    /// Drilling into a task and back doesn't take the board down: it stays
-    /// drawn, hidden, so Back finds it as it was, and leaving a workspace,
-    /// not opening a task, is what ends a visit to its board. The
-    /// conversation is taken down, so there's one view of its pane, the
-    /// rail's to pop open.
-    @MainActor
-    @Test("The board stays up while a task is open, and the conversation doesn't")
-    func theBoardStaysUpWhileATaskIsOpen() async {
-        final class Level: ObservableObject {
-            @Published var drilled = false
-            var boardGone = 0
-            var conversationGone = 0
-        }
-        let level = Level()
-        struct Hosted: View {
-            @ObservedObject var level: Level
-            var body: some View {
-                WorkspaceView(
-                    drilled: level.drilled, hasConversation: true, cell: WorkspaceColumns.defaultCell,
-                    focused: false, peek: false, pick: .constant(.orchestrator),
-                    conversation: { Color.clear.onDisappear { level.conversationGone += 1 } },
-                    rail: { Color.clear }, board: { Color.clear.onDisappear { level.boardGone += 1 } },
-                    breadcrumb: { Color.clear }, opened: { Color.clear })
-                .frame(width: 1032, height: 400)
-            }
-        }
-        let host = NSHostingView(rootView: Hosted(level: level))
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1032, height: 400), styleMask: [.borderless],
-            backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = host
-        func settle() async {
-            for _ in 0..<5 {
-                host.layoutSubtreeIfNeeded()
-                try? await Task.sleep(for: .milliseconds(20))
-            }
-        }
-        await settle()
-        level.drilled = true
-        await settle()
-        level.drilled = false
-        await settle()
-        window.close()
-        #expect(level.boardGone == 0)
-        #expect(level.conversationGone == 1)
-    }
-
-    /// Back puts the columns back where they were: the conversation's slot
-    /// in the split stays while drilled in, empty, so a divider dragged
-    /// before opening a task is where it was after Back, a resize in
-    /// between included. Torn out, the split holds the board alone.
-    @MainActor
-    @Test("Back finds the columns at the widths they had")
-    func backFindsTheColumnsAtTheWidthsTheyHad() async {
-        final class Level: ObservableObject {
-            @Published var drilled = false
-            @Published var width: CGFloat = 1200
-        }
-        let level = Level()
-        struct Hosted: View {
-            @ObservedObject var level: Level
-            var body: some View {
-                WorkspaceView(
-                    drilled: level.drilled, hasConversation: true, cell: WorkspaceColumns.defaultCell,
-                    focused: false, peek: false, pick: .constant(.orchestrator),
-                    conversation: { Color.clear }, rail: { Color.clear }, board: { Color.clear },
-                    breadcrumb: { Color.clear }, opened: { Color.clear })
-                .frame(width: level.width, height: 400)
-            }
-        }
-        let host = NSHostingView(rootView: Hosted(level: level))
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 400), styleMask: [.borderless],
-            backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = host
-        func settle() async {
-            for _ in 0..<5 {
-                host.layoutSubtreeIfNeeded()
-                try? await Task.sleep(for: .milliseconds(20))
-            }
-        }
-        func split(_ view: NSView) -> NSSplitView? {
-            if let split = view as? NSSplitView { return split }
-            for child in view.subviews { if let found = split(child) { return found } }
-            return nil
-        }
-        func widths() -> [CGFloat] {
-            split(host)?.arrangedSubviews.map { $0.frame.width.rounded() } ?? []
-        }
-        await settle()
-        guard let view = split(host) else {
-            Issue.record("no split view drawn")
-            window.close()
-            return
-        }
-        // Dragged somewhere no default would put it.
-        view.setPosition(460, ofDividerAt: 0)
-        await settle()
-        let before = widths()
-        level.drilled = true
-        await settle()
-        level.width = 1000
-        await settle()
-        level.width = 1200
-        await settle()
-        let during = widths()
-        level.drilled = false
-        await settle()
-        let after = widths()
-        window.close()
-        #expect(before.count == 2 && before.first == 460, "\(before)")
-        // Held while drilled in, through a resize, not rebuilt on Back. A
-        // hosted split rebuilt from one pane happens to come back at the old
-        // widths too, so what's pinned is the slot itself: two panes, as
-        // they were, the whole time.
-        #expect(during == before, "the split lost the conversation's slot: \(during)")
-        #expect(after == before)
-    }
-
-    /// On screen means drawn: a conversation shrunk to its rail, left out
-    /// in Focus, or behind Board in the one-column form isn't, so it isn't
-    /// marked seen or watched and the keyboard doesn't act on it. Popped
-    /// open over a task, it is. Nothing is, before the detail has been
-    /// measured, and no task is at the workspace's own level.
+    /// On screen means drawn: a conversation on its rail, or left out in
+    /// Focus, isn't, so it isn't marked seen or watched and the keyboard
+    /// doesn't act on it. Popped open, over the board or a task, it is.
+    /// What's opened is on screen while it's open. Nothing is, before the
+    /// detail has been measured.
     @Test("A conversation on its rail or hidden isn't on screen")
     func aRailedOrHiddenConversationIsntOnScreen() {
         let worktree = Worktree(
@@ -239,15 +203,15 @@ struct WorkspaceColumnsTests {
             return ShownLayout(column: column, worktree: worktree, group: group, groups: [group])
         }
         let shown = [layout(.conversation, "@1"), layout(.task, "@2")]
-        func columns(_ arrangement: WorkspaceColumns.Arrangement?, _ pick: WorkspacePick = .orchestrator) -> [ShownLayout.Column] {
-            WorkspaceScreen.visible(shown, arrangement: arrangement, pick: pick).map(\.column)
+        func columns(_ arrangement: WorkspaceColumns.Arrangement?) -> [ShownLayout.Column] {
+            WorkspaceScreen.visible(shown, arrangement: arrangement).map(\.column)
         }
-        #expect(columns(.peeked) == [.conversation, .task])
-        #expect(columns(.drilledIn) == [.task])
-        #expect(columns(.drilledAlone) == [.task])
-        #expect(columns(.two) == [.conversation])
-        #expect(columns(.one, .orchestrator) == [.conversation])
-        #expect(columns(.one, .board) == [])
+        #expect(columns(.besidePeeked) == [.conversation, .task])
+        #expect(columns(.beside) == [.task])
+        #expect(columns(.covering) == [.task])
+        #expect(columns(.alone) == [.task])
+        #expect(columns(.workspace) == [])
+        #expect(columns(.peeked) == [.conversation])
         #expect(columns(nil) == [])
     }
 

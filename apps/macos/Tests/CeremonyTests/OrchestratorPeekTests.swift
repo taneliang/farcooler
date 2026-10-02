@@ -38,10 +38,11 @@ struct OrchestratorPeekTests {
         var enabled: Bool?
     }
 
-    /// A drilled-in workspace 1032 pt wide beside a 200 pt sidebar, with
-    /// the sidebar, the rail, the conversation and what's opened each a view
-    /// the hit test names, moving on `motion`. The rail is at x 200–228 and
-    /// what's opened from 229; closed, the panel sits at about −207…205, so
+    /// A workspace 1032 pt wide with a task open beside its board, beside a
+    /// 200 pt sidebar, with the sidebar, the rail, the conversation, the
+    /// board and what's opened each a view the hit test names, moving on
+    /// `motion`. The rail is at x 200–228, the board's list at 229–529 and
+    /// what's opened from 530; closed, the panel sits at about −207…205, so
     /// over the sidebar, where only a panel that leaked would take a click.
     @MainActor
     private final class Harness {
@@ -56,16 +57,16 @@ struct OrchestratorPeekTests {
                 HStack(spacing: 0) {
                     MarkerView(name: "sidebar").frame(width: 200)
                     WorkspaceView(
-                        drilled: true, hasConversation: true, cell: WorkspaceColumns.defaultCell,
-                        focused: false, peek: level.peek, pick: .constant(.orchestrator),
+                        opened: "t" as String?, hasConversation: true, cell: WorkspaceColumns.defaultCell,
+                        focused: false, peek: level.peek, listWidth: .constant(300),
                         conversation: {
                             MarkerView(
                                 name: "conversation", onMake: { level.made += 1 },
                                 onUpdate: { level.outOfSight = $0; level.enabled = $1 })
                         },
-                        rail: { MarkerView(name: "rail") }, board: { Color.clear },
-                        breadcrumb: { Color.clear.frame(height: 30) }, opened: { MarkerView(name: "opened") },
-                        onDismissPeek: { level.peek = false }, peekMotion: motion)
+                        rail: { MarkerView(name: "rail") }, board: { MarkerView(name: "board") },
+                        breadcrumb: { _ in Color.clear.frame(height: 30) }, detail: { _ in MarkerView(name: "opened") },
+                        onDismissPeek: { level.peek = false }, motion: motion)
                     .frame(width: 1032, height: 400)
                 }
             }
@@ -128,14 +129,14 @@ struct OrchestratorPeekTests {
         harness.level.peek = false
         await harness.settle(2)
         #expect(harness.hit(210) == "rail", "closing")
-        // Closed, though still sliding: the click goes to what's opened.
-        #expect(harness.hit(329) == "opened", "closing")
+        // Closed, though still sliding: the click goes to what's under it.
+        #expect(harness.hit(329) == "board", "closing")
         #expect(harness.hit(1100) == "opened", "closing")
         try? await Task.sleep(for: .milliseconds(500))
         await harness.settle(1)
         #expect(harness.hit(210) == "rail", "partway closed")
         #expect(harness.hit(100) == "sidebar", "partway closed")
-        #expect(harness.hit(329) == "opened", "partway closed")
+        #expect(harness.hit(329) == "board", "partway closed")
         harness.window.close()
     }
 
@@ -162,7 +163,7 @@ struct OrchestratorPeekTests {
         await harness.settle(1)
         #expect(!open)
         #expect(harness.hit(1100) == "opened")
-        #expect(harness.hit(329) == "opened")
+        #expect(harness.hit(329) == "board")
         open = OrchestratorPeek.pressed(open: open)
         harness.level.peek = open
         await harness.settle(1)
@@ -183,7 +184,7 @@ struct OrchestratorPeekTests {
         #expect(harness.hit(329) == "conversation")
         harness.level.peek = false
         await harness.settle(10)
-        #expect(harness.hit(329) == "opened")
+        #expect(harness.hit(329) == "board")
         #expect(harness.hit(210) == "rail")
         // Where the closed panel sits: the sidebar's, not the panel's.
         #expect(harness.hit(100) == "sidebar")
@@ -251,10 +252,10 @@ struct OrchestratorPeekTests {
         window.close()
     }
 
-    /// Drilled in, the panel draws the conversation's layout closed as well
-    /// as open, so it's one terminal view; but it's on screen (seen,
-    /// watched) and has the keyboard only while popped open. At the
-    /// workspace level it's what `visible` says.
+    /// The panel draws the conversation's layout closed as well as open, so
+    /// it's one terminal view; but it's on screen (seen, watched) and has the
+    /// keyboard only while popped open, over the board alone or a task
+    /// beside it.
     @Test("A closed panel draws the conversation without seeing, watching or typing into it")
     func aClosedPanelDrawsWithoutSeeingOrTyping() {
         let worktree = Worktree(
@@ -267,9 +268,12 @@ struct OrchestratorPeekTests {
         }
         let all = [layout(.conversation, "@1", "conductor"), layout(.task, "@2", "agent")]
         let key = PaneRef(host: "", worktree: "w", terminal: "conductor")
-        for (arrangement, open) in [(WorkspaceColumns.Arrangement.drilledIn, false), (.peeked, true)] {
-            let visible = WorkspaceScreen.visible(all, arrangement: arrangement, pick: .orchestrator)
-            let drawn = OrchestratorPeek.conversation(drilled: true, visible: visible, drawable: all)
+        let cases: [(WorkspaceColumns.Arrangement, Bool)] = [
+            (.beside, false), (.besidePeeked, true), (.workspace, false), (.peeked, true), (.alone, false),
+        ]
+        for (arrangement, open) in cases {
+            let visible = WorkspaceScreen.visible(all, arrangement: arrangement)
+            let drawn = OrchestratorPeek.conversation(visible: visible, drawable: all)
             #expect(drawn.layout?.group.id == "@1", "drawn either way")
             #expect(drawn.onScreen == open)
             // What's seen and watched (`visibleTerminals`) comes from `visible`.
@@ -277,9 +281,5 @@ struct OrchestratorPeekTests {
             #expect(
                 OrchestratorPeek.takesKeyboard(drawn.layout!, onScreen: drawn.onScreen, key: key, onBoard: false) == open)
         }
-        // At the workspace level, one column with Board picked draws none.
-        let board = WorkspaceScreen.visible(all, arrangement: .one, pick: .board)
-        let level = OrchestratorPeek.conversation(drilled: false, visible: board, drawable: all)
-        #expect(level.layout == nil && !level.onScreen)
     }
 }

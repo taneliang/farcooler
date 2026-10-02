@@ -50,9 +50,18 @@ final class TaskBoardStore: ObservableObject {
     /// task column. Nil opens it here, which is all a test needs.
     var onChoose: ((TaskRow) -> Void)?
 
+    /// What ↑ and ↓ in the list do: the window opens the row's task beside
+    /// the board, and never closes it. Nil opens it here.
+    var onGlance: ((TaskRow) -> Void)?
+
     /// A card was clicked: open it where the window puts tasks.
     func choose(_ row: TaskRow) {
         if let onChoose { onChoose(row) } else { Task { await open(row) } }
+    }
+
+    /// A card stepped to from the keyboard: open it beside the board.
+    func glance(_ row: TaskRow) {
+        if let onGlance { onGlance(row) } else { Task { await open(row) } }
     }
     // MARK: - Since you were last here
 
@@ -594,15 +603,30 @@ struct TaskBoardView: View {
     /// Where the collapsed sections are kept. The app's own defaults,
     /// except in a test.
     let defaults: UserDefaults
+    /// The task open beside the board, drawn selected (ov-85).
+    let selected: String?
+    /// Bumped when the window gives the list the keyboard: ⌥⌘2, a row
+    /// chosen, or what's opened closed.
+    let focusRequest: Int
+    /// The list took the keyboard on its own, from a click: the window's
+    /// terminals let go of it.
+    let onKeyboard: () -> Void
 
     /// The list's collapsed sections: read from `defaults` in `init`, and
     /// again when the view is handed another board.
     @State private var collapsed: Set<TaskStatus>
     @State private var newTaskOpen = false
+    /// Done showing all of its tasks, not just the recent: kept here, not
+    /// in its section, since ↑ and ↓ walk the rows it shows.
+    @State private var showingAllDone = false
+    /// The list has the keyboard: ↑ and ↓ glance through the tasks, Return
+    /// opens one.
+    @FocusState private var listFocused: Bool
 
     init(
         store: TaskBoardStore, client: DaemonClient, agents: BoardAgents, waiting: Int = 0,
-        onGoTo: @escaping (BoardPane) -> Void, defaults: UserDefaults = .standard
+        onGoTo: @escaping (BoardPane) -> Void, defaults: UserDefaults = .standard,
+        selected: String? = nil, focusRequest: Int = 0, onKeyboard: @escaping () -> Void = {}
     ) {
         self.store = store
         self.client = client
@@ -610,6 +634,9 @@ struct TaskBoardView: View {
         self.waiting = waiting
         self.onGoTo = onGoTo
         self.defaults = defaults
+        self.selected = selected
+        self.focusRequest = focusRequest
+        self.onKeyboard = onKeyboard
         _collapsed = State(
             initialValue: BoardForm.collapsed(
                 host: store.hostKey, workspace: store.workspace.id, from: defaults))
@@ -702,26 +729,69 @@ struct TaskBoardView: View {
     // MARK: - The list
 
     private var list: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
-                ForEach(store.board.sections) { section in
-                    TaskListSection(
-                        section: section,
-                        expanded: BoardForm.isExpanded(section, collapsed: collapsed),
-                        onToggle: { toggle(section.status) },
-                        store: store, agents: agents, onGoTo: onGoTo)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
+                    ForEach(store.board.sections) { section in
+                        TaskListSection(
+                            section: section,
+                            expanded: BoardForm.isExpanded(section, collapsed: collapsed),
+                            onToggle: { toggle(section.status) },
+                            store: store, agents: agents, onGoTo: onGoTo,
+                            selected: selected, keyed: listFocused,
+                            showingAllDone: $showingAllDone,
+                            onChoose: { row in
+                                listFocused = true
+                                store.choose(row)
+                            })
+                    }
+                    if !store.board.unreadable.isEmpty {
+                        UnreadableColumnView(rows: store.board.unreadable)
+                    }
                 }
-                if !store.board.unreadable.isEmpty {
-                    UnreadableColumnView(rows: store.board.unreadable)
-                }
+                // Measured from the board column's edge: the sections' chevrons
+                // and the cards' edges at column A.
+                .padding(.horizontal, ColumnGrid.a)
+                .padding(.vertical, ColumnGrid.rhythm)
             }
-            // Measured from the board column's edge: the sections' chevrons
-            // and the cards' edges at column A.
-            .padding(.horizontal, ColumnGrid.a)
-            .padding(.vertical, ColumnGrid.rhythm)
+            // The task open stays in sight as ↑ and ↓ step past the edge,
+            // scrolled by as little as that takes.
+            .onChange(of: selected) { _, id in
+                guard let id, listFocused else { return }
+                withAnimation(WorkspaceMotion.spring) { proxy.scrollTo(id) }
+            }
         }
+        .focusable()
+        .focused($listFocused)
+        .focusEffectDisabled()
+        .onKeyPress(.downArrow) { step(1) }
+        .onKeyPress(.upArrow) { step(-1) }
+        .onKeyPress(.return) {
+            // Nothing open: the first task, or the one stepped to.
+            guard selected == nil, let row = BoardKeys.row(BoardKeys.step(from: nil, by: 1, in: rowIDs), in: store.board)
+            else { return .ignored }
+            store.glance(row)
+            return .handled
+        }
+        .onChange(of: focusRequest) { _, _ in listFocused = true }
+        .onChange(of: listFocused) { _, focused in if focused { onKeyboard() } }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("board-list")
+    }
+
+    /// The tasks the list shows, top to bottom: what ↑ and ↓ walk.
+    private var rowIDs: [String] {
+        BoardKeys.rows(store.board, collapsed: collapsed, showingAllDone: showingAllDone, now: Date())
+    }
+
+    /// ↑ or ↓: the task above or below the one open, opened beside the
+    /// board in its place.
+    private func step(_ by: Int) -> KeyPress.Result {
+        guard let row = BoardKeys.row(BoardKeys.step(from: selected, by: by, in: rowIDs), in: store.board),
+            row.id != selected
+        else { return selected == nil ? .ignored : .handled }
+        store.glance(row)
+        return .handled
     }
 
     /// Open or close one section, and keep it that way on this device.
@@ -733,6 +803,34 @@ struct TaskBoardView: View {
         }
         BoardForm.setCollapsed(
             collapsed, host: store.hostKey, workspace: store.workspace.id, in: defaults)
+    }
+}
+
+/// The board list's keys (ov-85): ↑ and ↓ step through the tasks it shows,
+/// top to bottom, opening each beside the board in place of the last.
+enum BoardKeys {
+    /// The tasks the list shows, top to bottom: the expanded sections' rows,
+    /// Done's recent ones unless all are shown.
+    static func rows(
+        _ board: TaskBoardModel, collapsed: Set<TaskStatus>, showingAllDone: Bool, now: Date
+    ) -> [String] {
+        board.sections
+            .filter { BoardForm.isExpanded($0, collapsed: collapsed) }
+            .flatMap { $0.visibleRows(showingAllDone: showingAllDone, now: now).map(\.id) }
+    }
+
+    /// The task `by` rows on from `current` in `ids`, held at either end;
+    /// from none, or one no longer shown, the first going down and the last
+    /// going up. Nil with nothing shown.
+    static func step(from current: String?, by: Int, in ids: [String]) -> String? {
+        guard !ids.isEmpty else { return nil }
+        guard let current, let at = ids.firstIndex(of: current) else { return by >= 0 ? ids.first : ids.last }
+        return ids[min(max(at + by, 0), ids.count - 1)]
+    }
+
+    static func row(_ id: String?, in board: TaskBoardModel) -> TaskRow? {
+        guard let id else { return nil }
+        return board.columns.lazy.flatMap(\.rows).first { $0.id == id }
     }
 }
 
@@ -805,7 +903,12 @@ private struct TaskListSection: View {
     @ObservedObject var store: TaskBoardStore
     let agents: BoardAgents
     let onGoTo: (BoardPane) -> Void
-    @State private var showingAllDone = false
+    /// The task open beside the board, and whether the list has the
+    /// keyboard, which draws it in the accent rather than gray.
+    let selected: String?
+    let keyed: Bool
+    @Binding var showingAllDone: Bool
+    let onChoose: (TaskRow) -> Void
 
     /// Needs Decision is the one status waiting on the person reading, and
     /// the only one drawn in the accent color.
@@ -850,7 +953,9 @@ private struct TaskListSection: View {
                         TaskListRow(
                             row: row, prominent: leads, store: store,
                             live: agents.live(for: row), presence: agents.presence(for: row),
-                            onGoTo: onGoTo)
+                            onGoTo: onGoTo, selected: row.id == selected, keyed: keyed,
+                            onChoose: { onChoose(row) })
+                        .id(row.id)
                     }
                     ShowAllDoneButton(section: section, showingAll: $showingAllDone)
                 }
@@ -897,6 +1002,11 @@ struct TaskListRow: View {
     let live: [BoardPane]
     let presence: TaskAgentPresence
     let onGoTo: (BoardPane) -> Void
+    /// Open beside the board (ov-85).
+    var selected = false
+    /// The list has the keyboard: selected reads in the accent.
+    var keyed = false
+    var onChoose: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -956,17 +1066,28 @@ struct TaskListRow: View {
         .padding(.horizontal, ColumnGrid.step)
         .padding(.vertical, ColumnGrid.rhythm)
         .background(RoundedRectangle(cornerRadius: 8).fill(WorkspaceStyle.paneChrome))
+        .background {
+            // Selected: a wash under the card, in the accent while the list
+            // has the keyboard, else gray, as a Mac list draws its selection.
+            if selected {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(keyed ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.08))
+            }
+        }
         .overlay(
             BoardTick { now in
                 let stale = row.staleness(at: now) == .stale
                 RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(
-                        stale ? Color.orange.opacity(0.55) : WorkspaceStyle.hairline,
-                        lineWidth: stale ? 1 : 0.5)
+                        selected
+                            ? (keyed ? Color.accentColor : Color.secondary.opacity(0.6))
+                            : stale ? Color.orange.opacity(0.55) : WorkspaceStyle.hairline,
+                        lineWidth: selected || stale ? 1 : 0.5)
             }
         )
         .contentShape(Rectangle())
-        .onTapGesture { store.choose(row) }
+        .onTapGesture { if let onChoose { onChoose() } else { store.choose(row) } }
+        .accessibilityAddTraits(selected ? .isSelected : [])
         .contextMenu { TaskRowMenu(row: row, live: live, store: store, onGoTo: onGoTo) }
         .accessibilityIdentifier("board-row-\(row.key)")
     }
