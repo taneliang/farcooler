@@ -186,7 +186,9 @@ struct ChangesPane: View {
     /// somewhere to put it that a phone does not.
     @ViewBuilder
     private var guessedBase: some View {
-        if changes.changeSet.baseIsGuessed && changes.scope == .branch {
+        // Not over an empty diff, whose own line says it (`branchNothingDetail`):
+        // a banner and a different sentence beneath it were two answers.
+        if changes.changeSet.baseIsGuessed && changes.scope == .branch && !changes.files.isEmpty {
             HStack(spacing: 5) {
                 Image(systemName: "questionmark.circle")
                     .font(.system(size: 9.5))
@@ -1205,10 +1207,21 @@ struct ChangesPane: View {
             // empty by this comparison and very far from empty by any other.
             return "This commit changed nothing against its first parent."
         case .branch:
-            return changes.changeSet.baseRef.isEmpty
-                ? "There’s nothing to compare this branch against yet."
-                : "This branch matches \(changes.changeSet.baseRef)."
+            return Self.branchNothingDetail(
+                baseRef: changes.changeSet.baseRef, guessed: changes.changeSet.baseIsGuessed)
         }
+    }
+
+    /// What an empty branch diff says, in one line that carries the base
+    /// caveat with it (ov-81 P14). It used to be two: a "base was guessed"
+    /// banner over a different sentence, and a different sentence again when
+    /// a read came back with no base at all.
+    static func branchNothingDetail(baseRef: String, guessed: Bool) -> String {
+        if baseRef.isEmpty { return "There’s nothing to compare this branch against yet." }
+        if guessed {
+            return "This branch matches \(baseRef), which was assumed as its base because nothing recorded the real one."
+        }
+        return "This branch matches \(baseRef)."
     }
 
     @ViewBuilder

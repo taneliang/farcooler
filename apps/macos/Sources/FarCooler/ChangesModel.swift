@@ -60,6 +60,23 @@ struct ChangeSet: Decodable, Equatable {
     /// the honest answer for a runner that cannot say — see `BaseSource` in the
     /// protocol, where `unknown` is likewise not a guess.
     var baseIsGuessed: Bool { baseSource == "guessed" }
+
+    /// This set, with the base `previous` knew when this one's came back
+    /// empty for the same branch.
+    ///
+    /// The base is read once and kept (ov-81 P14). A re-read that answered
+    /// with no base for a branch the pane already had one for made the pane
+    /// say "nothing to compare this branch against yet" on one visit and
+    /// "this branch matches main" on the next, for the same branch.
+    func keepingBase(from previous: ChangeSet) -> ChangeSet {
+        guard baseRef.isEmpty, !previous.baseRef.isEmpty, branch == previous.branch else {
+            return self
+        }
+        var kept = self
+        kept.baseRef = previous.baseRef
+        kept.baseSource = previous.baseSource
+        return kept
+    }
 }
 
 /// One commit on this branch, as the history picker draws it.
@@ -1060,7 +1077,8 @@ final class ChangesStore: ObservableObject {
         var args = ["changes", "status", worktree.short, "--json"]
         if fresh { args.append("--fresh") }
         if let data = await client.changesJSON(args) {
-            changeSet = (try? JSONDecoder().decode(ChangeSet.self, from: data)) ?? .empty
+            changeSet = ((try? JSONDecoder().decode(ChangeSet.self, from: data)) ?? .empty)
+                .keepingBase(from: changeSet)
             error = nil
         } else {
             // A failure is NOT an empty diff. Saying so was a real bug once: a
@@ -1462,8 +1480,10 @@ final class ChangesStore: ObservableObject {
         guard !loading else { return }
         let args = ["changes", "status", worktree.short, "--json"]
         guard let data = await client.changesJSON(args),
-            let next = try? JSONDecoder().decode(ChangeSet.self, from: data),
-            next != changeSet
+            let decoded = try? JSONDecoder().decode(ChangeSet.self, from: data)
+        else { return }
+        let next = decoded.keepingBase(from: changeSet)
+        guard next != changeSet
         else { return }
 
         let before = Dictionary(
