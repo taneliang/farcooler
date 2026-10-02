@@ -725,3 +725,36 @@ func anOrchestratorsNoteIsBylinedOrchestrator() {
     #expect(note.byline == "Orchestrator")
     #expect(!note.byline.localizedCaseInsensitiveContains("manager"))
 }
+
+// ---------------------------------------------------------------------------
+// ov-81 P8, P12: the record's words, and a finished card's time line
+// ---------------------------------------------------------------------------
+
+/// The runner writes a status change with the wire's ids; the record shows
+/// the board's names.
+@Test func aStatusChangeInTheRecordShowsStatusNamesNotWireIds() {
+    func note(_ body: String, _ kind: TaskNoteKind = .statusChange) -> TaskNoteRow {
+        TaskNoteRow(id: "n", kind: kind, actor: "user", at: Date(), body: body)
+    }
+    #expect(note("moved from backlog to in_progress").displayBody == "Backlog → In Progress")
+    #expect(note("moved from in_progress to needs_decision").displayBody == "In Progress → Needs Decision")
+    #expect(note("moved from in_review to cancelled").displayBody == "In Review → Canceled")
+    // Anything else is shown as written: a status this build doesn't know,
+    // another sentence, or a person's note that happens to say the same words.
+    #expect(note("moved from backlog to parked").displayBody == "moved from backlog to parked")
+    #expect(note("reopened").displayBody == "reopened")
+    #expect(note("moved from backlog to todo", .comment).displayBody == "moved from backlog to todo")
+}
+
+/// A finished card says when it finished, not that it was "Updated".
+@Test func aFinishedCardSaysWhenItWasDoneOrCanceled() {
+    let now = Date()
+    let since = now.addingTimeInterval(-2 * 3600 - 60)
+    let created = now.addingTimeInterval(-9 * 86_400)
+    let done = TaskRow.fixture(status: .done, statusSince: since, createdAt: created, updatedAt: since)
+    #expect(done.timeNote(at: now) == "Done 2h ago")
+    let canceled = TaskRow.fixture(status: .cancelled, statusSince: since, createdAt: created, updatedAt: now)
+    #expect(canceled.timeNote(at: now) == "Canceled 2h ago")
+    // From a runner that never sent created_at, too.
+    #expect(TaskRow.fixture(status: .done, statusSince: since).timeNote(at: now) == "Done 2h ago")
+}

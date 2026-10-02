@@ -1487,16 +1487,23 @@ struct TaskCard: View {
                             Text(note.byline)
                                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
                                 .foregroundStyle(.secondary)
-                            Text(note.at, style: .relative)
-                                .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                                .foregroundStyle(.secondary)
+                            // The board's own abbreviated words ("4m ago"), as
+                            // the card's line says it, with the exact time on
+                            // hover. The system's relative style spelled out
+                            // "3 min, 58 sec", beside "Updated 3m ago".
+                            BoardTick { now in
+                                Text(TaskRow.ago(now.timeIntervalSince(note.at)))
+                                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                                    .foregroundStyle(.secondary)
+                                    .help(note.at.formatted(date: .abbreviated, time: .standard))
+                            }
                             if note.supersedes != nil {
                                 Text("Replaces an earlier entry")
                                     .font(.system(size: WorkspaceStyle.PaneText.minimum))
                                     .foregroundStyle(.secondary)
                             }
                         }
-                        Text(note.body)
+                        Text(note.displayBody)
                             .font(.system(size: WorkspaceStyle.PaneText.body))
                             .textSelection(.enabled)
                     }

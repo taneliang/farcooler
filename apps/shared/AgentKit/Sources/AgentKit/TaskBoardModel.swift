@@ -277,7 +277,14 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
     /// "Updated" is `updatedAt` strictly after `createdAt`. The runner sends
     /// the two equal for a card nothing has happened to, so equality is
     /// "Added" and not an update made in the same instant.
+    ///
+    /// A finished card says the fact that matters about it instead: "Done 2h
+    /// ago" or "Canceled 2h ago", from when its status last changed
+    /// (`statusSince`), which a runner of any age sends.
     public func timeNote(at now: Date) -> String? {
+        if status.isFinished {
+            return status.title + " " + TaskRow.ago(now.timeIntervalSince(statusSince))
+        }
         guard stalenessNote(at: now) == nil, let createdAt else { return nil }
         if let updatedAt, updatedAt > createdAt {
             return "Updated " + TaskRow.ago(now.timeIntervalSince(updatedAt))
@@ -718,6 +725,22 @@ public struct TaskNoteRow: Equatable, Sendable, Hashable, Identifiable {
         self.at = at
         self.body = body
         self.supersedes = supersedes
+    }
+
+    /// The note's body as the record draws it.
+    ///
+    /// A status change's body is written by the runner as "moved from
+    /// in_progress to needs_decision", wire ids and all, and every record
+    /// already written has it. It's read here as "In Progress → Needs
+    /// Decision". A body that isn't that shape, or names a status this build
+    /// doesn't know, is shown as written.
+    public var displayBody: String {
+        guard kind == .statusChange else { return body }
+        let words = body.split(separator: " ").map(String.init)
+        guard words.count == 5, words[0] == "moved", words[1] == "from", words[3] == "to",
+            let from = TaskStatus(rawValue: words[2]), let to = TaskStatus(rawValue: words[4])
+        else { return body }
+        return "\(from.title) → \(to.title)"
     }
 
     /// Who wrote it, as a person reads it.
