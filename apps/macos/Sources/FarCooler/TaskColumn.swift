@@ -501,14 +501,6 @@ enum WorkspaceNavigation {
         }
     }
 
-    /// Whether a task chosen on the board leaves the keyboard on the board's
-    /// list: only where the list stands beside it (`beside`), or when the
-    /// choice closed it. Where what's opened covers the list, a list holding
-    /// the keyboard would be one nobody can see.
-    static func boardTakesKeyboard(beside: Bool, opening: Bool) -> Bool {
-        beside || !opening
-    }
-
     /// A task chosen on its board (ov-85): opened beside the board, or, with
     /// `toggles` (a click), closed when it's the one open already. A glance
     /// (↑ or ↓) only opens.

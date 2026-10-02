@@ -38,18 +38,19 @@ struct WorkspaceColumnsTests {
     func theOrchestratorFillsTheMainArea(width: CGFloat) {
         let arrangement = Columns.layout(width: width, opened: false)
         #expect(arrangement == .workspace)
-        let frames = Columns.frames(width: width, arrangement: arrangement, list: 300)
+        let frames = Columns.frames(width: width, arrangement: arrangement, board: 300)
         // 300 pt, or what leaves the rail and a task their own.
         let board = min(300, width - 29 - 1 - Columns.openedMinimum())
         #expect(frames.boardX == width - board && frames.board == board)
         #expect(frames.main == width - board - 1)
-        #expect(frames.conversationX == 0 && frames.conversation == frames.main)
+        // Filling it from the leading edge, as wide as it is past the rail.
+        #expect(frames.conversationX == 0 && frames.conversation == frames.main - 29)
         // A peek means nothing with the orchestrator out already.
         #expect(Columns.layout(width: width, opened: false, peek: true) == .workspace)
         // No conversation: nothing fills it, and the board is where it was.
         let bare = Columns.layout(width: width, opened: false, hasConversation: false)
         #expect(bare.conversation == .none && bare.board == .side)
-        #expect(Columns.frames(width: width, arrangement: bare, list: 300).boardX == width - board)
+        #expect(Columns.frames(width: width, arrangement: bare, board: 300).boardX == width - board)
     }
 
     /// Opening a task springs the orchestrator to its rail and puts the task
@@ -60,33 +61,33 @@ struct WorkspaceColumnsTests {
         for (width, opened) in [(1222, 892), (1192, 862), (1032, 702)] as [(CGFloat, CGFloat)] {
             let arrangement = Columns.layout(width: width, opened: true)
             #expect(arrangement == .beside, "at \(width)")
-            let frames = Columns.frames(width: width, arrangement: arrangement, list: 300)
+            let frames = Columns.frames(width: width, arrangement: arrangement, board: 300)
             #expect(frames.openedX == 29 && frames.opened == opened, "at \(width)")
             #expect(frames.openedX + frames.opened + 1 == frames.boardX, "at \(width)")
-            // On its rail, the conversation keeps the width it had.
-            #expect(frames.conversation == nil)
-            // Popped open over the task: its minimum, past the rail.
+            // On its rail, the conversation keeps its width.
+            #expect(frames.conversation == opened)
+            // Popped open over the task: covering it, past the rail.
             let peeked = Columns.layout(width: width, opened: true, peek: true)
             #expect(peeked == .besidePeeked)
-            let over = Columns.frames(width: width, arrangement: peeked, list: 300)
-            #expect(over.conversationX == 29 && over.conversation == Columns.conversationMinimum())
+            let over = Columns.frames(width: width, arrangement: peeked, board: 300)
+            #expect(over.conversationX == 29 && over.conversation == opened)
             #expect(over.openedX == frames.openedX && over.opened == frames.opened, "the peek resized the task")
         }
         // Focus: what's opened alone, from edge to edge.
         let focus = Columns.layout(width: 1222, opened: true, focused: true, peek: true, boardOver: true)
         #expect(focus == .alone)
-        let focusFrames = Columns.frames(width: 1222, arrangement: focus, list: 300)
+        let focusFrames = Columns.frames(width: 1222, arrangement: focus, board: 300)
         #expect(focusFrames.openedX == 0 && focusFrames.opened == 1222)
         // Focus means nothing with nothing open.
         #expect(Columns.layout(width: 1222, opened: false, focused: true) == .workspace)
         // No conversation: no rail, and the task from the edge.
         let bare = Columns.layout(width: 1222, opened: true, hasConversation: false)
         #expect(bare.conversation == .none)
-        #expect(Columns.frames(width: 1222, arrangement: bare, list: 300).openedX == 0)
+        #expect(Columns.frames(width: 1222, arrangement: bare, board: 300).openedX == 0)
         // No board: the main area runs to the trailing edge.
         let boardless = Columns.layout(width: 1222, opened: true, hasBoard: false)
         #expect(boardless.board == .none)
-        let boardlessFrames = Columns.frames(width: 1222, arrangement: boardless, list: 300)
+        let boardlessFrames = Columns.frames(width: 1222, arrangement: boardless, board: 300)
         #expect(boardlessFrames.main == 1222 && boardlessFrames.opened == 1222 - 29, "\(boardlessFrames)")
     }
 
@@ -104,7 +105,7 @@ struct WorkspaceColumnsTests {
                 Columns.layout(width: width, opened: false, peek: true),
             ]
             let boards = states.map { arrangement in
-                let frames = Columns.frames(width: width, arrangement: arrangement, list: list)
+                let frames = Columns.frames(width: width, arrangement: arrangement, board: list)
                 return [frames.boardX, frames.board, frames.main]
             }
             #expect(Set(boards).count == 1, "at \(width), dragged to \(list): \(boards)")
@@ -112,9 +113,29 @@ struct WorkspaceColumnsTests {
             #expect(board >= Columns.boardMinimum)
             #expect(board == min(max(list, Columns.boardMinimum), width - 29 - 1 - Columns.openedMinimum()))
             // What's opened keeps its 58 columns beside it, at any drag.
-            let opened = Columns.frames(width: width, arrangement: states[1], list: list).opened
+            let opened = Columns.frames(width: width, arrangement: states[1], board: list).opened
             #expect(opened >= Columns.openedMinimum(), "at \(width), dragged to \(list)")
         }
+    }
+
+    /// The orchestrator is one width in the main area, on its rail and
+    /// popped open (ov-89 review), so moving between them never resizes its
+    /// terminal or tmux window, and popped open → filling the main area is
+    /// one slide. Only the detail's width, or the board collapsing, changes
+    /// it. In Focus it isn't drawn, and keeps what it had.
+    @Test("The orchestrator is one width in every state", arguments: [1600, 1222, 1032, 779, 778, 600] as [CGFloat])
+    func theOrchestratorIsOneWidth(width: CGFloat) {
+        let states = [
+            Columns.layout(width: width, opened: false),
+            Columns.layout(width: width, opened: true),
+            Columns.layout(width: width, opened: true, peek: true),
+            Columns.layout(width: width, opened: false, boardOver: true),
+            Columns.layout(width: width, opened: true, peek: true, boardOver: true),
+        ]
+        let widths = states.map { Columns.frames(width: width, arrangement: $0, board: 300).conversation }
+        #expect(Set(widths).count == 1, "at \(width): \(widths)")
+        #expect(widths[0] == Columns.conversationWidth(in: Columns.frames(width: width, arrangement: states[0], board: 300).main))
+        #expect(Columns.frames(width: width, arrangement: .alone, board: 300).conversation == nil)
     }
 
     /// Below the width where the rail, what's opened at its 58 columns and
@@ -131,16 +152,16 @@ struct WorkspaceColumnsTests {
             #expect(closed == .narrow, "at \(width)")
             let open = Columns.layout(width: width, opened: true)
             #expect(open == .narrowOpened, "at \(width)")
-            let frames = Columns.frames(width: width, arrangement: open, list: 300)
+            let frames = Columns.frames(width: width, arrangement: open, board: 300)
             #expect(frames.main == width - 29, "at \(width)")
             #expect(frames.openedX == 29 && frames.opened == width - 58, "at \(width)")
             // Tucked under the strip, out of sight.
             #expect(frames.boardX >= width - 28, "at \(width)")
-            #expect(Columns.frames(width: width, arrangement: closed, list: 300).conversation == width - 29)
+            #expect(Columns.frames(width: width, arrangement: closed, board: 300).conversation == width - 58)
             // Popped open: over the main area, against the strip.
             let over = Columns.layout(width: width, opened: true, boardOver: true)
             #expect(over.board == .over && over.boardInSight)
-            let overFrames = Columns.frames(width: width, arrangement: over, list: 300)
+            let overFrames = Columns.frames(width: width, arrangement: over, board: 300)
             #expect(overFrames.boardX + overFrames.board == width - 29, "at \(width)")
             #expect(overFrames.board == min(300, width - 29), "at \(width)")
             #expect(overFrames.opened == frames.opened, "popping the board resized the task")
@@ -149,31 +170,6 @@ struct WorkspaceColumnsTests {
         #expect(Columns.layout(width: 779, opened: true, boardOver: true) == .beside)
         #expect(!Columns.Arrangement.narrow.boardInSight)
         #expect(Columns.Arrangement.workspace.boardInSight)
-    }
-
-    /// The window's state through a session: nothing open, a task, another
-    /// one glanced at, the orchestrator popped open over it, closed; and
-    /// twenty toggles inside a frame end where the last one says.
-    @Test("Nothing open, a task, a switch, a peek and a close")
-    func theLayoutFollowsTheSession() {
-        var opened: String?
-        var peek = false
-        func now() -> Columns.Arrangement { Columns.layout(width: 1032, opened: opened != nil, peek: peek) }
-        #expect(now() == .workspace)
-        opened = "bil-3"
-        #expect(now() == .beside)
-        opened = "bil-7"
-        #expect(now() == .beside)
-        peek = true
-        #expect(now() == .besidePeeked)
-        // Closing what's opened puts the peek away with it (`closeOpened`).
-        opened = nil
-        peek = false
-        #expect(now() == .workspace)
-        for index in 0..<20 { opened = index.isMultiple(of: 3) ? nil : "bil-\(index)" }
-        #expect(now() == .beside)
-        opened = nil
-        #expect(now() == .workspace)
     }
 
     /// The motion's state, apart from the window's (ov-85): opening,
@@ -229,7 +225,7 @@ struct WorkspaceColumnsTests {
             var body: some View {
                 WorkspaceView(
                     opened: "t" as String?, hasConversation: true, cell: WorkspaceColumns.defaultCell,
-                    focused: false, peek: false, listWidth: .constant(300),
+                    focused: false, peek: false, boardWidth: .constant(300),
                     conversation: { Color.clear }, rail: { Color.clear }, board: { Color.clear },
                     strip: { Color.clear }, breadcrumb: { _ in Color.clear }, detail: { _, _ in Color.clear })
                 .frame(width: width, height: 400)

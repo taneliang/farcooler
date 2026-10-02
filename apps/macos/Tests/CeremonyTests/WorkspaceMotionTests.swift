@@ -69,7 +69,7 @@ struct WorkspaceMotionTests {
             var body: some View {
                 WorkspaceView(
                     opened: level.opened, hasConversation: true, cell: WorkspaceColumns.defaultCell,
-                    focused: false, peek: false, boardOver: level.boardOver, listWidth: .constant(300),
+                    focused: false, peek: false, boardOver: level.boardOver, boardWidth: .constant(300),
                     conversation: { MotionMarkerView(name: "conversation", tally: tally) },
                     rail: { MotionMarkerView(name: "rail", tally: tally) },
                     board: { MotionMarkerView(name: "board", tally: tally) },

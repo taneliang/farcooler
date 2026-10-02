@@ -26,8 +26,10 @@ enum WorkspaceColumns {
     /// counts the same.
     static let chrome: CGFloat = 40
 
-    /// The conversation's width popped open, in terminal columns: every
+    /// The conversation's measured minimum, in terminal columns: every
     /// fixed line an orchestrator shows fits, and it's what an iPhone shows.
+    /// The main area past the rail is wider than this at every width that
+    /// keeps the board as a sidebar.
     static let conversationColumns = 48
     /// What's opened in the main area, at the least, in terminal columns:
     /// the width at which no fixed line of any harness's permission prompt
@@ -38,7 +40,7 @@ enum WorkspaceColumns {
     /// title and its agent pill (ov-85).
     static let boardMinimum: CGFloat = 260
     /// The board sidebar's width until its leading edge is dragged (ov-89).
-    static let boardListDefault: CGFloat = 300
+    static let boardDefault: CGFloat = 300
     /// The orchestrator's rail: as wide as its icon and its sideways label
     /// need (ov-84). The board's collapsed strip mirrors it (ov-89).
     static let rail: CGFloat = 28
@@ -83,10 +85,13 @@ enum WorkspaceColumns {
         return max(boardMinimum, min(remembered, most))
     }
 
-    /// How wide the conversation pops open over what's opened, in a main
-    /// area `main` pt wide: its minimum, or what's left past the rail.
-    static func peekWidth(in main: CGFloat, cell: CGFloat = defaultCell) -> CGFloat {
-        max(0, min(conversationMinimum(cell: cell), main - rail - divider))
+    /// The conversation's width in a main area `main` pt wide, in the main
+    /// area and popped open from the rail alike: the main area less the
+    /// rail. One width for both, so moving between them never resizes its
+    /// terminal or the tmux window behind it; only the window's width, or
+    /// the board collapsing, does (ov-89 review).
+    static func conversationWidth(in main: CGFloat) -> CGFloat {
+        max(0, main - rail - divider)
     }
 
     /// What's drawn (spec §4.3, ov-89): the main area on the left, which
@@ -100,7 +105,7 @@ enum WorkspaceColumns {
             /// opened. Clicking it pops the conversation open.
             case rail
             /// The rail, with the conversation popped open over what's
-            /// opened, which stays where it is underneath.
+            /// opened, covering it, which stays where it is underneath.
             case peek
             /// Not drawn: Focus, or a workspace with no conversation (a
             /// runner without `workstreams`, or a loose worktree).
@@ -123,7 +128,7 @@ enum WorkspaceColumns {
         var opened: Bool
         var board: Board
 
-        /// Whether the board's list is in sight to take the keyboard.
+        /// Whether the board is in sight to take the keyboard.
         var boardInSight: Bool { board == .side || board == .over }
 
         static let workspace = Arrangement(conversation: .main, opened: false, board: .side)
@@ -172,9 +177,9 @@ enum WorkspaceColumns {
         /// sidebar; over the main area, or tucked under the strip, collapsed.
         var boardX: CGFloat
         var board: CGFloat
-        /// The conversation's width while it's in sight: the main area's, or
-        /// popped open, its minimum. Nil on the rail, where it keeps the
-        /// width it had (`WorkspaceView`), so it isn't resized on the way.
+        /// The conversation's width, the same in the main area, on the rail
+        /// and popped open (`conversationWidth`). Nil in Focus or with no
+        /// conversation, where it keeps the width it had (`WorkspaceView`).
         var conversation: CGFloat?
         /// Where the conversation's panel starts: the rail's trailing edge,
         /// or the leading edge with no rail.
@@ -184,7 +189,7 @@ enum WorkspaceColumns {
     /// The frames `arrangement` puts its parts at in a detail `width` pt
     /// wide, with the board `remembered` pt wide when it can be.
     static func frames(
-        width: CGFloat, arrangement: Arrangement, list remembered: CGFloat, cell: CGFloat = defaultCell
+        width: CGFloat, arrangement: Arrangement, board remembered: CGFloat, cell: CGFloat = defaultCell
     ) -> Frames {
         let sidebar = boardWidth(remembered, width: width, cell: cell)
         let trailing: CGFloat
@@ -209,13 +214,108 @@ enum WorkspaceColumns {
         let main = max(0, width - trailing)
         let edge: CGFloat = [.rail, .peek].contains(arrangement.conversation) ? rail + divider : 0
         let conversation: CGFloat? =
-            switch arrangement.conversation {
-            case .main: main
-            case .peek: peekWidth(in: main, cell: cell)
-            case .rail, .none: nil
-            }
+            arrangement.conversation == .none ? nil : conversationWidth(in: main)
         return Frames(
             main: main, openedX: edge, opened: max(0, main - edge), boardX: boardX, board: board,
             conversation: conversation, conversationX: edge)
+    }
+}
+
+/// Where the board and the keyboard go for each command that moves them
+/// (ov-89 review), as values: the popped-open board, Focus and the keyboard's
+/// target, from whether the board is collapsed at this width, what's open,
+/// and what's popped. `ContentView` does what these say and decides nothing.
+///
+/// The rule under all of it: the keyboard never stays on a board that isn't
+/// drawn, and a command with nothing to act on changes nothing.
+extension WorkspaceNavigation {
+    /// Where the keyboard goes.
+    enum KeyTarget: Equatable {
+        /// The board's list.
+        case board
+        /// What fills the main area: what's opened, else the orchestrator.
+        case main
+        /// The orchestrator: filling the main area, or popped open.
+        case conversation
+        /// What's opened.
+        case opened
+        /// Where it is.
+        case unchanged
+    }
+
+    struct BoardState: Equatable {
+        /// The board is a strip at this width (`WorkspaceColumns.collapses`).
+        var collapsed: Bool
+        /// A task or a worktree is open.
+        var opened: Bool
+        /// The board is popped open from its strip.
+        var popped = false
+        /// Focus (⌃⌘↩).
+        var focus = false
+        /// The board has the keyboard.
+        var onBoard = false
+
+        /// Whether the board is drawn for its list to take the keyboard.
+        var boardInSight: Bool { !focus && (!collapsed || popped) }
+    }
+
+    enum BoardCommand: Equatable {
+        /// ⌥⌘1, or the rail.
+        case conversation
+        /// ⌥⌘2, or the strip.
+        case board
+        /// ⌥⌘3.
+        case task
+        /// ⌃⌘↩.
+        case toggleFocus
+        /// A row on the board clicked, or glanced at with ↑ or ↓;
+        /// `opening` is whether something is open after it.
+        case choose(glance: Bool, opening: Bool)
+        /// What's opened closed: Esc, the ×, Back, a click on it in the board.
+        case close
+        /// The popped-open board put away: a click outside it, or Esc.
+        case dismissBoard
+    }
+
+    struct BoardStep: Equatable {
+        var popped: Bool
+        var focus: Bool
+        var keyboard: KeyTarget
+    }
+
+    static func boardStep(_ command: BoardCommand, from s: BoardState) -> BoardStep {
+        let nothing = BoardStep(popped: s.popped, focus: s.focus, keyboard: .unchanged)
+        switch command {
+        case .conversation:
+            return BoardStep(popped: false, focus: false, keyboard: .conversation)
+        case .board:
+            guard s.collapsed else { return BoardStep(popped: false, focus: false, keyboard: .board) }
+            // Pressed again, or the strip clicked again: put away.
+            if s.popped && !s.focus { return BoardStep(popped: false, focus: false, keyboard: .main) }
+            return BoardStep(popped: true, focus: false, keyboard: .board)
+        case .task:
+            guard s.opened else { return nothing }
+            return BoardStep(popped: false, focus: s.focus, keyboard: .opened)
+        case .toggleFocus:
+            guard s.opened else { return nothing }
+            // Into Focus the board and the orchestrator go: the keyboard
+            // follows to what's opened if either had it.
+            if !s.focus { return BoardStep(popped: false, focus: true, keyboard: .opened) }
+            return BoardStep(popped: false, focus: false, keyboard: .unchanged)
+        case .choose(let glance, let opening):
+            // A glance keeps the board where it is, keyboard and all.
+            if glance { return BoardStep(popped: s.popped, focus: false, keyboard: .board) }
+            // A click puts a popped board away, and the keyboard goes to the
+            // board only where it's still drawn.
+            let after = BoardState(collapsed: s.collapsed, opened: opening)
+            if after.boardInSight { return BoardStep(popped: false, focus: false, keyboard: .board) }
+            return BoardStep(popped: false, focus: false, keyboard: opening ? .opened : .main)
+        case .close:
+            let after = BoardState(collapsed: s.collapsed, opened: false, popped: s.popped)
+            return BoardStep(popped: s.popped, focus: false, keyboard: after.boardInSight ? .board : .main)
+        case .dismissBoard:
+            guard s.popped else { return nothing }
+            return BoardStep(popped: false, focus: s.focus, keyboard: s.onBoard ? .main : .unchanged)
+        }
     }
 }

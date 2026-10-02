@@ -1195,6 +1195,42 @@ struct BoardSidebarTests {
         #expect(bare.board == Self.repoA && !bare.hasConversation)
     }
 
+    /// The main area is the orchestrator's place (ov-89 review): a workspace
+    /// without one draws the conversation there, whose empty state offers
+    /// Start Orchestrator and, for a shell already running claude in it, Use
+    /// a Running Terminal…. Only a runner without workspaces, which can't run
+    /// one, draws `WorkspaceMain`, and says why, never "No Task Open".
+    @Test("A workspace without an orchestrator offers one in the main area")
+    func aWorkspaceWithoutAnOrchestratorOffersOne() throws {
+        var shell = Self.terminal("shell", taskId: nil)
+        shell.workspace = Self.billing
+        var checkout = Self.worktree("main", workspace: Self.billing, terminals: [shell])
+        checkout.is_main_checkout = true
+        let fleet = Self.fleet(
+            workspaces: [Self.summary(Self.main, "Main", isMain: true), Self.summary(Self.billing, "Billing")],
+            worktrees: [checkout])
+        let scene = try #require(
+            ContentView.workspaceScene(.workspace(host: "", workspace: Self.billing, focus: nil), in: fleet, repositories: []))
+        #expect(scene.hasConversation)
+        let summary = try #require(scene.summary)
+        #expect(WorkspaceScreen.orchestrator(of: summary, host: "", in: fleet) == nil)
+        let state = ConversationColumn.state(seat: nil, isStarting: false, startedAt: nil, now: .now)
+        #expect(state == .none)
+        #expect(ConversationColumn.offers(state) == OrchestratorHarness.allCases.map(ConversationColumn.Offer.start))
+        #expect(OrchestratorAdoption.candidates(for: summary, host: "", in: fleet).map(\.terminal.id) == ["shell"])
+        // The main area, laid out for it: the conversation fills it.
+        #expect(WorkspaceColumns.layout(width: 1032, opened: false, hasConversation: scene.hasConversation) == .workspace)
+        // A runner without workspaces: no conversation, and the empty state
+        // says so.
+        let older = Self.fleet(workspaces: nil, worktrees: [])
+        let bare = try #require(
+            ContentView.workspaceScene(
+                .workspace(host: "", workspace: Self.repoA, focus: nil), in: older, repositories: [Self.repoA]))
+        #expect(!bare.hasConversation)
+        #expect(WorkspaceMain.title == "No Orchestrator")
+        #expect(WorkspaceMain.message == "Update Far Cooler on this runner to use an orchestrator here.")
+    }
+
     /// A new worktree — from ⌘N, or a repository header's "New Worktree in
     /// X…" — is claimed for the workspace you are in, or have selected, when
     /// it is being made in that workspace's repository on that runner.

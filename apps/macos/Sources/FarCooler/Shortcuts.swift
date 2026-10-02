@@ -115,7 +115,7 @@ enum Shortcut {
             [
                 Item(keys: "⌃⌘←", action: "Back: from a worktree to its task, from a task to the workspace"),
                 Item(keys: "⌃⌘↩", action: "Focus: the task’s or worktree’s terminals at full size; again to put the rest back"),
-                Item(keys: "⌥⌘1 ⌥⌘2 ⌥⌘3", action: "Go to the orchestrator (over a task, from its rail), the board, the task"),
+                Item(keys: "⌥⌘1 ⌥⌘2 ⌥⌘3", action: "Go to the orchestrator (popped open over a task), the board (popped open when collapsed), the task"),
                 Item(keys: "⌃⌘↓ ⌃⌘↑", action: "Next / previous worktree, in the board list’s order"),
                 Item(keys: "⌘1 … ⌘9", action: "Go to a workspace, in the title bar’s order"),
                 Item(keys: "⌘0", action: "Switch workspace: open the title bar’s switcher"),

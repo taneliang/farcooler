@@ -99,14 +99,6 @@ struct BoardGlanceTests {
         #expect(!EscapeBack.goesBack(responder: NSView(), selection: top, focusColumn: false))
     }
 
-    @Test("Where the task covers the board, a click gives the task the keyboard")
-    func coveringGivesTheTaskTheKeyboard() {
-        #expect(WorkspaceNavigation.boardTakesKeyboard(beside: true, opening: true))
-        #expect(!WorkspaceNavigation.boardTakesKeyboard(beside: false, opening: true))
-        // Closed by the click: the board's back in sight either way.
-        #expect(WorkspaceNavigation.boardTakesKeyboard(beside: false, opening: false))
-    }
-
     @MainActor
     @Test("Esc keeps to a loose worktree with nowhere to close to")
     func escStaysWithNowhereToClose() {

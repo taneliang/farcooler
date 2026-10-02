@@ -65,7 +65,7 @@ enum ConversationColumn {
         seat?.terminal.agent == .done
     }
 
-    /// The sentence under "No orchestrator" (spec §8).
+    /// The sentence under "No Orchestrator" (spec §8).
     static let emptyExplanation =
         "An orchestrator runs this workspace’s board. It reads the charter, dispatches agents, and asks you when it needs a decision."
 }
@@ -194,7 +194,7 @@ struct ConversationPlaceholder: View {
         VStack(spacing: 10) {
             switch state {
             case .none:
-                Text("No orchestrator").font(.headline)
+                Text("No Orchestrator").font(.headline)
                 Text(ConversationColumn.emptyExplanation)
                     .font(.callout)
                     .foregroundStyle(.secondary)

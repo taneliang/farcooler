@@ -143,9 +143,10 @@ struct ContentView: View {
     /// The Needs You item ⌃⌘N last opened, by its key: where the next
     /// press goes on from, while the window is still showing it.
     @State private var lastAttention: String?
-    /// The board list's width beside a task or a worktree opened, as its
-    /// divider was last dropped, on this Mac (ov-85).
-    @AppStorage("workspace.boardListWidth") private var boardListWidth = Double(WorkspaceColumns.boardListDefault)
+    /// The board sidebar's width, as its leading edge was last dropped, on
+    /// this Mac (ov-89). The key is ov-85's, when it was the list beside a
+    /// task, so the width carries over.
+    @AppStorage("workspace.boardListWidth") private var boardWidth = Double(WorkspaceColumns.boardDefault)
     /// Asks the board list for the keyboard: bumped by ⌥⌘2, and by a click
     /// on a row, so ↑ and ↓ glance through the tasks from there.
     @State private var boardFocusRequest = 0
@@ -2441,7 +2442,7 @@ struct ContentView: View {
             focused: focusColumn,
             peek: orchestratorPeek,
             boardOver: boardPopped,
-            listWidth: $boardListWidth,
+            boardWidth: $boardWidth,
             conversation: {
                 // The panel stays mounted while it's closed, and draws the
                 // same layout then as open; it just doesn't have the
@@ -2758,26 +2759,22 @@ struct ContentView: View {
         let board = selection.flatMap(workspaceScene)?.board
         guard let current = selection, let closed = WorkspaceNavigation.closing(current, board: board) else { return }
         trail = nil
-        focusColumn = false
         orchestratorPeek = false
         // The board keeps the keyboard where it's in sight; collapsed to its
         // strip, the orchestrator filling the main area takes it.
-        guard boardBeside || boardPopped else {
-            selection = closed
-            return
-        }
-        boardKeyboardPending = true
+        let step = WorkspaceNavigation.boardStep(.close, from: boardState)
+        if step.keyboard == .board { boardKeyboardPending = true }
+        boardPopped = step.popped
+        focusColumn = step.focus
         selection = closed
-        keyboardOnBoard = true
-        boardFocusRequest += 1
+        key(step.keyboard)
     }
 
     /// Put the popped-open board away, and give the keyboard back to what
     /// fills the main area.
     private func closeBoard() {
         guard boardPopped else { return }
-        boardPopped = false
-        if keyboardOnBoard { keyMain() }
+        apply(WorkspaceNavigation.boardStep(.dismissBoard, from: boardState))
     }
 
     /// The keyboard to what fills the main area: what's opened, else the
@@ -2810,14 +2807,13 @@ struct ContentView: View {
             .flatMap(WorkspaceScreen.columnPane)
         {
             step(to: pane)
+        } else if case .workspace(_, _, nil)? = selection {
+            // Nothing opened: the orchestrator filling the main area takes
+            // it (ov-89).
+            keyMain()
         } else {
             keyPane = nil
             windowBox.window?.makeFirstResponder(nil)
-            // Nothing opened to take it: the board does.
-            if case .workspace(_, _, nil)? = selection {
-                keyboardOnBoard = true
-                boardFocusRequest += 1
-            }
         }
     }
 
@@ -3857,55 +3853,29 @@ struct ContentView: View {
         let focus = scene.opened
         switch command {
         case .focusConversation:
-            boardPopped = false
-            // Filling the main area: only the keyboard moves.
-            if focus == nil {
-                if let pane = shownLayouts(for: selection).first(where: { $0.column == .conversation })
-                    .flatMap(WorkspaceScreen.columnPane)
-                {
-                    step(to: pane)
-                }
-                return
-            }
-            // Pressed again, or the rail clicked again: it closes, at once,
-            // mid-flight or not (`OrchestratorPeek`).
-            if !OrchestratorPeek.pressed(open: orchestratorPeek) {
+            // Beside what's opened, pressed again, or the rail clicked
+            // again: it closes, at once, mid-flight or not
+            // (`OrchestratorPeek`). Filling the main area, only the keyboard
+            // moves.
+            if focus != nil, !OrchestratorPeek.pressed(open: orchestratorPeek) {
                 closePeek()
                 return
             }
-            focusColumn = false
-            orchestratorPeek = true
-            if let pane = shownLayouts(for: selection).first(where: { $0.column == .conversation })
-                .flatMap(WorkspaceScreen.columnPane)
-            {
-                step(to: pane)
-            }
+            if focus != nil { orchestratorPeek = true }
+            apply(WorkspaceNavigation.boardStep(.conversation, from: boardState))
         case .focusBoard:
-            focusColumn = false
-            orchestratorPeek = false
             // Beside the others, the board has no text to type into: the
-            // terminals let go of the keyboard, and the list takes it.
+            // terminals let go of the keyboard, and the list takes it;
+            // collapsed to its strip, it pops open over the main area, and
+            // is put away pressed again, or the strip clicked again.
             guard scene.board != nil else { return }
-            if !boardBeside {
-                // Collapsed to its strip: popped open over the main area,
-                // and put away pressed again, or the strip clicked again.
-                if boardPopped {
-                    closeBoard()
-                    return
-                }
-                boardPopped = true
-            }
-            keyboardOnBoard = true
-            windowBox.window?.makeFirstResponder(nil)
-            boardFocusRequest += 1
-        case .focusTask:
             orchestratorPeek = false
-            boardPopped = false
-            if let pane = shownLayouts(for: selection).last(where: { $0.column != .conversation })
-                .flatMap(WorkspaceScreen.columnPane)
-            {
-                step(to: pane)
-            }
+            apply(WorkspaceNavigation.boardStep(.board, from: boardState))
+        case .focusTask:
+            // With nothing open, nothing to go to: nothing changes.
+            guard focus != nil else { return }
+            orchestratorPeek = false
+            apply(WorkspaceNavigation.boardStep(.task, from: boardState))
         default:
             break
         }
@@ -3931,20 +3901,57 @@ struct ContentView: View {
         let next = WorkspaceNavigation.choosing(task: id, host: host, workspace: workspace, from: selection, toggles: !glance)
         guard next != selection else { return }
         trail = nil
-        // A click in the popped-open board puts it away; a glance keeps it.
-        if !glance { boardPopped = false }
-        // Where the board is out of sight, the keyboard goes to the task, as
-        // from anywhere else.
-        guard WorkspaceNavigation.boardTakesKeyboard(beside: boardBeside || boardPopped, opening: next.focus != nil)
-        else {
-            selection = next
-            keyOpened()
-            return
-        }
-        boardKeyboardPending = true
+        // A click in the popped-open board puts it away, and the keyboard
+        // goes to the board only where it's still drawn; a glance keeps it.
+        let step = WorkspaceNavigation.boardStep(.choose(glance: glance, opening: next.focus != nil), from: boardState)
+        if step.keyboard == .board { boardKeyboardPending = true }
+        boardPopped = step.popped
+        focusColumn = step.focus
         selection = next
-        keyboardOnBoard = true
-        boardFocusRequest += 1
+        key(step.keyboard)
+    }
+
+    /// What `WorkspaceNavigation.boardStep` reads: the board at this width,
+    /// what's open, and what's popped.
+    private var boardState: WorkspaceNavigation.BoardState {
+        WorkspaceNavigation.BoardState(
+            collapsed: !boardBeside, opened: selection.flatMap(workspaceScene)?.opened != nil,
+            popped: boardPopped, focus: focusColumn, onBoard: keyboardOnBoard)
+    }
+
+    /// Does what a `BoardStep` says.
+    private func apply(_ step: WorkspaceNavigation.BoardStep) {
+        boardPopped = step.popped
+        focusColumn = step.focus
+        key(step.keyboard)
+    }
+
+    /// The keyboard to `target`.
+    private func key(_ target: WorkspaceNavigation.KeyTarget) {
+        switch target {
+        case .board:
+            keyboardOnBoard = true
+            windowBox.window?.makeFirstResponder(nil)
+            boardFocusRequest += 1
+        case .main:
+            keyMain()
+        case .conversation:
+            if let pane = shownLayouts(for: selection).first(where: { $0.column == .conversation })
+                .flatMap(WorkspaceScreen.columnPane)
+            {
+                step(to: pane)
+            } else {
+                // A placeholder, a restart or a chat view: off the board, to
+                // the view itself.
+                keyboardOnBoard = false
+                keyPane = nil
+                windowBox.window?.makeFirstResponder(nil)
+            }
+        case .opened:
+            keyOpened()
+        case .unchanged:
+            break
+        }
     }
 
     /// Open a Needs You item where spec §2.5 says it lands.
@@ -4079,9 +4086,11 @@ struct ContentView: View {
             }
         case .back: goBack()
         case .focusColumn:
-            if selection?.focus != nil {
+            if selection.flatMap(workspaceScene)?.opened != nil {
+                if !focusColumn { orchestratorPeek = false }
+                apply(WorkspaceNavigation.boardStep(.toggleFocus, from: boardState))
+            } else if selection?.focus != nil {
                 focusColumn.toggle()
-                if focusColumn { orchestratorPeek = false }
             }
         case .focusConversation, .focusBoard, .focusTask:
             focusWorkspaceColumn(command)

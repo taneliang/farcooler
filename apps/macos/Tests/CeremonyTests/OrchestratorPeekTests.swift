@@ -42,8 +42,9 @@ struct OrchestratorPeekTests {
     /// 200 pt sidebar, with the sidebar, the rail, the conversation, the
     /// board and what's opened each a view the hit test names, moving on
     /// `motion`. The rail is at x 200–228, what's opened at 229–931 and the
-    /// board from 932 (ov-89); closed, the panel sits at about −207…205, so
-    /// over the sidebar, where only a panel that leaked would take a click.
+    /// board from 932 (ov-89). Popped open, the panel covers what's opened
+    /// at its width; closed, it sits off to the left, over the sidebar, where
+    /// only a panel that leaked would take a click.
     @MainActor
     private final class Harness {
         let level = Level()
@@ -58,7 +59,7 @@ struct OrchestratorPeekTests {
                     MarkerView(name: "sidebar").frame(width: 200)
                     WorkspaceView(
                         opened: "t" as String?, hasConversation: true, cell: WorkspaceColumns.defaultCell,
-                        focused: false, peek: level.peek, listWidth: .constant(300),
+                        focused: false, peek: level.peek, boardWidth: .constant(300),
                         conversation: {
                             MarkerView(
                                 name: "conversation", onMake: { level.made += 1 },
@@ -158,8 +159,8 @@ struct OrchestratorPeekTests {
             await harness.settle(1)
         }
         #expect(open)
-        // Open: a click over what's opened is the panel's or the catcher's.
-        #expect(harness.hit(800) == "catcher")
+        // Open: it covers what's opened, at the same width (ov-89 review).
+        #expect(harness.hit(800) != "opened")
         open = OrchestratorPeek.pressed(open: open)
         harness.level.peek = open
         await harness.settle(1)
@@ -169,7 +170,7 @@ struct OrchestratorPeekTests {
         open = OrchestratorPeek.pressed(open: open)
         harness.level.peek = open
         await harness.settle(1)
-        #expect(harness.hit(800) == "catcher")
+        #expect(harness.hit(800) != "opened")
         #expect(harness.level.made == 1, "the conversation was rebuilt \(harness.level.made) times")
         harness.window.close()
     }
@@ -198,9 +199,8 @@ struct OrchestratorPeekTests {
         #expect(harness.level.made == 1, "the conversation was rebuilt \(harness.level.made) times")
         harness.window.close()
         // And as values: off past its own width and shadow, and no clicks.
-        let width = WorkspaceColumns.peekWidth(in: 1032)
-        #expect(OrchestratorPeek.offset(open: false, width: width) < -width)
-        #expect(OrchestratorPeek.offset(open: true, width: width) == 0)
+        let width = WorkspaceColumns.conversationWidth(in: 731)
+        #expect(OrchestratorPeek.hidden(width: width) < -width - WorkspaceMotion.overhang)
     }
 
     /// Closed, nothing in the panel takes the keyboard: what's inside reads
