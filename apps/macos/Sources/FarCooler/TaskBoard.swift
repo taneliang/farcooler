@@ -647,8 +647,10 @@ struct TaskBoardView: View {
     /// and what draws the selected row in the accent.
     let hasKeyboard: Bool
     /// The workspace's worktrees (ov-86): each task's, named on its row,
-    /// and the loose ones, in the Worktrees section under the tasks.
-    let worktrees: BoardWorktrees
+    /// and the loose ones, in the Worktrees section under the tasks. Asked
+    /// of the board as it is now, here, where the board is observed: worked
+    /// out by the window, it stayed as it was before the first read.
+    let worktreesOf: (TaskBoardModel) -> BoardWorktrees
 
     /// The list's collapsed sections: read from `defaults` in `init`, and
     /// again when the view is handed another board.
@@ -697,7 +699,8 @@ struct TaskBoardView: View {
         store: TaskBoardStore, client: DaemonClient, agents: BoardAgents, waiting: Int = 0,
         onGoTo: @escaping (BoardPane) -> Void, defaults: UserDefaults = .standard,
         selected: String? = nil, focusRequest: Int = 0, onKeyboard: @escaping () -> Void = {},
-        onEnter: @escaping () -> Void = {}, hasKeyboard: Bool = false, worktrees: BoardWorktrees = .none
+        onEnter: @escaping () -> Void = {}, hasKeyboard: Bool = false,
+        worktrees: @escaping (TaskBoardModel) -> BoardWorktrees = { _ in .none }
     ) {
         self.store = store
         self.client = client
@@ -710,7 +713,7 @@ struct TaskBoardView: View {
         self.onKeyboard = onKeyboard
         self.onEnter = onEnter
         self.hasKeyboard = hasKeyboard
-        self.worktrees = worktrees
+        self.worktreesOf = worktrees
         _collapsed = State(
             initialValue: BoardForm.collapsed(
                 host: store.hostKey, workspace: store.workspace.id, from: defaults))
@@ -803,7 +806,8 @@ struct TaskBoardView: View {
     // MARK: - The list
 
     private var list: some View {
-        ScrollViewReader { proxy in
+        let worktrees = worktreesOf(store.board)
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
                     ForEach(store.board.sections) { section in

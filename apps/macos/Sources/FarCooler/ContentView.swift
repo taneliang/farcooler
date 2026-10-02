@@ -1251,7 +1251,7 @@ struct ContentView: View {
         guard client.state == .connected, client.repositoriesListed else {
             return "Far Cooler is still loading this runner’s repositories."
         }
-        return "This board isn’t on its runner anymore. Choose another board in the sidebar."
+        return "This board isn’t on its runner anymore. Choose another workspace from the title bar."
     }
 
     /// Go to a pane a card offered, as the fleet has it now. See
@@ -2269,8 +2269,9 @@ struct ContentView: View {
 
     /// The board list's worktrees: each task's name, and the loose ones
     /// under Worktrees.
-    private func boardWorktrees(host: String, workspace: WorkspaceSummary, client: DaemonClient) -> BoardWorktrees {
-        let board = boardStore(for: workspace, client: client, host: host).board
+    private func boardWorktrees(
+        host: String, workspace: WorkspaceSummary, client: DaemonClient, board: TaskBoardModel
+    ) -> BoardWorktrees {
         let loose = WorkspaceWorktrees.loose(in: workspace, host: host, board: board, fleet: store.fleet)
         let usable = store.refusal(for: host) == nil
         let repository = client.repositories.first { $0.id == (workspace.repository ?? workspace.id) }
@@ -2909,7 +2910,7 @@ struct ContentView: View {
                 onKeyboard: { keyboardOnBoard = true },
                 onEnter: { focusWorkspaceColumn(.focusTask) },
                 hasKeyboard: keyboardOnBoard,
-                worktrees: boardWorktrees(host: host, workspace: workspace, client: client)
+                worktrees: { board in boardWorktrees(host: host, workspace: workspace, client: client, board: board) }
             )
         } else {
             // Said, rather than the generic "Select a worktree": this
@@ -3001,7 +3002,7 @@ struct ContentView: View {
         ContentUnavailableView {
             Label("No Workspace Selected", systemImage: "square.stack.3d.up")
         } description: {
-            Text("A workspace shows its board, with its orchestrator a click away on the left.")
+            Text("Choose one from the title bar. A workspace shows its board, with its orchestrator a click away on the left.")
         } actions: {
             if !workspaceRepositories.isEmpty {
                 Button("New Workspace…") {

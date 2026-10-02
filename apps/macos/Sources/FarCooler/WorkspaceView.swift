@@ -562,10 +562,9 @@ struct DrillBreadcrumb: View {
 extension DrillBreadcrumb {
     @ViewBuilder
     private func menuItem(_ item: WorkspaceWorktrees.MenuItem) -> some View {
-        Button {
-            onGo(item.target)
-        } label: {
-            if item.current { Image(systemName: "checkmark") }
+        // A toggle, for the menu's own checkmark on where you are: a
+        // button's image beside a subtitle was dropped (live, ov-86).
+        Toggle(isOn: Binding(get: { item.current }, set: { _ in onGo(item.target) })) {
             Text(item.title)
             if let subtitle = item.subtitle { Text(subtitle) }
         }
