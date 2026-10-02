@@ -17,7 +17,8 @@ These are binding. The rest of this document works them out.
 1. **Direction A, with B's inbox.**
    - The Mac sidebar lists workspaces, per repository. Each workspace is one row, with its orchestrator's status
      and a needs-you count. A "Needs You" row sits at the top.
-   - Selecting a workspace shows its orchestrator's conversation beside its board.
+   - Selecting a workspace shows its board, with its orchestrator on a rail at the leading edge that pops its
+     conversation open over the board (ov-85; until then the conversation was a column beside the board).
    - Selecting a task opens it: since ov-85 beside the board, which narrows to a list on the left, with its
      agent's terminal and changes beneath it and the orchestrator as a rail at every level (ov-79 had it take
      the whole detail). See §4.3.
@@ -394,6 +395,12 @@ ticket is open, and every change should move on a spring.
   a breadcrumb: Workspace › Task, Workspace › Task › Worktree, or Workspace › Worktree. The list keeps its
   scroll and draws the open task selected (the task a worktree was opened from, while that worktree is open).
 - **Glancing:** clicking another task, or ↑/↓ while the list has the keyboard, swaps what's opened in place.
+  A held arrow walks the list: the selection and the task's header and text change at once on every step,
+  and what costs something (its terminal mounted, its `task show` read, the changes read) waits until the
+  selection has stayed put for 150 ms (`WorkspaceMotion.settle`), so passing a row costs nothing. The task
+  leaving fades in 0.08 s while the next fades in on the spring, so two records never overprint for long, and
+  while it fades it draws the record it showed, read-only: no Answer buttons on a question that may have been
+  answered since (ov-65's O2 still holds: no task ever draws another's record).
   The list keeps the keyboard throughout: a click on a row, ⌥⌘2 and a close all give it to the list.
 - **Closing:** Esc when no terminal or field has the keyboard, a click on the selected task, the **×** at the
   breadcrumb's trailing end, or Back from a task. What's opened leaves and the board widens back. The
@@ -403,7 +410,8 @@ ticket is open, and every change should move on a spring.
   width, and is there as it was when it closes.
 - **A worktree opened** from a task (Open Worktree) stays in the same pane, as does one opened from the
   sidebar. A **loose worktree** (one no workspace claims, or any on a runner without `workstreams`) opens
-  there too, beside its repository's board (Main's, or the implicit one), with no rail.
+  there too, beside its repository's board (Main's, or the implicit one), with that board's orchestrator on
+  the rail, so the rail never comes and goes between them; an implicit board has none.
 - **Focus** (⌃⌘↩) shows what's opened alone: no rail, no board, and a task's terminals and changes at full
   height without its text, in the same views. ⌃⌘↩ again, or Esc when no terminal has the keyboard, puts the
   rest back.
@@ -482,6 +490,18 @@ there. Its rows are now workspaces, and a worktree row shows up only under Workt
   dot, that's about 128 pt for the name and task key: `fc-3-webhooks · bil-9` (136 pt) loses its last characters.
 - At the 220 pt minimum, the same row has about 100 pt, which is `fc-3-webhooks` and no key. Names truncate, as
   they do today, so the narrower sidebar still works.
+
+**Wireframe, a task open beside the board** (ov-85):
+
+```
+┌ Sidebar ──────────┬──┬ Billing ──────────── + ↻ ┬ Billing › bil-3 Tax rounding on credit notes ──── × ┐
+│ ◉ Needs You     3 │O │ ▾ To Do              2   │ bil-3 Tax rounding on credit notes    In Progress ▾ │
+│                   │r │   bil-2 Webhook retries  │ Intent  Round tax per line, not per note.           │
+│ shop              │c │ ▾ In Progress        2   │ Record  …                                           │
+│   Main        ●  1│h │ ▸ bil-3 Tax rounding ◀── │ ─ Worktree tax-rounding · claude working ────────── │
+│ ▸ Billing  ●  2   │  │   bil-1 Invoice PDF      │ [ terminal ]                          [ Changes ]   │
+└───────────────────┴──┴──────── 300 pt ──────────┴─────────────────────────────────────────────────────┘
+```
 
 **Wireframe before ov-85, drilled into a task** (superseded: the board is now the list beside the task):
 
@@ -847,6 +867,9 @@ sessions, windows, worktree order and claims are untouched.
   - "Workspaces are now in the sidebar."
   - "Select one to see its orchestrator and board side by side. Its worktrees are one click down."
   - The button is **OK**.
+  - Superseded (ov-85): the tip now teaches the board-and-task layout, under a fresh key
+    (`tips.tasksBesideBoard`), so it shows once even to whoever dismissed the first: "Tasks now open beside the
+    board." / "Click one to open it. Press ↑ or ↓ to look through the others, and Esc to close it."
 
 **iOS:**
 - Each worktree's remembered terminal (`ShellFleetMap.resume`, `ios/ShellScreen.swift:1943`) carries over to the

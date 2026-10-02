@@ -124,7 +124,7 @@ share. A task with nothing started is just that line.
   list has the keyboard: it swaps in place, and the list keeps its scroll.
 - To close the task, click it again in the list, click the **×** at the end of
   the breadcrumb, or press Esc (when no terminal or field has the keyboard).
-  The board widens back.
+  The board widens back. Return in the list, with a task open, moves into it.
 - Drag the line between the list and the task to make the list wider or
   narrower; it remembers the width. In a window too narrow for both, the task
   covers the board instead, and closing it brings the board back as it was.
@@ -141,7 +141,7 @@ Opening, closing and switching all move on one spring, and you can click again
 while something is still moving.
 
 A worktree with no workspace of its own opens the same way, beside its
-repository's board.
+repository's board, with that board's orchestrator on the rail.
 
 ## Worktrees
 
@@ -175,8 +175,8 @@ don't need to type anything to get it going. You can start one from the
 workspace's row in the sidebar, from its conversation (pop it open from the rail),
 or on either phone.
 
-If an orchestrator's terminal is lost, the conversation column says "The
-orchestrator stopped". **Restart** picks the conversation back up where it left
+If an orchestrator's terminal is lost, its conversation (pop it open from the
+rail) says "The orchestrator stopped". **Restart** picks the conversation back up where it left
 off, and **Replace…** starts a new one. Replacing asks you to confirm first,
 because the orchestrator running now closes. From a terminal:
 
@@ -335,7 +335,6 @@ about a line of work, its board, or the orchestrator driving it, the word is
   workspace's board, charter and orchestrator, which there's one of per line of
   work rather than one per directory.
 - `Move to Workspace` and `Unclaimed` — which worktrees a workspace owns.
-- `Workspaces are now in the sidebar.` — the places you navigate.
 
 A sentence that teaches the relationship needs both words: a workspace owns
 worktrees; a worktree belongs to at most one workspace.
