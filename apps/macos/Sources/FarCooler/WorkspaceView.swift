@@ -126,6 +126,10 @@ struct WorkspaceView<
                     height: height, at: frames.content + frames.board, current: frames.board,
                     shown: drawn.opened && drawn.board, live: now.opened && now.board, content: width - frames.content)
                 openedPane(height: height)
+                    // One piece: a task switched in, or opened from
+                    // closed, is placed inside it and moves with it, rather
+                    // than appearing where the motion ends and fading in.
+                    .geometryGroup()
                     .frame(width: max(0, stage.open == nil ? (leavingWidth ?? frames.opened) : frames.opened), height: height)
                     .offset(x: stage.open == nil ? width + WorkspaceMotion.overhang : frames.openedX)
                     .allowsHitTesting(opened != nil)

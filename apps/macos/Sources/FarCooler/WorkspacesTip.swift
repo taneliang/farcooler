@@ -7,7 +7,7 @@ enum WorkspacesTip {
     static let key = "tips.workspaces"
 
     static let title = "Workspaces are now in the sidebar."
-    static let message = "Select one to see its orchestrator and board side by side. Its worktrees are one click down."
+    static let message = "Select one to see its board, with its orchestrator on the rail beside it. Its worktrees are one click down."
 
     static func shouldShow(_ defaults: UserDefaults = .standard) -> Bool {
         !defaults.bool(forKey: key)

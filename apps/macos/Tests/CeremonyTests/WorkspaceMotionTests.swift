@@ -144,6 +144,9 @@ struct WorkspaceMotionTests {
         // Barely moving, and already open: the board list beside it is
         // clickable where it will be.
         #expect(harness.hit(100) == "board")
+        // Still off to the trailing side, sliding in: not already where the
+        // motion ends, fading in there (frames, ov-85).
+        #expect(harness.hit(900) != "bil-3", "it appeared where the motion ends")
         try? await Task.sleep(for: .seconds(3.5))
         await harness.settle()
         #expect(harness.hit(900) == "bil-3")
