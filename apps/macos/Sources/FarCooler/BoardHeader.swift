@@ -3,13 +3,19 @@ import SwiftUI
 
 /// The board's header: its title, what's waiting, and the controls.
 ///
-/// A board can be as narrow as `WorkspaceColumns.boardMinimum`, and at 1180 pt
-/// it is not much wider, so the header can't assume its controls fit
-/// (ov-81 P1: Refresh, the New Task button and the layout toggle ran out of
-/// the window's edge). It offers three arrangements, and `ViewThatFits` takes
-/// the first that fits whole: every control with its words, then icons only,
-/// then the title and one overflow menu. The last always fits, because its
-/// title is the one thing allowed to truncate.
+/// One row on the board column's grid (ov-83): the workspace's title at
+/// column B, over the sections' titles below it, and the controls at the
+/// trailing edge, each the same 24 pt square — New Task… and Refresh, both
+/// icons. (A list/kanban toggle sat between them until the owner removed the
+/// kanban; Refresh was a bordered word button beside it, and the row read as
+/// crowded.) ⌘R reloads the fleet, from the menu bar, as before.
+///
+/// A board can be as narrow as `WorkspaceColumns.boardMinimum`, so the header
+/// can't assume its sentences fit (ov-81 P1). It offers three arrangements,
+/// and `ViewThatFits` takes the first that fits whole: the waiting count and
+/// any trouble as sentences, then said short, then the title and one overflow
+/// menu. The last always fits, because its title is the one thing allowed to
+/// truncate.
 struct BoardHeader: View {
     let title: String
     let waiting: Int
@@ -17,21 +23,24 @@ struct BoardHeader: View {
     /// What a failed re-read says, when one failed over a board already read.
     let trouble: String?
     let offersWrites: Bool
-    @Binding var choice: BoardForm.Choice
-    /// The form on screen, for the toggle's marking.
-    let drawn: BoardForm?
     @Binding var newTaskOpen: Bool
     let onCreate: (String) async -> Bool
     let onRefresh: () -> Void
 
+    /// Every control's square: the sidebar's, so the app has one size.
+    static let control: CGFloat = SidebarGrid.control
+
     var body: some View {
         ViewThatFits(in: .horizontal) {
             row(.full)
-            row(.icons)
+            row(.short)
             row(.overflow)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        // Title at column B; the controls end at column A's distance from
+        // the trailing edge.
+        .padding(.leading, ColumnGrid.b)
+        .padding(.trailing, ColumnGrid.a)
+        .padding(.vertical, ColumnGrid.rhythm)
         .background(WorkspaceStyle.paneChrome)
         // On the header rather than on the button, so the same form opens
         // from the plus button and from the overflow menu's item.
@@ -40,12 +49,13 @@ struct BoardHeader: View {
         }
     }
 
-    /// How much of the controls a header can afford.
-    enum Level { case full, icons, overflow }
+    /// How much a header can afford to say.
+    enum Level { case full, short, overflow }
 
     private func row(_ level: Level) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: SidebarGrid.gap) {
             Text(title).font(WorkspaceStyle.sectionTitle).lineLimit(1).truncationMode(.tail)
+                .gridMark("header", .text)
             // The one count worth putting in a title bar, and the sentence is
             // the model's like every other one here. Nothing when nothing is
             // waiting — `waitingSentence` is nil at zero, because a badge
@@ -86,32 +96,36 @@ struct BoardHeader: View {
                 }
             }
             switch level {
-            case .full, .icons:
-                if offersWrites { newTaskButton }
-                formToggle
-                if level == .full {
-                    Button("Refresh", action: onRefresh).fixedSize()
-                } else {
-                    Button(action: onRefresh) { Image(systemName: "arrow.clockwise") }
-                        .help("Refresh")
-                        .accessibilityLabel("Refresh")
+            case .full, .short:
+                HStack(spacing: 2) {
+                    if offersWrites {
+                        iconButton("plus", help: "New Task…") { newTaskOpen = true }
+                            .accessibilityIdentifier("board-new-task")
+                    }
+                    iconButton("arrow.clockwise", help: "Refresh", action: onRefresh)
+                        .accessibilityIdentifier("board-refresh")
                 }
             case .overflow:
                 overflowMenu
             }
         }
-        .fixedSize(horizontal: level != .overflow, vertical: false)
+        .frame(minHeight: Self.control)
     }
 
-    private var newTaskButton: some View {
-        Button {
-            newTaskOpen = true
-        } label: {
-            Image(systemName: "plus")
+    /// A control: its glyph in a `control`-point square, borderless, so
+    /// every one is the same size whatever glyph is inside it.
+    private func iconButton(
+        _ symbol: String, help: String, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .medium))
+                .frame(width: Self.control, height: Self.control)
+                .contentShape(Rectangle())
         }
-        .help("New Task…")
-        .accessibilityLabel("New Task…")
-        .accessibilityIdentifier("board-new-task")
+        .buttonStyle(.borderless)
+        .help(help)
+        .accessibilityLabel(help)
     }
 
     /// Everything the header does, in one menu, for a board with no room.
@@ -121,10 +135,9 @@ struct BoardHeader: View {
                 Button("New Task…") { newTaskOpen = true }
             }
             Button("Refresh", action: onRefresh)
-            Divider()
-            layoutPicker
         } label: {
             Image(systemName: "ellipsis.circle")
+                .frame(width: Self.control, height: Self.control)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -132,15 +145,6 @@ struct BoardHeader: View {
         .help("Board Actions")
         .accessibilityLabel("Board Actions")
         .accessibilityIdentifier("board-overflow")
-    }
-
-    private var layoutPicker: some View {
-        Picker("Board Layout", selection: $choice) {
-            Text("Automatic").tag(BoardForm.Choice.auto)
-            Text("List").tag(BoardForm.Choice.list)
-            Text("Kanban").tag(BoardForm.Choice.kanban)
-        }
-        .pickerStyle(.inline)
     }
 
     private func waitingPill(_ text: String) -> some View {
@@ -156,51 +160,4 @@ struct BoardHeader: View {
     /// The waiting pill's short form, for a board too narrow for the
     /// sentence: "2 waiting".
     static func waitingShort(_ count: Int) -> String { "\(count) waiting" }
-
-    /// `≡` List and `▦` Kanban. Clicking one forces it; clicking the one
-    /// forced goes back to Automatic, which is also in the control's menu.
-    /// The form on screen is always marked, and a forced one more strongly.
-    private var formToggle: some View {
-        HStack(spacing: 1) {
-            formButton(.list, symbol: "list.bullet", name: "List")
-            formButton(.kanban, symbol: "rectangle.split.3x1", name: "Kanban")
-        }
-        .padding(2)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
-        .contextMenu { layoutPicker }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("board-form-toggle")
-    }
-
-    private func formButton(_ form: BoardForm, symbol: String, name: String) -> some View {
-        let forced = choice.forced == form
-        let shown = drawn == form
-        return Button {
-            choice = choice.choosing(form)
-        } label: {
-            Image(systemName: symbol)
-                .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
-                .frame(width: 24, height: 18)
-                .foregroundStyle(forced ? Color.white : shown ? Color.primary : Color.secondary)
-                .background(
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(
-                            forced
-                                ? Color.accentColor
-                                : shown ? Color.primary.opacity(0.1) : Color.clear))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(
-            forced
-                ? "Always shown as \(article(form)). Click again to choose by width."
-                : "Always show this board as \(article(form)).")
-        .accessibilityLabel(name)
-        .accessibilityValue(forced ? "Chosen" : shown ? "Shown" : "")
-    }
-
-    /// "a list" or "a kanban", for the toggle's tooltips.
-    private func article(_ form: BoardForm) -> String {
-        form == .list ? "a list" : "a kanban"
-    }
 }

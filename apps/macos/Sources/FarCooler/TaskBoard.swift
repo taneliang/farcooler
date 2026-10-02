@@ -573,13 +573,12 @@ enum TaskBoardWrites {
 /// it is a place in the sidebar like any worktree, and ⇧⌘B or a click on its
 /// row brings it back.
 ///
-/// **Two forms, chosen by the board's own width** (owner decision 3, spec
-/// §5): a status-sectioned list when narrow and the kanban when wide,
-/// measured with a `GeometryReader` on the board and never read from the
-/// window, which the board shares with a sidebar and other columns. The
-/// header's toggle forces either, kept per device and per board. Every
-/// status is drawn in both: a collapsed "Backlog 0" in the list, and an
-/// empty column in the kanban.
+/// **One form, the status-sectioned list**, on the board column's grid
+/// (`ColumnGrid`): each section's chevron at column A, its title at B, its
+/// count trailing, and its cards' text at B. Every status is drawn, an empty
+/// one as a collapsed "Backlog 0". There was a kanban too, for a wide board,
+/// with a toggle in the header; the owner removed both (ov-83), since the
+/// board almost always sits in a narrow column.
 struct TaskBoardView: View {
     @ObservedObject var store: TaskBoardStore
     @ObservedObject var client: DaemonClient
@@ -592,18 +591,12 @@ struct TaskBoardView: View {
     /// Go to a pane working a task. The window's, because only the window can
     /// change what is selected.
     let onGoTo: (BoardPane) -> Void
-    /// Where the form and the collapsed sections are kept. The app's own
-    /// defaults, except in a test.
+    /// Where the collapsed sections are kept. The app's own defaults,
+    /// except in a test.
     let defaults: UserDefaults
 
-    /// The toggle's choice for this board: read from `defaults` in `init`,
-    /// so a board forced to one form never draws a frame in the other before
-    /// its choice is known, and again when the view is handed another board.
-    @State private var choice: BoardForm.Choice
-    /// The form last drawn, which is what the hysteresis keeps between 868
-    /// and 892 pt.
-    @State private var drawn: BoardForm?
-    /// The list's collapsed sections, read the same way.
+    /// The list's collapsed sections: read from `defaults` in `init`, and
+    /// again when the view is handed another board.
     @State private var collapsed: Set<TaskStatus>
     @State private var newTaskOpen = false
 
@@ -617,9 +610,6 @@ struct TaskBoardView: View {
         self.waiting = waiting
         self.onGoTo = onGoTo
         self.defaults = defaults
-        _choice = State(
-            initialValue: BoardForm.Choice.read(
-                host: store.hostKey, workspace: store.workspace.id, from: defaults))
         _collapsed = State(
             initialValue: BoardForm.collapsed(
                 host: store.hostKey, workspace: store.workspace.id, from: defaults))
@@ -644,7 +634,7 @@ struct TaskBoardView: View {
                     }
                 }
             } else {
-                forms
+                list
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -676,7 +666,6 @@ struct TaskBoardView: View {
         .onChange(of: remembered) { old, key in
             BoardVisit.write(Date(), host: old.host, workspace: old.workspace, in: defaults)
             store.beginVisit(in: defaults)
-            choice = BoardForm.Choice.read(host: key.host, workspace: key.workspace, from: defaults)
             collapsed = BoardForm.collapsed(host: key.host, workspace: key.workspace, from: defaults)
         }
     }
@@ -701,7 +690,7 @@ struct TaskBoardView: View {
         BoardHeader(
             title: store.title, waiting: waiting, reading: store.reading,
             trouble: store.hasRead ? store.trouble : nil, offersWrites: store.offersWrites,
-            choice: chosen, drawn: drawn, newTaskOpen: $newTaskOpen,
+            newTaskOpen: $newTaskOpen,
             onCreate: { title in await store.createTask(title: title) },
             onRefresh: { Task { await store.reload() } })
     }
@@ -710,37 +699,11 @@ struct TaskBoardView: View {
     /// sentence: "2 waiting".
     static func waitingShort(_ count: Int) -> String { BoardHeader.waitingShort(count) }
 
-    /// The toggle's choice, kept on this device as it changes.
-    private var chosen: Binding<BoardForm.Choice> {
-        Binding(
-            get: { choice },
-            set: { new in
-                choice = new
-                new.write(host: store.hostKey, workspace: store.workspace.id, in: defaults)
-            })
-    }
-
-    // MARK: - The two forms
-
-    /// The form for the board's own width, measured here.
-    private var forms: some View {
-        GeometryReader { geometry in
-            let form = BoardForm.resolve(
-                width: geometry.size.width, previous: drawn, forced: choice)
-            Group {
-                switch form {
-                case .list: list
-                case .kanban: kanban
-                }
-            }
-            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
-            .onChange(of: form, initial: true) { _, new in drawn = new }
-        }
-    }
+    // MARK: - The list
 
     private var list: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 6) {
+            LazyVStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
                 ForEach(store.board.sections) { section in
                     TaskListSection(
                         section: section,
@@ -749,16 +712,16 @@ struct TaskBoardView: View {
                         store: store, agents: agents, onGoTo: onGoTo)
                 }
                 if !store.board.unreadable.isEmpty {
-                    UnreadableColumnView(rows: store.board.unreadable, width: nil)
+                    UnreadableColumnView(rows: store.board.unreadable)
                 }
             }
-            .padding(BoardForm.boardPadding)
+            // Measured from the board column's edge: the sections' chevrons
+            // and the cards' edges at column A.
+            .padding(.horizontal, ColumnGrid.a)
+            .padding(.vertical, ColumnGrid.rhythm)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("board-list")
-        // From the form itself, not from the value the switch reads, so what
-        // is published is what was drawn.
-        .preference(key: BoardFormPreference.self, value: .list)
     }
 
     /// Open or close one section, and keep it that way on this device.
@@ -770,38 +733,6 @@ struct TaskBoardView: View {
         }
         BoardForm.setCollapsed(
             collapsed, host: store.hostKey, workspace: store.workspace.id, in: defaults)
-    }
-
-    private var kanban: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: BoardForm.columnSpacing) {
-                    // `sections`, not `columns`: every status, whatever the
-                    // board was read with.
-                    ForEach(store.board.sections) { column in
-                        TaskColumnView(column: column, store: store, agents: agents, onGoTo: onGoTo)
-                    }
-                    if !store.board.unreadable.isEmpty {
-                        UnreadableColumnView(rows: store.board.unreadable, width: BoardForm.columnWidth)
-                    }
-                }
-                .padding(BoardForm.boardPadding)
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("board-kanban")
-        .preference(key: BoardFormPreference.self, value: .kanban)
-    }
-}
-
-/// The form a board is drawn in, published by the form that was drawn, for
-/// whatever holds it: the window, which can say which form is on screen, and
-/// `BoardFormWiringTests`, which reads it from a board it can't see. Nil for a
-/// board not drawn yet.
-struct BoardFormPreference: PreferenceKey {
-    static let defaultValue: BoardForm? = nil
-    static func reduce(value: inout BoardForm?, nextValue: () -> BoardForm?) {
-        value = nextValue() ?? value
     }
 }
 
@@ -877,30 +808,34 @@ private struct TaskListSection: View {
     @State private var showingAllDone = false
 
     /// Needs Decision is the one status waiting on the person reading, and
-    /// the only one drawn in the accent color, as in the kanban.
+    /// the only one drawn in the accent color.
     private var leads: Bool { section.status == .needsDecision }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
             Button(action: onToggle) {
-                HStack(spacing: 6) {
+                // Chevron at column A, title at B, count trailing (ov-83).
+                HStack(spacing: 0) {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .bold))
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                         .foregroundStyle(.secondary)
                         .opacity(BoardForm.canExpand(section) ? 1 : 0.35)
+                        .frame(width: ColumnGrid.step, alignment: .leading)
+                        .gridMark("section", .chevron)
                     Text(section.title)
                         .font(WorkspaceStyle.sectionTitle)
                         .foregroundStyle(
                             section.count == 0
                                 ? Color.secondary : leads ? Color.accentColor : Color.primary)
+                        .gridMark("section", .text)
+                    Spacer(minLength: SidebarGrid.gap)
                     Text("\(section.count)")
                         .font(.system(size: WorkspaceStyle.PaneText.secondary))
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
                 }
-                .padding(.vertical, 3)
+                .frame(minHeight: ColumnGrid.rowHeight)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -910,7 +845,7 @@ private struct TaskListSection: View {
             .accessibilityValue(BoardForm.canExpand(section) ? (expanded ? "Expanded" : "Collapsed") : "")
             .accessibilityIdentifier("board-section-\(section.id)")
             if expanded {
-                VStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
                     ForEach(section.visibleRows(showingAllDone: showingAllDone, now: Date())) { row in
                         TaskListRow(
                             row: row, prominent: leads, store: store,
@@ -940,17 +875,22 @@ private struct ShowAllDoneButton: View {
             .buttonStyle(.plain)
             .font(.system(size: WorkspaceStyle.PaneText.secondary))
             .foregroundStyle(.secondary)
-            .padding(.vertical, 2)
+            .gridMark("showAllDone", .text)
+            // At column B, under the cards' text.
+            .padding(.leading, ColumnGrid.step)
             .accessibilityIdentifier("board-show-all-done")
         }
     }
 }
 
-/// One card in the list form, after the iPhone's row: its key, title, what
-/// it asks of you, how long it has sat, how much of its acceptance holds,
-/// and the way to its agent, which sits beside the words rather than under
-/// them, since a list row has the width.
-private struct TaskListRow: View {
+/// One card in the list, after the iPhone's row: its key, title, what it
+/// asks of you, how long it has sat, how much of its acceptance holds, its
+/// labels, and the way to its agent, which sits beside the words rather than
+/// under them, since a list row has the width.
+///
+/// Its edge at column A and its text at B, under its section's title.
+/// Internal rather than private for `BoardCardTickTests`, which draws it.
+struct TaskListRow: View {
     let row: TaskRow
     let prominent: Bool
     @ObservedObject var store: TaskBoardStore
@@ -965,6 +905,14 @@ private struct TaskListRow: View {
                     Text(row.key)
                         .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
                         .foregroundStyle(.secondary)
+                        .gridMark("card", .text)
+                    // A stale row is visibly different, which is the
+                    // board's whole job beyond showing state: a task sitting
+                    // in `todo` that you assumed was in flight is the failure
+                    // mode of the factory. On the board's tick, like the
+                    // sentence and the border: a card crosses a day of
+                    // silence on a quiet board with no data change to redraw
+                    // it, and its three stale marks turn together.
                     BoardTick { now in
                         if row.staleness(at: now) == .stale {
                             Image(systemName: "clock.badge.exclamationmark")
@@ -995,11 +943,18 @@ private struct TaskListRow: View {
                         AcceptanceProgressLabel(progress: progress)
                     }
                 }
+                if !row.labels.isEmpty {
+                    Text(row.labels.joined(separator: " · "))
+                        .font(.system(size: WorkspaceStyle.PaneText.minimum))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             AgentPill(live: live, presence: presence, onGoTo: onGoTo)
         }
-        .padding(9)
+        .padding(.horizontal, ColumnGrid.step)
+        .padding(.vertical, ColumnGrid.rhythm)
         .background(RoundedRectangle(cornerRadius: 8).fill(WorkspaceStyle.paneChrome))
         .overlay(
             BoardTick { now in
@@ -1017,8 +972,8 @@ private struct TaskListRow: View {
     }
 }
 
-/// A card's context menu, the same in both forms: the way to its agent, and
-/// the moves the model offers.
+/// A card's context menu: the way to its agent, and the moves the model
+/// offers.
 private struct TaskRowMenu: View {
     let row: TaskRow
     let live: [BoardPane]
@@ -1039,49 +994,6 @@ private struct TaskRowMenu: View {
                 Button(move.action.title) { Task { await store.move(row, to: move.status) } }
             }
         }
-    }
-}
-
-/// One column, headed by its status.
-private struct TaskColumnView: View {
-    let column: TaskBoardColumn
-    @ObservedObject var store: TaskBoardStore
-    let agents: BoardAgents
-    let onGoTo: (BoardPane) -> Void
-    @State private var showingAllDone = false
-
-    /// The only state waiting on the person looking at the board, so it is the
-    /// only one drawn in the accent color. Everything competing for
-    /// prominence is nothing having it.
-    private var leads: Bool { column.status == .needsDecision }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Text(column.title)
-                    .font(WorkspaceStyle.sectionTitle)
-                    .foregroundStyle(leads ? Color.accentColor : Color.primary)
-                Text("\(column.count)")
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(.secondary)
-            }
-            ScrollView {
-                LazyVStack(spacing: 8) {
-                    ForEach(column.visibleRows(showingAllDone: showingAllDone, now: Date())) { row in
-                        TaskCardRow(
-                            row: row, prominent: leads, store: store,
-                            live: agents.live(for: row), presence: agents.presence(for: row),
-                            onGoTo: onGoTo)
-                    }
-                    ShowAllDoneButton(section: column, showingAll: $showingAllDone)
-                }
-            }
-        }
-        .frame(width: BoardForm.columnWidth)
-        .padding(BoardForm.columnPadding)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(leads ? Color.accentColor.opacity(0.07) : WorkspaceStyle.document))
     }
 }
 
@@ -1110,99 +1022,6 @@ private struct CardTimeLines: View {
                     .foregroundStyle(.secondary)
             }
         }
-    }
-}
-
-/// One card. Internal rather than private for `BoardCardTickTests`, which
-/// draws it.
-struct TaskCardRow: View {
-    let row: TaskRow
-    let prominent: Bool
-    @ObservedObject var store: TaskBoardStore
-    /// The panes working this task, and what the card says about them. Both
-    /// decided by AgentKit's rule; see `BoardAgents`.
-    let live: [BoardPane]
-    let presence: TaskAgentPresence
-    let onGoTo: (BoardPane) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(row.key)
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                // A stale row is visibly different, which is the board's whole
-                // job beyond showing state: a task sitting in `todo` that you
-                // assumed was in flight is the failure mode of the factory,
-                // and one rendered identically to a task that moved a minute
-                // ago is what lets it happen.
-                //
-                // On the board's tick, like the sentence and the border: a
-                // card crosses a day of silence on a quiet board, with no data
-                // change to redraw it, and its three stale marks turn together.
-                BoardTick { now in
-                    if row.staleness(at: now) == .stale {
-                        Image(systemName: "clock.badge.exclamationmark")
-                            .foregroundStyle(.orange)
-                            .font(.system(size: WorkspaceStyle.PaneText.body))
-                    }
-                }
-            }
-            Text(row.title)
-                .font(
-                    .system(
-                        size: WorkspaceStyle.PaneText.body,
-                        weight: prominent ? .semibold : .regular)
-                )
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
-            // Both sentences come from the model. Composing either here would
-            // put the board's only real copy where nothing reads it back.
-            if let call = row.callToAction {
-                Text(call)
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
-                    .foregroundStyle(Color.accentColor)
-            }
-            CardTimeLines(
-                row: row,
-                staleSize: WorkspaceStyle.PaneText.secondary,
-                timeSize: WorkspaceStyle.PaneText.minimum)
-            // How far along it is, and who is on it: the two things a card
-            // says about the work rather than about the task.
-            if row.acceptanceProgress != nil || presence.title != nil {
-                HStack(alignment: .center, spacing: 6) {
-                    if let progress = row.acceptanceProgress {
-                        AcceptanceProgressLabel(progress: progress)
-                    }
-                    Spacer(minLength: 0)
-                    AgentPill(live: live, presence: presence, onGoTo: onGoTo)
-                }
-            }
-            if !row.labels.isEmpty {
-                Text(row.labels.joined(separator: " · "))
-                    .font(.system(size: WorkspaceStyle.PaneText.minimum))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-        }
-        .padding(9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8).fill(WorkspaceStyle.paneChrome)
-        )
-        .overlay(
-            BoardTick { now in
-                let stale = row.staleness(at: now) == .stale
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(
-                        stale ? Color.orange.opacity(0.55) : WorkspaceStyle.hairline,
-                        lineWidth: stale ? 1 : 0.5)
-            }
-        )
-        .contentShape(Rectangle())
-        .onTapGesture { store.choose(row) }
-        .contextMenu { TaskRowMenu(row: row, live: live, store: store, onGoTo: onGoTo) }
     }
 }
 
@@ -1317,16 +1136,20 @@ private struct GoToAgentItems: View {
 /// makes work vanish from a board whose whole claim is that it shows the work.
 private struct UnreadableColumnView: View {
     let rows: [UnreadableTaskRow]
-    /// A kanban column's width, or nil for the list, where it spans the board.
-    let width: CGFloat?
 
+    /// A section like the statuses above it: its heading at column B, and
+    /// its rows as cards with their edges at A and their text at B.
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Not On This Version").font(WorkspaceStyle.sectionTitle)
-            Text("This runner uses states this Far Cooler doesn’t have yet.")
-                .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Not On This Version").font(WorkspaceStyle.sectionTitle)
+                    .gridMark("unreadable", .text)
+                Text("This runner uses states this Far Cooler doesn’t have yet.")
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.leading, ColumnGrid.step)
             ForEach(rows) { row in
                 VStack(alignment: .leading, spacing: 3) {
                     Text(row.key)
@@ -1340,16 +1163,13 @@ private struct UnreadableColumnView: View {
                         .font(.system(size: WorkspaceStyle.PaneText.minimum, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
-                .padding(9)
+                .padding(.horizontal, ColumnGrid.step)
+                .padding(.vertical, ColumnGrid.rhythm)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: 8).fill(WorkspaceStyle.paneChrome))
             }
-            if width != nil { Spacer() }
         }
-        .frame(width: width, alignment: .leading)
-        .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
-        .padding(BoardForm.columnPadding)
-        .background(RoundedRectangle(cornerRadius: 10).fill(WorkspaceStyle.document))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

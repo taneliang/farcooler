@@ -1,5 +1,105 @@
 import SwiftUI
 
+/// The four columns the sidebar and the board column both lay out on, Finder
+/// and Mail style (ov-83), measured from the column's leading edge: every
+/// chevron, icon and text start sits on one of these, and nothing falls
+/// between. One 18 pt step apart, the width of a disclosure chevron's cell,
+/// so a row one level in starts exactly one column further over.
+///
+/// The owner's screenshot of 2 October counted six left edges down the
+/// sidebar, among them a repository's name 12 pt in from everything else,
+/// pushed there by a chevron cell that was drawn invisibly while open.
+/// `GridGeometryTests` reads where each row type's marks really land, through
+/// `gridMark(_:_:)`, and fails on any that isn't one of these.
+enum ColumnGrid {
+    /// One column to the next.
+    static let step: CGFloat = 18
+    /// The first column: the sidebar's title, its search, a repository's
+    /// name, a workspace's chevron; the board's section chevrons.
+    static let a: CGFloat = 16
+    /// The second: a workspace's glyph, a worktree's chevron, Needs You's
+    /// text; the board's section titles, its summary and its header title.
+    static let b: CGFloat = a + step
+    /// The third: a workspace's name, a worktree's branch glyph.
+    static let c: CGFloat = b + step
+    /// The fourth: a worktree's title and branch, a terminal's dot.
+    static let d: CGFloat = c + step
+
+    /// Column `n`, counting `a` as 0: the columns past `d` keep the step.
+    static func column(_ n: Int) -> CGFloat { a + CGFloat(n) * step }
+
+    /// Whether `x` is a column, to within a rounding error.
+    static func isColumn(_ x: CGFloat) -> Bool {
+        let n = ((x - a) / step).rounded()
+        return n >= 0 && abs(x - column(Int(n))) < 0.5
+    }
+
+    /// The vertical base: row heights and the space between sections are
+    /// multiples of it.
+    static let rhythm: CGFloat = 8
+    /// A one-line row: a workspace, Needs You, a board section's heading.
+    static let rowHeight: CGFloat = 3 * rhythm
+    /// A two-line row: a worktree, its title over its branch.
+    static let twoLineRowHeight: CGFloat = 5 * rhythm
+}
+
+/// What a mark in a row is, for `GridGeometryTests`.
+enum GridRole: String, Sendable {
+    case chevron, icon, text
+}
+
+/// One mark a row reported: which row type, which kind of mark, and where it
+/// is. Reported only under `gridProbing`, so the app itself pays nothing.
+struct GridMark {
+    let row: String
+    let role: GridRole
+    let bounds: Anchor<CGRect>
+}
+
+struct GridMarksKey: PreferenceKey {
+    static let defaultValue: [GridMark] = []
+    static func reduce(value: inout [GridMark], nextValue: () -> [GridMark]) {
+        value += nextValue()
+    }
+}
+
+private struct GridProbingKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Whether rows report their marks: set by `GridGeometryTests` around the
+    /// real row views, and never by the app.
+    var gridProbing: Bool {
+        get { self[GridProbingKey.self] }
+        set { self[GridProbingKey.self] = newValue }
+    }
+}
+
+private struct GridMarkModifier: ViewModifier {
+    let row: String
+    let role: GridRole
+    @Environment(\.gridProbing) private var probing
+
+    func body(content: Content) -> some View {
+        if probing {
+            content.anchorPreference(key: GridMarksKey.self, value: .bounds) {
+                [GridMark(row: row, role: role, bounds: $0)]
+            }
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    /// Say that this view is `row`'s `role` mark — its chevron cell, its icon
+    /// cell or its text — so a geometry test can read where it really landed.
+    func gridMark(_ row: String, _ role: GridRole) -> some View {
+        modifier(GridMarkModifier(row: row, role: role))
+    }
+}
+
 /// The sidebar's one column system.
 ///
 /// This exists because the previous arrangement had four independent sources of
@@ -18,11 +118,13 @@ import SwiftUI
 /// three that were live duplicated values already here. Two single sources of
 /// truth is none, so it is gone and its survivors are below.
 enum SidebarGrid {
-    /// The band's inset from the window edge. One number, one place.
-    static let edge: CGFloat = 14
+    /// The band's inset from the window edge: column A. One number, one
+    /// place.
+    static let edge: CGFloat = ColumnGrid.a
 
-    /// The disclosure chevron's column, and therefore one indent level.
-    static let gutter: CGFloat = 18
+    /// The disclosure chevron's column, and therefore one indent level: one
+    /// grid step.
+    static let gutter: CGFloat = ColumnGrid.step
 
     /// How far `ContentView.sidebarRow` indents a row drawn at `depth`.
     static func indent(_ depth: Int) -> CGFloat { CGFloat(depth) * gutter }
@@ -41,8 +143,16 @@ enum SidebarGrid {
     /// frame its chevron is drawn in.
     static let chevronColumn: CGFloat = gutter
 
-    /// Where a workspace or worktree row drawn at `depth` starts its text.
-    static func text(depth: Int) -> CGFloat { chevron(depth: depth) + chevronColumn }
+    /// Where a workspace or worktree row drawn at `depth` puts its glyph:
+    /// the column after its chevron.
+    static func glyph(depth: Int) -> CGFloat { chevron(depth: depth) + chevronColumn }
+
+    /// The width of a row's glyph cell: one column.
+    static let glyphColumn: CGFloat = gutter
+
+    /// Where a workspace or worktree row drawn at `depth` starts its text,
+    /// the column after its glyph.
+    static func text(depth: Int) -> CGFloat { glyph(depth: depth) + glyphColumn }
 
     /// Space between a marker and the text it belongs to.
     static let gap: CGFloat = 8
@@ -62,19 +172,16 @@ enum SidebarGrid {
     /// the same box whatever glyph is inside it.
     static let control: CGFloat = 24
 
-    /// Breathing room inside primary worktree and terminal rows.
-    ///
-    /// Four points gives single-line children a native source-list cadence and
-    /// leaves two-line worktrees comfortable without making a long fleet feel
-    /// vertically inflated. Secondary rows such as Hidden remain denser.
+    /// Breathing room inside primary worktree and terminal rows, inside the
+    /// row's `ColumnGrid.rowHeight` or `twoLineRowHeight`.
     static let rowVerticalPadding: CGFloat = 4
 
-    /// Hidden and Unclaimed headings, denser than a primary row on purpose:
-    /// they are secondary, and a fleet of them should not inflate the list.
-    static let headerVerticalPadding: CGFloat = 3
+    /// Hidden and Unclaimed headings, and the rows inside Hidden: secondary,
+    /// so held to the one-line row height and no taller.
+    static let headerVerticalPadding: CGFloat = 4
 
-    /// The rows inside a Hidden group, denser still.
-    static let secondaryRowVerticalPadding: CGFloat = 2
+    /// The rows inside a Hidden group.
+    static let secondaryRowVerticalPadding: CGFloat = 4
 
     /// A row's fill while the pointer is over it.
     static let hoverFill = Color.primary.opacity(0.045)
@@ -82,14 +189,14 @@ enum SidebarGrid {
     /// Project labels separate groups, so the space before one is deliberately
     /// larger than the space after it. That makes each heading belong to the
     /// worktrees below instead of floating halfway between two projects.
-    static let projectTopPadding: CGFloat = 14
-    static let projectBottomPadding: CGFloat = 2
+    static let projectTopPadding: CGFloat = 2 * ColumnGrid.rhythm
+    static let projectBottomPadding: CGFloat = 0
 }
 
 /// One row of the sidebar, in the band every other row uses.
 ///
-/// `indent` is in LEVELS, not points: 0 heads a section, 1 is a worktree, 2 is a
-/// terminal under it. A caller that wants to nudge something by three points is
+/// `indent` is in LEVELS, not points: each is one `ColumnGrid` step, so a row
+/// drawn at `indent` n starts at column n (0 is column A). A caller that wants to nudge something by three points is
 /// a caller about to break the column, which is exactly how this got out of
 /// alignment before.
 struct SidebarRow<Content: View>: View {
@@ -161,6 +268,7 @@ extension SidebarMenuItem {
             let invoker = MenuInvoker(item.action)
             entry.target = invoker
             entry.representedObject = invoker
+            entry.state = item.isChecked ? .on : .off
             menu.addItem(entry)
         }
         // Below the control, aligned to its leading edge — expressed in the
@@ -222,6 +330,8 @@ struct SidebarMenuItem {
     let title: String
     let action: () -> Void
     var isSeparator = false
+    /// Drawn with a checkmark: the current choice, in a menu that picks one.
+    var isChecked = false
 
     /// A computed property, not a stored one: a struct holding a closure is
     /// not `Sendable`, and a `static let` of one is a concurrency error under

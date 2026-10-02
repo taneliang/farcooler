@@ -27,8 +27,10 @@ enum WorkspaceColumns {
     /// The conversation's minimum, in terminal columns: every fixed line an
     /// orchestrator shows fits, and it's what an iPhone shows.
     static let conversationColumns = 48
-    /// The board's minimum: one kanban column's outer width, a 260 pt card
-    /// plus its 10 pt padding each side.
+    /// The board's minimum: room for a list card's key, a short title and
+    /// its agent pill. It was one kanban column's outer width, a 260 pt card
+    /// plus its 10 pt padding each side, before the kanban was removed
+    /// (ov-83), and still fits the list.
     static let boardMinimum: CGFloat = 280
     /// The board's width when there's room: a list with room for its rows'
     /// titles, and not so wide the conversation loses a column for it.

@@ -1,0 +1,254 @@
+import AgentKit
+import AppKit
+import SwiftUI
+import Testing
+
+@testable import Far_Cooler
+
+/// The sidebar and the board column on one grid (ov-83): every chevron, icon
+/// and text start of every row type lands on a `ColumnGrid` column, and on
+/// the one the owner's ruling names.
+///
+/// Measured, not computed. The real row views are drawn, each reporting
+/// where its marks landed through `gridMark(_:_:)`, at the depth
+/// `ContentView.sidebarRows` gives it; and the board is the real
+/// `TaskBoardView`, over a board read through a stubbed CLI. ov-78's
+/// `SidebarColumnTests` read the constants the rows were meant to lay out
+/// from, and passed while a repository's name sat 12 pt off its column,
+/// pushed there by a chevron cell drawn invisibly.
+@MainActor
+struct GridGeometryTests {
+    struct Mark: CustomStringConvertible {
+        let row: String
+        let role: GridRole
+        let x: CGFloat
+        var description: String { "\(row).\(role.rawValue) at \(x)" }
+    }
+
+    final class Box {
+        var marks: [Mark] = []
+        func record(_ marks: [GridMark], _ proxy: GeometryProxy) {
+            self.marks = marks.map { Mark(row: $0.row, role: $0.role, x: proxy[$0.bounds].minX) }
+        }
+    }
+
+    /// `content` with its marks switched on, read in its own coordinates.
+    struct Probe<Content: View>: View {
+        let box: Box
+        let content: Content
+        var body: some View {
+            content
+                .environment(\.gridProbing, true)
+                .overlayPreferenceValue(GridMarksKey.self) { marks in
+                    GeometryReader { proxy in
+                        let _ = box.record(marks, proxy)
+                        Color.clear
+                    }
+                }
+        }
+    }
+
+    /// Draw `view` `width` wide, top-left, in an unshown window, and read
+    /// back its marks.
+    private func marks<V: View>(_ view: V, width: CGFloat, height: CGFloat = 900) async -> [Mark] {
+        let box = Box()
+        let root = Probe(box: box, content: view.frame(width: width, height: height, alignment: .topLeading))
+        let host = NSHostingView(rootView: root)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: width, height: height), styleMask: [.borderless],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+        for _ in 0..<10 {
+            host.layoutSubtreeIfNeeded()
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return box.marks
+    }
+
+    /// Every mark on a column, each named one on its own, and every named
+    /// one drawn.
+    private func check(_ marks: [Mark], expect: [String: CGFloat]) {
+        for mark in marks {
+            #expect(ColumnGrid.isColumn(mark.x), "\(mark) is between columns")
+        }
+        for (name, column) in expect.sorted(by: { $0.key < $1.key }) {
+            let found = marks.filter { "\($0.row).\($0.role.rawValue)" == name }
+            #expect(!found.isEmpty, "no \(name) was drawn")
+            for mark in found {
+                #expect(abs(mark.x - column) < 0.5, "\(mark), not at \(column)")
+            }
+        }
+    }
+
+    // MARK: - The sidebar
+
+    private static let terminal = Terminal(
+        id: "t", short: "t", title: "claude", preset: "claude", state: "running", epoch: 0)
+
+    private static func worktree(_ id: String, workspace: String?, hidden: Bool = false) -> Worktree {
+        Worktree(
+            id: id, short: id, task: id, branch: "feat/\(id)", repository: "r", host: "",
+            path: "/tmp/\(id)", state: hidden ? "hidden" : "active", terminals: [terminal],
+            repositoryID: "repo", workspace: workspace)
+    }
+
+    /// One repository: Main with a worktree, an empty workspace, and an
+    /// unclaimed worktree; every row type the sidebar draws, at the depths
+    /// `sidebarRows` gives them.
+    private static func rows() -> [SidebarEntry] {
+        var fleet = Fleet(
+            runtimeHealthy: true, livePanes: 0,
+            worktrees: [worktree("w", workspace: "ws"), worktree("u", workspace: nil)],
+            branchPrefix: nil)
+        fleet.runnerWorkspaces[""] = [
+            WorkspaceSummary(id: "ws", name: "Main", taskPrefix: "fc", isMain: true, ordinal: 0, repository: "repo"),
+            WorkspaceSummary(id: "e", name: "Empty", taskPrefix: "em", isMain: false, ordinal: 1, repository: "repo"),
+        ]
+        return ContentView.sidebarRows(fleet: fleet, open: { _ in true })
+    }
+
+    private struct Search: View {
+        @State private var query = ""
+        @FocusState private var focused: Bool
+        var body: some View { SidebarSearchRow(query: $query, focused: $focused) }
+    }
+
+    private static func section(_ worktree: Worktree) -> WorktreeSection {
+        WorktreeSection(
+            worktree: worktree, isExpanded: true, selected: nil, onSelect: { _ in }, onToggle: {},
+            onNewTerminal: {}, onHide: {}, onUnhide: {}, onRemove: {},
+            onTerminalAction: { _, _ in })
+    }
+
+    @ViewBuilder
+    private static func draw(_ entry: SidebarEntry) -> some View {
+        switch entry.kind {
+        case .repository:
+            ProjectHeader(name: entry.project, count: 1, onToggleCollapse: {})
+                .sidebarDepth(entry.depth)
+        case .workspace(let name):
+            WorkspaceRow(
+                name: name, workspace: entry.workspace?.id ?? "", taskPrefix: "fc", seat: nil,
+                implicit: false, count: 1, unread: false, isSelected: false, onSelect: {},
+                actions: nil, isOpen: true)
+                .sidebarDepth(entry.depth)
+        case .worktree:
+            section(entry.worktree!).sidebarDepth(entry.depth)
+        case .noWorktrees:
+            NoWorktreesRow().sidebarDepth(entry.depth)
+        case .unclaimed:
+            UnclaimedWorktrees(
+                worktrees: entry.worktrees, isExpanded: true, onToggle: {},
+                row: { section($0).sidebarDepth(1) })
+                .sidebarDepth(entry.depth)
+        case .hidden:
+            EmptyView()
+        }
+    }
+
+    @Test("Every sidebar row's chevron, icon and text is on a grid column")
+    func theSidebarIsOnTheGrid() async {
+        let rows = Self.rows()
+        #expect(
+            rows.map(\.kind) == [
+                .repository, .workspace("Main"), .worktree("w"), .workspace("Empty"), .noWorktrees,
+                .unclaimed(count: 1),
+            ])
+        let sidebar = VStack(alignment: .leading, spacing: 0) {
+            SidebarTitleRow(busy: false) { EmptyView() }
+            Search()
+            NeedsYouRow(count: 2, isSelected: false, onSelect: {})
+            ForEach(rows) { Self.draw($0) }
+            HiddenWorktrees(
+                project: "r", worktrees: [Self.worktree("h", workspace: nil, hidden: true)],
+                isExpanded: true, onToggle: {}, onUnhide: { _ in })
+            // A silent runner's header, which names the runner.
+            ProjectHeader(name: "carl", count: 0)
+        }
+        let found = await marks(sidebar, width: 260, height: 1200)
+        check(found, expect: [
+            "title.text": ColumnGrid.a,
+            "search.text": ColumnGrid.a,
+            "needsYou.icon": ColumnGrid.a,
+            "needsYou.text": ColumnGrid.b,
+            "repository.text": ColumnGrid.a,
+            "workspace.chevron": ColumnGrid.a,
+            "workspace.icon": ColumnGrid.b,
+            "workspace.text": ColumnGrid.c,
+            "worktree.chevron": ColumnGrid.b,
+            "worktree.icon": ColumnGrid.c,
+            "worktree.text": ColumnGrid.d,
+            "worktree.branch.text": ColumnGrid.d,
+            "terminal.icon": ColumnGrid.d,
+            "terminal.text": ColumnGrid.column(4),
+            "noWorktrees.text": ColumnGrid.c,
+            "group.chevron": ColumnGrid.a,
+            "group.icon": ColumnGrid.b,
+            "group.text": ColumnGrid.c,
+            "hidden.text": ColumnGrid.d,
+            "runner.icon": ColumnGrid.a,
+            "runner.text": ColumnGrid.b,
+        ])
+    }
+
+    // MARK: - The board column
+
+    /// A store read through a stubbed CLI: three tasks, all new in the last
+    /// day, so the summary has groups to draw.
+    private static func store() async -> TaskBoardStore {
+        let client = DaemonClient(target: "", notifications: NotificationCenter())
+        let now = Int64(Date().timeIntervalSince1970 * 1000) - 60_000
+        client.commandRunnerForTesting = { args in
+            guard args.starts(with: ["task", "list"]) else { return (Data(), nil) }
+            let tasks = [
+                ("t1", "ov-81", "General polish", "done"),
+                ("t2", "ov-1234", "Polish the sidebar", "needs_decision"),
+                ("t3", "ov-9", "Coordinator", "todo"),
+            ].map { id, key, title, status in
+                #"{"id":"\#(id)","key":"\#(key)","title":"\#(title)","status":"\#(status)","status_since":\#(now),"created_at":\#(now),"updated_at":\#(now)}"#
+            }
+            return (Data(#"{"tasks":[\#(tasks.joined(separator: ","))]}"#.utf8), nil)
+        }
+        let store = TaskBoardStore(client: client, workspace: .implicit(repository: "r"))
+        await store.readIfNeverRead()
+        return store
+    }
+
+    @Test("Every board row's chevron and text is on the board column's grid", arguments: [false, true])
+    func theBoardIsOnTheGrid(collapsedSummary: Bool) async {
+        let store = await Self.store()
+        #expect(store.board.rows.count == 3)
+        let defaults = UserDefaults(suiteName: "grid-\(UUID().uuidString)")!
+        defaults.set(collapsedSummary, forKey: "board.summary.collapsed.\(store.hostKey).\(store.workspace.id)")
+        let board = TaskBoardView(
+            store: store, client: store.client, agents: .none, onGoTo: { _ in }, defaults: defaults)
+        let found = await marks(board, width: WorkspaceColumns.boardIdeal)
+        var expect: [String: CGFloat] = [
+            "header.text": ColumnGrid.b,
+            "summary.chevron": ColumnGrid.a,
+            "summary.text": ColumnGrid.b,
+            "section.chevron": ColumnGrid.a,
+            "section.text": ColumnGrid.b,
+            "card.text": ColumnGrid.b,
+        ]
+        if !collapsedSummary {
+            expect["summary.group.text"] = ColumnGrid.b
+            expect["summary.key.text"] = ColumnGrid.b
+        }
+        check(found, expect: expect)
+        // The items' titles in one column after the widest key, "ov-1234":
+        // past the key, and the same x for every item.
+        let titles = Set(found.filter { $0.row == "summary.title" }.map(\.x))
+        #expect(titles.count == (collapsedSummary ? 0 : 1), "titles at \(titles)")
+        if let title = titles.first { #expect(title > ColumnGrid.c, "a title at \(title) overlaps its key") }
+    }
+
+    @Test func theCollapsedStripIsOneLine() {
+        #expect(BoardSummaryStrip.collapsedLine(count: 2, period: .sinceLastVisit) == "2 new since your last visit")
+        #expect(BoardSummaryStrip.collapsedLine(count: 0, period: .sinceLastVisit) == "Nothing new since your last visit")
+        #expect(BoardSummaryStrip.collapsedLine(count: 1, period: .lastHour) == "1 new in the last hour")
+        #expect(BoardSummaryStrip.collapsedLine(count: 3, period: .today) == "3 new today")
+    }
+}

@@ -39,8 +39,8 @@ struct ChecklistFixesTests {
     }
 }
 
-/// The sidebar's columns, measured from its edge (ov-78, replacing ov-63
-/// M3's): a plain tree, each level's text one step in from its parent's.
+/// The sidebar's columns, measured from its edge (ov-83's grid, replacing
+/// ov-78's and ov-63 M3's): a plain tree, each level one column in.
 /// Read from what the rows lay out from (`SidebarGrid.chevron(depth:)`,
 /// `text(depth:)`, `TerminalRow.columns(depth:)`, and the depth
 /// `sidebarRows` gives each row), so a change to a row's inset, its chevron
@@ -64,16 +64,19 @@ struct SidebarColumnTests {
         // The worktree directly under its workspace.
         #expect(rows.map(\.kind) == [.repository, .workspace("Main"), .worktree("w")])
         let workspace = rows[1].depth, worktree = rows[2].depth
-        // Repository text at 14, a workspace's chevron there too and its
-        // name at 32; a worktree's chevron under that name, its title at 50.
-        #expect(SidebarGrid.edge + SidebarGrid.indent(rows[0].depth) == 14)
-        #expect(SidebarGrid.chevron(depth: workspace) == 14)
-        #expect(SidebarGrid.text(depth: workspace) == 32)
-        #expect(SidebarGrid.chevron(depth: worktree) == 32)
-        #expect(SidebarGrid.text(depth: worktree) == 50)
-        // A terminal's dot under its worktree's title, its name past it.
+        // On ov-83's grid: repository text at A, a workspace's chevron
+        // there too, its glyph at B and its name at C; a worktree's chevron
+        // under that glyph, its glyph under the name, its title at D.
+        // `GridGeometryTests` measures the drawn rows against the same.
+        #expect(SidebarGrid.edge + SidebarGrid.indent(rows[0].depth) == ColumnGrid.a)
+        #expect(SidebarGrid.chevron(depth: workspace) == ColumnGrid.a)
+        #expect(SidebarGrid.glyph(depth: workspace) == ColumnGrid.b)
+        #expect(SidebarGrid.text(depth: workspace) == ColumnGrid.c)
+        #expect(SidebarGrid.chevron(depth: worktree) == ColumnGrid.b)
+        #expect(SidebarGrid.text(depth: worktree) == ColumnGrid.d)
+        // A terminal's dot under its worktree's title, its name a column on.
         let terminal = TerminalRow.columns(depth: worktree)
-        #expect(terminal.glyph == 50)
-        #expect(terminal.text == 65)
+        #expect(terminal.glyph == ColumnGrid.d)
+        #expect(terminal.text == ColumnGrid.column(4))
     }
 }

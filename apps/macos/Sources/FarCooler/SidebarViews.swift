@@ -60,6 +60,9 @@ extension View {
 /// It expands on its own when something inside wants the user, because a
 /// collapsed row that hides the agent asking a question defeats the point.
 struct WorktreeSection: View {
+    /// What a worktree is drawn as in its glyph column: a branch.
+    static let glyph = "arrow.triangle.branch"
+
     /// The one drag in flight anywhere in the sidebar. An `@ObservedObject` on
     /// the shared instance rather than a parameter: `worktreeRow` already
     /// passes eighteen arguments and its own comment records that a nineteenth
@@ -206,6 +209,9 @@ struct WorktreeSection: View {
     /// children rather than another run of equal rows.
     private var header: some View {
         HStack(alignment: .center, spacing: 0) {
+            // Chevron, branch glyph, then the title over its branch: one
+            // column each (ov-83), so under a workspace the chevron is at B,
+            // the glyph at C and both lines at D.
             Button(action: onToggle) {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
@@ -215,6 +221,14 @@ struct WorktreeSection: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .gridMark("worktree", .chevron)
+
+            Image(systemName: Self.glyph)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tertiary)
+                .frame(width: SidebarGrid.glyphColumn, height: 16, alignment: .leading)
+                .gridMark("worktree", .icon)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 1) {
                 // With its open tasks' keys, "fc-3-webhooks · bil-9", so a
@@ -222,6 +236,7 @@ struct WorktreeSection: View {
                 Text(worktree.rowTitle)
                     .font(WorkspaceStyle.sidebarPrimary)
                     .lineLimit(1)
+                    .gridMark("worktree", .text)
 
                 HStack(spacing: 5) {
                     Text(worktree.isMainCheckout ? "Main checkout" : worktree.branch)
@@ -229,6 +244,7 @@ struct WorktreeSection: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .gridMark("worktree.branch", .text)
 
                     if worktree.worktreeMissing {
                         Text("worktree gone")
@@ -385,6 +401,7 @@ struct WorktreeSection: View {
                 alignment: .trailing)
             .padding(.leading, SidebarGrid.cellGap)
         }
+        .frame(minHeight: ColumnGrid.twoLineRowHeight - 2 * SidebarGrid.rowVerticalPadding)
         .padding(.vertical, SidebarGrid.rowVerticalPadding)
         .padding(.horizontal, SidebarGrid.rowInset)
         .background(
@@ -551,36 +568,25 @@ struct ProjectHeader: View {
         SidebarRow {
             HStack(spacing: 0) {
                 // Flush, like a section of Finder's sidebar: a repository
-                // heads its workspaces rather than containing them, so it
-                // takes no gutter of its own and they take no indent under
-                // it (ov-63). A silent runner's header keeps its machine
-                // icon, which is what says it names a runner.
+                // heads its workspaces rather than containing them, so its
+                // name is at column A with no chevron, open or closed
+                // (ov-83). Show and Hide are words at the trailing edge, on
+                // hover, as in Finder. A silent runner's header keeps its
+                // machine icon at A, which is what says it names a runner,
+                // and its name at B, like Needs You.
                 if onToggleCollapse == nil {
                     Image(systemName: "desktopcomputer")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.tertiary)
-                        .padding(.trailing, 5)
-                }
-
-                // Finder's Show and Hide, as a chevron in the leading column,
-                // the same side as the workspace and worktree chevrons; counts
-                // and glyphs trail. The whole row toggles; this says so.
-                if onToggleCollapse != nil {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(isCollapsed ? 0 : 90))
-                        .frame(width: 12, height: SidebarGrid.control, alignment: .leading)
-                        // Kept while collapsed: a section with nothing under
-                        // it has to say it can open.
-                        .opacity(hovering || isCollapsed ? 1 : 0)
-                        .accessibilityLabel(isCollapsed ? "Show \(name)" : "Hide \(name)")
+                        .frame(width: SidebarGrid.glyphColumn, alignment: .leading)
+                        .gridMark("runner", .icon)
                 }
 
                 HStack(spacing: 6) {
                     Text(name)
                         .font(WorkspaceStyle.sectionTitle)
                         .foregroundStyle(.secondary)
+                        .gridMark(onToggleCollapse == nil ? "runner" : "repository", .text)
                     if showHost {
                         Text(host.isEmpty ? "This Mac" : host)
                             .font(.system(size: 10.5))
@@ -625,6 +631,17 @@ struct ProjectHeader: View {
                         .opacity(hovering ? 1 : 0)
                     }
 
+                    // Finder's own words for a sidebar section, at the
+                    // trailing edge. Kept while collapsed: a section with
+                    // nothing under it has to say it can open.
+                    if let onToggleCollapse {
+                        Button(isCollapsed ? "Show" : "Hide", action: onToggleCollapse)
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .opacity(hovering || isCollapsed ? 1 : 0)
+                            .accessibilityLabel(isCollapsed ? "Show \(name)" : "Hide \(name)")
+                    }
                 }
             }
         }
@@ -784,28 +801,31 @@ struct TerminalRow: View {
     /// alone.
     private var ticking: Bool { status == .working || status == .blocked }
 
-    /// The gap between the status column and the text beside it.
-    ///
-    /// Named rather than written twice: the feed's lines below have to begin
-    /// in the same column the terminal's name does, and two hand-written 7s is
-    /// exactly how a column goes out of alignment — see `SidebarGrid`'s own
-    /// note on the four insets that used to be chosen locally.
+    /// The gap between the name and what follows it on the status line.
     private static let markerGap: CGFloat = 7
 
-    /// The row's leading inset inside its highlight: one step past the
+    /// How far the name, and the feed's lines under it, start from the
+    /// status glyph: one grid column, the glyph's cell (ov-83).
+    ///
+    /// Named rather than written twice: the feed's lines below have to begin
+    /// in the same column the terminal's name does, and two hand-written
+    /// numbers is exactly how a column goes out of alignment.
+    private static let textOffset: CGFloat = SidebarGrid.glyphColumn
+
+    /// The row's leading inset inside its highlight: two steps past the
     /// band's.
     ///
-    /// A terminal is indented one step under its worktree (ov-78), so its
-    /// status glyph starts where the worktree's title does, one chevron's
-    /// width in, and never under the chevrons. ov-63 had it take no step,
-    /// which put a column of dots under a column of collapsed arrows.
-    static let leading: CGFloat = SidebarGrid.rowInset + SidebarGrid.gutter
+    /// A terminal's status glyph sits under its worktree's title, past the
+    /// worktree's chevron and branch glyph (ov-83), and never under either.
+    /// ov-63 had it take no step, which put a column of dots under a column
+    /// of collapsed arrows.
+    static let leading: CGFloat = SidebarGrid.rowInset + 2 * SidebarGrid.gutter
 
     /// Where a terminal's glyph and name start, from the sidebar's edge,
     /// under a worktree drawn at `depth`.
     static func columns(depth: Int) -> (glyph: CGFloat, text: CGFloat) {
         let glyph = SidebarGrid.indent(depth) + SidebarGrid.highlightInset + leading
-        return (glyph, glyph + StatusGlyph.inline + markerGap)
+        return (glyph, glyph + textOffset)
     }
 
     var body: some View {
@@ -816,10 +836,16 @@ struct TerminalRow: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: Self.markerGap) {
                 StatusGlyph(status: status)
+                    .frame(width: Self.textOffset, alignment: .leading)
+                    .gridMark("terminal", .icon)
+                    // The cell is the whole step to the name: take back the
+                    // stack's spacing, which is for the marks after it.
+                    .padding(.trailing, -Self.markerGap)
 
                 Text(terminal.label)
                     .font(.system(size: 12.5))
                     .lineLimit(1)
+                    .gridMark("terminal", .text)
                     // The name yields before the status does. Which terminal it
                     // is matters less than what it wants, and the sidebar is
                     // narrow.
@@ -881,7 +907,7 @@ struct TerminalRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .padding(.leading, StatusGlyph.inline + Self.markerGap)
+                    .padding(.leading, Self.textOffset)
                     // Take the width offered and no more — see the transcript
                     // below, where the same modifier keeps the widest line from
                     // setting the sidebar's ideal width.
@@ -922,7 +948,7 @@ struct TerminalRow: View {
                 // Aligned under the terminal's name, not under its status dot,
                 // so the steps read as belonging to the row rather than as a
                 // second column of their own.
-                .padding(.leading, StatusGlyph.inline + Self.markerGap)
+                .padding(.leading, Self.textOffset)
                 // Take the width offered and no more. Without this the widest
                 // step would set the row's ideal width and the sidebar would
                 // report wanting to be wider than the name ever needed.
@@ -950,7 +976,7 @@ struct TerminalRow: View {
                 }
                 // Under the name like the lines above, not a step further:
                 // the branch mark says they're underneath.
-                .padding(.leading, StatusGlyph.inline + Self.markerGap)
+                .padding(.leading, Self.textOffset)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -1319,7 +1345,8 @@ struct HiddenWorktrees: View {
         VStack(alignment: .leading, spacing: 0) {
             SidebarRow(indent: 0) {
                 SidebarDisclosureHeader(
-                    title: "Hidden", count: worktrees.count, attention: attentionStatus,
+                    title: "Hidden", glyph: "eye.slash", count: worktrees.count,
+                    attention: attentionStatus,
                     attentionHelp: "\(attention) waiting on you, inside a hidden worktree",
                     isExpanded: isExpanded, onToggle: onToggle)
             }
@@ -1327,12 +1354,15 @@ struct HiddenWorktrees: View {
 
             if isExpanded {
                 ForEach(worktrees) { ws in
-                    SidebarRow(indent: 1) {
+                    // At D, where a worktree's title is: these are
+                    // worktrees, without their chevrons or glyphs.
+                    SidebarRow(indent: 3) {
                         HStack(spacing: SidebarGrid.gap) {
                             Text(ws.task)
                                 .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
+                                .gridMark("hidden", .text)
                             Text(ws.branch)
                                 .font(.system(size: 10, design: .monospaced))
                                 .foregroundStyle(.tertiary)
@@ -1345,6 +1375,7 @@ struct HiddenWorktrees: View {
                         }
                         .contentShape(Rectangle())
                     }
+                    .frame(minHeight: ColumnGrid.rowHeight - 2 * SidebarGrid.secondaryRowVerticalPadding)
                     .padding(.vertical, SidebarGrid.secondaryRowVerticalPadding)
                 }
             }
@@ -1361,6 +1392,10 @@ struct HiddenWorktrees: View {
 /// none, and the workspace's needs-you count in amber. The task prefix is in the tooltip. It keeps
 /// ov-60's menu and is still where a dragged worktree is dropped to move it.
 struct WorkspaceRow: View {
+    /// What a workspace is drawn as in column B: a stack of tasks, its
+    /// board.
+    static let glyph = "rectangle.stack"
+
     let name: String
     /// The workspace's id: what a worktree dropped here is assigned to.
     let workspace: String
@@ -1392,10 +1427,9 @@ struct WorkspaceRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 0) {
-            // The chevron takes the leading column, where the status glyph
-            // was, so the name stays at 32 and each level's text is one
-            // step in from its parent's (ov-78): a worktree's chevron sits
-            // under this name, its title a step further in.
+            // Chevron at column A, glyph at B, name at C (ov-83): a
+            // worktree's chevron sits under this glyph, its own glyph under
+            // this name.
             Button(action: onToggle) {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
@@ -1405,11 +1439,20 @@ struct WorkspaceRow: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .gridMark("workspace", .chevron)
             .accessibilityLabel(isOpen ? "Hide Worktrees" : "Show Worktrees")
+
+            Image(systemName: Self.glyph)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: SidebarGrid.glyphColumn, height: 16, alignment: .leading)
+                .gridMark("workspace", .icon)
+                .accessibilityHidden(true)
 
             Text(name)
                 .font(WorkspaceStyle.sidebarPrimary)
                 .lineLimit(1)
+                .gridMark("workspace", .text)
             if unread {
                 Circle()
                     .fill(GlancePalette.amber(scheme))
@@ -1448,6 +1491,7 @@ struct WorkspaceRow: View {
                     .accessibilityLabel(count == 1 ? "1 needs you" : "\(count) need you")
             }
         }
+        .frame(minHeight: ColumnGrid.rowHeight - 2 * SidebarGrid.rowVerticalPadding)
         .padding(.vertical, SidebarGrid.rowVerticalPadding)
         .padding(.horizontal, SidebarGrid.rowInset)
         .background(
@@ -1480,9 +1524,9 @@ struct WorkspaceRow: View {
     }
 }
 
-/// An open workspace with no worktrees: one dim line (spec §8), where a
-/// worktree's title would start. New Worktree… is on the workspace row's
-/// menu, and the repository header's +.
+/// An open workspace with no worktrees: one dim line (spec §8), under the
+/// workspace's name at column C (drawn at depth 2). New Worktree… is on the
+/// workspace row's menu, and the repository header's +.
 struct NoWorktreesRow: View {
     static let sentence = "No worktrees yet"
     /// What the line's tooltip adds: where they'll come from.
@@ -1495,7 +1539,9 @@ struct NoWorktreesRow: View {
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .help(Self.help)
+                .gridMark("noWorktrees", .text)
         }
+        .frame(minHeight: ColumnGrid.rowHeight - 2 * SidebarGrid.headerVerticalPadding)
         .padding(.vertical, SidebarGrid.headerVerticalPadding)
     }
 }
@@ -1516,8 +1562,10 @@ struct NeedsYouRow: View {
             Image(systemName: count > 0 ? "tray.full" : "tray")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(count > 0 ? GlancePalette.amber(scheme) : .secondary)
-                .frame(width: SidebarGrid.gutter, height: 16, alignment: .leading)
+                .frame(width: SidebarGrid.glyphColumn, height: 16, alignment: .leading)
+                .gridMark("needsYou", .icon)
             Text("Needs You").font(WorkspaceStyle.sidebarPrimary)
+                .gridMark("needsYou", .text)
             Spacer(minLength: 6)
             if count > 0 {
                 Text("\(count)")
@@ -1526,8 +1574,9 @@ struct NeedsYouRow: View {
                     .foregroundStyle(GlancePalette.amber(scheme))
             }
         }
+        .frame(minHeight: ColumnGrid.rowHeight - 2 * SidebarGrid.rowVerticalPadding)
         .padding(.vertical, SidebarGrid.rowVerticalPadding)
-        .padding(.horizontal, SidebarGrid.edge - SidebarGrid.highlightInset)
+        .padding(.horizontal, SidebarGrid.rowInset)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(
@@ -1627,15 +1676,16 @@ struct UnclaimedWorktrees<Row: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             SidebarRow(indent: 0) {
                 SidebarDisclosureHeader(
-                    title: "Unclaimed", count: worktrees.count, attention: attentionStatus,
+                    title: "Unclaimed", glyph: "questionmark.folder", count: worktrees.count,
+                    attention: attentionStatus,
                     attentionHelp: attention == 1
                         ? "1 waiting on you, in a worktree no workspace owns"
                         : "\(attention) waiting on you, in worktrees no workspace owns",
                     isExpanded: isExpanded, onToggle: onToggle)
                 .help("Worktrees no workspace owns yet")
             }
-            .padding(.top, 6)
-            .padding(.bottom, SidebarGrid.headerVerticalPadding)
+            .padding(.top, ColumnGrid.rhythm)
+            .padding(.vertical, SidebarGrid.headerVerticalPadding)
 
             if isExpanded {
                 ForEach(worktrees) { worktree in row(worktree) }
@@ -1654,6 +1704,8 @@ struct UnclaimedWorktrees<Row: View>: View {
 /// `WorkspaceStyle.sectionTitle`, the project heading's own style.
 struct SidebarDisclosureHeader: View {
     let title: String
+    /// What the group is drawn as in column B, as a workspace is.
+    let glyph: String
     let count: Int
     /// The most urgent status inside, when something in the group wants you.
     let attention: Status?
@@ -1663,27 +1715,118 @@ struct SidebarDisclosureHeader: View {
 
     var body: some View {
         Button(action: onToggle) {
-            HStack(spacing: SidebarGrid.gap) {
+            HStack(spacing: 0) {
+                // Chevron at A, glyph at B, title at C: a workspace's
+                // columns, since these sit among the workspaces (ov-83).
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.tertiary)
                     .rotationEffect(.degrees(isExpanded ? 90 : 0))
                     .animation(.snappy(duration: 0.15), value: isExpanded)
-                    .frame(width: SidebarGrid.gutter - SidebarGrid.gap, alignment: .leading)
+                    .frame(width: SidebarGrid.chevronColumn, alignment: .leading)
+                    .gridMark("group", .chevron)
+                Image(systemName: glyph)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: SidebarGrid.glyphColumn, alignment: .leading)
+                    .gridMark("group", .icon)
                 Text(title)
                     .font(WorkspaceStyle.sectionTitle)
                     .foregroundStyle(.secondary)
+                    .gridMark("group", .text)
+                    .padding(.trailing, SidebarGrid.cellGap)
                 Text("\(count)")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
                 if let attention {
                     StatusGlyph(status: attention, inAppDiameter: 5)
                         .help(attentionHelp)
+                        .padding(.leading, SidebarGrid.cellGap)
                 }
                 Spacer(minLength: 0)
             }
+            .frame(minHeight: ColumnGrid.rowHeight - 2 * SidebarGrid.headerVerticalPadding)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+extension View {
+    /// Indent a sidebar row `depth` columns in: what `ContentView.sidebarRow`
+    /// does with `SidebarEntry.depth`, and what `GridGeometryTests` does with
+    /// the same depth, so the test measures the arrangement the app draws.
+    func sidebarDepth(_ depth: Int) -> some View {
+        padding(.leading, SidebarGrid.indent(depth))
+    }
+}
+
+/// The sidebar's title row: "Fleet" at column A, a spinner while any runner
+/// is reading, and `trailing` — the add menu — at the trailing edge.
+///
+/// Just the word. It used to be the one runner being driven, because the
+/// sidebar was that runner's worktrees and the pane could not otherwise say
+/// whose. Now it is every runner's at once, and each row already names its own
+/// runner below, so a header naming one would be naming the wrong thing, or
+/// picking a favorite among rows that are not ranked.
+struct SidebarTitleRow<Trailing: View>: View {
+    let busy: Bool
+    @ViewBuilder let trailing: Trailing
+
+    var body: some View {
+        SidebarRow {
+            HStack(spacing: SidebarGrid.gap) {
+                Text("Fleet")
+                    .font(.title3.weight(.semibold))
+                    .gridMark("title", .text)
+                if busy { ProgressView().controlSize(.mini) }
+                Spacer()
+                trailing
+            }
+        }
+        .padding(.top, 2 * ColumnGrid.rhythm)
+        .padding(.bottom, ColumnGrid.rhythm)
+    }
+}
+
+/// Search, because worktrees are unbounded: the field's edge at column A.
+///
+/// It matches terminals too, so typing an agent's name finds the worktree
+/// containing it — which is how you reach an agent on another runner without
+/// going looking for the runner.
+struct SidebarSearchRow: View {
+    @Binding var query: String
+    var focused: FocusState<Bool>.Binding
+
+    var body: some View {
+        SidebarRow {
+            HStack(spacing: 6) {
+                // The system's own field and focus ring, in place of a plain
+                // field drawn into a rounded rectangle with a ring of its own.
+                TextField("Find a workspace, task, or agent", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.callout)
+                    .focused(focused)
+                    .gridMark("search", .text)
+                    // Esc clears the search, and on an empty one leaves the
+                    // field (checklist F3). The window's Esc monitor passes
+                    // Esc to a text field, so this is the one place it's
+                    // heard.
+                    .onExitCommand {
+                        let next = SearchEscape.after(query: query)
+                        query = next.query
+                        if !next.keepsFocus { focused.wrappedValue = false }
+                    }
+                if !query.isEmpty {
+                    Button { query = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.bottom, ColumnGrid.rhythm)
     }
 }

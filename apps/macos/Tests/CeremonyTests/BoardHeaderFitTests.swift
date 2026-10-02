@@ -14,7 +14,7 @@ struct BoardHeaderFitTests {
     ) -> CGFloat {
         let header = BoardHeader(
             title: title, waiting: waiting, reading: false, trouble: trouble,
-            offersWrites: offersWrites, choice: .constant(.auto), drawn: .list,
+            offersWrites: offersWrites,
             newTaskOpen: .constant(false), onCreate: { _ in true }, onRefresh: {})
         let host = NSHostingController(rootView: header)
         return host.sizeThatFits(in: CGSize(width: proposed, height: 200)).width
@@ -33,13 +33,13 @@ struct BoardHeaderFitTests {
     }
 
     /// Drawn at exactly `board` wide, whether anything is inked in the 8 pt
-    /// at either edge, where the header's 14 pt padding should be bare. A row
-    /// wider than the board is centered and clipped, so its controls land
-    /// there.
+    /// at either edge, where the header's padding (34 pt leading, 16
+    /// trailing) should be bare. A row wider than the board is centered and
+    /// clipped, so its controls land there.
     private func edgesAreBare(board: CGFloat, title: String, waiting: Int) -> Bool {
         let header = BoardHeader(
             title: title, waiting: waiting, reading: false, trouble: "Couldn’t refresh",
-            offersWrites: true, choice: .constant(.auto), drawn: .list,
+            offersWrites: true,
             newTaskOpen: .constant(false), onCreate: { _ in true }, onRefresh: {})
         // No window and a bitmap of its own at a fixed 2x: a window's minimum
         // width, the screen's backing scale and the machine's appearance all

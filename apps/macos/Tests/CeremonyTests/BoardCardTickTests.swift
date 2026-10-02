@@ -12,7 +12,7 @@ import os
 ///
 /// The board redraws only when a task changes, and a card crosses a day of
 /// silence at whatever minute it crosses it. So each of the card's three stale
-/// marks is drawn inside `BoardTick`, and this draws the real `TaskCardRow` in
+/// marks is drawn inside `BoardTick`, and this draws the real `TaskListRow` in
 /// an unshown window, moves the board's clock past the day, and reads the
 /// three marks back out of the pixels. A mark drawn from `Date()` outside a
 /// tick — as the border and the icon were until ov-29 — stays grey here and
@@ -35,14 +35,19 @@ struct BoardCardTickTests {
     }
 
     /// Orange pixels in three places on the card: a band down its left edge
-    /// (the border), its top-right corner (the icon), and the rest of its
-    /// inside (the sentence — nothing else on this card is orange). The two
-    /// inner regions keep six points off every edge, clear of the border's
-    /// rounded corners, whose ink would otherwise count for the other marks.
+    /// (the border), its first line, beside the key (the icon), and the rest
+    /// of its inside (the sentence — nothing else on this card is orange).
+    /// The two inner regions keep six points off every edge, clear of the
+    /// border's rounded corners, whose ink would otherwise count for the
+    /// other marks.
     struct Ink: CustomStringConvertible {
         var border = 0, icon = 0, sentence = 0
         var description: String { "border \(border), icon \(icon), sentence \(sentence)" }
     }
+
+    /// Where the card's first line, its key and the clock icon, ends: its
+    /// 8 pt top padding and a line of key.
+    private static let firstLine: CGFloat = 24
 
     private static func ink(_ view: NSView) -> Ink {
         let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
@@ -60,11 +65,9 @@ struct BoardCardTickTests {
                 let (fx, fy) = (CGFloat(x), CGFloat(y))
                 if x < pt(1.5), fy > h * 0.3, fy < h * 0.7 {
                     ink.border += 1
-                } else if fx > w - CGFloat(pt(32)), x < rep.pixelsWide - pt(6), y > pt(6),
-                    y < pt(28)
-                {
+                } else if x > pt(6), x < rep.pixelsWide - pt(6), y > pt(6), y < pt(Self.firstLine) {
                     ink.icon += 1
-                } else if x > pt(6), fx < w - CGFloat(pt(32)), y > pt(6),
+                } else if x > pt(6), fx < w - CGFloat(pt(6)), y >= pt(Self.firstLine),
                     y < rep.pixelsHigh - pt(6)
                 {
                     ink.sentence += 1
@@ -88,7 +91,7 @@ struct BoardCardTickTests {
         let store = TaskBoardStore(
             client: client,
             workspace: .implicit(repository: "r"))
-        let card = TaskCardRow(
+        let card = TaskListRow(
             row: row, prominent: false, store: store, live: [], presence: .unsaid,
             onGoTo: { _ in })
         // The card at a column's width and its own height, and the window

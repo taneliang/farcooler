@@ -1242,10 +1242,9 @@ struct ContentView: View {
     /// have re-indented the whole block to say one thing. A builder method is
     /// what this file already does for the detail side — see `tiled(_:group:)`.
     private func sidebarRow(_ entry: SidebarEntry) -> some View {
-        // One gutter in per level, and only two levels: see
-        // `SidebarEntry.depth`.
+        // One column in per level: see `SidebarEntry.depth`.
         sidebarRowContent(entry)
-            .padding(.leading, SidebarGrid.indent(entry.depth))
+            .sidebarDepth(entry.depth)
     }
 
     @ViewBuilder
@@ -1295,7 +1294,7 @@ struct ContentView: View {
                 // One step in from the group's header, as a workspace's
                 // worktrees are from its row.
                 row: { worktree in
-                    worktreeRow(worktree, usable: usable).padding(.leading, SidebarGrid.gutter)
+                    worktreeRow(worktree, usable: usable).sidebarDepth(1)
                 })
         case .hidden:
             HiddenWorktrees(
@@ -1385,7 +1384,7 @@ struct ContentView: View {
                         NeedsYouRow(
                             count: store.needsYou.count, isSelected: selection == .needsYou,
                             onSelect: { selection = .needsYou })
-                            .padding(.bottom, 6)
+                            .padding(.bottom, ColumnGrid.rhythm)
                         ForEach(entries) { entry in sidebarRow(entry) }
                     }
                     .padding(.bottom, 10)
@@ -1426,56 +1425,13 @@ struct ContentView: View {
         .navigationSplitViewColumnWidth(min: 220, ideal: 248, max: 360)
     }
 
-    /// Search, because worktrees are unbounded.
-    ///
-    /// It matches terminals too, so typing an agent's name finds the worktree
-    /// containing it — which is how you reach an agent on another runner
-    /// without going looking for the runner.
+    /// Search, because worktrees are unbounded. See `SidebarSearchRow`.
     private var searchField: some View {
-        SidebarRow {
-            HStack(spacing: 6) {
-            // The system's own field and focus ring, in place of a plain field
-            // drawn into a rounded rectangle with a ring of its own.
-            TextField("Find a workspace, task, or agent", text: $query)
-                .textFieldStyle(.roundedBorder)
-                .font(.callout)
-                .focused($searchFocused)
-                // Esc clears the search, and on an empty one leaves the
-                // field (checklist F3). The window's Esc monitor passes Esc
-                // to a text field, so this is the one place it's heard.
-                .onExitCommand {
-                    let next = SearchEscape.after(query: query)
-                    query = next.query
-                    if !next.keepsFocus { searchFocused = false }
-                }
-            if !query.isEmpty {
-                Button { query = "" } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        }
-        .padding(.bottom, 6)
+        SidebarSearchRow(query: $query, focused: $searchFocused)
     }
 
     private var sidebarHeader: some View {
-        SidebarRow {
-            HStack(spacing: 8) {
-            // Just the word, now. It used to be the one runner being driven,
-            // because the sidebar was that runner's worktrees and the pane
-            // could not otherwise say whose. Now it is every runner's at
-            // once, and each row already names its own runner below, so a
-            // header naming one would be naming the wrong thing, or picking
-            // a favorite among rows that are not ranked.
-            Text("Fleet")
-                .font(.title3.weight(.semibold))
-            if store.clients.values.contains(where: \.busy) { ProgressView().controlSize(.mini) }
-
-            Spacer()
-
+        SidebarTitleRow(busy: store.clients.values.contains(where: \.busy)) {
             // A menu rather than a button, because "add a repository" has to be
             // reachable at all times. It used to live only in the empty state,
             // so once you had one worktree there was no way to add a second
@@ -1508,10 +1464,7 @@ struct ContentView: View {
                     // user, the port and the host key.
                     SidebarMenuItem(title: "Add Device or Runner…") { showAdd = true },
                 ])
-            }
         }
-        .padding(.top, 12)
-        .padding(.bottom, 8)
     }
 
     /// Shown only once a fleet has actually been read.
