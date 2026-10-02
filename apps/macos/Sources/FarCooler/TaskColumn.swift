@@ -38,6 +38,20 @@ enum TaskColumnModel {
         row.worktreeID.flatMap { $0.isEmpty ? nil : $0 } ?? agent?.worktree.id
     }
 
+    /// The worktrees a task with none can be put on: this repository's own
+    /// linked worktrees on `host` that no other task is using, and that are
+    /// not hidden or gone from disk. Never the main checkout, which is where
+    /// the person works rather than a lane.
+    static func attachable(
+        _ worktrees: [Worktree], host: String, repository: String, taken: [TaskRow]
+    ) -> [Worktree] {
+        let used = Set(taken.compactMap(\.worktreeID))
+        return worktrees.filter {
+            ($0.host ?? "") == host && $0.repositoryID == repository && !$0.isMainCheckout
+                && !$0.isHidden && !$0.worktreeMissing && !used.contains($0.id)
+        }
+    }
+
     /// Whether the changes lead: In Review, a task is its changes; otherwise
     /// its agent is where the work is happening.
     static func changesLead(_ status: TaskStatus) -> Bool { status == .inReview }
@@ -158,6 +172,18 @@ struct TaskWorkHeader: View {
     let chosen: BoardPane?
     var onChooseAgent: (BoardPane) -> Void
     var onOpenWorktree: () -> Void
+    /// What a task with no worktree can do (ov-81 P3): start an agent on a
+    /// worktree made for it, with the agent's id, or go onto one that
+    /// exists. Nil hides the actions, as for a runner that takes no writes.
+    var onStartAgent: ((String) -> Void)?
+    var attachable: [Worktree] = []
+    var onAttach: (Worktree) -> Void = { _ in }
+
+    /// Whether the line offers the two actions: nothing has started and
+    /// there's no worktree to open instead.
+    private var offersStart: Bool {
+        worktree == nil && agent == .none(openWorktree: false) && onStartAgent != nil
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -194,6 +220,29 @@ struct TaskWorkHeader: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize()
+            }
+            if offersStart, let onStartAgent {
+                Menu("Start Agent…") {
+                    ForEach(Agents.all) { agent in
+                        Button(agent.name) { onStartAgent(agent.id) }
+                    }
+                }
+                .controlSize(.small)
+                .fixedSize()
+                .help("Make a worktree for this task and start an agent in it")
+                .accessibilityIdentifier("task-start-agent")
+                Menu("Open Worktree…") {
+                    if attachable.isEmpty {
+                        Text("No Free Worktrees")
+                    }
+                    ForEach(attachable) { worktree in
+                        Button(worktree.task) { onAttach(worktree) }
+                    }
+                }
+                .controlSize(.small)
+                .fixedSize()
+                .help("Put this task on a worktree that already exists")
+                .accessibilityIdentifier("task-attach-worktree")
             }
             if worktree != nil {
                 Button("Open Worktree", action: onOpenWorktree)

@@ -2499,7 +2499,28 @@ struct ContentView: View {
                         agent: agent, worktree: lane.map { WorkspaceScreen.ownTerminals(of: $0, fleet: store.fleet) },
                         agents: agents, chosen: chosen,
                         onChooseAgent: { pane in chosenAgents[row.id] = pane.terminal.id },
-                        onOpenWorktree: openWorktree)
+                        onOpenWorktree: openWorktree,
+                        onStartAgent: board.offersWrites
+                            ? { preset in
+                                Task {
+                                    if let sentence = await board.startAgent(
+                                        for: row, agent: preset,
+                                        undelivered: { errorBanner = $0 })
+                                    {
+                                        errorBanner = sentence
+                                    }
+                                }
+                            } : nil,
+                        attachable: TaskColumnModel.attachable(
+                            store.fleet.worktrees, host: host, repository: board.repositoryID,
+                            taken: board.board.rows),
+                        onAttach: { target in
+                            Task {
+                                if let sentence = await board.attach(row, toWorktree: target.id) {
+                                    errorBanner = sentence
+                                }
+                            }
+                        })
                     if work == .full {
                         Divider()
                         TaskColumnSplit(

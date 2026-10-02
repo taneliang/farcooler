@@ -40,6 +40,8 @@ struct StartTaskTests {
         /// The runner refuses `terminal send`.
         var sendFails = false
         var listFails = false
+        /// The runner refuses `task set`.
+        var linkFails = false
 
         init(capabilities: [String]) { self.capabilities = capabilities }
 
@@ -63,6 +65,8 @@ struct StartTaskTests {
                     return entry
                 }
                 return (json(["branches": list]), nil)
+            case ["task", "set"]:
+                return linkFails ? (nil, "error: operation failed") : (json([:]), nil)
             case ["terminal", "send"]:
                 return sendFails ? (nil, "error: the pane is gone") : (Data(), nil)
             case ["worktree", "list"]:
