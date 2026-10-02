@@ -669,11 +669,26 @@ The column header shows:
 The owner (2 Oct): a workspace switcher in the title bar, and a way between worktrees from inside one. The
 sidebar becomes optional; everything it did is reachable without it.
 
-- **The workspace switcher**, the toolbar's leading item, after the traffic lights: "Billing ▾ · shop", the
-  workspace and its repository. It opens a popover of every workspace grouped by repository, in the sidebar's
-  order (`WorkspaceNumbers.groups`, from `sidebarRows`), each with its amber needs-you count and its ⌘-number,
-  and at its foot Needs You, New Workspace… and Runners and Devices… (Settings ▸ Runners, where devices are too).
-  It works with the sidebar hidden. The Needs You tray, with its count, sits beside it.
+- **The workspace switcher**, the toolbar's leading item, after the traffic lights: "Billing · shop ⌄", the
+  workspace and its repository. It's a native `NSMenu` (`WorkspaceSwitcherButton`, review M3), so arrow keys,
+  type-select, Return and VoiceOver work; ⌘0 (Workspace ▸ Switch Workspace…) opens it. Its lines are
+  `WorkspaceSwitcherMenu.entries`: every workspace grouped by repository under section headers, in the
+  sidebar's order (`WorkspaceNumbers.groups`), with the waiting count as the item's badge, an amber dot, and its
+  ⌘-number as its key equivalent; Repositories ▸ with each repository header's Reconnect, New Terminal in
+  Checkout and Remove Repository…; the runners' state with Reconnect for each in trouble; then Needs You, Go to
+  Anything…, New Workspace…, New Worktree…, Add Repository…, Add Device or Runner… and Runners and Devices…
+  (Settings ▸ Runners). The Needs You tray sits beside it. The window has no subtitle in a workspace: the
+  switcher says the workspace and repository.
+- **The runner banner** (`RunnerBanner`) across the top of the detail carries the sidebar status bar's trouble,
+  sidebar or not: the runners' state while it's trouble, Reconnect for each runner in trouble, and
+  `DaemonUpdateBar`.
+- **Nothing is reachable only from the sidebar.** `SidebarAction` lists what it does; `SidebarParityTests`
+  checks the switcher, the banner and `WorktreeMenu` offer every one. A worktree's menu (`WorktreeMenu.items`:
+  Open, Show Changes, New Terminal, Move to Workspace ▸, Use as Orchestrator, Hide or Unhide, Remove Worktree…)
+  is on its row under Worktrees, on a task row (Worktree ▸) and at the end of the breadcrumb's menu. A
+  workspace row's Show Board, Start Orchestrator and Show Charter were already on the rail and the
+  conversation header. Settings ▸ Runners has Reconnect All; Remove Repository… is only in the switcher there,
+  since Settings has no fleet.
 - **The board list is the navigator inside a workspace.** Each task's row names its worktree after its key
   (`⎇ tax-rounding`; the task's own worktree, else its agent's, as §4.4 draws beneath it). A **Worktrees**
   section after the statuses lists the worktrees no task on the board names (`WorkspaceWorktrees.loose`):
@@ -682,21 +697,28 @@ sidebar becomes optional; everything it did is reachable without it.
   Worktree…; a row's menu has Hide (never the main checkout), and hidden ones collapse under **Hidden** with
   Unhide. Rows are drawn without seated orchestrators (`ownTerminals`), so the orchestrator's terminal is never
   listed there (§4.7's one place).
-- **The order** (`WorkspaceWorktrees.entries`): each task's worktree in board-list order (sections in `order`,
-  then rows; a worktree once, under its first task), then the Worktrees section's in the runner's order.
-- **The breadcrumb's last segment is a menu**, "Billing › bil-3 Tax rounding › ⎇ tax-rounding ▾": the
-  workspace's worktrees, task ones labelled with their task and the worktree beneath, then the loose ones, the
-  current one checked. It stands for a worktree opened whole in place of its crumb, and follows a task as the
-  worktree beneath it ("⎇ Worktrees" for a task with none). A task's worktree is gone to as its task.
+- **The order** (`WorkspaceWorktrees.entries`): the order the list draws (review M2): sections in `order`, each
+  section's rows as `visibleRows` draws them (Done newest first), a worktree once under its first task; then
+  the Worktrees section's, then its Hidden ones. Collapsed sections, Done's cut tasks and hidden worktrees are
+  walked too, in the place they'd be drawn, so nothing is reachable only from the sidebar.
+- **The breadcrumb's last segment is a menu**, "Billing › bil-3 Tax rounding › tax-rounding ▾" after the branch
+  symbol (one glyph, `WorktreeSection.glyph`, on task rows, the section and the breadcrumb): the workspace's
+  worktrees, task ones labelled with their task and the worktree beneath, then the loose ones, the current one
+  checked, then that worktree's own menu. It stands for a worktree opened whole in place of its crumb, and
+  follows a task as the worktree beneath it ("Worktrees" for a task with none; `WorkspaceWorktrees.crumb`). A
+  task's worktree is gone to as its task.
 - **Keys.** ⌃⌘↓ and ⌃⌘↑ (Workspace ▸ Next/Previous Worktree) walk the order, wrapping, from the task or
   worktree open, or from the board alone to the first or last. ⌘1–⌘9 select the first nine workspaces in the
   switcher's order. They were Terminal 1–9, which moved to ⌃⌘1–⌃⌘9 (free, and not a system chord;
-  `ShortcutSheetTests.numbersAreWorkspaces`). ⌘P lists a worktree before the terminals found only by its
-  name (they score `PaletteIndex.locatedPenalty` under it) and finds it by its open tasks' keys.
+  `ShortcutSheetTests.numbersAreWorkspaces`). ⌘0 opens the switcher. These, and ⌃⌘↑/↓, act only with the
+  main window key and nothing over it (`MainWindowFocus.navigates`), and a command acts in the key window
+  alone. ⌘P lists a worktree before the terminals found only by its name (they score
+  `PaletteIndex.locatedPenalty`, 12, under it) and finds it by its open tasks' keys.
 - **The sidebar's default** (`SidebarDefault`): `NavigationSplitView` takes a `columnVisibility` read from
   `window.sidebar`, written on every change. With nothing stored, it's hidden, unless the app has history here
-  (`workspace.lastSelection` or the legacy `fleet.lastTerminal`): someone who used it before keeps the sidebar
-  they always had. ⌘B (View ▸ Toggle Sidebar) and the toolbar button still toggle it. With it hidden, ⌘F opens
+  (`SidebarDefault.historyKeys`: a saved selection, the sidebar's open workspaces or collapsed repositories, a
+  Settings tab) and AppKit's saved split view doesn't say it was collapsed: someone who used it before keeps
+  the sidebar as they had it. ⌘B (View ▸ Toggle Sidebar) and the toolbar button still toggle it. With it hidden, ⌘F opens
   the palette, since the sidebar's search isn't there.
 
 ## 5. The responsive board

@@ -74,11 +74,22 @@ same list.
 ## A workspace, on the Mac
 
 **The workspace switcher** is at the left of the title bar, after the window's
-buttons: "Billing ▾ · shop", the workspace you're in and its repository. Click
-it for every workspace, grouped by repository, each with its count of what's
-waiting and its ⌘-number: ⌘1 through ⌘9 go straight to the first nine. At its
-foot are **Needs You**, **New Workspace…** and **Runners and Devices…**, which
-opens Settings. The tray beside the switcher is Needs You.
+buttons: "Billing · shop", the workspace you're in and its repository. Click it,
+or press ⌘0 (Workspace ▸ Switch Workspace…), for a menu of every workspace,
+grouped by repository, each with its count of what's waiting and its ⌘-number:
+⌘1 through ⌘9 go straight to the first nine. Arrow keys and typing a name work
+as in any menu. Below the workspaces:
+
+- **Repositories ▸** has each repository's **Reconnect**, **New Terminal in
+  Checkout** and **Remove Repository…**.
+- The runners' state, with **Reconnect** for any runner in trouble.
+- **Needs You**, **Go to Anything…**, **New Workspace…**, **New Worktree…**,
+  **Add Repository…**, **Add Device or Runner…**, and **Runners and
+  Devices…**, which opens Settings.
+
+The tray beside the switcher is Needs You. When a runner can't be reached, has
+lost tmux, or runs an older Far Cooler, a banner across the top of the window
+says so, with **Reconnect** or the update, whether or not the sidebar is out.
 
 **The sidebar** is hidden in a new window, since the switcher does its work.
 Show it with the button in the title bar or View ▸ Toggle Sidebar (⌘B); the
@@ -87,8 +98,8 @@ the switcher, it stays as you had it. It lists each repository's workspaces,
 with Needs You above them. A workspace row shows its name, its orchestrator's
 status (`◌` when it has none), and how many items need you. Its menu has
 **Show Board**, **Start Orchestrator** (or **Replace Orchestrator**) and **Show
-Charter**. With the sidebar hidden, ⌘F opens ⌘P instead, which finds the same
-workspaces, tasks and agents.
+Charter**. With the sidebar hidden, ⌘F opens Go to Anything (⌘P), which finds
+the same workspaces, tasks and agents.
 
 Select a workspace to see its board. The orchestrator sits on a thin rail at
 the left edge, with its status and its dot; click the rail (or press ⌥⌘1) to pop
@@ -151,8 +162,10 @@ share. A task with nothing started is just that line.
 - ⌥⌘1, ⌥⌘2 and ⌥⌘3 give the keyboard to the orchestrator, the board's list and
   the task.
 - ⌃⌘↓ and ⌃⌘↑ (Workspace ▸ Next Worktree and Previous Worktree) go to the next
-  or previous worktree, in the board list's order: each task's, then the ones
-  under Worktrees. A task's worktree opens as its task, with the worktree
+  or previous worktree, in the order the board list draws them: each task's,
+  section by section (Done newest first), then the ones under Worktrees and
+  Hidden. Tasks in a collapsed section, and older Done tasks the list leaves
+  out, are walked too. A task's worktree opens as its task, with the worktree
   beneath it. ⌃⌘1 through ⌃⌘9 jump to a terminal on screen (they were ⌘1
   through ⌘9, which now go to workspaces).
 
@@ -173,11 +186,14 @@ Inside a workspace, the board list is how you get around them.
   such as the main checkout (under Main) and scratch ones. Main's also lists
   the repository's unclaimed worktrees. Click one to open it beside the board,
   with the rail as usual. The **+** on the section's header is **New
-  Worktree…**. Control-click a row to **Hide** it; hidden ones collapse under
-  **Hidden**, each with **Unhide**. The orchestrator's own terminal is never
-  listed there: it's on the rail.
-- **From the breadcrumb.** Its last part, "⎇ tax-rounding ▾", is a menu of the
-  workspace's worktrees: the task ones by their task, then the loose ones.
+  Worktree…**. Control-click a row for what the sidebar's row offered: **Show
+  Changes**, **New Terminal**, **Move to Workspace**, **Use as Orchestrator**,
+  **Hide** and **Remove Worktree…**. Control-click a task for the same, under
+  **Worktree**. Hidden ones collapse under **Hidden**, each with **Unhide**.
+  The orchestrator's own terminal is never listed there: it's on the rail.
+- **From the breadcrumb.** Its last part, "tax-rounding ▾" after the branch
+  glyph, is a menu of the workspace's worktrees: the task ones by their task,
+  then the loose ones, and that worktree's own actions at the end.
 - **From ⌘P**, which finds a worktree by its name, its branch, or the key of
   the task it's for, and lists matching worktrees before the terminals inside
   them.
