@@ -1434,6 +1434,9 @@ struct WorkspaceRow: View {
                 }
             }
             .padding(.leading, 6)
+            // A gap between the glyph and the count: "○1" read as one mark
+            // (ov-81 P13).
+            .padding(.trailing, count > 0 ? 4 : 0)
             if count > 0 {
                 Text("\(count)")
                     .font(.system(size: 11, weight: .semibold))
