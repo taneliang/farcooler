@@ -362,6 +362,31 @@ final class TaskBoardStore: ObservableObject {
         return true
     }
 
+    /// Start an agent for `row`, which has no worktree: New Task's own start
+    /// path, then the task is put on the new lane and the board read again.
+    /// Nil when it went; else a sentence for the window.
+    func startAgent(for row: TaskRow, agent: String, undelivered: (@MainActor (String) -> Void)? = nil)
+        async -> String?
+    {
+        let outcome = await client.startAgent(
+            for: row, repository: repositoryID, workspace: workspace.boardWorkspace, agent: agent,
+            undelivered: undelivered)
+        await reload()
+        if opened?.id == row.id { await refreshOpened() }
+        if case .failed(let sentence, _) = outcome { return sentence }
+        return nil
+    }
+
+    /// Put `row` on an existing worktree. Nil when it went.
+    func attach(_ row: TaskRow, toWorktree worktree: String) async -> String? {
+        if await client.linkTask(key: row.key, worktree: worktree, repository: repositoryID) != nil {
+            return "Far Cooler couldn’t attach that worktree to the task. Check that the runner is reachable, then try again."
+        }
+        await reload()
+        if opened?.id == row.id { await refreshOpened() }
+        return nil
+    }
+
     /// Answer a task's question with `body`: an option's text, or what was
     /// typed. True when it was written. The card is read again, so the
     /// answer shows in its record and the buttons go.
@@ -666,124 +691,17 @@ struct TaskBoardView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 10) {
-            Text(store.title).font(WorkspaceStyle.sectionTitle).lineLimit(1)
-            // The one count worth putting in a title bar, and the sentence is
-            // the model's like every other one here. Nothing when nothing is
-            // waiting — `waitingSentence` is nil at zero, because a badge
-            // reading zero teaches people to ignore it.
-            //
-            // One line always: at a narrow board the sentence wrapped a word
-            // to a line into a tall lozenge (checklist F2). Where the whole
-            // sentence doesn't fit, it's said short.
-            if let sentence = TaskBoardModel.waitingSentence(waiting) {
-                ViewThatFits(in: .horizontal) {
-                    waitingPill(sentence)
-                    waitingPill(Self.waitingShort(waiting))
-                }
-                .layoutPriority(1)
-                .help(sentence)
-            }
-            Spacer()
-            if store.reading { ProgressView().controlSize(.small) }
-            // Shown beside the board rather than over it: a failed re-read
-            // leaves the last good board on screen, and hiding it behind an
-            // error would cost more than the error is worth.
-            if let trouble = store.trouble, store.hasRead {
-                Text(trouble)
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(.secondary)
-            }
-            if store.offersWrites {
-                Button {
-                    newTaskOpen = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .help("New Task…")
-                .accessibilityLabel("New Task…")
-                .accessibilityIdentifier("board-new-task")
-                .popover(isPresented: $newTaskOpen, arrowEdge: .bottom) {
-                    NewTaskForm(
-                        onCreate: { title in await store.createTask(title: title) },
-                        onClose: { newTaskOpen = false })
-                }
-            }
-            formToggle
-            Button("Refresh") { Task { await store.reload() } }.fixedSize()
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(WorkspaceStyle.paneChrome)
-    }
-
-    private func waitingPill(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .semibold))
-            .lineLimit(1)
-            .fixedSize()
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2)
-            .background(Color.accentColor.opacity(0.18), in: Capsule())
+        BoardHeader(
+            title: store.title, waiting: waiting, reading: store.reading,
+            trouble: store.hasRead ? store.trouble : nil, offersWrites: store.offersWrites,
+            choice: chosen, drawn: drawn, newTaskOpen: $newTaskOpen,
+            onCreate: { title in await store.createTask(title: title) },
+            onRefresh: { Task { await store.reload() } })
     }
 
     /// The waiting pill's short form, for a board too narrow for the
     /// sentence: "2 waiting".
-    static func waitingShort(_ count: Int) -> String { "\(count) waiting" }
-
-    /// `≡` List and `▦` Kanban. Clicking one forces it; clicking the one
-    /// forced goes back to Automatic, which is also in the control's menu.
-    /// The form on screen is always marked, and a forced one more strongly.
-    private var formToggle: some View {
-        HStack(spacing: 1) {
-            formButton(.list, symbol: "list.bullet", name: "List")
-            formButton(.kanban, symbol: "rectangle.split.3x1", name: "Kanban")
-        }
-        .padding(2)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
-        .contextMenu {
-            Picker("Board Layout", selection: chosen) {
-                Text("Automatic").tag(BoardForm.Choice.auto)
-                Text("List").tag(BoardForm.Choice.list)
-                Text("Kanban").tag(BoardForm.Choice.kanban)
-            }
-            .pickerStyle(.inline)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("board-form-toggle")
-    }
-
-    private func formButton(_ form: BoardForm, symbol: String, name: String) -> some View {
-        let forced = choice.forced == form
-        let shown = drawn == form
-        return Button {
-            chosen.wrappedValue = choice.choosing(form)
-        } label: {
-            Image(systemName: symbol)
-                .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
-                .frame(width: 24, height: 18)
-                .foregroundStyle(forced ? Color.white : shown ? Color.primary : Color.secondary)
-                .background(
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(
-                            forced
-                                ? Color.accentColor
-                                : shown ? Color.primary.opacity(0.1) : Color.clear))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(
-            forced
-                ? "Always shown as \(article(form)). Click again to choose by width."
-                : "Always show this board as \(article(form)).")
-        .accessibilityLabel(name)
-        .accessibilityValue(forced ? "Chosen" : shown ? "Shown" : "")
-    }
-
-    /// "a list" or "a kanban", for the toggle's tooltips.
-    private func article(_ form: BoardForm) -> String {
-        form == .list ? "a list" : "a kanban"
-    }
+    static func waitingShort(_ count: Int) -> String { BoardHeader.waitingShort(count) }
 
     /// The toggle's choice, kept on this device as it changes.
     private var chosen: Binding<BoardForm.Choice> {
@@ -813,31 +731,9 @@ struct TaskBoardView: View {
         }
     }
 
-    /// Whether the board has been read and has nothing on it at all.
-    private var isEmpty: Bool {
-        store.hasRead && store.board.rows.isEmpty && store.board.unreadable.isEmpty
-    }
-
-    /// Above either form on an empty board: what it is, and the way to put a
-    /// task on it. The form is still drawn under it, every status at 0.
-    private var emptyNote: some View {
-        HStack(spacing: 10) {
-            Text("Nothing on this board yet.")
-                .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
-            Spacer(minLength: 0)
-            if store.offersWrites {
-                Button("New Task…") { newTaskOpen = true }
-                    .accessibilityIdentifier("board-empty-new-task")
-            }
-        }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(WorkspaceStyle.document))
-    }
-
     private var list: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 6) {
-                if isEmpty { emptyNote.padding(.bottom, 6) }
                 ForEach(store.board.sections) { section in
                     TaskListSection(
                         section: section,
@@ -871,10 +767,6 @@ struct TaskBoardView: View {
 
     private var kanban: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if isEmpty {
-                emptyNote
-                    .padding([.horizontal, .top], BoardForm.boardPadding)
-            }
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: BoardForm.columnSpacing) {
                     // `sections`, not `columns`: every status, whatever the
@@ -911,7 +803,7 @@ struct BoardFormPreference: PreferenceKey {
 /// Only the title, which is all `task create` needs and all a board card
 /// shows; the intent and acceptance are the orchestrator's to write, or the
 /// CLI's for anyone who wants them now.
-private struct NewTaskForm: View {
+struct NewTaskForm: View {
     let onCreate: (String) async -> Bool
     let onClose: () -> Void
 

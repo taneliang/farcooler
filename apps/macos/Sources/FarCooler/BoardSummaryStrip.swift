@@ -46,6 +46,8 @@ struct BoardSummaryStrip: View {
                         Text(BoardSummary.nothingNew)
                             .font(.system(size: WorkspaceStyle.PaneText.body))
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                             .accessibilityIdentifier("board-summary-empty")
                     } else {
                         group("Finished", summary.finished)
@@ -83,6 +85,11 @@ struct BoardSummaryStrip: View {
             count: count, collapsed: collapsed)
     }
 
+    /// The disclosure and the period, and nothing else: the period IS the
+    /// heading. It was a title ("Since you were last here") wrapping to two
+    /// lines beside a picker saying "Since Last Visit" (ov-81 P5), so the same
+    /// idea cost a line and was said twice. Open, the picker is the heading;
+    /// closed, the period's name stands in for it.
     private var header: some View {
         HStack(spacing: 6) {
             Button {
@@ -94,15 +101,19 @@ struct BoardSummaryStrip: View {
                         .font(.system(size: 9, weight: .bold))
                         .rotationEffect(.degrees(collapsed ? 0 : 90))
                         .foregroundStyle(.secondary)
-                    Text("Since you were last here")
-                        .font(.system(size: WorkspaceStyle.PaneText.body, weight: .semibold))
+                    if collapsed {
+                        Text(period.title)
+                            .font(.system(size: WorkspaceStyle.PaneText.body, weight: .semibold))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Summary")
             .accessibilityValue(collapsed ? "Collapsed" : "Expanded")
             .accessibilityIdentifier("board-summary-toggle")
-            Spacer(minLength: 0)
             if !collapsed {
                 Picker("Period", selection: $period) {
                     ForEach(BoardSummary.Period.allCases) { Text($0.title).tag($0) }
@@ -115,6 +126,7 @@ struct BoardSummaryStrip: View {
                     defaults.set(now.rawValue, forKey: Self.periodKey(store))
                 }
             }
+            Spacer(minLength: 0)
         }
     }
 
@@ -124,6 +136,8 @@ struct BoardSummaryStrip: View {
                 Text("\(title) (\(items.count))")
                     .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 ForEach(BoardSummary.capped(items).shown) { item in
                     Button {
                         if let row = store.board.rows.first(where: { $0.id == item.taskID }) {
@@ -134,6 +148,8 @@ struct BoardSummaryStrip: View {
                             Text(item.key)
                                 .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
                                 .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .fixedSize()
                             Text(item.title).lineLimit(1)
                             if let detail = item.detail {
                                 Text(detail)
@@ -152,6 +168,7 @@ struct BoardSummaryStrip: View {
                     Text("and \(BoardSummary.capped(items).more) more")
                         .font(.system(size: WorkspaceStyle.PaneText.secondary))
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
         }
