@@ -447,6 +447,8 @@ AGENTKIT_SOURCES = [
     # two since card -19; the phone draws the same cards off the same rules, so
     # they are here rather than copied, and `swift test` is what checks them.
     "TaskBoardModel.swift",
+    # The record's order: newest first, pairs kept, Created last.
+    "TaskNoteFeed.swift",
     "TaskBoardAgents.swift",
     "RunnerBoards.swift",
     # Repository, then workspace, then its worktrees: the one grouping rule

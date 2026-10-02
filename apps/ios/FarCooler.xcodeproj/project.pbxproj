@@ -125,6 +125,7 @@
 		F188FE9262A85DAF9FDA0D09 /* TerminalAskCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 742ED7168E51517A91940652; };
 		D79A359A02EA5A59B926AC81 /* PermissionAnswering.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37CC6E8D2E535D51AD6904A0; };
 		E8052914E2C95A1D8C38A3F1 /* TaskBoardModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA1A7FEE33435A79A9B20ADF; };
+		F7B496A5B1995BAF902ED257 /* TaskNoteFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0609EA5E6B815DA5B28DCB6F; };
 		5E88F5B7D4E35B1787938B7D /* TaskBoardAgents.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBE27674E334533B8BE7C7BD; };
 		3AEDDF986DE55B539988F40C /* RunnerBoards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BBD929AC34859148CDFEB80; };
 		0D650BC429815BE5A56B05BA /* WorkspaceGroups.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB159548D52F5D658261D46D; };
@@ -324,6 +325,7 @@
 		742ED7168E51517A91940652 /* TerminalAskCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalAskCard.swift; sourceTree = "<group>"; };
 		37CC6E8D2E535D51AD6904A0 /* PermissionAnswering.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionAnswering.swift; sourceTree = "<group>"; };
 		EA1A7FEE33435A79A9B20ADF /* TaskBoardModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskBoardModel.swift; sourceTree = "<group>"; };
+		0609EA5E6B815DA5B28DCB6F /* TaskNoteFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskNoteFeed.swift; sourceTree = "<group>"; };
 		CBE27674E334533B8BE7C7BD /* TaskBoardAgents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskBoardAgents.swift; sourceTree = "<group>"; };
 		3BBD929AC34859148CDFEB80 /* RunnerBoards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerBoards.swift; sourceTree = "<group>"; };
 		DB159548D52F5D658261D46D /* WorkspaceGroups.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceGroups.swift; sourceTree = "<group>"; };
@@ -623,6 +625,7 @@
 				742ED7168E51517A91940652 /* TerminalAskCard.swift */,
 				37CC6E8D2E535D51AD6904A0 /* PermissionAnswering.swift */,
 				EA1A7FEE33435A79A9B20ADF /* TaskBoardModel.swift */,
+				0609EA5E6B815DA5B28DCB6F /* TaskNoteFeed.swift */,
 				CBE27674E334533B8BE7C7BD /* TaskBoardAgents.swift */,
 				3BBD929AC34859148CDFEB80 /* RunnerBoards.swift */,
 				DB159548D52F5D658261D46D /* WorkspaceGroups.swift */,
@@ -1027,6 +1030,7 @@
 				F188FE9262A85DAF9FDA0D09 /* TerminalAskCard.swift in Sources */,
 				D79A359A02EA5A59B926AC81 /* PermissionAnswering.swift in Sources */,
 				E8052914E2C95A1D8C38A3F1 /* TaskBoardModel.swift in Sources */,
+				F7B496A5B1995BAF902ED257 /* TaskNoteFeed.swift in Sources */,
 				5E88F5B7D4E35B1787938B7D /* TaskBoardAgents.swift in Sources */,
 				3AEDDF986DE55B539988F40C /* RunnerBoards.swift in Sources */,
 				0D650BC429815BE5A56B05BA /* WorkspaceGroups.swift in Sources */,
