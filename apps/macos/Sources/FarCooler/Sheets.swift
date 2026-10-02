@@ -152,7 +152,7 @@ struct NewWorktreeSheet: View {
 
                 LabeledContent("Name") {
                     VStack(alignment: .leading, spacing: 4) {
-                        TextField("", text: $name, prompt: Text("rate-limiting"))
+                        TextField("", text: $name, prompt: .fieldPrompt("rate-limiting"))
                         if let worktreePath {
                             Text(worktreePath)
                                 .font(.caption.monospaced())
@@ -165,11 +165,11 @@ struct NewWorktreeSheet: View {
 
                 TextField(
                     "Branch", text: $branch,
-                    prompt: Text(
+                    prompt: .fieldPrompt(
                         suggestedBranch.isEmpty
                             ? branchPrefix(choice?.host ?? "") + "my-change" : suggestedBranch))
 
-                TextField("Base revision", text: $base, prompt: Text("HEAD"))
+                TextField("Base revision", text: $base, prompt: .fieldPrompt("HEAD"))
             }
             .formStyle(.grouped)
         }
@@ -314,7 +314,7 @@ struct RemoveWorktreeSheet: View {
                         // terminals, which meant the one field standing between
                         // the user and a dirty worktree could not be typed into
                         // for a reason that no longer stops removal at all.
-                        TextField("", text: $typed, prompt: Text(worktree.task))
+                        TextField("", text: $typed, prompt: .fieldPrompt(worktree.task))
                             .textFieldStyle(.roundedBorder)
                     }
                 }
@@ -422,7 +422,7 @@ struct RemoveRepositorySheet: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Type the folder name to confirm")
                             .font(.callout)
-                        TextField("", text: $typed, prompt: Text(rootName))
+                        TextField("", text: $typed, prompt: .fieldPrompt(rootName))
                             .textFieldStyle(.roundedBorder)
                     }
                 }

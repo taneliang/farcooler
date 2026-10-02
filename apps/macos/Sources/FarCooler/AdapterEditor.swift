@@ -102,7 +102,7 @@ struct AdapterEditor: View {
                     Text("Native").tag(AdapterInfo.Backend.native)
                 }
             }
-            TextField("Program", text: $draft.program, prompt: Text("npx"))
+            TextField("Program", text: $draft.program, prompt: .fieldPrompt("npx"))
                 .autocorrectionDisabled()
             lines("Arguments", $argsText, prompt: "-y\n@agentclientprotocol/my-agent-acp")
             lines("Environment", $envText, prompt: "MY_AGENT_API_KEY=…")

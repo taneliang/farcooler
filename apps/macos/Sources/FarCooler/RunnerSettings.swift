@@ -153,7 +153,7 @@ struct RunnerSettingsSheet: View {
     private var branchSection: some View {
         Section {
             HStack {
-                TextField("Branch prefix", text: $prefixDraft, prompt: Text("feat/"))
+                TextField("Branch prefix", text: $prefixDraft, prompt: .fieldPrompt("feat/"))
                     .autocorrectionDisabled()
                     // Committed on return or on losing focus, not per keystroke:
                     // this is a file write and an ssh round trip.

@@ -64,7 +64,7 @@ struct NewWorkspaceSheet: View {
                     }
                 }
                 TextField("Name", text: $typed)
-                TextField("Task prefix", text: $prefix, prompt: Text(derived))
+                TextField("Task prefix", text: $prefix, prompt: .fieldPrompt(derived))
                 if prefix.trimmingCharacters(in: .whitespaces).isEmpty {
                     Text("Left empty, tasks start with “\(derived)-”, from the name.")
                         .font(.caption)

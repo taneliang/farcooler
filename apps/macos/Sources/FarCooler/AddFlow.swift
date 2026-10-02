@@ -172,7 +172,8 @@ private struct RunnerAddressStep: View {
                 subtitle: "Far Cooler runs farcooler over SSH, so anything you can already reach "
                     + "works: a user@host, or an alias from your ~/.ssh/config.")
 
-            TextField("user@host, or an SSH alias", text: $target)
+            TextField("", text: $target, prompt: .fieldPrompt("user@host, or an SSH alias"))
+                .accessibilityLabel("Runner address")
                 .autocorrectionDisabled()
                 .onSubmit(add)
 
