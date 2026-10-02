@@ -124,6 +124,7 @@ enum Shortcut {
             "Repositories",
             [
                 Item(keys: "⌘N", action: "New worktree — describe what you want done and go"),
+                Item(keys: "⌥⌘N", action: "New workspace"),
                 Item(keys: "⇧⌘B", action: "Show this workspace’s board"),
                 Item(keys: "⇧⌘R", action: "Add Repository"),
                 Item(keys: "⇧⌘E", action: "Open this worktree in your editor"),

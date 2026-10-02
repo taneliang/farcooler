@@ -15,6 +15,7 @@ enum AppCommand: String {
     case nextAttention
     case newWorktree
     case addRepository
+    case newWorkspace
     case showBoard
     case openInEditor
     case reload
@@ -97,6 +98,8 @@ struct FarCoolerCommands: Commands {
             // name the other thing.
             Button("New Worktree…") { AppCommand.newWorktree.post() }
                 .keyboardShortcut("n", modifiers: .command)
+            Button("New Workspace…") { AppCommand.newWorkspace.post() }
+                .keyboardShortcut("n", modifiers: [.command, .option])
             Button("Add Repository…") { AppCommand.addRepository.post() }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
         }
