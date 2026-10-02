@@ -380,12 +380,14 @@ conversation and the board; sidebar | orchestrator | tasks | worktree is gone.
   breadcrumb: Workspace › Task, Workspace › Task › Worktree, or Workspace › Worktree for a worktree opened from
   the sidebar. Each crumb but the last goes back there; Back (⌃⌘←), and Esc when no terminal or field has the
   keyboard, go up one level. The board is out of sight; ⌥⌘2 goes back up to it.
-- **The conversation shrinks to a 36 pt rail** at the leading edge, at every width, with its status glyph and
-  needs-you dot. Clicking the rail, or ⌥⌘1, pops the conversation open *over* what's opened (its minimum width,
+- **The conversation shrinks to a 28 pt rail** at the leading edge, at every width: the orchestrator's icon
+  with its state on it (a spinner while it works, the amber dot when it needs you or has an unseen turn),
+  "Orchestrator · <agent>" set sideways, and a chevron that turns as it opens (ov-84). Clicking the rail, or ⌥⌘1, pops the conversation open *over* what's opened (its minimum width,
   or what the rail leaves), so the task's terminals and their tmux windows keep their size, and gives it the
   keyboard. A click on the rail, a click anywhere outside it, ⌥⌘1 again, or going anywhere else puts it away,
   and the keyboard goes back to the task's terminal, or to the view when it has none. Esc stays with the
-  terminal: it's never taken from one. It counts as on screen only while popped open.
+  terminal: it's never taken from one. It counts as on screen only while popped open. It slides on one spring
+  and stays mounted once opened, so every press toggles it at once and retargets the motion mid-flight.
 - **Focus** (⌃⌘↩) shows what's opened alone: no rail, and a task's terminals and changes at full height
   without its text, in the same views, so the changes keep their place. A task with nothing beneath its text
   keeps it: there Focus only hides the rail. ⌃⌘↩ again, or Esc when no terminal has the keyboard, puts the
