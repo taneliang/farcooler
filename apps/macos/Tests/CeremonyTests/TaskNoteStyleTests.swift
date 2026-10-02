@@ -45,6 +45,20 @@ struct TaskNoteStyleTests {
         #expect(TaskNoteStyle.decision("Rejected: x").rejected == nil)
     }
 
+    @Test("A decision's rejected options come from extra.rejected on the wire")
+    func rejectedOptionsComeFromTheWire() throws {
+        let json = """
+            {"task": {}, "notes": [{"id": "n1", "kind": "decision", "actor": "manager", "at": 0,
+              "body": "Two columns.", "extra": {"rejected": ["An inspector", "Tabs"]}},
+             {"id": "n2", "kind": "decision", "actor": "manager", "at": 0, "body": "Plain.", "extra": "junk"}]}
+            """
+        let notes = try TaskDetailModel.decode(Data(json.utf8)).notes
+        #expect(notes[0].rejected == ["An inspector", "Tabs"])
+        #expect(TaskNoteStyle.decision(notes[0]) == .init(chosen: "Two columns.", rejected: "An inspector; Tabs"))
+        #expect(notes[1].rejected.isEmpty)
+        #expect(TaskNoteStyle.decision(notes[1]).rejected == nil)
+    }
+
     @Test("An answer right after a question is paired with it")
     func anAnswerAfterAQuestionIsPaired() {
         func note(_ id: String, _ kind: TaskNoteKind) -> TaskNoteRow {

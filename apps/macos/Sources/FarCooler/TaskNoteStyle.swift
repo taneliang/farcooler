@@ -68,6 +68,17 @@ struct TaskNoteStyle: Equatable {
         var rejected: String?
     }
 
+    /// A decision as drawn: its `extra.rejected` options when it has them,
+    /// else the body split at "Rejected:", which is only for older notes
+    /// written before the options were kept on the wire.
+    static func decision(_ note: TaskNoteRow) -> Decision {
+        let options = note.rejected.filter { !$0.isEmpty }
+        guard options.isEmpty else {
+            return Decision(chosen: note.body, rejected: options.joined(separator: "; "))
+        }
+        return decision(note.body)
+    }
+
     static func decision(_ body: String) -> Decision {
         guard let range = body.range(of: "Rejected:", options: .caseInsensitive) else {
             return Decision(chosen: body, rejected: nil)

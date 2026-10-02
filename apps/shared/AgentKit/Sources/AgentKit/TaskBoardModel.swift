@@ -714,11 +714,14 @@ public struct TaskNoteRow: Equatable, Sendable, Hashable, Identifiable {
     /// earlier one. Both stay readable forever; this is what lets the board
     /// draw the line between them.
     public var supersedes: String?
+    /// A decision's rejected options, from the wire's `extra.rejected`.
+    public var rejected: [String]
 
     public init(
         id: String, kind: TaskNoteKind, actor: String, at: Date, body: String,
-        supersedes: String? = nil
+        supersedes: String? = nil, rejected: [String] = []
     ) {
+        self.rejected = rejected
         self.id = id
         self.kind = kind
         self.actor = actor
@@ -769,10 +772,15 @@ public struct WireTaskNote: Decodable, Sendable {
     public var at: Int64
     public var body: String
     public var supersedes: String?
+    /// `extra.rejected`, when the note carries one; empty otherwise, and for
+    /// an `extra` of any other shape.
+    public var rejected: [String]
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, actor, at, body, supersedes
+        case id, kind, actor, at, body, supersedes, extra
     }
+
+    private struct Extra: Decodable { var rejected: [String]? }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -782,6 +790,7 @@ public struct WireTaskNote: Decodable, Sendable {
         at = try c.decodeIfPresent(Int64.self, forKey: .at) ?? 0
         body = try c.decodeIfPresent(String.self, forKey: .body) ?? ""
         supersedes = try c.decodeIfPresent(String.self, forKey: .supersedes)
+        rejected = (try? c.decodeIfPresent(Extra.self, forKey: .extra))?.rejected ?? []
     }
 }
 
@@ -820,7 +829,7 @@ public struct TaskDetailModel: Equatable, Sendable {
                     actor: note.actor,
                     at: Date(timeIntervalSince1970: Double(note.at) / 1000),
                     body: note.body,
-                    supersedes: note.supersedes))
+                    supersedes: note.supersedes, rejected: note.rejected))
         }
         return TaskDetailModel(blocks: wire.blocks, notes: notes, unreadableNotes: unreadable)
     }

@@ -1681,7 +1681,7 @@ private struct TaskNoteView: View {
     }
 
     private var card: some View {
-        let decision = TaskNoteStyle.decision(note.body)
+        let decision = TaskNoteStyle.decision(note)
         return VStack(alignment: .leading, spacing: 5) {
             header
             Text(decision.chosen)
