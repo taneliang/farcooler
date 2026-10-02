@@ -35,8 +35,9 @@ enum WorkspaceColumns {
     /// The board's width when there's room: a list with room for its rows'
     /// titles, and not so wide the conversation loses a column for it.
     static let boardIdeal: CGFloat = 340
-    /// What the conversation shrinks to with a task or a worktree open.
-    static let rail: CGFloat = 36
+    /// What the conversation shrinks to with a task or a worktree open: as
+    /// wide as its icon and its sideways label need (ov-84).
+    static let rail: CGFloat = 28
     /// Each `HSplitView` divider.
     static let divider: CGFloat = 1
 
@@ -63,7 +64,7 @@ enum WorkspaceColumns {
         enum Conversation: Equatable {
             /// Its own column, beside the board.
             case column
-            /// Shrunk to a 36 pt rail at the leading edge: its status and its
+            /// Shrunk to a 28 pt rail at the leading edge: its status and its
             /// dot. Clicking it pops the conversation open.
             case rail
             /// The rail, with the conversation popped open over what's

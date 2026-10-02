@@ -32,6 +32,9 @@ struct WorkspaceView<Conversation: View, Rail: View, Board: View, Crumbs: View, 
     @ViewBuilder let opened: () -> Drilled
     /// A click outside the popped-open conversation: it closes.
     var onDismissPeek: () -> Void = {}
+    /// How the popped-open conversation moves: `OrchestratorPeek.spring`,
+    /// slowed only by a test that reads it mid-flight.
+    var peekMotion: Animation = OrchestratorPeek.spring
 
     var body: some View {
         GeometryReader { proxy in
@@ -81,38 +84,17 @@ struct WorkspaceView<Conversation: View, Rail: View, Board: View, Crumbs: View, 
                         // Animated here alone: going anywhere else takes the
                         // drilled level down at once, so the conversation is
                         // never drawn twice while one fades.
-                        ZStack(alignment: .leading) {
-                            if arrangement.conversation == .peek {
-                                peekPanel(width: width)
-                            }
+                        if arrangement.conversation != .none {
+                            OrchestratorPeekPanel(
+                                open: arrangement.conversation == .peek,
+                                width: WorkspaceColumns.peekWidth(in: width, cell: cell),
+                                motion: peekMotion, content: conversation, onDismiss: onDismissPeek)
                         }
-                        .animation(.snappy(duration: 0.2), value: arrangement.conversation == .peek)
                     }
                     .accessibilityIdentifier("workspace-opened")
             }
         }
         .background(WorkspaceStyle.canvas)
-    }
-
-    private func peekPanel(width: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 0) {
-                conversation()
-                    .frame(width: WorkspaceColumns.peekWidth(in: width, cell: cell))
-                    .frame(maxHeight: .infinity)
-                    .background(WorkspaceStyle.canvas)
-                Divider()
-            }
-            .compositingGroup()
-            .shadow(color: .black.opacity(0.18), radius: 8, x: 2)
-            .accessibilityIdentifier("workspace-conversation-peek")
-            // A click anywhere else over what's opened puts it away.
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture(perform: onDismissPeek)
-                .accessibilityHidden(true)
-        }
-        .transition(.move(edge: .leading).combined(with: .opacity))
     }
 
     @ViewBuilder
@@ -163,6 +145,103 @@ struct WorkspaceView<Conversation: View, Rail: View, Board: View, Crumbs: View, 
             }
         }
     }
+}
+
+/// The orchestrator popped open over a task or a worktree, from the rail.
+///
+/// Mounted on its first open and kept while drilled in, closed or not, so
+/// each open slides the same terminal view in rather than building a new
+/// one; it goes with the drilled level, and in Focus. It moves on an offset,
+/// on one spring, never by inserting and removing it: a press mid-flight
+/// retargets the spring from wherever the panel is.
+///
+/// Whether it's open is `open`, the window's state, and nothing here waits
+/// on the motion. The moment it reads closed, neither the panel nor the
+/// click-outside catcher takes a click or the accessibility tree's notice,
+/// however far it has left to slide; and it's clipped to what's opened, so
+/// in flight it never passes over the rail. Both of those are what made the
+/// rail seem dead while it moved (ov-84): the old panel slid in and out by
+/// its whole width, catcher and all, across the rail, still hit-testable
+/// while removed, so a click on the rail mid-close landed on the catcher,
+/// whose close found it already closed. The clip covers clicks as well as
+/// drawing: a clip alone lets the panel's far side take clicks over the
+/// rail and the sidebar.
+struct OrchestratorPeekPanel<Content: View>: View {
+    let open: Bool
+    /// The conversation's width open (`WorkspaceColumns.peekWidth`).
+    let width: CGFloat
+    var motion: Animation = OrchestratorPeek.spring
+    @ViewBuilder let content: () -> Content
+    var onDismiss: () -> Void
+
+    /// Opened once: from then on it stays, off to the side when closed.
+    @State private var mounted = false
+
+    var body: some View {
+        // Out only once it's on screen to move: the first open mounts it
+        // closed, and its appearing slides it out.
+        let out = open && mounted
+        ZStack(alignment: .leading) {
+            // A click anywhere else over what's opened puts it away, under a
+            // dimming that comes and goes with it.
+            Color.black
+                .opacity(out ? OrchestratorPeek.dimming : 0)
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onDismiss)
+                .allowsHitTesting(OrchestratorPeek.takesClicks(open: open))
+                .accessibilityHidden(true)
+            if mounted || open {
+                HStack(spacing: 0) {
+                    content()
+                        .frame(width: width)
+                        .frame(maxHeight: .infinity)
+                        .background(WorkspaceStyle.canvas)
+                    Divider()
+                }
+                .compositingGroup()
+                .shadow(color: .black.opacity(out ? OrchestratorPeek.shadow : 0), radius: 8, x: 2)
+                .offset(x: OrchestratorPeek.offset(open: out, width: width))
+                .allowsHitTesting(OrchestratorPeek.takesClicks(open: open))
+                .accessibilityHidden(!open)
+                .accessibilityIdentifier("workspace-conversation-peek")
+                .onAppear { mounted = true }
+            }
+        }
+        .animation(motion, value: out)
+        // Drawn and clicked only over what's opened: in flight, the panel's
+        // far side is over the rail and the sidebar, and a clip alone stops
+        // the drawing there but not the clicks.
+        .clipShape(Rectangle())
+        .contentShape(Rectangle())
+        .allowsHitTesting(OrchestratorPeek.takesClicks(open: open))
+    }
+}
+
+/// How the popped-open orchestrator moves, and what a press of the rail,
+/// ⌥⌘1, Esc or a click outside does to it: always the opposite of what it
+/// is now, at once, with nothing waiting on the motion (ov-84).
+enum OrchestratorPeek {
+    /// One spring for the panel, its shadow and the dimming, retargeted from
+    /// where it is by a press mid-flight.
+    static let spring = Animation.spring(response: 0.32, dampingFraction: 0.86)
+    /// What's opened, dimmed under it.
+    static let dimming = 0.08
+    static let shadow = 0.18
+    /// Past its own width when closed, so the shadow is out of sight too.
+    static let overhang: CGFloat = 24
+
+    /// Where the panel sits: at the rail's edge open, wholly off to the
+    /// side closed.
+    static func offset(open: Bool, width: CGFloat) -> CGFloat {
+        open ? 0 : -(width + WorkspaceColumns.divider + overhang)
+    }
+
+    /// Whether the panel and the catcher around it take clicks: exactly
+    /// while it's open, whatever the motion is doing.
+    static func takesClicks(open: Bool) -> Bool { open }
+
+    /// The state after a press of the rail or ⌥⌘1, drilled in.
+    static func pressed(open: Bool) -> Bool { !open }
 }
 
 /// The breadcrumb over a task or a worktree opened: Back, then each level up

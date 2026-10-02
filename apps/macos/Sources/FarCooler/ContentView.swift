@@ -2052,11 +2052,7 @@ struct ContentView: View {
     /// Every layout the detail draws for `selection`: `WorkspaceScreen`'s,
     /// and of a workspace's, only the columns its width draws.
     private func shownLayouts(for selection: Selection?) -> [ShownLayout] {
-        let all = WorkspaceScreen.shown(
-            selection, in: store.fleet,
-            layouts: { host, worktree in store.clients[host]?.layouts[worktree] },
-            repositories: { host in store.clients[host]?.repositories.map(\.id) ?? [] },
-            chosen: { chosenAgents[$0] })
+        let all = drawableLayouts(for: selection)
         guard case .workspace(let host, let id, let focus)? = selection else { return all }
         let summary = WorkspaceScreen.workspace(
             id, host: host, in: store.fleet, repositories: store.clients[host]?.repositories.map(\.id) ?? [])
@@ -2071,6 +2067,17 @@ struct ContentView: View {
 
     /// What the detail draws now.
     private var shown: [ShownLayout] { shownLayouts(for: selection) }
+
+    /// Every layout `selection` could draw, on screen or not: the
+    /// conversation's included while it's tucked away beside a task, so the
+    /// popped-open panel draws one terminal view whether it's out or not.
+    private func drawableLayouts(for selection: Selection?) -> [ShownLayout] {
+        WorkspaceScreen.shown(
+            selection, in: store.fleet,
+            layouts: { host, worktree in store.clients[host]?.layouts[worktree] },
+            repositories: { host in store.clients[host]?.repositories.map(\.id) ?? [] },
+            chosen: { chosenAgents[$0] })
+    }
 
     @ViewBuilder
     private var detail: some View {
@@ -2130,7 +2137,12 @@ struct ContentView: View {
             pick: Binding(
                 get: { workspacePicks[key] ?? .orchestrator }, set: { workspacePicks[key] = $0 }),
             conversation: {
-                conversationColumn(host: host, workspace: summary, shown: layouts.first { $0.column == .conversation })
+                // Drilled in, the panel stays mounted while it's closed, and
+                // draws the same layout then as open; it just doesn't have
+                // the keyboard, or count as seen or watched (`shown`).
+                let onScreen = layouts.first { $0.column == .conversation }
+                let drawn = focus == nil ? onScreen : drawableLayouts(for: selection).first { $0.column == .conversation }
+                conversationColumn(host: host, workspace: summary, shown: drawn, onScreen: onScreen != nil)
             },
             rail: { conversationRail(host: host, workspace: summary) },
             board: { boardColumn(host: host, id: id) },
@@ -2206,7 +2218,9 @@ struct ContentView: View {
     /// row drew it, under its header, or the state around one (spec §8).
     /// See `ConversationColumn`.
     @ViewBuilder
-    private func conversationColumn(host: String, workspace: WorkspaceSummary?, shown: ShownLayout?) -> some View {
+    private func conversationColumn(
+        host: String, workspace: WorkspaceSummary?, shown: ShownLayout?, onScreen: Bool = true
+    ) -> some View {
         if let workspace {
             let seat = WorkspaceScreen.orchestrator(of: workspace, host: host, in: store.fleet)
             let key = "\(host)|\(workspace.id)"
@@ -2248,7 +2262,7 @@ struct ContentView: View {
                         startedAt: orchestratorStartedAt[key], now: context.date)
                     conversationBody(
                         state: state, offers: ConversationColumn.offers(state, canAct: canAct),
-                        shown: shown, seat: seat, workspace: workspace, host: host)
+                        shown: shown, seat: seat, workspace: workspace, host: host, onScreen: onScreen)
                 }
             }
             // A start first seen here is timed from here; a live one clears it.
@@ -2269,7 +2283,7 @@ struct ContentView: View {
     @ViewBuilder
     private func conversationBody(
         state: ConversationColumn.State, offers: [ConversationColumn.Offer], shown: ShownLayout?,
-        seat: BoardPane?, workspace: WorkspaceSummary, host: String
+        seat: BoardPane?, workspace: WorkspaceSummary, host: String, onScreen: Bool
     ) -> some View {
         let placeholder = ConversationPlaceholder(
             state: state, offers: offers,
@@ -2284,9 +2298,9 @@ struct ContentView: View {
         switch state {
         case .live:
             if let shown {
-                tiled(shown, titled: false)
+                tiled(shown, titled: false, keyboard: onScreen)
             } else if let seat {
-                bareTerminal(seat)
+                bareTerminal(seat, keyboard: onScreen)
             }
         case .lost:
             // Its last screen, dimmed, under what can be done about it.
@@ -2300,40 +2314,15 @@ struct ContentView: View {
     }
 
     /// The conversation shrunk to a rail beside a task or a worktree: its
-    /// status and its dot, and a click that pops it open over what's opened,
-    /// or closes it again.
+    /// icon and state, its name set sideways, and a click that pops it open
+    /// over what's opened, or closes it again. See `OrchestratorRailView`.
     private func conversationRail(host: String, workspace: WorkspaceSummary?) -> some View {
         let seat = workspace.flatMap { WorkspaceScreen.orchestrator(of: $0, host: host, in: store.fleet) }
-        return Button {
-            focusWorkspaceColumn(.focusConversation)
-        } label: {
-            VStack {
-                if let seat {
-                    StatusGlyph(status: seat.terminal.status)
-                } else {
-                    Image(systemName: "circle.dashed").foregroundStyle(.tertiary)
-                }
-                // Its needs-you dot: something in this workspace is waiting,
-                // or the orchestrator finished a turn nobody has seen.
-                if let workspace,
-                    store.needsYou.count(in: workspace.id) > 0 || ConversationColumn.unread(seat)
-                {
-                    Circle().fill(GlancePalette.amber(colorScheme)).frame(width: 6, height: 6)
-                }
-                Spacer()
-                Image(systemName: orchestratorPeek ? "chevron.left" : "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 12)
-            }
-            .padding(.top, 12)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background(orchestratorPeek ? Color.primary.opacity(0.06) : WorkspaceStyle.canvas)
-        .help(orchestratorPeek ? "Hide the orchestrator" : "Show the orchestrator (⌥⌘1)")
-        .accessibilityLabel(orchestratorPeek ? "Hide the Orchestrator" : "Show the Orchestrator")
+        return OrchestratorRailView(
+            state: OrchestratorRail.state(seat: seat, waiting: workspace.map { store.needsYou.count(in: $0.id) } ?? 0),
+            agent: ConversationHeader.agentName(seat),
+            open: orchestratorPeek,
+            onToggle: { focusWorkspaceColumn(.focusConversation) })
     }
 
     /// The breadcrumb over a task or a worktree opened: Workspace › Task, or
@@ -2612,7 +2601,7 @@ struct ContentView: View {
     /// a pane in no layout at all: "we haven't read the layouts yet" and
     /// "it's in none" look the same from here, and showing the terminal is
     /// the right answer to both.
-    private func bareTerminal(_ pane: BoardPane) -> some View {
+    private func bareTerminal(_ pane: BoardPane, keyboard: Bool = true) -> some View {
         let ws = pane.worktree
         let term = pane.terminal
         let client = store.client(for: ws)
@@ -2632,7 +2621,7 @@ struct ContentView: View {
                 await store.client(for: ws)?.searchFiles(in: ws, query: query) ?? []
             },
             onAction: { action in Task { await run(action, on: term, in: ws) } },
-            hasKeyboard: WorkspaceScreen.bareTakesKeyboard(shown)
+            hasKeyboard: keyboard && WorkspaceScreen.bareTakesKeyboard(shown)
         )
     }
 
@@ -2680,17 +2669,20 @@ struct ContentView: View {
     /// handler was fixed in one copy and not the other, so dropping a pane
     /// behaved differently depending on which sidebar row you had clicked last.
     @ViewBuilder
-    private func tiled(_ shown: ShownLayout, titled: Bool = true) -> some View {
+    private func tiled(_ shown: ShownLayout, titled: Bool = true, keyboard: Bool = true) -> some View {
         let ws = shown.worktree
         if let client = store.client(for: ws) {
-            tiled(shown, client: client, frame: Self.frame(of: shown, in: store.fleet), titled: titled)
+            tiled(
+                shown, client: client, frame: Self.frame(of: shown, in: store.fleet), titled: titled,
+                keyboard: keyboard)
         } else {
             placeholder
         }
     }
 
     private func tiled(
-        _ shown: ShownLayout, client: DaemonClient, frame: (title: String, subtitle: String), titled: Bool
+        _ shown: ShownLayout, client: DaemonClient, frame: (title: String, subtitle: String), titled: Bool,
+        keyboard: Bool = true
     ) -> some View {
         let ws = shown.worktree
         return TileView(
@@ -2739,7 +2731,7 @@ struct ContentView: View {
             title: frame.title,
             subtitle: frame.subtitle,
             setsTitle: titled,
-            hasKeyboard: WorkspaceScreen.hasKeyboard(shown, key: selectedPane, onBoard: keyboardOnBoard)
+            hasKeyboard: keyboard && WorkspaceScreen.hasKeyboard(shown, key: selectedPane, onBoard: keyboardOnBoard)
         )
     }
 
@@ -3436,8 +3428,9 @@ struct ContentView: View {
         let key = "\(host)|\(id)"
         switch command {
         case .focusConversation:
-            // Pressed again, or the rail clicked again: it closes.
-            if focus != nil, orchestratorPeek {
+            // Pressed again, or the rail clicked again: it closes, at once,
+            // mid-flight or not (`OrchestratorPeek`).
+            if focus != nil, !OrchestratorPeek.pressed(open: orchestratorPeek) {
                 closePeek()
                 return
             }
