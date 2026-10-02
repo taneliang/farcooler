@@ -12,7 +12,7 @@ import SwiftUI
 /// that has to be learned is one that will not be:
 ///
 ///   ⌘T / ⌘W   new and close, as in every tabbed app
-///   ⌘1…⌘9     jump to the nth thing, as in every browser
+///   ⌘1…⌘9     jump to the nth workspace, as a browser does its tabs
 ///   ⌘[ / ⌘]   back and forward through them
 ///   ⌃⇥ / ⇧⌘]  next tab, on both spellings the platform uses — and a layout
 ///             IS the tab here, which is why these walk the pill bar
@@ -55,7 +55,7 @@ enum Shortcut {
             [
                 Item(keys: "⌘T", action: "New terminal in this worktree"),
                 Item(keys: "⌘W", action: "Close terminal"),
-                Item(keys: "⌘1 … ⌘9", action: "Jump to terminal"),
+                Item(keys: "⌃⌘1 … ⌃⌘9", action: "Jump to a terminal on screen"),
                 Item(keys: "⌘]", action: "Next terminal on screen"),
                 Item(keys: "⌘[", action: "Previous terminal on screen"),
                 Item(keys: "⌃⌘N", action: "Jump to the next thing that needs you"),
@@ -116,6 +116,8 @@ enum Shortcut {
                 Item(keys: "⌃⌘←", action: "Back: from a worktree to its task, from a task to the workspace"),
                 Item(keys: "⌃⌘↩", action: "Focus: the task’s or worktree’s terminals at full size; again to put the rest back"),
                 Item(keys: "⌥⌘1 ⌥⌘2 ⌥⌘3", action: "Go to the orchestrator (over a task, from its rail), the board, the task"),
+                Item(keys: "⌃⌘↓ ⌃⌘↑", action: "Next / previous worktree, in the board list’s order"),
+                Item(keys: "⌘1 … ⌘9", action: "Go to a workspace, in the title bar’s order"),
             ]
         ),
         (

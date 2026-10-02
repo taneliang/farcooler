@@ -40,6 +40,10 @@ enum AppCommand: String {
     case focusConversation
     case focusBoard
     case focusTask
+    /// The next or previous worktree in the workspace, in the board list's
+    /// order (ov-86).
+    case nextWorktree
+    case previousWorktree
 
     static let notification = Notification.Name("farcooler.command")
 
@@ -53,6 +57,13 @@ enum AppCommand: String {
         NotificationCenter.default.post(
             name: Notification.Name("farcooler.selectIndex"), object: index)
     }
+
+    /// Go to the workspace numbered `number` (⌘1 through ⌘9, ov-86).
+    static func selectWorkspace(_ number: Int) {
+        NotificationCenter.default.post(name: selectWorkspaceNotification, object: number)
+    }
+
+    static let selectWorkspaceNotification = Notification.Name("farcooler.selectWorkspace")
 }
 
 /// The menu bar.
@@ -143,8 +154,12 @@ struct FarCoolerCommands: Commands {
         }
 
         // A workspace's levels and panes. ⌃⌘ and ⌥⌘ because the usual chords are
-        // taken: ⌘[ is Previous Terminal, ⇧⌘↩ is Zoom Pane, and ⌘digits
-        // are the terminals (spec §4.9).
+        // taken: ⌘[ is Previous Terminal and ⇧⌘↩ is Zoom Pane (spec §4.9).
+        //
+        // ⌘1 through ⌘9 are the workspaces themselves (ov-86), in the title
+        // bar switcher's order, as a browser's are its tabs: with no sidebar,
+        // they're the fastest way between them. They were the terminals on
+        // screen, which moved to ⌃⌘1 through ⌃⌘9.
         CommandMenu("Workspace") {
             Button("Back") { AppCommand.back.post() }
                 .keyboardShortcut(.leftArrow, modifiers: [.command, .control])
@@ -157,6 +172,20 @@ struct FarCoolerCommands: Commands {
                 .keyboardShortcut("2", modifiers: [.command, .option])
             Button("Task") { AppCommand.focusTask.post() }
                 .keyboardShortcut("3", modifiers: [.command, .option])
+            Section {
+                // The worktrees in the board list's order: each task's, then
+                // the loose ones under Worktrees.
+                Button("Next Worktree") { AppCommand.nextWorktree.post() }
+                    .keyboardShortcut(.downArrow, modifiers: [.command, .control])
+                Button("Previous Worktree") { AppCommand.previousWorktree.post() }
+                    .keyboardShortcut(.upArrow, modifiers: [.command, .control])
+            }
+            Section {
+                ForEach(1...WorkspaceNumbers.count, id: \.self) { n in
+                    Button("Workspace \(n)") { AppCommand.selectWorkspace(n) }
+                        .keyboardShortcut(KeyEquivalent(Character("\(n)")), modifiers: .command)
+                }
+            }
         }
 
         CommandMenu("Terminal") {
@@ -172,9 +201,10 @@ struct FarCoolerCommands: Commands {
                 .keyboardShortcut("n", modifiers: [.command, .control])
                 .disabled(!MainWindowFocus.stepsToAttention(mainWindow))
             Divider()
+            // ⌃⌘, since ⌘1 through ⌘9 went to the workspaces (ov-86).
             ForEach(1...9, id: \.self) { n in
                 Button("Terminal \(n)") { AppCommand.selectIndex(n - 1) }
-                    .keyboardShortcut(KeyEquivalent(Character("\(n)")), modifiers: .command)
+                    .keyboardShortcut(KeyEquivalent(Character("\(n)")), modifiers: [.command, .control])
             }
         }
 
@@ -359,6 +389,13 @@ extension View {
                 return
             }
             perform(command)
+        }
+    }
+
+    func onSelectWorkspace(_ perform: @escaping (Int) -> Void) -> some View {
+        onReceive(NotificationCenter.default.publisher(for: AppCommand.selectWorkspaceNotification)) { note in
+            guard let number = note.object as? Int else { return }
+            perform(number)
         }
     }
 

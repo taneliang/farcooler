@@ -188,6 +188,10 @@ struct ContentView: View {
     /// Which workspaces are open in the sidebar, their worktrees listed, as
     /// `SidebarEntry.openKey`s, one a line. Empty by default (spec §9).
     @AppStorage("sidebar.openWorktrees") private var openWorktrees = ""
+    /// Whether the sidebar is out (ov-86): hidden for a new window, since the
+    /// title bar's switcher does its work, and kept as it was left by anyone
+    /// who has used the app. See `SidebarDefault`.
+    @State private var sidebarVisibility: NavigationSplitViewVisibility = Self.initialSidebar()
     /// When each workspace's orchestrator start began, by `host|workspace`:
     /// this app's, or one first seen starting. See `ConversationColumn.slowStart`.
     @State private var orchestratorStartedAt: [String: Date] = [:]
@@ -206,7 +210,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $sidebarVisibility) {
             sidebar
         } detail: {
             // Top-aligned over the detail pane specifically, not the sidebar —
@@ -220,6 +224,17 @@ struct ContentView: View {
                 // them. This is the one place that decides which worktree the
                 // window is showing, which is exactly what the control acts on.
                 .openInEditorToolbar(worktree: detailWorktree) { editorError = $0 }
+                .toolbar {
+                    // The workspace switcher, leading, after the traffic
+                    // lights, and Needs You beside it (ov-86): what the
+                    // sidebar was for, so it can stay hidden.
+                    ToolbarItem(placement: .navigation) { workspaceSwitcher }
+                    ToolbarItem(placement: .navigation) {
+                        NeedsYouToolbarButton(
+                            count: store.needsYou.count, selected: selection == .needsYou,
+                            onSelect: { selection = .needsYou })
+                    }
+                }
                 .toolbar {
                     // Not offered on a runner that has already said it cannot
                     // read changes at all. Its daemon predates the whole
@@ -334,6 +349,14 @@ struct ContentView: View {
         .onCommand { command in run(command) }
         .onTileCommand { command in Task { await tile(command) } }
         .onSelectIndex { index in selectTerminal(at: index) }
+        .onSelectWorkspace { number in
+            if let target = WorkspaceNumbers.target(number, in: WorkspaceNumbers.groups(in: store.fleet)) {
+                selection = target
+            }
+        }
+        .onChange(of: sidebarVisibility, initial: true) { _, now in
+            UserDefaults.standard.set(SidebarDefault.stored(now != .detailOnly), forKey: SidebarDefault.key)
+        }
         .onChange(of: store.layouts) { _, _ in followLayoutFocus() }
         // Every client change reaches `store.fleet` — `FleetStore` remerges
         // on each one — so this hears a runner leaving, coming back as a new
@@ -2184,6 +2207,107 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Getting around without the sidebar (ov-86)
+
+    /// The sidebar as a new window opens it: hidden, unless someone who
+    /// has used the app left it out, or has never chosen and has history
+    /// here from before it could be hidden.
+    private static func initialSidebar(in defaults: UserDefaults = .standard) -> NavigationSplitViewVisibility {
+        let history = !(defaults.string(forKey: SelectionMemory.key) ?? "").isEmpty
+            || defaults.object(forKey: SelectionMemory.legacyKey) != nil
+        let shown = SidebarDefault.shown(stored: defaults.string(forKey: SidebarDefault.key), hasHistory: history)
+        return shown ? .all : .detailOnly
+    }
+
+    /// The title bar's workspace switcher, naming where the window is.
+    private var workspaceSwitcher: some View {
+        let scene = selection.flatMap(workspaceScene)
+        let repository = scene?.summary.flatMap { w in
+            store.clients[scene?.host ?? ""]?.repositories.first { $0.id == (w.repository ?? w.id) }?.displayName
+        } ?? ""
+        let title: String = {
+            if selection == .needsYou { return "Needs You" }
+            guard let summary = scene?.summary else { return "Workspaces" }
+            return summary.isImplicit ? "Main" : summary.name
+        }()
+        return WorkspaceSwitcher(
+            groups: WorkspaceNumbers.groups(in: store.fleet),
+            current: scene.flatMap { s in s.board.map { (s.host, $0) } },
+            title: title, repository: scene?.summary == nil ? "" : repository,
+            waiting: { place in WorkspaceCounts.count(for: place.workspace, host: place.host, in: store.needsYou) },
+            showsHosts: showHosts, needsYou: store.needsYou.count,
+            onGo: { selection = $0 },
+            onNeedsYou: { selection = .needsYou },
+            onNewWorkspace: workspaceRepositories.isEmpty ? nil : { newWorkspaceName = NewWorkspaceName(name: "") },
+            onRunners: {
+                preferences.settingsTab = "machines"
+                openSettings()
+            })
+    }
+
+    /// The workspace's worktrees in the board list's order, for the scene
+    /// the selection draws: what ⌃⌘↑ and ⌃⌘↓ walk and the breadcrumb's
+    /// menu lists.
+    private func worktreeEntries(_ scene: WorkspaceScene) -> [WorkspaceWorktrees.Entry] {
+        guard let summary = scene.summary, let client = store.clients[scene.host] else { return [] }
+        let board = boardStore(for: summary, client: client, host: scene.host).board
+        return WorkspaceWorktrees.entries(in: summary, host: scene.host, board: board, fleet: store.fleet)
+    }
+
+    /// ⌃⌘↓ and ⌃⌘↑: the next or previous worktree in the workspace on
+    /// screen, in the board list's order.
+    private func stepWorktree(by offset: Int) {
+        guard let scene = selection.flatMap(workspaceScene), let board = scene.board else { return }
+        if let next = WorkspaceWorktrees.step(
+            from: selection, by: offset, in: worktreeEntries(scene), host: scene.host, workspace: board,
+            fleet: store.fleet)
+        {
+            trail = nil
+            navigate(to: next)
+        }
+    }
+
+    /// The board list's worktrees: each task's name, and the loose ones
+    /// under Worktrees.
+    private func boardWorktrees(host: String, workspace: WorkspaceSummary, client: DaemonClient) -> BoardWorktrees {
+        let board = boardStore(for: workspace, client: client, host: host).board
+        let loose = WorkspaceWorktrees.loose(in: workspace, host: host, board: board, fleet: store.fleet)
+        let usable = store.refusal(for: host) == nil
+        let repository = client.repositories.first { $0.id == (workspace.repository ?? workspace.id) }
+        return BoardWorktrees(
+            byTask: WorkspaceWorktrees.taskWorktrees(on: board, host: host, in: store.fleet).mapValues(\.task),
+            shown: loose.shown, hidden: loose.hidden,
+            selected: Self.openedWhole(selection).map(\.worktree)
+                ?? WorkspaceScreen.namedTerminal(selection).map(\.worktree),
+            onOpen: { worktree in
+                trail = nil
+                open(worktree, terminal: nil)
+            },
+            onNew: usable ? repository.map { repo in { newWorktree(host: host, project: repo.displayName) } } : nil,
+            onHide: usable ? { ws in Task { await act(on: ws) { c in await c.hideWorktree(ws.short) } } } : nil,
+            onUnhide: usable ? { ws in Task { await act(on: ws) { c in await c.unhideWorktree(ws.short) } } } : nil)
+    }
+
+    /// The breadcrumb's worktree menu for `place`: standing for a worktree
+    /// opened whole, or following a task as the worktree beneath it.
+    private func worktreeCrumb(for place: Selection, scene: WorkspaceScene) -> WorktreeCrumb? {
+        guard let board = scene.board else { return nil }
+        let entries = worktreeEntries(scene)
+        let current = WorkspaceSelection.samePlace(place, selection) ? selection : place
+        let menu = WorkspaceWorktrees.menu(entries, selection: current, host: scene.host, workspace: board, fleet: store.fleet)
+        switch place {
+        case .workspace(let host, _, .worktree(let id, _)?), .looseWorktree(let host, let id, _):
+            let name = worktree(host: host, id: id)?.task ?? "Worktree"
+            return WorktreeCrumb(title: "⎇ \(name)", isHere: true, tasks: menu.tasks, loose: menu.loose)
+        case .workspace(_, _, .task(let id)?):
+            let name = WorkspaceWorktrees.index(of: place, in: entries).map { entries[$0].worktree.task }
+            return WorktreeCrumb(
+                title: name.map { "⎇ \($0)" } ?? "⎇ Worktrees", isHere: false, tasks: menu.tasks, loose: menu.loose)
+        default:
+            return nil
+        }
+    }
+
     /// A workspace: the orchestrator's rail, the board, and the task or
     /// worktree opened beside it under the breadcrumb (ov-85). A loose
     /// worktree is drawn here too, beside its repository's board.
@@ -2212,8 +2336,11 @@ struct ContentView: View {
                 if let board = scene.board { boardColumn(host: host, id: board) }
             },
             breadcrumb: { place in
+                let crumbs = crumbs(for: place, host: host, workspace: summary)
+                let worktrees = worktreeCrumb(for: place, scene: scene)
                 DrillBreadcrumb(
-                    crumbs: crumbs(for: place, host: host, workspace: summary),
+                    crumbs: worktrees?.isHere == true ? Array(crumbs.dropLast()) : crumbs,
+                    worktrees: worktrees,
                     onGo: { target in
                         if target == trail { trail = nil }
                         selection = target
@@ -2781,7 +2908,8 @@ struct ContentView: View {
                 focusRequest: boardFocusRequest,
                 onKeyboard: { keyboardOnBoard = true },
                 onEnter: { focusWorkspaceColumn(.focusTask) },
-                hasKeyboard: keyboardOnBoard
+                hasKeyboard: keyboardOnBoard,
+                worktrees: boardWorktrees(host: host, workspace: workspace, client: client)
             )
         } else {
             // Said, rather than the generic "Select a worktree": this
@@ -3780,10 +3908,15 @@ struct ContentView: View {
             }
         case .focusConversation, .focusBoard, .focusTask:
             focusWorkspaceColumn(command)
+        case .nextWorktree: stepWorktree(by: 1)
+        case .previousWorktree: stepWorktree(by: -1)
         case .openInEditor: openInPreferredEditor()
         case .reload: Task { for client in store.clients.values { await client.refresh() } }
         case .showShortcuts: showShortcuts = true
-        case .search: searchFocused = true
+        // With the sidebar hidden its search isn't there to focus: the
+        // palette finds the same workspaces, tasks and agents.
+        case .search:
+            if sidebarVisibility == .detailOnly { showPalette = true } else { searchFocused = true }
 
         // Toggles rather than opens. ⌘P on an open palette is what a hand
         // reaches for when it changed its mind, and every switcher on this

@@ -646,6 +646,9 @@ struct TaskBoardView: View {
     /// close), and no terminal has taken it back since: what ↑ and ↓ need,
     /// and what draws the selected row in the accent.
     let hasKeyboard: Bool
+    /// The workspace's worktrees (ov-86): each task's, named on its row,
+    /// and the loose ones, in the Worktrees section under the tasks.
+    let worktrees: BoardWorktrees
 
     /// The list's collapsed sections: read from `defaults` in `init`, and
     /// again when the view is handed another board.
@@ -694,7 +697,7 @@ struct TaskBoardView: View {
         store: TaskBoardStore, client: DaemonClient, agents: BoardAgents, waiting: Int = 0,
         onGoTo: @escaping (BoardPane) -> Void, defaults: UserDefaults = .standard,
         selected: String? = nil, focusRequest: Int = 0, onKeyboard: @escaping () -> Void = {},
-        onEnter: @escaping () -> Void = {}, hasKeyboard: Bool = false
+        onEnter: @escaping () -> Void = {}, hasKeyboard: Bool = false, worktrees: BoardWorktrees = .none
     ) {
         self.store = store
         self.client = client
@@ -707,6 +710,7 @@ struct TaskBoardView: View {
         self.onKeyboard = onKeyboard
         self.onEnter = onEnter
         self.hasKeyboard = hasKeyboard
+        self.worktrees = worktrees
         _collapsed = State(
             initialValue: BoardForm.collapsed(
                 host: store.hostKey, workspace: store.workspace.id, from: defaults))
@@ -809,6 +813,7 @@ struct TaskBoardView: View {
                             onToggle: { toggle(section.status) },
                             store: store, agents: agents, onGoTo: onGoTo,
                             selected: selected, keyed: hasKeyboard,
+                            worktreeNames: worktrees.byTask,
                             showingAllDone: $showingAllDone,
                             onChoose: { row in
                                 listFocused = true
@@ -817,6 +822,9 @@ struct TaskBoardView: View {
                     }
                     if !store.board.unreadable.isEmpty {
                         UnreadableColumnView(rows: store.board.unreadable)
+                    }
+                    if !worktrees.isEmpty {
+                        BoardWorktreesSection(worktrees: worktrees, keyed: hasKeyboard)
                     }
                 }
                 // Measured from the board column's edge: the sections' chevrons
@@ -1018,6 +1026,8 @@ private struct TaskListSection: View {
     /// keyboard, which draws it in the accent rather than gray.
     let selected: String?
     let keyed: Bool
+    /// Each task's worktree name, by task id.
+    let worktreeNames: [String: String]
     @Binding var showingAllDone: Bool
     let onChoose: (TaskRow) -> Void
 
@@ -1065,6 +1075,7 @@ private struct TaskListSection: View {
                             row: row, prominent: leads, store: store,
                             live: agents.live(for: row), presence: agents.presence(for: row),
                             onGoTo: onGoTo, selected: row.id == selected, keyed: keyed,
+                            worktree: worktreeNames[row.id],
                             onChoose: { onChoose(row) })
                         .id(row.id)
                     }
@@ -1117,6 +1128,8 @@ struct TaskListRow: View {
     var selected = false
     /// The list has the keyboard: selected reads in the accent.
     var keyed = false
+    /// Its worktree's name (ov-86): where its work is, beside its key.
+    var worktree: String?
     var onChoose: (() -> Void)?
 
     var body: some View {
@@ -1127,6 +1140,15 @@ struct TaskListRow: View {
                         .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .gridMark("card", .text)
+                    if let worktree {
+                        Text("⎇ \(worktree)")
+                            .font(.system(size: WorkspaceStyle.PaneText.minimum, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .help("Worktree \(worktree)")
+                            .accessibilityLabel("Worktree \(worktree)")
+                    }
                     // A stale row is visibly different, which is the
                     // board's whole job beyond showing state: a task sitting
                     // in `todo` that you assumed was in flight is the failure

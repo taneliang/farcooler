@@ -482,6 +482,11 @@ enum OrchestratorPeek {
 /// beside the board rather than across the window from it (ov-85).
 struct DrillBreadcrumb: View {
     let crumbs: [WorkspaceNavigation.Crumb]
+    /// The trailing worktree segment (ov-86): "⎇ tax-rounding ▾", a menu
+    /// of the workspace's worktrees, task ones by their task, then the
+    /// loose ones. It stands for a worktree opened whole, in place of its
+    /// crumb, and follows a task as the worktree beneath it.
+    var worktrees: WorktreeCrumb?
     var onGo: (ContentView.Selection) -> Void
     /// Close: what's opened goes, and the board widens back. Nil where
     /// there's nothing to close to, and no button.
@@ -503,6 +508,32 @@ struct DrillBreadcrumb: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
+            }
+            if let worktrees {
+                if !crumbs.isEmpty { Text("›").foregroundStyle(.tertiary) }
+                Menu {
+                    if !worktrees.tasks.isEmpty {
+                        Section("Tasks") {
+                            ForEach(worktrees.tasks) { item in menuItem(item) }
+                        }
+                    }
+                    if !worktrees.loose.isEmpty {
+                        Section("Worktrees") {
+                            ForEach(worktrees.loose) { item in menuItem(item) }
+                        }
+                    }
+                    if worktrees.tasks.isEmpty && worktrees.loose.isEmpty {
+                        Text("No worktrees yet")
+                    }
+                } label: {
+                    Text(worktrees.title)
+                        .fontWeight(worktrees.isHere ? .semibold : .regular)
+                        .lineLimit(1)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Go to another worktree in this workspace (⌃⌘↑ ⌃⌘↓)")
+                .accessibilityIdentifier("breadcrumb-worktrees")
             }
             Spacer(minLength: 0)
             if let onClose {
@@ -526,6 +557,31 @@ struct DrillBreadcrumb: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Breadcrumb")
     }
+}
+
+extension DrillBreadcrumb {
+    @ViewBuilder
+    private func menuItem(_ item: WorkspaceWorktrees.MenuItem) -> some View {
+        Button {
+            onGo(item.target)
+        } label: {
+            if item.current { Image(systemName: "checkmark") }
+            Text(item.title)
+            if let subtitle = item.subtitle { Text(subtitle) }
+        }
+    }
+}
+
+/// The breadcrumb's worktree menu, as the window builds it.
+struct WorktreeCrumb {
+    /// What the segment says: "⎇ tax-rounding", the worktree it stands
+    /// for, or "⎇ Worktrees" beside a task with none.
+    var title: String
+    /// Whether it's the level you're at, a worktree opened whole, rather
+    /// than the one beneath a task.
+    var isHere: Bool
+    var tasks: [WorkspaceWorktrees.MenuItem]
+    var loose: [WorkspaceWorktrees.MenuItem]
 }
 
 /// The arrangement a `WorkspaceView` drew, published from the value it

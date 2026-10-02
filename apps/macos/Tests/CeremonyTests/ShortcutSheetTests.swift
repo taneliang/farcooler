@@ -97,8 +97,9 @@ struct ShortcutSheetTests {
         } else if key.hasPrefix("\""), key.hasSuffix("\""), key.count == 3 {
             drawn = String(key.dropFirst().dropLast()).uppercased()
         } else if key.hasPrefix("KeyEquivalent(Character(\"\\(") {
-            // `Terminal \(n)`, bound in a `ForEach(1...9)`. The sheet lists
-            // the range as ⌘1 … ⌘9, so its first member stands for it.
+            // `Workspace \(n)` and `Terminal \(n)`, each bound in a
+            // `ForEach` over 1 to 9. The sheet lists a range as ⌘1 … ⌘9, so
+            // its first member stands for it.
             drawn = "1"
         } else {
             return nil
@@ -189,6 +190,30 @@ struct ShortcutSheetTests {
         let shared = counts.filter { $0.value > 1 }.keys.sorted()
         #expect(shared.isEmpty, "chords bound twice: \(shared)")
         #expect(spelled.contains("⌃⌘←") && spelled.contains("⌃⌘↩") && spelled.contains("⌥⌘1"))
+    }
+
+    /// The shortcut on the line after the menu item titled `title`.
+    private static func shortcut(after title: String) -> String? {
+        let lines = commands.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard let at = lines.firstIndex(where: { $0.contains("Button(\"\(title)\")") }), at + 1 < lines.count
+        else { return nil }
+        let pattern = #/\.keyboardShortcut\(\s*(.+?),\s*modifiers:\s*(\[[^\]]*\]|\.[a-z]+)\s*\)/#
+        guard let match = lines[at + 1].firstMatch(of: pattern) else { return nil }
+        return spelled(key: String(match.output.1), modifiers: String(match.output.2))
+    }
+
+    /// ⌘1 through ⌘9 go to the first nine workspaces (ov-86). They were the
+    /// terminals on screen, which move to ⌃⌘1 through ⌃⌘9, beside ⌃⌘↑ and
+    /// ⌃⌘↓, which walk a workspace's worktrees.
+    @Test("⌘-numbers are workspaces, and the terminals moved to ⌃⌘-numbers")
+    func numbersAreWorkspaces() {
+        #expect(Self.shortcut(after: "Workspace \\(n)") == "⌘1")
+        #expect(Self.shortcut(after: "Terminal \\(n)") == "⌃⌘1")
+        #expect(Self.shortcut(after: "Next Worktree") == "⌃⌘↓")
+        #expect(Self.shortcut(after: "Previous Worktree") == "⌃⌘↑")
+        let rows = Shortcut.groups.flatMap { $0.1 }
+        #expect(rows.first { $0.keys == "⌘1 … ⌘9" }?.action.contains("workspace") == true)
+        #expect(rows.first { $0.keys == "⌃⌘1 … ⌃⌘9" }?.action.contains("terminal") == true)
     }
 
     /// "Repository" and "workspace" replaced "project" (spec §1): not in the
