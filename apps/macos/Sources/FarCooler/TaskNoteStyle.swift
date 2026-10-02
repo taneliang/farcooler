@@ -89,6 +89,13 @@ struct TaskNoteStyle: Equatable {
         return Decision(chosen: chosen, rejected: rejected)
     }
 
+    /// The record as the task view draws it: newest first (`TaskNoteFeed`),
+    /// with the answers that sit under their question.
+    static func feed(_ notes: [TaskNoteRow]) -> (notes: [TaskNoteRow], paired: Set<String>) {
+        let ordered = TaskNoteFeed.newestFirst(notes)
+        return (ordered, answersPaired(ordered))
+    }
+
     /// The ids of answers that directly follow a question, which are drawn
     /// as its reply: indented under it, on a rule.
     static func answersPaired(_ notes: [TaskNoteRow]) -> Set<String> {

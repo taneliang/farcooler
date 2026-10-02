@@ -1300,8 +1300,9 @@ struct TaskCard: View {
                         .font(.system(size: WorkspaceStyle.PaneText.body))
                         .foregroundStyle(.secondary)
                 }
-                let paired = TaskNoteStyle.answersPaired(detail.notes)
-                ForEach(detail.notes) { note in
+                let feed = TaskNoteStyle.feed(detail.notes)
+                let paired = feed.paired
+                ForEach(feed.notes) { note in
                     TaskNoteView(note: note, pairedWithQuestion: paired.contains(note.id))
                 }
                 // Never silently: an entry this build cannot name is still an

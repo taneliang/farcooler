@@ -68,6 +68,18 @@ struct TaskNoteStyleTests {
         #expect(TaskNoteStyle.answersPaired(notes) == ["2"])
     }
 
+    @Test("The task view's record is newest first, pairs kept, Created last")
+    func theRecordIsNewestFirst() {
+        func note(_ id: String, _ kind: TaskNoteKind, _ t: Double) -> TaskNoteRow {
+            TaskNoteRow(id: id, kind: kind, actor: "user", at: Date(timeIntervalSince1970: t), body: "")
+        }
+        let feed = TaskNoteStyle.feed([
+            note("made", .created, 0), note("q", .question, 1), note("a", .answer, 2), note("p", .progress, 3),
+        ])
+        #expect(feed.notes.map(\.id) == ["p", "q", "a", "made"])
+        #expect(feed.paired == ["a"])
+    }
+
     @Test("The text above the divider keeps a minimum height")
     func theTextKeepsAMinimumHeight() {
         #expect(TaskColumnModel.topHeight(total: 700, share: 0.15, minimum: 260) == 260)
