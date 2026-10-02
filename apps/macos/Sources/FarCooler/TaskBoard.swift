@@ -1474,47 +1474,15 @@ struct TaskCard: View {
 
     @ViewBuilder private var record: some View {
         section("Record") {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 if detail.notes.isEmpty {
                     Text("Nothing written down yet.")
                         .font(.system(size: WorkspaceStyle.PaneText.body))
                         .foregroundStyle(.secondary)
                 }
+                let paired = TaskNoteStyle.answersPaired(detail.notes)
                 ForEach(detail.notes) { note in
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Text(note.kind.title)
-                                .font(
-                                    .system(
-                                        size: WorkspaceStyle.PaneText.secondary,
-                                        weight: .semibold)
-                                )
-                                .foregroundStyle(
-                                    note.kind.isMachineWritten ? Color.secondary : Color.primary)
-                            Text(note.byline)
-                                .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                                .foregroundStyle(.secondary)
-                            // The board's own abbreviated words ("4m ago"), as
-                            // the card's line says it, with the exact time on
-                            // hover. The system's relative style spelled out
-                            // "3 min, 58 sec", beside "Updated 3m ago".
-                            BoardTick { now in
-                                Text(TaskRow.ago(now.timeIntervalSince(note.at)))
-                                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                                    .foregroundStyle(.secondary)
-                                    .help(note.at.formatted(date: .abbreviated, time: .standard))
-                            }
-                            if note.supersedes != nil {
-                                Text("Replaces an earlier entry")
-                                    .font(.system(size: WorkspaceStyle.PaneText.minimum))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        Text(note.displayBody)
-                            .font(.system(size: WorkspaceStyle.PaneText.body))
-                            .textSelection(.enabled)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    TaskNoteView(note: note, pairedWithQuestion: paired.contains(note.id))
                 }
                 // Never silently: an entry this build cannot name is still an
                 // entry, and the record's claim is that nothing in it is lost.
@@ -1645,5 +1613,109 @@ private struct QuestionAnswers: View {
                 writing = false
             }
         }
+    }
+}
+
+/// One note in the record, drawn by its kind (`TaskNoteStyle`): an icon and
+/// label in the kind's tint, the byline and time, then the text. A decision
+/// is a card with its rejected options beneath; an answer that follows a
+/// question sits under it on a rule; the store's own entries are one muted line.
+private struct TaskNoteView: View {
+    let note: TaskNoteRow
+    let pairedWithQuestion: Bool
+
+    private var style: TaskNoteStyle { .of(note.kind) }
+
+    var body: some View {
+        switch style.weight {
+        case .quiet: quiet
+        case .prominent: card
+        case .standard: standard
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            Image(systemName: style.symbol)
+                .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .regular))
+                .foregroundStyle(style.tint.color)
+                .frame(width: 16)
+                .accessibilityHidden(true)
+            Text(style.label)
+                .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .semibold))
+                .foregroundStyle(style.tint.color)
+            Text(note.byline)
+                .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                .foregroundStyle(.secondary)
+            // The board's own abbreviated words ("4m ago"), as the card's
+            // line says it, with the exact time on hover.
+            BoardTick { now in
+                Text(TaskRow.ago(now.timeIntervalSince(note.at)))
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                    .foregroundStyle(.secondary)
+                    .help(note.at.formatted(date: .abbreviated, time: .standard))
+            }
+            if note.supersedes != nil {
+                Text("Replaces an earlier entry")
+                    .font(.system(size: WorkspaceStyle.PaneText.minimum))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var standard: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            header
+            Text(note.displayBody)
+                .font(.system(size: WorkspaceStyle.PaneText.body))
+                .textSelection(.enabled)
+                .padding(.leading, 22)
+        }
+        .padding(.leading, pairedWithQuestion ? 14 : 0)
+        .overlay(alignment: .leading) {
+            if pairedWithQuestion {
+                Capsule().fill(style.tint.color.opacity(0.5)).frame(width: 2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var card: some View {
+        let decision = TaskNoteStyle.decision(note.body)
+        return VStack(alignment: .leading, spacing: 5) {
+            header
+            Text(decision.chosen)
+                .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
+                .textSelection(.enabled)
+                .padding(.leading, 22)
+            if let rejected = decision.rejected {
+                Text("Rejected: \(rejected)")
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .padding(.leading, 22)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(style.tint.color.opacity(0.08)))
+    }
+
+    /// "Backlog → In Progress", or the bare "Created": history, not somebody's
+    /// word, so no paragraph of its own. A created note's body is the title
+    /// again, so it isn't repeated.
+    private var quiet: some View {
+        HStack(spacing: 6) {
+            Image(systemName: style.symbol)
+                .frame(width: 16)
+                .accessibilityHidden(true)
+            Text(note.kind == .created ? style.label : "\(style.label): \(note.displayBody)")
+            BoardTick { now in Text(TaskRow.ago(now.timeIntervalSince(note.at))) }
+        }
+        .font(.system(size: WorkspaceStyle.PaneText.secondary))
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

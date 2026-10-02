@@ -562,6 +562,21 @@ struct ProjectHeader: View {
                         .padding(.trailing, 5)
                 }
 
+                // Finder's Show and Hide, as a chevron in the leading column,
+                // the same side as the workspace and worktree chevrons; counts
+                // and glyphs trail. The whole row toggles; this says so.
+                if onToggleCollapse != nil {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                        .frame(width: 12, height: SidebarGrid.control, alignment: .leading)
+                        // Kept while collapsed: a section with nothing under
+                        // it has to say it can open.
+                        .opacity(hovering || isCollapsed ? 1 : 0)
+                        .accessibilityLabel(isCollapsed ? "Show \(name)" : "Hide \(name)")
+                }
+
                 HStack(spacing: 6) {
                     Text(name)
                         .font(WorkspaceStyle.sectionTitle)
@@ -610,19 +625,6 @@ struct ProjectHeader: View {
                         .opacity(hovering ? 1 : 0)
                     }
 
-                    // Finder's Show and Hide, as a chevron at the trailing
-                    // edge on hover. The whole row toggles; this says so.
-                    if onToggleCollapse != nil {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.tertiary)
-                            .rotationEffect(.degrees(isCollapsed ? 0 : 90))
-                            .frame(width: SidebarGrid.control, height: SidebarGrid.control)
-                            // Kept while collapsed: a section with nothing
-                            // under it has to say it can open.
-                            .opacity(hovering || isCollapsed ? 1 : 0)
-                            .accessibilityLabel(isCollapsed ? "Show \(name)" : "Hide \(name)")
-                    }
                 }
             }
         }

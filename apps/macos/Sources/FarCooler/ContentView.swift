@@ -2523,6 +2523,10 @@ struct ContentView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
                 }
+                // The record runs past this half on a long task: bars that
+                // stay, and a soft edge that says there is more below.
+                .scrollIndicators(.visible)
+                .scrollEdgeEffectStyle(.soft, for: .bottom)
                 .background(WorkspaceStyle.document)
             } workArea: {
                 VStack(spacing: 0) {

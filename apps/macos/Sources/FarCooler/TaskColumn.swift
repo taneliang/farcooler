@@ -296,7 +296,8 @@ struct TaskViewSplit<Content: View, WorkArea: View>: View {
             }
         case .full:
             ShareSplit(
-                stored: $contentShare, fallback: TaskColumnModel.contentShare(stored: nil), collapsed: focused
+                stored: $contentShare, fallback: TaskColumnModel.contentShare(stored: nil), collapsed: focused,
+                minimumTop: TaskColumnModel.minimumContentHeight
             ) {
                 content()
             } bottom: {
@@ -347,6 +348,8 @@ struct ShareSplit<Top: View, Bottom: View>: View {
     let fallback: Double
     /// The top folded away, and the divider with it: the bottom has it all.
     var collapsed = false
+    /// The least height the top keeps, in points, whatever the share.
+    var minimumTop: CGFloat = 0
     @ViewBuilder let top: () -> Top
     @ViewBuilder let bottom: () -> Bottom
 
@@ -359,7 +362,7 @@ struct ShareSplit<Top: View, Bottom: View>: View {
             let height = proxy.size.height
             VStack(spacing: 0) {
                 top()
-                    .frame(height: collapsed ? 0 : max(0, height * share - 3))
+                    .frame(height: collapsed ? 0 : max(0, TaskColumnModel.topHeight(total: height, share: share, minimum: minimumTop) - 3))
                     .clipped()
                     .opacity(collapsed ? 0 : 1)
                     .accessibilityHidden(collapsed)
@@ -388,7 +391,8 @@ struct ShareSplit<Top: View, Bottom: View>: View {
                 DragGesture(minimumDistance: 1, coordinateSpace: .named(space))
                     .onChanged { value in
                         guard height > 0 else { return }
-                        dragging = Self.clamped(Double(value.location.y / height))
+                        let least = min(Double(minimumTop / height), 1 - TaskColumnModel.minimumShare)
+                        dragging = max(Self.clamped(Double(value.location.y / height)), least)
                     }
                     .onEnded { _ in
                         if let dragging { stored = dragging }
