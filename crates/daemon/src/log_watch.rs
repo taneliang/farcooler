@@ -212,6 +212,7 @@ fn watch_roots(roots: &[PathBuf], sink: Arc<Mutex<HashSet<PathBuf>>>) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use std::time::{Duration, Instant};
 
     /// `LogWatcher::start`, then wait for its registration to finish and
@@ -300,17 +301,30 @@ mod tests {
         d
     }
 
-    /// Polls `drain` instead of sleeping a fixed amount: the platform backend
-    /// (FSEvents on macOS) has its own latency before an event surfaces, and a
-    /// fixed sleep either wastes time on a fast machine or flakes on a slow
-    /// one. Panics past the deadline, which is the failure this exists to
-    /// catch — a change that never surfaces at all.
-    fn wait_for_drain(watcher: &LogWatcher, deadline: Duration) -> Vec<PathBuf> {
+    /// Polls `drain`, accumulating, until `file` is among what has surfaced
+    /// or the deadline passes; returns everything seen either way.
+    ///
+    /// Waiting for ANY event is the wrong gate: the FSEvents stream also
+    /// reports the scratch directory's own creation (made a moment before the
+    /// watch), and that report can land after `registered`'s drain, so the
+    /// first non-empty drain held only the root and the test failed with
+    /// "expected the file among [the root]" on macos-latest, where `fseventsd`
+    /// is slow. The gate is the path under test, compared canonical on both
+    /// sides (`/var` is `/private/var` on macOS), and drains accumulate
+    /// because a drain empties the set.
+    fn wait_for_path(watcher: &LogWatcher, file: &Path, deadline: Duration) -> Vec<PathBuf> {
+        let canonical = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+        let want = canonical(file);
         let start = Instant::now();
+        let mut seen: Vec<PathBuf> = Vec::new();
         loop {
-            let found = watcher.drain();
-            if !found.is_empty() || start.elapsed() > deadline {
-                return found;
+            for p in watcher.drain() {
+                if !seen.contains(&p) {
+                    seen.push(p);
+                }
+            }
+            if seen.iter().any(|p| canonical(p) == want) || start.elapsed() > deadline {
+                return seen;
             }
             std::thread::sleep(Duration::from_millis(50));
         }
@@ -324,7 +338,7 @@ mod tests {
         let file = root.join("session.jsonl");
         std::fs::write(&file, "{}").unwrap();
 
-        let found = wait_for_drain(&watcher, Duration::from_secs(5));
+        let found = wait_for_path(&watcher, &file, Duration::from_secs(5));
         let canonical_file = file.canonicalize().unwrap_or_else(|_| file.clone());
         assert!(
             found.iter().any(|p| p.canonicalize().unwrap_or_else(|_| p.clone()) == canonical_file),
@@ -366,8 +380,9 @@ mod tests {
         let root = scratch("idempotent");
         let watcher = registered(vec![root.clone()]);
 
-        std::fs::write(root.join("session.jsonl"), "{}").unwrap();
-        let first = wait_for_drain(&watcher, Duration::from_secs(5));
+        let file = root.join("session.jsonl");
+        std::fs::write(&file, "{}").unwrap();
+        let first = wait_for_path(&watcher, &file, Duration::from_secs(5));
         assert!(!first.is_empty(), "the write should have surfaced first");
 
         // Asserted against a QUIET watcher rather than against the tick after
@@ -395,7 +410,7 @@ mod tests {
         std::fs::write(real.join("session.jsonl"), "{}").unwrap();
 
         let file = real.join("session.jsonl");
-        let found = wait_for_drain(&watcher, Duration::from_secs(5));
+        let found = wait_for_path(&watcher, &file, Duration::from_secs(5));
         let canonical_file = file.canonicalize().unwrap_or_else(|_| file.clone());
         assert!(
             found.iter().any(|p| p.canonicalize().unwrap_or_else(|_| p.clone()) == canonical_file),
@@ -421,8 +436,11 @@ mod tests {
         // One settling wait rather than draining after every write: the point
         // under test is that a burst collapses to one entry, which a drain
         // taken mid-burst could not show either way.
+        let mut found = wait_for_path(&watcher, &file, Duration::from_secs(5));
         std::thread::sleep(Duration::from_millis(500));
-        let found = watcher.drain();
+        found.extend(watcher.drain());
+        found.sort();
+        found.dedup();
 
         let canonical_file = file.canonicalize().unwrap_or(file.clone());
         let hits = found
