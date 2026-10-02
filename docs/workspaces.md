@@ -90,17 +90,14 @@ how work gets from idea to landed, what done means, who reviews, what it may
 decide alone. You can edit the charter any time with **Show Charter**; the
 orchestrator rereads it whenever it picks the work back up.
 
-**The board** fits the space it has. When a workspace has tasks waiting on a
-decision, the header says "3 tasks are waiting on you" ("1 task is waiting on
-you" for one), and "3 waiting" where the room is short. It says nothing at
-zero. When it's narrow, it's a list sectioned by
-status, with Needs Decision first. When it's wide, it's a kanban with a column
-per status. The toggle in the board's header forces either one, and choosing it
-again returns to automatic; the Mac remembers your choice per workspace. Every
-status is always shown, even an empty one: an empty status is a header with a
-0 in the list, and an empty column in the kanban. Done and Canceled start
-collapsed. The **+** button in the board's header (**New Task…**) files a task by
-hand. It's there when the runner lets this Mac write to the board.
+**The board** is a list sectioned by status, with Needs Decision first. When a
+workspace has tasks waiting on a decision, the header says "3 tasks are waiting
+on you" ("1 task is waiting on you" for one), and "3 waiting" where the room is
+short. It says nothing at zero. Every status is always shown, even an empty one:
+an empty status is a header with a 0. Done and Canceled start collapsed. The
+**+** button in the board's header (**New Task…**) files a task by hand. It's
+there when the runner lets this Mac write to the board. Beside it, the arrow
+re-reads the board.
 
 ## Following a task to its changes
 

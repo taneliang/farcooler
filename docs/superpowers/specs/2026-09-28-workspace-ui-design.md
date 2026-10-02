@@ -23,12 +23,10 @@ These are binding. The rest of this document works them out.
 2. **A worktree is no longer a place of its own.** It's one click under a task, or under a workspace's
    disclosure of its worktrees, which also holds a shell in a branch that has no task. (The review called this
    disclosure "Helpers"; it's labeled "Worktrees", per ruling 9 in §12.)
-3. **The board is responsive to its own width.**
-   - Narrow: the status-sectioned list, ported from the iPhone.
-   - Wide: the kanban.
-   - A toggle in the board header forces either one, remembered per workspace.
-   - Empty statuses are never hidden. In the list, an empty status is a collapsed header with a 0 count. In the
-     kanban, every column is drawn.
+3. **The board is the status-sectioned list**, ported from the iPhone, at every width.
+   - Empty statuses are never hidden: an empty status is a collapsed header with a 0 count.
+   - There was a kanban for a wide board, with a toggle in the header. The owner removed both (ov-83): the board
+     almost always sits in a narrow column beside the conversation.
 4. **The vocabulary stays:** workspace, orchestrator, board, worktree, task, agent. Nothing is renamed; the drift
    is fixed.
 5. **The phones mirror A as first-class clients.**
@@ -436,8 +434,9 @@ conversation and the board; sidebar | orchestrator | tasks | worktree is gone.
   `min(280, max(220, W × 0.2))` of it, plus a 1 pt divider. So widening a task column past 620 pt narrows its diff: 69 characters at 619 pt, 40 at
   620, and 69 again only at 839 pt. 2D has to decide whether the task column accepts that cliff or keeps
   `ChangesPane` compact below about 840 pt.
-- **The board's 280 pt** is one kanban column's outer width: the 260 pt card that has always held a task, plus its
-  10 pt padding each side (`TaskBoard.swift:517-518`).
+- **The board's 280 pt** was one kanban column's outer width: the 260 pt card that held a task, plus its 10 pt
+  padding each side. The kanban is gone (ov-83); 280 pt still holds a list card's key, a short title and its
+  agent pill.
 - **The dividers cost 1 pt each.** An `HSplitView` of children at their minimums needs their sum plus a point a
   divider. Below that it doesn't collapse or hide anything: it overflows the window, clipped. The collapse has
   to be done by `layout(width:drilled:…)`.
@@ -621,27 +620,16 @@ The column header shows:
 
 ## 5. The responsive board
 
-One `TaskBoardView` with two forms. The form is chosen by the board pane's **own** width, measured with
-`GeometryReader` on the board, not by the window's width.
+One `TaskBoardView`, in one form: the list.
 
-| Board width | Form |
-|---|---|
-| < 892 pt | **List**: status sections, Needs Decision first |
-| ≥ 892 pt | **Kanban**: seven 260 pt columns (`TaskBoard.swift:470, 517`), scrolling sideways past three |
+**Superseded (ov-83).** This section first specified two forms chosen by the board's own width: the list below
+892 pt and a kanban of 260 pt columns from there up, with 24 pt of hysteresis, and a `≡`/`▦` toggle in the board
+header that forced either, kept per device as `board.form.<host>.<workspace>`. The owner removed the kanban, the
+toggle and the thresholds: the board almost always sits in a narrow column beside the conversation, where the
+kanban showed fewer statuses than the list does. `BoardForm` now holds only the list's rules.
 
-- **Where 892 pt comes from:** the width at which three whole kanban columns fit: 3×(260 + 2×10 column padding) +
-  2×12 spacing + 2×14 board padding. This was 824 pt, which left out each column's own padding and took the board's
-  as 10; the 2A measurement found the real metrics need 892 (`.claude/agent/reports/ui/2a-report.md`). The numbers
-  are `BoardForm`'s constants (`AK/BoardForm.swift`), which the Mac's kanban draws with, so the threshold can't
-  drift from the columns. Below it, a kanban shows fewer than three statuses, which the list does better.
-- **Hysteresis:** the form switches at 892 pt going up and 868 pt going down, so a divider drag across the line
-  doesn't flicker.
-
-**The toggle** is a segmented control in the board header: `≡` List, `▦` Kanban. Choosing one forces that form;
-choosing the selected one again returns to Automatic, which is also in its menu.
-- It is remembered per workspace, on this Mac: `board.form.<host>.<workspace>` = `auto | list | kanban`, default
-  `auto`.
-- It is kept per device, not synced (ruling 7): a phone is always a list, so there's nothing to agree on.
+**The header** is one row on the board column's grid (ov-83): the workspace's title at column B, the waiting
+count beside it, and New Task… (**+**) and Refresh as icons at the trailing edge.
 
 **The list form:**
 - **Sections:** every status in `TaskBoardModel.order` (`AK/TaskBoardModel.swift:406-407`), always.
@@ -651,8 +639,6 @@ choosing the selected one again returns to Automatic, which is also in its menu.
 - **Card rows:** the iPhone's row (key, title, call to action, time, acceptance, agent control), ported from
   `ios/TaskBoardView.swift` to the shared view layer where it can be shared.
 - **Selecting a row** opens the task, drilled into (§4.4).
-
-**The kanban form:** unchanged, except that opening a card opens the task instead of a sheet.
 
 **Every form, on every platform:**
 - `TaskBoardModel.sections` keeps every status with its count. It's added beside `listed`, which drops empty
@@ -992,7 +978,7 @@ The owner delegated these to the coordinator, who ruled on 2026-09-28. Each is d
    rectangle (`TileView.swift:416`); the column embeds the view directly, without the pane. *Why:* no new renderer,
    and nothing resizes the agent's window for other clients.
 7. **The list/kanban choice is kept per device, not synced.** *Why:* the phone is always a list, so there's nothing
-   to sync.
+   to sync. (Moot since ov-83, which removed the kanban: every board is a list.)
 8. **Phones may start orchestrators, and a worktree created from a workspace's screen is claimed for it.** *Why:* a
    workspace with no orchestrator was a dead end on the phone, and new worktrees landing in Main was a surprise.
 9. **"Helpers" becomes "Worktrees".** *Why:* the vocabulary stays, and "worktree" is already the word.
