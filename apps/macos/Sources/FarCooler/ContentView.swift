@@ -192,6 +192,8 @@ struct ContentView: View {
     /// title bar's switcher does its work, and kept as it was left by anyone
     /// who has used the app. See `SidebarDefault`.
     @State private var sidebarVisibility: NavigationSplitViewVisibility = Self.initialSidebar()
+    /// Bumped by ⌘0 (Switch Workspace…): the title bar's switcher opens.
+    @State private var switcherRequest = 0
     /// When each workspace's orchestrator start began, by `host|workspace`:
     /// this app's, or one first seen starting. See `ConversationColumn.slowStart`.
     @State private var orchestratorStartedAt: [String: Date] = [:]
@@ -218,6 +220,9 @@ struct ContentView: View {
             // this banner only appears once something has actually been acted
             // on, so the two never draw at once.
             detail
+                // Runner trouble and out-of-date runners, which only the
+                // sidebar's status bar said before (ov-86 review M1).
+                .safeAreaInset(edge: .top, spacing: 0) { runnerBanner }
                 // Attached here rather than beside each of the four
                 // `navigationTitle` calls, which sit in three different views
                 // that would each need the failure channel threaded down to
@@ -346,10 +351,13 @@ struct ContentView: View {
         // is open over it. See `MainWindowFocus`.
         .focusedSceneValue(
             \.mainWindow, MainWindowFocus(overlayOpen: showQuickCreate || showPalette))
-        .onCommand { command in run(command) }
+        // The key window's alone: with two windows, both heard every
+        // command, and ⌘B toggled one sidebar twice (review m2).
+        .onCommand { command in if isKeyWindow { run(command) } }
         .onTileCommand { command in Task { await tile(command) } }
-        .onSelectIndex { index in selectTerminal(at: index) }
+        .onSelectIndex { index in if isKeyWindow { selectTerminal(at: index) } }
         .onSelectWorkspace { number in
+            guard isKeyWindow else { return }
             if let target = WorkspaceNumbers.target(number, in: WorkspaceNumbers.groups(in: store.fleet)) {
                 selection = target
             }
@@ -2213,11 +2221,12 @@ struct ContentView: View {
     /// has used the app left it out, or has never chosen and has history
     /// here from before it could be hidden.
     private static func initialSidebar(in defaults: UserDefaults = .standard) -> NavigationSplitViewVisibility {
-        let history = !(defaults.string(forKey: SelectionMemory.key) ?? "").isEmpty
-            || defaults.object(forKey: SelectionMemory.legacyKey) != nil
-        let shown = SidebarDefault.shown(stored: defaults.string(forKey: SidebarDefault.key), hasHistory: history)
-        return shown ? .all : .detailOnly
+        SidebarDefault.shown(in: defaults) ? .all : .detailOnly
     }
+
+    /// Whether this is the window menu commands are for: the key one, or
+    /// the only one before its window is known.
+    private var isKeyWindow: Bool { windowBox.window?.isKeyWindow ?? true }
 
     /// The title bar's workspace switcher, naming where the window is.
     private var workspaceSwitcher: some View {
@@ -2230,19 +2239,114 @@ struct ContentView: View {
             guard let summary = scene?.summary else { return "Workspaces" }
             return summary.isImplicit ? "Main" : summary.name
         }()
-        return WorkspaceSwitcher(
+        let entries = WorkspaceSwitcherMenu.entries(
             groups: WorkspaceNumbers.groups(in: store.fleet),
             current: scene.flatMap { s in s.board.map { (s.host, $0) } },
-            title: title, repository: scene?.summary == nil ? "" : repository,
             waiting: { place in WorkspaceCounts.count(for: place.workspace, host: place.host, in: store.needsYou) },
-            showsHosts: showHosts, needsYou: store.needsYou.count,
-            onGo: { selection = $0 },
-            onNeedsYou: { selection = .needsYou },
-            onNewWorkspace: workspaceRepositories.isEmpty ? nil : { newWorkspaceName = NewWorkspaceName(name: "") },
-            onRunners: {
-                preferences.settingsTab = "machines"
-                openSettings()
-            })
+            showsHosts: showHosts, needsYou: store.needsYou.count, offersNewWorkspace: !workspaceRepositories.isEmpty,
+            status: store.reading.sentence, statusTrouble: store.reading.isTrouble, troubled: store.unhealthyHosts)
+        return WorkspaceSwitcherButton(
+            title: title, repository: scene?.summary == nil ? "" : repository, entries: entries,
+            openRequest: switcherRequest, perform: { perform($0) })
+    }
+
+    /// What a switcher item does: the sidebar's own actions, by the same
+    /// routes.
+    private func perform(_ command: SwitcherCommand) {
+        switch command {
+        case .go(let target): selection = target
+        case .needsYou: selection = .needsYou
+        case .newWorkspace: newWorkspaceName = NewWorkspaceName(name: "")
+        case .newWorktree: run(.newWorktree)
+        case .addRepository: showAddRepository = true
+        case .addRunner: showAdd = true
+        case .find: showPalette = true
+        case .runners:
+            preferences.settingsTab = "machines"
+            openSettings()
+        case .reconnect(let host): store.reconnect(host)
+        case .newCheckoutTerminal(let host, let id, let name):
+            startMainTerminal(host: host, repositoryID: id, project: name)
+        case .removeRepository(let host, let id, let name):
+            guard let repo = repository(host: host, id: id, project: name) else { return }
+            removeRepository = RepositoryToRemove(host: host, repository: repo)
+        }
+    }
+
+    /// A worktree's menu away from the sidebar (`WorktreeMenu.items`): the
+    /// sidebar row's, by the same rules.
+    private func worktreeMenu(for ws: Worktree) -> [WorktreeMenu.Item] {
+        let host = ws.host ?? ""
+        let listed = worktree(host: host, id: ws.id) ?? ws
+        let usable = store.refusal(for: host) == nil
+        let offer = roleOffer(in: listed)
+        return WorktreeMenu.items(
+            for: listed, usable: usable, showsChanges: showChangesAction(for: listed, usable: usable) != nil,
+            moveTargets: Self.moveTargets(for: listed, in: store.fleet, assigns: Self.assigns(store)(listed)),
+            adoptable: listed.terminals.filter { offer($0) == .use })
+    }
+
+    private func perform(_ item: WorktreeMenu.Item, on ws: Worktree) {
+        let host = ws.host ?? ""
+        let listed = worktree(host: host, id: ws.id) ?? ws
+        switch item {
+        case .open:
+            trail = nil
+            open(listed, terminal: nil)
+        case .showChanges: showChangesAction(for: listed, usable: store.refusal(for: host) == nil)?()
+        case .newTerminal: newTerminal(in: listed)
+        case .move(let id, _):
+            if let target = store.fleet.runnerWorkspaces[host]?.first(where: { $0.id == id }) { move(listed, to: target) }
+        case .useAsOrchestrator(let terminal, _):
+            if let term = listed.terminals.first(where: { $0.id == terminal }) {
+                Task { await run(.useAsOrchestrator, on: term, in: listed) }
+            }
+        case .hide: Task { await act(on: listed) { c in await c.hideWorktree(listed.short) } }
+        case .unhide: Task { await act(on: listed) { c in await c.unhideWorktree(listed.short) } }
+        case .remove, .dismiss: removeWorktree = listed
+        }
+    }
+
+    /// The runner banner over the detail: the sidebar's status bar's
+    /// trouble, whether or not the sidebar is out (review M1).
+    @ViewBuilder
+    private var runnerBanner: some View {
+        let offers = RunnerBanner.actions(
+            trouble: store.reading.isTrouble, unhealthy: showHosts ? store.unhealthyHosts : [],
+            stale: store.staleHosts)
+        if !offers.isEmpty {
+            VStack(spacing: 0) {
+                HStack(spacing: 7) {
+                    if offers.contains(.runnerStatus) {
+                        Circle()
+                            .fill(store.reading.isTrouble ? Color.red : Color.secondary)
+                            .frame(width: 7, height: 7)
+                        Text(store.reading.sentence)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if offers.contains(.retryRunner) {
+                        ForEach(store.unhealthyHosts, id: \.self) { host in
+                            Button("Reconnect \(host.isEmpty ? "This Mac" : host)") { store.reconnect(host) }
+                                .buttonStyle(.link)
+                                .font(.caption)
+                                .foregroundStyle(troubleColor(for: host))
+                                .help("\(host.isEmpty ? "this Mac" : host): \(troubleReason(for: host))")
+                        }
+                    }
+                    if offers.contains(.updateDaemon) {
+                        DaemonUpdateBar(targets: store.staleHosts.compactMap(daemonUpdate(for:)))
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                Divider()
+            }
+            .background(WorkspaceStyle.canvas)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("runner-banner")
+        }
     }
 
     /// The workspace's worktrees in the board list's order, for the scene
@@ -2276,7 +2380,7 @@ struct ContentView: View {
         let usable = store.refusal(for: host) == nil
         let repository = client.repositories.first { $0.id == (workspace.repository ?? workspace.id) }
         return BoardWorktrees(
-            byTask: WorkspaceWorktrees.taskWorktrees(on: board, host: host, in: store.fleet).mapValues(\.task),
+            byTask: WorkspaceWorktrees.taskWorktrees(on: board, host: host, in: store.fleet),
             shown: loose.shown, hidden: loose.hidden,
             selected: Self.openedWhole(selection).map(\.worktree)
                 ?? WorkspaceScreen.namedTerminal(selection).map(\.worktree),
@@ -2285,8 +2389,10 @@ struct ContentView: View {
                 open(worktree, terminal: nil)
             },
             onNew: usable ? repository.map { repo in { newWorktree(host: host, project: repo.displayName) } } : nil,
-            onHide: usable ? { ws in Task { await act(on: ws) { c in await c.hideWorktree(ws.short) } } } : nil,
-            onUnhide: usable ? { ws in Task { await act(on: ws) { c in await c.unhideWorktree(ws.short) } } } : nil)
+            onUnhide: usable ? { ws in Task { await act(on: ws) { c in await c.unhideWorktree(ws.short) } } } : nil,
+            menu: { worktreeMenu(for: $0) },
+            perform: { item, ws in perform(item, on: ws) },
+            collapseKey: "board.worktreesCollapsed.\(host)|\(workspace.id)")
     }
 
     /// The breadcrumb's worktree menu for `place`: standing for a worktree
@@ -2296,17 +2402,21 @@ struct ContentView: View {
         let entries = worktreeEntries(scene)
         let current = WorkspaceSelection.samePlace(place, selection) ? selection : place
         let menu = WorkspaceWorktrees.menu(entries, selection: current, host: scene.host, workspace: board, fleet: store.fleet)
-        switch place {
-        case .workspace(let host, _, .worktree(let id, _)?), .looseWorktree(let host, let id, _):
-            let name = worktree(host: host, id: id)?.task ?? "Worktree"
-            return WorktreeCrumb(title: "⎇ \(name)", isHere: true, tasks: menu.tasks, loose: menu.loose)
-        case .workspace(_, _, .task(let id)?):
-            let name = WorkspaceWorktrees.index(of: place, in: entries).map { entries[$0].worktree.task }
-            return WorktreeCrumb(
-                title: name.map { "⎇ \($0)" } ?? "⎇ Worktrees", isHere: false, tasks: menu.tasks, loose: menu.loose)
-        default:
-            return nil
-        }
+        guard let crumb = WorkspaceWorktrees.crumb(for: place, entries: entries, name: { worktree(host: $0, id: $1)?.task })
+        else { return nil }
+        // The worktree it names, for its own menu's items.
+        let named: Worktree? = {
+            switch place {
+            case .workspace(let host, _, .worktree(let id, _)?), .looseWorktree(let host, let id, _):
+                return worktree(host: host, id: id)
+            default:
+                return WorkspaceWorktrees.index(of: place, in: entries).map { entries[$0].worktree }
+            }
+        }()
+        return WorktreeCrumb(
+            title: crumb.title, isHere: crumb.isHere, tasks: menu.tasks, loose: menu.loose, worktree: named?.task,
+            actions: named.map { worktreeMenu(for: $0).filter { $0 != .open } } ?? [],
+            perform: { item in if let named { perform(item, on: named) } })
     }
 
     /// A workspace: the orchestrator's rail, the board, and the task or
@@ -2340,7 +2450,7 @@ struct ContentView: View {
                 let crumbs = crumbs(for: place, host: host, workspace: summary)
                 let worktrees = worktreeCrumb(for: place, scene: scene)
                 DrillBreadcrumb(
-                    crumbs: worktrees?.isHere == true ? Array(crumbs.dropLast()) : crumbs,
+                    crumbs: WorkspaceWorktrees.crumbs(crumbs, isHere: worktrees?.isHere == true),
                     worktrees: worktrees,
                     onGo: { target in
                         if target == trail { trail = nil }
@@ -2356,7 +2466,8 @@ struct ContentView: View {
                 if let width, width != detailWidth { detailWidth = width }
             }
         }
-        .modifier(WindowTitle(title: title.title, subtitle: title.subtitle))
+        // No subtitle: "Billing · shop" is the switcher's, beside it (ov-86).
+        .modifier(WindowTitle(title: title.title, subtitle: ""))
     }
 
     /// The window's title for `scene`: a workspace's, or a loose worktree's
@@ -3909,6 +4020,7 @@ struct ContentView: View {
             }
         case .focusConversation, .focusBoard, .focusTask:
             focusWorkspaceColumn(command)
+        case .switchWorkspace: switcherRequest += 1
         case .nextWorktree: stepWorktree(by: 1)
         case .previousWorktree: stepWorktree(by: -1)
         case .openInEditor: openInPreferredEditor()

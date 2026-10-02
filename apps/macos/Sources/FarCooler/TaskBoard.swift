@@ -817,7 +817,7 @@ struct TaskBoardView: View {
                             onToggle: { toggle(section.status) },
                             store: store, agents: agents, onGoTo: onGoTo,
                             selected: selected, keyed: hasKeyboard,
-                            worktreeNames: worktrees.byTask,
+                            worktrees: worktrees,
                             showingAllDone: $showingAllDone,
                             onChoose: { row in
                                 listFocused = true
@@ -1030,8 +1030,8 @@ private struct TaskListSection: View {
     /// keyboard, which draws it in the accent rather than gray.
     let selected: String?
     let keyed: Bool
-    /// Each task's worktree name, by task id.
-    let worktreeNames: [String: String]
+    /// Each task's worktree, and its menu.
+    let worktrees: BoardWorktrees
     @Binding var showingAllDone: Bool
     let onChoose: (TaskRow) -> Void
 
@@ -1079,7 +1079,11 @@ private struct TaskListSection: View {
                             row: row, prominent: leads, store: store,
                             live: agents.live(for: row), presence: agents.presence(for: row),
                             onGoTo: onGoTo, selected: row.id == selected, keyed: keyed,
-                            worktree: worktreeNames[row.id],
+                            worktree: worktrees.byTask[row.id],
+                            worktreeMenu: worktrees.byTask[row.id].map(worktrees.menu) ?? [],
+                            performOnWorktree: { item in
+                                if let worktree = worktrees.byTask[row.id] { worktrees.perform(item, worktree) }
+                            },
                             onChoose: { onChoose(row) })
                         .id(row.id)
                     }
@@ -1132,8 +1136,11 @@ struct TaskListRow: View {
     var selected = false
     /// The list has the keyboard: selected reads in the accent.
     var keyed = false
-    /// Its worktree's name (ov-86): where its work is, beside its key.
-    var worktree: String?
+    /// Its worktree (ov-86): where its work is, named beside its key, with
+    /// its menu on the card's.
+    var worktree: Worktree?
+    var worktreeMenu: [WorktreeMenu.Item] = []
+    var performOnWorktree: (WorktreeMenu.Item) -> Void = { _ in }
     var onChoose: (() -> Void)?
 
     var body: some View {
@@ -1145,13 +1152,20 @@ struct TaskListRow: View {
                         .foregroundStyle(.secondary)
                         .gridMark("card", .text)
                     if let worktree {
-                        Text("⎇ \(worktree)")
-                            .font(.system(size: WorkspaceStyle.PaneText.minimum, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .help("Worktree \(worktree)")
-                            .accessibilityLabel("Worktree \(worktree)")
+                        // The branch glyph the Worktrees section and the
+                        // breadcrumb draw, one for the one idea.
+                        HStack(spacing: 2) {
+                            Image(systemName: WorktreeSection.glyph)
+                                .font(.system(size: WorkspaceStyle.PaneText.minimum - 1, weight: .medium))
+                            Text(worktree.task)
+                                .font(.system(size: WorkspaceStyle.PaneText.minimum))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .foregroundStyle(.secondary)
+                        .help("Worktree \(worktree.task)")
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Worktree \(worktree.task)")
                     }
                     // A stale row is visibly different, which is the
                     // board's whole job beyond showing state: a task sitting
@@ -1225,7 +1239,15 @@ struct TaskListRow: View {
         .contentShape(Rectangle())
         .onTapGesture { if let onChoose { onChoose() } else { store.choose(row) } }
         .accessibilityAddTraits(selected ? .isSelected : [])
-        .contextMenu { TaskRowMenu(row: row, live: live, store: store, onGoTo: onGoTo) }
+        .contextMenu {
+            TaskRowMenu(row: row, live: live, store: store, onGoTo: onGoTo)
+            if let worktree, !worktreeMenu.isEmpty {
+                Divider()
+                Menu("Worktree \(worktree.task)") {
+                    WorktreeMenuItems(items: worktreeMenu, perform: performOnWorktree)
+                }
+            }
+        }
         .accessibilityIdentifier("board-row-\(row.key)")
     }
 }

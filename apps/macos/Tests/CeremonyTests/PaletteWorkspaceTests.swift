@@ -45,6 +45,11 @@ struct PaletteWorkspaceTests {
         let found = PaletteIndex.matching("api", in: [lane("w1", "api-auth"), lane("w2", "api-billing")])
         let kinds = found.filter { $0.kind != "action" }.map(\.kind)
         #expect(kinds.prefix(2) == ["worktree", "worktree"], "\(found.map(\.title))")
+        // And past a long name: "api" in a 60-character name loses six to
+        // its length, which a two-point penalty didn't cover.
+        let long = PaletteIndex.matching(
+            "api", in: [lane("w1", "api"), lane("w2", "api-" + String(repeating: "x", count: 56))])
+        #expect(long.filter { $0.kind != "action" }.map(\.kind).prefix(2) == ["worktree", "worktree"], "\(long.map(\.title))")
     }
 
     /// A worktree is found by the key of the task it's for: "bil-9" goes to

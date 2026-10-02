@@ -1,0 +1,229 @@
+import AgentKit
+import Foundation
+
+// Everything the sidebar does, and where else it's done (ov-86 review M1).
+//
+// A new window opens without the sidebar, so nothing may be reachable only
+// from it. The title bar's switcher, the runner banner and the worktree
+// menus are drawn from the values here, and `SidebarParityTests` checks
+// that between them they offer every `SidebarAction`.
+
+/// One thing the sidebar lets you do.
+enum SidebarAction: String, CaseIterable {
+    // The window's places.
+    case needsYou, switchWorkspace, newWorkspace, newWorktree, addRepository, addRunner, find
+    // The status bar: a runner in trouble, retried with a click, and a
+    // runner whose Far Cooler is out of date.
+    case runnerStatus, retryRunner, updateDaemon
+    // A repository header's menu.
+    case reconnect, newCheckoutTerminal, removeRepository
+    // A worktree row and its menus.
+    case openWorktree, showChanges, newTerminal, moveToWorkspace, useAsOrchestrator, hide, unhide, removeWorktree
+}
+
+/// What a worktree's menus offer away from the sidebar: on its row under
+/// the board list's Worktrees, on a task row's worktree, and in the
+/// breadcrumb's worktree menu. The sidebar row's menus, one list.
+enum WorktreeMenu {
+    enum Item: Hashable {
+        case open
+        case showChanges
+        case newTerminal
+        /// Move to Workspace ▸, one item a workspace.
+        case move(workspace: String, name: String)
+        /// Use as Orchestrator, for one of its terminals.
+        case useAsOrchestrator(terminal: String, label: String)
+        case hide
+        case unhide
+        case remove
+        /// Remove for a worktree whose directory is gone: Dismiss.
+        case dismiss
+
+        var action: SidebarAction {
+            switch self {
+            case .open: return .openWorktree
+            case .showChanges: return .showChanges
+            case .newTerminal: return .newTerminal
+            case .move: return .moveToWorkspace
+            case .useAsOrchestrator: return .useAsOrchestrator
+            case .hide: return .hide
+            case .unhide: return .unhide
+            case .remove, .dismiss: return .removeWorktree
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .open: return "Open"
+            case .showChanges: return "Show Changes"
+            case .newTerminal: return "New Terminal"
+            case .move(_, let name): return name
+            case .useAsOrchestrator(_, let label): return "Use \(label) as Orchestrator"
+            case .hide: return "Hide"
+            case .unhide: return "Unhide"
+            case .remove: return "Remove Worktree…"
+            case .dismiss: return "Dismiss"
+            }
+        }
+    }
+
+    /// `worktree`'s items, in the sidebar's order. `showsChanges` is
+    /// whether its runner reads changes; `moveTargets` are the workspaces a
+    /// drag would move it to (`ContentView.moveTargets`); `adoptable` its
+    /// terminals Use as Orchestrator is offered for. Nothing that writes
+    /// while the runner is refused (`usable`), and no Hide or Remove for the
+    /// main checkout.
+    static func items(
+        for worktree: Worktree, usable: Bool, showsChanges: Bool, moveTargets: [WorkspaceSummary],
+        adoptable: [Terminal]
+    ) -> [Item] {
+        var out: [Item] = [.open]
+        guard usable else { return out }
+        if showsChanges { out.append(.showChanges) }
+        out.append(.newTerminal)
+        out += moveTargets.map { .move(workspace: $0.id, name: $0.name) }
+        out += adoptable.map { .useAsOrchestrator(terminal: $0.id, label: $0.label) }
+        if worktree.isHidden {
+            out.append(.unhide)
+        } else if !worktree.isMainCheckout {
+            out.append(.hide)
+        }
+        if !worktree.isMainCheckout { out.append(worktree.worktreeMissing ? .dismiss : .remove) }
+        return out
+    }
+}
+
+/// What the title bar's switcher asks the window to do.
+enum SwitcherCommand: Hashable {
+    case go(ContentView.Selection)
+    case needsYou
+    case newWorkspace
+    case newWorktree
+    case addRepository
+    case addRunner
+    case runners
+    case find
+    case reconnect(host: String)
+    case newCheckoutTerminal(host: String, repositoryID: String?, repository: String)
+    case removeRepository(host: String, repositoryID: String?, repository: String)
+
+    var action: SidebarAction {
+        switch self {
+        case .go: return .switchWorkspace
+        case .needsYou: return .needsYou
+        case .newWorkspace: return .newWorkspace
+        case .newWorktree: return .newWorktree
+        case .addRepository: return .addRepository
+        case .addRunner: return .addRunner
+        case .runners: return .runnerStatus
+        case .find: return .find
+        case .reconnect: return .reconnect
+        case .newCheckoutTerminal: return .newCheckoutTerminal
+        case .removeRepository: return .removeRepository
+        }
+    }
+}
+
+/// One line of the switcher's menu.
+indirect enum SwitcherEntry: Hashable {
+    /// A repository's name, over its workspaces.
+    case header(String)
+    case workspace(name: String, waiting: Int, current: Bool, number: Int?, command: SwitcherCommand)
+    case item(title: String, symbol: String, command: SwitcherCommand)
+    /// A line that says something and does nothing: the runners' state.
+    case status(String, trouble: Bool)
+    case submenu(title: String, symbol: String, entries: [SwitcherEntry])
+    case separator
+
+    /// Every command this line, or a menu under it, can send.
+    var commands: [SwitcherCommand] {
+        switch self {
+        case .workspace(_, _, _, _, let command), .item(_, _, let command): return [command]
+        case .submenu(_, _, let entries): return entries.flatMap(\.commands)
+        case .header, .status, .separator: return []
+        }
+    }
+}
+
+enum WorkspaceSwitcherMenu {
+    /// The switcher's menu: each repository's workspaces under its name,
+    /// numbered; a menu of each repository's own actions (the sidebar
+    /// header's: Reconnect, New Terminal in the checkout, Remove
+    /// Repository…); then the runners' state, with Reconnect for each in
+    /// trouble; then the places and the things to add.
+    static func entries(
+        groups: [WorkspaceNumbers.Group], current: (host: String, workspace: String)?,
+        waiting: (WorkspaceNumbers.Place) -> Int, showsHosts: Bool, needsYou: Int, offersNewWorkspace: Bool,
+        status: String, statusTrouble: Bool, troubled: [String]
+    ) -> [SwitcherEntry] {
+        var out: [SwitcherEntry] = []
+        for group in groups {
+            out.append(.header(showsHosts && !group.host.isEmpty ? "\(group.repository) · \(group.host)" : group.repository))
+            for place in group.places {
+                let here = current.map { $0.host == place.host && $0.workspace == place.workspace.id } ?? false
+                out.append(
+                    .workspace(
+                        name: place.name, waiting: waiting(place), current: here, number: place.number,
+                        command: .go(place.selection)))
+            }
+        }
+        if !groups.isEmpty {
+            out.append(.separator)
+            out.append(
+                .submenu(
+                    title: "Repositories", symbol: "folder",
+                    entries: groups.map { group in
+                        .submenu(
+                            title: group.repository, symbol: "folder",
+                            entries: [
+                                .item(title: "Reconnect", symbol: "arrow.clockwise", command: .reconnect(host: group.host)),
+                                .item(
+                                    title: "New Terminal in Checkout", symbol: "terminal",
+                                    command: .newCheckoutTerminal(
+                                        host: group.host, repositoryID: group.repositoryID, repository: group.repository)),
+                                .separator,
+                                .item(
+                                    title: "Remove Repository…", symbol: "trash",
+                                    command: .removeRepository(
+                                        host: group.host, repositoryID: group.repositoryID, repository: group.repository)),
+                            ])
+                    }))
+        }
+        out.append(.separator)
+        out.append(.status(status, trouble: statusTrouble))
+        for host in troubled {
+            out.append(
+                .item(
+                    title: "Reconnect \(host.isEmpty ? "This Mac" : host)", symbol: "arrow.clockwise",
+                    command: .reconnect(host: host)))
+        }
+        out.append(.separator)
+        out.append(.item(title: needsYou > 0 ? "Needs You (\(needsYou))" : "Needs You", symbol: "tray", command: .needsYou))
+        out.append(.item(title: "Go to Anything…", symbol: "magnifyingglass", command: .find))
+        out.append(.separator)
+        if offersNewWorkspace {
+            out.append(.item(title: "New Workspace…", symbol: "plus.rectangle.on.rectangle", command: .newWorkspace))
+        }
+        out.append(.item(title: "New Worktree…", symbol: "plus", command: .newWorktree))
+        out.append(.item(title: "Add Repository…", symbol: "folder.badge.plus", command: .addRepository))
+        out.append(.item(title: "Add Device or Runner…", symbol: "qrcode", command: .addRunner))
+        out.append(.item(title: "Runners and Devices…", symbol: "server.rack", command: .runners))
+        return out
+    }
+}
+
+/// The runner banner over the detail (ov-86 review M1): the status bar's
+/// trouble, shown whether or not the sidebar is. Nothing while every runner
+/// is well and current.
+enum RunnerBanner {
+    /// What the banner offers: the runners' state, a retry for each runner
+    /// in trouble, and the update for each out of date. Empty when there's
+    /// nothing to say.
+    static func actions(trouble: Bool, unhealthy: [String], stale: [String]) -> [SidebarAction] {
+        var out: [SidebarAction] = []
+        if trouble || !unhealthy.isEmpty { out.append(.runnerStatus) }
+        if !unhealthy.isEmpty { out.append(.retryRunner) }
+        if !stale.isEmpty { out.append(.updateDaemon) }
+        return out
+    }
+}

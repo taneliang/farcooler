@@ -299,8 +299,10 @@ enum PaletteIndex {
     }
 
     /// What a terminal found only by its worktree's name gives up to the
-    /// worktree: enough to rank under every worktree that matches as well.
-    static let locatedPenalty = 2
+    /// worktree: about one matched character's worth (a match is 4, a run
+    /// 8 more), so it ranks under every worktree that matches as well, and
+    /// under one whose name is much longer (review m6: 2 only broke ties).
+    static let locatedPenalty = 12
 
     static func entry(for worktree: Worktree) -> PaletteEntry {
         PaletteEntry(

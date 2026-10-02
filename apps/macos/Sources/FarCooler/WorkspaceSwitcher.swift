@@ -1,176 +1,145 @@
 import AgentKit
+import AppKit
 import SwiftUI
 
 /// The workspace switcher in the title bar (ov-86): the workspace you're
-/// in and its repository, "Billing ▾ · shop", and a popover of every
-/// workspace grouped by repository, each with what's waiting in it and its
-/// ⌘-number, with New Workspace…, Needs You and the runners at its foot.
+/// in and its repository, "Billing · shop ⌄", opening a native menu of
+/// every workspace grouped by repository, each with its waiting count as
+/// the item's badge and its ⌘-number as its key equivalent, then each
+/// repository's own actions, the runners' state, and the places and the
+/// things to add (`WorkspaceSwitcherMenu.entries`).
 ///
-/// It's what the sidebar was for, so the sidebar can stay hidden: the
-/// repositories are its groups, the workspaces its rows.
-struct WorkspaceSwitcher: View {
-    let groups: [WorkspaceNumbers.Group]
-    /// The workspace on screen, and its repository's name, or nil.
-    let current: (host: String, workspace: String)?
+/// An `NSMenu`, not a popover of buttons (review M3): arrow keys, type to
+/// select, Return and VoiceOver come with it. ⌘0 (Workspace ▸ Switch
+/// Workspace…) opens it from the keyboard (`openRequest`).
+struct WorkspaceSwitcherButton: NSViewRepresentable {
     let title: String
     let repository: String
-    /// What's waiting in a workspace, for its dot and count.
-    let waiting: (WorkspaceNumbers.Place) -> Int
-    /// Whether a group names its runner: only on a fleet of more than one.
-    let showsHosts: Bool
-    let needsYou: Int
-    let onGo: (ContentView.Selection) -> Void
-    let onNeedsYou: () -> Void
-    /// New Workspace…, or nil where no runner has workspaces.
-    let onNewWorkspace: (() -> Void)?
-    let onRunners: () -> Void
+    let entries: [SwitcherEntry]
+    /// Bumped to open the menu from the keyboard.
+    let openRequest: Int
+    let perform: (SwitcherCommand) -> Void
 
-    @State private var open = false
-    @Environment(\.colorScheme) private var scheme
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
-    var body: some View {
-        Button {
-            open.toggle()
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: WorkspaceRow.glyph)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.secondary)
-                if !repository.isEmpty {
-                    Text("· \(repository)")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-            .padding(.horizontal, 6)
-            .contentShape(Rectangle())
+    func makeNSView(context: Context) -> NSButton {
+        let button = NSButton(title: "", target: context.coordinator, action: #selector(Coordinator.open(_:)))
+        button.isBordered = false
+        button.bezelStyle = .accessoryBarAction
+        button.imagePosition = .imageTrailing
+        button.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
+        button.setAccessibilityIdentifier("workspace-switcher")
+        button.toolTip = "Switch Workspace (⌘0)"
+        context.coordinator.seen = openRequest
+        return button
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.entries = entries
+        coordinator.perform = perform
+        let text = NSMutableAttributedString(
+            string: title, attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold)])
+        if !repository.isEmpty {
+            text.append(
+                NSAttributedString(
+                    string: " · \(repository)",
+                    attributes: [
+                        .font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.secondaryLabelColor,
+                    ]))
         }
-        .buttonStyle(.plain)
-        .help("Switch Workspace")
-        .accessibilityLabel("Workspace, \(title)")
-        .accessibilityIdentifier("workspace-switcher")
-        .popover(isPresented: $open, arrowEdge: .bottom) {
-            list
-                .frame(width: 300)
+        text.append(NSAttributedString(string: " "))
+        button.attributedTitle = text
+        button.setAccessibilityLabel(repository.isEmpty ? "Workspace: \(title)" : "Workspace: \(title), \(repository)")
+        if openRequest != coordinator.seen {
+            coordinator.seen = openRequest
+            DispatchQueue.main.async { coordinator.open(button) }
         }
     }
 
-    private var list: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
-                        Text(showsHosts && !group.host.isEmpty ? "\(group.repository) · \(group.host)" : group.repository)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 12)
-                            .padding(.top, 8)
-                            .padding(.bottom, 2)
-                        ForEach(group.places, id: \.workspace.id) { place in
-                            row(place)
-                        }
-                    }
-                    if groups.isEmpty {
-                        Text("No workspaces yet")
-                            .foregroundStyle(.secondary)
-                            .padding(12)
-                    }
-                }
-                .padding(.vertical, 6)
-            }
-            .frame(maxHeight: 420)
-            .fixedSize(horizontal: false, vertical: true)
-            Divider()
-            VStack(alignment: .leading, spacing: 0) {
-                footer("Needs You", systemImage: needsYou > 0 ? "tray.full" : "tray", count: needsYou) {
-                    open = false
-                    onNeedsYou()
-                }
-                if let onNewWorkspace {
-                    footer("New Workspace…", systemImage: "plus") {
-                        open = false
-                        onNewWorkspace()
-                    }
-                }
-                footer("Runners and Devices…", systemImage: "server.rack") {
-                    open = false
-                    onRunners()
-                }
-            }
-            .padding(.vertical, 6)
-        }
-    }
+    @MainActor
+    final class Coordinator: NSObject {
+        var entries: [SwitcherEntry] = []
+        var perform: (SwitcherCommand) -> Void = { _ in }
+        var seen = 0
 
-    private func row(_ place: WorkspaceNumbers.Place) -> some View {
-        let here = current.map { $0.host == place.host && $0.workspace == place.workspace.id } ?? false
-        let count = waiting(place)
-        return Button {
-            open = false
-            onGo(place.selection)
-        } label: {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(count > 0 ? GlancePalette.amber(scheme) : Color.clear)
-                    .frame(width: 7, height: 7)
-                Text(place.name)
-                    .fontWeight(here ? .semibold : .regular)
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.system(size: 11, weight: .semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(GlancePalette.amber(scheme))
-                }
-                if let number = place.number {
-                    Text("⌘\(number)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                        .monospacedDigit()
-                }
-            }
-            .padding(.horizontal, 12)
-            .frame(height: 24)
-            .background(
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(here ? Color.accentColor.opacity(0.15) : .clear)
-                    .padding(.horizontal, 4))
-            .contentShape(Rectangle())
+        @objc func open(_ sender: NSButton) {
+            let menu = NSMenu()
+            menu.autoenablesItems = false
+            for entry in entries { add(entry, to: menu) }
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 4), in: sender)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(count > 0 ? "\(place.name), \(count) waiting" : place.name)
-        .accessibilityAddTraits(here ? .isSelected : [])
-    }
 
-    private func footer(
-        _ title: String, systemImage: String, count: Int = 0, action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .frame(width: 16)
-                    .foregroundStyle(count > 0 ? GlancePalette.amber(scheme) : .secondary)
-                Text(title)
-                Spacer(minLength: 8)
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.system(size: 11, weight: .semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(GlancePalette.amber(scheme))
-                }
-            }
-            .padding(.horizontal, 12)
-            .frame(height: 24)
-            .contentShape(Rectangle())
+        @objc func pick(_ item: NSMenuItem) {
+            guard let command = (item.representedObject as? Box)?.command else { return }
+            perform(command)
         }
-        .buttonStyle(.plain)
+
+        private final class Box: NSObject {
+            let command: SwitcherCommand
+            init(_ command: SwitcherCommand) { self.command = command }
+        }
+
+        private func item(_ title: String, _ command: SwitcherCommand, symbol: String? = nil) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: #selector(pick(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = Box(command)
+            if let symbol { item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) }
+            return item
+        }
+
+        private func add(_ entry: SwitcherEntry, to menu: NSMenu) {
+            switch entry {
+            case .header(let title):
+                menu.addItem(NSMenuItem.sectionHeader(title: title))
+            case .workspace(let name, let waiting, let current, let number, let command):
+                let item = item(name, command)
+                item.state = current ? .on : .off
+                if let number {
+                    item.keyEquivalent = "\(number)"
+                    item.keyEquivalentModifierMask = .command
+                }
+                // The attention dot: the count, in the menu's own badge.
+                if waiting > 0 {
+                    item.badge = NSMenuItemBadge(count: waiting)
+                    item.image = Self.dot(.systemOrange)
+                    item.setAccessibilityLabel(waiting == 1 ? "\(name), 1 waiting" : "\(name), \(waiting) waiting")
+                } else {
+                    item.image = Self.dot(.clear)
+                }
+                menu.addItem(item)
+            case .item(let title, let symbol, let command):
+                menu.addItem(item(title, command, symbol: symbol))
+            case .status(let text, let trouble):
+                let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                item.image = Self.dot(trouble ? .systemRed : .secondaryLabelColor)
+                menu.addItem(item)
+            case .submenu(let title, let symbol, let entries):
+                let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+                item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+                let sub = NSMenu(title: title)
+                sub.autoenablesItems = false
+                for entry in entries { add(entry, to: sub) }
+                item.submenu = sub
+                menu.addItem(item)
+            case .separator:
+                menu.addItem(.separator())
+            }
+        }
+
+        /// A 7 pt dot, drawn in its color rather than as a template, so the
+        /// menu keeps it amber.
+        static func dot(_ color: NSColor) -> NSImage {
+            let image = NSImage(size: NSSize(width: 12, height: 12), flipped: false) { rect in
+                color.setFill()
+                NSBezierPath(ovalIn: rect.insetBy(dx: 2.5, dy: 2.5)).fill()
+                return true
+            }
+            image.isTemplate = false
+            return image
+        }
     }
 }
 

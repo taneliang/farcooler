@@ -6,8 +6,9 @@ import SwiftUI
 /// A value handed to the board by the window, which holds the fleet and
 /// the selection.
 struct BoardWorktrees {
-    /// Each task's worktree name, by task id: shown beside its key.
-    var byTask: [String: String] = [:]
+    /// Each task's worktree, by task id: named beside its key, with its
+    /// menu on the task's.
+    var byTask: [String: Worktree] = [:]
     /// The Worktrees section: the loose ones (`WorkspaceWorktrees.loose`).
     var shown: [Worktree] = []
     var hidden: [Worktree] = []
@@ -17,8 +18,13 @@ struct BoardWorktrees {
     /// New Worktree…, the section header's +. Nil where the runner can't
     /// take one.
     var onNew: (() -> Void)?
-    var onHide: ((Worktree) -> Void)?
     var onUnhide: ((Worktree) -> Void)?
+    /// A worktree's menu, the sidebar row's (`WorktreeMenu.items`), and
+    /// what choosing an item does.
+    var menu: (Worktree) -> [WorktreeMenu.Item] = { _ in [] }
+    var perform: (WorktreeMenu.Item, Worktree) -> Void = { _, _ in }
+    /// Where the section's collapsed state is kept, per board.
+    var collapseKey = ""
 
     static var none: BoardWorktrees { BoardWorktrees() }
 
@@ -40,14 +46,25 @@ struct BoardWorktreesSection: View {
     /// The list has the keyboard: a selected row reads in the accent.
     let keyed: Bool
 
-    @State private var expanded = true
+    @State private var collapsed: Bool
     @State private var hiddenExpanded = false
+    private let defaults: UserDefaults
+
+    init(worktrees: BoardWorktrees, keyed: Bool, defaults: UserDefaults = .standard) {
+        self.worktrees = worktrees
+        self.keyed = keyed
+        self.defaults = defaults
+        _collapsed = State(initialValue: defaults.bool(forKey: worktrees.collapseKey))
+    }
+
+    private var expanded: Bool { !collapsed }
 
     var body: some View {
         VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
             HStack(spacing: 0) {
                 Button {
-                    withAnimation(Motion.snap) { expanded.toggle() }
+                    withAnimation(Motion.snap) { collapsed.toggle() }
+                    if !worktrees.collapseKey.isEmpty { defaults.set(collapsed, forKey: worktrees.collapseKey) }
                 } label: {
                     HStack(spacing: 0) {
                         Image(systemName: "chevron.right")
@@ -61,10 +78,6 @@ struct BoardWorktreesSection: View {
                             .foregroundStyle(worktrees.shown.isEmpty ? Color.secondary : Color.primary)
                             .gridMark("worktrees", .text)
                         Spacer(minLength: SidebarGrid.gap)
-                        Text("\(worktrees.shown.count)")
-                            .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
                     }
                     .frame(minHeight: ColumnGrid.rowHeight)
                     .contentShape(Rectangle())
@@ -81,18 +94,24 @@ struct BoardWorktreesSection: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.borderless)
-                    .padding(.leading, SidebarGrid.gap)
+                    .padding(.trailing, SidebarGrid.gap)
                     .help("New Worktree…")
                     .accessibilityLabel("New Worktree")
                     .accessibilityIdentifier("board-new-worktree")
                 }
+                // Trailing, under the status sections' counts.
+                Text("\(worktrees.shown.count)")
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
             }
             if expanded {
                 ForEach(worktrees.shown) { worktree in
                     BoardWorktreeRow(
                         worktree: worktree, selected: worktree.id == worktrees.selected, keyed: keyed,
                         onOpen: { worktrees.onOpen(worktree) },
-                        onHide: worktree.isMainCheckout ? nil : worktrees.onHide.map { hide in { hide(worktree) } })
+                        menu: worktrees.menu(worktree), perform: { worktrees.perform($0, worktree) })
                 }
                 if !worktrees.hidden.isEmpty {
                     hiddenGroup
@@ -159,11 +178,21 @@ private struct BoardWorktreeRow: View {
     let selected: Bool
     let keyed: Bool
     let onOpen: () -> Void
-    let onHide: (() -> Void)?
+    let menu: [WorktreeMenu.Item]
+    let perform: (WorktreeMenu.Item) -> Void
 
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
+        // A button, so it's reached by the keyboard as well as the mouse.
+        Button(action: onOpen) { label }
+            .buttonStyle(.plain)
+            .contextMenu { WorktreeMenuItems(items: menu, perform: perform) }
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .accessibilityIdentifier("board-worktree-\(worktree.task)")
+    }
+
+    private var label: some View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
             Image(systemName: WorktreeSection.glyph)
                 .font(.system(size: 10, weight: .medium))
@@ -199,16 +228,35 @@ private struct BoardWorktreeRow: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture(perform: onOpen)
-        .contextMenu {
-            Button("Open", action: onOpen)
-            if let onHide {
-                Divider()
-                Button("Hide", action: onHide)
+    }
+}
+
+/// A worktree's menu items (`WorktreeMenu.items`), drawn as the sidebar
+/// row's menus draw them: Move to Workspace folded into a submenu, the
+/// hiding and removing below a divider.
+struct WorktreeMenuItems: View {
+    let items: [WorktreeMenu.Item]
+    let perform: (WorktreeMenu.Item) -> Void
+
+    var body: some View {
+        let moves = items.filter { if case .move = $0 { return true } else { return false } }
+        ForEach(items.filter { [.open, .showChanges, .newTerminal].contains($0) }, id: \.self) { item in
+            Button(item.title) { perform(item) }
+        }
+        if !moves.isEmpty {
+            Menu("Move to Workspace") {
+                ForEach(moves, id: \.self) { item in Button(item.title) { perform(item) } }
             }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityIdentifier("board-worktree-\(worktree.task)")
+        ForEach(items.filter { if case .useAsOrchestrator = $0 { return true } else { return false } }, id: \.self) { item in
+            Button(item.title) { perform(item) }
+        }
+        let last = items.filter { [.hide, .unhide, .remove, .dismiss].contains($0) }
+        if !last.isEmpty {
+            Divider()
+            ForEach(last, id: \.self) { item in
+                Button(item.title, role: item == .remove ? .destructive : nil) { perform(item) }
+            }
+        }
     }
 }

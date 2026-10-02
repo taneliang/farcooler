@@ -61,23 +61,28 @@ enum WorkspaceWorktrees {
         return (mine.filter { !$0.isHidden }, mine.filter(\.isHidden))
     }
 
-    /// The workspace's worktrees in board-list order: each task's, in the
-    /// order the board lists its tasks (each worktree once, under the first
-    /// task naming it), then the Worktrees section's, in the runner's order.
+    /// The workspace's worktrees in the order the board list draws them:
+    /// each task's, section by section, with each section's rows as the
+    /// list draws them (Done newest first, `visibleRows`), then the
+    /// Worktrees section's, then its Hidden ones, in the runner's order. A
+    /// collapsed section, the Done tasks the list cuts and the hidden
+    /// worktrees are walked too, in the place they're drawn when shown, so
+    /// none of them is out of reach (ov-86 review M2). Each worktree once,
+    /// under the first task naming it.
     static func entries(
-        in workspace: WorkspaceSummary, host: String, board: TaskBoardModel, fleet: Fleet
+        in workspace: WorkspaceSummary, host: String, board: TaskBoardModel, fleet: Fleet, now: Date = Date()
     ) -> [Entry] {
         var seen = Set<String>()
         var out: [Entry] = []
         for section in board.sections {
-            for row in section.rows {
+            for row in section.visibleRows(showingAllDone: true, now: now) {
                 guard let worktree = worktree(of: row, host: host, in: fleet), seen.insert(worktree.id).inserted
                 else { continue }
                 out.append(Entry(worktree: worktree, task: row))
             }
         }
-        for worktree in loose(in: workspace, host: host, board: board, fleet: fleet).shown
-        where seen.insert(worktree.id).inserted {
+        let loose = loose(in: workspace, host: host, board: board, fleet: fleet)
+        for worktree in loose.shown + loose.hidden where seen.insert(worktree.id).inserted {
             out.append(Entry(worktree: worktree, task: nil))
         }
         return out
@@ -125,13 +130,14 @@ enum WorkspaceWorktrees {
     struct MenuItem: Equatable, Identifiable {
         /// A task's key and title, or a loose worktree's name.
         var title: String
-        /// A task's worktree, under its title.
+        /// A task's worktree's name, under its title.
         var subtitle: String?
         var target: Selection
         /// Where the window is now: checked.
         var current: Bool
 
-        var id: String { "\(title)|\(subtitle ?? "")" }
+        /// Where it goes: two worktrees can share a name, never a place.
+        var id: Selection { target }
     }
 
     /// The breadcrumb's worktree menu: the task ones, labelled with their
@@ -147,13 +153,36 @@ enum WorkspaceWorktrees {
             if let task = entry.task {
                 tasks.append(
                     MenuItem(
-                        title: "\(task.key) \(task.title)", subtitle: "⎇ \(entry.worktree.task)", target: target,
+                        title: "\(task.key) \(task.title)", subtitle: entry.worktree.task, target: target,
                         current: at == here))
             } else {
-                loose.append(MenuItem(title: "⎇ \(entry.worktree.task)", subtitle: nil, target: target, current: at == here))
+                loose.append(MenuItem(title: entry.worktree.task, subtitle: nil, target: target, current: at == here))
             }
         }
         return (tasks, loose)
+    }
+
+    /// The breadcrumb's worktree segment for `place`: the worktree opened
+    /// whole, standing in for its own crumb (`isHere`), or the one beneath a
+    /// task, after the task's crumb; a task with none says "Worktrees". Nil
+    /// at the board alone.
+    static func crumb(
+        for place: Selection, entries: [Entry], name: (_ host: String, _ worktree: String) -> String?
+    ) -> (title: String, isHere: Bool)? {
+        switch place {
+        case .workspace(let host, _, .worktree(let id, _)?), .looseWorktree(let host, let id, _):
+            return (name(host, id) ?? "Worktree", true)
+        case .workspace(_, _, .task?):
+            return (index(of: place, in: entries).map { entries[$0].worktree.task } ?? "Worktrees", false)
+        default:
+            return nil
+        }
+    }
+
+    /// The crumbs drawn before the segment: all of them beside a task's
+    /// worktree, all but the last when the segment stands for it.
+    static func crumbs(_ crumbs: [WorkspaceNavigation.Crumb], isHere: Bool) -> [WorkspaceNavigation.Crumb] {
+        isHere ? Array(crumbs.dropLast()) : crumbs
     }
 }
 
@@ -180,6 +209,8 @@ enum WorkspaceNumbers {
     struct Group: Equatable {
         var host: String
         var repository: String
+        /// The repository's id, or nil from a CLI too old to send one.
+        var repositoryID: String? = nil
         var places: [Place]
     }
 
@@ -190,7 +221,7 @@ enum WorkspaceNumbers {
         for entry in ContentView.sidebarRows(fleet: fleet) {
             switch entry.kind {
             case .repository:
-                out.append(Group(host: entry.host, repository: entry.project, places: []))
+                out.append(Group(host: entry.host, repository: entry.project, repositoryID: entry.repositoryID, places: []))
             case .workspace(let name):
                 guard let workspace = entry.workspace, !out.isEmpty else { continue }
                 number += 1
@@ -221,11 +252,42 @@ enum SidebarDefault {
     /// `hasHistory` is whether an earlier launch left a selection behind
     /// (`SelectionMemory.key`): someone who used the app before this build,
     /// whose sidebar was open, as it always was.
-    static func shown(stored: String?, hasHistory: Bool) -> Bool {
+    static func shown(stored: String?, hasHistory: Bool, collapsedBefore: Bool = false) -> Bool {
         switch stored {
         case "shown": return true
         case "hidden": return false
-        default: return hasHistory
+        default: return hasHistory && !collapsedBefore
+        }
+    }
+
+    /// The keys a launch before this build leaves behind: a selection, the
+    /// sidebar's open workspaces or collapsed repositories, a Settings tab.
+    static let historyKeys = [
+        SelectionMemory.key, SelectionMemory.legacyKey, "sidebar.openWorktrees", "sidebar.collapsedProjects",
+        "settings.tab",
+    ]
+
+    /// Whether the window opens with the sidebar, from what `defaults`
+    /// holds: the stored choice; else, for someone with history here, the
+    /// sidebar as AppKit saved it last (its split view's first subview,
+    /// collapsed or not); else hidden.
+    static func shown(in defaults: UserDefaults) -> Bool {
+        let history = historyKeys.contains { defaults.object(forKey: $0) != nil }
+        return shown(
+            stored: defaults.string(forKey: key), hasHistory: history, collapsedBefore: collapsedBefore(in: defaults))
+    }
+
+    /// Whether AppKit's saved frames for the split view say the sidebar was
+    /// collapsed: "x, y, w, h, YES, NO" for its first subview.
+    static func collapsedBefore(in defaults: UserDefaults) -> Bool {
+        let saved = defaults.dictionaryRepresentation().filter {
+            $0.key.hasPrefix("NSSplitView Subview Frames") && $0.key.hasSuffix("SidebarNavigationSplitView")
+        }
+        guard !saved.isEmpty else { return false }
+        return saved.values.allSatisfy { value in
+            guard let frames = value as? [String], let first = frames.first else { return false }
+            let parts = first.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            return parts.count > 4 && parts[4] == "YES"
         }
     }
 

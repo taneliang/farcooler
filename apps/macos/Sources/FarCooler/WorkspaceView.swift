@@ -525,10 +525,21 @@ struct DrillBreadcrumb: View {
                     if worktrees.tasks.isEmpty && worktrees.loose.isEmpty {
                         Text("No worktrees yet")
                     }
+                    // The worktree the segment stands for, and what its
+                    // sidebar row's menus did (review M1).
+                    if let name = worktrees.worktree, !worktrees.actions.isEmpty {
+                        Section(name) {
+                            WorktreeMenuItems(items: worktrees.actions, perform: worktrees.perform)
+                        }
+                    }
                 } label: {
-                    Text(worktrees.title)
-                        .fontWeight(worktrees.isHere ? .semibold : .regular)
-                        .lineLimit(1)
+                    HStack(spacing: 3) {
+                        Image(systemName: WorktreeSection.glyph)
+                            .font(.system(size: 10, weight: .medium))
+                        Text(worktrees.title)
+                            .fontWeight(worktrees.isHere ? .semibold : .regular)
+                            .lineLimit(1)
+                    }
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
@@ -565,22 +576,30 @@ extension DrillBreadcrumb {
         // A toggle, for the menu's own checkmark on where you are: a
         // button's image beside a subtitle was dropped (live, ov-86).
         Toggle(isOn: Binding(get: { item.current }, set: { _ in onGo(item.target) })) {
-            Text(item.title)
-            if let subtitle = item.subtitle { Text(subtitle) }
+            if let subtitle = item.subtitle {
+                Text(item.title)
+                Text(subtitle)
+            } else {
+                Label(item.title, systemImage: WorktreeSection.glyph)
+            }
         }
     }
 }
 
 /// The breadcrumb's worktree menu, as the window builds it.
 struct WorktreeCrumb {
-    /// What the segment says: "⎇ tax-rounding", the worktree it stands
-    /// for, or "⎇ Worktrees" beside a task with none.
+    /// What the segment says, after the branch glyph: "tax-rounding", the
+    /// worktree it stands for, or "Worktrees" beside a task with none.
     var title: String
     /// Whether it's the level you're at, a worktree opened whole, rather
     /// than the one beneath a task.
     var isHere: Bool
     var tasks: [WorkspaceWorktrees.MenuItem]
     var loose: [WorkspaceWorktrees.MenuItem]
+    /// The worktree the segment names, and its menu's items.
+    var worktree: String?
+    var actions: [WorktreeMenu.Item] = []
+    var perform: (WorktreeMenu.Item) -> Void = { _ in }
 }
 
 /// The arrangement a `WorkspaceView` drew, published from the value it

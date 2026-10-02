@@ -44,6 +44,8 @@ enum AppCommand: String {
     /// order (ov-86).
     case nextWorktree
     case previousWorktree
+    /// Open the title bar's workspace switcher (⌘0).
+    case switchWorkspace
 
     static let notification = Notification.Name("farcooler.command")
 
@@ -172,18 +174,28 @@ struct FarCoolerCommands: Commands {
                 .keyboardShortcut("2", modifiers: [.command, .option])
             Button("Task") { AppCommand.focusTask.post() }
                 .keyboardShortcut("3", modifiers: [.command, .option])
+            // Only while the main window is key with nothing over it: with
+            // the palette open or Settings key, they moved the window behind.
             Section {
                 // The worktrees in the board list's order: each task's, then
                 // the loose ones under Worktrees.
                 Button("Next Worktree") { AppCommand.nextWorktree.post() }
                     .keyboardShortcut(.downArrow, modifiers: [.command, .control])
+                    .disabled(!MainWindowFocus.navigates(mainWindow))
                 Button("Previous Worktree") { AppCommand.previousWorktree.post() }
                     .keyboardShortcut(.upArrow, modifiers: [.command, .control])
+                    .disabled(!MainWindowFocus.navigates(mainWindow))
             }
             Section {
+                // ⌘0, which nothing else here or in the system's menus holds:
+                // the switcher from the keyboard, past the ninth workspace.
+                Button("Switch Workspace…") { AppCommand.switchWorkspace.post() }
+                    .keyboardShortcut("0", modifiers: .command)
+                    .disabled(!MainWindowFocus.navigates(mainWindow))
                 ForEach(1...WorkspaceNumbers.count, id: \.self) { n in
                     Button("Workspace \(n)") { AppCommand.selectWorkspace(n) }
                         .keyboardShortcut(KeyEquivalent(Character("\(n)")), modifiers: .command)
+                        .disabled(!MainWindowFocus.navigates(mainWindow))
                 }
             }
         }

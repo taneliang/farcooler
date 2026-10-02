@@ -118,6 +118,7 @@ enum Shortcut {
                 Item(keys: "⌥⌘1 ⌥⌘2 ⌥⌘3", action: "Go to the orchestrator (over a task, from its rail), the board, the task"),
                 Item(keys: "⌃⌘↓ ⌃⌘↑", action: "Next / previous worktree, in the board list’s order"),
                 Item(keys: "⌘1 … ⌘9", action: "Go to a workspace, in the title bar’s order"),
+                Item(keys: "⌘0", action: "Switch workspace: open the title bar’s switcher"),
             ]
         ),
         (

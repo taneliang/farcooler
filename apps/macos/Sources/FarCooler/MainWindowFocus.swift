@@ -26,6 +26,14 @@ struct MainWindowFocus: Equatable {
         focus != nil
     }
 
+    /// Going somewhere from the keyboard (⌘0, ⌘1–⌘9, ⌃⌘↑ and ⌃⌘↓, ov-86)
+    /// acts only when the main window is key and nothing is open over it:
+    /// with the palette up, or Settings key, it moved the window behind.
+    static func navigates(_ focus: MainWindowFocus?) -> Bool {
+        guard let focus else { return false }
+        return !focus.overlayOpen
+    }
+
     /// Zoom Pane (⇧⌘↩) acts only when the main window is key and nothing is
     /// open over it. The ⌘N panel and the ⌘P palette each have their own
     /// meaning for ⇧⌘↩ (a newline, and submit), and an enabled menu item would

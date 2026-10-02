@@ -96,7 +96,7 @@ struct WorkspaceWorktreesTests {
     @Test("Worktrees go in board-list order: tasks' by the board's sections, then the loose ones")
     func theOrderIsTheBoardList() {
         let order = Self.entries().map { "\($0.worktree.id):\($0.task?.key ?? "-")" }
-        #expect(order == ["tax:bil-3", "pdf:bil-9", "scratch:-"])
+        #expect(order == ["tax:bil-3", "pdf:bil-9", "scratch:-", "old:-"])
     }
 
     @Test("⌃⌘↓ and ⌃⌘↑ step from the open task or worktree, and wrap")
@@ -110,13 +110,15 @@ struct WorkspaceWorktreesTests {
         let scratch = Selection.workspace(host: "", workspace: Self.billing, focus: .worktree("scratch", terminal: nil))
         let board = Selection.workspace(host: "", workspace: Self.billing, focus: nil)
         #expect(step(tax, 1) == pdf)
+        let old = Selection.workspace(host: "", workspace: Self.billing, focus: .worktree("old", terminal: nil))
         #expect(step(pdf, 1) == scratch)
-        #expect(step(scratch, 1) == tax)
-        #expect(step(tax, -1) == scratch)
+        #expect(step(scratch, 1) == old)
+        #expect(step(old, 1) == tax)
+        #expect(step(tax, -1) == old)
         #expect(step(scratch, -1) == pdf)
         // From the board alone: the first going down, the last going up.
         #expect(step(board, 1) == tax)
-        #expect(step(board, -1) == scratch)
+        #expect(step(board, -1) == old)
         // A task's worktree opened whole counts as where its task is.
         #expect(step(.workspace(host: "", workspace: Self.billing, focus: .worktree("pdf", terminal: "x")), 1) == scratch)
         // A task with no worktree isn't in the order: going on starts over.
@@ -139,16 +141,75 @@ struct WorkspaceWorktreesTests {
         let menu = WorkspaceWorktrees.menu(
             Self.entries(), selection: here, host: "", workspace: Self.billing, fleet: Self.fleet())
         #expect(menu.tasks.map(\.title) == ["bil-3 Task bil-3", "bil-9 Task bil-9"])
-        #expect(menu.tasks.map(\.subtitle) == ["⎇ tax", "⎇ pdf"])
+        #expect(menu.tasks.map(\.subtitle) == ["tax", "pdf"])
         #expect(menu.tasks.map(\.current) == [false, true])
         #expect(menu.tasks.map(\.target) == [
             .workspace(host: "", workspace: Self.billing, focus: .task("t3")), here,
         ])
-        #expect(menu.loose.map(\.title) == ["⎇ scratch"])
+        #expect(menu.loose.map(\.title) == ["scratch", "old"])
         #expect(menu.loose.map(\.target) == [
-            .workspace(host: "", workspace: Self.billing, focus: .worktree("scratch", terminal: nil))
+            .workspace(host: "", workspace: Self.billing, focus: .worktree("scratch", terminal: nil)),
+            .workspace(host: "", workspace: Self.billing, focus: .worktree("old", terminal: nil)),
         ])
-        #expect(menu.loose.map(\.current) == [false])
+        #expect(menu.loose.map(\.current) == [false, false])
+        // Each item is its place: two worktrees of one name stay two.
+        #expect(Set(menu.loose.map(\.id)).count == 2)
+    }
+
+    /// The order is the list's as drawn (review M2): Done newest first,
+    /// not in the runner's order, a collapsed section's rows where they'd
+    /// be drawn, and Done's older tasks, which the list cuts, after its
+    /// recent ones.
+    @Test("⌃⌘↓ walks the rows in the order the list draws them, Done newest first")
+    func theOrderIsAsDrawn() {
+        var fleet = Self.fleet()
+        fleet.worktrees += ["d1", "d2", "d3", "c1"].map { Self.worktree($0, workspace: Self.billing) }
+        let now = Date()
+        func done(_ id: String, _ key: String, daysAgo: Double, on worktree: String) -> TaskRow {
+            TaskRow(
+                id: id, key: key, title: key, status: .done, statusSince: now.addingTimeInterval(-daysAgo * 86_400),
+                worktreeID: worktree)
+        }
+        // In the runner's order: oldest first. Twelve more Done tasks, all
+        // recent, push the oldest past what the list shows.
+        let filler = (0..<12).map { n in
+            TaskRow(id: "f\(n)", key: "bil-f\(n)", title: "", status: .done, statusSince: now.addingTimeInterval(-60))
+        }
+        let board = TaskBoardModel(columns: [
+            TaskBoardColumn(
+                status: .done,
+                rows: [done("o", "bil-20", daysAgo: 30, on: "d1"), done("m", "bil-21", daysAgo: 2, on: "d2")]
+                    + filler + [done("n", "bil-22", daysAgo: 0.5, on: "d3")]),
+            TaskBoardColumn(status: .backlog, rows: [Self.row("b", "bil-30", .backlog, worktree: "c1")]),
+        ])
+        let drawn = TaskBoardModel.order.flatMap { status in
+            board.sections.first { $0.status == status }?.visibleRows(showingAllDone: true, now: now) ?? []
+        }.compactMap(\.worktreeID)
+        let order = WorkspaceWorktrees.entries(in: Self.billingSummary, host: "", board: board, fleet: fleet, now: now)
+            .compactMap { $0.task?.worktreeID }
+        #expect(order == drawn)
+        #expect(order == ["c1", "d3", "d2", "d1"])
+    }
+
+    @Test("The breadcrumb's segment stands for a worktree opened whole, and follows a task")
+    func theBreadcrumbSegment() {
+        let entries = Self.entries()
+        func name(_ host: String, _ id: String) -> String? { id == "scratch" ? "scratch" : nil }
+        let whole = WorkspaceWorktrees.crumb(
+            for: .workspace(host: "", workspace: Self.billing, focus: .worktree("scratch", terminal: nil)),
+            entries: entries, name: name)
+        #expect(whole?.title == "scratch" && whole?.isHere == true)
+        let task = WorkspaceWorktrees.crumb(
+            for: .workspace(host: "", workspace: Self.billing, focus: .task("t3")), entries: entries, name: name)
+        #expect(task?.title == "tax" && task?.isHere == false)
+        let none = WorkspaceWorktrees.crumb(
+            for: .workspace(host: "", workspace: Self.billing, focus: .task("t1")), entries: entries, name: name)
+        #expect(none?.title == "Worktrees")
+        #expect(WorkspaceWorktrees.crumb(
+            for: .workspace(host: "", workspace: Self.billing, focus: nil), entries: entries, name: name) == nil)
+        let crumbs = [WorkspaceNavigation.Crumb(title: "Billing", target: nil), .init(title: "scratch", target: nil)]
+        #expect(WorkspaceWorktrees.crumbs(crumbs, isHere: true).map(\.title) == ["Billing"])
+        #expect(WorkspaceWorktrees.crumbs(crumbs, isHere: false).map(\.title) == ["Billing", "scratch"])
     }
 
     // MARK: - The Worktrees section
@@ -202,5 +263,32 @@ struct WorkspaceWorktreesTests {
         #expect(SidebarDefault.shown(stored: nil, hasHistory: true) == true)
         #expect(SidebarDefault.shown(stored: "hidden", hasHistory: true) == false)
         #expect(SidebarDefault.shown(stored: "shown", hasHistory: false) == true)
+        #expect(SidebarDefault.shown(stored: nil, hasHistory: true, collapsedBefore: true) == false)
+    }
+
+    /// Read from the defaults themselves (review m3): history is any key
+    /// an earlier launch leaves, and a sidebar AppKit saved collapsed stays
+    /// collapsed.
+    @Test("The sidebar's default is read from what the defaults hold")
+    func sidebarDefaultFromDefaults() throws {
+        func fresh() throws -> UserDefaults {
+            let name = "ov86-\(UUID().uuidString)"
+            let defaults = try #require(UserDefaults(suiteName: name))
+            defaults.removePersistentDomain(forName: name)
+            return defaults
+        }
+        #expect(SidebarDefault.shown(in: try fresh()) == false)
+        let collapsedProjects = try fresh()
+        collapsedProjects.set("", forKey: "sidebar.collapsedProjects")
+        #expect(SidebarDefault.shown(in: collapsedProjects) == true)
+        let collapsed = try fresh()
+        collapsed.set("general", forKey: "settings.tab")
+        collapsed.set(
+            ["0.000000, 0.000000, 320.000000, 1130.000000, YES, NO", "0, 0, 1800, 1130, NO, NO"],
+            forKey: "NSSplitView Subview Frames X-1-AppWindow-1, SidebarNavigationSplitView")
+        #expect(SidebarDefault.shown(in: collapsed) == false)
+        let stored = try fresh()
+        stored.set("shown", forKey: SidebarDefault.key)
+        #expect(SidebarDefault.shown(in: stored) == true)
     }
 }
