@@ -183,7 +183,10 @@ enum PaletteIndex {
         }
 
         for worktree in worktrees {
-            let fields = [worktree.task, worktree.branch, worktree.repository ?? ""]
+            // And by the tasks it's for, by key and title: "bil-9" finds
+            // the worktree bil-9 is being done in, as well as the task.
+            let tasks = (worktree.openTasks ?? []).flatMap { [$0.key, $0.title, "\($0.key) \($0.title)"] }
+            let fields = [worktree.task, worktree.branch, worktree.repository ?? ""] + tasks
             if let score = fields.compactMap({ Fuzzy.score($0, query) }).max() {
                 scored.append((entry(for: worktree), score))
                 if score > (bestWorktree?.score ?? Int.min) {
@@ -196,8 +199,14 @@ enum PaletteIndex {
                 // Nobody remembers that the agent in "refactor api" is named
                 // `claude` — there are four of those — and everybody remembers
                 // "refactor api".
-                let fields = [terminal.label, worktree.task]
-                guard let score = fields.compactMap({ Fuzzy.score($0, query) }).max() else {
+                //
+                // Found by where it lives alone, it ranks under the worktree
+                // itself (ov-86), which ties with it otherwise: typing a
+                // worktree's name lists the worktrees it could mean first,
+                // not the first one and then every pane inside it.
+                let named = Fuzzy.score(terminal.label, query)
+                let located = Fuzzy.score(worktree.task, query).map { $0 - Self.locatedPenalty }
+                guard let score = [named, located].compactMap({ $0 }).max() else {
                     continue
                 }
                 scored.append((entry(for: terminal, in: worktree), score))
@@ -289,12 +298,20 @@ enum PaletteIndex {
             kind: "terminal")
     }
 
+    /// What a terminal found only by its worktree's name gives up to the
+    /// worktree: enough to rank under every worktree that matches as well.
+    static let locatedPenalty = 2
+
     static func entry(for worktree: Worktree) -> PaletteEntry {
         PaletteEntry(
             id: "worktree:\(worktree.id)",
             action: .openWorktree(worktree.id),
             title: worktree.task,
-            detail: worktree.windowSubtitle,
+            // The task it's for leads, where it has one: the worktree is
+            // the task's place, and the key is how a task is known.
+            detail: ((worktree.openTasks ?? []).map(\.key) + [worktree.windowSubtitle])
+                .filter { !$0.isEmpty }
+                .joined(separator: " · "),
             symbol: "arrow.triangle.branch",
             kind: "worktree")
     }

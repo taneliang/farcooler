@@ -28,6 +28,37 @@ struct PaletteWorkspaceTests {
             == .openTask(host: "", workspace: "ws-bil", id: "t-9"))
     }
 
+    /// Worktrees rank above the terminals found only by where they are
+    /// (ov-86): typing a worktree's name lists the worktrees it could mean
+    /// before the panes inside any of them, which the worktree's own name
+    /// would otherwise tie with and interleave.
+    @Test("A worktree outranks the terminals found by its name")
+    func worktreesOutrankTheirTerminals() {
+        func lane(_ id: String, _ name: String) -> Worktree {
+            Worktree(
+                id: id, short: id, task: name, branch: name, repository: "overnight", host: "", path: "/tmp/\(id)",
+                state: "active",
+                terminals: ["zsh", "claude"].map {
+                    Terminal(id: "\(id)-\($0)", short: "\(id)-\($0)", title: $0, preset: $0, state: "running", epoch: 0)
+                })
+        }
+        let found = PaletteIndex.matching("api", in: [lane("w1", "api-auth"), lane("w2", "api-billing")])
+        let kinds = found.filter { $0.kind != "action" }.map(\.kind)
+        #expect(kinds.prefix(2) == ["worktree", "worktree"], "\(found.map(\.title))")
+    }
+
+    /// A worktree is found by the key of the task it's for: "bil-9" goes to
+    /// the task, and to its worktree too.
+    @Test("A worktree is found by its task's key")
+    func aWorktreeIsFoundByItsTasksKey() {
+        var lane = Self.lane
+        lane.openTasks = [NeedsYouTask(id: "t-9", key: "bil-9", title: "Invoice PDF export", status: "in_progress")]
+        let found = PaletteIndex.matching("bil-9", in: [lane])
+        let row = found.first { $0.action == .openWorktree("w-1") }
+        #expect(row != nil)
+        #expect(row?.detail.contains("bil-9") == true, "\(row?.detail ?? "")")
+    }
+
     /// Found by its name, whether or not any worktree matches; its
     /// orchestrator by "Billing Orchestrator". It used to be dropped when
     /// no worktree in it matched.
