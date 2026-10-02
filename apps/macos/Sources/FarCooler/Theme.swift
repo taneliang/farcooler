@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import os
 
 /// A color scheme: the terminal's palette, and which way the app around it
 /// goes.
@@ -114,21 +115,25 @@ enum WorkspaceStyle {
         static let minimum: CGFloat = 9.5
     }
 
-    static var canvas: Color {
-        Color(nsColor: blend(.windowBackgroundColor, withTheme: 0.05))
-    }
+    static var canvas: Color { Color(nsColor: canvasNS) }
 
-    static var sidebar: Color {
-        Color(nsColor: blend(.windowBackgroundColor, withTheme: 0.035))
-    }
+    /// `canvas` as the dynamic `NSColor` it wraps, so it can be resolved under a chosen appearance.
+    static var canvasNS: NSColor { blend(.windowBackgroundColor, withTheme: 0.05) }
 
-    static var document: Color {
-        Color(nsColor: blend(.textBackgroundColor, withTheme: 0.09))
-    }
+    static var sidebar: Color { Color(nsColor: sidebarNS) }
 
-    static var paneChrome: Color {
-        Color(nsColor: blend(.controlBackgroundColor, withTheme: 0.14))
-    }
+    /// `sidebar` as the dynamic `NSColor` it wraps, so it can be resolved under a chosen appearance.
+    static var sidebarNS: NSColor { blend(.windowBackgroundColor, withTheme: 0.035) }
+
+    static var document: Color { Color(nsColor: documentNS) }
+
+    /// `document` as the dynamic `NSColor` it wraps, so it can be resolved under a chosen appearance.
+    static var documentNS: NSColor { blend(.textBackgroundColor, withTheme: 0.09) }
+
+    static var paneChrome: Color { Color(nsColor: paneChromeNS) }
+
+    /// `paneChrome` as the dynamic `NSColor` it wraps, so it can be resolved under a chosen appearance.
+    static var paneChromeNS: NSColor { blend(.controlBackgroundColor, withTheme: 0.14) }
 
     static var hairline: Color { Color.primary.opacity(0.11) }
 
@@ -177,24 +182,44 @@ enum WorkspaceStyle {
     /// it. The resting state stays almost invisible in a long diff.
     static var disclosureHover: Color { Color.accentColor.opacity(0.08) }
 
-    /// Resolve dynamic system colors in the app's effective appearance before
-    /// mixing. Otherwise Aqua's light value can be captured while Dark Aqua is
-    /// on screen, producing a flash when the theme changes.
+    /// A DYNAMIC color: system `base` mixed `amount` of the way toward the
+    /// theme's background, mixed again every time the color is resolved.
+    ///
+    /// It used to resolve `base` once, when the property was read, and return
+    /// a plain sRGB color. SwiftUI keeps a view's body when the appearance flips
+    /// and only re-resolves the colors in it, so a surface built from the old
+    /// value stayed a dark band after Dark to Light, with text that had already
+    /// gone dark on it (ov-81 P2). The provider receives the appearance being
+    /// drawn, so each one gets its own mix.
     private static func blend(_ system: NSColor, withTheme amount: CGFloat) -> NSColor {
-        let appearance = NSApp?.effectiveAppearance
-            ?? NSAppearance(named: Themes.shared.current.dark ? .darkAqua : .aqua)!
-        var native = system
-        appearance.performAsCurrentDrawingAppearance {
-            native = system.usingColorSpace(.sRGB) ?? system
+        NSColor(name: nil) { appearance in
+            var native = system
+            appearance.performAsCurrentDrawingAppearance {
+                native = system.usingColorSpace(.sRGB) ?? system
+            }
+            return ThemeBackdrop.mix(native, amount: amount)
         }
-        let themed = Themes.shared.current.backgroundColor.usingColorSpace(.sRGB)
-            ?? Themes.shared.current.backgroundColor
+    }
+}
 
+/// The theme's background, readable from any thread.
+///
+/// A dynamic color's provider can run wherever the color is resolved, and
+/// `Themes` is main-actor. `Themes` writes the value here when the theme in
+/// force changes; `WorkspaceStyle`'s colors read it when they resolve.
+enum ThemeBackdrop {
+    private static let color = OSAllocatedUnfairLock(initialState: Theme.fallback.backgroundColor)
+
+    static func set(_ new: NSColor) { color.withLock { $0 = new } }
+
+    /// `native` moved `amount` of the way toward the theme's background.
+    static func mix(_ native: NSColor, amount: CGFloat) -> NSColor {
+        let background = color.withLock { $0 }
+        let themed = background.usingColorSpace(.sRGB) ?? background
         var nr: CGFloat = 0, ng: CGFloat = 0, nb: CGFloat = 0, na: CGFloat = 0
         var tr: CGFloat = 0, tg: CGFloat = 0, tb: CGFloat = 0, ta: CGFloat = 0
         native.getRed(&nr, green: &ng, blue: &nb, alpha: &na)
         themed.getRed(&tr, green: &tg, blue: &tb, alpha: &ta)
-
         return NSColor(
             srgbRed: nr + (tr - nr) * amount,
             green: ng + (tg - ng) * amount,
@@ -237,6 +262,7 @@ final class Themes: ObservableObject {
         get { UserDefaults.standard.string(forKey: "app.theme") ?? Theme.fallback.name }
         set {
             UserDefaults.standard.set(newValue, forKey: "app.theme")
+            ThemeBackdrop.set((available.first { $0.name == newValue } ?? .fallback).backgroundColor)
             revision += 1
             objectWillChange.send()
         }
@@ -282,6 +308,7 @@ final class Themes: ObservableObject {
         guard let reply = try? JSONDecoder().decode(Reply.self, from: data), !reply.themes.isEmpty
         else { return }
         available = reply.themes
+        ThemeBackdrop.set(current.backgroundColor)
         revision += 1
     }
 
