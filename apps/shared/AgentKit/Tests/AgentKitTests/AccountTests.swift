@@ -287,6 +287,7 @@ struct RelayFailureTests {
     /// vocabulary rather than the part somebody remembered to list.
     static let everyFailure: [AccountError] = [
         .notSignedIn,
+        .keychainUnreadable,
         .signInIncomplete,
         .relayAddressInvalid,
         .unreachable(reason: "offline"),
@@ -310,6 +311,17 @@ struct RelayFailureTests {
                 == "You’re not signed in on this device. Sign in under Settings ▸ Account.")
         #expect(relay.sent.isEmpty, "there is no credential, so there is nothing to send")
         #expect(relay.refreshes == 0)
+    }
+
+    @Test("Signed in, but the Keychain won't give the credential up: says that, not \"not signed in\"")
+    func keychainUnreadable() async {
+        let relay = ScriptedRelay()
+        relay.credential = .failure(.keychainUnreadable)
+
+        #expect(
+            await relay.sentence()
+                == "Far Cooler couldn’t read your sign-in from the keychain. Allow access when it asks, or sign in again.")
+        #expect(relay.sent.isEmpty)
     }
 
     @Test("A bearer refused twice is the one case that says sign in again")

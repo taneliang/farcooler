@@ -26,7 +26,7 @@ public struct AccountSection: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("Sign out") { Task { await account.signOut() } }
+                    Button("Sign Out") { Task { await account.signOut() } }
                 }
             } else if account.signingIn {
                 HStack {
@@ -53,10 +53,14 @@ public struct AccountSection: View {
         } header: {
             Text("Account")
         } footer: {
-            Text(
-                "Sign in to receive notifications when an agent needs you. "
-                    + "Everything else works without an account over SSH."
-            )
+            // Only to somebody who isn't signed in: under their own email and
+            // "This device can receive notifications." it contradicted both.
+            if !account.isSignedIn {
+                Text(
+                    "Sign in to receive notifications when an agent needs you. "
+                        + "Everything else works without an account over SSH."
+                )
+            }
         }
     }
 

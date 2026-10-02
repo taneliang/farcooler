@@ -260,7 +260,13 @@ public final class Account: NSObject, ObservableObject {
     /// refused the refresh token" and "this laptop has no network" are three
     /// different things to tell somebody, and an Optional makes them one.
     func credential(forceRefresh: Bool = false) async -> Result<String, AccountError> {
-        guard let refresh = TokenStore.read(Self.refreshKey) else { return .failure(.notSignedIn) }
+        guard let refresh = TokenStore.read(Self.refreshKey) else {
+            // Signed in by this device's own record, yet the Keychain gave
+            // nothing back: access was refused, or the item is gone. That is
+            // not "not signed in", which the screen was saying under the
+            // person's own email (ov-81 P6).
+            return .failure(isSignedIn ? .keychainUnreadable : .notSignedIn)
+        }
         if !forceRefresh, let access = TokenStore.read(Self.accessKey),
             let expiry = Self.jwtExpiry(access), expiry.timeIntervalSinceNow > 60
         {
@@ -859,6 +865,9 @@ enum AccountResponseAction: Equatable {
 public enum AccountError: Error, Equatable, Sendable, LocalizedError {
     /// Nothing on this device to authenticate with.
     case notSignedIn
+    /// This device is signed in, but the Keychain would not give the
+    /// credential up: access was refused, or the item is gone.
+    case keychainUnreadable
     /// The sign-in sheet closed without a callback.
     case signInIncomplete
     /// The relay setting is not a URL this app could send anything to.
@@ -890,6 +899,8 @@ public enum AccountError: Error, Equatable, Sendable, LocalizedError {
         switch self {
         case .notSignedIn:
             return "You’re not signed in on this device. Sign in under Settings ▸ Account."
+        case .keychainUnreadable:
+            return "Far Cooler couldn’t read your sign-in from the keychain. Allow access when it asks, or sign in again."
         case .signInIncomplete:
             return "Sign-in didn’t complete."
         case .relayAddressInvalid:
@@ -922,6 +933,7 @@ public enum AccountError: Error, Equatable, Sendable, LocalizedError {
     public var diagnostic: String {
         switch self {
         case .notSignedIn: return "no local credential"
+        case .keychainUnreadable: return "keychain read returned nothing"
         case .signInIncomplete: return "sign-in returned no callback"
         case .relayAddressInvalid: return "relay address is not a URL"
         case .unreachable(let reason): return "unreachable (\(reason))"
