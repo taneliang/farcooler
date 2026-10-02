@@ -101,7 +101,7 @@ struct OrchestratorRailView: View {
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .rotationEffect(.degrees(open ? 180 : 0))
-                    .animation(OrchestratorPeek.spring, value: open)
+                    .animation(WorkspaceMotion.spring, value: open)
             }
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -41,6 +41,12 @@ struct BoardGlanceTests {
         // One no longer shown (its section folded) starts over.
         #expect(BoardKeys.step(from: "bil-9", by: 1, in: ids) == "bil-1")
         #expect(BoardKeys.step(from: "bil-3", by: 1, in: []) == nil)
+        // The keys themselves: bare arrows only, their own flags allowed.
+        #expect(BoardKeys.arrow(keyCode: 125, modifiers: [.function, .numericPad]) == 1)
+        #expect(BoardKeys.arrow(keyCode: 126, modifiers: []) == -1)
+        #expect(BoardKeys.arrow(keyCode: 125, modifiers: [.command]) == nil)
+        #expect(BoardKeys.arrow(keyCode: 125, modifiers: [.option, .function]) == nil)
+        #expect(BoardKeys.arrow(keyCode: 36, modifiers: []) == nil)
     }
 
     @Test("Closing goes back to the board, a loose worktree's included")
@@ -91,5 +97,30 @@ struct BoardGlanceTests {
         // the board: Esc puts it away.
         #expect(EscapeBack.goesBack(responder: NSView(), selection: top, focusColumn: true))
         #expect(!EscapeBack.goesBack(responder: NSView(), selection: top, focusColumn: false))
+    }
+
+    @Test("Where the task covers the board, a click gives the task the keyboard")
+    func coveringGivesTheTaskTheKeyboard() {
+        #expect(WorkspaceNavigation.boardTakesKeyboard(beside: true, opening: true))
+        #expect(!WorkspaceNavigation.boardTakesKeyboard(beside: false, opening: true))
+        // Closed by the click: the board's back in sight either way.
+        #expect(WorkspaceNavigation.boardTakesKeyboard(beside: false, opening: false))
+    }
+
+    @MainActor
+    @Test("Esc keeps to a loose worktree with nowhere to close to")
+    func escStaysWithNowhereToClose() {
+        let loose = Selection.looseWorktree(host: "h", worktree: "w-9", terminal: nil)
+        #expect(!EscapeBack.goesBack(responder: NSView(), selection: loose, focusColumn: false, closable: false))
+        #expect(EscapeBack.goesBack(responder: NSView(), selection: loose, focusColumn: true, closable: false))
+    }
+
+    @Test("A loose worktree beside a workspace's own board doesn't end its visit")
+    func aLooseWorktreeBesideTheBoardStays() {
+        let loose = Selection.looseWorktree(host: "h", worktree: "w-9", terminal: nil)
+        #expect(!WorkspaceSelection.leaves(top, for: loose, beside: "ws"))
+        #expect(WorkspaceSelection.leaves(top, for: loose, beside: "main"))
+        #expect(WorkspaceSelection.leaves(top, for: loose))
+        #expect(!WorkspaceSelection.leaves(top, for: bil3))
     }
 }

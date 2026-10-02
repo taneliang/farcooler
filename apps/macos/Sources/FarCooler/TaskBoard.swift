@@ -33,16 +33,33 @@ import SwiftUI
 final class TaskBoardStore: ObservableObject {
     @Published private(set) var board: TaskBoardModel = .empty
     @Published private(set) var detail: TaskDetailModel = .empty
-    /// The card `detail` and `question` were read for. They are single slots,
+    /// The card `detail` and `question` were read for, once they've been
+    /// read: nil from `open` until the read lands. They are single slots,
     /// and a column that has just switched to another task renders once
     /// before `open` blanks them: drawn through `detail(for:)` and
-    /// `question(for:)`, that frame is empty rather than the last task's.
+    /// `question(for:)`, that frame is never the last task's (ov-65 O2).
     private var readID: String?
-    /// `detail` if it is `id`'s record, else empty.
-    func detail(for id: String) -> TaskDetailModel { readID == id ? detail : .empty }
+    /// The last few cards' records and questions, by task id, as they were
+    /// when another card was opened: what a task leaving the window draws as
+    /// it fades out under the next (ov-85), rather than going blank. Each is
+    /// only ever drawn for its own task.
+    private var recent: [(id: String, detail: TaskDetailModel, question: TaskQuestion?)] = []
+    /// How many cards `recent` keeps.
+    static let recentCount = 3
 
-    /// `question` if it is `id`'s, else nil.
-    func question(for id: String) -> TaskQuestion? { readID == id ? question : nil }
+    /// `id`'s record: the one read for it, or, while it's leaving or until a
+    /// read for it lands, the one it last showed. Empty for a task never read.
+    func detail(for id: String) -> TaskDetailModel {
+        if readID == id { return detail }
+        return recent.first { $0.id == id }?.detail ?? .empty
+    }
+
+    /// `id`'s question, as `detail(for:)` finds its record. Nil for any
+    /// other task's.
+    func question(for id: String) -> TaskQuestion? {
+        if readID == id { return question }
+        return recent.first { $0.id == id }?.question
+    }
 
     /// The card that is open, or nil for the board alone.
     @Published var opened: TaskRow?
@@ -279,8 +296,14 @@ final class TaskBoardStore: ObservableObject {
     /// each one tore down the answer being typed into it.
     func open(_ row: TaskRow) async {
         if opened?.id != row.id {
+            // What the card going away showed, kept for it under its own id.
+            if let readID {
+                recent.removeAll { $0.id == readID }
+                recent.insert((readID, detail, question), at: 0)
+                recent = Array(recent.prefix(Self.recentCount))
+            }
             opened = row
-            readID = row.id
+            readID = nil
             detail = .empty
             question = nil
         }
@@ -358,6 +381,12 @@ final class TaskBoardStore: ObservableObject {
     /// Answer buttons. `TaskBoardWrites.offered`'s rule over this runner's
     /// build.
     var offersWrites: Bool { TaskBoardWrites.offered(by: client.daemonBuild) }
+
+    /// Whether `id`'s card offers its question's answers: only from a read
+    /// made for it since it was opened. A record kept from before (`recent`:
+    /// a task leaving under the next, or one reopened until its read lands)
+    /// is drawn read-only, since its question may have been answered since.
+    func canAnswer(_ id: String) -> Bool { offersWrites && readID == id }
 
     /// File a task on this board: New Task…. True when it went on.
     ///
@@ -611,6 +640,12 @@ struct TaskBoardView: View {
     /// The list took the keyboard on its own, from a click: the window's
     /// terminals let go of it.
     let onKeyboard: () -> Void
+    /// Return with a task open: the keyboard into it, as ⌥⌘3.
+    let onEnter: () -> Void
+    /// The window has given the board the keyboard (⌥⌘2, a row chosen, a
+    /// close), and no terminal has taken it back since: what ↑ and ↓ need,
+    /// and what draws the selected row in the accent.
+    let hasKeyboard: Bool
 
     /// The list's collapsed sections: read from `defaults` in `init`, and
     /// again when the view is handed another board.
@@ -622,11 +657,44 @@ struct TaskBoardView: View {
     /// The list has the keyboard: ↑ and ↓ glance through the tasks, Return
     /// opens one.
     @FocusState private var listFocused: Bool
+    /// The window this board is in, and the monitor that hears its arrows.
+    @State private var windowBox = WindowBox()
+    @State private var arrowMonitor: Any?
+    /// What the monitor reads, kept in state as they change: it was made
+    /// with this view as it was then, so `selected` and the focus it
+    /// captured would stay as they were (live, ov-85: it never moved).
+    @State private var heard = Heard()
+    final class Heard {
+        var keyed = false
+        var selected: String?
+        /// The task the last ↑ or ↓ went to, until the window's selection
+        /// catches up: key repeats come faster than it redraws, and each
+        /// must step on from the last, not from where the window still says
+        /// it is.
+        var stepped: String?
+        /// The rows shown, top to bottom, and the board they're on.
+        var rows: [String] = []
+        weak var store: TaskBoardStore?
+
+        /// ↑ or ↓: the task above or below the one open (or the last one
+        /// stepped to), opened beside the board in its place.
+        @MainActor
+        func step(_ by: Int) -> KeyPress.Result {
+            let from = stepped ?? selected
+            guard let store, let row = BoardKeys.row(BoardKeys.step(from: from, by: by, in: rows), in: store.board),
+                row.id != from
+            else { return from == nil ? .ignored : .handled }
+            stepped = row.id
+            store.glance(row)
+            return .handled
+        }
+    }
 
     init(
         store: TaskBoardStore, client: DaemonClient, agents: BoardAgents, waiting: Int = 0,
         onGoTo: @escaping (BoardPane) -> Void, defaults: UserDefaults = .standard,
-        selected: String? = nil, focusRequest: Int = 0, onKeyboard: @escaping () -> Void = {}
+        selected: String? = nil, focusRequest: Int = 0, onKeyboard: @escaping () -> Void = {},
+        onEnter: @escaping () -> Void = {}, hasKeyboard: Bool = false
     ) {
         self.store = store
         self.client = client
@@ -637,6 +705,8 @@ struct TaskBoardView: View {
         self.selected = selected
         self.focusRequest = focusRequest
         self.onKeyboard = onKeyboard
+        self.onEnter = onEnter
+        self.hasKeyboard = hasKeyboard
         _collapsed = State(
             initialValue: BoardForm.collapsed(
                 host: store.hostKey, workspace: store.workspace.id, from: defaults))
@@ -738,7 +808,7 @@ struct TaskBoardView: View {
                             expanded: BoardForm.isExpanded(section, collapsed: collapsed),
                             onToggle: { toggle(section.status) },
                             store: store, agents: agents, onGoTo: onGoTo,
-                            selected: selected, keyed: listFocused,
+                            selected: selected, keyed: hasKeyboard,
                             showingAllDone: $showingAllDone,
                             onChoose: { row in
                                 listFocused = true
@@ -757,24 +827,44 @@ struct TaskBoardView: View {
             // The task open stays in sight as ↑ and ↓ step past the edge,
             // scrolled by as little as that takes.
             .onChange(of: selected) { _, id in
-                guard let id, listFocused else { return }
+                guard let id, hasKeyboard else { return }
                 withAnimation(WorkspaceMotion.spring) { proxy.scrollTo(id) }
             }
         }
         .focusable()
         .focused($listFocused)
         .focusEffectDisabled()
-        .onKeyPress(.downArrow) { step(1) }
-        .onKeyPress(.upArrow) { step(-1) }
+        // ↑ and ↓, pressed or held: heard from the window's key events,
+        // since SwiftUI drops a held key's repeats once the view they started
+        // in has redrawn, which every step does (live, ov-85: twelve repeats
+        // moved it one row). Each step retargets the same spring.
+        .background(WindowReader(box: windowBox))
+        .onAppear { listenForArrows() }
+        .onDisappear {
+            if let arrowMonitor { NSEvent.removeMonitor(arrowMonitor) }
+            arrowMonitor = nil
+        }
         .onKeyPress(.return) {
-            // Nothing open: the first task, or the one stepped to.
-            guard selected == nil, let row = BoardKeys.row(BoardKeys.step(from: nil, by: 1, in: rowIDs), in: store.board)
+            // A task open: into it. Nothing open: the first task.
+            if selected != nil {
+                onEnter()
+                return .handled
+            }
+            guard let row = BoardKeys.row(BoardKeys.step(from: nil, by: 1, in: rowIDs), in: store.board)
             else { return .ignored }
             store.glance(row)
             return .handled
         }
         .onChange(of: focusRequest) { _, _ in listFocused = true }
+        // The window caught up with the steps taken.
+        .onChange(of: selected, initial: true) { _, now in
+            heard.stepped = nil
+            heard.selected = now
+        }
         .onChange(of: listFocused) { _, focused in if focused { onKeyboard() } }
+        .onChange(of: hasKeyboard, initial: true) { _, keyed in heard.keyed = keyed }
+        .onChange(of: rowIDs, initial: true) { _, rows in heard.rows = rows }
+        .onChange(of: ObjectIdentifier(store), initial: true) { _, _ in heard.store = store }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("board-list")
     }
@@ -784,15 +874,23 @@ struct TaskBoardView: View {
         BoardKeys.rows(store.board, collapsed: collapsed, showingAllDone: showingAllDone, now: Date())
     }
 
-    /// ↑ or ↓: the task above or below the one open, opened beside the
-    /// board in its place.
-    private func step(_ by: Int) -> KeyPress.Result {
-        guard let row = BoardKeys.row(BoardKeys.step(from: selected, by: by, in: rowIDs), in: store.board),
-            row.id != selected
-        else { return selected == nil ? .ignored : .handled }
-        store.glance(row)
-        return .handled
+    /// Listen for ↑ and ↓, repeats included, in this board's window while
+    /// the list has the keyboard.
+    private func listenForArrows() {
+        guard arrowMonitor == nil else { return }
+        // The box and the window's box, not this view: the monitor outlives
+        // the copy of the view it was made in.
+        let heard = heard
+        let box = windowBox
+        arrowMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard heard.keyed, let window = event.window, window === box.window, window.attachedSheet == nil,
+                !EscapeBack.keepsEscape(window.firstResponder),
+                let by = BoardKeys.arrow(keyCode: event.keyCode, modifiers: event.modifierFlags)
+            else { return event }
+            return heard.step(by) == .handled ? nil : event
+        }
     }
+
 
     /// Open or close one section, and keep it that way on this device.
     private func toggle(_ status: TaskStatus) {
@@ -826,6 +924,19 @@ enum BoardKeys {
         guard !ids.isEmpty else { return nil }
         guard let current, let at = ids.firstIndex(of: current) else { return by >= 0 ? ids.first : ids.last }
         return ids[min(max(at + by, 0), ids.count - 1)]
+    }
+
+    /// The step a key event asks for: −1 for a bare ↑, 1 for a bare ↓, nil
+    /// for anything else. Arrow keys carry the function and keypad flags of
+    /// their own, which don't count as modifiers.
+    static func arrow(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Int? {
+        let held = modifiers.intersection(.deviceIndependentFlagsMask).subtracting([.function, .numericPad])
+        guard held.isEmpty else { return nil }
+        switch keyCode {
+        case 125: return 1
+        case 126: return -1
+        default: return nil
+        }
     }
 
     static func row(_ id: String?, in board: TaskBoardModel) -> TaskRow? {

@@ -19,7 +19,7 @@ enum PaletteAction: Hashable {
     /// A workspace: its conversation beside its board. Its orchestrator's
     /// row lands here too.
     case openWorkspace(host: String, id: String)
-    /// A task, drilled into in its workspace.
+    /// A task, opened beside its workspace's board.
     case openTask(host: String, workspace: String, id: String)
     /// Make a workspace, named what was typed (`workspace create`).
     case newWorkspace(String)

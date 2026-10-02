@@ -1173,6 +1173,28 @@ struct BoardSidebarTests {
                 == WorkspaceSummary.implicit(repository: Self.repoA))
     }
 
+    /// A loose worktree opens beside its repository's board with that
+    /// board's orchestrator on the rail, as Main's own tasks do, so the rail
+    /// doesn't come and go between them (ov-85). On a runner without
+    /// workspaces, an implicit board has no orchestrator and no rail.
+    @Test("A loose worktree has its board's rail")
+    func aLooseWorktreeHasItsBoardsRail() throws {
+        let fleet = Self.fleet(
+            workspaces: [Self.summary(Self.main, "Main", isMain: true), Self.summary(Self.billing, "Billing")],
+            worktrees: [Self.worktree("stray", workspace: nil)])
+        let loose = try #require(
+            ContentView.workspaceScene(.looseWorktree(host: "", worktree: "stray", terminal: "t"), in: fleet, repositories: []))
+        let main = try #require(
+            ContentView.workspaceScene(.workspace(host: "", workspace: Self.main, focus: nil), in: fleet, repositories: []))
+        #expect(loose.board == Self.main && loose.key == main.key)
+        #expect(loose.hasConversation && main.hasConversation)
+        #expect(loose.opened == .looseWorktree(host: "", worktree: "stray", terminal: nil))
+        let older = Self.fleet(workspaces: nil, worktrees: [Self.worktree("a", workspace: nil)])
+        let bare = try #require(
+            ContentView.workspaceScene(.looseWorktree(host: "", worktree: "a", terminal: nil), in: older, repositories: []))
+        #expect(bare.board == Self.repoA && !bare.hasConversation)
+    }
+
     /// A new worktree — from ⌘N, or a repository header's "New Worktree in
     /// X…" — is claimed for the workspace you are in, or have selected, when
     /// it is being made in that workspace's repository on that runner.

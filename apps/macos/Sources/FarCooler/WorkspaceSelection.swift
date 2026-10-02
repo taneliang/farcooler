@@ -3,9 +3,9 @@ import Foundation
 
 // What the window is showing, now that a workspace is a place (spec §4.2).
 //
-// The sidebar lists workspaces, and selecting one shows its orchestrator's
-// conversation beside its board; a task, or one of its worktrees, drills in,
-// taking the detail. So a selection names a workspace and what's focused in it,
+// The sidebar lists workspaces, and selecting one shows its board, with its
+// orchestrator on a rail; a task, or one of its worktrees, opens beside the
+// board (ov-85). So a selection names a workspace and what's focused in it,
 // and a worktree is a place only when no workspace owns it.
 //
 // Worked out here, as values, so the rules are the ones
@@ -24,7 +24,7 @@ extension ContentView {
         /// Everything waiting on you, from every workspace (spec §4.6).
         case needsYou
         /// A workspace: its orchestrator's conversation beside its board,
-        /// or `focus`, drilled into. On a runner without `workstreams`
+        /// or `focus`, opened beside the board. On a runner without `workstreams`
         /// the workspace is a repository's implicit one, whose id is the
         /// repository's (`WorkspaceSummary.implicit`).
         case workspace(host: String, workspace: String, focus: Focus?)
@@ -48,7 +48,7 @@ extension ContentView {
             return nil
         }
 
-        /// The task or worktree drilled into, or nil at the workspace's own
+        /// The task or worktree open beside the board, or nil at the workspace's own
         /// level.
         var focus: Focus? {
             if case .workspace(_, _, let focus) = self { return focus }
@@ -63,7 +63,7 @@ extension ContentView {
         }
     }
 
-    /// What a workspace has drilled into.
+    /// What a workspace has open beside its board.
     enum Focus: Hashable {
         /// A task, by its id: its card, its agent and its changes (spec §4.4).
         case task(String)
@@ -95,11 +95,14 @@ extension WorkspaceSelection {
     }
 
     /// Whether going from `old` to `new` leaves `old`'s workspace: for
-    /// another workspace, Needs You, a loose worktree, or nothing. Drilling
-    /// into a task or a worktree, and back up, stays in it.
-    static func leaves(_ old: ContentView.Selection?, for new: ContentView.Selection?) -> Bool {
+    /// another workspace, Needs You, a loose worktree beside another board,
+    /// or nothing. Opening a task or a worktree beside its board, and
+    /// closing it, stays in it, as does a loose worktree opened beside this
+    /// workspace's own board (`beside`, the board `new` draws).
+    static func leaves(_ old: ContentView.Selection?, for new: ContentView.Selection?, beside: String? = nil) -> Bool {
         guard case .workspace(let host, let id, _)? = old else { return false }
         if case .workspace(host, id, _)? = new { return false }
+        if case .looseWorktree(host, _, _)? = new, beside == id { return false }
         return true
     }
 }
@@ -224,7 +227,7 @@ extension ContentView {
     }
 
     /// Where choosing `worktree`, or a terminal in it, from its row goes: the
-    /// workspace that owns it, drilled into, or the worktree alone when none
+    /// workspace that owns it, with the worktree open, or the worktree alone when none
     /// does. Never its task: the row was the worktree's.
     nonisolated static func opening(_ worktree: Worktree, terminal: String?, in fleet: Fleet) -> Selection {
         let host = worktree.host ?? ""

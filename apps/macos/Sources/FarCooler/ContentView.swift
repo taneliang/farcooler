@@ -315,7 +315,10 @@ struct ContentView: View {
                     !showPalette, !showQuickCreate,
                     EscapeBack.goesBack(
                         responder: window.firstResponder, selection: selection,
-                        focusColumn: focusColumn || orchestratorPeek)
+                        focusColumn: focusColumn || orchestratorPeek,
+                        closable: selection.flatMap { current in
+                            WorkspaceNavigation.closing(current, board: workspaceScene(current)?.board)
+                        } != nil)
                 else { return event }
                 goBack()
                 return nil
@@ -403,10 +406,12 @@ struct ContentView: View {
                 focusColumn = false
                 orchestratorPeek = false
             }
-            // Leaving a workspace ends a visit to it, whatever level it was
-            // at, and whether or not its board was drawn: the one-column
-            // form with Orchestrator picked has none.
-            if case .workspace(let host, let id, _)? = old, WorkspaceSelection.leaves(old, for: new) {
+            // Leaving a workspace ends a visit to it, whatever was open
+            // beside its board; a loose worktree opened beside that same
+            // board doesn't.
+            if case .workspace(let host, let id, _)? = old,
+                WorkspaceSelection.leaves(old, for: new, beside: new.flatMap(workspaceScene)?.board)
+            {
                 markVisited(host: host, workspace: id)
             }
             keyboardOnBoard = WorkspaceNavigation.boardKeepsKeyboard(
@@ -429,7 +434,9 @@ struct ContentView: View {
             // reason: both set a selection and let the layout overrule it.
             let arrived = WorkspaceScreen.keyPane(nil, in: shownLayouts(for: new), selection: new)
             keyPane = arrived
-            if let arrived,
+            // Glancing from the board, the keyboard stays there: nothing on
+            // the runner moves for a task passed on the way.
+            if !keyboardOnBoard, let arrived,
                 let worktree = worktree(host: arrived.host, id: arrived.worktree),
                 let c = store.client(for: worktree),
                 let holder = c.group(holding: arrived.terminal, in: arrived.worktree),
@@ -1812,7 +1819,7 @@ struct ContentView: View {
     }
 
     /// This worktree's changes pane, if it has one open in the layout the
-    /// detail draws for it, drilled into or loose.
+    /// detail draws for it, in a workspace or loose.
     ///
     /// Asked of that layout rather than of the worktree's terminals,
     /// because that is the question the toolbar button is answering: whether
@@ -1827,7 +1834,7 @@ struct ContentView: View {
         return ws.terminals.first { inGroup.contains($0.id) && $0.isChangesPane }
     }
 
-    /// The layout the detail draws for `ws` opened whole: drilled into in a
+    /// The layout the detail draws for `ws` opened whole: beside a board in a
     /// workspace, or on its own. Nil when it draws none, which is the
     /// case for a worktree with no terminal.
     private func worktreeColumn(of ws: Worktree) -> ShownLayout? {
@@ -1850,13 +1857,13 @@ struct ContentView: View {
     /// Show Changes: the toolbar's, a worktree row's menus' and its card's
     /// (ov-78). Reachable whether or not the worktree has a terminal open.
     ///
-    /// With the worktree's layout drilled into, a split of its
+    /// With the worktree's layout open, a split of its
     /// focused pane, exactly as `⌃B %` and a drop on an edge are: the daemon
     /// has one verb for "a new pane, here, running this", and a changes pane
     /// is that verb with a different preset. With no layout there (no
     /// terminal, or the main checkout named from the Orchestrator column),
     /// its changes pane, one it has or a new one in a window of its own,
-    /// opened, drilled into. Never a split of the orchestrator's
+    /// opened beside the board. Never a split of the orchestrator's
     /// window.
     private func showChanges(in ws: Worktree) {
         if let open = changesPane(in: ws) {
@@ -2056,13 +2063,11 @@ struct ContentView: View {
     /// and of a workspace's, only the columns its width draws.
     private func shownLayouts(for selection: Selection?) -> [ShownLayout] {
         let all = drawableLayouts(for: selection)
-        guard case .workspace(let host, let id, let focus)? = selection else { return all }
-        let summary = WorkspaceScreen.workspace(
-            id, host: host, in: store.fleet, repositories: store.clients[host]?.repositories.map(\.id) ?? [])
+        guard let selection, let scene = workspaceScene(selection) else { return all }
         let arrangement = detailWidth.map { width in
             WorkspaceColumns.layout(
-                width: width, opened: focus != nil, cell: TerminalMetrics.cell(preferences.terminalFont()).width,
-                hasConversation: summary.map { !$0.isImplicit } ?? false, focused: focusColumn,
+                width: width, opened: scene.opened != nil, cell: TerminalMetrics.cell(preferences.terminalFont()).width,
+                hasConversation: scene.hasConversation, focused: focusColumn,
                 peek: orchestratorPeek)
         }
         return WorkspaceScreen.visible(all, arrangement: arrangement)
@@ -2075,11 +2080,22 @@ struct ContentView: View {
     /// conversation's included while it's tucked away beside a task, so the
     /// popped-open panel draws one terminal view whether it's out or not.
     private func drawableLayouts(for selection: Selection?) -> [ShownLayout] {
-        WorkspaceScreen.shown(
-            selection, in: store.fleet,
-            layouts: { host, worktree in store.clients[host]?.layouts[worktree] },
-            repositories: { host in store.clients[host]?.repositories.map(\.id) ?? [] },
-            chosen: { chosenAgents[$0] })
+        func shown(_ selection: Selection?) -> [ShownLayout] {
+            WorkspaceScreen.shown(
+                selection, in: store.fleet,
+                layouts: { host, worktree in store.clients[host]?.layouts[worktree] },
+                repositories: { host in store.clients[host]?.repositories.map(\.id) ?? [] },
+                chosen: { chosenAgents[$0] })
+        }
+        // A loose worktree beside a workspace's board has that workspace's
+        // orchestrator on its rail, ahead of the worktree.
+        if case .looseWorktree(let host, _, _)? = selection, let scene = workspaceScene(selection!),
+            scene.hasConversation, let board = scene.board
+        {
+            let conversation = shown(.workspace(host: host, workspace: board, focus: nil)).filter { $0.column == .conversation }
+            return conversation + shown(selection)
+        }
+        return shown(selection)
     }
 
     @ViewBuilder
@@ -2141,19 +2157,27 @@ struct ContentView: View {
     }
 
     private func workspaceScene(_ selection: Selection) -> WorkspaceScene? {
+        Self.workspaceScene(
+            selection, in: store.fleet, repositories: store.clients[selection.host ?? ""]?.repositories.map(\.id) ?? [])
+    }
+
+    /// The scene `selection` draws, from `fleet`: a workspace's own board
+    /// and orchestrator; for a loose worktree, its repository's board
+    /// (`boardWorkspace(for:in:)`) and that board's orchestrator on the
+    /// rail, so the rail never comes and goes between the two.
+    nonisolated static func workspaceScene(
+        _ selection: Selection, in fleet: Fleet, repositories: [String]
+    ) -> WorkspaceScene? {
         switch selection {
         case .workspace(let host, let id, let focus):
-            let summary = WorkspaceScreen.workspace(
-                id, host: host, in: store.fleet, repositories: store.clients[host]?.repositories.map(\.id) ?? [])
+            let summary = WorkspaceScreen.workspace(id, host: host, in: fleet, repositories: repositories)
             return WorkspaceScene(
                 host: host, board: id, summary: summary, hasConversation: summary.map { !$0.isImplicit } ?? false,
                 opened: focus == nil ? nil : WorkspaceSelection.place(selection))
         case .looseWorktree(let host, _, _):
-            // Beside the board it's nearest: its repository's Main, or the
-            // repository's own on a runner without workspaces.
-            let found = Self.boardWorkspace(for: selection, in: store.fleet)
+            let found = boardWorkspace(for: selection, in: fleet)
             return WorkspaceScene(
-                host: host, board: found?.id, summary: found, hasConversation: false,
+                host: host, board: found?.id, summary: found, hasConversation: found.map { !$0.isImplicit } ?? false,
                 opened: WorkspaceSelection.place(selection))
         case .needsYou:
             return nil
@@ -2194,9 +2218,9 @@ struct ContentView: View {
                         if target == trail { trail = nil }
                         selection = target
                     },
-                    onClose: { closeOpened() })
+                    onClose: WorkspaceNavigation.closing(place, board: scene.board) == nil ? nil : { closeOpened() })
             },
-            detail: { place in openedView(place, layouts: layouts) },
+            detail: { place, settled in openedView(place, layouts: layouts, settled: settled) },
             onDismissPeek: { closePeek() }
         )
         .onPreferenceChange(WorkspaceWidthPreference.self) { width in
@@ -2408,7 +2432,7 @@ struct ContentView: View {
     /// under the next, drawn with its layout and no keyboard, so its
     /// terminal view stays what it was until it's gone.
     @ViewBuilder
-    private func openedView(_ place: Selection, layouts: [ShownLayout]) -> some View {
+    private func openedView(_ place: Selection, layouts: [ShownLayout], settled: Bool) -> some View {
         let current = WorkspaceSelection.samePlace(place, selection)
         let shown =
             current
@@ -2416,9 +2440,12 @@ struct ContentView: View {
             : drawableLayouts(for: place).last { $0.column != .conversation }
         switch place {
         case .workspace(let host, _, .task(let id)?):
-            taskView(host: host, id: id, place: place, shown: shown, keyboard: current)
+            taskView(host: host, id: id, place: place, shown: shown, keyboard: current, settled: settled)
         case .workspace(let host, _, .worktree(let wt, _)?), .looseWorktree(let host, let wt, _):
-            if let shown {
+            if !settled {
+                // Passed on the way: its terminals wait until it settles.
+                Color.clear
+            } else if let shown {
                 tiled(shown, titled: false, keyboard: current)
             } else if let ws = worktree(host: host, id: wt) {
                 worktreeDetail(ws)
@@ -2434,10 +2461,10 @@ struct ContentView: View {
     /// worktree was opened from, else closed to the board.
     ///
     /// The popped-open orchestrator closes first, then Focus is left, one a
-    /// press; `unfocusFirst` false does all of it at once.
-    private func goBack(unfocusFirst: Bool = true) {
+    /// press.
+    private func goBack() {
         let step = WorkspaceNavigation.backStep(
-            peek: orchestratorPeek, focus: focusColumn, oneAtATime: unfocusFirst, from: selection, trail: trail)
+            peek: orchestratorPeek, focus: focusColumn, oneAtATime: true, from: selection, trail: trail)
         if step.leavesFocus { focusColumn = false }
         if let back = step.goesTo {
             guard back.focus != nil else {
@@ -2503,17 +2530,21 @@ struct ContentView: View {
         }
     }
 
-    /// A task, drilled into (spec §4.4): its text first, whole, and its
+    /// A task, beside the board (spec §4.4): its text first, whole, and its
     /// agent and changes beneath.
     @ViewBuilder
-    private func taskView(host: String, id: String, place: Selection, shown: ShownLayout?, keyboard: Bool) -> some View {
+    private func taskView(
+        host: String, id: String, place: Selection, shown: ShownLayout?, keyboard: Bool, settled: Bool
+    ) -> some View {
         let summary = place.workspace.flatMap {
             WorkspaceScreen.workspace($0, host: host, in: store.fleet, repositories: store.clients[host]?.repositories.map(\.id) ?? [])
         }
         if let client = store.clients[host], let summary {
             let board = boardStore(for: summary, client: client, host: host)
             if let row = board.board.columns.flatMap(\.rows).first(where: { $0.id == id }) {
-                taskView(row: row, board: board, client: client, host: host, shown: shown, keyboard: keyboard)
+                taskView(
+                    row: row, board: board, client: client, host: host, shown: shown, keyboard: keyboard,
+                    settled: settled)
             } else if !board.hasRead {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2532,7 +2563,7 @@ struct ContentView: View {
 
     private func taskView(
         row: TaskRow, board: TaskBoardStore, client: DaemonClient, host: String, shown: ShownLayout?,
-        keyboard: Bool = true
+        keyboard: Bool = true, settled: Bool = true
     ) -> some View {
         let agents = WorkspaceScreen.agents(of: row.id, host: host, in: store.fleet)
         let chosen = WorkspaceScreen.agent(of: row.id, host: host, in: store.fleet, chosen: chosenAgents[row.id])
@@ -2591,7 +2622,9 @@ struct ContentView: View {
                                 }
                             }
                         })
-                    if work == .full {
+                    // A task passed on the way, glancing: no terminal mounted,
+                    // no changes read, until it settles.
+                    if work == .full, settled {
                         Divider()
                         TaskColumnSplit(
                             status: row.status, showsChanges: showsChanges, showsAgent: chosen != nil,
@@ -2615,8 +2648,11 @@ struct ContentView: View {
                 }
             }
         }
-        // The card's record and question, read for the task on screen.
-        .task(id: row.id) { await board.open(row) }
+        // The card's record and question, read for the task on screen once
+        // it has settled: one read for a held arrow's whole walk.
+        .task(id: settled ? row.id : nil) {
+            if settled { await board.open(row) }
+        }
     }
 
     /// Move to Its Own Window: `terminal`, sharing the orchestrator's
@@ -2743,7 +2779,9 @@ struct ContentView: View {
                 onGoTo: { pane in go(to: pane) },
                 selected: WorkspaceNavigation.selectedTask(selection, trail: trail, board: id),
                 focusRequest: boardFocusRequest,
-                onKeyboard: { keyboardOnBoard = true }
+                onKeyboard: { keyboardOnBoard = true },
+                onEnter: { focusWorkspaceColumn(.focusTask) },
+                hasKeyboard: keyboardOnBoard
             )
         } else {
             // Said, rather than the generic "Select a worktree": this
@@ -3186,7 +3224,7 @@ struct ContentView: View {
         }()
         // The orchestrator is one pane (ov-78): with the keyboard in its
         // column, what would add a pane there opens a shell in the main
-        // checkout instead, which the workspace drills into.
+        // checkout instead, which the workspace opens beside its board.
         if WorkspaceScreen.opensShellInstead(command, key: selectedPane, in: self.shown) {
             await openShell(besideOrchestratorIn: worktree)
             return
@@ -3521,7 +3559,9 @@ struct ContentView: View {
     /// it stands beside what's opened; only where what's opened covers it
     /// does it close what's opened to reach it (ov-85).
     private func focusWorkspaceColumn(_ command: AppCommand) {
-        guard case .workspace(_, _, let focus)? = selection else { return }
+        // A loose worktree beside its repository's board takes them too.
+        guard let current = selection, let scene = workspaceScene(current) else { return }
+        let focus = scene.opened
         switch command {
         case .focusConversation:
             // Pressed again, or the rail clicked again: it closes, at once,
@@ -3542,13 +3582,13 @@ struct ContentView: View {
             orchestratorPeek = false
             // Beside the others, the board has no text to type into: the
             // terminals let go of the keyboard, and the list takes it.
+            guard scene.board != nil else { return }
             if focus != nil, !boardBeside {
                 // Covered by what's opened: going up first. The selection's
                 // change keeps it on the board (`boardKeepsKeyboard`) rather
                 // than taking it back.
-                trail = nil
-                boardKeyboardPending = true
-                selection = selection?.closed
+                closeOpened()
+                return
             }
             keyboardOnBoard = true
             windowBox.window?.makeFirstResponder(nil)
@@ -3589,6 +3629,13 @@ struct ContentView: View {
         let next = WorkspaceNavigation.choosing(task: id, host: host, workspace: workspace, from: selection, toggles: !glance)
         guard next != selection else { return }
         trail = nil
+        // Where the task covers the board, the list is out of sight: the
+        // keyboard goes to the task, as from anywhere else.
+        guard WorkspaceNavigation.boardTakesKeyboard(beside: boardBeside, opening: next.focus != nil) else {
+            selection = next
+            keyOpened()
+            return
+        }
         boardKeyboardPending = true
         selection = next
         keyboardOnBoard = true
@@ -4001,7 +4048,7 @@ struct ContentView: View {
     }
 
     /// ⌃B %, ⌃B " or ⌃B c with the keyboard in the Orchestrator column: a
-    /// shell in the main checkout, in a window of its own, drilled into in
+    /// shell in the main checkout, in a window of its own, opened beside the board in
     /// the workspace on screen. Never a split of the
     /// orchestrator's window, which would make a checkout terminal only the
     /// column could draw (ov-78).

@@ -163,7 +163,7 @@ struct WorkspaceColumnsTests {
                     opened: "t" as String?, hasConversation: true, cell: WorkspaceColumns.defaultCell,
                     focused: false, peek: false, listWidth: .constant(300),
                     conversation: { Color.clear }, rail: { Color.clear }, board: { Color.clear },
-                    breadcrumb: { _ in Color.clear }, detail: { _ in Color.clear })
+                    breadcrumb: { _ in Color.clear }, detail: { _, _ in Color.clear })
                 .frame(width: width, height: 400)
                 .frame(width: 1600, height: 400, alignment: .leading)
                 .onPreferenceChange(WorkspaceArrangementPreference.self) { value in

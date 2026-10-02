@@ -6,35 +6,36 @@ import Testing
 
 /// A view the hosting view's hit test can name, counting how often it's
 /// made and taken down.
-final class Named: NSView {
+final class MotionMarker: NSView {
     var name = ""
 }
 
 @MainActor
-final class Tally {
+final class MotionTally {
     var made: [String: Int] = [:]
     var gone: [String: Int] = [:]
+    var fetches: [String: Int] = [:]
 }
 
-struct NamedView: NSViewRepresentable {
+struct MotionMarkerView: NSViewRepresentable {
     let name: String
-    let tally: Tally
-    func makeNSView(context: Context) -> Named {
+    let tally: MotionTally
+    func makeNSView(context: Context) -> MotionMarker {
         tally.made[name, default: 0] += 1
-        let view = Named()
+        let view = MotionMarker()
         view.name = name
         return view
     }
-    func updateNSView(_ view: Named, context: Context) {}
-    static func dismantleNSView(_ view: Named, coordinator: ()) {
-        MainActor.assumeIsolated { Tally.current?.gone[view.name, default: 0] += 1 }
+    func updateNSView(_ view: MotionMarker, context: Context) {}
+    static func dismantleNSView(_ view: MotionMarker, coordinator: ()) {
+        MainActor.assumeIsolated { MotionTally.current?.gone[view.name, default: 0] += 1 }
     }
 }
 
-extension Tally {
+extension MotionTally {
     /// The tally the views of the test running now report to: dismantling
     /// is static, so it can't reach an instance any other way.
-    @MainActor static var current: Tally?
+    @MainActor static var current: MotionTally?
 }
 
 /// Opening a task beside the board, glancing through others and closing it
@@ -55,28 +56,38 @@ struct WorkspaceMotionTests {
     @MainActor
     final class Harness {
         let level = Level()
-        let tally = Tally()
+        let tally = MotionTally()
         let host: NSHostingView<Hosted>
         let window: NSWindow
 
         struct Hosted: View {
             @ObservedObject var level: Level
-            let tally: Tally
+            let tally: MotionTally
             let motion: Animation
             var body: some View {
                 WorkspaceView(
                     opened: level.opened, hasConversation: true, cell: WorkspaceColumns.defaultCell,
                     focused: false, peek: false, listWidth: .constant(300),
-                    conversation: { Color.clear }, rail: { NamedView(name: "rail", tally: tally) },
-                    board: { NamedView(name: "board", tally: tally) },
+                    conversation: { Color.clear }, rail: { MotionMarkerView(name: "rail", tally: tally) },
+                    board: { MotionMarkerView(name: "board", tally: tally) },
                     breadcrumb: { _ in Color.clear.frame(height: 30) },
-                    detail: { item in NamedView(name: item, tally: tally) }, motion: motion)
+                    detail: { item, settled in
+                        ZStack {
+                            MotionMarkerView(name: item, tally: tally)
+                            // What waits on settling: a terminal, and a read
+                            // of the runner.
+                            if settled {
+                                MotionMarkerView(name: "work-\(item)", tally: tally)
+                                    .task { tally.fetches[item, default: 0] += 1 }
+                            }
+                        }
+                    }, motion: motion)
                 .frame(width: 1032, height: 400)
             }
         }
 
         init(motion: Animation) {
-            Tally.current = tally
+            MotionTally.current = tally
             host = NSHostingView(rootView: Hosted(level: level, tally: tally, motion: motion))
             window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 1032, height: 400), styleMask: [.borderless],
@@ -92,13 +103,16 @@ struct WorkspaceMotionTests {
             }
         }
 
+        /// What a click `x` pt in lands on: a task's name, whether on its
+        /// header or its settled work ("work-…"), or a part's.
         func hit(_ x: CGFloat) -> String {
-            (host.hitTest(NSPoint(x: x, y: 200)) as? Named)?.name ?? "none"
+            let name = (host.hitTest(NSPoint(x: x, y: 200)) as? MotionMarker)?.name ?? "none"
+            return name.hasPrefix("work-") ? String(name.dropFirst("work-".count)) : name
         }
 
         func close() {
             window.close()
-            Tally.current = nil
+            MotionTally.current = nil
         }
     }
 
@@ -166,6 +180,76 @@ struct WorkspaceMotionTests {
         harness.close()
         #expect(harness.tally.made["board"] == 1)
         #expect(harness.tally.gone["board"] == nil)
-        #expect(harness.tally.made["bil-3"] == 1, "bil-3 was rebuilt by its own close")
+    }
+    /// Closed and, mid-flight, opened again: the same view slides back,
+    /// never taken down and made again. (Fails when what's drawn follows
+    /// what's open instead of outliving it: `show` setting `drawn = item`
+    /// for nil too.)
+    @Test("Reopened mid-close, the same view comes back")
+    func reopenedMidCloseIsTheSameView() async {
+        let harness = Harness(motion: Self.slow)
+        await harness.settle()
+        harness.level.opened = "bil-3"
+        try? await Task.sleep(for: .seconds(3.5))
+        await harness.settle()
+        harness.level.opened = nil
+        // Well into the 3 s close, long past any removal's own fade.
+        try? await Task.sleep(for: .milliseconds(600))
+        await harness.settle(1)
+        harness.level.opened = "bil-3"
+        try? await Task.sleep(for: .seconds(3.5))
+        await harness.settle()
+        let hit = harness.hit(900)
+        harness.close()
+        #expect(hit == "bil-3", "\(hit)")
+        #expect(harness.tally.made["bil-3"] == 1, "bil-3 was made \(harness.tally.made["bil-3"] ?? 0) times")
+        #expect(harness.tally.gone["bil-3"] == nil, "bil-3 was taken down mid-close")
+    }
+
+    /// Switched on a slow spring, the one leaving takes no click while it
+    /// fades: a click there is the new one's.
+    @Test("A task switched away from takes no click while it fades")
+    func theLeavingTaskTakesNoClick() async {
+        let harness = Harness(motion: Self.slow)
+        await harness.settle()
+        harness.level.opened = "bil-3"
+        try? await Task.sleep(for: .seconds(3.5))
+        await harness.settle()
+        harness.level.opened = "bil-7"
+        var hits: [String] = []
+        for _ in 0..<4 {
+            await harness.settle(1)
+            hits.append(harness.hit(900))
+        }
+        harness.close()
+        #expect(!hits.contains("bil-3"), "the leaving task took a click: \(hits)")
+    }
+
+    /// Ten quick steps through the list, as a held arrow takes them: every
+    /// one is drawn at once, but only the last settles, so one terminal is
+    /// mounted and one record read for the whole walk. (Fails with
+    /// `settle` setting `settled` at once on a switch.)
+    @Test("Ten quick steps mount one terminal and read one record")
+    func tenQuickStepsSettleOnce() async {
+        let harness = Harness(motion: Self.quick)
+        await harness.settle()
+        harness.level.opened = "t0"
+        await harness.settle(10)
+        let start = harness.tally.fetches.values.reduce(0, +)
+        for index in 1...10 {
+            harness.level.opened = "t\(index)"
+            await harness.settle(1)
+        }
+        // Drawn at once, header and all: the last one is up already.
+        let drawnAtOnce = harness.tally.made["t10"] == 1
+        try? await Task.sleep(for: .milliseconds(400))
+        await harness.settle()
+        let mounted = (1...10).map { harness.tally.made["work-t\($0)"] ?? 0 }
+        let fetched = harness.tally.fetches.values.reduce(0, +) - start
+        harness.close()
+        #expect(drawnAtOnce)
+        #expect(mounted == Array(repeating: 0, count: 9) + [1], "mounted \(mounted)")
+        #expect(fetched == 1, "read \(fetched) records")
     }
 }
+

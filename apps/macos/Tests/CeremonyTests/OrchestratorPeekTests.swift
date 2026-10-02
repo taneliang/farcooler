@@ -65,7 +65,7 @@ struct OrchestratorPeekTests {
                                 onUpdate: { level.outOfSight = $0; level.enabled = $1 })
                         },
                         rail: { MarkerView(name: "rail") }, board: { MarkerView(name: "board") },
-                        breadcrumb: { _ in Color.clear.frame(height: 30) }, detail: { _ in MarkerView(name: "opened") },
+                        breadcrumb: { _ in Color.clear.frame(height: 30) }, detail: { _, _ in MarkerView(name: "opened") },
                         onDismissPeek: { level.peek = false }, motion: motion)
                     .frame(width: 1032, height: 400)
                 }

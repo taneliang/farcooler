@@ -1,7 +1,7 @@
 import AgentKit
 import SwiftUI
 
-// A task, drilled into (spec §4.4): the task itself first, whole (its status,
+// A task, opened beside the board (spec §4.4): the task itself first, whole (its status,
 // title, intent, acceptance and record), and its agent and changes beneath,
 // behind a divider. A task need not have a worktree or a terminal at all, so
 // with neither the space beneath is one line, never a placeholder.
@@ -130,7 +130,7 @@ extension TaskColumnCard where Card == TaskCard {
     init(row: TaskRow, store: TaskBoardStore) {
         self.init(row: row, store: store) { shown, detail, question in
             TaskCard(
-                row: shown, detail: detail, question: question, canAnswer: store.offersWrites,
+                row: shown, detail: detail, question: question, canAnswer: store.canAnswer(row.id),
                 onAnswer: { body in await store.answer(row, with: body) },
                 draft: TaskCard.Draft(read: { store.draft(for: $0) }, write: { store.setDraft($1, for: $0) }))
         }
@@ -402,7 +402,7 @@ struct ShareSplit<Top: View, Bottom: View>: View {
     }
 }
 
-/// Going up and down the levels (spec §4.4): Open Worktree drills from a
+/// Going up and down the levels (spec §4.4): Open Worktree goes from a
 /// task into its worktree, full size, and Back returns along the
 /// breadcrumb.
 enum WorkspaceNavigation {
@@ -501,6 +501,14 @@ enum WorkspaceNavigation {
         }
     }
 
+    /// Whether a task chosen on the board leaves the keyboard on the board's
+    /// list: only where the list stands beside it (`beside`), or when the
+    /// choice closed it. Where what's opened covers the list, a list holding
+    /// the keyboard would be one nobody can see.
+    static func boardTakesKeyboard(beside: Bool, opening: Bool) -> Bool {
+        beside || !opening
+    }
+
     /// A task chosen on its board (ov-85): opened beside the board, or, with
     /// `toggles` (a click), closed when it's the one open already. A glance
     /// (↑ or ↓) only opens.
@@ -546,10 +554,15 @@ enum EscapeBack {
     /// from (a task or a worktree opened beside the board, a loose one
     /// included, Focus, or the orchestrator popped open, which
     /// `focusColumn` stands for), and nobody else wanting it.
-    static func goesBack(responder: NSResponder?, selection: ContentView.Selection?, focusColumn: Bool) -> Bool {
+    /// `closable` is whether what's open has somewhere to close to: a loose
+    /// worktree with no board beside it doesn't, and keeps its Esc.
+    static func goesBack(
+        responder: NSResponder?, selection: ContentView.Selection?, focusColumn: Bool, closable: Bool = true
+    ) -> Bool {
         guard !keepsEscape(responder) else { return false }
-        if case .looseWorktree? = selection { return true }
-        return focusColumn || selection?.focus != nil
+        if focusColumn { return true }
+        if case .looseWorktree? = selection { return closable }
+        return selection?.focus != nil
     }
 }
 

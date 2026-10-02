@@ -47,8 +47,11 @@ struct WorkspaceView<
     /// close button.
     @ViewBuilder let breadcrumb: (Item) -> Crumbs
     /// What's opened, drawn for `Item`: the one the window has open, or the
-    /// one leaving, which takes no keyboard and isn't seen.
-    @ViewBuilder let detail: (Item) -> Opened
+    /// one leaving, which takes no keyboard and isn't seen. The flag says
+    /// whether it has settled (`WorkspaceMotion.settle`): until it has, only
+    /// what's cheap is drawn, its header and its text, and nothing that
+    /// mounts a terminal or reads the runner.
+    @ViewBuilder let detail: (Item, Bool) -> Opened
     /// A click outside the popped-open conversation: it closes.
     var onDismissPeek: () -> Void = {}
     /// How everything moves: `WorkspaceMotion.spring`, slowed only by a test
@@ -64,6 +67,11 @@ struct WorkspaceView<
     /// The width of what's opened as it leaves: held, so its terminals and
     /// their tmux windows keep their size on the way out.
     @State private var leavingWidth: CGFloat?
+    /// What's opened that has settled: the window's, once it's stayed put
+    /// for `WorkspaceMotion.settle`. Glancing through tasks with a held
+    /// arrow passes the rest without mounting or reading them.
+    @State private var settled: Item?
+    @State private var settling: Task<Void, Never>?
     /// The board list's width while its divider is dragged.
     @State private var dragging: CGFloat?
     /// The list's width when the drag began.
@@ -74,7 +82,7 @@ struct WorkspaceView<
         listWidth: Binding<Double>,
         @ViewBuilder conversation: @escaping () -> Conversation, @ViewBuilder rail: @escaping () -> Rail,
         @ViewBuilder board: @escaping () -> Board, @ViewBuilder breadcrumb: @escaping (Item) -> Crumbs,
-        @ViewBuilder detail: @escaping (Item) -> Opened, onDismissPeek: @escaping () -> Void = {},
+        @ViewBuilder detail: @escaping (Item, Bool) -> Opened, onDismissPeek: @escaping () -> Void = {},
         motion: Animation = WorkspaceMotion.spring
     ) {
         self.opened = opened
@@ -94,6 +102,7 @@ struct WorkspaceView<
         // Drawn as it is from the first frame: a window reopening on a task
         // doesn't slide it in.
         _stage = State(initialValue: WorkspaceStage(open: opened, focused: focused))
+        _settled = State(initialValue: opened)
     }
 
     private func arrangement(width: CGFloat, open: Bool, focused: Bool) -> WorkspaceColumns.Arrangement {
@@ -130,7 +139,7 @@ struct WorkspaceView<
                     // closed, is placed inside it and moves with it, rather
                     // than appearing where the motion ends and fading in.
                     .geometryGroup()
-                    .frame(width: max(0, stage.open == nil ? (leavingWidth ?? frames.opened) : frames.opened), height: height)
+                    .frame(width: max(0, openedWidth(frames: frames, width: width, now: now)), height: height)
                     .offset(x: stage.open == nil ? width + WorkspaceMotion.overhang : frames.openedX)
                     .allowsHitTesting(opened != nil)
                     .accessibilityHidden(opened == nil)
@@ -166,6 +175,7 @@ struct WorkspaceView<
             .onChange(of: width, initial: true) { _, width in measured = width }
         }
         .onChange(of: opened) { _, next in
+            settle(next, switching: stage.open != nil && next != nil)
             if next == nil, stage.open != nil {
                 // Held at the width it has now, for the way out.
                 let leaving = arrangement(width: measured, open: true, focused: stage.focused)
@@ -187,22 +197,54 @@ struct WorkspaceView<
         }
     }
 
+    /// What's opened's width: as it will be once open while it slides in,
+    /// so nothing in it is resized on the way; as it was while it slides out.
+    private func openedWidth(frames: WorkspaceColumns.Frames, width: CGFloat, now: WorkspaceColumns.Arrangement)
+        -> CGFloat
+    {
+        guard stage.open == nil else { return frames.opened }
+        if opened != nil {
+            return WorkspaceColumns.frames(
+                width: width, arrangement: now, list: dragging ?? CGFloat(listWidth), cell: cell
+            ).opened
+        }
+        return leavingWidth ?? frames.opened
+    }
+
+    /// `next` settles: at once when it opens from closed or closes, and when
+    /// it switches, only once it has stayed put for `WorkspaceMotion.settle`.
+    private func settle(_ next: Item?, switching: Bool) {
+        settling?.cancel()
+        guard switching else {
+            settled = next
+            return
+        }
+        settling = Task { @MainActor in
+            try? await Task.sleep(for: WorkspaceMotion.settle)
+            guard !Task.isCancelled else { return }
+            settled = next
+        }
+    }
+
     /// What's opened, under its breadcrumb: the window's, or the one
-    /// leaving. Another one switched in cross-fades over it, on the spring.
+    /// leaving. Another one switched in fades in over it on the spring,
+    /// while the one leaving goes in a blink, so two records are never
+    /// overprinted for long.
     private func openedPane(height: CGFloat) -> some View {
         ZStack {
             if let shown = stage.drawn {
                 VStack(spacing: 0) {
                     breadcrumb(shown)
                     Divider()
-                    detail(shown)
+                    detail(shown, settled == shown)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .background(WorkspaceStyle.canvas)
                 .id(shown)
-                .transition(.opacity)
-                // Leaving, nothing in it takes the keyboard.
+                .transition(.asymmetric(insertion: .opacity, removal: .opacity.animation(WorkspaceMotion.leave)))
+                // Leaving, nothing in it takes the keyboard or a click.
                 .environment(\.outOfSight, opened != shown)
+                .allowsHitTesting(opened == shown)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -255,6 +297,11 @@ enum WorkspaceMotion {
     static let overhang: CGFloat = 24
     /// Each side of the board list's divider that takes a drag.
     static let grip: CGFloat = 3
+    /// How long the one leaving takes to fade when another is switched in.
+    static let leave = Animation.easeOut(duration: 0.08)
+    /// How long a task switched to stays put before it's settled, and its
+    /// terminal is mounted and its record read.
+    static let settle: Duration = .milliseconds(150)
 }
 
 /// What a workspace's detail draws, as the window opens a task, switches to
@@ -392,9 +439,6 @@ enum KeyboardFence {
 /// ⌥⌘1, Esc or a click outside does to it: always the opposite of what it
 /// is now, at once, with nothing waiting on the motion (ov-84).
 enum OrchestratorPeek {
-    /// One spring for the panel, its shadow and the dimming, retargeted from
-    /// where it is by a press mid-flight: the workspace's one spring.
-    static let spring = WorkspaceMotion.spring
     /// What's opened, dimmed under it.
     static let dimming = 0.08
     static let shadow = 0.18
@@ -439,8 +483,9 @@ enum OrchestratorPeek {
 struct DrillBreadcrumb: View {
     let crumbs: [WorkspaceNavigation.Crumb]
     var onGo: (ContentView.Selection) -> Void
-    /// Close: what's opened goes, and the board widens back.
-    var onClose: () -> Void
+    /// Close: what's opened goes, and the board widens back. Nil where
+    /// there's nothing to close to, and no button.
+    var onClose: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 6) {
@@ -460,16 +505,18 @@ struct DrillBreadcrumb: View {
                 }
             }
             Spacer(minLength: 0)
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .semibold))
-                    .frame(width: SidebarGrid.control, height: SidebarGrid.control)
-                    .contentShape(Rectangle())
+            if let onClose {
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .frame(width: SidebarGrid.control, height: SidebarGrid.control)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .help("Close (Esc)")
+                .accessibilityLabel("Close")
+                .accessibilityIdentifier("workspace-close")
             }
-            .buttonStyle(.borderless)
-            .help("Close (Esc)")
-            .accessibilityLabel("Close")
-            .accessibilityIdentifier("workspace-close")
         }
         .font(.system(size: 12))
         .padding(.leading, 12)

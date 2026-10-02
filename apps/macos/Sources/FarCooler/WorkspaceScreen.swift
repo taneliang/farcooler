@@ -5,7 +5,7 @@ import Foundation
 //
 // A workspace shows up to two tmux layouts at once: its orchestrator's, in the
 // conversation column or popped open over what's opened, and a task's agent or
-// an opened worktree, drilled into.
+// an opened worktree, beside the board.
 // Everything that asks "what is on screen" asks this, so the layout commands,
 // ⌘] and ⌘[, "seen", and the drawing itself can't come to disagree about it:
 // the one mistake worse than not marking a pane seen is marking one that isn't
@@ -145,10 +145,10 @@ enum WorkspaceScreen {
     }
 
     /// The worktree the toolbar's Changes acts on for `selection` (ov-78):
-    /// the worktree opened whole, drilled into or on its own, whether
+    /// the worktree opened whole, in a workspace or on its own, whether
     /// or not it has a terminal; with none opened, the main checkout the
-    /// workspace's orchestrator runs in, whose changes open in it, drilled
-    /// into, never in the orchestrator's window. None with a task open,
+    /// workspace's orchestrator runs in, whose changes open in it, beside
+    /// the board, never in the orchestrator's window. None with a task open,
     /// whose view shows its changes already (spec R3), or with no
     /// orchestrator seated.
     static func changesTarget(
