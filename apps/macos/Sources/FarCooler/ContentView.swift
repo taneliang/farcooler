@@ -1482,11 +1482,19 @@ struct ContentView: View {
             // repository without dropping to the terminal.
             SidebarMenuButton(
                 systemImage: "plus",
-                help: "Add a worktree, a repository, or a runner",
+                help: "Add a worktree, a workspace, a repository, or a runner",
                 items: [
                     SidebarMenuItem(title: "New Worktree…") {
                         newWorktreeIntent = NewWorktreeIntent()
                     },
+                ]
+                // The workspace, which was only in the palette (ov-81 P15).
+                + (workspaceRepositories.isEmpty
+                    ? []
+                    : [SidebarMenuItem(title: "New Workspace…") {
+                        newWorkspaceName = NewWorkspaceName(name: "")
+                    }])
+                + [
                     SidebarMenuItem(title: "Add Repository…") { showAddRepository = true },
                     // Here as well as in the picker, because this is the menu
                     // people open looking for "add a thing" — and a runner is
@@ -2204,11 +2212,34 @@ struct ContentView: View {
             store.clients[host]?.repositories.first { $0.id == (w.repository ?? w.id) }?.displayName
         } ?? ""
         let name = workspace.map { $0.isImplicit ? repository : $0.name } ?? "Workspace"
-        if case .task(let id)? = focus, let row = taskRow(host: host, workspace: workspace, id: id) {
-            let under = workspace?.isImplicit == true ? [repository] : [name, repository]
-            return ("\(row.key) \(row.title)", under.filter { !$0.isEmpty }.joined(separator: " · "))
+        var leaf: String?
+        switch focus {
+        case .task(let id)?:
+            leaf = taskRow(host: host, workspace: workspace, id: id).map { "\($0.key) \($0.title)" }
+        case .worktree(let id, _)?:
+            leaf = worktree(host: host, id: id)?.windowTitle
+        case nil:
+            break
         }
-        return (name, [repository, host].filter { !$0.isEmpty }.joined(separator: " · "))
+        return Self.workspaceTitle(
+            workspace: name, repository: repository, host: host, leaf: leaf,
+            implicit: workspace?.isImplicit == true)
+    }
+
+    /// The window's title is the leaf of the breadcrumb: the task or the
+    /// worktree opened, with the workspace and repository beneath it
+    /// (ov-81 P10). The breadcrumb over the content owns the way back, so the
+    /// title no longer repeats the path, and a worktree opened says so here
+    /// as a task does instead of leaving the workspace's name up top. In the
+    /// workspace itself, the workspace, with "repository · runner" beneath.
+    nonisolated static func workspaceTitle(
+        workspace: String, repository: String, host: String, leaf: String?, implicit: Bool
+    ) -> (title: String, subtitle: String) {
+        if let leaf {
+            let under = implicit ? [repository] : [workspace, repository]
+            return (leaf, under.filter { !$0.isEmpty }.joined(separator: " · "))
+        }
+        return (workspace, [repository, host].filter { !$0.isEmpty }.joined(separator: " · "))
     }
 
     /// A task on a workspace's board, as the board last read it.
@@ -3602,6 +3633,9 @@ struct ContentView: View {
                 showQuickCreate = true
             }
         case .addRepository: showAddRepository = true
+        case .newWorkspace:
+            // Only where a runner has workspaces, as the palette's item is.
+            if !workspaceRepositories.isEmpty { newWorkspaceName = NewWorkspaceName(name: "") }
         case .showBoard:
             // Only reachable with a project registered; a board needs a
             // repository to be scoped to, the same way New Worktree needs one
