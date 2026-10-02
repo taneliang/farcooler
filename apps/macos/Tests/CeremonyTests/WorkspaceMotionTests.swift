@@ -279,4 +279,76 @@ struct WorkspaceMotionTests {
         #expect(harness.tally.made["board"] == 1, "the board was rebuilt")
         #expect(harness.tally.made["conversation"] == 1, "the orchestrator was rebuilt")
     }
+
+    /// With nothing open, the orchestrator runs right up to the board, with
+    /// no band of canvas before it; beside a task, it's the rail's width
+    /// narrower. Either way the width its terminal reports to tmux, its own
+    /// less `viewportSlack`, is the same (ov-89 review). (Fails with the
+    /// panel at one width and a canvas band after it, as it was, or with the
+    /// slack not set.)
+    @Test("The orchestrator reaches the board and reports one width")
+    func theOrchestratorReachesTheBoard() async {
+        final class Seen { var drawn: [CGFloat] = []; var reported: [CGFloat] = [] }
+        let seen = Seen()
+        struct Probe: View {
+            let seen: Seen
+            @Environment(\.viewportSlack) private var slack
+            var body: some View {
+                GeometryReader { proxy in
+                    Color.clear.onAppear { record(proxy.size.width) }
+                        .onChange(of: proxy.size.width) { _, width in record(width) }
+                        .onChange(of: slack) { _, _ in record(proxy.size.width) }
+                }
+            }
+            // To the point: layout lands a hair off whole points.
+            func record(_ width: CGFloat) {
+                seen.drawn.append(width.rounded())
+                seen.reported.append((width - slack).rounded())
+            }
+        }
+        let level = Level()
+        struct Hosted: View {
+            @ObservedObject var level: Level
+            let seen: Seen
+            var body: some View {
+                WorkspaceView(
+                    opened: level.opened, hasConversation: true, cell: WorkspaceColumns.defaultCell,
+                    focused: false, peek: level.boardOver, boardWidth: .constant(300),
+                    conversation: { Probe(seen: seen) }, rail: { Color.clear }, board: { Color.clear },
+                    strip: { Color.clear }, breadcrumb: { _ in Color.clear }, detail: { _, _ in Color.clear },
+                    motion: .linear(duration: 0.02))
+                .frame(width: 1032, height: 400)
+            }
+        }
+        let host = NSHostingView(rootView: Hosted(level: level, seen: seen))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1032, height: 400), styleMask: [.borderless],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        func settle() async {
+            for _ in 0..<6 {
+                host.layoutSubtreeIfNeeded()
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        await settle()
+        let filling = seen.drawn.last
+        level.opened = "bil-3"
+        await settle()
+        let railed = seen.drawn.last
+        // Popped open (`peek`, here driven by `boardOver`'s flag).
+        level.boardOver = true
+        await settle()
+        level.opened = nil
+        level.boardOver = false
+        await settle()
+        window.close()
+        // The main area is 1032 − 301 = 731 wide, all of it the orchestrator's.
+        let full: CGFloat = 731
+        let past: CGFloat = 702
+        #expect(filling == full, "\(seen.drawn)")
+        #expect(railed == past, "\(seen.drawn)")
+        #expect(Set(seen.reported) == [past], "reported \(seen.reported)")
+    }
 }

@@ -401,9 +401,9 @@ Workspace (nothing open)                          A ticket or worktree open
 - **The main area shows exactly one thing:** the orchestrator by default, or the task or worktree opened.
 - **Nothing open** (`focus` nil): the orchestrator's conversation fills the main area, and counts as on screen
   (seen, watched, given the keyboard by the selection's rule). There's no rail: the orchestrator *is* the main
-  area. ⌥⌘1 gives it the keyboard. It sits at the leading edge as wide as it is beside a task (below), with
-  the rail's 29 pt of canvas after it: the price of one width in every state, as the board's reserving the
-  rail's room is the price of a board that never moves. A workspace without an orchestrator draws the
+  area. ⌥⌘1 gives it the keyboard. It runs right up to the board. Its terminal keeps the grid it has beside a
+  task (below): the 29 pt the rail would take is drawn in the terminal's own background at its trailing edge
+  and never reported to tmux (`viewportSlack`), so its tmux window is one width in every state. A workspace without an orchestrator draws the
   conversation's empty state here: "No Orchestrator", with **Start Orchestrator** and, for a claude already
   running in a shell in the main checkout, **Use a Running Terminal…** (ov-63). Only a repository's implicit
   board on a runner without `workstreams`, which can't run one, says "No Orchestrator" / "Update Far Cooler on

@@ -411,8 +411,10 @@ struct WorkspaceStage<Item: Hashable>: Equatable {
 /// the same terminal view back, never a new one. It's the same width in
 /// every state, the main area less the rail, so none of those moves resizes
 /// its terminal or the tmux window behind it, and popped open → filling the
-/// main area is one slide on the spring. Filling the main area, it sits at
-/// the leading edge with the rail's width of canvas after it. Its width
+/// main area is one slide on the spring. Filling the main area, it's drawn
+/// the rail's width wider, up to the board, but its terminal reports the
+/// same grid to tmux (`viewportSlack`): the difference is the terminal's own
+/// background at its trailing edge. Its width
 /// changes only with the window's, or the board collapsing, and then snaps,
 /// so it's never resized on every frame of a spring.
 ///
@@ -443,6 +445,10 @@ struct ConversationPanel<Content: View>: View {
 
     var body: some View {
         let shownWidth = width ?? held ?? main
+        // Filling the main area, it runs to the board: the rail's width
+        // more than its terminal's, drawn by the terminal in its own
+        // background and never told to tmux (`viewportSlack`).
+        let extra = drawn == .main ? WorkspaceColumns.rail + WorkspaceColumns.divider : 0
         let open = state == .main || state == .peek
         let out = drawn == .main || drawn == .peek
         ZStack(alignment: .leading) {
@@ -454,20 +460,15 @@ struct ConversationPanel<Content: View>: View {
                 .onTapGesture(perform: onDismiss)
                 .allowsHitTesting(state == .peek)
                 .accessibilityHidden(true)
-            // Filling the main area, the rail's width after it is canvas,
-            // not what's opened showing through.
-            WorkspaceStyle.canvas
-                .opacity(drawn == .main ? 1 : 0)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
             HStack(spacing: 0) {
                 content()
-                    .frame(width: shownWidth)
+                    .environment(\.viewportSlack, extra)
+                    .frame(width: shownWidth + extra)
                     .frame(maxHeight: .infinity)
                     .background(WorkspaceStyle.canvas)
                     // Snapped: a terminal resized on every frame of the
                     // spring would resize its tmux window on every frame.
-                    .animation(nil, value: shownWidth)
+                    .animation(nil, value: shownWidth + extra)
                 Divider().opacity(drawn == .main ? 0 : 1)
             }
             .compositingGroup()
@@ -498,6 +499,11 @@ extension EnvironmentValues {
     /// (ov-84). A terminal or a composer under it takes no keyboard, by
     /// click, Tab or its own claim, and lets go of one it holds.
     @Entry var outOfSight = false
+    /// Points of a terminal view's width it doesn't report to tmux: the
+    /// orchestrator filling the main area is drawn the rail's width wider
+    /// than its grid, so its tmux window keeps one width in every state
+    /// (ov-89). Zero everywhere else.
+    @Entry var viewportSlack: CGFloat = 0
 }
 
 /// What an AppKit view that can take the keyboard does about `outOfSight`.

@@ -46,6 +46,8 @@ struct AgentSurface: View {
 
     @StateObject private var stream: AgentStream
     @ObservedObject private var preferences = Preferences.shared
+    /// What's drawn past the grid tmux is told of (`viewportSlack`).
+    @Environment(\.viewportSlack) private var viewportSlack
     @State private var lastReportedGeometry: (columns: Int, rows: Int) = (0, 0)
     /// Whether the transcript should follow its own tail — true while the
     /// reader is parked at the bottom, false once they scroll away.
@@ -472,7 +474,8 @@ struct AgentSurface: View {
         let cell = TerminalMetrics.cell(preferences.terminalFont())
         guard cell.width > 0, cell.height > 0 else { return }
 
-        let usableWidth = size.width - TerminalMetrics.padding.left - TerminalMetrics.padding.right
+        let usableWidth =
+            size.width - viewportSlack - TerminalMetrics.padding.left - TerminalMetrics.padding.right
         let usableHeight = size.height - TerminalMetrics.padding.top - TerminalMetrics.padding.bottom
         guard usableWidth > 0, usableHeight > 0 else { return }
 
