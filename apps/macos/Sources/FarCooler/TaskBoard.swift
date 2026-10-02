@@ -99,6 +99,10 @@ final class TaskBoardStore: ObservableObject {
     /// answer: a repository with no tasks on it should say so, and one that
     /// has not been read yet must not.
     @Published private(set) var hasRead = false
+    /// Tasks an agent is being started for, by id. A start makes a worktree and
+    /// an agent over several runner calls, and a second one made meanwhile
+    /// would make `name-2` beside it for the same task.
+    @Published private(set) var starting: Set<String> = []
     @Published private(set) var reading = false
     /// What to say when a read or a move did not work.
     ///
@@ -368,6 +372,9 @@ final class TaskBoardStore: ObservableObject {
     func startAgent(for row: TaskRow, agent: String, undelivered: (@MainActor (String) -> Void)? = nil)
         async -> String?
     {
+        guard !starting.contains(row.id) else { return nil }
+        starting.insert(row.id)
+        defer { starting.remove(row.id) }
         let outcome = await client.startAgent(
             for: row, repository: repositoryID, workspace: workspace.boardWorkspace, agent: agent,
             undelivered: undelivered)
@@ -380,7 +387,7 @@ final class TaskBoardStore: ObservableObject {
     /// Put `row` on an existing worktree. Nil when it went.
     func attach(_ row: TaskRow, toWorktree worktree: String) async -> String? {
         if await client.linkTask(key: row.key, worktree: worktree, repository: repositoryID) != nil {
-            return "Far Cooler couldn’t attach that worktree to the task. Check that the runner is reachable, then try again."
+            return "Far Cooler couldn’t attach that worktree to the task. Check that the runner is reachable, then try Open Worktree… again."
         }
         await reload()
         if opened?.id == row.id { await refreshOpened() }

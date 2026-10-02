@@ -80,3 +80,47 @@ struct TaskStartAgentTests {
         #expect(found.map(\.id) == ["w-free"])
     }
 }
+
+/// The fix round: a second start does nothing, finished and read-only tasks
+/// don't offer one.
+@MainActor
+struct TaskStartGuardTests {
+    @Test("A second Start Agent while the first runs starts nothing")
+    func secondPickDoesNothing() async {
+        let runner = StartTaskTests.Runner(capabilities: ["workspaces", "terminals", "launch_prompt"])
+        let client = DaemonClient(target: "", notifications: NotificationCenter())
+        var slow = false
+        client.commandRunnerForTesting = { args in
+            if slow { try? await Task.sleep(for: .milliseconds(40)) }
+            return runner.answer(args)
+        }
+        client.copyToClipboard = { _ in }
+        await client.refresh()
+        for _ in 0..<100 where client.daemonBuild == nil { try? await Task.sleep(for: .milliseconds(10)) }
+        slow = true
+        let store = TaskBoardStore(client: client, workspace: .implicit(repository: "repo"))
+        let row = TaskRow(id: "t-9", key: "bil-9", title: "Invoice", status: .backlog, statusSince: .now)
+
+        let first = Task { await store.startAgent(for: row, agent: "claude") }
+        try? await Task.sleep(for: .milliseconds(20))
+        #expect(store.starting.contains("t-9"))
+        _ = await store.startAgent(for: row, agent: "claude")
+        _ = await first.value
+        #expect(runner.calls.filter { $0.contains("worktree") && $0.contains("create") }.count == 1)
+        #expect(store.starting.isEmpty, "released afterwards")
+    }
+
+    @Test("Start and attach are offered only to an unstarted, unfinished task on a writable runner")
+    func offered() {
+        func offers(_ s: TaskStatus = .backlog, worktree: Bool = false,
+            agent: TaskColumnModel.Agent = .none(openWorktree: false), writes: Bool = true) -> Bool {
+            TaskColumnModel.offersStart(status: s, worktree: worktree, agent: agent, offersWrites: writes)
+        }
+        #expect(offers())
+        #expect(!offers(.done))
+        #expect(!offers(.cancelled))
+        #expect(!offers(writes: false))
+        #expect(!offers(worktree: true))
+        #expect(!offers(agent: .live))
+    }
+}

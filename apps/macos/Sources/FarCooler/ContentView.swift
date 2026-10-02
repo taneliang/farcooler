@@ -2531,6 +2531,7 @@ struct ContentView: View {
                         agents: agents, chosen: chosen,
                         onChooseAgent: { pane in chosenAgents[row.id] = pane.terminal.id },
                         onOpenWorktree: openWorktree,
+                        status: row.status, starting: board.starting.contains(row.id),
                         onStartAgent: board.offersWrites
                             ? { preset in
                                 Task {

@@ -38,6 +38,15 @@ enum TaskColumnModel {
         row.worktreeID.flatMap { $0.isEmpty ? nil : $0 } ?? agent?.worktree.id
     }
 
+    /// Whether a task's work line offers Start Agent… and Open Worktree…:
+    /// nothing has started, there's no worktree to open instead, the task
+    /// isn't finished, and the runner takes writes.
+    static func offersStart(
+        status: TaskStatus, worktree: Bool, agent: Agent, offersWrites: Bool
+    ) -> Bool {
+        offersWrites && !status.isFinished && !worktree && agent == .none(openWorktree: false)
+    }
+
     /// The worktrees a task with none can be put on: this repository's own
     /// linked worktrees on `host` that no other task is using, and that are
     /// not hidden or gone from disk. Never the main checkout, which is where
@@ -172,6 +181,9 @@ struct TaskWorkHeader: View {
     let chosen: BoardPane?
     var onChooseAgent: (BoardPane) -> Void
     var onOpenWorktree: () -> Void
+    var status: TaskStatus = .backlog
+    /// An agent is being started: both menus show it and do nothing.
+    var starting = false
     /// What a task with no worktree can do (ov-81 P3): start an agent on a
     /// worktree made for it, with the agent's id, or go onto one that
     /// exists. Nil hides the actions, as for a runner that takes no writes.
@@ -182,7 +194,8 @@ struct TaskWorkHeader: View {
     /// Whether the line offers the two actions: nothing has started and
     /// there's no worktree to open instead.
     private var offersStart: Bool {
-        worktree == nil && agent == .none(openWorktree: false) && onStartAgent != nil
+        TaskColumnModel.offersStart(
+            status: status, worktree: worktree != nil, agent: agent, offersWrites: onStartAgent != nil)
     }
 
     var body: some View {
@@ -222,13 +235,14 @@ struct TaskWorkHeader: View {
                     .fixedSize()
             }
             if offersStart, let onStartAgent {
-                Menu("Start Agent…") {
+                Menu(starting ? "Starting…" : "Start Agent…") {
                     ForEach(Agents.all) { agent in
                         Button(agent.name) { onStartAgent(agent.id) }
                     }
                 }
                 .controlSize(.small)
                 .fixedSize()
+                .disabled(starting)
                 .help("Make a worktree for this task and start an agent in it")
                 .accessibilityIdentifier("task-start-agent")
                 Menu("Open Worktree…") {
@@ -241,6 +255,7 @@ struct TaskWorkHeader: View {
                 }
                 .controlSize(.small)
                 .fixedSize()
+                .disabled(starting)
                 .help("Put this task on a worktree that already exists")
                 .accessibilityIdentifier("task-attach-worktree")
             }

@@ -31,4 +31,59 @@ struct BoardHeaderFitTests {
             #expect(used <= board, "\(title) at \(board) asked for \(used)")
         }
     }
+
+    /// Drawn at exactly `board` wide, whether anything is inked in the 8 pt
+    /// at either edge, where the header's 14 pt padding should be bare. A row
+    /// wider than the board is centered and clipped, so its controls land
+    /// there.
+    private func edgesAreBare(board: CGFloat, title: String, waiting: Int) -> Bool {
+        let header = BoardHeader(
+            title: title, waiting: waiting, reading: false, trouble: "Couldn’t refresh",
+            offersWrites: true, choice: .constant(.auto), drawn: .list,
+            newTaskOpen: .constant(false), onCreate: { _ in true }, onRefresh: {})
+        let host = NSHostingView(rootView: header.frame(width: board, height: 44))
+        host.frame = NSRect(x: 0, y: 0, width: board, height: 44)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.appearance = NSAppearance(named: .aqua)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        host.display()
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return false }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / board
+        let edge = Int(8 * scale)
+        for y in 0..<rep.pixelsHigh {
+            let reference = rep.colorAt(x: edge + 2, y: y)
+            for x in list(0..<edge) + list((rep.pixelsWide - edge)..<rep.pixelsWide) {
+                guard let c = rep.colorAt(x: x, y: y), let r = reference else { return false }
+                if abs(c.brightnessComponent - r.brightnessComponent) > 0.04 { return false }
+            }
+        }
+        return true
+    }
+
+    private func list(_ r: Range<Int>) -> [Int] { Array(r) }
+
+    @Test("No control is drawn into the header's edge padding at 1180 or the minimum",
+        arguments: [WorkspaceColumns.boardMinimum, 340, 1180])
+    func controlsStayInside(board: CGFloat) {
+        for (title, waiting) in [("Billing", 0), ("A Rather Long Workspace Name Indeed", 12)] {
+            #expect(edgesAreBare(board: board, title: title, waiting: waiting), "\(title) at \(board)")
+        }
+    }
+
+    /// The summary strip, with rows and a long title, never asks for more than
+    /// the board has either.
+    @Test("The summary strip fits the board at the minimum and at 1180", arguments: [
+        WorkspaceColumns.boardMinimum, 1180,
+    ])
+    func stripFits(board: CGFloat) {
+        let client = DaemonClient(target: "", notifications: NotificationCenter())
+        let store = TaskBoardStore(client: client, workspace: .implicit(repository: "r"))
+        let strip = BoardSummaryStrip(
+            store: store, defaults: UserDefaults(suiteName: "strip-fit-\(UUID().uuidString)")!)
+        let host = NSHostingController(rootView: strip)
+        let used = host.sizeThatFits(in: CGSize(width: board, height: 400)).width
+        #expect(used <= board, "strip at \(board) asked for \(used)")
+    }
 }

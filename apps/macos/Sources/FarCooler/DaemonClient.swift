@@ -1206,7 +1206,7 @@ final class DaemonClient: ObservableObject {
         case .started(let worktree, let terminal, let name):
             if await linkTask(key: row.key, worktree: worktree, repository: repository) != nil {
                 return .failed(
-                    "The agent started, but Far Cooler couldn’t attach it to this task. Use Open Worktree to attach \(name).",
+                    "The agent started, but Far Cooler couldn’t attach it to this task. Use Open Worktree… to attach \(name).",
                     made: MadeWorktree(id: worktree, name: name))
             }
             return .started(worktree: worktree, terminal: terminal)
