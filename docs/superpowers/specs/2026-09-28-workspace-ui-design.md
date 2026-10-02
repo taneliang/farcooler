@@ -401,17 +401,23 @@ Workspace (nothing open)                          A ticket or worktree open
 - **The main area shows exactly one thing:** the orchestrator by default, or the task or worktree opened.
 - **Nothing open** (`focus` nil): the orchestrator's conversation fills the main area, and counts as on screen
   (seen, watched, given the keyboard by the selection's rule). There's no rail: the orchestrator *is* the main
-  area. ⌥⌘1 gives it the keyboard. A workspace with no conversation (a repository's implicit board on a runner
-  without `workstreams`) shows "No Task Open" there instead.
+  area. ⌥⌘1 gives it the keyboard. It sits at the leading edge as wide as it is beside a task (below), with
+  the rail's 29 pt of canvas after it: the price of one width in every state, as the board's reserving the
+  rail's room is the price of a board that never moves. A workspace without an orchestrator draws the
+  conversation's empty state here: "No Orchestrator", with **Start Orchestrator** and, for a claude already
+  running in a shell in the main checkout, **Use a Running Terminal…** (ov-63). Only a repository's implicit
+  board on a runner without `workstreams`, which can't run one, says "No Orchestrator" / "Update Far Cooler on
+  this runner to use an orchestrator here." (`WorkspaceMain`).
 - **A task or a worktree open** (`focus` set; a click, Return, Needs You, the palette, ⌘]): it takes the main
   area under a breadcrumb (Workspace › Task, Workspace › Task › Worktree, or Workspace › Worktree, with the
   worktree menu at its end), and the orchestrator springs down to a **28 pt rail** at the main area's leading
   edge: its icon with its state on it (a spinner while it works, the amber dot when it needs you or has an
   unseen turn), "Orchestrator · <agent>" set sideways, and a chevron that turns as it opens (ov-84). Clicking
-  the rail, or ⌥⌘1, pops the conversation open *over* what's opened (its 48-column minimum, or what the rail
-  leaves), so nothing under it resizes, and gives it the keyboard. A click on the rail, a click anywhere
-  outside it, ⌥⌘1 again, Esc when no terminal has the keyboard, or going anywhere else puts it away. On its
-  rail it isn't on screen: not seen, not watched, no keyboard.
+  the rail, or ⌥⌘1, pops the conversation open *over* what's opened, covering it at the same width it fills
+  the main area with (ov-89 review: at 48 columns, as ov-84 had it, every peek resized the orchestrator's tmux
+  window twice and a real TUI redrew), so nothing under it resizes, and gives it the keyboard. A click on the
+  rail, ⌥⌘1 again, Esc when no terminal has the keyboard, or going anywhere else puts it away. On its rail it
+  isn't on screen: not seen, not watched, no keyboard.
 - **Glancing:** clicking another task, or ↑/↓ while the board has the keyboard, swaps what's opened in place.
   A held arrow walks the list: the selection and the task's header and text change at once on every step,
   and what costs something (its terminal mounted, its `task show` read, the changes read) waits until the
@@ -419,10 +425,16 @@ Workspace (nothing open)                          A ticket or worktree open
   leaving fades in 0.08 s while the next fades in on the spring, so two records never overprint for long, and
   while it fades it draws the record it showed, read-only (ov-65's O2 still holds: no task ever draws
   another's record). The board keeps the keyboard throughout: a click on a row, ⌥⌘2 and a close all give it
-  to the board.
+  to the board, where it's drawn.
 - **Closing:** Esc when no terminal or field has the keyboard, a click on the selected task, the **×** at the
   breadcrumb's trailing end, or Back from a task. The orchestrator springs back to fill the main area over
-  what's leaving, and the board keeps the keyboard.
+  what's leaving, on the same spring from wherever it was, popped open included. The board keeps the
+  keyboard where it's drawn; collapsed to its strip, the orchestrator takes it. While it springs back, a
+  click on what's leaving lands on nothing: clicks follow the window's state, not the motion.
+- **Where the keyboard goes** for each command is one pure function, `WorkspaceNavigation.boardStep`
+  (`BoardKeyboardTests`): the board never holds the keyboard where it isn't drawn, a popped board is put away
+  by ⌥⌘1, ⌥⌘3, Focus and a click on a task in it (a glance keeps it), and ⌥⌘3 and Focus with nothing open
+  change nothing.
 - **Narrow windows:** below `29 + 489 + 1 + 260 = 779` pt of detail (the rail, what's opened at its 58 columns,
   and the board at its minimum, each with its divider; wider at a larger font), the board collapses to a
   **28 pt strip** at the trailing edge, mirroring the rail: its icon, its needs-you count, "Board" set sideways
@@ -446,17 +458,18 @@ Workspace (nothing open)                          A ticket or worktree open
   positions are driven from state (`WorkspaceStage`), a step behind the window's own; what takes clicks and
   the keyboard follows the window's state at once, so nothing waits on the motion and a click mid-flight
   retargets it. What's opened stands where it stands open, coming and going, and the orchestrator slides over
-  it and away, so the task's terminals aren't resized by the motion. **The orchestrator is one view**
-  (`ConversationPanel`), mounted with the workspace and moved, never recreated, between the main area and the
-  rail's panel. Its width changes only where it's about to be seen (the main area's, or the peek's 48
-  columns) and snaps rather than springs, so its terminal and tmux window are resized once per move, not per
-  frame; sliding to the rail it keeps the width it had. The board is never rebuilt.
+  it and away, so the task's terminals aren't resized by the motion. The rail is drawn over the orchestrator
+  as it springs away, and under it as it comes back. **The orchestrator is one view** (`ConversationPanel`),
+  mounted with the workspace and moved, never recreated, between the main area and the rail's panel, at one
+  width in every state (`conversationWidth`: the main area less the rail), so its tmux window is resized only
+  when the window's width changes or the board collapses, and then it snaps rather than springs. The board is
+  never rebuilt.
 - `WorkspaceColumns.layout(width:opened:cell:hasConversation:hasBoard:focused:peek:boardOver:)` and
-  `frames(width:arrangement:list:)` decide all of this as values.
+  `frames(width:arrangement:board:)` decide all of this as values.
 
 | Part | Holds | Min | Default |
 |---|---|---|---|
-| **Orchestrator** | Its conversation: the main area with nothing open; beside what's opened, a rail that pops it open over it at 48 columns: 412 pt | 28 pt (rail) | the main area |
+| **Orchestrator** | Its conversation: the main area with nothing open; beside what's opened, a rail that pops it open over it, at the same width | 28 pt (rail); 48 columns: 412 pt, which the main area always exceeds | the main area less the rail |
 | **Board** | The board (§5), a sidebar at the trailing edge; a strip below 779 pt | 260 pt (28 pt strip) | 300 pt |
 | **Opened** | The task (§4.4) or the worktree, in the main area past the rail | 58 columns: 489 pt | the rest |
 
@@ -665,9 +678,9 @@ filters workspace rows and Worktrees.
 - **⇧⌘B, Show Board:** selects the current workspace and focuses its board column. With nothing selected and one
   repository, it opens Main. The refusal copy "choose a project's Board" (`ContentView.swift:2693`) becomes
   "Select a workspace first."
-- **Focus shortcuts:** ⌥⌘1 the orchestrator (popped open from its rail, at any level), ⌥⌘2 the board's list
-  (where it stands beside what's opened; going up to it only where what's opened covers it), ⌥⌘3 the task or
-  worktree opened. ⌘digits are the workspaces since ov-86 (§4.11); the terminals' moved to ⌃⌘digits.
+- **Focus shortcuts:** ⌥⌘1 the orchestrator (in the main area, or popped open from its rail beside what's
+  opened), ⌥⌘2 the board (popped open from its strip where it's collapsed, and put away pressed again), ⌥⌘3
+  the task or worktree opened (nothing with nothing open; ov-89). ⌘digits are the workspaces since ov-86 (§4.11); the terminals' moved to ⌃⌘digits.
 - **Back** is ⌃⌘← and **Focus** is ⌃⌘↩. The usual chords are taken: ⌘[ is Previous Terminal
   (`Commands.swift:136-137`) and ⇧⌘↩ is Zoom Pane (`:170-171`). ⌃⌘←, ⌃⌘↩ and ⌥⌘1–3 are unused in `Commands.swift`
   and aren't in `ShortcutSheetTests.systemChords`. Back goes from a worktree to the task it was opened from, and
@@ -926,7 +939,7 @@ Each of these reads the same items.
 
 | State | Mac | Phones |
 |---|---|---|
-| A repository with only Main, no orchestrator, and an empty board | Sidebar: "Main ◌". The workspace view shows the conversation column's empty state and the board's list, with every status at 0 and **New Task…** | The same, on the Orchestrator tab. Main's row is always listed; it isn't hidden for being empty (today's phones hide empty boards, `AK/RunnerBoards.swift:131-136`) |
+| A repository with only Main, no orchestrator, and an empty board | Sidebar: "Main ◌". The workspace view shows the orchestrator's empty state in the main area and the board on the right, with every status at 0 and **New Task…** | The same, on the Orchestrator tab. Main's row is always listed; it isn't hidden for being empty (today's phones hide empty boards, `AK/RunnerBoards.swift:131-136`) |
 | A workspace with no orchestrator | The conversation column is centered: "No orchestrator" / "An orchestrator runs this workspace's board. It reads the charter, dispatches agents, and asks you when it needs a decision." **Start Orchestrator** is a pop-up offering Claude, Codex and Cursor (`OrchestratorHarness`, from ov-60). While it starts: "Starting Orchestrator…". A refusal becomes a banner, in ov-60's words | **Start Orchestrator** with a harness menu, sending `workspace.start_orchestrator` (Control). Phones haven't sent it before; ruling 8 supersedes the workstreams spec's "no workspace management" line for this action |
 | An orchestrator whose pane was lost | The column shows the lost pane's last screen dimmed, with **Restart** (`terminal.restart`, which resumes the conversation) and **Replace…** | The same actions, in a menu |
 | An orchestrator that is starting and was never confirmed | "Starting Orchestrator…", then after 30 s: "This is taking longer than usual." with **Replace…**, since the seat can stick (CLI map §7.11) | The same |
