@@ -907,6 +907,7 @@ struct TerminalRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                    .gridMark("terminal.signal", .text)
                     .padding(.leading, Self.textOffset)
                     // Take the width offered and no more — see the transcript
                     // below, where the same modifier keeps the widest line from
@@ -943,6 +944,7 @@ struct TerminalRow: View {
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
                             .truncationMode(.tail)
+                            .gridMark("terminal.step", .text)
                     }
                 }
                 // Aligned under the terminal's name, not under its status dot,
@@ -972,6 +974,7 @@ struct TerminalRow: View {
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
                             .truncationMode(.tail)
+                            .gridMark("terminal.subagent", .text)
                     }
                 }
                 // Under the name like the lines above, not a step further:
@@ -1153,7 +1156,7 @@ struct WorktreeDetail: View {
 
                 footnote
             }
-            .padding(32)
+            .padding(32)  // grid-exempt: a detail page's margin, not a row
             .frame(maxWidth: 720, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1288,7 +1291,7 @@ struct WorktreeDetail: View {
                     .foregroundStyle(.tertiary)
             }
             .padding(.vertical, 12)
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 14)  // grid-exempt: a card's inset on the detail page
             .background(
                 RoundedRectangle(cornerRadius: 10)
                     .fill(Color.primary.opacity(0.04))
@@ -1457,7 +1460,7 @@ struct WorkspaceRow: View {
                 Circle()
                     .fill(GlancePalette.amber(scheme))
                     .frame(width: 5, height: 5)
-                    .padding(.leading, 5)
+                    .padding(.leading, SidebarGrid.cellGap)
                     .help("The orchestrator finished a turn you haven’t seen")
                     .accessibilityLabel("Unread")
             }
@@ -1478,10 +1481,10 @@ struct WorkspaceRow: View {
                         .help("No orchestrator")
                 }
             }
-            .padding(.leading, 6)
+            .padding(.leading, SidebarGrid.cellGap)
             // A gap between the glyph and the count: "○1" read as one mark
             // (ov-81 P13).
-            .padding(.trailing, count > 0 ? 4 : 0)
+            .padding(.trailing, count > 0 ? SidebarGrid.markGap : 0)
             if count > 0 {
                 Text("\(count)")
                     .font(.system(size: 11, weight: .semibold))

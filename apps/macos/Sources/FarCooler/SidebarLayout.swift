@@ -161,6 +161,10 @@ enum SidebarGrid {
     /// text that ends before them.
     static let cellGap: CGFloat = 6
 
+    /// The tight gap between a mark and the count it qualifies, "○ 1", so
+    /// the two read as a pair and not as one glyph (ov-81 P13).
+    static let markGap: CGFloat = 4
+
     /// How far a row's selection highlight sits inside the band.
     ///
     /// The highlight is narrower than the band so a selected row reads as a

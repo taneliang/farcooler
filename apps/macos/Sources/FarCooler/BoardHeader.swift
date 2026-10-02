@@ -152,7 +152,7 @@ struct BoardHeader: View {
             .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .semibold))
             .lineLimit(1)
             .fixedSize()
-            .padding(.horizontal, 7)
+            .padding(.horizontal, 7)  // grid-exempt: a badge's own inset
             .padding(.vertical, 2)
             .background(Color.accentColor.opacity(0.18), in: Capsule())
     }

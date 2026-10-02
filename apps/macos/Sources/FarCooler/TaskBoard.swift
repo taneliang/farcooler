@@ -776,7 +776,7 @@ struct NewTaskForm: View {
                     .disabled(!canSend)
             }
         }
-        .padding(14)
+        .padding(14)  // grid-exempt: the New Task popover's margin
     }
 
     private var canSend: Bool { !sending && TaskBoardWrites.titleFits(trimmed) }
@@ -1097,7 +1097,7 @@ private struct AgentPill: View {
                 .font(.system(size: 7.5, weight: .bold))
                 .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 7)
+        .padding(.horizontal, 7)  // grid-exempt: the agent pill's own inset
         .padding(.vertical, 2.5)
         .background(
             Capsule().fill(Color.primary.opacity(hovering ? 0.12 : 0.07)))

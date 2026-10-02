@@ -84,8 +84,16 @@ struct GridGeometryTests {
 
     // MARK: - The sidebar
 
-    private static let terminal = Terminal(
-        id: "t", short: "t", title: "claude", preset: "claude", state: "running", epoch: 0)
+    /// An agent with a feed and a running subagent, so the lines under its
+    /// name are drawn too.
+    private static let terminal: Terminal = {
+        var terminal = Terminal(
+            id: "t", short: "t", title: "claude", preset: "claude", state: "running", epoch: 0)
+        terminal.line = "Reading the board"
+        terminal.feed = ["Ran the tests"]
+        terminal.subagents = ["explorer"]
+        return terminal
+    }()
 
     private static func worktree(_ id: String, workspace: String?, hidden: Bool = false) -> Worktree {
         Worktree(
@@ -183,6 +191,8 @@ struct GridGeometryTests {
             "worktree.branch.text": ColumnGrid.d,
             "terminal.icon": ColumnGrid.d,
             "terminal.text": ColumnGrid.column(4),
+            "terminal.step.text": ColumnGrid.column(4),
+            "terminal.subagent.text": ColumnGrid.column(4),
             "noWorktrees.text": ColumnGrid.c,
             "group.chevron": ColumnGrid.a,
             "group.icon": ColumnGrid.b,
@@ -245,7 +255,69 @@ struct GridGeometryTests {
         if let title = titles.first { #expect(title > ColumnGrid.c, "a title at \(title) overlaps its key") }
     }
 
-    @Test func theCollapsedStripIsOneLine() {
+    /// Closed, the strip is one row: its 24 pt line and 8 pt above and
+    /// below, whatever it has to say.
+    @Test("The collapsed strip is one row tall")
+    func theCollapsedStripIsOneRowTall() async {
+        let store = await Self.store()
+        let defaults = UserDefaults(suiteName: "strip-\(UUID().uuidString)")!
+        defaults.set(true, forKey: "board.summary.collapsed.\(store.hostKey).\(store.workspace.id)")
+        let host = NSHostingController(rootView: BoardSummaryStrip(store: store, defaults: defaults))
+        for width in [WorkspaceColumns.boardMinimum, WorkspaceColumns.boardIdeal] {
+            let height = host.sizeThatFits(in: CGSize(width: width, height: 400)).height
+            #expect(height == ColumnGrid.rowHeight + 2 * ColumnGrid.rhythm, "\(height) tall at \(width)")
+        }
+    }
+
+    // MARK: - No stray offsets
+
+    /// The row files, and how much of each holds rows: TaskBoard.swift's
+    /// task detail, from `struct TaskCard` on, is another lane's.
+    private static let rowFiles: [(name: String, until: String?)] = [
+        ("SidebarViews.swift", nil), ("SidebarLayout.swift", nil), ("WorkspaceSidebar.swift", nil),
+        ("BoardHeader.swift", nil), ("BoardSummaryStrip.swift", nil),
+        ("TaskBoard.swift", "struct TaskCard: View"),
+    ]
+
+    /// Every numeric horizontal padding or x offset in `source`, with its
+    /// line number, that no `// grid-exempt:` comment explains.
+    static func strays(in source: String) -> [(line: Int, text: String)] {
+        let pattern = try! Regex(
+            #"\.padding\((\.(leading|trailing|horizontal),\s*)?-?[0-9]|\.offset\(x:\s*-?[0-9]"#)
+        return source.split(separator: "\n", omittingEmptySubsequences: false).enumerated()
+            .filter { $0.element.contains(pattern) && !$0.element.contains("grid-exempt:") }
+            .map { ($0.offset + 1, $0.element.trimmingCharacters(in: .whitespaces)) }
+    }
+
+    /// No row sets a horizontal inset in a number of its own: every one is a
+    /// grid constant, or says on its line why it isn't a column.
+    @Test("The row files hold no bare horizontal paddings or offsets")
+    func noStrayOffsets() throws {
+        let sources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/FarCooler")
+        for file in Self.rowFiles {
+            var text = try String(contentsOf: sources.appendingPathComponent(file.name), encoding: .utf8)
+            if let until = file.until, let end = text.range(of: until) {
+                text = String(text[..<end.lowerBound])
+            }
+            for stray in Self.strays(in: text) {
+                Issue.record("\(file.name):\(stray.line) sets a bare inset: \(stray.text)")
+            }
+        }
+    }
+
+    /// The scan finds what it is for, and lets an explained one through.
+    @Test func theScanCatchesABareInset() {
+        #expect(Self.strays(in: "x\n    .padding(.leading, 5)\n").map(\.line) == [2])
+        #expect(Self.strays(in: ".padding(12)").count == 1)
+        #expect(Self.strays(in: ".offset(x: -3)").count == 1)
+        #expect(Self.strays(in: ".padding(.leading, SidebarGrid.gap)").isEmpty)
+        #expect(Self.strays(in: ".padding(.vertical, 4)").isEmpty)
+        #expect(Self.strays(in: ".padding(14)  // grid-exempt: a popover").isEmpty)
+    }
+
+    @Test func theCollapsedStripsLineReads() {
         #expect(BoardSummaryStrip.collapsedLine(count: 2, period: .sinceLastVisit) == "2 new since your last visit")
         #expect(BoardSummaryStrip.collapsedLine(count: 0, period: .sinceLastVisit) == "Nothing new since your last visit")
         #expect(BoardSummaryStrip.collapsedLine(count: 1, period: .lastHour) == "1 new in the last hour")
