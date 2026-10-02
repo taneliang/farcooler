@@ -108,6 +108,7 @@ struct TerminalCanvas: NSViewRepresentable {
 
     func makeNSView(context: Context) -> TerminalRenderView {
         let view = TerminalRenderView()
+        view.takesKeyboard = !context.environment.outOfSight
         // BEFORE attaching, not after. Attaching replays the pane's history, and
         // tmux wrapped that history at the PANE width — so the emulator has to
         // already be that wide or every long line arrives wrapped a second time.
@@ -121,6 +122,7 @@ struct TerminalCanvas: NSViewRepresentable {
         // ignores a repeat, so this costs nothing on the updates that are not
         // about size — which is nearly all of them.
         view.setPaneGrid(grid)
+        view.takesKeyboard = !context.environment.outOfSight
 
         // Only re-attach when the selected terminal actually changes, or when
         // the link underneath it has been replaced. Restarting on every
@@ -142,7 +144,7 @@ struct TerminalCanvas: NSViewRepresentable {
         // Claimed on becoming focused, never on merely existing. Re-asserted on
         // every update because a pane can gain focus long after it mounted — a
         // ⌃B o, a click on another pane, or `farcooler layout focus` from a script.
-        if isFocused, context.coordinator.focused != true {
+        if isFocused, view.takesKeyboard, context.coordinator.focused != true {
             context.coordinator.focused = true
             view.claimKeyboard()
         } else if !isFocused {

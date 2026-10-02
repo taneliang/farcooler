@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// A workspace in the detail, at one of two levels (spec §4.3): its
@@ -203,6 +204,10 @@ struct OrchestratorPeekPanel<Content: View>: View {
                 .offset(x: OrchestratorPeek.offset(open: out, width: width))
                 .allowsHitTesting(OrchestratorPeek.takesClicks(open: open))
                 .accessibilityHidden(!open)
+                // Nothing in it takes the keyboard while it's closed: not the
+                // terminal, not a chat composer, not a SwiftUI control.
+                .environment(\.outOfSight, !open)
+                .disabled(!open)
                 .accessibilityIdentifier("workspace-conversation-peek")
                 .onAppear { mounted = true }
             }
@@ -214,6 +219,25 @@ struct OrchestratorPeekPanel<Content: View>: View {
         .clipShape(Rectangle())
         .contentShape(Rectangle())
         .allowsHitTesting(OrchestratorPeek.takesClicks(open: open))
+    }
+}
+
+extension EnvironmentValues {
+    /// Mounted but out of sight: the orchestrator tucked away beside a task
+    /// (ov-84). A terminal or a composer under it takes no keyboard, by
+    /// click, Tab or its own claim, and lets go of one it holds.
+    @Entry var outOfSight = false
+}
+
+/// What an AppKit view that can take the keyboard does about `outOfSight`.
+enum KeyboardFence {
+    /// Called as `takesKeyboard` turns off: the window's first responder,
+    /// if it's `view`, lets go, and what's opened takes it up from there
+    /// (`ContentView.closePeek`).
+    @MainActor
+    static func release(_ view: NSView) {
+        guard let window = view.window, window.firstResponder === view else { return }
+        window.makeFirstResponder(nil)
     }
 }
 
@@ -242,6 +266,25 @@ enum OrchestratorPeek {
 
     /// The state after a press of the rail or ⌥⌘1, drilled in.
     static func pressed(open: Bool) -> Bool { !open }
+
+    /// The layout the conversation's view draws, and whether it's on
+    /// screen. Drilled in, the panel draws the conversation's layout open
+    /// or closed, so it's one terminal view; it's on screen, seen, watched
+    /// and given the keyboard only when `visible` (`WorkspaceScreen.visible`)
+    /// has it, which is while it's popped open.
+    static func conversation(
+        drilled: Bool, visible: [ShownLayout], drawable: [ShownLayout]
+    ) -> (layout: ShownLayout?, onScreen: Bool) {
+        let shown = visible.first { $0.column == .conversation }
+        guard drilled else { return (shown, shown != nil) }
+        return (drawable.first { $0.column == .conversation }, shown != nil)
+    }
+
+    /// Whether a terminal view drawing `layout` has the keyboard: never
+    /// while it's off screen, else as `WorkspaceScreen.hasKeyboard` says.
+    static func takesKeyboard(_ layout: ShownLayout, onScreen: Bool, key: PaneRef?, onBoard: Bool) -> Bool {
+        onScreen && WorkspaceScreen.hasKeyboard(layout, key: key, onBoard: onBoard)
+    }
 }
 
 /// The breadcrumb over a task or a worktree opened: Back, then each level up

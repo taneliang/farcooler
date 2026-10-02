@@ -205,7 +205,13 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     // MARK: - Lifecycle
 
     override var isFlipped: Bool { true }
-    override var acceptsFirstResponder: Bool { true }
+    override var acceptsFirstResponder: Bool { takesKeyboard }
+
+    /// Off while the view is mounted but out of sight (`outOfSight`): it
+    /// refuses the keyboard, and lets go of one it holds.
+    var takesKeyboard = true {
+        didSet { if !takesKeyboard { KeyboardFence.release(self) } }
+    }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func viewDidMoveToWindow() {
@@ -526,6 +532,8 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     }
 
     override func becomeFirstResponder() -> Bool {
+        // Out of sight, not even a claim (`makeFirstResponder`) takes it.
+        guard takesKeyboard else { return false }
         needsDisplay = true
         return super.becomeFirstResponder()
     }

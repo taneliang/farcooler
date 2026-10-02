@@ -2140,9 +2140,9 @@ struct ContentView: View {
                 // Drilled in, the panel stays mounted while it's closed, and
                 // draws the same layout then as open; it just doesn't have
                 // the keyboard, or count as seen or watched (`shown`).
-                let onScreen = layouts.first { $0.column == .conversation }
-                let drawn = focus == nil ? onScreen : drawableLayouts(for: selection).first { $0.column == .conversation }
-                conversationColumn(host: host, workspace: summary, shown: drawn, onScreen: onScreen != nil)
+                let drawn = OrchestratorPeek.conversation(
+                    drilled: focus != nil, visible: layouts, drawable: drawableLayouts(for: selection))
+                conversationColumn(host: host, workspace: summary, shown: drawn.layout, onScreen: drawn.onScreen)
             },
             rail: { conversationRail(host: host, workspace: summary) },
             board: { boardColumn(host: host, id: id) },
@@ -2731,7 +2731,8 @@ struct ContentView: View {
             title: frame.title,
             subtitle: frame.subtitle,
             setsTitle: titled,
-            hasKeyboard: keyboard && WorkspaceScreen.hasKeyboard(shown, key: selectedPane, onBoard: keyboardOnBoard)
+            hasKeyboard: OrchestratorPeek.takesKeyboard(
+                shown, onScreen: keyboard, key: selectedPane, onBoard: keyboardOnBoard)
         )
     }
 

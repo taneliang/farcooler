@@ -868,7 +868,7 @@ private struct AgentComposerField: NSViewRepresentable {
 
         scroll.documentView = view
         context.coordinator.view = view
-        apply(view)
+        apply(view, outOfSight: context.environment.outOfSight)
         context.coordinator.report(view)
         return scroll
     }
@@ -881,7 +881,7 @@ private struct AgentComposerField: NSViewRepresentable {
             view.setSelectedRange(NSRange(location: location, length: 0))
         }
         view.placeholder = placeholder
-        apply(view)
+        apply(view, outOfSight: context.environment.outOfSight)
 
         // Claimed on becoming focused, never merely on existing — the same
         // rule `TerminalSurface` follows for the same reason: re-asserted on
@@ -909,7 +909,8 @@ private struct AgentComposerField: NSViewRepresentable {
     /// only.
     @Binding var measuredHeight: CGFloat
 
-    private func apply(_ view: ComposerTextView) {
+    private func apply(_ view: ComposerTextView, outOfSight: Bool = false) {
+        view.takesKeyboard = !outOfSight
         view.pickerOpen = pickerOpen
         view.onNavigate = onNavigate
         view.onAccept = onAccept
@@ -975,6 +976,17 @@ private struct AgentComposerField: NSViewRepresentable {
 /// moved elsewhere — exactly the failure `TerminalRenderView.keyDown` already
 /// guards against for a terminal, and a chat pane needs the same guard.
 final class ComposerTextView: NSTextView {
+    /// Off while out of sight (`outOfSight`): see `TerminalRenderView`.
+    var takesKeyboard = true {
+        didSet { if !takesKeyboard { KeyboardFence.release(self) } }
+    }
+
+    override var acceptsFirstResponder: Bool { takesKeyboard && super.acceptsFirstResponder }
+
+    override func becomeFirstResponder() -> Bool {
+        takesKeyboard && super.becomeFirstResponder()
+    }
+
     var pickerOpen = false
     var onNavigate: ((PaletteMove) -> Void)?
     var onAccept: (() -> Void)?
