@@ -107,8 +107,8 @@ is whatever you open; drag its left edge to make it wider or narrower, and it
 remembers the width. When you open a task or a worktree, it takes the main
 area, and the orchestrator shrinks to a thin rail at the left edge, with its
 status and its dot. Click the rail (or press ⌥⌘1) to pop the conversation open
-over the task, and click the rail again, click anywhere outside it, or press
-⌥⌘1 again to put it away. Close the task and the orchestrator fills the main
+over the task, and click the rail again, press ⌥⌘1 again, or press Esc to put
+it away. Close the task and the orchestrator fills the main
 area again.
 
 In a window too narrow for the board beside a usable terminal, the board
