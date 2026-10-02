@@ -2663,7 +2663,7 @@ fn parse_gap(raw: &str) -> Result<Duration, String> {
     let bad = || {
         format!("{raw:?} is not a length of time. write it as 45s, 10m, 2h or 3d")
     };
-    let unit = text.chars().next_back().ok_or_else(&bad)?;
+    let unit = text.chars().next_back().ok_or_else(bad)?;
     let seconds: u64 = match unit {
         's' => 1,
         'm' => 60,

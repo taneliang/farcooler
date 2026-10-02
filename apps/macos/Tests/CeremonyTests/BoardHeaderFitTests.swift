@@ -41,16 +41,23 @@ struct BoardHeaderFitTests {
             title: title, waiting: waiting, reading: false, trouble: "Couldn’t refresh",
             offersWrites: true, choice: .constant(.auto), drawn: .list,
             newTaskOpen: .constant(false), onCreate: { _ in true }, onRefresh: {})
-        let host = NSHostingView(rootView: header.frame(width: board, height: 44))
-        host.frame = NSRect(x: 0, y: 0, width: board, height: 44)
-        let window = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
-        window.appearance = NSAppearance(named: .aqua)
-        window.contentView = host
+        // No window and a bitmap of its own at a fixed 2x: a window's minimum
+        // width, the screen's backing scale and the machine's appearance all
+        // differ between a desk and a CI runner, and none of them is what's
+        // being measured. (ov-82: this failed at 280 on CI and passed here.)
+        let height: CGFloat = 44
+        let host = NSHostingView(rootView: header.frame(width: board, height: height))
+        host.appearance = NSAppearance(named: .aqua)
+        host.frame = NSRect(x: 0, y: 0, width: board, height: height)
         host.layoutSubtreeIfNeeded()
-        host.display()
-        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return false }
+        let scale: CGFloat = 2
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(board * scale), pixelsHigh: Int(height * scale),
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+        else { return false }
+        rep.size = host.bounds.size
         host.cacheDisplay(in: host.bounds, to: rep)
-        let scale = CGFloat(rep.pixelsWide) / board
         let edge = Int(8 * scale)
         for y in 0..<rep.pixelsHigh {
             let reference = rep.colorAt(x: edge + 2, y: y)
