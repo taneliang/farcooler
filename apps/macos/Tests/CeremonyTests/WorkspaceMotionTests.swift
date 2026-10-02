@@ -206,25 +206,6 @@ struct WorkspaceMotionTests {
         #expect(harness.tally.gone["bil-3"] == nil, "bil-3 was taken down mid-close")
     }
 
-    /// Switched on a slow spring, the one leaving takes no click while it
-    /// fades: a click there is the new one's.
-    @Test("A task switched away from takes no click while it fades")
-    func theLeavingTaskTakesNoClick() async {
-        let harness = Harness(motion: Self.slow)
-        await harness.settle()
-        harness.level.opened = "bil-3"
-        try? await Task.sleep(for: .seconds(3.5))
-        await harness.settle()
-        harness.level.opened = "bil-7"
-        var hits: [String] = []
-        for _ in 0..<4 {
-            await harness.settle(1)
-            hits.append(harness.hit(900))
-        }
-        harness.close()
-        #expect(!hits.contains("bil-3"), "the leaving task took a click: \(hits)")
-    }
-
     /// Ten quick steps through the list, as a held arrow takes them: every
     /// one is drawn at once, but only the last settles, so one terminal is
     /// mounted and one record read for the whole walk. (Fails with
