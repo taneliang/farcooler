@@ -3188,7 +3188,7 @@ struct ContentView: View {
     // MARK: - Commands
 
     /// The terminals of the view on screen, in the order they're drawn:
-    /// what ⌘] and ⌘[, ⌥⌘↓ and ⌥⌘↑ and ⌘1… step through (spec §4.9). The
+    /// what ⌘] and ⌘[, ⌥⌘↓ and ⌥⌘↑ and ⌃⌘1… step through (spec §4.9). The
     /// sidebar no longer lists terminals, so stepping through all of them
     /// would walk a list nobody can see.
     private var allTerminals: [PaneRef] { Self.stepOrder(shown) }

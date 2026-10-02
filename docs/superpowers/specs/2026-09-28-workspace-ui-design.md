@@ -547,6 +547,8 @@ along it.
 
 ### 4.5 The sidebar
 
+Optional since ov-86, and hidden in a new window: the title bar's switcher and the board list do its work (§4.11).
+
 ```
 ◉ Needs You                         3     ← selects .needsYou
 overnight                          ⋯ ＋   ← repository header (collapse and menus as today)
@@ -628,7 +630,7 @@ filters workspace rows and Worktrees.
 - **⌃⌘N, Next Needing Attention** (`Commands.swift:142-143`): walks the merged items in rank order from the
   current one, opening each as its Open action would. It used to walk terminals in sidebar order
   (`ContentView.swift:2656-2663`, `WorkspaceSidebar.swift:146-161`), which never reached a decision.
-- **⌘] and ⌘[, ⌥⌘↓ and ⌥⌘↑, ⌘1…:** step through the terminals of the view on screen. That's the task's layout, the
+- **⌘] and ⌘[, ⌥⌘↓ and ⌥⌘↑, ⌃⌘1…** (⌘1… until ov-86)**:** step through the terminals of the view on screen. That's the task's layout, the
   opened worktree, or the conversation. They no longer step through the whole sidebar, since the sidebar no longer
   lists terminals.
 - **⇧⌘B, Show Board:** selects the current workspace and focuses its board column. With nothing selected and one
@@ -636,7 +638,7 @@ filters workspace rows and Worktrees.
   "Select a workspace first."
 - **Focus shortcuts:** ⌥⌘1 the orchestrator (popped open from its rail, at any level), ⌥⌘2 the board's list
   (where it stands beside what's opened; going up to it only where what's opened covers it), ⌥⌘3 the task or
-  worktree opened. ⌘digits are taken by terminals.
+  worktree opened. ⌘digits are the workspaces since ov-86 (§4.11); the terminals' moved to ⌃⌘digits.
 - **Back** is ⌃⌘← and **Focus** is ⌃⌘↩. The usual chords are taken: ⌘[ is Previous Terminal
   (`Commands.swift:136-137`) and ⇧⌘↩ is Zoom Pane (`:170-171`). ⌃⌘←, ⌃⌘↩ and ⌥⌘1–3 are unused in `Commands.swift`
   and aren't in `ShortcutSheetTests.systemChords`. Back goes from a worktree to the task it was opened from, and
@@ -661,6 +663,41 @@ The column header shows:
 - a `⋯` menu with Replace Orchestrator…, Show Charter, Terminal / Chat, and Restart.
 
 ---
+
+### 4.11 Getting around without the sidebar (ov-86)
+
+The owner (2 Oct): a workspace switcher in the title bar, and a way between worktrees from inside one. The
+sidebar becomes optional; everything it did is reachable without it.
+
+- **The workspace switcher**, the toolbar's leading item, after the traffic lights: "Billing ▾ · shop", the
+  workspace and its repository. It opens a popover of every workspace grouped by repository, in the sidebar's
+  order (`WorkspaceNumbers.groups`, from `sidebarRows`), each with its amber needs-you count and its ⌘-number,
+  and at its foot Needs You, New Workspace… and Runners and Devices… (Settings ▸ Runners, where devices are too).
+  It works with the sidebar hidden. The Needs You tray, with its count, sits beside it.
+- **The board list is the navigator inside a workspace.** Each task's row names its worktree after its key
+  (`⎇ tax-rounding`; the task's own worktree, else its agent's, as §4.4 draws beneath it). A **Worktrees**
+  section after the statuses lists the worktrees no task on the board names (`WorkspaceWorktrees.loose`):
+  those the workspace owns, and, for Main, its repository's unclaimed ones, which open beside Main's board as a
+  loose worktree. Selecting one opens it whole beside the list, with the rail. Its header's **+** is New
+  Worktree…; a row's menu has Hide (never the main checkout), and hidden ones collapse under **Hidden** with
+  Unhide. Rows are drawn without seated orchestrators (`ownTerminals`), so the orchestrator's terminal is never
+  listed there (§4.7's one place).
+- **The order** (`WorkspaceWorktrees.entries`): each task's worktree in board-list order (sections in `order`,
+  then rows; a worktree once, under its first task), then the Worktrees section's in the runner's order.
+- **The breadcrumb's last segment is a menu**, "Billing › bil-3 Tax rounding › ⎇ tax-rounding ▾": the
+  workspace's worktrees, task ones labelled with their task and the worktree beneath, then the loose ones, the
+  current one checked. It stands for a worktree opened whole in place of its crumb, and follows a task as the
+  worktree beneath it ("⎇ Worktrees" for a task with none). A task's worktree is gone to as its task.
+- **Keys.** ⌃⌘↓ and ⌃⌘↑ (Workspace ▸ Next/Previous Worktree) walk the order, wrapping, from the task or
+  worktree open, or from the board alone to the first or last. ⌘1–⌘9 select the first nine workspaces in the
+  switcher's order. They were Terminal 1–9, which moved to ⌃⌘1–⌃⌘9 (free, and not a system chord;
+  `ShortcutSheetTests.numbersAreWorkspaces`). ⌘P lists a worktree before the terminals found only by its
+  name (they score `PaletteIndex.locatedPenalty` under it) and finds it by its open tasks' keys.
+- **The sidebar's default** (`SidebarDefault`): `NavigationSplitView` takes a `columnVisibility` read from
+  `window.sidebar`, written on every change. With nothing stored, it's hidden, unless the app has history here
+  (`workspace.lastSelection` or the legacy `fleet.lastTerminal`): someone who used it before keeps the sidebar
+  they always had. ⌘B (View ▸ Toggle Sidebar) and the toolbar button still toggle it. With it hidden, ⌘F opens
+  the palette, since the sidebar's search isn't there.
 
 ## 5. The responsive board
 

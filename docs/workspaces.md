@@ -39,8 +39,9 @@ lands.
 ## What needs you
 
 **Needs You** is one list of everything waiting on you, from every workspace on
-every runner. It sits at the top of the Mac's sidebar and is the first screen on
-the phones. Each item names its workspace, and there are four kinds, most urgent
+every runner. On the Mac it's the tray beside the workspace switcher in the
+title bar (and at the top of the sidebar, when that's showing); on the phones
+it's the first screen. Each item names its workspace, and there are four kinds, most urgent
 first:
 
 - **An agent asking permission**, such as to run a command. Answer it in place
@@ -57,8 +58,9 @@ someone else already answered, the item keeps the line "Someone already
 answered this." under its buttons until the list catches up.
 
 The count beside Needs You is the number of items, and it's the same number the
-lock screen, the widget and the watch show. Each workspace row in the sidebar
-carries its own share of that count.
+lock screen, the widget and the watch show. Each workspace in the title bar's
+switcher, and each workspace row in the sidebar, carries its own share of that
+count.
 
 Some things aren't items, on purpose. An agent that finished its turn keeps its
 checkmark and its notification, and a worktree with unread changes keeps its dot,
@@ -71,10 +73,22 @@ same list.
 
 ## A workspace, on the Mac
 
-The sidebar lists each repository's workspaces, with Needs You above them. A
-workspace row shows its name, its orchestrator's status (`◌` when it has none),
-and how many items need you. Its menu has **Show Board**, **Start
-Orchestrator** (or **Replace Orchestrator**) and **Show Charter**.
+**The workspace switcher** is at the left of the title bar, after the window's
+buttons: "Billing ▾ · shop", the workspace you're in and its repository. Click
+it for every workspace, grouped by repository, each with its count of what's
+waiting and its ⌘-number: ⌘1 through ⌘9 go straight to the first nine. At its
+foot are **Needs You**, **New Workspace…** and **Runners and Devices…**, which
+opens Settings. The tray beside the switcher is Needs You.
+
+**The sidebar** is hidden in a new window, since the switcher does its work.
+Show it with the button in the title bar or View ▸ Toggle Sidebar (⌘B); the
+window remembers whether you left it out, and if you used Far Cooler before
+the switcher, it stays as you had it. It lists each repository's workspaces,
+with Needs You above them. A workspace row shows its name, its orchestrator's
+status (`◌` when it has none), and how many items need you. Its menu has
+**Show Board**, **Start Orchestrator** (or **Replace Orchestrator**) and **Show
+Charter**. With the sidebar hidden, ⌘F opens ⌘P instead, which finds the same
+workspaces, tasks and agents.
 
 Select a workspace to see its board. The orchestrator sits on a thin rail at
 the left edge, with its status and its dot; click the rail (or press ⌥⌘1) to pop
@@ -136,6 +150,11 @@ share. A task with nothing started is just that line.
   view, without the rail or the board; press it again to bring them back.
 - ⌥⌘1, ⌥⌘2 and ⌥⌘3 give the keyboard to the orchestrator, the board's list and
   the task.
+- ⌃⌘↓ and ⌃⌘↑ (Workspace ▸ Next Worktree and Previous Worktree) go to the next
+  or previous worktree, in the board list's order: each task's, then the ones
+  under Worktrees. A task's worktree opens as its task, with the worktree
+  beneath it. ⌃⌘1 through ⌃⌘9 jump to a terminal on screen (they were ⌘1
+  through ⌘9, which now go to workspaces).
 
 Opening, closing and switching all move on one spring, and you can click again
 while something is still moving.
@@ -146,8 +165,22 @@ repository's board, with that board's orchestrator on the rail.
 ## Worktrees
 
 A worktree isn't a place of its own anymore; you reach it from what it's for.
+Inside a workspace, the board list is how you get around them.
 
-- **Under a task**, with **Open Worktree**.
+- **Under a task**, with **Open Worktree**. Each task's row in the board list
+  names its worktree beside its key (⎇ tax-rounding).
+- **Under Worktrees, at the bottom of the board list**: the ones no task has,
+  such as the main checkout (under Main) and scratch ones. Main's also lists
+  the repository's unclaimed worktrees. Click one to open it beside the board,
+  with the rail as usual. The **+** on the section's header is **New
+  Worktree…**. Control-click a row to **Hide** it; hidden ones collapse under
+  **Hidden**, each with **Unhide**. The orchestrator's own terminal is never
+  listed there: it's on the rail.
+- **From the breadcrumb.** Its last part, "⎇ tax-rounding ▾", is a menu of the
+  workspace's worktrees: the task ones by their task, then the loose ones.
+- **From ⌘P**, which finds a worktree by its name, its branch, or the key of
+  the task it's for, and lists matching worktrees before the terminals inside
+  them.
 - **Under a workspace's sidebar row.** Its chevron lists every worktree the
   workspace owns, each with its task key and its line counts, including ones
   with no task, such as a shell in a branch of your own. Clicking the row

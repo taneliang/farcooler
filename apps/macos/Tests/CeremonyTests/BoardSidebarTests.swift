@@ -1001,7 +1001,7 @@ struct BoardSidebarTests {
                 == ["stopped"])
     }
 
-    /// ⌘] and ⌘[, ⌥⌘↓ and ⌥⌘↑ and ⌘1… step through the terminals of the
+    /// ⌘] and ⌘[, ⌥⌘↓ and ⌥⌘↑ and ⌃⌘1… step through the terminals of the
     /// view on screen, column by column, each layout's panes in tmux's
     /// order: the conversation, then the task's agent. The sidebar no longer
     /// lists terminals, so walking all of them walked a list nobody saw.
@@ -1535,7 +1535,7 @@ struct BoardSidebarTests {
     }
 
     /// The number keys stay in the checkout's own panes with an orchestrator
-    /// running beside them. ⌘1… selects terminals in the order the sidebar
+    /// running beside them. ⌃⌘1… selects terminals in the order the sidebar
     /// draws them, the orchestrator in its own row. ⌃B and a digit counts
     /// the panes of the layout on screen, not of the orchestrator's window
     /// tmux calls active, and ⌃B n and ⌃B p step through the checkout's own
