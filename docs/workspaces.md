@@ -11,7 +11,7 @@ worktrees, and a workspace owns the worktrees its agents are using.
 Every repository starts with one workspace, called Main. When a thread of work
 grows large enough to crowd out the rest, you split it off into a workspace of
 its own. A runner too old to know about workspaces still shows its repository's
-single board, with no conversation column and no orchestrator.
+single board, with no orchestrator and no rail.
 
 ## The words
 
@@ -76,7 +76,11 @@ workspace row shows its name, its orchestrator's status (`◌` when it has none)
 and how many items need you. Its menu has **Show Board**, **Start
 Orchestrator** (or **Replace Orchestrator**) and **Show Charter**.
 
-Select a workspace to see its orchestrator's conversation beside its board.
+Select a workspace to see its board. The orchestrator sits on a thin rail at
+the left edge, with its status and its dot; click the rail (or press ⌥⌘1) to pop
+its conversation open over the board, and click the rail again, click anywhere
+outside it, or press ⌥⌘1 again to put it away. Left to right, it's a
+chain: the orchestrator, then the board, then whatever you've opened from it.
 
 **Talking to the orchestrator.** The conversation is the orchestrator's own
 terminal, or a chat view when it's in chat mode. The `⋯` menu in the
@@ -101,9 +105,9 @@ re-reads the board.
 
 ## Following a task to its changes
 
-Select a task, from the board, the sidebar, Needs You or ⌘P, to open it. The task
-takes the window, under a breadcrumb back to its workspace: its key, title and
-status first, then everything on its card, never collapsed: what it's for, what
+Select a task, from the board, the sidebar, Needs You or ⌘P, to open it. The
+board narrows to a list on the left, with the task selected, and the task opens
+beside it, under a breadcrumb: its key, title and status first, then everything on its card, never collapsed: what it's for, what
 counts as done, its notes, and, when it's waiting on a decision, the question
 with its answers. The status menu in the header moves the task.
 
@@ -116,18 +120,28 @@ share. A task with nothing started is just that line.
   and layouts. The breadcrumb leads back to the task.
 - A task with no agent still reaches its worktree and changes, so a finished
   task in review is one click from its diff.
-- While a task or worktree is open, the orchestrator shrinks to a thin rail on
-  the left, with its status and its dot. Click the rail (or press ⌥⌘1) to pop the
-  orchestrator open over the task without leaving it. Click the rail again,
-  click anywhere outside it, or press ⌥⌘1 again to put it away. Esc stays with
-  the terminal you're typing in.
-- Back (⌃⌘←, in the Workspace menu, or Esc when no terminal has the keyboard)
-  goes up one level, and the breadcrumb across the top goes straight to any
-  level. Focus (⌃⌘↩) gives the agent and changes the whole view; press it again
-  to bring the rest back.
+- To glance at another task, click it in the list, or press ↑ or ↓ while the
+  list has the keyboard: it swaps in place, and the list keeps its scroll.
+- To close the task, click it again in the list, click the **×** at the end of
+  the breadcrumb, or press Esc (when no terminal or field has the keyboard).
+  The board widens back.
+- Drag the line between the list and the task to make the list wider or
+  narrower; it remembers the width. In a window too narrow for both, the task
+  covers the board instead, and closing it brings the board back as it was.
+- The orchestrator's rail stays at the left, and pops open over the task the
+  same way. Esc stays with the terminal you're typing in.
+- Back (⌃⌘←, in the Workspace menu) goes up one level, from a worktree to the
+  task it was opened from, and from a task back to the board. The breadcrumb
+  goes straight to any level. Focus (⌃⌘↩) gives the agent and changes the whole
+  view, without the rail or the board; press it again to bring them back.
+- ⌥⌘1, ⌥⌘2 and ⌥⌘3 give the keyboard to the orchestrator, the board's list and
+  the task.
 
-With nothing open in a narrow window, an **Orchestrator | Board** control in the
-header switches between the two.
+Opening, closing and switching all move on one spring, and you can click again
+while something is still moving.
+
+A worktree with no workspace of its own opens the same way, beside its
+repository's board.
 
 ## Worktrees
 
@@ -158,7 +172,8 @@ A workspace with no orchestrator says so, with **Start Orchestrator**. Choose
 Claude, Codex or Cursor, and it starts working on its own: it reads the charter
 (or interviews you for one, if there isn't one yet) and then the board. You
 don't need to type anything to get it going. You can start one from the
-workspace's row in the sidebar, from its conversation column, or on either phone.
+workspace's row in the sidebar, from its conversation (pop it open from the rail),
+or on either phone.
 
 If an orchestrator's terminal is lost, the conversation column says "The
 orchestrator stopped". **Restart** picks the conversation back up where it left
