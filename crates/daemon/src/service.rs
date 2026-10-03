@@ -1646,7 +1646,10 @@ fn replace_hooks_file(
             return false;
         }
     };
-    let mode = rustix::fs::statat(&dir, name, rustix::fs::AtFlags::SYMLINK_NOFOLLOW).ok().map(|st| u32::from(st.st_mode) & 0o7777);
+    // `st_mode` is a u16 on macOS and already a u32 on Linux, where clippy
+    // calls the cast unnecessary (and `u32::from` a useless conversion).
+    #[allow(clippy::unnecessary_cast)]
+    let mode = rustix::fs::statat(&dir, name, rustix::fs::AtFlags::SYMLINK_NOFOLLOW).ok().map(|st| st.st_mode as u32 & 0o7777);
     match crate::codex_trust::replace_at(&dir, name, contents, mode, before, between) {
         Ok(Replaced::Written) => true,
         Ok(Replaced::Changed) => {
