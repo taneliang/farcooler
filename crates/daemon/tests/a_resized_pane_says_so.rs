@@ -19,14 +19,23 @@
 //! Whether that new pty has a new path is up to the OS: macOS hands out the
 //! lowest free one, so a respawn lands on a new path when the old pty is
 //! still open as the new one is made, and on the same path when it isn't. So
-//! both are forced rather than left to the host. One holds the old tty open
-//! across the respawn so the pane must move, then lets another terminal of the
-//! same size take the old number before the pane writes a byte: the path the
-//! pipe started on still reads the size last announced, so only asking tmux
-//! about the pane (`fanout::PaneSize`) finds the move. Another frees the old
-//! pty first and respawns onto it. A third respawns a program that ignores
-//! the hangup: it lives on, holding the old tty at the size last announced,
-//! so only the tty being hung up says the pane has gone.
+//! both are forced rather than left to the host. One keeps the old program
+//! alive across the respawn so the pane must move, then ends it and lets
+//! another terminal of the same size take the old number before the pane
+//! writes a byte: the path the pipe started on still reads the size last
+//! announced, so only asking tmux about the pane (`fanout::PaneSize`) finds
+//! the move. Another frees the old pty first and respawns onto it. A third
+//! respawns a program that ignores the hangup: it lives on, holding the old
+//! tty at the size last announced, so only the tty being hung up says the
+//! pane has gone.
+//!
+//! Only the old program can keep the old number taken. A pane's program leads
+//! its session, and when a session leader exits the kernel revokes its
+//! controlling terminal: every handle anyone holds on it goes dead, and once
+//! tmux has closed its side the number is free. A test holding the old tty
+//! open of its own therefore keeps nothing, and a program that dies of the
+//! hangup before tmux opens the new pty hands its number straight back. That
+//! raced, and lost on CI.
 //!
 //! tmux is required, and its absence fails rather than skips.
 
@@ -119,9 +128,10 @@ async fn subscribe(install: &str, pane: &str) -> UnixStream {
 /// Where a respawn puts the pane.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Respawn {
-    /// A new tty, and the old one's number then taken by another terminal
-    /// of the same size before the pane writes a byte, so the path the pipe
-    /// started on still reads the size last announced, from a stranger.
+    /// A new tty, the old program kept alive past the respawn and then
+    /// ended, and the old number then taken by another terminal of the same
+    /// size before the pane writes a byte, so the path the pipe started on
+    /// still reads the size last announced, from a stranger.
     OntoANewTty,
     /// The same tty: the old pty freed first, so the new one takes its number.
     OntoTheSameTty,
@@ -163,7 +173,8 @@ impl Drop for Lingering {
 }
 
 /// Open `tty` without making it anyone's controlling terminal. Held, it keeps
-/// the pty's number from being handed out again.
+/// the pty's number from being handed out again, but only until the session
+/// it controls ends: its leader's exit revokes every handle on it.
 fn hold(tty: &str) -> std::fs::File {
     use std::os::unix::fs::OpenOptionsExt;
     std::fs::OpenOptions::new()
@@ -185,7 +196,9 @@ async fn grown_after_a_respawn(how: Respawn) {
         tmux,
         socket: format!("farcooler-{}", uuid::Uuid::now_v7().simple()),
     };
-    let first = if how == Respawn::PastAProgramThatIgnoresTheHangup { "stubborn" } else { "" };
+    // Ignoring the hangup, the first program outlives the respawn and keeps
+    // its tty, so the respawn can't land on the same number.
+    let first = if how == Respawn::OntoTheSameTty { "" } else { "stubborn" };
     server.run(&["new-session", "-d", "-s", "s", "-x", "80", "-y", "24", "sh", script, first]);
     let pane = server.run(&["display-message", "-p", "-t", "s", "#{pane_id}"]);
     let first_tty = server.run(&["display-message", "-p", "-t", "s", "#{pane_tty}"]);
@@ -214,11 +227,13 @@ async fn grown_after_a_respawn(how: Respawn) {
     let mut _lingering = None;
     let _old_tty = match how {
         Respawn::OntoANewTty => {
-            let held = hold(&first_tty);
+            let old: libc::pid_t = pid.parse().expect("a pid");
+            // It ignores the hangup, so nothing else ends it if this fails.
+            _lingering = Some(Lingering(old));
             server.run(&["respawn-pane", "-k", "-t", &pane, "sh", script, "quiet"]);
             let second_tty = server.run(&["display-message", "-p", "-t", &pane, "#{pane_tty}"]);
-            assert_ne!(first_tty, second_tty, "a held tty was handed out again");
-            drop(held);
+            assert_ne!(first_tty, second_tty, "a tty still held was handed out again");
+            end(old).await;
             let stranger = take(&first_tty, 80, 24);
             let pid = server.run(&["display-message", "-p", "-t", &pane, "#{pane_pid}"]);
             let told = std::process::Command::new("kill").args(["-USR2", &pid]).status().expect("kill");
@@ -266,6 +281,22 @@ async fn grown_after_a_respawn(how: Respawn) {
         .collect();
     assert_eq!(rows[0], "W".repeat(120), "the repaint wrapped: {rows:?}");
     assert!(rows[1].starts_with("winched 120 30"), "{rows:?}");
+}
+
+/// Kill the process group `leader` leads, an old pane program and its
+/// `sleep`, and wait until it is gone: by then its session has ended, its tty
+/// is revoked, and the pty's number is free for `take`.
+async fn end(leader: libc::pid_t) {
+    // SAFETY: plain signals to a process group this test started.
+    unsafe { libc::kill(-leader, libc::SIGKILL) };
+    for _ in 0..500 {
+        // SAFETY: signal 0 only asks whether the process exists.
+        if unsafe { libc::kill(leader, 0) } != 0 {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("the old program {leader} never ended");
 }
 
 /// Respawn `pane` onto the tty it has now. The program is ended and the pane
