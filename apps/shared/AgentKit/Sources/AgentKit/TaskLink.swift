@@ -26,6 +26,9 @@ public protocol TaskLinkPane {
     /// Whether this pane is its workspace's orchestrator (`role` is
     /// `orchestrator`). The Mac's `Terminal` and the phone's both have it.
     var isOrchestrator: Bool { get }
+    /// Whose work this pane does, as a workspace id, or nil when the runner
+    /// didn't say. `Terminal.workspace_id`; read by `noticeTask` only.
+    var workspace: String? { get }
 }
 
 /// A worktree, as `TaskLink` asks about it.
@@ -77,11 +80,20 @@ extension TaskLink {
     /// The id of the task `pane`'s own notifications fold into, or nil when
     /// it notifies as itself.
     ///
+    /// Where this client can't see what the runner sees, it doesn't fold:
+    /// an agent left with its own banner beside the task's is a duplicate,
+    /// and one folded here but not by the runner hears nothing at all.
+    ///
     /// - Never an orchestrator's: it works for its whole workspace.
-    /// - The task it was opened for, when it was opened for one.
+    /// - The task it was opened for, when that task is one of its lane's
+    ///   open tasks. The runner folds only into a task it still has, and a
+    ///   task missing here may be gone.
     /// - Otherwise its lane's task, when the lane has exactly one open task.
     ///   With two, a guess would file an agent's question under the wrong
     ///   task, which is worse than leaving it on its own.
+    /// - Not by lane for a pane that names its workspace. The runner refuses
+    ///   another workspace's task, and `open_tasks` doesn't say whose a task
+    ///   is, so only a pane with no workspace is sure to be folded there.
     /// - Never by lane in the repository's main checkout. Ad hoc agents run
     ///   there, and one task dispatched to it (`task dispatch --worktree`)
     ///   would take in every one of them, and turn their turn ends into that
@@ -90,9 +102,9 @@ extension TaskLink {
     ///   both banners, never neither.
     public static func noticeTask(of pane: some TaskLinkPane, in worktree: some TaskLinkWorktree) -> String? {
         guard !pane.isOrchestrator else { return nil }
-        if let own = pane.boardTaskID, !own.isEmpty { return own }
-        guard !worktree.isRepositoryCheckout else { return nil }
         let open = worktree.openTaskIDs
+        if let own = pane.boardTaskID, !own.isEmpty { return open.contains(own) ? own : nil }
+        guard !worktree.isRepositoryCheckout, pane.workspace?.isEmpty ?? true else { return nil }
         return open.count == 1 ? open[0] : nil
     }
 

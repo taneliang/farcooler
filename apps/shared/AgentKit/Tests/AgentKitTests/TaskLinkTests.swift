@@ -12,6 +12,7 @@ private struct Pane: TaskLinkPane, TaskBoardPane {
     var boardState: String = "running"
     var runsAgent: Bool = true
     var isOrchestrator: Bool = false
+    var workspace: String? = nil
 }
 
 private struct Lane: TaskLinkWorktree {
@@ -106,14 +107,30 @@ func thePhonesFleetNamesAPanesTaskFromOpenTasks() throws {
 // `task_link::task_of`, less the main checkout (ov-107). Android's
 // `TaskLinkTest.kt` states the same cases.
 
-@Test("An agent's notices fold into the task it was opened for, anywhere")
+@Test("An agent's notices fold into the task it was opened for, where that task is known")
 func anAgentsNoticesFoldIntoTheTaskItWasOpenedFor() {
-    #expect(TaskLink.noticeTask(of: Pane(boardTaskID: bil7), in: Lane(openTaskIDs: [bil9])) == bil7)
-    #expect(TaskLink.noticeTask(of: Pane(boardTaskID: bil7), in: Lane(openTaskIDs: [])) == bil7)
+    #expect(TaskLink.noticeTask(of: Pane(boardTaskID: bil7), in: Lane(openTaskIDs: [bil9, bil7])) == bil7)
     // In the main checkout too: it was dispatched there for that task.
     #expect(
         TaskLink.noticeTask(
-            of: Pane(boardTaskID: bil7), in: Lane(openTaskIDs: [bil9], isRepositoryCheckout: true)) == bil7)
+            of: Pane(boardTaskID: bil7), in: Lane(openTaskIDs: [bil7], isRepositoryCheckout: true)) == bil7)
+}
+
+@Test("An agent's own task the client doesn't know folds nothing")
+func anAgentsUnknownOwnTaskFoldsNothing() {
+    // The runner folds only into a task it still has (`get_task`), and this
+    // client can't tell a deleted task from one that's merely elsewhere, so
+    // it leaves the banner up: a duplicate at worst, never silence.
+    #expect(TaskLink.noticeTask(of: Pane(boardTaskID: bil7), in: Lane(openTaskIDs: [])) == nil)
+    #expect(TaskLink.noticeTask(of: Pane(boardTaskID: bil7), in: Lane(openTaskIDs: [bil9])) == nil)
+}
+
+@Test("A lane's task takes in an agent only when its workspace can't differ")
+func aLanesTaskTakesInAnAgentOnlyWhenItsWorkspaceCantDiffer() {
+    // The runner refuses another workspace's task (task_link.rs `task_of`),
+    // and `open_tasks` doesn't say whose a task is.
+    #expect(TaskLink.noticeTask(of: Pane(boardTaskID: nil, workspace: "ws-b"), in: Lane(openTaskIDs: [bil9])) == nil)
+    #expect(TaskLink.noticeTask(of: Pane(boardTaskID: nil, workspace: nil), in: Lane(openTaskIDs: [bil9])) == bil9)
 }
 
 @Test("An agent opened by hand folds into its lane's one open task, never two")
@@ -142,7 +159,7 @@ func anOrchestratorsNoticesAreItsOwn() {
 func aBannerIsLeftToTheTaskOnlyWhereTheNoticeArrives() {
     let agent = Pane(boardTaskID: bil7)
     let loose = Pane(boardTaskID: nil)
-    let lane = Lane(openTaskIDs: [])
+    let lane = Lane(openTaskIDs: [bil7, bil9])
     #expect(TaskLink.leavesBannerToTask(agent, in: lane, noticeReachesHere: true))
     #expect(!TaskLink.leavesBannerToTask(agent, in: lane, noticeReachesHere: false), "its own banner is all there is")
     #expect(!TaskLink.leavesBannerToTask(loose, in: lane, noticeReachesHere: true))

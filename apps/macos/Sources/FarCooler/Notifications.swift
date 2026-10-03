@@ -302,7 +302,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// What `report` last did per terminal, so a test can see what a caller
     /// like `DaemonClient.apply` made of a change without a notification
-    /// centre. Cleared with the terminal by `forget`.
+    /// center. Cleared with the terminal by `forget`.
     private(set) var lastReport: [String: Report] = [:]
 
     private func postOwnBanner(terminal: Terminal, place: String, activity: AgentActivity) {

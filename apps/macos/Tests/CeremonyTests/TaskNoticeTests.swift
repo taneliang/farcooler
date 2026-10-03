@@ -87,15 +87,16 @@ struct TaskNoticeTests {
             return try JSONDecoder().decode(Worktree.self, from: Data(json.utf8))
         }
         var agent = pane("a1")
-        agent.taskId = "task-1"
+        agent.taskId = "t-0"
         var orchestrator = pane("o1")
-        orchestrator.taskId = "task-1"
+        orchestrator.taskId = "t-0"
         orchestrator.role = "orchestrator"
         let loose = pane("l1")
-        let bare = try lane(openTasks: 0)
-        #expect(Notifier.foldsIntoTask(agent, in: bare, runnerSendsNotices: true))
-        #expect(!Notifier.foldsIntoTask(agent, in: bare, runnerSendsNotices: false), "an older runner sends none")
-        #expect(!Notifier.foldsIntoTask(orchestrator, in: bare, runnerSendsNotices: true))
+        let bare = try lane(openTasks: 0), own = try lane(openTasks: 1)
+        #expect(Notifier.foldsIntoTask(agent, in: own, runnerSendsNotices: true))
+        #expect(!Notifier.foldsIntoTask(agent, in: own, runnerSendsNotices: false), "an older runner sends none")
+        #expect(!Notifier.foldsIntoTask(agent, in: bare, runnerSendsNotices: true), "a task this Mac doesn't know")
+        #expect(!Notifier.foldsIntoTask(orchestrator, in: own, runnerSendsNotices: true))
         #expect(!Notifier.foldsIntoTask(loose, in: bare, runnerSendsNotices: true))
         // Opened by hand in a lane with one open task: the runner folds it,
         // so its banner is the task's too (ov-107). Not in the main checkout.
@@ -113,9 +114,9 @@ struct TaskNoticeTests {
     @MainActor
     func reportLeavesATaskBoundAgentToItsTask() throws {
         var agent = Terminal(id: "ov107-a1", short: "a1", title: "claude", preset: "claude", state: "running", epoch: 0)
-        agent.taskId = "task-1"
+        agent.taskId = "t-1"
         agent.activity = "blocked"
-        let json = #"{"id":"w-1","short":"w1","task":"lane","branch":"b","worktree":"/tmp/w","state":"active","open_tasks":[],"terminals":[]}"#
+        let json = #"{"id":"w-1","short":"w1","task":"lane","branch":"b","worktree":"/tmp/w","state":"active","open_tasks":[{"id":"t-1","key":"ov-1","title":"T","status":"in_progress"}],"terminals":[]}"#
         let lane = try JSONDecoder().decode(Worktree.self, from: Data(json.utf8))
         let sends = DaemonBuild(version: "v", matches: true, platform: "linux", capabilities: ["tasks", "task_notices"])
         let older = DaemonBuild(version: "v", matches: true, platform: "linux", capabilities: ["tasks"])
