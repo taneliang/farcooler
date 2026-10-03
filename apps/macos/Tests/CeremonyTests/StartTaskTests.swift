@@ -544,8 +544,26 @@ struct StartTaskTests {
         let client = await client(runner)
         client.presence = presence
         client.reportWatching(["t1"])
-        try? await Task.sleep(for: .milliseconds(100))
+        await afterTheSentinel(client, runner)
         return runner.watchingCalls
+    }
+
+    /// Wait until a call queued AFTER the action under test has reached the
+    /// runner, so a "nothing was sent" check means nothing was sent.
+    ///
+    /// A fixed 100 ms sleep passed just as well for a call that was on its
+    /// way. `reportWatching` and `markSeen(onScreen:)` hand their call to a
+    /// main-actor `Task` before they return, and the stub records it before
+    /// that task first suspends, so this one, enqueued on the same actor
+    /// after them, lands after theirs. `agent-prompt`, so no filter below
+    /// (`sent`, `watchingCalls`, `seenCalls`) ever counts it.
+    private func afterTheSentinel(_ client: DaemonClient, _ runner: Runner) async {
+        let sentinel = ["terminal", "agent-prompt", "sentinel", ""]
+        Task { _ = await client.agentPrompt(terminal: "sentinel", text: "") }
+        for _ in 0..<500 where !runner.calls.contains(sentinel) {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(runner.calls.contains(sentinel), "the sentinel never reached the runner")
     }
 
     @Test func somebodyPresentClaimsThePanesOnScreen() async {
@@ -632,7 +650,7 @@ struct StartTaskTests {
             appActive: { true }, screenAwake: { true }, sessionUnlocked: { true },
             secondsSinceInput: { idle })
         client.reportWatching(["t1"])
-        try? await Task.sleep(for: .milliseconds(100))
+        await afterTheSentinel(client, runner)
         #expect(!runner.watchingCalls.contains { $0.contains("t1") }, "nobody there yet")
 
         idle = 1
@@ -685,7 +703,7 @@ struct StartTaskTests {
         #expect(onScreen.map(\.agent) == [.done], "the stub's agent has finished")
 
         client.markSeen(onScreen: onScreen)
-        try? await Task.sleep(for: .milliseconds(100))
+        await afterTheSentinel(client, runner)
         #expect(runner.seenCalls == (present ? [["terminal", "seen", "tnew"]] : []))
     }
 
@@ -702,7 +720,7 @@ struct StartTaskTests {
             secondsSinceInput: { idle })
         client.markSeen(onScreen: client.fleet.worktrees.flatMap(\.terminals))
         client.reportWatching(["t-new"])
-        try? await Task.sleep(for: .milliseconds(100))
+        await afterTheSentinel(client, runner)
         #expect(runner.seenCalls.isEmpty, "nobody there yet")
 
         idle = 1
@@ -725,7 +743,7 @@ struct StartTaskTests {
         runner.listFails = true
         await client.refresh()
         client.reportWatching(["t1"])
-        try? await Task.sleep(for: .milliseconds(100))
+        await afterTheSentinel(client, runner)
         #expect(runner.watchingCalls.isEmpty)
     }
 
@@ -735,7 +753,7 @@ struct StartTaskTests {
         client.presence = Self.present()
         client.reportWatching([])
         client.reportWatching([])
-        try? await Task.sleep(for: .milliseconds(100))
+        await afterTheSentinel(client, runner)
         #expect(runner.watchingCalls.isEmpty)
     }
 }
