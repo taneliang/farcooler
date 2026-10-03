@@ -3,11 +3,13 @@ import SwiftUI
 // The board's shared components (ov-92): one collapsible section, one section
 // title style and one navigator row style, so every disclosure in the
 // navigator looks, moves and answers the keyboard and VoiceOver the same way.
-// The owner, 2 Oct: "it's very cool that the worktrees list in the board
-// animates when opening and closing. why don't we do that with the other
-// collapsibles as well? … make board UI components reusable so that you can
-// ensure that they look and feel consistent." ov-101 moves the rest of the
-// app's collapsibles onto these.
+// ov-101 made them the whole app's: every collapsible is a
+// `CollapsibleSection`, or, where its rows are siblings of its header in a
+// flat lazy list, a `DisclosureButton`; both draw the one `DisclosureChevron`
+// and move on `BoardMotion`. The owner, 2 Oct: "it's very cool that the
+// worktrees list in the board animates when opening and closing. why don't we
+// do that with the other collapsibles as well? … make board UI components
+// reusable so that you can ensure that they look and feel consistent."
 
 /// How a section's title is set.
 enum SectionHeaderStyle: Equatable {
@@ -66,11 +68,114 @@ struct SectionTitle: View {
     }
 }
 
-/// Every collapsible section the board draws: a header row (its chevron at
+/// How a section's header and content sit: the room between them, the
+/// chevron's cell, the header's least height and its insets. One per place a
+/// section is drawn, so a section's look is chosen by naming where it is.
+struct SectionMetrics: Equatable {
+    /// Between the header and what it opens.
+    var spacing: CGFloat
+    /// The chevron's cell, which is one column of the grid where there is one.
+    var chevronWidth: CGFloat = ColumnGrid.step
+    var minHeight: CGFloat = ColumnGrid.rowHeight
+    /// Around the header alone: the content keeps its own.
+    var headerInsets = EdgeInsets()
+
+    /// The board's navigator: its sections, task statuses and groups.
+    static let navigator = SectionMetrics(spacing: ColumnGrid.rhythm)
+    /// The sidebar: a group of rows below a repository (Unclaimed, Hidden),
+    /// at the sidebar's edges, its rows straight under it.
+    static let sidebar = SectionMetrics(
+        spacing: 0, minHeight: ColumnGrid.rowHeight - 2 * SidebarGrid.headerVerticalPadding,
+        headerInsets: EdgeInsets(
+            top: SidebarGrid.headerVerticalPadding, leading: SidebarGrid.edge,
+            bottom: SidebarGrid.headerVerticalPadding, trailing: SidebarGrid.edge))
+    /// A small disclosure in running text: a thought, a card's details, a
+    /// settings row's.
+    static let inline = SectionMetrics(spacing: 6, chevronWidth: 14, minHeight: 0)
+    /// The header of a filled box whose content is under a divider: a tool
+    /// call, a subagent's block, the plan.
+    static let card = SectionMetrics(
+        spacing: 0, chevronWidth: 14, minHeight: 0,
+        headerInsets: EdgeInsets(top: 6, leading: 9, bottom: 6, trailing: 9))
+}
+
+/// What opens and closes a section.
+enum SectionToggle {
+    /// The whole header row: a section heading.
+    case row
+    /// The chevron alone, the rest of the header being a control of its own
+    /// (a row you select, as Finder's outline rows are).
+    case chevron
+}
+
+/// The disclosure chevron, the one way the app draws one (ov-101): at the
+/// leading edge (the owner's rule: on the left), pointing right closed and
+/// down open, turning on whatever animation the change runs in. No view draws
+/// a disclosure chevron of its own; `CollapsibleSectionTests` fails on one.
+struct DisclosureChevron: View {
+    let expanded: Bool
+    /// Drawn: none on a section that can't open, since a dimmed chevron read
+    /// as a disabled control (ov-104 review).
+    var visible = true
+
+    var body: some View {
+        Image(systemName: "chevron.right")
+            .font(.system(size: 9, weight: .bold))
+            .rotationEffect(.degrees(expanded ? 90 : 0))
+            .foregroundStyle(.secondary)
+            .opacity(visible ? 1 : 0)
+            .accessibilityHidden(true)
+    }
+}
+
+/// A disclosure's chevron on its own, as a button, for the disclosures whose
+/// rows are siblings of their header in a flat, lazy list rather than inside
+/// it, which `CollapsibleSection` can't hold: a workspace's worktrees and a
+/// worktree's terminals in the sidebar, a file's lines in the diff. Both of
+/// those lists were flattened on purpose, so that only the rows on screen are
+/// built. It turns on the shared spring (`BoardMotion.toggle`); the list gives
+/// its rows `BoardMotion.rowTransition`.
+struct DisclosureButton: View {
+    let expanded: Bool
+    /// What VoiceOver hears, before Expanded or Collapsed.
+    let accessibilityLabel: String
+    /// The row its chevron is marked on for `GridGeometryTests`, if any.
+    var gridRow: String?
+    var width: CGFloat = ColumnGrid.step
+    var height: CGFloat = 16
+    let action: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.boardMotionSlowdown) private var slowdown
+
+    var body: some View {
+        Button {
+            BoardMotion.toggle(reduceMotion: reduceMotion, slowedBy: slowdown, action)
+        } label: {
+            DisclosureChevron(expanded: expanded)
+                .frame(width: width, height: height, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .modifier(OptionalGridMark(row: gridRow))
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+    }
+}
+
+private struct OptionalGridMark: ViewModifier {
+    let row: String?
+    func body(content: Content) -> some View {
+        if let row { content.gridMark(row, .chevron) } else { content }
+    }
+}
+
+/// Every collapsible section the app draws: a header row (its chevron at
 /// column A, its title at B, an accessory and its count trailing) that
 /// expands and collapses on the shared spring, its content fading and sliding
-/// in and out as it goes; its state kept by key or by the caller; Space, ←
-/// and → on a focused header; and VoiceOver hearing a button with its state.
+/// in and out as it goes, and only fading under Reduce Motion; its state kept
+/// by key or by the caller; Space, ← and → on a focused header; and
+/// VoiceOver hearing a button with its state.
 ///
 /// Every one registers its `id` (`CollapsibleSectionsKey`), so a test can say
 /// which sections were drawn through it.
@@ -79,6 +184,8 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
     /// accessibility identifier.
     let id: String
     var style: SectionHeaderStyle = .group
+    var metrics: SectionMetrics = .navigator
+    var toggle: SectionToggle = .row
     /// Whether it can open at all: an empty task status can't.
     var canExpand = true
     var count: Int?
@@ -98,16 +205,23 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
     private let key: String?
     private let defaults: UserDefaults
     @State private var stored: Bool
+    /// Closing, until its spring settles: what the content is clipped for.
+    @State private var closing = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.boardMotionSlowdown) private var slowdown
 
     /// A section whose open state the caller keeps.
     init(
-        id: String, style: SectionHeaderStyle = .group, isExpanded: Binding<Bool>, canExpand: Bool = true,
+        id: String, style: SectionHeaderStyle = .group, metrics: SectionMetrics = .navigator,
+        toggle: SectionToggle = .row, isExpanded: Binding<Bool>, canExpand: Bool = true,
         count: Int? = nil, accessibilityLabel: String, fillsRow: Bool = true,
         @ViewBuilder label: @escaping (Bool) -> Label, @ViewBuilder accessory: @escaping () -> Accessory,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.id = id
         self.style = style
+        self.metrics = metrics
+        self.toggle = toggle
         self.canExpand = canExpand
         self.count = count
         self.accessibilityLabel = accessibilityLabel
@@ -123,7 +237,8 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
 
     /// A section that keeps its own open state, under `key` in `defaults`.
     init(
-        id: String, style: SectionHeaderStyle = .group, key: String, defaults: UserDefaults = .standard,
+        id: String, style: SectionHeaderStyle = .group, metrics: SectionMetrics = .navigator,
+        toggle: SectionToggle = .row, key: String, defaults: UserDefaults = .standard,
         expandedByDefault: Bool = true, canExpand: Bool = true, count: Int? = nil, accessibilityLabel: String,
         fillsRow: Bool = true,
         @ViewBuilder label: @escaping (Bool) -> Label, @ViewBuilder accessory: @escaping () -> Accessory,
@@ -131,6 +246,8 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
     ) {
         self.id = id
         self.style = style
+        self.metrics = metrics
+        self.toggle = toggle
         self.canExpand = canExpand
         self.count = count
         self.accessibilityLabel = accessibilityLabel
@@ -153,88 +270,124 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
         defaults.object(forKey: key).map { _ in defaults.bool(forKey: key) } ?? expanded
     }
 
+    /// What its content does coming and going: fades and slides down a
+    /// rhythm in, and fades out fast, before the headers under it have
+    /// closed up over it (the rows' rule, `BoardMotion.rowTransition`); only
+    /// fades under Reduce Motion.
+    static func contentTransition(reduceMotion: Bool, slowedBy: Double = 1) -> AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        return .asymmetric(
+            insertion: .opacity.combined(with: .offset(y: -ColumnGrid.rhythm)),
+            removal: .opacity.animation(.easeOut(duration: 0.08 * slowedBy)))
+    }
+
     private var expanded: Bool { canExpand && (binding?.wrappedValue ?? stored) }
 
     /// Open or close it, on the shared spring.
     private func set(_ open: Bool) {
         guard canExpand, open != expanded else { return }
-        withAnimation(WorkspaceMotion.spring) {
+        closing = !open
+        BoardMotion.toggle(reduceMotion: reduceMotion, slowedBy: slowdown) {
             if let binding { binding.wrappedValue = open } else { stored = open }
+        } completion: {
+            if !open { closing = false }
         }
         if let key { defaults.set(open, forKey: key) }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
+        VStack(alignment: .leading, spacing: 0) {
             header
-            if expanded {
-                content()
-                    .transition(
-                        .asymmetric(
-                            insertion: .opacity.combined(with: .offset(y: -ColumnGrid.rhythm)),
-                            removal: .opacity))
+            // In a container of its own, clipped while it closes: the
+            // container's height springs to nothing while the leaving content
+            // is still drawn at its full height, so the clip hides it behind
+            // the edge that's rising, and the next section's header never
+            // slides over its fading rows (ov-109's live check, in slowed
+            // frames). Only while it closes: a task row moving into an open
+            // section flies in from outside it (`matchedGeometryEffect`), and
+            // a clip would cut it off at the edge.
+            VStack(alignment: .leading, spacing: 0) {
+                if expanded {
+                    content()
+                        .padding(.top, metrics.spacing)
+                        .transition(Self.contentTransition(reduceMotion: reduceMotion, slowedBy: slowdown))
+                }
             }
+            .clipShape(ClipWhile(clips: closing))
         }
         // Added to, not set: a section inside another one registers too.
         .transformPreference(CollapsibleSectionsKey.self) { $0.insert(id) }
     }
 
+    private var chevron: some View {
+        DisclosureChevron(expanded: expanded, visible: canExpand)
+            .frame(width: metrics.chevronWidth, alignment: .leading)
+            .gridMark(Self.gridRow(id), .chevron)
+    }
+
     private var header: some View {
         HStack(spacing: 0) {
-            Button { set(!expanded) } label: {
-                HStack(spacing: 0) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
-                        .rotationEffect(.degrees(expanded ? 90 : 0))
-                        .foregroundStyle(.secondary)
-                        // None on an empty section: a dimmed chevron read
-                        // as a disabled control (ov-104 review).
-                        .opacity(canExpand ? 1 : 0)
-                        .frame(width: ColumnGrid.step, alignment: .leading)
-                        .gridMark(Self.gridRow(id), .chevron)
-                    label(expanded)
-                    if fillsRow { Spacer(minLength: SidebarGrid.gap) }
+            switch toggle {
+            case .row:
+                toggleButton {
+                    HStack(spacing: 0) {
+                        chevron
+                        label(expanded)
+                        if fillsRow { Spacer(minLength: SidebarGrid.gap) }
+                    }
                 }
-                .frame(minHeight: ColumnGrid.rowHeight)
-                .contentShape(Rectangle())
+            case .chevron:
+                toggleButton { chevron }
+                label(expanded)
+                if fillsRow { Spacer(minLength: SidebarGrid.gap) }
             }
-            .buttonStyle(.plain)
-            .disabled(!canExpand)
-            .onKeyPress(.leftArrow) {
-                guard expanded else { return .ignored }
-                set(false)
-                return .handled
-            }
-            .onKeyPress(.rightArrow) {
-                guard !expanded, canExpand else { return .ignored }
-                set(true)
-                return .handled
-            }
-            .onKeyPress(.space) {
-                set(!expanded)
-                return .handled
-            }
-            .accessibilityLabel(count.map { "\(accessibilityLabel), \($0)" } ?? accessibilityLabel)
-            .accessibilityValue(canExpand ? (expanded ? "Expanded" : "Collapsed") : "")
-            .accessibilityAddTraits([.isHeader, .isButton])
-            .accessibilityIdentifier("section-\(id)")
             accessory()
             if !fillsRow { Spacer(minLength: 0) }
             if let count { SectionCount(count: count).accessibilityHidden(true) }
         }
+        .padding(metrics.headerInsets)
+    }
+
+    private func toggleButton<Face: View>(@ViewBuilder _ face: () -> Face) -> some View {
+        Button { set(!expanded) } label: {
+            face()
+                .frame(minHeight: metrics.minHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!canExpand)
+        .onKeyPress(.leftArrow) {
+            guard expanded else { return .ignored }
+            set(false)
+            return .handled
+        }
+        .onKeyPress(.rightArrow) {
+            guard !expanded, canExpand else { return .ignored }
+            set(true)
+            return .handled
+        }
+        .onKeyPress(.space) {
+            set(!expanded)
+            return .handled
+        }
+        .accessibilityLabel(count.map { "\(accessibilityLabel), \($0)" } ?? accessibilityLabel)
+        .accessibilityValue(canExpand ? (expanded ? "Expanded" : "Collapsed") : "")
+        .accessibilityAddTraits(toggle == .row ? [.isHeader, .isButton] : .isButton)
+        .accessibilityIdentifier("section-\(id)")
     }
 }
 
 extension CollapsibleSection where Label == SectionTitle {
     /// A section titled in its style, keeping its own state by `key`.
     init(
-        _ title: String, id: String, style: SectionHeaderStyle = .group, tone: SectionTitle.Tone = .primary,
+        _ title: String, id: String, style: SectionHeaderStyle = .group, metrics: SectionMetrics = .navigator,
+        tone: SectionTitle.Tone = .primary,
         key: String, defaults: UserDefaults = .standard, expandedByDefault: Bool = true, canExpand: Bool = true,
         count: Int? = nil,
         @ViewBuilder accessory: @escaping () -> Accessory, @ViewBuilder content: @escaping () -> Content
     ) {
         self.init(
-            id: id, style: style, key: key, defaults: defaults, expandedByDefault: expandedByDefault,
+            id: id, style: style, metrics: metrics, key: key, defaults: defaults, expandedByDefault: expandedByDefault,
             canExpand: canExpand, count: count, accessibilityLabel: title,
             label: { _ in SectionTitle(text: title, style: style, tone: tone, gridRow: Self.gridRow(id)) }, accessory: accessory,
             content: content)
@@ -242,12 +395,13 @@ extension CollapsibleSection where Label == SectionTitle {
 
     /// A section titled in its style, whose state the caller keeps.
     init(
-        _ title: String, id: String, style: SectionHeaderStyle = .group, tone: SectionTitle.Tone = .primary,
+        _ title: String, id: String, style: SectionHeaderStyle = .group, metrics: SectionMetrics = .navigator,
+        tone: SectionTitle.Tone = .primary,
         isExpanded: Binding<Bool>, canExpand: Bool = true, count: Int? = nil,
         @ViewBuilder accessory: @escaping () -> Accessory, @ViewBuilder content: @escaping () -> Content
     ) {
         self.init(
-            id: id, style: style, isExpanded: isExpanded, canExpand: canExpand, count: count,
+            id: id, style: style, metrics: metrics, isExpanded: isExpanded, canExpand: canExpand, count: count,
             accessibilityLabel: title, label: { _ in SectionTitle(text: title, style: style, tone: tone, gridRow: Self.gridRow(id)) },
             accessory: accessory, content: content)
     }
@@ -255,23 +409,25 @@ extension CollapsibleSection where Label == SectionTitle {
 
 extension CollapsibleSection where Label == SectionTitle, Accessory == EmptyView {
     init(
-        _ title: String, id: String, style: SectionHeaderStyle = .group, tone: SectionTitle.Tone = .primary,
+        _ title: String, id: String, style: SectionHeaderStyle = .group, metrics: SectionMetrics = .navigator,
+        tone: SectionTitle.Tone = .primary,
         key: String, defaults: UserDefaults = .standard, expandedByDefault: Bool = true, canExpand: Bool = true,
         count: Int? = nil, @ViewBuilder content: @escaping () -> Content
     ) {
         self.init(
-            title, id: id, style: style, tone: tone, key: key, defaults: defaults,
+            title, id: id, style: style, metrics: metrics, tone: tone, key: key, defaults: defaults,
             expandedByDefault: expandedByDefault, canExpand: canExpand, count: count, accessory: { EmptyView() },
             content: content)
     }
 
     init(
-        _ title: String, id: String, style: SectionHeaderStyle = .group, tone: SectionTitle.Tone = .primary,
+        _ title: String, id: String, style: SectionHeaderStyle = .group, metrics: SectionMetrics = .navigator,
+        tone: SectionTitle.Tone = .primary,
         isExpanded: Binding<Bool>, canExpand: Bool = true, count: Int? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.init(
-            title, id: id, style: style, tone: tone, isExpanded: isExpanded, canExpand: canExpand, count: count,
+            title, id: id, style: style, metrics: metrics, tone: tone, isExpanded: isExpanded, canExpand: canExpand, count: count,
             accessory: { EmptyView() }, content: content)
     }
 }
@@ -280,10 +436,14 @@ extension CollapsibleSection where Label == SectionTitle, Accessory == EmptyView
 /// right-aligned at the trailing edge, tertiary, in tabular digits, as Mail
 /// and Xcode draw theirs. Never "Title (N)".
 struct SectionCount: View {
-    let count: Int
+    let text: String
+
+    init(count: Int) { text = "\(count)" }
+    /// Progress, "3 of 7": the plan's.
+    init(_ done: Int, of total: Int) { text = "\(done) of \(total)" }
 
     var body: some View {
-        Text("\(count)")
+        Text(text)
             .font(.system(size: WorkspaceStyle.PaneText.secondary))
             .monospacedDigit()
             .foregroundStyle(.tertiary)
@@ -308,6 +468,17 @@ struct GroupHeader: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(count.map { "\(title), \($0)" } ?? title)
         .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// The section's own bounds while `clips`, and otherwise a bound far
+/// outside them: a clip that comes and goes without the content under it
+/// changing identity.
+struct ClipWhile: Shape {
+    var clips: Bool
+
+    func path(in rect: CGRect) -> Path {
+        Path(clips ? rect : rect.insetBy(dx: -10_000, dy: -10_000))
     }
 }
 
