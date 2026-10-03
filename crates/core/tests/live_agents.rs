@@ -19,18 +19,20 @@
 //!
 //! # Running it
 //!
-//! Every test here is `#[ignore]`, so `cargo test` never touches it. Run it
-//! deliberately — after changing anything in `activity.rs` or `title.rs`, and
-//! periodically to catch a third-party release:
+//! Every test here is `#[ignore]`, so `cargo test` never touches it, and the
+//! three that start an agent also need `FARCOOLER_LIVE_AGENTS=1` (see
+//! `test/live_agents.rs`), so `cargo test -- --ignored` alone does not start
+//! one either. Run it deliberately — after changing anything in `activity.rs`
+//! or `title.rs`, and periodically to catch a third-party release:
 //!
 //! ```text
-//! cargo test -p farcooler-core --test live_agents -- --ignored --nocapture
+//! FARCOOLER_LIVE_AGENTS=1 cargo test -p farcooler-core --test live_agents -- --ignored --nocapture
 //! ```
 //!
 //! One agent at a time:
 //!
 //! ```text
-//! cargo test -p farcooler-core --test live_agents claude -- --ignored --nocapture
+//! FARCOOLER_LIVE_AGENTS=1 cargo test -p farcooler-core --test live_agents claude -- --ignored --nocapture
 //! ```
 //!
 //! # What it costs, and what it needs
@@ -52,6 +54,9 @@
 //! When a check fails it writes the captured screen to `target/live-agents/`
 //! and prints the path. That capture is both the bug report and the fix: it
 //! drops straight into `crates/core/captures/` once the rules are corrected.
+
+#[path = "../../../test/live_agents.rs"]
+mod live;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -269,6 +274,9 @@ fn dump(spec: &AgentSpec, want: AgentActivity, screen: &str) -> PathBuf {
 /// and one that reaches Idle without ever having been Blocked means the
 /// approval prompt was missed entirely.
 fn drive(spec: &AgentSpec) {
+    if !live::enabled(&format!("{}_still_reports_its_states", spec.preset)) {
+        return;
+    }
     let Some(exe) = bare_binary(spec.binary) else {
         eprintln!("SKIP {}: no bare `{}` on PATH", spec.preset, spec.binary);
         return;
@@ -326,19 +334,19 @@ fn drive(spec: &AgentSpec) {
 // ----------------------------------------------------------------- the tests
 
 #[test]
-#[ignore = "runs the real claude binary; costs money"]
+#[ignore = "starts the real claude, which costs money; run with FARCOOLER_LIVE_AGENTS=1 and --ignored"]
 fn claude_still_reports_its_states() {
     drive(&CLAUDE);
 }
 
 #[test]
-#[ignore = "runs the real codex binary; costs money"]
+#[ignore = "starts the real codex, which costs money; run with FARCOOLER_LIVE_AGENTS=1 and --ignored"]
 fn codex_still_reports_its_states() {
     drive(&CODEX);
 }
 
 #[test]
-#[ignore = "runs the real cursor-agent binary; costs money"]
+#[ignore = "starts the real cursor-agent, which costs money; run with FARCOOLER_LIVE_AGENTS=1 and --ignored"]
 fn cursor_still_reports_its_states() {
     drive(&CURSOR);
 }

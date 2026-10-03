@@ -6,6 +6,18 @@
 //! `@agentclientprotocol/codex-acp`, and it stalled at 0.16.0 against the live
 //! 1.1.9. No amount of unit testing can catch that — only asking the outside
 //! world can.
+//!
+//! Only on request: every test here is `#[ignore]` and also needs
+//! `FARCOOLER_LIVE_AGENTS=1` (see `test/live_agents.rs`), because each one
+//! starts a real agent or adapter, or runs `npm` (a node program) against the
+//! registry. CI turns the switch on in the step that runs this file.
+//!
+//! ```text
+//! FARCOOLER_LIVE_AGENTS=1 cargo test -p farcooler-agent --test backends -- --ignored
+//! ```
+
+#[path = "../../../test/live_agents.rs"]
+mod live;
 
 use farcooler_core::activity::Registry;
 
@@ -95,7 +107,11 @@ fn install(spec: &farcooler_core::activity::AdapterSpec, package: &str) -> Resul
 }
 
 #[test]
+#[ignore = "runs npm against the registry; run with FARCOOLER_LIVE_AGENTS=1 and --ignored"]
 fn no_built_in_adapter_is_deprecated_on_npm() {
+    if !live::enabled("no_built_in_adapter_is_deprecated_on_npm") {
+        return;
+    }
     for rules in Registry::built_in().all() {
         let Some(spec) = &rules.adapter else { continue };
         let Some(package) = npm_package(spec) else { continue };
@@ -120,7 +136,11 @@ fn no_built_in_adapter_is_deprecated_on_npm() {
 }
 
 #[test]
+#[ignore = "starts every built-in ACP adapter; run with FARCOOLER_LIVE_AGENTS=1 and --ignored"]
 fn every_built_in_backend_completes_a_handshake() {
+    if !live::enabled("every_built_in_backend_completes_a_handshake") {
+        return;
+    }
     // A cold `npx` builds a several-hundred-megabyte tree on first use, so this
     // is slow the first time and fast afterwards. That install is done as its
     // own step by `install` above rather than inside the handshake's timeout —
@@ -166,7 +186,11 @@ fn every_built_in_backend_completes_a_handshake() {
 }
 
 #[test]
+#[ignore = "starts the real codex; run with FARCOOLER_LIVE_AGENTS=1 and --ignored"]
 fn the_codex_native_backend_handshakes_against_the_installed_binary() {
+    if !live::enabled("the_codex_native_backend_handshakes_against_the_installed_binary") {
+        return;
+    }
     // The point of building this backend rather than stubbing it: it is the
     // only thing that proves the seam is cut in the right place before the
     // transcript work commits to it.
@@ -190,7 +214,11 @@ fn the_codex_native_backend_handshakes_against_the_installed_binary() {
 }
 
 #[test]
+#[ignore = "starts the real claude; run with FARCOOLER_LIVE_AGENTS=1 and --ignored"]
 fn the_claude_native_backend_handshakes_against_the_installed_binary() {
+    if !live::enabled("the_claude_native_backend_handshakes_against_the_installed_binary") {
+        return;
+    }
     // As above: a missing program is a FAILURE, not a skip.
     //
     // This test is also the only automated proof that the CLAUDECODE scrub

@@ -191,7 +191,7 @@ write to a third party rather than read from one.
 **Status:** Deferred, trigger-based
 **Surfaced by:** Stage 1 of the agent-activity work, 2026-08-16
 
-**What:** Run `cargo test -p farcooler-core --test live_agents -- --ignored` on a
+**What:** Run `FARCOOLER_LIVE_AGENTS=1 cargo test -p farcooler-core --test live_agents -- --ignored` on a
 schedule, rather than only when a person or an agent asks for it.
 
 **Why it is not done:** The suite itself exists — see the Tests section of the README —

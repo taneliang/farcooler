@@ -249,6 +249,11 @@ jobs:
       #
       # The handshake needs the binary and nothing else: no key, no login. It
       # answers in about five seconds for both.
+      #
+      # Those tests are `#[ignore]` and gated on `FARCOOLER_LIVE_AGENTS=1` (see
+      # `test/live_agents.rs`), so a developer's `cargo test` never starts a
+      # real agent. The step after `cargo test --workspace` below is where CI
+      # turns the switch on and runs them.
       - name: Install the agents the native backends spawn
         run: npm install -g opencode-ai @anthropic-ai/claude-code @openai/codex
 
@@ -468,6 +473,21 @@ jobs:
           echo "$PWD/target/debug" >> "$GITHUB_PATH"
 
       - run: cargo test --workspace
+
+      # The tests that start a real agent or adapter, which `cargo test
+      # --workspace` above skips: the handshakes and the npm deprecation check
+      # in crates/agent, and one real turn each through the claude and codex
+      # backends. Run by target so nothing else that is `#[ignore]` comes along.
+      # `crates/core/tests/live_agents.rs` is not here: it needs signed-in CLIs
+      # and is for a developer's machine.
+      - name: Live agent tests
+        env:
+          FARCOOLER_LIVE_AGENTS: "1"
+        run: |
+          set -euo pipefail
+          cargo test -p farcooler-agent --test backends -- --ignored
+          cargo test -p farcooler-claude --test live_turn -- --ignored
+          cargo test -p farcooler-codex --test live_turn -- --ignored
 
   swift:
     name: Swift (shared + macOS)

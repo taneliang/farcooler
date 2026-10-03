@@ -4,14 +4,29 @@
 //! handshake test gives: on a machine without the agent installed, silently
 //! passing means the one test that can catch a broken backend never runs where
 //! it matters.
+//!
+//! Only on request: it is `#[ignore]` and also needs `FARCOOLER_LIVE_AGENTS=1`
+//! (see `test/live_agents.rs`), because a lane running the crate's tests must
+//! never start a real, signed-in claude.
+//!
+//! ```text
+//! FARCOOLER_LIVE_AGENTS=1 cargo test -p farcooler-claude --test live_turn -- --ignored
+//! ```
+
+#[path = "../../../test/live_agents.rs"]
+mod live;
 
 use farcooler_agent_core::backend::{AgentBackend, Launch};
 use farcooler_agent_core::event::{AgentEvent, Role};
 use farcooler_claude::backend::ClaudeBackend;
 
 #[tokio::test]
+#[ignore = "starts the real claude; run with FARCOOLER_LIVE_AGENTS=1 and --ignored"]
 async fn a_real_turn_reaches_claude_and_comes_back_as_a_conversation() {
-    let launch = Launch { program: which_claude(), args: Vec::new(), env: Default::default() };
+    if !live::enabled("a_real_turn_reaches_claude_and_comes_back_as_a_conversation") {
+        return;
+    }
+    let launch = Launch { program: live::installed("claude"), args: Vec::new(), env: Default::default() };
 
     let (mut backend, prelude) = ClaudeBackend::start(&launch, std::env::temp_dir(), None)
         .await
@@ -97,14 +112,4 @@ async fn a_real_turn_reaches_claude_and_comes_back_as_a_conversation() {
     .expect("a turn ending has to ask what the context window costs");
     assert!(usage.1 > 0, "a window of zero is nothing to measure against: {usage:?}");
     assert!(usage.0 <= usage.1, "used more context than exists: {usage:?}");
-}
-
-fn which_claude() -> std::path::PathBuf {
-    let out = std::process::Command::new("sh")
-        .args(["-lc", "command -v claude"])
-        .output()
-        .expect("sh must run");
-    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    assert!(!path.is_empty(), "claude must be installed for this test to mean anything");
-    std::path::PathBuf::from(path)
 }

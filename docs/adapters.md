@@ -415,8 +415,8 @@ in `crates/agent/src/dispatch.rs` asserts every built-in preset's adapter is
 `Acp`, so reaching a native backend today means editing the file or flipping the
 picker yourself. What is proven is that both start and answer — the two tests in
 `crates/agent/tests/backends.rs` complete a real handshake against the installed
-`claude` and `codex`, and a missing binary fails those tests rather than
-skipping them. One stale string to ignore on the way: the Mac editor's own
+`claude` and `codex` when `FARCOOLER_LIVE_AGENTS=1` (CI sets it), and a
+missing binary fails those tests rather than skipping them. One stale string to ignore on the way: the Mac editor's own
 footer still reads "Chat mode still runs the ACP adapter — Test proves the
 native handshake only", which describes an earlier state — `start_backend` in
 `crates/cli/src/agent_host.rs` dispatches on the same field that picker writes

@@ -8,14 +8,30 @@
 //! handshake test gives: on a machine without the agent installed, silently
 //! passing would mean the one test that can catch a broken backend never runs
 //! where it matters.
+//!
+//! Only on request: it is `#[ignore]` and also needs `FARCOOLER_LIVE_AGENTS=1`
+//! (see `test/live_agents.rs`), because a lane running the crate's tests must
+//! never start a real, signed-in codex.
+//!
+//! ```text
+//! FARCOOLER_LIVE_AGENTS=1 cargo test -p farcooler-codex --test live_turn -- --ignored
+//! ```
+
+#[path = "../../../test/live_agents.rs"]
+mod live;
 
 use farcooler_agent_core::backend::{AgentBackend, Launch};
 use farcooler_agent_core::event::{AgentEvent, Role};
 use farcooler_codex::backend::CodexBackend;
 
 #[tokio::test]
+#[ignore = "starts the real codex; run with FARCOOLER_LIVE_AGENTS=1 and --ignored"]
 async fn a_real_turn_reaches_the_agent_and_comes_back_as_a_conversation() {
-    let program = which_codex();
+    if !live::enabled("a_real_turn_reaches_the_agent_and_comes_back_as_a_conversation") {
+        return;
+    }
+    // The installed codex, resolved the way the daemon resolves it.
+    let program = live::installed("codex");
     let worktree = std::env::temp_dir();
     let launch = Launch { program, args: Vec::new(), env: Default::default() };
 
@@ -72,15 +88,4 @@ async fn a_real_turn_reaches_the_agent_and_comes_back_as_a_conversation() {
         .filter(|e| matches!(e, AgentEvent::Gap { .. }))
         .collect();
     assert!(gaps.is_empty(), "a real turn produced unmapped frames: {gaps:?}");
-}
-
-/// The installed codex, resolved the way the daemon resolves it.
-fn which_codex() -> std::path::PathBuf {
-    let out = std::process::Command::new("sh")
-        .args(["-lc", "command -v codex"])
-        .output()
-        .expect("sh must run");
-    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    assert!(!path.is_empty(), "codex must be installed for this test to mean anything");
-    std::path::PathBuf::from(path)
 }
