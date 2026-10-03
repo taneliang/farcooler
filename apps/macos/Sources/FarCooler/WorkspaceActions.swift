@@ -11,7 +11,7 @@ import Foundation
 /// What a workspace header's menu offers, in order.
 enum WorkspaceMenu {
     enum Item: Hashable {
-        case showBoard, startOrchestrator, replaceOrchestrator, showCharter
+        case showBoard, startOrchestrator, replaceOrchestrator, showCharter, wakeOnAnswer
 
         var title: String {
             switch self {
@@ -19,6 +19,7 @@ enum WorkspaceMenu {
             case .startOrchestrator: return "Start Orchestrator"
             case .replaceOrchestrator: return "Replace Orchestrator"
             case .showCharter: return "Show Charter"
+            case .wakeOnAnswer: return "Wake the Agent When You Answer"
             }
         }
     }
@@ -28,9 +29,13 @@ enum WorkspaceMenu {
     /// orchestrator, and the runner refuses a second start without
     /// `--replace`. Show Charter always, disabled when this Mac can't open it
     /// (`CharterAccess`), so the item says why rather than vanishing.
-    static func items(hasBoard: Bool, hasOrchestrator: Bool) -> [Item] {
+    /// Wake the Agent When You Answer last, a checkmark, only from a runner
+    /// that said whether it's on (`WorkspaceSummary.wakeOnAnswer`): one that
+    /// can't wake anyone gets no switch rather than one that does nothing.
+    static func items(hasBoard: Bool, hasOrchestrator: Bool, wakeOnAnswer: Bool? = nil) -> [Item] {
         (hasBoard ? [.showBoard] : [])
             + [hasOrchestrator ? .replaceOrchestrator : .startOrchestrator, .showCharter]
+            + (wakeOnAnswer == nil ? [] : [.wakeOnAnswer])
     }
 }
 
@@ -88,6 +93,38 @@ extension DaemonClient {
     ) -> [String] {
         ["workspace", "start-orchestrator", workspace.id, "--harness", harness.rawValue]
             + (replace ? ["--replace"] : []) + ["--json"]
+    }
+
+    /// `farcooler workspace set`, turning Wake the Agent When You Answer on
+    /// or off, by the workspace's id as `startOrchestratorArguments` names
+    /// it.
+    static func wakeOnAnswerArguments(_ workspace: WorkspaceSummary, on: Bool) -> [String] {
+        ["workspace", "set", workspace.id, "--wake-on-answer", on ? "on" : "off", "--json"]
+    }
+
+    /// Why the switch didn't change, by the `code:` word, in this app's
+    /// words. A failure with no word never reached the runner.
+    static func wakeOnAnswerRefusal(_ message: String?, workspace: WorkspaceSummary) -> String {
+        let name = workspace.name
+        let said = (message ?? "").lowercased()
+        switch TaskFailure.code(in: message) {
+        case "not-found":
+            return "\(name) isn’t on this runner anymore."
+        case "capability-unsupported":
+            return "This runner’s Far Cooler is too old to wake an agent when you answer. Update it there, then try again."
+        case "scope-denied":
+            return "This runner lets Far Cooler see its workspaces but not change them."
+        case "resource-conflict":
+            return "\(name) changed just now. Try again."
+        case .some:
+            return "This runner couldn’t change \(name)’s setting. That’s a problem in the app, not in anything you did."
+        case nil where said.contains("no workspace matching"):
+            return "\(name) isn’t on this runner anymore."
+        case nil where said.contains("update it first"):
+            return "This runner’s Far Cooler is too old to wake an agent when you answer. Update it there, then try again."
+        case nil:
+            return "Couldn’t change \(name)’s setting. Check that the runner is reachable, then try again."
+        }
     }
 
     /// Why an orchestrator didn't start, by the `code:` word on the CLI's

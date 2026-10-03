@@ -2201,6 +2201,17 @@ final class DaemonClient: ObservableObject {
         return Self.orchestratorRefusal(message, workspace: workspace, replace: replace)
     }
 
+    /// Turn Wake the Agent When You Answer on or off for `workspace`:
+    /// `wakeOnAnswerArguments`. Nil once the runner has it, or the sentence
+    /// to show (`wakeOnAnswerRefusal`). Followed by a refresh either way, so
+    /// the checkmark follows the runner.
+    func setWakeOnAnswer(_ workspace: WorkspaceSummary, on: Bool) async -> String? {
+        let (data, message) = await runRaw(Self.wakeOnAnswerArguments(workspace, on: on))
+        await refresh()
+        if data != nil { return nil }
+        return Self.wakeOnAnswerRefusal(message, workspace: workspace)
+    }
+
     /// Set a terminal's role: `setRoleArguments`. Whether the runner
     /// refused, and the CLI's stderr to word that from
     /// (`OrchestratorAdoption.refusal`). Followed by a refresh either way, so

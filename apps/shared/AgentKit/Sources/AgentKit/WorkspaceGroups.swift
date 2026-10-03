@@ -38,20 +38,25 @@ public struct WorkspaceSummary: Identifiable, Equatable, Hashable, Sendable, Dec
     /// Whether this stands in for a runner without workspaces: one per
     /// repository, whose id is the repository's own. Never decoded.
     public let isImplicit: Bool
+    /// Whether answering one of this board's decisions wakes the agent
+    /// waiting on it. Nil from a runner that can't, which draws no switch.
+    public let wakeOnAnswer: Bool?
 
     public init(
         id: String, name: String, taskPrefix: String, isMain: Bool, ordinal: Int,
-        repository: String? = nil, orchestrator: String? = nil, charter: String? = nil
+        repository: String? = nil, orchestrator: String? = nil, charter: String? = nil,
+        wakeOnAnswer: Bool? = nil
     ) {
         self.init(
             id: id, repository: repository, name: name, taskPrefix: taskPrefix,
             isMain: isMain, ordinal: ordinal, orchestrator: orchestrator, charter: charter,
-            isImplicit: false)
+            isImplicit: false, wakeOnAnswer: wakeOnAnswer)
     }
 
     private init(
         id: String, repository: String?, name: String, taskPrefix: String, isMain: Bool,
-        ordinal: Int, orchestrator: String?, charter: String? = nil, isImplicit: Bool
+        ordinal: Int, orchestrator: String?, charter: String? = nil, isImplicit: Bool,
+        wakeOnAnswer: Bool? = nil
     ) {
         self.id = id
         self.repository = repository
@@ -62,6 +67,7 @@ public struct WorkspaceSummary: Identifiable, Equatable, Hashable, Sendable, Dec
         self.orchestrator = orchestrator
         self.charter = charter
         self.isImplicit = isImplicit
+        self.wakeOnAnswer = wakeOnAnswer
     }
 
     /// The one workspace a runner without `workstreams` has in a repository.
@@ -84,6 +90,7 @@ public struct WorkspaceSummary: Identifiable, Equatable, Hashable, Sendable, Dec
         case id, repository, name, ordinal, orchestrator, charter
         case taskPrefix = "task_prefix"
         case isMain = "is_main"
+        case wakeOnAnswer = "wake_on_answer"
     }
 
     /// Hand-written for `WireTask`'s reason: a key added or dropped by a
@@ -102,6 +109,7 @@ public struct WorkspaceSummary: Identifiable, Equatable, Hashable, Sendable, Dec
             $0.isEmpty ? nil : $0
         }
         isImplicit = false
+        wakeOnAnswer = (try? c.decodeIfPresent(Bool.self, forKey: .wakeOnAnswer)) ?? nil
     }
 }
 

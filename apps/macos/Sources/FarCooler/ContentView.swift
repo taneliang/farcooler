@@ -1215,6 +1215,13 @@ struct ContentView: View {
                 if !NSWorkspace.shared.open(url) {
                     errorBanner = "Couldn’t open \(workspace.name)’s charter. It may have been moved or deleted."
                 }
+            },
+            wakeOnAnswer: workspace.wakeOnAnswer,
+            onSetWakeOnAnswer: { on in
+                guard let client = store.clients[host] else { return }
+                Task {
+                    if let refused = await client.setWakeOnAnswer(workspace, on: on) { errorBanner = refused }
+                }
             })
     }
 

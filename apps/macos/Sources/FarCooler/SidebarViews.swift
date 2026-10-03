@@ -1608,6 +1608,10 @@ struct WorkspaceHeaderActions {
     /// running.
     let onStart: (_ harness: OrchestratorHarness, _ replace: Bool) -> Void
     let onShowCharter: (URL) -> Void
+    /// Whether answering a decision wakes the agent; nil from a runner that
+    /// can't, which draws no switch.
+    let wakeOnAnswer: Bool?
+    let onSetWakeOnAnswer: (Bool) -> Void
 }
 
 /// The header's menu, item by item, in `WorkspaceMenu`'s order.
@@ -1616,7 +1620,9 @@ private struct WorkspaceMenuItems: View {
 
     var body: some View {
         ForEach(
-            WorkspaceMenu.items(hasBoard: actions.hasBoard, hasOrchestrator: actions.hasOrchestrator),
+            WorkspaceMenu.items(
+                hasBoard: actions.hasBoard, hasOrchestrator: actions.hasOrchestrator,
+                wakeOnAnswer: actions.wakeOnAnswer),
             id: \.self
         ) { item in
             switch item {
@@ -1647,6 +1653,13 @@ private struct WorkspaceMenuItems: View {
                         .disabled(true)
                         .help(why)
                 }
+            case .wakeOnAnswer:
+                Divider()
+                Toggle(
+                    item.title,
+                    isOn: Binding(
+                        get: { actions.wakeOnAnswer ?? false }, set: actions.onSetWakeOnAnswer))
+                    .help("When you answer one of this board’s decisions, type the answer into the agent working that task, or else the orchestrator, once it’s idle.")
             }
         }
     }

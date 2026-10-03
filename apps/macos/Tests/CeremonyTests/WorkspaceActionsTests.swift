@@ -62,6 +62,34 @@ struct WorkspaceActionsTests {
                 == [.startOrchestrator, .showCharter])
     }
 
+    /// The switch is drawn only from a runner that says where it stands,
+    /// last, whichever way it's set.
+    @Test("Wake the Agent When You Answer is offered only by a runner that can")
+    func wakeOnAnswerOnlyWhereKnown() {
+        #expect(!WorkspaceMenu.items(hasBoard: true, hasOrchestrator: false).contains(.wakeOnAnswer))
+        for on in [true, false] {
+            #expect(
+                WorkspaceMenu.items(hasBoard: true, hasOrchestrator: false, wakeOnAnswer: on)
+                    == [.showBoard, .startOrchestrator, .showCharter, .wakeOnAnswer])
+        }
+        #expect(WorkspaceMenu.Item.wakeOnAnswer.title == "Wake the Agent When You Answer")
+    }
+
+    @Test("The switch names the workspace by id and says on or off")
+    func wakeOnAnswerArguments() {
+        #expect(
+            DaemonClient.wakeOnAnswerArguments(Self.billing, on: false)
+                == ["workspace", "set", "ws-billing", "--wake-on-answer", "off", "--json"])
+        #expect(DaemonClient.wakeOnAnswerArguments(Self.billing, on: true)[4] == "on")
+        #expect(
+            DaemonClient.wakeOnAnswerRefusal("code: not-found", workspace: Self.billing)
+                == "Billing isn’t on this runner anymore.")
+        #expect(
+            DaemonClient.wakeOnAnswerRefusal(
+                "this runner's Far Cooler can't wake an agent when you answer yet. update it first",
+                workspace: Self.billing).contains("too old"))
+    }
+
     @Test("Menu items are title case")
     func titles() {
         #expect(WorkspaceMenu.Item.showBoard.title == "Show Board")

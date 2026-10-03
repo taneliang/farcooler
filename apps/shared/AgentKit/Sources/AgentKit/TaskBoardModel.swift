@@ -759,6 +759,8 @@ public struct TaskNoteRow: Equatable, Sendable, Hashable, Identifiable {
         switch actor {
         case "user": return "You"
         case "manager": return "Orchestrator"
+        // What the runner did on its own: "Told Agent 2 about the decision".
+        case "runner": return "Runner"
         default: return actor.hasPrefix("agent:") ? "An agent" : "Someone else"
         }
     }

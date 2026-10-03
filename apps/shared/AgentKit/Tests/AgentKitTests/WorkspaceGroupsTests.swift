@@ -10,6 +10,20 @@ struct WorkspaceGroupsTests {
     let main = WorkspaceSummary(id: "m", name: "Main", taskPrefix: "ov", isMain: true, ordinal: 1)
     let billing = WorkspaceSummary(id: "b", name: "Billing", taskPrefix: "bil", isMain: false, ordinal: 0)
 
+    /// The wake switch as the runner says it, and nothing from one that
+    /// doesn't: no switch is drawn, rather than one that changes nothing.
+    @Test func aWorkspaceSaysWhetherAnAnswerWakesItsAgent() throws {
+        func decoded(_ extra: String) throws -> WorkspaceSummary {
+            try JSONDecoder().decode(
+                WorkspaceSummary.self, from: Data(#"{"id":"b","name":"Billing"\#(extra)}"#.utf8))
+        }
+        #expect(try decoded(#","wake_on_answer":true"#).wakeOnAnswer == true)
+        #expect(try decoded(#","wake_on_answer":false"#).wakeOnAnswer == false)
+        #expect(try decoded(#","wake_on_answer":null"#).wakeOnAnswer == nil)
+        #expect(try decoded("").wakeOnAnswer == nil)
+        #expect(try decoded(#","wake_on_answer":"yes""#).wakeOnAnswer == nil, "a bad value costs the field, not the row")
+    }
+
     @Test func mainComesFirstAndAWorkspaceWithNothingIsStillShown() {
         let g = WorkspaceGrouping.group(
             repository: "r", workspaces: [billing, main],

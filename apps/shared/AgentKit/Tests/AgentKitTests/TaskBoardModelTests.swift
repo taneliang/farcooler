@@ -649,6 +649,7 @@ private let realDetailJSON = """
     }
     #expect(byline("user") == "You")
     #expect(byline("manager") == "Orchestrator")
+    #expect(byline("runner") == "Runner")
     #expect(byline("agent:0198f2c0-0000-7000-8000-0000000000bb") == "An agent")
     // A word from a runner this app has never met. Something rather than
     // nothing, and never the word itself.
