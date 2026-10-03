@@ -177,6 +177,23 @@ extension WorkspaceNavigation {
         var selectsOrchestrator = false
     }
 
+    /// A task opened from outside its navigator, by the palette or a click
+    /// on its notice: opened as a row clicked in it is
+    /// (`choosing(toggles: false)`, `boardStep(.choose)`), with the
+    /// navigator taking the keyboard, never closed for being open already.
+    /// `s` is the window as it is, perhaps another workspace's or a loose
+    /// worktree's; the task's workspace always has its navigator.
+    static func openingTask(
+        _ task: String, host: String, workspace: String, from s: BoardState
+    ) -> (selection: Selection, step: BoardStep) {
+        var there = s
+        there.hasNavigator = true
+        return (
+            choosing(task: task, host: host, workspace: workspace, from: nil, toggles: false),
+            boardStep(.choose(glance: false), from: there)
+        )
+    }
+
     static func boardStep(_ command: BoardCommand, from s: BoardState) -> BoardStep {
         let nothing = BoardStep(focus: s.focus, keyboard: .unchanged)
         switch command {

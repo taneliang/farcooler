@@ -95,4 +95,17 @@ struct BoardKeyboardTests {
         #expect(Nav.boardStep(.toggleFocus, from: task) == Step(focus: true, keyboard: .opened))
         #expect(Nav.boardStep(.toggleFocus, from: focused) == Step(focus: false, keyboard: .unchanged))
     }
+
+    /// A task opened from outside its navigator, by the palette or a click
+    /// on its notice (ov-106 review), lands as a row chosen in it: out of
+    /// Focus, with the navigator holding the keyboard, from wherever the
+    /// window was, a loose worktree with no navigator included.
+    @Test func aTaskOpenedFromElsewhereGivesTheNavigatorTheKeyboard() {
+        let chosen = Nav.choosing(task: "task-1", host: "studio", workspace: "ws-1", from: nil, toggles: false)
+        for state in Self.states {
+            let opened = Nav.openingTask("task-1", host: "studio", workspace: "ws-1", from: state)
+            #expect(opened.selection == chosen)
+            #expect(opened.step == Step(focus: false, keyboard: .board), "\(state)")
+        }
+    }
 }

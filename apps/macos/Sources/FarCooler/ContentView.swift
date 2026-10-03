@@ -3901,10 +3901,16 @@ struct ContentView: View {
         }
     }
 
-    /// Open a task: its workspace, with the task beside the board.
+    /// Open a task from outside its navigator (the palette, a notice):
+    /// its workspace, with the task beside the board and the navigator
+    /// holding the keyboard, as a row clicked in it does (`chooseTask`).
     private func openTask(_ id: String, host: String, workspace: String) {
+        let opened = WorkspaceNavigation.openingTask(id, host: host, workspace: workspace, from: boardState)
         trail = nil
-        selection = .workspace(host: host, workspace: workspace, focus: .task(id))
+        if opened.step.keyboard == .board { boardKeyboardPending = true }
+        focusColumn = opened.step.focus
+        selection = opened.selection
+        key(opened.step.keyboard)
     }
 
     /// Open the task a notice was clicked for, in this window if it's the
