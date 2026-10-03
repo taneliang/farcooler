@@ -201,6 +201,10 @@ AGENTKIT_SOURCES = [
     # level costs a round trip a second — a bound no screen can show you. See
     # `NotLivePaneTests`.
     "NotLivePane.swift",
+    # What a terminal with no running pane says, and whether it offers Restart
+    # and Dismiss (ov-191). Shared with the Mac, whose worktree page opens a
+    # lost terminal to the same words. See `LostPaneTests`.
+    "LostPane.swift",
     # Which of the runners a ceremony granted this device may write a key into.
     # Here rather than in `CeremonyStore` because of what the answer is used for
     # -- appending to `~/.ssh/authorized_keys` -- and because the direction that

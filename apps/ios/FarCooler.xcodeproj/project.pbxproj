@@ -70,6 +70,7 @@
 		1118F5A2DF8858BB87B47A8D /* ShellClose.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46AB2C59AAEF5EA08D568AAD; };
 		A97DC3D4564555F5B87F6741 /* ShellBringUp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2175859E81D057B885EE8E5D; };
 		81B3A9343E45553A982E5903 /* NotLivePane.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4C7A2999D305877A619CF82; };
+		281E5E5DF7DB5BDEA9C9CFA2 /* LostPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFA2FDC2D84C58E1A2E38A69; };
 		4FE0F80836335EF78167CF6A /* CeremonyReach.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DD450C653665073A3D23906; };
 		6CD6DAD003BF5AA89B3727FD /* FleetPublication.swift in Sources */ = {isa = PBXBuildFile; fileRef = 574079E9304759DF9FEA4FFD; };
 		A53D685077E05276BE850197 /* FleetMembership.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF8FD509234D55C3A614DFAB; };
@@ -275,6 +276,7 @@
 		46AB2C59AAEF5EA08D568AAD /* ShellClose.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellClose.swift; sourceTree = "<group>"; };
 		2175859E81D057B885EE8E5D /* ShellBringUp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellBringUp.swift; sourceTree = "<group>"; };
 		C4C7A2999D305877A619CF82 /* NotLivePane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotLivePane.swift; sourceTree = "<group>"; };
+		EFA2FDC2D84C58E1A2E38A69 /* LostPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LostPane.swift; sourceTree = "<group>"; };
 		2DD450C653665073A3D23906 /* CeremonyReach.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CeremonyReach.swift; sourceTree = "<group>"; };
 		574079E9304759DF9FEA4FFD /* FleetPublication.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FleetPublication.swift; sourceTree = "<group>"; };
 		BF8FD509234D55C3A614DFAB /* FleetMembership.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FleetMembership.swift; sourceTree = "<group>"; };
@@ -579,6 +581,7 @@
 				46AB2C59AAEF5EA08D568AAD /* ShellClose.swift */,
 				2175859E81D057B885EE8E5D /* ShellBringUp.swift */,
 				C4C7A2999D305877A619CF82 /* NotLivePane.swift */,
+				EFA2FDC2D84C58E1A2E38A69 /* LostPane.swift */,
 				2DD450C653665073A3D23906 /* CeremonyReach.swift */,
 				574079E9304759DF9FEA4FFD /* FleetPublication.swift */,
 				BF8FD509234D55C3A614DFAB /* FleetMembership.swift */,
@@ -988,6 +991,7 @@
 				1118F5A2DF8858BB87B47A8D /* ShellClose.swift in Sources */,
 				A97DC3D4564555F5B87F6741 /* ShellBringUp.swift in Sources */,
 				81B3A9343E45553A982E5903 /* NotLivePane.swift in Sources */,
+				281E5E5DF7DB5BDEA9C9CFA2 /* LostPane.swift in Sources */,
 				4FE0F80836335EF78167CF6A /* CeremonyReach.swift in Sources */,
 				6CD6DAD003BF5AA89B3727FD /* FleetPublication.swift in Sources */,
 				A53D685077E05276BE850197 /* FleetMembership.swift in Sources */,
