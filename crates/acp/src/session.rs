@@ -17,18 +17,16 @@ use farcooler_agent_core::event::{
     PromptImage, Role, ToolStatus,
 };
 use farcooler_agent_core::backend::BackendKind;
-use farcooler_agent_core::fs_guard::{open_confined, Access, OpenError};
+use farcooler_agent_core::fs_guard::{FsGuardError, OpenError, Worktree};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
     #[error(transparent)]
     Acp(#[from] AcpError),
-    #[error("refused: the path is outside the worktree")]
-    Refused,
-    /// The path was allowed, and the filesystem said no: missing, not
-    /// readable, not a regular file, a disk that is full.
+    /// An `fs/*` request that was refused or failed. Answered to the agent,
+    /// never returned from `handle`.
     #[error(transparent)]
-    Fs(std::io::Error),
+    Fs(#[from] OpenError),
     #[error("the agent did not accept the session")]
     Rejected,
 }
@@ -41,56 +39,55 @@ pub const INTERNAL_ERROR: i64 = -32603;
 /// ACP's code for a resource that does not exist.
 pub const RESOURCE_NOT_FOUND: i64 = -32002;
 
-impl From<OpenError> for SessionError {
-    fn from(e: OpenError) -> Self {
-        match e {
-            OpenError::Refused(_) => SessionError::Refused,
-            OpenError::Io(e) => SessionError::Fs(e),
+/// How a failed `fs/*` request is answered: a JSON-RPC error whose code says
+/// which kind, and whose message is fixed wording rather than an OS error
+/// string, because the agent quotes it to the person in its turn.
+///
+/// Only the path the agent asked for is echoed, never what it resolved to.
+pub fn fs_answer(error: &SessionError, requested: &str, verb: &str) -> (i64, String) {
+    use std::io::ErrorKind;
+    let SessionError::Fs(error) = error else {
+        return (INTERNAL_ERROR, format!("{requested} couldn’t be {verb}."));
+    };
+    match error {
+        OpenError::Refused(FsGuardError::Escapes) => {
+            (INVALID_PARAMS, format!("{requested} is outside the worktree."))
         }
-    }
-}
-
-impl SessionError {
-    /// How a failed `fs/*` request is answered: a JSON-RPC error, with the
-    /// code saying which kind, and the message read by the agent, not a
-    /// person.
-    pub fn fs_answer(&self, requested: &str) -> (i64, String) {
-        match self {
-            SessionError::Refused => {
-                (INVALID_PARAMS, format!("{requested} is outside the worktree"))
-            }
-            SessionError::Fs(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                (RESOURCE_NOT_FOUND, format!("{requested}: {e}"))
-            }
-            e => (INTERNAL_ERROR, format!("{requested}: {e}")),
+        OpenError::Refused(FsGuardError::BadWorktree) => {
+            (INTERNAL_ERROR, "The worktree couldn’t be opened.".to_string())
         }
+        OpenError::NotAFile => (INVALID_PARAMS, format!("{requested} isn’t a regular file.")),
+        OpenError::TooLarge => (INTERNAL_ERROR, format!("{requested} is larger than 16 MB.")),
+        OpenError::Io(e) => match e.kind() {
+            ErrorKind::NotFound => (RESOURCE_NOT_FOUND, format!("{requested} doesn’t exist.")),
+            ErrorKind::PermissionDenied => {
+                (INTERNAL_ERROR, format!("Permission to access {requested} was denied."))
+            }
+            ErrorKind::InvalidData => (INTERNAL_ERROR, format!("{requested} isn’t UTF-8 text.")),
+            ErrorKind::IsADirectory => (INVALID_PARAMS, format!("{requested} is a directory.")),
+            ErrorKind::NotADirectory => {
+                (INVALID_PARAMS, format!("A parent of {requested} isn’t a directory."))
+            }
+            ErrorKind::StorageFull => (INTERNAL_ERROR, "The disk is full.".to_string()),
+            _ => (INTERNAL_ERROR, format!("{requested} couldn’t be {verb}.")),
+        },
     }
 }
 
 /// Perform a confined write and describe it as a diff.
 ///
-/// The file is opened once, by `open_confined`, and both the text it held and
-/// the new text go through that one descriptor, so the diff's before is what
-/// was actually replaced.
+/// The diff's before is what the write actually replaced: `Worktree::write`
+/// reads it from the file it then renames over.
 pub fn handle_fs_write(
-    worktree: &Path,
+    worktree: &Worktree,
     requested: &str,
     contents: &str,
 ) -> Result<AgentEvent, SessionError> {
-    use std::io::{Read, Seek, Write};
-    let opened = open_confined(worktree, Path::new(requested), Access::Write)?;
-    let (mut file, path) = (opened.file, opened.path);
-    let old_text = if opened.created {
-        None
-    } else {
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes).map_err(SessionError::Fs)?;
-        // Not text: the write still goes ahead, the diff just has no before.
-        String::from_utf8(bytes).ok()
-    };
-    file.set_len(0).map_err(SessionError::Fs)?;
-    file.rewind().map_err(SessionError::Fs)?;
-    file.write_all(contents.as_bytes()).map_err(SessionError::Fs)?;
+    let written = worktree.write(Path::new(requested), contents.as_bytes())?;
+    let path = written.path;
+    // Not text, or too large to keep: the write still goes ahead, the diff
+    // just has no before.
+    let old_text = written.before.and_then(|b| String::from_utf8(b).ok());
     Ok(AgentEvent::ToolUpdate {
         id: path.display().to_string(),
         status: ToolStatus::Completed,
@@ -111,12 +108,10 @@ pub fn handle_fs_write(
 }
 
 /// Read a confined file for the agent.
-pub fn handle_fs_read(worktree: &Path, requested: &str) -> Result<String, SessionError> {
-    use std::io::Read;
-    let mut file = open_confined(worktree, Path::new(requested), Access::Read)?.file;
-    let mut text = String::new();
-    file.read_to_string(&mut text).map_err(SessionError::Fs)?;
-    Ok(text)
+pub fn handle_fs_read(worktree: &Worktree, requested: &str) -> Result<String, SessionError> {
+    let (_, bytes) = worktree.read(Path::new(requested))?;
+    String::from_utf8(bytes)
+        .map_err(|_| OpenError::Io(std::io::ErrorKind::InvalidData.into()).into())
 }
 
 /// A `session/request_permission` as the event that blocks a fleet row.
@@ -583,6 +578,7 @@ impl AgentSession {
             session_id: self.session_id,
             pending_prompt: self.pending_prompt,
             worktree,
+            fs: None,
         }
     }
 }
@@ -605,9 +601,21 @@ pub struct RunningSession {
     /// See the field of the same name on `AgentSession`.
     pending_prompt: Option<u64>,
     worktree: PathBuf,
+    /// The worktree held open for `fs/*` requests, from the first one on, so
+    /// every later request walks from the same directory.
+    fs: Option<Worktree>,
 }
 
 impl RunningSession {
+    /// The worktree for an `fs/*` request, opened on the first.
+    fn fs(&mut self) -> Result<&Worktree, SessionError> {
+        let fs = match self.fs.take() {
+            Some(fs) => fs,
+            None => Worktree::open(&self.worktree).map_err(OpenError::from)?,
+        };
+        Ok(self.fs.insert(fs))
+    }
+
     /// Start a turn.
     ///
     /// The queue that used to wrap this is `ChatSession`'s now. Holding a
@@ -868,7 +876,7 @@ impl RunningSession {
         match (method.as_str(), id) {
             ("fs/read_text_file", Some(id)) => {
                 let path = params["path"].as_str().unwrap_or_default();
-                match handle_fs_read(&worktree, path) {
+                match self.fs().and_then(|fs| handle_fs_read(fs, path)) {
                     Ok(content) => {
                         self.writer.respond(id, serde_json::json!({ "content": content })).await?
                     }
@@ -877,7 +885,7 @@ impl RunningSession {
                     // because `{"content": ""}` told it the file was empty,
                     // and it could overwrite it on that basis.
                     Err(e) => {
-                        let (code, message) = e.fs_answer(path);
+                        let (code, message) = fs_answer(&e, path, "read");
                         self.writer.respond_error(id, code, &message).await?
                     }
                 }
@@ -895,7 +903,7 @@ impl RunningSession {
                 // gone now: this call is only reachable from `next_events`,
                 // which nothing but a daemon command can preempt, and that is
                 // orders of magnitude rarer than "the daemon sent a byte".
-                match handle_fs_write(&worktree, path, content) {
+                match self.fs().and_then(|fs| handle_fs_write(fs, path, content)) {
                     Ok(event) => {
                         self.writer.respond(id, serde_json::json!({})).await?;
                         Ok(vec![event])
@@ -904,7 +912,7 @@ impl RunningSession {
                     // Nothing goes to the transcript from here: no write
                     // happened, so there is no diff, and nothing was unparsed.
                     Err(e) => {
-                        let (code, message) = e.fs_answer(path);
+                        let (code, message) = fs_answer(&e, path, "written");
                         self.writer.respond_error(id, code, &message).await?;
                         Ok(Vec::new())
                     }
@@ -1005,6 +1013,7 @@ mod tests {
             session_id: "s".to_string(),
             pending_prompt: None,
             worktree,
+            fs: None,
         };
 
         let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), session.next_events())
@@ -1117,6 +1126,7 @@ mod tests {
             session_id: "s".to_string(),
             pending_prompt: None,
             worktree,
+            fs: None,
         };
         session.prompt("hello", &[]).await.expect("the prompt goes out");
         assert_eq!(session.pending_prompt, Some(1));
@@ -1152,7 +1162,7 @@ mod tests {
         let file = dir.join("a.txt");
         std::fs::write(&file, "old\n").unwrap();
 
-        let event = handle_fs_write(&dir, file.to_str().unwrap(), "new\n").expect("allowed");
+        let event = handle_fs_write(&tree(&dir), file.to_str().unwrap(), "new\n").expect("allowed");
         let AgentEvent::ToolUpdate { diff: Some(d), .. } = event else { panic!("expected a diff") };
         assert_eq!(d.old_text.as_deref(), Some("old\n"));
         assert_eq!(d.new_text, "new\n");
@@ -1162,18 +1172,22 @@ mod tests {
     fn a_write_outside_the_worktree_is_refused_and_says_so() {
         let dir = std::env::temp_dir().join(format!("farcooler-sess2-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        assert!(handle_fs_write(&dir, "/etc/passwd", "x").is_err());
+        assert!(handle_fs_write(&tree(&dir), "/etc/passwd", "x").is_err());
     }
 
     #[test]
     fn a_shorter_write_leaves_nothing_of_the_old_text_and_a_new_file_has_no_before() {
         let (wt, _) = worktree_and_outside("shorter");
         std::fs::write(wt.join("a.txt"), "a much longer line\n").unwrap();
-        handle_fs_write(&wt, "a.txt", "short\n").expect("allowed");
+        handle_fs_write(&tree(&wt), "a.txt", "short\n").expect("allowed");
         assert_eq!(std::fs::read_to_string(wt.join("a.txt")).unwrap(), "short\n");
-        let event = handle_fs_write(&wt, "new/b.txt", "b\n").expect("allowed");
+        let event = handle_fs_write(&tree(&wt), "new/b.txt", "b\n").expect("allowed");
         let AgentEvent::ToolUpdate { diff: Some(d), .. } = event else { panic!("expected a diff") };
         assert_eq!(d.old_text, None, "the file did not exist");
+    }
+
+    fn tree(dir: &Path) -> Worktree {
+        Worktree::open(dir).expect("open the worktree")
     }
 
     /// A fresh worktree, and a directory beside it that is not in it.
@@ -1194,7 +1208,7 @@ mod tests {
         let (wt, away) = worktree_and_outside("dangling");
         std::fs::create_dir_all(&away).unwrap();
         std::os::unix::fs::symlink(away.join("planted"), wt.join("link")).unwrap();
-        assert!(handle_fs_write(&wt, "link", "x").is_err());
+        assert!(handle_fs_write(&tree(&wt), "link", "x").is_err());
         assert!(!away.join("planted").exists(), "nothing may be written outside");
     }
 
@@ -1203,7 +1217,7 @@ mod tests {
         let (wt, away) = worktree_and_outside("dir");
         std::fs::create_dir_all(&away).unwrap();
         std::os::unix::fs::symlink(away.join("sub"), wt.join("dir")).unwrap();
-        assert!(handle_fs_write(&wt, "dir/new/file.rs", "x").is_err());
+        assert!(handle_fs_write(&tree(&wt), "dir/new/file.rs", "x").is_err());
         assert!(!away.join("sub").exists(), "not even the parent directories");
     }
 
@@ -1217,7 +1231,14 @@ mod tests {
         let conn = AcpConnection::spawn(&launch, wt).await.expect("spawn");
         let worktree = conn.worktree.clone();
         let (writer, incoming) = conn.split();
-        RunningSession { writer, incoming, session_id: "s".to_string(), pending_prompt: None, worktree }
+        RunningSession {
+            writer,
+            incoming,
+            session_id: "s".to_string(),
+            pending_prompt: None,
+            worktree,
+            fs: None,
+        }
     }
 
     /// The frame the adapter received, once it has arrived.
@@ -1248,6 +1269,8 @@ mod tests {
         assert_eq!(frame["id"], 7);
         assert!(frame.get("result").is_none(), "a failure is not a result: {frame}");
         assert_eq!(frame["error"]["code"], RESOURCE_NOT_FOUND, "{frame}");
+        // Fixed wording, not an OS error string the agent would quote.
+        assert_eq!(frame["error"]["message"], "missing.rs doesn’t exist.", "{frame}");
     }
 
     #[tokio::test]
@@ -1260,6 +1283,7 @@ mod tests {
         let frame = received(&record).await;
         assert!(frame.get("result").is_none(), "a refusal is not a result: {frame}");
         assert_eq!(frame["error"]["code"], INVALID_PARAMS, "{frame}");
+        assert_eq!(frame["error"]["message"], "/etc/hosts is outside the worktree.", "{frame}");
     }
 
     #[tokio::test]
@@ -1278,7 +1302,8 @@ mod tests {
         let events = session.handle(request).await.expect("handled");
         let frame = received(&record).await;
         assert!(frame.get("result").is_none(), "a failed write is not a result: {frame}");
-        assert!(frame["error"]["code"].is_i64(), "{frame}");
+        assert_eq!(frame["error"]["code"], INVALID_PARAMS, "{frame}");
+        assert_eq!(frame["error"]["message"], "link is outside the worktree.", "{frame}");
         assert!(
             !events.iter().any(|e| matches!(e, AgentEvent::Gap { reason: AgentGapReason::Unparsed })),
             "nothing failed to parse: {events:?}"

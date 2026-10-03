@@ -43,19 +43,13 @@ impl From<SessionError> for BackendError {
     fn from(e: SessionError) -> Self {
         match e {
             SessionError::Acp(inner) => inner.into(),
-            // Both mean the same thing to a caller: this session cannot
-            // proceed. `Refused` carries no message here because neither
-            // variant has one — the path refusal is ours, not the agent's.
-            SessionError::Refused => {
-                BackendError::Refused("the path is outside the worktree".into())
-            }
+            // This session cannot proceed.
             SessionError::Rejected => {
                 BackendError::Refused("the agent did not accept the session".into())
             }
             // In practice never reached: `handle` answers a failed `fs/*`
-            // request to the agent and carries on, and that is the only place
-            // this variant is made.
-            SessionError::Fs(e) => BackendError::Refused(e.to_string()),
+            // request to the agent and carries on.
+            SessionError::Fs(_) => BackendError::Refused("a file request failed".into()),
         }
     }
 }
