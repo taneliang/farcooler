@@ -49,6 +49,17 @@ class PromptImageBudgetTest {
         assertEquals("image/png", mime)
     }
 
+    /** As on the iPhone, a small GIF or WebP goes untouched, so a GIF keeps its animation. */
+    @Test
+    fun `a small GIF or WebP goes untouched`() {
+        val gif = file("GIF89a".toByteArray(), 100_000)
+        assertEquals("image/gif", PromptImageBudget.fit(gif) { error("must not re-encode") }!!.second)
+        val webp = file("RIFF\u0000\u0000\u0000\u0000WEBP".toByteArray(), 100_000)
+        val (data, mime) = PromptImageBudget.fit(webp) { error("must not re-encode") }!!
+        assertEquals("image/webp", mime)
+        assertArrayEquals(webp, data)
+    }
+
     /** Both agents refuse HEIC, however small; the iPhone sends a small one labeled JPEG. */
     @Test
     fun `a small HEIC is re-encoded as JPEG, not relabeled`() {

@@ -49,6 +49,9 @@ object PromptImageBudget {
     fun sniff(bytes: ByteArray): String? = when {
         bytes.startsWith(0x89, 'P'.code, 'N'.code, 'G'.code) -> "image/png"
         bytes.startsWith(0xFF, 0xD8, 0xFF) -> "image/jpeg"
+        bytes.startsWith('G'.code, 'I'.code, 'F'.code, '8'.code) -> "image/gif"
+        bytes.startsWith('R'.code, 'I'.code, 'F'.code, 'F'.code) &&
+            bytes.copyOfRange(8, minOf(12, bytes.size)).contentEquals("WEBP".toByteArray()) -> "image/webp"
         else -> null
     }
 
@@ -56,10 +59,12 @@ object PromptImageBudget {
      * The bytes to send and their type, or null when the picture cannot be
      * prepared.
      *
-     * A PNG or JPEG already inside the budget goes untouched: a screenshot is
-     * usually small and full of small text a re-encode would smear. Anything
-     * else — too big, or a format an agent refuses — is resized to
-     * [MAX_DIMENSION] and sent as JPEG at the first quality that fits.
+     * A PNG, JPEG, GIF or WebP already inside the budget goes untouched, as
+     * on the iPhone: a screenshot is usually small and full of small text a
+     * re-encode would smear, and a GIF keeps its animation. These four are the
+     * types the agents read. Anything else — too big, or a format an agent
+     * refuses, like HEIC — is resized to [MAX_DIMENSION] and sent as JPEG at
+     * the first quality that fits.
      */
     fun fit(original: ByteArray, encoder: () -> Encoder?): Pair<ByteArray, String>? {
         val kind = sniff(original)
