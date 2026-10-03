@@ -1,4 +1,4 @@
-// Shipped by Canary at 3ddd0e66fed6c2b00e819c4b7fe5146c05c36075. Written by canary.yml; see scripts/proto-lint.py.
+// Shipped by Canary at b1f0af34ba15b672b16bb2a4a238dc4429390fe6. Written by canary.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -186,6 +186,8 @@ message Request {
     WorktreeAssign worktree_assign = 84;
     TerminalSetRole terminal_set_role = 85;
     WorkspaceStartOrchestrator workspace_start_orchestrator = 86;
+    // Behind the `wake_on_answer` capability.
+    WorkspaceSetSettings workspace_set_settings = 87;
   }
 }
 
@@ -3001,6 +3003,12 @@ message Workspace {
   // scope. The home is keyed by id, so a rename never moves it.
   optional string home = 9;
   optional string charter_path = 10;
+  // Whether answering one of this board's decisions tells the agent waiting
+  // on it: the answer typed into the task's agent, or else the workspace's
+  // orchestrator, once that terminal is idle. On unless somebody turned it
+  // off. Absent from a runner without the `wake_on_answer` capability,
+  // which never tells anyone.
+  optional bool wake_on_answer = 11;
 }
 
 message WorkspaceList { repeated Workspace items = 1; }
@@ -3022,6 +3030,17 @@ message WorkspaceRename {
 // issued keep resolving; only new tasks take the new prefix.
 message WorkspaceSetPrefix {
   string task_prefix = 1;
+  // As in `WorkspaceRename`.
+  optional uint64 expected_version = 2;
+}
+
+// `workspace.set_settings`. `target_resource_id` is the workspace. Each
+// field is a switch to set when present and leave alone when absent, so a
+// client changes one setting without knowing the others. Answers with the
+// workspace. Behind the `wake_on_answer` capability.
+message WorkspaceSetSettings {
+  // See `Workspace.wake_on_answer`.
+  optional bool wake_on_answer = 1;
   // As in `WorkspaceRename`.
   optional uint64 expected_version = 2;
 }
