@@ -47,7 +47,8 @@ pub fn enabled(test: &str) -> bool {
 }
 
 /// The installed `name`, found the way the daemon finds it: this process's
-/// own `PATH` first (`farcooler_core::programs::find`), then a login shell's.
+/// own `PATH` first, by the same executable-file rule as
+/// `farcooler_core::programs::find`, then a login shell's.
 ///
 /// `PATH` first matters beyond matching the daemon. A login `sh` runs macOS's
 /// `path_helper`, which puts `/etc/paths.d` — `/opt/homebrew/bin` — AHEAD of
@@ -56,8 +57,9 @@ pub fn enabled(test: &str) -> bool {
 ///
 /// Panics when nothing has it: a missing agent is a failure, not a skip.
 pub fn installed(name: &str) -> PathBuf {
-    let on_path = std::env::var_os("PATH")
-        .and_then(|raw| std::env::split_paths(&raw).map(|d| d.join(name)).find(|p| p.is_file()));
+    let on_path = std::env::var_os("PATH").and_then(|raw| {
+        std::env::split_paths(&raw).map(|d| d.join(name)).find(|p| is_executable(p))
+    });
     if let Some(path) = on_path {
         return path;
     }
@@ -68,4 +70,35 @@ pub fn installed(name: &str) -> PathBuf {
     let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
     assert!(!path.is_empty(), "{name} must be installed for this test to mean anything");
     PathBuf::from(path)
+}
+
+/// A regular file with an execute bit, which is `programs::is_executable`'s
+/// rule. `is_file` alone would pick a stray non-executable `claude` on `PATH`
+/// that the daemon would skip.
+fn is_executable(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+}
+
+/// What a real-turn test asks, so the answer can be checked exactly.
+pub const PROMPT: &str = "Reply with exactly: hi";
+
+/// Fails unless `spoken` IS the answer to `PROMPT`, not merely some text.
+///
+/// "The agent said something" cannot fail on the case that matters most. A
+/// logged-out claude answers in about 0.4 s with "Not logged in · Please run
+/// /login" (or "Invalid API key") as ordinary agent text, and codex's `error`
+/// notification becomes an agent message reading "Error: …". Neither backend
+/// has an error event to carry the difference, so the words are the only
+/// witness: CI's claude turn passed this way, on the logged-out text.
+///
+/// Letters only, case folded, so "Hi!" and "hi." pass and nothing else does.
+pub fn assert_answered(agent: &str, spoken: &str) {
+    let answer: String =
+        spoken.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase();
+    assert_eq!(
+        answer, "hi",
+        "{agent} did not answer {PROMPT:?}. A logged-out or failing agent says so as text, \
+         so this is usually that: {spoken:?}"
+    );
 }

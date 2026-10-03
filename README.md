@@ -82,10 +82,10 @@ FARCOOLER_LIVE_AGENTS=1 cargo test -p farcooler-core --test live_agents -- --ign
 
 Run it after touching `activity.rs` or `title.rs`, and periodically to catch a
 third-party release. It costs a few cents and a few minutes, needs the CLIs
-already signed in, and SKIPS rather than fails when one is missing. A check that
-fails writes the captured screen to `target/live-agents/` — that file is both
-the bug report and the fix, since it belongs in `crates/core/captures/` once the
-rules are corrected.
+already signed in, and fails when one is missing (name one agent to check only
+that one). A check that fails writes the captured screen to
+`target/live-agents/` — that file is both the bug report and the fix, since it
+belongs in `crates/core/captures/` once the rules are corrected.
 
 Every test that starts a real agent — this suite, the `live_turn` tests in
 `crates/claude` and `crates/codex`, and the handshakes in

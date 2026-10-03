@@ -45,7 +45,7 @@ async fn a_real_turn_reaches_claude_and_comes_back_as_a_conversation() {
 
     // This also proves the CLAUDECODE scrub: the test usually runs from inside
     // a Claude Code session, and without it the CLI never answers.
-    backend.prompt("Reply with exactly: hi", &[]).await.expect("a prompt has to land");
+    backend.prompt(live::PROMPT, &[]).await.expect("a prompt has to land");
 
     let collected = tokio::time::timeout(std::time::Duration::from_secs(180), async {
         let mut seen = Vec::new();
@@ -72,6 +72,9 @@ async fn a_real_turn_reaches_claude_and_comes_back_as_a_conversation() {
         })
         .collect();
     assert!(!spoken.trim().is_empty(), "claude said nothing: {collected:?}");
+    // Some text is not an answer: a logged-out or failing claude turn ends
+    // normally with its error as agent text. See `live::assert_answered`.
+    live::assert_answered("claude", &spoken);
 
     // The prompt must NOT come back — the client already drew it. This is the
     // doubling that showed up on codex, asserted here so it cannot appear.
@@ -112,4 +115,23 @@ async fn a_real_turn_reaches_claude_and_comes_back_as_a_conversation() {
     .expect("a turn ending has to ask what the context window costs");
     assert!(usage.1 > 0, "a window of zero is nothing to measure against: {usage:?}");
     assert!(usage.0 <= usage.1, "used more context than exists: {usage:?}");
+}
+
+/// The answer check above, against the replies that used to pass it. No agent
+/// runs here, so this is not gated: it is what shows the live check can fail.
+#[test]
+fn a_logged_out_or_failed_turn_is_not_an_answer() {
+    for not_an_answer in [
+        "Not logged in · Please run /login",
+        "Invalid API key · Please run /login",
+        "Error: stream disconnected before completion\n\nRetrying.",
+        "hi, but I cannot reach the model",
+        "",
+    ] {
+        let refused = std::panic::catch_unwind(|| live::assert_answered("claude", not_an_answer));
+        assert!(refused.is_err(), "accepted {not_an_answer:?} as the answer");
+    }
+    for answer in ["hi", "Hi!", " hi.\n"] {
+        live::assert_answered("claude", answer);
+    }
 }

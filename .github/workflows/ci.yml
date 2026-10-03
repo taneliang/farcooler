@@ -236,8 +236,9 @@ jobs:
       # The ACP adapters are `npx` packages, which need only node and a network
       # — both of which the runner already has. These three are spawned BY NAME
       # instead, so the binary has to be on PATH before anything can hand shake
-      # with it: opencode for crates/core/tests/adapters.rs, and claude and
-      # codex for the two native-backend tests in crates/agent.
+      # with it: opencode for `every_built_in_backend_completes_a_handshake`,
+      # and claude and codex for the two native-backend tests, all in
+      # crates/agent/tests/backends.rs.
       #
       # Installing them is the contract rather than a convenience.
       # `crates/agent/tests/backends.rs` says three times over that a missing
@@ -476,18 +477,18 @@ jobs:
 
       # The tests that start a real agent or adapter, which `cargo test
       # --workspace` above skips: the handshakes and the npm deprecation check
-      # in crates/agent, and one real turn each through the claude and codex
-      # backends. Run by target so nothing else that is `#[ignore]` comes along.
-      # `crates/core/tests/live_agents.rs` is not here: it needs signed-in CLIs
-      # and is for a developer's machine.
-      - name: Live agent tests
+      # in crates/agent. They need the binaries and no sign-in. Run by target
+      # so nothing else that is `#[ignore]` comes along.
+      #
+      # Not here, because they need a signed-in agent and this runner has none:
+      # the `live_turn` tests in crates/claude and crates/codex, and
+      # `crates/core/tests/live_agents.rs`. The live_turn tests used to run
+      # here and pass on claude's "Not logged in" text in 0.4 s; they now
+      # demand the actual answer, so they belong on a developer's machine.
+      - name: Live agent handshakes
         env:
           FARCOOLER_LIVE_AGENTS: "1"
-        run: |
-          set -euo pipefail
-          cargo test -p farcooler-agent --test backends -- --ignored
-          cargo test -p farcooler-claude --test live_turn -- --ignored
-          cargo test -p farcooler-codex --test live_turn -- --ignored
+        run: cargo test -p farcooler-agent --test backends -- --ignored
 
   swift:
     name: Swift (shared + macOS)

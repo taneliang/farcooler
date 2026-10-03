@@ -51,7 +51,7 @@ async fn a_real_turn_reaches_the_agent_and_comes_back_as_a_conversation() {
     assert!(backend.capabilities().native_steer, "turn/steer is real, so do not emulate it");
 
     backend
-        .prompt("Reply with exactly: hi", &[])
+        .prompt(live::PROMPT, &[])
         .await
         .expect("a prompt has to reach the agent");
 
@@ -82,6 +82,9 @@ async fn a_real_turn_reaches_the_agent_and_comes_back_as_a_conversation() {
         })
         .collect();
     assert!(!spoken.trim().is_empty(), "the agent said nothing: {collected:?}");
+    // Some text is not an answer: a logged-out or failing codex turn ends
+    // normally with its error as agent text. See `live::assert_answered`.
+    live::assert_answered("codex", &spoken);
 
     let gaps: Vec<_> = collected
         .iter()

@@ -42,9 +42,10 @@
 //! not survive pointing an agent at a scratch config directory, which is why
 //! this runs on a developer's machine rather than in CI.
 //!
-//! A missing or unauthenticated binary SKIPS, loudly, and does not fail. An
-//! agent running this suite on a machine without `cursor-agent` should learn
-//! that it was not checked, not chase a red herring.
+//! With the switch on, a missing binary FAILS: an agent running this suite on
+//! a machine without `cursor-agent` has to learn that it was not checked, and
+//! a skip printed with `eprintln!` reads as a pass. Name one agent, as below,
+//! to run only the ones installed.
 //!
 //! # The rule that keeps it honest
 //!
@@ -277,9 +278,11 @@ fn drive(spec: &AgentSpec) {
     if !live::enabled(&format!("{}_still_reports_its_states", spec.preset)) {
         return;
     }
+    // Asked for by name, so a missing binary FAILS: a skip here would print
+    // through `eprintln!`, which libtest swallows for a passing test, and the
+    // run would read as checked when it was not.
     let Some(exe) = bare_binary(spec.binary) else {
-        eprintln!("SKIP {}: no bare `{}` on PATH", spec.preset, spec.binary);
-        return;
+        panic!("{}: no bare `{}` on PATH, so nothing was checked", spec.preset, spec.binary);
     };
     eprintln!("== {} ({})", spec.preset, exe.display());
 
