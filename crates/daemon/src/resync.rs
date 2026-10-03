@@ -182,11 +182,22 @@ impl TerminalSink {
 }
 
 impl AttachSink for TerminalSink {
+    /// In place of whatever is queued, not behind it (ov-118 re-review).
+    /// Added behind, every `terminal.attach` on a connection that had stopped
+    /// reading queued one more pinned picture, and pinned bytes are outside
+    /// the bound: k attaches held k pictures. Replacing keeps one — the newest,
+    /// which is the only one the client still wants, since a second attach ends
+    /// the first.
+    ///
+    /// Behind a reset, because what it replaces may be a picture the client
+    /// has already been sent part of. Into the fresh emulator an attach usually
+    /// lands in, the reset changes nothing.
     fn open(&mut self, picture: Vec<u8>) -> bool {
+        let picture = reset_then(picture);
         let start = self.sequence;
         self.sequence += picture.len() as u64;
         let frames = self.picture_frames(start, picture);
-        self.push.push_pinned(frames)
+        self.push.replace(frames)
     }
 
     fn output(&mut self, bytes: Vec<u8>) -> Taken {
@@ -374,6 +385,30 @@ mod tests {
 
         // And live output flows again behind it.
         assert_eq!(sink.output(b"next".to_vec()), Taken::Sent);
+    }
+
+    /// **Attaching again on a connection that has stopped reading keeps one
+    /// picture, not one per attach** (ov-118 re-review). Each picture is
+    /// pinned, outside the bound, so adding them up was unbounded.
+    #[tokio::test]
+    async fn repeated_attaches_on_a_stalled_connection_keep_one_picture() {
+        let (push, _stalled) = farcooler_transport::push_queue(TERMINAL_BACKLOG_BYTES);
+        let picture = vec![b'p'; 512 * 1024];
+        let mut one = 0;
+        for attach in 0..8 {
+            let mut sink = TerminalSink::new(push.clone(), Uuid::now_v7(), 1);
+            assert!(sink.open(picture.clone()));
+            // Some live output behind it, as a busy pane would add.
+            let _ = sink.output(vec![b'y'; 16 * 1024]);
+            if attach == 0 {
+                one = push.queued_bytes();
+            }
+            assert!(
+                push.queued_bytes() <= one,
+                "attach {attach}: {} bytes queued, more than one picture's {one}",
+                push.queued_bytes()
+            );
+        }
     }
 
     /// **A picture larger than the backlog bound arrives whole, however live
