@@ -245,7 +245,7 @@ struct WorkspaceActionsTests {
     private static func cliNoMatch(_ kind: String, _ given: String) -> String {
         let source = (try? String(
             contentsOf: repoRoot.appendingPathComponent("crates/cli/src/main.rs"), encoding: .utf8)) ?? ""
-        let format = #"0 => Err(format!("no {kind} matching {prefix:?}")),"#
+        let format = #"0 => Err(Unresolved::Missing(format!("no {kind} matching {prefix:?}"))),"#
         guard source.contains(format) else {
             Issue.record("crates/cli/src/main.rs no longer says \"no {kind} matching\"")
             return ""
