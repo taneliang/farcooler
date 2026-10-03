@@ -5418,6 +5418,10 @@ mod tests {
     /// this test can honestly ask about is itself. So "older than the pane"
     /// has to mean "older than this binary", and the only way to write a file
     /// older than a program that is already running is to backdate it.
+    ///
+    /// libc deprecates `time_t` on musl only, ahead of musl 1.2's move to 64
+    /// bits; on the 64-bit targets we build it already is.
+    #[cfg_attr(target_env = "musl", allow(deprecated))]
     fn backdate(path: &Path, seconds_ago: u64) {
         let when = std::time::SystemTime::now() - std::time::Duration::from_secs(seconds_ago);
         let secs = when.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
