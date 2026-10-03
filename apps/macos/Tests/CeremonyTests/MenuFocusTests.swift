@@ -194,7 +194,6 @@ struct MenuWiringTests {
     }()
 
     /// Each item's title, as written, and what its `.disabled(` must read.
-    /// An empty rule asks only that it has one.
     static let rules: [String: String] = [
         "Check for Updates…": "Updates.shared.isEnabled",
         "New Terminal": "hasWorktree",
@@ -215,8 +214,7 @@ struct MenuWiringTests {
         "Previous Worktree": "\\.previousWorktree",
         "Switch Workspace…": "navigates",
         "Workspace \\(n)": "picksWorkspace(n",
-        // ov-210's: only that it has one.
-        "Mark All as Read": "",
+        "Mark All as Read": "MainWindowFocus.marksRead(",
         "Next Terminal": "\\.stepsTerminals",
         "Previous Terminal": "\\.stepsTerminals",
         "Next Item That Needs You": "stepsToAttention",
