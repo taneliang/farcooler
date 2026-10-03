@@ -892,6 +892,7 @@ fun NewTerminalSheet(connection: Connection, worktree: Worktree, onDismiss: () -
     var presetId by remember { mutableStateOf(TerminalPresets.all.first().id) }
     var model_ by remember { mutableStateOf("") }
     var working by remember { mutableStateOf(false) }
+    var failure by remember { mutableStateOf<Trouble?>(null) }
 
     val models = QuickAgents.all.firstOrNull { it.id == presetId }?.models ?: emptyList()
 
@@ -929,17 +930,29 @@ fun NewTerminalSheet(connection: Connection, worktree: Worktree, onDismiss: () -
                 ) { model_ = it }
             }
 
+            failure?.let { SheetFailure(it) }
             Button(
                 onClick = {
                     working = true
+                    failure = null
                     scope.launch {
-                        runCatching {
+                        val created = runCatching {
                             connection.createTerminal(
                                 worktree.id,
                                 presetId,
                                 if (models.isEmpty()) presetId
                                 else QuickAgents.preset(presetId, model_),
                             )
+                        }
+                        // A refusal keeps the sheet open and says so, as Add a
+                        // Repository's does, rather than closing on a terminal
+                        // that was never made (ov-167).
+                        created.onFailure {
+                            it.rethrowIfCancellation()
+                            failure = troubleAfter(
+                                it.refusalWord, it.message, "Starting this terminal didn’t finish.")
+                            working = false
+                            return@launch
                         }
                         connection.refresh()
                         working = false
