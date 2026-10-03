@@ -225,6 +225,6 @@ public struct DaemonBuild: Equatable, Sendable {
             detail.removeLast("-dirty".count)
             suffix = ", uncommitted"
         }
-        return "\(marketing) (\(detail)\(suffix))"
+        return "\(marketing) (\(detail)\(suffix))"  // not a count: the build
     }
 }

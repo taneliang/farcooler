@@ -9,10 +9,18 @@ badge; a sentence says "3 things need you". Never "Finished (14)".
 This scans the user-facing sources of the Mac, the phones and the shared
 Swift package for the shapes such a count takes:
 
-  Swift   "Finished (\\(count))"        an interpolation alone in parentheses
-  Kotlin  "Finished ($count)"           a template alone in parentheses
+  Swift   "Finished (\\(count))"        an interpolation leading the parentheses,
+          "Unread (\\(n) new)"           words after it or not
+  Kotlin  "Finished ($count)"           a template leading them
           "Finished (${items.size})"
-  any     "Finished (%d)", "(%1$d)"     a format specifier alone in them
+  any     "Finished (%d)", "(%1$d new)" a format specifier leading them
+
+Lines inside a multi-line \"\"\" string count as string content.
+
+The patterns flag any parenthesized interpolation that leads its parentheses,
+which also catches errors, dates and names: those take an allow comment. That
+churn is the price of not guessing which expressions are numbers. String
+concatenation ("(" + n + ")") isn't seen.
 
 A line that matches and is not a count (a version's channel, a twin pane told
 apart by its id) says so with `not a count` in a comment on the same line; one
@@ -34,9 +42,13 @@ SWIFT_ROOTS = ["apps/macos/Sources", "apps/ios", "apps/shared/AgentKit/Sources"]
 KOTLIN_ROOTS = ["apps/android/app/src/main"]
 SKIP_PARTS = {"Tests", "FarCoolerUITests", "test", "androidTest", ".build", "build"}
 
-SWIFT = re.compile(r"\(\\\([^()]*(?:\([^()]*\)[^()]*)*\)\)")
-KOTLIN = re.compile(r"\(\$(?:\{[^{}]*\}|[A-Za-z_][A-Za-z0-9_.]*)\)")
-FORMAT = re.compile(r"\(%(?:\d+\$)?(?:l{0,2}[dui]|@|s)\)")
+# An interpolation's expression, one level of parentheses deep.
+_EXPR = r"[^()]*(?:\([^()]*\)[^()]*)*"
+# A count leads the parentheses, and words may follow it: "(\(n))",
+# "(\(n) new)", "(\(a) of \(b))".
+SWIFT = re.compile(r"\(\\\(" + _EXPR + r"\)(?:[^()\"\\]|\\\(" + _EXPR + r"\))*\)")
+KOTLIN = re.compile(r"\(\$(?:\{[^{}]*\}|[A-Za-z_][A-Za-z0-9_.]*)(?:[^()\"$]|\$\{[^{}]*\}|\$[A-Za-z_]\w*)*\)")
+FORMAT = re.compile(r"\(%(?:\d+\$)?[,']?(?:l{0,2}[dui]|@|s)[^()\"%]*\)")
 # A line that matches without breaking the rule says why on the line: it isn't
 # a count, or it isn't drawn (a prompt written to an agent).
 ALLOWS = ("not a count", "not UI copy")
@@ -54,13 +66,18 @@ def code(line: str) -> str:
 def hits(text: str, kind: str) -> list[tuple[int, str]]:
     patterns = {"swift": [SWIFT, FORMAT], "kotlin": [KOTLIN, FORMAT], "xml": [FORMAT]}[kind]
     out = []
+    # Inside a multi-line `"""` string, every line is string content.
+    in_block = False
     for number, line in enumerate(text.splitlines(), 1):
+        was_in_block = in_block
+        if line.count('"""') % 2 == 1:
+            in_block = not in_block
         if any(allow in line for allow in ALLOWS):
             continue
-        body = code(line)
+        body = line if was_in_block else code(line)
         # Only inside a string: a count is copy, and a call's parentheses
         # around an interpolation-free argument are not.
-        if '"' not in body and kind != "xml":
+        if '"' not in body and kind != "xml" and not was_in_block:
             continue
         if any(p.search(body) for p in patterns):
             out.append((number, line.strip()))
@@ -112,6 +129,14 @@ def self_test() -> int:
         ("kotlin", 'Text("Tasks (${tasks.size})")', True),
         ("kotlin", 'stringResource(R.string.x, "(%1$d)")', True),
         ("xml", '<string name="unread">Unread (%d)</string>', True),
+        ("swift", 'Text("Unread (\\(n) new)")', True),
+        ("swift", 'Text("Retry (\\(attempt) of \\(limit))")', True),
+        ("swift", 'let s = """\nUnread (\\(n))\n"""', True),
+        ("kotlin", 'Text("Unread ($n new)")', True),
+        ("kotlin", 'Text("Retry (${a} of ${b})")', True),
+        ("kotlin", 'val s = """\n    Unread ($n)\n"""', True),
+        ("swift", 'String(format: "Unread (%1$d new)", n)', True),
+        ("swift", 'String(format: "Lines (%1$,d)", n)', True),
         # Each must pass.
         ("swift", 'Text("Finished")', False),
         ("swift", '"\\(marketing) (\\(channel))"  // not a count: the channel', False),
@@ -120,6 +145,8 @@ def self_test() -> int:
         ("swift", 'Text("\\(n) unchanged lines")', False),
         ("kotlin", 'Text("$count things need you")', False),
         ("kotlin", 'Text("Price (USD)")', False),
+        ("swift", 'Text("Tasks (beta)")', False),
+        ("swift", 'Text("Open in Terminal (⌘T)")', False),
         ("xml", '<string name="x">%d things need you</string>', False),
     ]
     failed = 0
