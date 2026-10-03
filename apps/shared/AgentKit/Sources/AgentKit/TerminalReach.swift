@@ -54,7 +54,7 @@ enum TerminalReach {
     ///
     /// `everyRunnerHasAnswered` and not "any runner has answered": a fleet of
     /// three where two have come back still cannot say a pane does not exist,
-    /// because it might be on the third. `FleetView.dropUnknownTerminal` reaches
+    /// because it might be on the third. `PhoneRoot.follow` reaches
     /// for the same predicate for the same reason, and it is the one that was
     /// missing here.
     ///

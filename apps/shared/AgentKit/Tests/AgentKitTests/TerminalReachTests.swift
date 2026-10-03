@@ -58,7 +58,7 @@ struct TerminalReachTests {
 
     /// **Every runner, not any.** A fleet of three where two have answered
     /// cannot say a pane does not exist — it may be on the third. This is the
-    /// predicate `FleetView.dropUnknownTerminal` already reaches for, and using
+    /// predicate `PhoneRoot.follow` already reaches for, and using
     /// the weaker one here is the same defect one step later.
     @Test func aPartlyAnsweredFleetIsStillStartingAndNotAnAnswer() {
         let partly = TerminalReach.miss(

@@ -1854,7 +1854,7 @@ enum PhoneLaunch {
     }
 
     /// How long a launch waits for every runner before it gives up and
-    /// stays on Needs You, as Android's `LaunchRule` does. A last workspace
+    /// stays on Needs You. A last workspace
     /// pushed a minute after launch would land over whatever somebody had
     /// started reading.
     static let decideWithin: TimeInterval = 10

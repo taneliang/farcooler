@@ -109,7 +109,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                 action: response.actionIdentifier, typed: typed)
             return
         }
-        await click(userInfo: info, thread: thread, action: response.actionIdentifier)
+        // Built here, off the main actor: `userInfo` isn't Sendable, the open is.
+        guard let open = DestinationOpen(
+            userInfo: info, thread: thread, action: response.actionIdentifier, now: Date())
+        else { return }
+        await MainActor.run { DestinationOpener.shared.request(open) }
     }
 
     /// A click on a notification that isn't a task notice: open what it's

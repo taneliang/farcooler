@@ -255,6 +255,16 @@ class DestinationRoutingTest {
     }
 
     @Test
+    fun aRelaunchWithNoRunnersWaitsForNothing() {
+        val driver = driver()
+        val kept = Destination(runner = Destination.Runner(host = "h1"), place = Destination.Place.Workspace("ws-1"))
+        assertEquals(false, driver.restore(kept, runners = 0))
+        assertEquals(false, driver.isPending)
+        assertEquals(true, driver.restore(kept, runners = 1))
+        assertEquals(true, driver.isPending)
+    }
+
+    @Test
     fun aRelaunchYieldsToSomebodyWhoMovedFirst() {
         val kept = Destination(runner = Destination.Runner(host = "h1"), place = Destination.Place.Workspace("ws-1"))
         assertNull(restored(kept, moved = true))

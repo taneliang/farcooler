@@ -1,4 +1,5 @@
 import AgentKit
+import AppKit
 import Foundation
 import UserNotifications
 
@@ -187,10 +188,25 @@ final class DestinationOpener: ObservableObject {
     /// How long a window that isn't key leaves a click to the key one.
     static let keyWindowFirst: TimeInterval = 0.5
 
-    /// A click to open, in place of any before it.
+    /// The main windows that are open. A click with none has nothing to open
+    /// it, so it opens one.
+    private var windows: Set<UUID> = []
+    /// Opens a main window: the app's `openWindow`, set by `FarCoolerApp`.
+    var openMainWindow: (() -> Void)?
+    /// Brings the app forward. Replaced in tests.
+    var activateApp: () -> Void = { NSApp.activate() }
+
+    func register(window: UUID) { windows.insert(window) }
+    func unregister(window: UUID) { windows.remove(window) }
+
+    /// A click to open, in place of any before it. With no window open the app
+    /// comes forward and opens one, which then takes the click (`drive`).
     func request(_ open: DestinationOpen) {
         pending = open
         claimedBy = nil
+        guard windows.isEmpty else { return }
+        activateApp()
+        openMainWindow?()
     }
 
     /// Whether `window` opens `open`: the first to ask, except that a window

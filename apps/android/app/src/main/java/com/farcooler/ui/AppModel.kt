@@ -273,8 +273,7 @@ class AppModel(
                 )
             }
             ?: return
-        destinations.request(kept, DestinationResolver.Arrival.RESTORE)
-        follow()
+        if (destinations.restore(kept, hosts.hosts.value.size)) follow()
     }
 
     private fun land(route: Route) {

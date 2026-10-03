@@ -5,9 +5,13 @@ struct FarCoolerApp: App {
     /// to take notification clicks before launching finishes (`PushDelegate`).
     @NSApplicationDelegateAdaptor(PushDelegate.self) private var pushDelegate
     @State private var showsCLIToolsPrompt = false
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
-        WindowGroup {
+        // A click on a notification with every window closed opens one
+        // (`DestinationOpener.request`), which then opens what was clicked.
+        let _ = DestinationOpener.shared.openMainWindow = { openWindow(id: Self.mainWindowID) }
+        WindowGroup(id: Self.mainWindowID) {
             ContentView()
                 // What animates in this window pauses while nobody can see it.
                 // See `WindowVisibility`.
@@ -50,6 +54,8 @@ struct FarCoolerApp: App {
             .windowResizability(.contentSize)
             .windowStyle(.hiddenTitleBar)
     }
+
+    static let mainWindowID = "main"
 
     /// Catches the person who never opens Settings. Fires at most once, ever,
     /// per machine — the flag is set the moment the decision to show is made,

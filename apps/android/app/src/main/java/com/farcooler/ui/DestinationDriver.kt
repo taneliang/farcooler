@@ -44,6 +44,17 @@ class DestinationDriver(private val clock: () -> Long = System::currentTimeMilli
         pending = Pending(++counter, destination, arrival, clock())
     }
 
+    /**
+     * Wait to go back to [destination] on a relaunch, unless there are no
+     * [runners]: that launch is onboarding, which has nowhere to go back to
+     * and no Back button to leave. True when it's waiting.
+     */
+    fun restore(destination: Destination, runners: Int): Boolean {
+        if (runners == 0) return false
+        request(destination, Arrival.RESTORE)
+        return true
+    }
+
     /** Drop what is waiting, as when the runners are all gone. */
     fun clear() {
         pending = null

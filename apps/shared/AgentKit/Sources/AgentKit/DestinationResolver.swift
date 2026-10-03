@@ -1,8 +1,8 @@
 import Foundation
 
 /// Where a `Destination` actually opens, given what this device holds now
-/// (ov-182, ov-183): the Mac's `TaskNoticeOpen.step`, generalized from a task
-/// notice to every place, and from a click to a relaunch.
+/// (ov-182, ov-183): ov-106's rule for a task notice's click (find its runner, wait for
+/// it, give up at a deadline), generalized to every place and to a relaunch.
 ///
 /// Pure, and called again on every change until it stops answering `wait`:
 ///
@@ -145,7 +145,7 @@ public enum DestinationResolver {
         }
         // Two seats with one id are one runner reached two ways (a LAN
         // address and a tailnet one): the first that has the place, else the
-        // first, as `TaskNoticeOpen.step` took the first.
+        // first, as ov-106's task notice open took the first.
         let matching = world.seats.filter { $0.ready && $0.runnerId?.lowercased() == id }
         if let seat = matching.first(where: { presence(destination.place, on: $0) == .here }) ?? matching.first {
             return .found(seat)

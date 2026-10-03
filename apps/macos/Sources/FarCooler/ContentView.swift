@@ -257,6 +257,7 @@ struct ContentView: View {
         // `PrefixHintOverlay` uses for its chip.
         .animation(.snappy(duration: 0.22), value: outcomes.shown)
         .task {
+            DestinationOpener.shared.register(window: windowID)
             Notifier.shared.requestAuthorization()
             PushRegistration.shared.label = { Host.current().localizedName ?? "Mac" }
             // Beside the label and for the same reason: AgentKit files this
@@ -292,6 +293,7 @@ struct ContentView: View {
             // What this window showed is shown no longer; the runners are told
             // what the remaining windows still show.
             Notifier.shared.closeWindow(windowID)
+            DestinationOpener.shared.unregister(window: windowID)
             for client in store.clients.values {
                 client.stopEvents()
                 client.reportWatching([])
