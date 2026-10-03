@@ -744,6 +744,13 @@ private fun FileBody(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             )
 
+            state.fileFailures[path] != null -> Text(
+                state.fileFailures.getValue(path),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+
             else -> Patch(
                 lines = state.fileDiffs[path].orEmpty(),
                 fontFamily = fontFamily,

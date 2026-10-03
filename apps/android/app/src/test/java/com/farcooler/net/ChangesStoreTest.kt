@@ -327,6 +327,46 @@ class ChangesStoreTest {
     }
 
     /**
+     * Unread, but not silent (ov-167). The row draws `fileDiffs[path].orEmpty()`
+     * when a path is neither loading nor unsupported, so a failure that left
+     * no trace was an empty patch card: a file that changed, shown unchanged.
+     * The reason goes away with the next good read, and with a reload.
+     */
+    @Test
+    fun `a failed patch says it failed until a read succeeds`() = runTest {
+        val source = FakeSource().apply {
+            set = ChangeSet(files = listOf(file("a.rs")))
+            diffs["a.rs"] = diff("added" to 1)
+            diffFails = CoreException("boom")
+        }
+        val store = ChangesStore(ref, source, InMemoryReviewStorage(), storeScope())
+        store.load()
+        store.ensure("a.rs")
+        assertEquals(
+            "This file’s changes couldn’t be read. Open it again to retry.",
+            store.state.value.fileFailures["a.rs"],
+        )
+
+        source.diffFails = DisconnectedException("gone")
+        store.ensure("a.rs")
+        assertEquals(
+            "The connection to this runner dropped. Open the file again once it’s back.",
+            store.state.value.fileFailures["a.rs"],
+        )
+
+        source.diffFails = null
+        store.ensure("a.rs")
+        assertNull(store.state.value.fileFailures["a.rs"])
+        assertTrue(store.state.value.fileDiffs.containsKey("a.rs"))
+
+        source.diffFails = CoreException("boom")
+        store.load()
+        store.ensure("a.rs")
+        store.load()
+        assertNull(store.state.value.fileFailures["a.rs"])
+    }
+
+    /**
      * One ahead, and only from the file that is actually open — so Next lands on a
      * patch instead of a spinner, and the chain stops at one because a prefetched
      * file is not expanded.

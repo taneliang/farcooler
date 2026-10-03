@@ -203,6 +203,7 @@ class ChangesStore(
                 it.copy(
                     fileDiffs = emptyMap(),
                     fileNotices = emptyMap(),
+                    fileFailures = emptyMap(),
                     unsupported = emptyMap(),
                     generation = it.generation + 1,
                 )
@@ -262,14 +263,18 @@ class ChangesStore(
                     state.copy(
                         fileDiffs = state.fileDiffs + (path to diff.lines()),
                         fileNotices = withNotices,
+                        fileFailures = state.fileFailures - path,
                     )
                 }
             }
             prefetchAfter(path)
         } catch (e: Exception) {
             e.rethrowIfCancellation()
-            // Left unread rather than recorded as empty, so pulling to refresh
-            // tries it again instead of showing a permanent blank.
+            // Left unread rather than recorded as empty, so opening it again
+            // tries again instead of showing a permanent blank — and said, so
+            // the row isn't an empty patch in the meantime (ov-167).
+            if (_state.value.generation != asked) return
+            _state.update { it.copy(fileFailures = it.fileFailures + (path to fileTrouble(e))) }
         } finally {
             _state.update { it.copy(loadingFiles = it.loadingFiles - path) }
         }
@@ -352,6 +357,7 @@ class ChangesStore(
                 // better disguise.
                 fileDiffs = emptyMap(),
                 fileNotices = emptyMap(),
+                fileFailures = emptyMap(),
                 unsupported = emptyMap(),
                 // Every scope is a different file list, so the open file goes
                 // with it rather than being carried across — the same path can
@@ -741,6 +747,7 @@ class ChangesStore(
                     error = null,
                     fileDiffs = emptyMap(),
                     fileNotices = emptyMap(),
+                    fileFailures = emptyMap(),
                     unsupported = emptyMap(),
                     commitFiles = emptyList(),
                     commitUnreadable = false,
@@ -769,6 +776,14 @@ class ChangesStore(
             "combined_diff" -> "A merge commit, shown against its first parent"
             else -> "This patch couldn’t be read"
         }
+
+        /** Why one file's patch isn't on screen, when reading it failed. */
+        internal fun fileTrouble(e: Exception): String =
+            if (e is DisconnectedException) {
+                "The connection to this runner dropped. Open the file again once it’s back."
+            } else {
+                "This file’s changes couldn’t be read. Open it again to retry."
+            }
 
         /**
          * The core's answer, as something worth putting on a phone screen.

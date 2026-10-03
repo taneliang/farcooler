@@ -164,6 +164,15 @@ data class ChangesState(
      */
     val fileNotices: Map<String, List<String>> = emptyMap(),
     /**
+     * Files whose patch couldn't be read this time, and the sentence saying so.
+     *
+     * Not [unsupported], which is the daemon's settled answer: this one goes
+     * away with the next good read, and the file is left out of [fileDiffs] so
+     * opening it again tries again. Without it a failed read drew as an empty
+     * patch — a file that changed, shown as if nothing in it had (ov-167).
+     */
+    val fileFailures: Map<String, String> = emptyMap(),
+    /**
      * Files being read right now, so a row can say so rather than look empty.
      * An unread file and a file with no hunks are not the same thing.
      */
