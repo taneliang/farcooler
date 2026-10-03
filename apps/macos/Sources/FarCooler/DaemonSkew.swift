@@ -118,11 +118,12 @@ enum DaemonSkew: Equatable {
         }
     }
 
-    /// Whether the sidebar shows anything for it: an update to offer, or a
-    /// runner ahead of this Mac, which offers nothing but says what to do.
-    var showsInSidebar: Bool {
+    /// Whether this runner is newer than this Mac: the toolbar's runner item
+    /// says so, with nothing to press (`RunnerStatusItem`, ov-178; it was the
+    /// old sidebar's dot and card).
+    var isAhead: Bool {
         if case .ahead = self { return true }
-        return offersUpdate
+        return false
     }
 
     /// What a runner ahead of this Mac says. The fix is updating the app.

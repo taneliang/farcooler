@@ -238,6 +238,9 @@ struct NeedsYouToolbarButton: View {
 struct RunnerStatusMenu: View {
     let label: String
     let symbol: String
+    /// The tooltip: the label, or for a runner newer than this Mac what to
+    /// do about it.
+    var help: String? = nil
     let entries: [RunnerStatusItem.Entry]
     let updates: [DaemonUpdateTarget]
     let perform: (RunnerStatusItem.Entry) -> Void
@@ -264,7 +267,7 @@ struct RunnerStatusMenu: View {
                 .foregroundStyle(.secondary)
         }
         .menuIndicator(.hidden)
-        .help(label)
+        .help(help ?? label)
         .accessibilityIdentifier("toolbar-runner-status")
         .popover(isPresented: $showingUpdate, arrowEdge: .bottom) {
             DaemonUpdateCard(targets: updates) { showingUpdate = false }
@@ -349,6 +352,8 @@ struct NavigatorToggle: View {
 struct TrailingToolbar: ToolbarContent {
     let troubles: [RunnerStatusItem.Trouble]
     let stale: [String]
+    /// Runners newer than this Mac: said, with no update (ov-143).
+    var ahead: [String] = []
     let updates: [DaemonUpdateTarget]
     let needsYou: Int
     let needsYouSelected: Bool
@@ -357,12 +362,13 @@ struct TrailingToolbar: ToolbarContent {
 
     var body: some ToolbarContent {
         ToolbarSpacer(.fixed)
-        if let label = RunnerStatusItem.label(troubles: troubles, stale: stale) {
+        if let label = RunnerStatusItem.label(troubles: troubles, stale: stale, ahead: ahead) {
             ToolbarItem {
                 RunnerStatusMenu(
-                    label: label, symbol: RunnerStatusItem.symbol(troubles: troubles),
-                    entries: RunnerStatusItem.entries(troubles: troubles, stale: stale), updates: updates,
-                    perform: perform)
+                    label: label, symbol: RunnerStatusItem.symbol(troubles: troubles, stale: stale, ahead: ahead),
+                    help: RunnerStatusItem.help(troubles: troubles, stale: stale, ahead: ahead) ?? label,
+                    entries: RunnerStatusItem.entries(troubles: troubles, stale: stale, ahead: ahead),
+                    updates: updates, perform: perform)
             }
         }
         ToolbarItem {

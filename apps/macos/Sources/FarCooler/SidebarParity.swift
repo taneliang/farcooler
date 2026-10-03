@@ -311,8 +311,10 @@ enum RunnerStatusItem {
         }
     }
 
-    /// The item's words, or nil to show nothing at all.
-    static func label(troubles: [Trouble], stale: [String]) -> String? {
+    /// The item's words, or nil to show nothing at all. A runner newer than
+    /// this Mac (`ahead`, ov-143) is said last, quietly: nothing is wrong
+    /// with it, and the fix is updating Far Cooler here.
+    static func label(troubles: [Trouble], stale: [String], ahead: [String] = []) -> String? {
         if troubles.count == 1, let one = troubles.first {
             let name = name(one.host)
             switch one.problem {
@@ -326,20 +328,38 @@ enum RunnerStatusItem {
                 ? "\(troubles.count) runners offline" : "\(troubles.count) runners unavailable"
         }
         if !stale.isEmpty { return stale.count == 1 ? "Update available" : "\(stale.count) updates available" }
+        if !ahead.isEmpty { return ahead.count == 1 ? "Runner is newer" : "\(ahead.count) runners are newer" }
         return nil
     }
 
+    /// The item's tooltip when the only news is a runner newer than this Mac:
+    /// ov-143's advice. Nil otherwise, for the label to stand.
+    static func help(troubles: [Trouble], stale: [String], ahead: [String]) -> String? {
+        guard troubles.isEmpty, stale.isEmpty, !ahead.isEmpty else { return nil }
+        return aheadSentence(ahead)
+    }
+
+    /// What a runner ahead of this Mac says, named: ov-143's advice.
+    static func aheadSentence(_ ahead: [String]) -> String {
+        ahead.count == 1 && !ahead[0].isEmpty
+            ? "\(ahead[0]) is newer than this Mac. Update Far Cooler on this Mac."
+            : ahead.count == 1 ? DaemonSkew.aheadAdvice
+            : "\(ahead.count) runners are newer than this Mac. Update Far Cooler on this Mac."
+    }
+
     /// The item's symbol: the warning while a runner is in trouble, the
-    /// download arrow when the only news is an update.
-    static func symbol(troubles: [Trouble]) -> String {
-        troubles.isEmpty ? "arrow.down.circle" : "exclamationmark.triangle"
+    /// download arrow when the news is an update, and a quiet info mark when
+    /// the only news is a runner newer than this Mac.
+    static func symbol(troubles: [Trouble], stale: [String] = [], ahead: [String] = []) -> String {
+        if !troubles.isEmpty { return "exclamationmark.triangle" }
+        return stale.isEmpty && !ahead.isEmpty ? "info.circle" : "arrow.down.circle"
     }
 
     /// The item's menu: each runner in trouble and its Reconnect, Reconnect
     /// All when there's more than one, the update for runners behind this
     /// app's build, then Runners and Devices…. Empty while it's hidden.
-    static func entries(troubles: [Trouble], stale: [String]) -> [Entry] {
-        guard label(troubles: troubles, stale: stale) != nil else { return [] }
+    static func entries(troubles: [Trouble], stale: [String], ahead: [String] = []) -> [Entry] {
+        guard label(troubles: troubles, stale: stale, ahead: ahead) != nil else { return [] }
         var out: [Entry] = []
         if troubles.count > 1 {
             out += troubles.map { .note("\(name($0.host)): \(words($0.problem))") }
@@ -354,6 +374,12 @@ enum RunnerStatusItem {
                         ? "\(name(stale[0])) isn’t running this app’s build"
                         : "\(stale.count) runners aren’t running this app’s build"))
             out.append(.update(count: stale.count))
+        }
+        // Said, never offered: no Update here, which would install this
+        // Mac's older build over the newer one (ov-143).
+        if !ahead.isEmpty {
+            if !out.isEmpty { out.append(.separator) }
+            out.append(.note(aheadSentence(ahead)))
         }
         out.append(.separator)
         out.append(.runners)

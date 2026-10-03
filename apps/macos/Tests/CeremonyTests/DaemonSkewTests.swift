@@ -46,13 +46,13 @@ struct DaemonSkewTests {
             state: .connected, build: newer, unreadable: false, remote: true)
         #expect(skew == .ahead(daemon: newer.readable))
         #expect(!skew.offersUpdate)
-        #expect(skew.showsInSidebar)
+        #expect(skew.isAhead)
         #expect(DaemonSkew.aheadAdvice
             == "This runner is newer than this Mac. Update Far Cooler on this Mac.")
         // And the behind case still offers one.
         #expect(DaemonClient.skew(
             state: .connected, build: build(matches: false), unreadable: false, remote: true
-        ).showsInSidebar)
+        ).offersUpdate)
     }
 
     /// The distinction the `unreadable` flag exists for. A read that has not

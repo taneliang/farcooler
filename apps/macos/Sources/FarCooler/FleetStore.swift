@@ -385,6 +385,13 @@ final class FleetStore: ObservableObject {
         hosts.filter { clients[$0]?.daemonSkew.offersUpdate == true }
     }
 
+    /// Runners newer than this Mac (`DaemonSkew.ahead`, ov-143): never in
+    /// `staleHosts`, since the only "update" from here would install this
+    /// Mac's older build over them. The runner item says to update this Mac.
+    var aheadHosts: [String] {
+        hosts.filter { clients[$0]?.daemonSkew.isAhead == true }
+    }
+
     // MARK: - Routing
 
     /// The runner a row came from.

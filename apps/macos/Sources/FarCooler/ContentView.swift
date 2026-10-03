@@ -217,7 +217,7 @@ struct ContentView: View {
         // `LeadingToolbar` and `TrailingToolbar`.
         .toolbar {
             TrailingToolbar(
-                troubles: runnerTroubles, stale: store.staleHosts,
+                troubles: runnerTroubles, stale: store.staleHosts, ahead: store.aheadHosts,
                 updates: store.staleHosts.compactMap(daemonUpdate(for:)), needsYou: store.needsYou.count,
                 needsYouSelected: selection == .needsYou, onNeedsYou: { selection = .needsYou },
                 perform: { perform($0) })
@@ -876,10 +876,10 @@ struct ContentView: View {
     /// version could not be read is not a runner to offer an update for, and a
     /// runner nobody can reach is not one either. See `DaemonSkew`.
     private func daemonUpdate(for host: String) -> DaemonUpdateTarget? {
-        // `showsInSidebar`, so a runner ahead of this Mac gets its dot too; its
-        // card has no Update button (`DaemonAheadCard`), so `update` is never
-        // reachable for it.
-        guard let client = store.clients[host], client.daemonSkew.showsInSidebar else { return nil }
+        // Never for a runner ahead of this Mac (ov-143): updating it would
+        // install this Mac's older build over it. The runner item says so
+        // instead (`RunnerStatusItem`, `aheadHosts`).
+        guard let client = store.clients[host], client.daemonSkew.offersUpdate else { return nil }
         return DaemonUpdateTarget(host: host, skew: client.daemonSkew) {
             await client.updateDaemon()
         }
