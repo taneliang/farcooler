@@ -21,6 +21,14 @@
 
 use std::sync::{Mutex, MutexGuard};
 
+// Under `panic = "abort"`, `catch_unwind` catches nothing and every guard in
+// the workspace is silently a no-op: the app aborts exactly as it did before
+// any of them existed. No test can notice, because Cargo builds test targets
+// and their dependencies with unwind whatever a profile says. So the build that
+// ships is the one that refuses: any app library built under abort fails here.
+#[cfg(not(panic = "unwind"))]
+compile_error!("farcooler-ffi-guard needs panic = \"unwind\": catch_unwind is a no-op under abort");
+
 /// Run an entry point's body so that a panic cannot leave it.
 ///
 /// The fallback is each function's own "this did not happen" value: 0 for a
@@ -40,7 +48,10 @@ pub fn guarded<T>(fallback: T, body: impl FnOnce() -> T) -> T {
 
 /// Run a body, and say whether it panicked rather than letting it unwind.
 ///
-/// `None` means it panicked; the panic has already been logged. For a caller
+/// `None` means it panicked; the panic has been handed to `tracing`, which
+/// records it only where a subscriber is installed — none of the apps install
+/// one yet, so in a shipped app the record is the default panic hook's line on
+/// stderr. For a caller
 /// that has state to repair before it answers — `guarded` is this plus a
 /// fallback.
 pub fn caught<T>(body: impl FnOnce() -> T) -> Option<T> {
@@ -82,9 +93,9 @@ mod tests {
 
     /// A panic under the boundary must come back as a value, not a signal.
     ///
-    /// Worth an actual panic rather than a reading of the code: `catch_unwind`
-    /// is a no-op under `panic = "abort"`, so a profile change could remove
-    /// this protection silently and nothing else would notice. This test would.
+    /// This cannot see a profile set to `panic = "abort"` — Cargo builds tests
+    /// with unwind regardless — which is what the `compile_error!` at the top
+    /// of this file is for.
     #[test]
     fn a_panic_inside_an_entry_point_becomes_its_fallback() {
         assert_eq!(guarded(0u64, || panic!("the core fell over")), 0);
