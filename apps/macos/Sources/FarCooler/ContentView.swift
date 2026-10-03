@@ -221,6 +221,8 @@ struct ContentView: View {
         // The detail is the window: the old Fleet sidebar is gone, and the
         // navigator inside a workspace is its one sidebar (ov-178).
         detailOpeningNotices
+        // Task keys in its text open their tasks (ov-196).
+        .environment(\.taskKeyLinker, taskKeyLinker)
         // The window's toolbar, inner to outer, so its items are
         // laid out from the trailing end in (ov-105): see
         // `LeadingToolbar` and `TrailingToolbar`.
@@ -3152,6 +3154,15 @@ struct ContentView: View {
         focusColumn = opened.step.focus
         selection = opened.selection
         key(opened.step.keyboard)
+    }
+
+    /// What "ov-190" in the selection's text links to: a task on its
+    /// runner's boards read so far, opened as the palette opens one.
+    private var taskKeyLinker: TaskKeyLinker {
+        guard let host = selection?.host else { return .none }
+        let index = TaskKeyIndex.mac(
+            host: host, workspaces: store.fleet.runnerWorkspaces[host] ?? [], stores: boardStores.values)
+        return TaskKeyLinker(index: index) { openTask($0.task, host: $0.runner, workspace: $0.workspace) }
     }
 
     /// A finished status's History page, in the main area (ov-103). The

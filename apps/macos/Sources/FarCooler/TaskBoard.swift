@@ -1499,6 +1499,8 @@ struct TaskCard: View {
     /// Where Answer…'s unsent text is kept: the store, so it outlives this
     /// view, which is redrawn whenever the card's record is read again.
     var draft: Draft = .none
+    /// The task keys its lines link (ov-196), and where they go.
+    @Environment(\.taskKeyLinker) private var linker
 
     /// Reads and writes an unsent answer, by question.
     struct Draft {
@@ -1526,9 +1528,9 @@ struct TaskCard: View {
         }
         .frame(maxWidth: TaskTypography.measure, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // Links in task text open on the web or in mail, nothing else
-        // (`Markdown.opens`), here as in `MarkdownText`.
-        .environment(\.openURL, Markdown.openGuard)
+        // Links in task text open on the web or in mail, or a task key's
+        // task here, nothing else (`Markdown.opens`), as in `MarkdownText`.
+        .environment(\.openURL, Markdown.openGuard(linker))
     }
 
     /// What a card offers for its question, which is all `QuestionAnswers`
@@ -1590,7 +1592,7 @@ struct TaskCard: View {
                             Image(systemName: line.met ? "checkmark.square" : "square")
                                 .foregroundStyle(.secondary)
                                 .accessibilityHidden(true)
-                            Text(TaskProse.acceptance(line.text, met: line.met))
+                            Text(linker.linked(TaskProse.acceptance(line.text, met: line.met)))
                                 .font(TaskTypography.body)
                                 .foregroundStyle(line.met ? Color.secondary : Color.primary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -1608,7 +1610,7 @@ struct TaskCard: View {
                     ForEach(row.constraints, id: \.self) { text in
                         HStack(alignment: .firstTextBaseline, spacing: ColumnGrid.rhythm) {
                             Text("•").foregroundStyle(.secondary)
-                            Text(TaskProse.inline(text))
+                            Text(linker.linked(TaskProse.inline(text)))
                                 .fixedSize(horizontal: false, vertical: true)
                                 .textSelection(.enabled)
                         }
@@ -1687,13 +1689,14 @@ private struct QuestionAnswers: View {
     @State private var failed = false
     @State private var writing = false
     @State private var typed = ""
+    @Environment(\.taskKeyLinker) private var linker
 
     var body: some View {
         VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
             Text("Question")
                 .font(TaskTypography.label)
                 .foregroundStyle(Color.accentColor)
-            Text(TaskProse.inline(offer.question.body))
+            Text(linker.linked(TaskProse.inline(offer.question.body)))
                 .font(TaskTypography.body.weight(.medium))
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
@@ -1789,6 +1792,7 @@ private struct TaskNoteView: View {
     /// The label's color: secondary, or the accent for a question still
     /// waiting on the person (`TaskNoteStyle.tint(of:in:status:)`).
     var tint: TaskNoteStyle.Tint = .secondary
+    @Environment(\.taskKeyLinker) private var linker
 
     private var style: TaskNoteStyle { .of(note.kind) }
 
@@ -1835,7 +1839,7 @@ private struct TaskNoteView: View {
             line
             MarkdownText(text: decision.chosen, spacing: .document)
             if let rejected = decision.rejected {
-                Text(TaskProse.inline("Rejected: \(rejected)"))
+                Text(linker.linked(TaskProse.inline("Rejected: \(rejected)")))
                     .font(TaskTypography.meta)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

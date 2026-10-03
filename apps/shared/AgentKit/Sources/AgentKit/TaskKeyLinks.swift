@@ -214,9 +214,9 @@ public enum TaskKeyLinks {
 /// the runner is known, read by `MarkdownText` and a task's own lines.
 public struct TaskKeyLinker: Sendable {
     public var index: TaskKeyIndex
-    public var open: @MainActor @Sendable (TaskKeyTarget) -> Void
+    public var open: @MainActor (TaskKeyTarget) -> Void
 
-    public init(index: TaskKeyIndex, open: @escaping @MainActor @Sendable (TaskKeyTarget) -> Void) {
+    public init(index: TaskKeyIndex, open: @escaping @MainActor (TaskKeyTarget) -> Void) {
         self.index = index
         self.open = open
     }
