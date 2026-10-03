@@ -3230,7 +3230,9 @@ struct ContentView: View {
     /// it, the keyboard goes to what the main area shows.
     private func toggleNavigator() {
         navigatorHidden.toggle()
-        if navigatorHidden && keyboardOnBoard { key(.main) }
+        guard navigatorHidden, keyboardOnBoard else { return }
+        keyboardOnBoard = false
+        key(.main)
     }
 
     /// Does what a `BoardStep` says.

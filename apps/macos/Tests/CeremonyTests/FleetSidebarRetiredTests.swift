@@ -101,7 +101,7 @@ struct FleetSidebarRetiredTests {
             .appendingPathComponent("Sources/FarCooler")
         let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)?
             .compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" } ?? []
-        return try files.map { ($0.lastPathComponent, try String(contentsOf: $0, encoding: .utf8)) }
+        return try files.map { (name: $0.lastPathComponent, text: try String(contentsOf: $0, encoding: .utf8)) }
     }
 
     /// Deleted, not hidden (ov-178's third acceptance line): no view, row
