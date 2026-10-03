@@ -1,5 +1,49 @@
 use std::io::Result;
 
+/// Asks git for a directory and makes it absolute (git prints it relative to
+/// the cwd when it can). `None` when git is missing or this is not a checkout.
+fn git_dir(flag: &str) -> Option<std::path::PathBuf> {
+    let out = std::process::Command::new("git")
+        .args(["rev-parse", flag])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if text.is_empty() {
+        return None;
+    }
+    std::env::current_dir().ok().map(|cwd| cwd.join(text))
+}
+
+/// Declares the git state the build stamp and channel depend on.
+///
+/// In a linked worktree `.git` is a file, so a hard-coded `../../.git/HEAD`
+/// does not exist, and cargo treats a missing `rerun-if-changed` path as
+/// always stale: every build reran this script and recompiled protocol and its
+/// dependents. So ask git where things really live: `HEAD` and `index` are
+/// per worktree (`--git-dir`), refs and tags are shared (`--git-common-dir`).
+/// Only paths that exist are emitted. With no git or no `.git` (a source
+/// tarball) nothing is emitted and the stamp falls back to `unknown`.
+fn watch_git() {
+    let (Some(git), Some(common)) = (git_dir("--git-dir"), git_dir("--git-common-dir")) else {
+        return;
+    };
+    let mut paths = vec![git.join("HEAD"), git.join("index"), common.join("packed-refs")];
+    // A commit moves the current branch's ref, not HEAD itself. Before the
+    // branch has a loose ref file, watch the heads directory instead.
+    let branch = std::fs::read_to_string(git.join("HEAD"))
+        .ok()
+        .and_then(|h| h.trim().strip_prefix("ref: ").map(str::to_string));
+    match branch.map(|r| common.join(r)) {
+        Some(r) if r.exists() => paths.push(r),
+        _ => paths.push(common.join("refs/heads")),
+    }
+    paths.push(common.join("refs/tags"));
+    for p in paths.into_iter().filter(|p| p.exists()) {
+        println!("cargo:rerun-if-changed={}", p.display());
+    }
+}
+
 fn main() -> Result<()> {
     // Use a vendored protoc so the build has no system dependency. The proto
     // files are the canonical protocol source of truth and ship with every
@@ -20,8 +64,7 @@ fn main() -> Result<()> {
     // to a Mac, or a Mac driving a Linux host over ssh, has no such guarantee —
     // there the two really are built separately and the only honest answer is
     // to say which source each came from.
-    println!("cargo:rerun-if-changed=../../.git/HEAD");
-    println!("cargo:rerun-if-changed=../../.git/index");
+    watch_git();
     let sha = std::process::Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()
@@ -54,7 +97,6 @@ fn main() -> Result<()> {
     // version.sh gives about an unstamped bundle: defaulting the other way
     // would let a build made outside the release path call itself a release.
     println!("cargo:rerun-if-changed=../../scripts/version.sh");
-    println!("cargo:rerun-if-changed=../../.git/refs/tags");
     // The environment `version.sh` reads, or the answer is cached forever.
     //
     // Cargo re-runs a build script when its declared inputs change, and an
