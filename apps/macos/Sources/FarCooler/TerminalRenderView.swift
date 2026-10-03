@@ -75,7 +75,16 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     /// is the case that has been quietly appending a second copy of every
     /// pane's history since re-attach stopped resetting the core.
     private var corePainted = false
-    private var displayLink: CADisplayLink?
+    private(set) var displayLink: CADisplayLink?
+    /// Whether the layout shows this pane: false for one mounted but out of
+    /// sight (`outOfSight`), such as a pane another has been zoomed over.
+    /// See `TerminalRenderView+Idle.swift` for what stops with it.
+    var isShown = true {
+        didSet { if isShown != oldValue { updateDrawing() } }
+    }
+    private(set) lazy var windowWatch = WindowVisibilityWatch { [weak self] _ in self?.updateDrawing() }
+    /// Which rows the last frame drew, so the next draws only what moved.
+    var damage = TerminalDamage()
     /// Watches the theme, so a pick in Settings reaches a live terminal.
     ///
     /// Subscribed here rather than threaded down as a `themeRevision` property
@@ -261,6 +270,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         displayLink?.invalidate()
         guard window != nil else {
             displayLink = nil
+            windowWatch.follow(nil)
             return
         }
         // Vsync-driven rather than a timer: a fixed timer either lags behind
@@ -269,6 +279,9 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         let link = displayLink(target: self, selector: #selector(tick))
         link.add(to: .main, forMode: .common)
         displayLink = link
+        // Paused from the start when nobody can see it (ov-229).
+        windowWatch.follow(window)
+        updateDrawing()
         // Deliberately does NOT claim the keyboard.
         //
         // It used to, and with four panes that meant whichever mounted last owned
@@ -295,8 +308,16 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         let revision = core.revision
         guard revision != lastDrawnRevision else { return }
         lastDrawnRevision = revision
-        needsDisplay = true
+        invalidateChangedRows()
+        drainSignals()
+    }
 
+    /// Act on what feeding bytes left for the view: a bell, a copy, replies.
+    ///
+    /// The tick's job while it runs, and `feed`'s while the tick is paused for
+    /// a pane nobody can see — a program asking the terminal a question must
+    /// still get its answer.
+    func drainSignals() {
         if core.takeBell() { NSSound.beep() }
         // OSC 52: the program handing you something. Drained on the tick beside
         // the bell and the pty replies because it arrives the same way they do —
@@ -562,6 +583,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         if resizes != lastStreamResize.count {
             lastStreamResize = (resizes, ContinuousClock.now)
         }
+        if displayLink?.isPaused ?? true { drainSignals() }
     }
 
     /// Draw this terminal's last frame, from before its view was destroyed.
@@ -655,9 +677,11 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         context.fill(bounds)
 
         core.withSnapshot { snapshot in
-            drawBackgrounds(snapshot, in: context)
+            // Only the rows asked for: a spinner redraws one row, not the pane.
+            let rows = rows(in: dirtyRect, of: snapshot)
+            drawBackgrounds(snapshot, rows: rows, in: context)
             drawSelection(snapshot, in: context)
-            drawGlyphs(snapshot, in: context)
+            drawGlyphs(snapshot, rows: rows, in: context)
             drawLinkUnderline(snapshot, in: context)
             drawCursor(snapshot, in: context)
         }
@@ -695,6 +719,19 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         }
     }
 
+    /// The strip one row of cells occupies, edge to edge.
+    func rowRect(_ row: Int) -> NSRect {
+        NSRect(x: 0, y: origin(row: row, column: 0).y, width: bounds.width, height: cellHeight)
+    }
+
+    /// The rows a rectangle touches.
+    private func rows(in rect: NSRect, of snapshot: VTSnapshot) -> Range<Int> {
+        let first = Int(((rect.minY - padding.top) / cellHeight).rounded(.down))
+        let last = Int(((rect.maxY - padding.top) / cellHeight).rounded(.up))
+        let lower = min(max(first, 0), snapshot.rows)
+        return lower..<min(max(last, lower), snapshot.rows)
+    }
+
     private func origin(row: Int, column: Int) -> CGPoint {
         CGPoint(
             x: padding.left + CGFloat(column) * cellWidth,
@@ -710,9 +747,9 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
 
     /// Fill background runs. Batched, because a full-width bar is one rect, not
     /// two hundred.
-    private func drawBackgrounds(_ snapshot: VTSnapshot, in context: CGContext) {
+    private func drawBackgrounds(_ snapshot: VTSnapshot, rows: Range<Int>, in context: CGContext) {
         let defaultBG = Palette.backgroundPacked
-        for row in 0..<snapshot.rows {
+        for row in rows {
             var column = 0
             while column < snapshot.columns {
                 let color = effectiveBackground(snapshot[row, column])
@@ -749,7 +786,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     /// layout engine applies kerning and ligatures, which look lovely and put
     /// every character in the wrong column. A terminal is a grid; each glyph
     /// sits at its own cell origin.
-    private func drawGlyphs(_ snapshot: VTSnapshot, in context: CGContext) {
+    private func drawGlyphs(_ snapshot: VTSnapshot, rows: Range<Int>, in context: CGContext) {
         context.saveGState()
         defer { context.restoreGState() }
         // Glyph positions passed to CTFontDrawGlyphs are in TEXT space, so a
@@ -764,7 +801,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         var positions: [CGPoint] = []
         var fallbacks: [(Character, CGPoint, UInt32, NSFont)] = []
 
-        for row in 0..<snapshot.rows {
+        for row in rows {
             var column = 0
             while column < snapshot.columns {
                 let cell = snapshot[row, column]

@@ -1,0 +1,86 @@
+import AppKit
+import CFarCoolerVT
+
+/// What a terminal stops doing when nobody can see it, and how little it
+/// redraws when somebody can (ov-229).
+///
+/// Every pane ran a display link at the display's refresh rate for as long as
+/// it was in a window, and redrew its whole grid on every new byte: a full
+/// snapshot, a background pass and a glyph pass over every cell. An agent's
+/// spinner is about eight new frames a second, so each working pane redrew
+/// its whole screen eight times a second. That happened in a window behind
+/// others, with the app hidden, and for panes zoomed out of sight at opacity
+/// zero.
+///
+/// So the link pauses while the pane can't be seen. Bytes still reach the
+/// emulator, and its replies still go back, but nothing draws. When the pane
+/// is shown again, the first tick finds the revision moved and draws once.
+/// When it is drawn, only the rows that changed are redrawn.
+extension TerminalRenderView {
+    /// Whether this pane should draw: shown by its layout, in a window
+    /// somebody can see.
+    var drawsNow: Bool { isShown && windowWatch.isVisible }
+
+    /// Pause or resume the display link to match `drawsNow`.
+    func updateDrawing() {
+        displayLink?.isPaused = !drawsNow
+    }
+
+    /// Mark for redrawing only the rows that differ from the last frame.
+    ///
+    /// Falls back to the whole view whenever the comparison can't say: the
+    /// first frame, a new size, a scroll into history.
+    func invalidateChangedRows() {
+        let changed = core.withSnapshot { damage.rows(changedIn: $0) } ?? nil
+        guard let changed else {
+            needsDisplay = true
+            return
+        }
+        for row in changed { setNeedsDisplay(rowRect(row)) }
+    }
+}
+
+/// Which rows of a terminal changed between two frames.
+///
+/// A copy of the last frame's cells, compared row by row: a `memcmp` of a few
+/// kilobytes per row. That costs far less than drawing the rows that didn't
+/// change. The cursor counts as part of the rows it leaves and enters.
+struct TerminalDamage {
+    private var cells: [FarCoolerVtCell] = []
+    private var columns = 0
+    private var rows = 0
+    private var displayOffset = -1
+    private var cursor: (row: Int, column: Int, visible: Bool) = (-1, -1, false)
+
+    /// The rows that changed since the last call, or nil for "all of them".
+    mutating func rows(changedIn snapshot: VTSnapshot) -> IndexSet? {
+        defer { remember(snapshot) }
+        guard snapshot.columns == columns, snapshot.rows == rows, snapshot.displayOffset == displayOffset,
+            cells.count == snapshot.cells.count, columns > 0
+        else { return nil }
+
+        var changed = IndexSet()
+        let rowBytes = columns * MemoryLayout<FarCoolerVtCell>.stride
+        cells.withUnsafeBytes { old in
+            let new = UnsafeRawBufferPointer(snapshot.cells)
+            guard let oldBase = old.baseAddress, let newBase = new.baseAddress else { return }
+            for row in 0..<rows where memcmp(oldBase + row * rowBytes, newBase + row * rowBytes, rowBytes) != 0 {
+                changed.insert(row)
+            }
+        }
+        let now = (row: snapshot.cursorRow, column: snapshot.cursorColumn, visible: snapshot.cursorVisible)
+        if now != cursor {
+            for row in [cursor.row, now.row] where (0..<rows).contains(row) { changed.insert(row) }
+        }
+        return changed
+    }
+
+    private mutating func remember(_ snapshot: VTSnapshot) {
+        columns = snapshot.columns
+        rows = snapshot.rows
+        displayOffset = snapshot.displayOffset
+        cursor = (snapshot.cursorRow, snapshot.cursorColumn, snapshot.cursorVisible)
+        cells.removeAll(keepingCapacity: true)
+        cells.append(contentsOf: snapshot.cells)
+    }
+}

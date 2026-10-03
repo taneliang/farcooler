@@ -37,7 +37,8 @@ enum WindowVisibility {
 
 #if DEBUG
     extension WindowVisibility {
-        static let assumeVisible = ProcessInfo.processInfo.environment["FARCOOLER_ASSUME_VISIBLE"] == "1"
+        /// Settable for the tests, which have no window anybody can see.
+        @MainActor static var assumeVisible = ProcessInfo.processInfo.environment["FARCOOLER_ASSUME_VISIBLE"] == "1"
     }
 #endif
 

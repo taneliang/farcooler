@@ -13,6 +13,7 @@ import Testing
 /// window every frame, a display-rate timeline, and terminals drawing into
 /// windows nobody could see. These fail if one of them comes back.
 @MainActor
+@Suite(.serialized)
 struct IdleCostTests {
     // MARK: - Visibility
 
@@ -57,6 +58,61 @@ struct IdleCostTests {
         #expect(breath.keyPath == "opacity")
         #expect(breath.repeatCount == .infinity)
         #expect(breath.autoreverses)
+    }
+
+    // MARK: - Terminals
+
+    private static func paneInWindow() -> (TerminalRenderView, NSWindow) {
+        let view = TerminalRenderView()
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 200), styleMask: [.titled],
+            backing: .buffered, defer: true)
+        window.contentView?.addSubview(view)
+        return (view, window)
+    }
+
+    /// A pane in a window nobody can see doesn't tick, and one that can be
+    /// seen does, until its layout hides it.
+    @Test func aPaneTicksOnlyWhileItCanBeSeen() throws {
+        let (hidden, hiddenWindow) = Self.paneInWindow()
+        let link = try #require(hidden.displayLink, "a pane in a window has no display link")
+        #expect(link.isPaused, "a pane in a window nobody can see is still ticking")
+        _ = hiddenWindow
+
+        WindowVisibility.assumeVisible = true
+        defer { WindowVisibility.assumeVisible = false }
+        let (shown, shownWindow) = Self.paneInWindow()
+        _ = shownWindow
+        #expect(shown.displayLink?.isPaused == false, "a pane in a visible window isn't ticking")
+
+        shown.isShown = false
+        #expect(shown.displayLink?.isPaused == true, "a pane its layout hides is still ticking")
+        shown.isShown = true
+        #expect(shown.displayLink?.isPaused == false, "a pane shown again didn't resume")
+    }
+
+    /// The rows a frame changed, from a real emulator.
+    private static func damaged(after bytes: String, on core: VTCore, _ damage: inout TerminalDamage) -> IndexSet? {
+        core.feed(Array(bytes.utf8))
+        return core.withSnapshot { damage.rows(changedIn: $0) } ?? nil
+    }
+
+    @Test func aFrameRedrawsOnlyTheRowsItChanged() {
+        let core = VTCore(columns: 20, rows: 6)
+        var damage = TerminalDamage()
+        #expect(Self.damaged(after: "one\r\ntwo", on: core, &damage) == nil, "the first frame must draw everything")
+        #expect(Self.damaged(after: "", on: core, &damage) == IndexSet(), "an unchanged frame redrew something")
+
+        // A spinner: the last row rewritten in place, cursor staying on it.
+        let spun = Self.damaged(after: "\r\u{1B}[Kthree", on: core, &damage)
+        #expect(spun == IndexSet(integer: 1), "a rewritten row redrew \(spun.map(Array.init) ?? [])")
+
+        // A new line: the row it lands on, and the row the cursor left.
+        let moved = Self.damaged(after: "\r\nfour", on: core, &damage)
+        #expect(moved == IndexSet([1, 2]), "a new line redrew \(moved.map(Array.init) ?? [])")
+
+        core.resize(columns: 30, rows: 6)
+        #expect(Self.damaged(after: "", on: core, &damage) == nil, "a resize must draw everything")
     }
 
     // MARK: - The sources

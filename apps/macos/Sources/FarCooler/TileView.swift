@@ -188,6 +188,12 @@ struct TileView: View {
                                 .frame(width: frame.width, height: frame.height)
                                 .offset(x: frame.minX, y: frame.minY)
                                 .opacity(group.zoomed == nil || rect.zoomed ? 1 : 0)
+                                // Kept streaming under the zoomed pane, but not
+                                // drawing, and not taking the keyboard (ov-229).
+                                // Added to whatever already hid it, never in
+                                // place of it: a tile view on a hidden tab is
+                                // out of sight zoomed or not.
+                                .transformEnvironment(\.outOfSight) { $0 = $0 || (group.zoomed != nil && !rect.zoomed) }
                                 .zIndex(rect.zoomed ? 1 : 0)
                                 // A pane joining or leaving grows and fades rather
                                 // than appearing at full size, which at four panes
