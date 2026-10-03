@@ -248,10 +248,22 @@ impl From<EndReasonWire> for EndReason {
 /// - `http_status`: the provider's status, when the backend forwards it
 ///   (Claude's `api_error_status`, codex's `httpStatusCode`).
 /// - `message`: the human sentence, read for a few well-known phrases only
-///   when nothing better said what happened.
+///   when nothing better said what happened. A LAST resort, and a loose one:
+///   the phrases are wide substrings ("network", "quota", "/login"), so a
+///   sentence that merely mentions one of them can land on the wrong kind.
+///   It is reached for every ACP error but -32000, a refused codex
+///   `turn/start`, and a Claude result with no `error` word or status.
 ///
 /// Unrecognized is `Other`, never a guess.
 pub fn classify_error(code: Option<&str>, http_status: Option<u16>, message: &str) -> FailureKind {
+    // A connection word with a status is a connection that DID get an
+    // answer, and the answer is the more specific of the two: codex sends
+    // `{"httpConnectionFailed":{"httpStatusCode":429}}` for a rate limit.
+    if code.and_then(kind_from_code) == Some(FailureKind::Network)
+        && let Some(kind) = http_status.and_then(kind_from_status)
+    {
+        return kind;
+    }
     if let Some(kind) = code.and_then(kind_from_code) {
         return kind;
     }
@@ -268,7 +280,7 @@ fn kind_from_code(code: &str) -> Option<FailureKind> {
         code.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_lowercase();
     Some(match word.as_str() {
         "authenticationfailed" | "authenticationerror" | "unauthorized" | "authrequired"
-        | "permissionerror" | "invalidapikey" => FailureKind::Auth,
+        | "permissionerror" | "invalidapikey" | "oauthorgnotallowed" => FailureKind::Auth,
         "billingerror" | "usagelimitexceeded" | "sessionbudgetexceeded" | "insufficientquota"
         | "errormaxbudgetusd" | "creditbalancetoolow" => FailureKind::Quota,
         "ratelimit" | "ratelimiterror" | "ratelimited" | "toomanyrequests" => {
@@ -603,6 +615,8 @@ mod tests {
         assert_eq!(k(Some("usageLimitExceeded"), None, ""), FailureKind::Quota);
         assert_eq!(k(Some("serverOverloaded"), None, ""), FailureKind::Overloaded);
         assert_eq!(k(Some("httpConnectionFailed"), None, ""), FailureKind::Network);
+        assert_eq!(k(Some("httpConnectionFailed"), Some(429), ""), FailureKind::RateLimited);
+        assert_eq!(k(Some("oauth_org_not_allowed"), None, ""), FailureKind::Auth);
         // The code wins over a message that says something else.
         assert_eq!(k(Some("rate_limit"), Some(401), "Invalid API key"), FailureKind::RateLimited);
         // Only words, when nothing better was said.

@@ -223,7 +223,9 @@ impl Live {
             }
             "assistant" => {
                 self.spend.observe(frame);
-                if let Some(code) = api_error_of(frame) {
+                // Every `error` word, `max_output_tokens` included: that one
+                // is not hidden, but it still decides how the turn ended.
+                if let Some(code) = frame["error"].as_str().filter(|c| !c.is_empty()) {
                     self.api_error = Some(code.to_string());
                 }
                 let drawn = frame["message"]["id"]
@@ -578,11 +580,19 @@ fn tool_locations(input: &serde_json::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The `SDKAssistantMessageError` that is an ending, not a failure.
+const MAX_OUTPUT_TOKENS: &str = "max_output_tokens";
+
 /// The `error` word on an assistant frame that reports a failed API call
 /// rather than an answer (`SDKAssistantMessage.error` in the SDK's types).
 /// The on-disk transcript marks the same record `isApiErrorMessage`.
+///
+/// `max_output_tokens` is the exception. It is in the same type, but it is not
+/// a failure: the answer ran out of room, and the CLI's notice saying so is the
+/// only explanation the person gets. The turn ends `MaxTokens`.
 fn api_error_of(frame: &serde_json::Value) -> Option<&str> {
     match frame["error"].as_str() {
+        Some(MAX_OUTPUT_TOKENS) => None,
         Some(code) if !code.is_empty() => Some(code),
         _ if frame["isApiErrorMessage"].as_bool() == Some(true) => Some("unknown"),
         _ => None,
@@ -604,8 +614,11 @@ fn turn_failed(frame: &serde_json::Value) -> bool {
 /// `code` is the word the turn's API-error `assistant` frame carried, when the
 /// caller saw one. A Stop still reads as `Cancelled` whatever else is set.
 fn result_reason(frame: &serde_json::Value, code: Option<&str>) -> EndReason {
+    if code == Some(MAX_OUTPUT_TOKENS) {
+        return EndReason::MaxTokens;
+    }
     let reason = end_reason(frame["stop_reason"].as_str().unwrap_or_default());
-    if reason == EndReason::Cancelled || !turn_failed(frame) {
+    if matches!(reason, EndReason::Cancelled | EndReason::MaxTokens) || !turn_failed(frame) {
         return reason;
     }
     let detail = match &frame["result"] {
@@ -1385,6 +1398,38 @@ mod tests {
         assert!(matches!(end_reason("something"), EndReason::EndTurn));
         assert!(matches!(end_reason("interrupted"), EndReason::Cancelled));
         assert!(matches!(end_reason("max_output_tokens"), EndReason::MaxTokens));
+    }
+
+    #[test]
+    fn running_out_of_output_room_is_max_tokens_and_keeps_its_notice() {
+        // `max_output_tokens` is in `SDKAssistantMessageError` beside the real
+        // failures. Read as one, a truncated answer lost the CLI's notice
+        // saying why and ended `Failed`.
+        let mut live = Live::default();
+        let notice = serde_json::json!({
+            "type": "assistant", "error": "max_output_tokens",
+            "message": { "id": "m1", "model": "<synthetic>",
+                         "content": [{ "type": "text", "text": "Claude's response exceeded the output token maximum." }] }
+        });
+        assert!(matches!(
+            live.frame_to_events(&notice).as_slice(),
+            [AgentEvent::Message { role: Role::Agent, .. }]
+        ));
+        let result = serde_json::json!({
+            "type": "result", "subtype": "success", "is_error": true, "stop_reason": null
+        });
+        assert_eq!(
+            live.frame_to_events(&result),
+            [AgentEvent::TurnEnded { reason: EndReason::MaxTokens }]
+        );
+        // And with no frame before it, a result that says so itself.
+        let said = serde_json::json!({
+            "type": "result", "is_error": true, "stop_reason": "max_tokens"
+        });
+        assert_eq!(
+            Live::default().frame_to_events(&said),
+            [AgentEvent::TurnEnded { reason: EndReason::MaxTokens }]
+        );
     }
 
     #[test]
