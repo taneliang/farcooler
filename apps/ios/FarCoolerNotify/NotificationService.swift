@@ -41,23 +41,21 @@ final class NotificationService: UNNotificationServiceExtension {
         // sentence and it is already right.
         defer { contentHandler(request.content) }
 
-        let info = request.content.userInfo
-        guard
-            let terminal = info["terminal"] as? String, !terminal.isEmpty,
-            let status = info["status"] as? String, !status.isEmpty
-        else { return }
-
-        let label = info["label"] as? String ?? ""
-        // How the turn ENDED, which `status` cannot say: a turn that died
-        // arrives as `done` exactly as a turn that finished does, because both
-        // are over and the relay treats them the same. See
-        // `push::Notification::failed` for why it is a field rather than a
-        // fourth status.
+        // The four keys the relay writes beside `aps`, read by `AgentPush`,
+        // which AgentKit's tests decode the relay's own payloads with
+        // (`test/fixtures/contracts/push/apns/`). A push with no terminal or
+        // no status is a task notice or an older runner's, and changes
+        // nothing here.
         //
-        // Absent for a runner or a relay built before the field, and absent
-        // reads as `false` — the behavior this extension always had, which is
-        // the right way for an optional field to be missing.
-        let failed = info["failed"] as? Bool ?? false
+        // `failed` is how the turn ENDED, which `status` cannot say: a turn
+        // that died arrives as `done` exactly as a turn that finished does.
+        // See `push::Notification::failed` for why it is a field rather than
+        // a fourth status. Absent reads as `false`.
+        guard let push = AgentPush(userInfo: request.content.userInfo) else { return }
+        let terminal = push.terminal
+        let status = push.status
+        let label = push.label
+        let failed = push.failed
         let now = Date()
         // Nothing on disk yet means nothing has ever polled, and a snapshot
         // built from here is partial by definition — `FleetSnapshot.empty`

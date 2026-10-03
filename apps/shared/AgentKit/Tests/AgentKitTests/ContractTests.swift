@@ -42,10 +42,16 @@ enum Contracts {
         return try #require(try JSONSerialization.jsonObject(with: data) as? NSDictionary)
     }
 
+    struct RewritingUnderCI: Error {}
+
     /// `FARCOOLER_WRITE_CONTRACTS=1` rewrites a producer's fixture instead of
-    /// comparing. Only for a deliberate change, reviewed in the diff.
+    /// comparing. Only for a deliberate change, reviewed in the diff, and
+    /// refused under CI, where a producer that rewrote its fixture would pass
+    /// by definition.
     static func write(_ value: [String: Any], to path: String) throws {
-        guard ProcessInfo.processInfo.environment["FARCOOLER_WRITE_CONTRACTS"] != nil else { return }
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["FARCOOLER_WRITE_CONTRACTS"] != nil else { return }
+        guard environment["CI"] != "true" else { throw RewritingUnderCI() }
         var data = try JSONSerialization.data(
             withJSONObject: value, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         data.append(0x0a)
@@ -93,6 +99,57 @@ struct RegistrationContractTests {
     }
 }
 
+struct ActivityRegistrationContractTests {
+    /// What `registerActivityToken` sends for a card's token, for a card a
+    /// person swiped away, and for one that ended any other way
+    /// (`LiveActivities.watch` in the iOS app).
+    static func produced(_ name: String) -> [String: Any]? {
+        let terminal = "term-01999a8f2c4e"
+        return switch name {
+        case "running": Account.activityRegistration(
+            terminal: terminal,
+            updateToken: "80f1c2d3e4b5a6978869504132a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7",
+            environment: "production", dismissed: false)
+        case "dismissed": Account.activityRegistration(
+            terminal: terminal, updateToken: nil, environment: "production", dismissed: true)
+        case "ended": Account.activityRegistration(
+            terminal: terminal, updateToken: nil, environment: "production", dismissed: false)
+        default: nil
+        }
+    }
+
+    @Test("Each activity fixture is what registerActivityToken sends", arguments: ["running", "dismissed", "ended"])
+    func eachActivityIsWhatRegisterActivityTokenSends(name: String) throws {
+        let payload = try #require(Self.produced(name))
+        let path = "activity/\(name).json"
+        try Contracts.write(payload, to: path)
+        let fixture = try Contracts.json(Contracts.object(path))
+        #expect(try Contracts.json(payload) == fixture, "\(path) is not what Account.activityRegistration sends")
+    }
+
+    @Test("Every activity fixture has a producer")
+    func everyFixtureHasAProducer() throws {
+        #expect(try Contracts.names("activity") == ["dismissed", "ended", "running"])
+    }
+}
+
+struct PulseContractTests {
+    @Test("The relay's pulse answer decodes to the runner that beat")
+    func thePulseDecodes() throws {
+        let pulses = try #require(RunnerPulse.decode(Contracts.data("pulse/response.json")))
+        #expect(pulses.count == 1)
+        let pulse = try #require(pulses.first)
+        #expect(pulse.label == "Studio")
+        #expect(pulse.name == "Studio")
+        #expect(pulse.heardAgo == 90_000)
+        #expect(pulse.beatEvery == 300)
+        // The relay's per-account key over the beat's runner id, which a
+        // phone makes too (ov-71).
+        #expect(pulse.runner == RunnerPulse.key(account: "user_1", runner: runner))
+        #expect(!pulse.isQuiet)
+    }
+}
+
 struct PushContractTests {
     /// What each alert the relay sends an Apple device opens, and the task
     /// notice it carries. Every fixture must have a line here.
@@ -126,7 +183,19 @@ struct PushContractTests {
         let want = try #require(Self.expected[name])
         #expect(PushTap(userInfo: userInfo, thread: thread) == want.tap)
         #expect(TaskNotice(userInfo: userInfo) == want.notice)
+        #expect(AgentPush(userInfo: userInfo) == Self.agents[name] ?? nil)
     }
+
+    /// What the notification service extension folds into the widget from
+    /// each: an agent's pane, status, name and how its turn ended, or nothing
+    /// for a task notice.
+    static let agents: [String: AgentPush?] = [
+        "agent-blocked": AgentPush(terminal: "term-01999a8f2c4e", status: "blocked", label: "claude", failed: false),
+        "agent-done-failed": AgentPush(terminal: "term-01999a90aa10", status: "done", label: "codex", failed: true),
+        "decision-legacy": nil,
+        "task-decision": nil,
+        "task-review": nil,
+    ]
 }
 
 struct LiveActivityContractTests {
@@ -174,5 +243,26 @@ struct LiveActivityContractTests {
         #expect(row.updatedAt == Date(timeIntervalSince1970: 1_791_019_800))
         #expect(row.trace?.count == 66, "the daemon's 66 trace bytes, base64")
         #expect(row.traceAnchor == 5_970_066)
+    }
+
+    @Test("A running card's update and end carry the card the app decodes")
+    func aRunningCardUpdatesAndEnds() throws {
+        #expect(try Contracts.names("live-activity/running") == ["end", "update"])
+
+        let update = try #require(try Contracts.object("live-activity/running/update.json")["aps"] as? [String: Any])
+        #expect(update["event"] as? String == "update")
+        #expect(update["attributes"] == nil, "APNs refuses an update that repeats the attributes")
+        let state = try JSONSerialization.data(withJSONObject: try #require(update["content-state"]))
+        let card = try JSONDecoder().decode(AgentCardState.self, from: state)
+        #expect(card.status == "working")
+        #expect(card.terminal == "term-01999a8f2c4e")
+        #expect(card.detail == "3/7 · Designing test matrix")
+        #expect(card.rows.first?.traceAnchor == 5_970_066)
+
+        let end = try #require(try Contracts.object("live-activity/running/end.json")["aps"] as? [String: Any])
+        #expect(end["event"] as? String == "end")
+        #expect(end["dismissal-date"] as? Int == 1_791_019_800, "taken down now: the retire's `immediate`")
+        let over = try JSONSerialization.data(withJSONObject: try #require(end["content-state"]))
+        #expect(try JSONDecoder().decode(AgentCardState.self, from: over).status == "done")
     }
 }

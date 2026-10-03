@@ -446,11 +446,6 @@ public final class Account: NSObject, ObservableObject {
     public func registerActivityToken(
         terminal: String, updateToken: String?, environment: String, dismissed: Bool = false
     ) async -> Result<Void, AccountError> {
-        // NSNull rather than leaving the key out or passing the Optional along:
-        // JSONSerialization throws on a bare `Optional.none`, and an absent key
-        // reads to the relay as "no change" — but clearing is the entire point
-        // of the nil case.
-        let update: Any = updateToken.map { $0 as Any } ?? NSNull()
         // Nothing reads this result — the two callers in `LiveActivities` are
         // reporting a token, not asking a question. It carries the cause
         // anyway so there is ONE vocabulary here rather than a Bool for the
@@ -458,11 +453,26 @@ public final class Account: NSObject, ObservableObject {
         // failure still reaches `lastRelayFailure` and the log either way.
         return await authenticatedPost(
             "/v1/devices/activity",
-            [
-                "terminal": terminal, "updateToken": update, "environment": environment,
-                "dismissed": dismissed,
-            ]
+            Self.activityRegistration(
+                terminal: terminal, updateToken: updateToken, environment: environment, dismissed: dismissed)
         ).map { _ in () }
+    }
+
+    /// What `registerActivityToken` sends the relay's `/v1/devices/activity`.
+    /// Pinned by `test/fixtures/contracts/activity/`, which the relay's suite
+    /// files (ov-121).
+    nonisolated static func activityRegistration(
+        terminal: String, updateToken: String?, environment: String, dismissed: Bool
+    ) -> [String: Any] {
+        // NSNull rather than leaving the key out or passing the Optional along:
+        // JSONSerialization throws on a bare `Optional.none`, and an absent key
+        // reads to the relay as "no change" — but clearing is the entire point
+        // of the nil case.
+        let update: Any = updateToken.map { $0 as Any } ?? NSNull()
+        return [
+            "terminal": terminal, "updateToken": update, "environment": environment,
+            "dismissed": dismissed,
+        ]
     }
 
     /// Ask for a token that lets one runner notify this account.

@@ -212,3 +212,39 @@ public enum TaskDecisionActions {
         }
     #endif
 }
+
+/// An agent's alert push, as the notification service extension folds it into
+/// the widget snapshot: the pane, its status word, the agent's name, and
+/// whether its turn ended badly.
+///
+/// The relay's `sendApns` writes these four keys beside `aps`; nil for a push
+/// with no terminal or no status, which is a task notice or a push from a
+/// runner too old to send a status. Here rather than in the extension so
+/// AgentKit's tests can decode `test/fixtures/contracts/push/apns/` with the
+/// same code the extension runs (ov-121). Lives in this file because the
+/// extension already compiles it (`apps/ios/generate-project.py`).
+public struct AgentPush: Equatable, Sendable {
+    public let terminal: String
+    public let status: String
+    /// Empty when the push names none.
+    public let label: String
+    /// Absent reads as `false`: a runner or relay older than the field, and
+    /// the behavior the extension always had.
+    public let failed: Bool
+
+    public init(terminal: String, status: String, label: String, failed: Bool) {
+        self.terminal = terminal
+        self.status = status
+        self.label = label
+        self.failed = failed
+    }
+
+    public init?(userInfo: [AnyHashable: Any]) {
+        guard let terminal = userInfo["terminal"] as? String, !terminal.isEmpty,
+            let status = userInfo["status"] as? String, !status.isEmpty
+        else { return nil }
+        self.init(
+            terminal: terminal, status: status, label: userInfo["label"] as? String ?? "",
+            failed: userInfo["failed"] as? Bool ?? false)
+    }
+}
