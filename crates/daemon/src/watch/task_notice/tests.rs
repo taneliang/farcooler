@@ -47,11 +47,12 @@ fn note(svc: &Service, watcher: &Watcher, task: Uuid, kind: pb::TaskNoteKind, ac
 }
 
 /// Every task notice tapped until the composer has long gone quiet, in
-/// order. Count notices, which the same writes cause, are left out.
+/// order, whether it went as `kind: "task"` or as a legacy decision: both
+/// carry a class. Count notices, which the same writes cause, are left out.
 async fn task_notices(taps: &mut tokio::sync::mpsc::UnboundedReceiver<Tapped>) -> Vec<Tapped> {
     let mut heard = Vec::new();
     while let Ok(Some(tap)) = tokio::time::timeout(AT_MOST * 3, taps.recv()).await {
-        if tap.kind == Some("task") {
+        if tap.event.is_some() {
             heard.push(tap);
         }
     }
@@ -169,10 +170,15 @@ async fn a_decision_sends_at_once_with_its_question_and_options() {
     move_to(&svc, &watcher, task.id, pb::TaskStatus::NeedsDecision, "manager");
     let first = loop {
         let tap = taps.recv().await.expect("a notice");
-        if tap.kind == Some("task") {
+        if tap.event.is_some() {
             break tap;
         }
     };
+    // As a legacy decision, so a relay or an app older than task notices
+    // still alerts and opens it, carrying the task notice's own fields.
+    assert_eq!(first.kind, Some("decision"));
+    let runner = crate::service::stable_host_id(svc.install_id()).to_string();
+    assert_eq!(first.notice_id, Some(notice_id(&runner, &task)));
     assert!(began.elapsed() < QUIET_FOR, "waited {:?} on a decision", began.elapsed());
     assert_eq!(first.event, Some("decision"));
     assert_eq!(first.level, Some("time-sensitive"));
@@ -380,4 +386,58 @@ async fn the_notice_event_reaches_every_client_paired_or_not() {
     assert_eq!(notice.task_key, task.key);
     assert!(notice.notice_id.starts_with("t:"));
     assert_eq!(notice.title, format!("{} Heard", task.key));
+}
+
+#[tokio::test]
+async fn a_follow_up_question_in_the_same_status_is_news_and_a_repeat_is_not() {
+    let (_dir, svc, workspace, _, _) = a_runner().await;
+    let watcher = Watcher::new(svc.clone());
+    let task = svc.store.create_task(workspace, "Pick", Actor::User).unwrap();
+    let mut taps = watcher.tap_notices();
+    tokio::time::pause();
+    note(&svc, &watcher, task.id, pb::TaskNoteKind::Question, "manager", "Which library?", "");
+    move_to(&svc, &watcher, task.id, pb::TaskStatus::NeedsDecision, "manager");
+    let first = task_notices(&mut taps).await;
+    assert_eq!(first.len(), 1, "{first:#?}");
+    note(&svc, &watcher, task.id, pb::TaskNoteKind::Answer, "user", "pdfkit", "");
+    // Asked again, the task never having left Needs Decision.
+    note(&svc, &watcher, task.id, pb::TaskNoteKind::Question, "manager", "Which version?", "");
+    let second = task_notices(&mut taps).await;
+    assert_eq!(second.len(), 1, "a follow-up question buzzes: {second:#?}");
+    assert_eq!(second[0].subtitle, "Needs your decision · Which version?");
+    // The same question, told again, is not.
+    let task = svc.store.get_task(task.id).unwrap();
+    watcher.task_event(&task, TaskEvent::Asked, Actor::Manager);
+    assert_eq!(task_notices(&mut taps).await, Vec::<Tapped>::new());
+}
+
+#[tokio::test]
+async fn a_second_blocker_in_the_same_status_is_news() {
+    let (_dir, svc, workspace, _, _) = a_runner().await;
+    let watcher = Watcher::new(svc.clone());
+    let task = svc.store.create_task(workspace, "Waiting", Actor::User).unwrap();
+    let a = svc.store.create_task(workspace, "A", Actor::User).unwrap();
+    let b = svc.store.create_task(workspace, "B", Actor::User).unwrap();
+    let block = |by: Uuid| {
+        crate::task_ops::block(
+            &svc,
+            &watcher,
+            &pb::TaskBlockSet {
+                task_id: crate::wire::id_bytes(task.id),
+                blocked_by: crate::wire::id_bytes(by),
+                reason: None,
+                actor: "manager".into(),
+                clear: false,
+            },
+        )
+        .unwrap();
+    };
+    let mut taps = watcher.tap_notices();
+    tokio::time::pause();
+    block(a.id);
+    assert_eq!(task_notices(&mut taps).await.len(), 1);
+    block(b.id);
+    let heard = task_notices(&mut taps).await;
+    assert_eq!(heard.len(), 1, "{heard:#?}");
+    assert_eq!(heard[0].subtitle, format!("Blocked on {}", b.key));
 }

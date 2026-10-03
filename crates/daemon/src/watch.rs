@@ -8428,7 +8428,10 @@ mod needs_you_push_tests {
         .unwrap();
         // Now as its task's notice (ov-94): `kind: "task"`, class decision.
         let sent = next(&mut taps).await.expect("a decision pushes");
-        assert_eq!((sent.kind, sent.event), (Some("task"), Some("decision")));
+        // Still `kind: "decision"` for older relays and apps, with the task
+        // notice's fields beside it (ov-94, `task_notice::LEGACY_DECISION`).
+        assert_eq!((sent.kind, sent.event), (Some("decision"), Some("decision")));
+        assert!(sent.notice_id.as_deref().is_some_and(|id| id.starts_with("t:")));
         assert_eq!(sent.terminal, None, "a decision is about a task, not a pane");
         assert_eq!(sent.task.as_deref(), Some(task.key.as_str()));
         assert_eq!(sent.title, format!("{} Pick a PDF library", task.key));

@@ -156,6 +156,26 @@ pub(crate) struct Composed {
     /// Whether this is news about the task's status, told once per status:
     /// an agent's news isn't, and may come again.
     pub of_status: bool,
+    /// What, within the status, this news is about: a decision's QUESTION
+    /// note, a block's blocker. Part of what is told once, so a follow-up
+    /// question, or a second blocker, in the same status is news again.
+    pub about: Option<Uuid>,
+}
+
+/// Whether a status decision also goes out as `kind: "decision"`, carrying
+/// the task notice's fields: a relay older than ov-94 alerts only on that
+/// kind, and an older app's tap opens a task only from it. A relay of this
+/// era reads it as a task notice, so it alerts once either way. An agent's
+/// fold stays `kind: "task"`: an old relay already alerts on its agent
+/// notice, and a decision as well would be twice.
+///
+/// TODO(ov-94): remove after one stable release has shipped the relay and
+/// apps that read `kind: "task"`, with the relay's `legacyDecision` reading.
+pub(crate) const LEGACY_DECISION: bool = true;
+
+/// The wire kind `composed` goes out as. See `LEGACY_DECISION`.
+pub(crate) fn wire_kind(composed: &Composed) -> &'static str {
+    if LEGACY_DECISION && composed.of_status && composed.class == Class::Decision { "decision" } else { "task" }
 }
 
 /// The id every platform files `task`'s notices under: `t:<runner>:<key>`,
@@ -296,7 +316,10 @@ impl Watcher {
         let Some(composed) = self.compose(&task, &pending).await else { return };
         if composed.of_status {
             let mut told = self.task_told.lock().unwrap_or_else(|e| e.into_inner());
-            let this = (composed.class, task.status_since);
+            // Told before it is sent, on purpose: a relay that refused it
+            // isn't asked again for the same news, which would buzz twice if
+            // the refusal was only a slow 200.
+            let this = (composed.class, task.status_since, composed.about);
             if told.get(&id) == Some(&this) {
                 return;
             }
@@ -310,8 +333,8 @@ impl Watcher {
     async fn compose(&self, task: &Task, pending: &Pending) -> Option<Composed> {
         let store = &self.service.store;
         let mut found: Vec<Composed> = Vec::new();
-        let status = |class, body: String| Composed { class, body, options: Vec::new(), of_status: true };
-        let agent = |class, body: String| Composed { class, body, options: Vec::new(), of_status: false };
+        let status = |class, body: String| Composed { class, body, options: Vec::new(), of_status: true, about: None };
+        let agent = |class, body: String| Composed { class, body, options: Vec::new(), of_status: false, about: None };
 
         if (pending.asked || pending.moved.contains(&TaskStatus::NeedsDecision))
             && task.status == TaskStatus::NeedsDecision
@@ -332,6 +355,7 @@ impl Watcher {
                     },
                     options: question.map(options_of).unwrap_or_default(),
                     of_status: true,
+                    about: question.map(|q| q.id),
                 });
             }
         }
@@ -375,14 +399,17 @@ impl Watcher {
                     continue;
                 }
                 let reason = edge.reason.trim();
-                found.push(status(
-                    Class::Blocked,
-                    if reason.is_empty() {
-                        format!("Blocked on {}", blocker.key)
-                    } else {
-                        format!("Blocked on {} · {}", blocker.key, quoted(reason))
-                    },
-                ));
+                found.push(Composed {
+                    about: Some(blocker.id),
+                    ..status(
+                        Class::Blocked,
+                        if reason.is_empty() {
+                            format!("Blocked on {}", blocker.key)
+                        } else {
+                            format!("Blocked on {} · {}", blocker.key, quoted(reason))
+                        },
+                    )
+                });
                 break;
             }
         }
@@ -434,8 +461,9 @@ impl Watcher {
         });
         let Some(pairing) = self.audience() else { return };
         let count = self.needs_you_count().await;
+        let kind = wire_kind(&composed);
         self.tap(Tapped {
-            kind: Some("task"),
+            kind: Some(kind),
             title: title.clone(),
             task: Some(task.key.clone()),
             workspace: workspace.clone(),
@@ -448,7 +476,7 @@ impl Watcher {
             ..Tapped::default()
         });
         let outgoing = crate::push::Outgoing {
-            kind: Some("task"),
+            kind: Some(kind),
             title: &title,
             subtitle: &composed.body,
             task: Some(&task.key),
@@ -489,7 +517,7 @@ fn done_body(notes: &[TaskNote]) -> String {
 
 /// The two maps the composer keeps on the watcher.
 pub(crate) type Windows = HashMap<Uuid, Pending>;
-pub(crate) type Told = HashMap<Uuid, (Class, i64)>;
+pub(crate) type Told = HashMap<Uuid, (Class, i64, Option<Uuid>)>;
 
 #[cfg(test)]
 mod tests;
