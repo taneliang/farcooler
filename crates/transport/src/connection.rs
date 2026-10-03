@@ -362,6 +362,25 @@ type Lane = Option<Bytes>;
 ///
 /// Responses go out as requests finish, so they may arrive in a different order
 /// from the requests; `request_id` is what pairs them, as it always was.
+///
+/// **What order is guaranteed, for a client that pipelines.** None does today:
+/// `Client::call` holds the reader for the length of one request, the mobile
+/// `Session` is behind a mutex, and the CLI is one call per process. A client
+/// that starts to must rely on exactly this and no more:
+///
+/// - Two requests with byte-equal `target_resource_id` run one after the
+///   other, in the order they were sent. Everything that acts on one terminal
+///   names it — write, paste, resize, attach, the agent calls — so those keep
+///   their order.
+/// - Two requests with no target run in the order they were sent.
+/// - Nothing else is ordered. A create targets its PARENT (the repository or
+///   worktree), not what it creates; stopping a terminal and then removing its
+///   worktree name two different targets; two attaches to two terminals race
+///   for the connection's one attachment, and the one that finishes last wins.
+///   A client that needs one of those in order waits for the first answer.
+///
+/// And a request that was started is finished, whatever happens to the
+/// connection. See `Ending`.
 pub async fn serve_connection<R, H>(
     conn: &mut Connection<R>,
     cfg: &HandshakeConfig,
@@ -403,7 +422,7 @@ where
     let mut lanes: HashMap<Lane, VecDeque<Request>> = HashMap::new();
     let mut in_flight = 0usize;
 
-    loop {
+    let (outcome, ending) = loop {
         // Read before the `select!`, because `conn.recv()` below holds `conn`.
         let push_room = conn.queued_bytes() < PUSH_HIGH_WATER;
 
@@ -416,22 +435,22 @@ where
             // that must win a tie: a revoked device whose request is already
             // sitting in the socket buffer would otherwise be served it, and
             // the whole point of closing the connection is that it is not.
-            // Requests still running are dropped with the loop, unanswered.
+            // What is already running is finished, unanswered: see `Ending`.
             biased;
 
             _ = &mut closed => {
                 tracing::debug!(client = ?peer.client_id, "this connection was closed from above");
-                return Ok(());
+                break (Ok(()), Ending::Revoked);
             }
 
             (lane, request_id, mut response) = next_finished(&mut running) => {
                 response.request_id = request_id;
-                conn.send(&WireEnvelope {
+                in_flight -= 1;
+                let sent = conn.send(&WireEnvelope {
                     protocol_version: PROTOCOL_VERSION,
                     message_id: ids::new_id(),
                     body: Some(wire_envelope::Body::Response(response)),
-                }).await?;
-                in_flight -= 1;
+                }).await;
 
                 // The next request in this lane, now that the one ahead of it
                 // has finished.
@@ -442,13 +461,19 @@ where
                         lanes.remove(&lane);
                     }
                 }
+                if let Err(err) = sent {
+                    break (Err(err), Ending::Unanswerable);
+                }
             }
 
             incoming = conn.recv(), if in_flight < MAX_REQUESTS_IN_FLIGHT => {
-                let envelope = incoming?;
+                let envelope = match incoming {
+                    Ok(envelope) => envelope,
+                    Err(err) => break (Err(err), Ending::NoMoreRequests),
+                };
                 let request = match envelope.body {
                     Some(wire_envelope::Body::Request(req)) => req,
-                    _ => return Err(ConnectionError::UnexpectedFrame),
+                    _ => break (Err(ConnectionError::UnexpectedFrame), Ending::NoMoreRequests),
                 };
                 in_flight += 1;
                 let lane: Lane = request.target_resource_id.clone();
@@ -469,11 +494,13 @@ where
                     events = None;
                     continue;
                 };
-                conn.send(&WireEnvelope {
+                if let Err(err) = conn.send(&WireEnvelope {
                     protocol_version: PROTOCOL_VERSION,
                     message_id: ids::new_id(),
                     body: Some(wire_envelope::Body::Event(event)),
-                }).await?;
+                }).await {
+                    break (Err(err), Ending::Unanswerable);
+                }
             }
 
             // Last in the biased order, behind the broadcast, so a pane writing
@@ -492,11 +519,13 @@ where
                     pushes = None;
                     continue;
                 };
-                conn.send(&WireEnvelope {
+                if let Err(err) = conn.send(&WireEnvelope {
                     protocol_version: PROTOCOL_VERSION,
                     message_id: ids::new_id(),
                     body: Some(wire_envelope::Body::Event(event)),
-                }).await?;
+                }).await {
+                    break (Err(err), Ending::Unanswerable);
+                }
             }
 
             // The writer put something on the wire, so there may be room for
@@ -504,8 +533,79 @@ where
             // nothing itself: going round the loop re-reads `push_room`.
             _ = written.notified(), if !push_room && pushes.is_some() => {}
         }
+    };
+
+    // Nothing new is read from here on. What was already received is finished
+    // rather than cancelled — see `Ending` for why, and for which of it.
+    drop(pushes);
+    drop(events);
+    let drain = async {
+        let mut answering = ending == Ending::NoMoreRequests;
+        if ending == Ending::Revoked {
+            lanes.clear();
+        }
+        while !running.is_empty() {
+            let (lane, request_id, mut response) = next_finished(&mut running).await;
+            if answering {
+                response.request_id = request_id;
+                answering = conn
+                    .send(&WireEnvelope {
+                        protocol_version: PROTOCOL_VERSION,
+                        message_id: ids::new_id(),
+                        body: Some(wire_envelope::Body::Response(response)),
+                    })
+                    .await
+                    .is_ok();
+            }
+            if let Some(request) = lanes.get_mut(&lane).and_then(VecDeque::pop_front) {
+                running.push(Box::pin(dispatch(handler, lane, request)));
+            }
+        }
+    };
+    let finished = tokio::time::timeout(DRAIN_DEADLINE, drain).await;
+    if finished.is_err() {
+        tracing::warn!(
+            client = ?peer.client_id,
+            "requests still running when the connection ended were abandoned at the deadline"
+        );
     }
+    outcome
 }
+
+/// How a connection's loop ended, which decides what becomes of the requests
+/// it had already received.
+///
+/// They used to be safe by construction: the loop awaited each one inline, so a
+/// request that had started always finished. Running them alongside each other
+/// put them in a list the loop owns, and returning from the loop dropped them
+/// part-way through — a `terminal.create` whose store row was written and whose
+/// tmux window never was, because the phone that asked went out of signal in
+/// between. So every ending finishes what was started, and the endings differ
+/// only in what else they owe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ending {
+    /// The client stopped sending — an EOF, a half-close, a broken frame. Its
+    /// requests were received and are all run, queued ones included, and
+    /// answered while the write side still takes answers. A client that sends
+    /// its request and then closes its write half (`runner_pipe`) still gets
+    /// its answer.
+    NoMoreRequests,
+    /// The connection cannot be written to. Everything received is still run,
+    /// for its effects, and nothing is answered.
+    Unanswerable,
+    /// The connection was closed from above — a device revoked. Nothing new is
+    /// served, and that includes requests queued behind a running one: they
+    /// were received but never started, so nothing is half done by dropping
+    /// them. What was running is finished, unanswered.
+    Revoked,
+}
+
+/// How long a connection that has ended waits for the requests it was running.
+///
+/// The backstop, not the mechanism: requests finish in milliseconds to seconds.
+/// It exists for one that is waiting on something that will not come, which
+/// would otherwise keep a dead connection's task alive forever.
+pub const DRAIN_DEADLINE: Duration = Duration::from_secs(30);
 
 /// One request, answered, and labeled with what the loop needs to file the
 /// answer: the lane to release, and the id to echo.

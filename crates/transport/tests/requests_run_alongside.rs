@@ -22,17 +22,33 @@ struct Handlers {
     typed: Arc<Mutex<Vec<String>>>,
     /// Zero permits until the test releases `slow`.
     slow: Arc<tokio::sync::Semaphore>,
+    /// Closed to end the connection from above, as revoking a device does.
+    revoked: Arc<tokio::sync::Semaphore>,
+    /// What `terminal.create` got done: a row, then a window.
+    created: Arc<Mutex<Vec<&'static str>>>,
 }
 
 impl Default for Handlers {
     fn default() -> Self {
-        Self { typed: Arc::default(), slow: Arc::new(tokio::sync::Semaphore::new(0)) }
+        Self {
+            typed: Arc::default(),
+            slow: Arc::new(tokio::sync::Semaphore::new(0)),
+            revoked: Arc::new(tokio::sync::Semaphore::new(0)),
+            created: Arc::default(),
+        }
     }
 }
 
 impl Handler for Handlers {
     fn peer(&self) -> Peer {
         Peer { client_id: None, scope: v1::Scope::Control }
+    }
+
+    fn closed(&self) -> impl std::future::Future<Output = ()> + Send {
+        let revoked = self.revoked.clone();
+        async move {
+            let _ = revoked.acquire().await;
+        }
     }
 
     fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
@@ -50,6 +66,14 @@ impl Handler for Handlers {
                     let (delay, _) = text.split_once(':').unwrap();
                     tokio::time::sleep(Duration::from_millis(delay.parse().unwrap())).await;
                     this.typed.lock().unwrap().push(text);
+                }
+                // The shape of `Service::open_terminal`: a store row, an await,
+                // then the tmux window. Cut between the two, a row with no
+                // window is left behind.
+                "terminal.create" => {
+                    this.created.lock().unwrap().push("row");
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    this.created.lock().unwrap().push("window");
                 }
                 other => panic!("unexpected method {other}"),
             }
@@ -96,8 +120,16 @@ fn slow(target: Option<&'static [u8]>) -> (Bytes, WireEnvelope) {
 async fn connect(
     handlers: Handlers,
 ) -> Connection<tokio::io::ReadHalf<tokio::io::DuplexStream>> {
+    connect_serving(handlers).await.0
+}
+
+/// `connect`, and the task serving it, which finishes when the server is done
+/// with the connection.
+async fn connect_serving(
+    handlers: Handlers,
+) -> (Connection<tokio::io::ReadHalf<tokio::io::DuplexStream>>, tokio::task::JoinHandle<()>) {
     let (server_io, client_io) = tokio::io::duplex(64 * 1024);
-    tokio::spawn(async move {
+    let serving = tokio::spawn(async move {
         let (r, w) = tokio::io::split(server_io);
         let mut conn = Connection::new(r, w);
         let cfg = HandshakeConfig { daemon_version: "t".into() };
@@ -106,7 +138,7 @@ async fn connect(
     let (r, w) = tokio::io::split(client_io);
     let mut client = Connection::new(r, w);
     client.client_handshake("itest", "0").await.unwrap();
-    client
+    (client, serving)
 }
 
 /// The id of the next response to arrive.
@@ -170,4 +202,147 @@ async fn a_slow_write_to_one_terminal_does_not_hold_up_another() {
     client.send(&frame).await.unwrap();
 
     assert_eq!(answered(&mut client).await, quick);
+}
+
+fn create() -> (Bytes, WireEnvelope) {
+    envelope("terminal.create", Some(b"worktree"), v1::request::Payload::Empty(v1::Empty {}))
+}
+
+/// **A request that started finishes, even when its client vanishes** (ov-118
+/// review). Requests in flight used to be dropped with the loop the moment the
+/// connection ended, so a phone that lost signal mid-`terminal.create` left a
+/// store row with no window. The connection is dropped right after the request
+/// is sent; the create still gets both halves done.
+#[tokio::test]
+async fn a_request_whose_client_vanished_is_finished_not_abandoned() {
+    let handlers = Handlers::default();
+    let (mut client, serving) = connect_serving(handlers.clone()).await;
+    client.send(&create().1).await.unwrap();
+    // Until the handler has started, there is nothing in flight to lose.
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while handlers.created.lock().unwrap().is_empty() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the create never started");
+    drop(client);
+
+    tokio::time::timeout(Duration::from_secs(2), serving).await.expect("the server never let go").unwrap();
+    assert_eq!(*handlers.created.lock().unwrap(), ["row", "window"], "a row with no window");
+}
+
+/// A client that sends its request and closes its write half still gets the
+/// answer: the end of its requests is not the end of its interest in them.
+#[tokio::test]
+async fn a_client_that_half_closes_is_still_answered() {
+    use farcooler_transport::{FrameReader, FrameWriter};
+
+    let handlers = Handlers::default();
+    let (server_io, client_io) = tokio::net::UnixStream::pair().unwrap();
+    let serving_handlers = handlers.clone();
+    tokio::spawn(async move {
+        let (r, w) = server_io.into_split();
+        let mut conn = Connection::new(r, w);
+        let cfg = HandshakeConfig { daemon_version: "t".into() };
+        let _ = serve_connection(&mut conn, &cfg, &serving_handlers).await;
+    });
+
+    let (r, w) = client_io.into_split();
+    let mut reader = FrameReader::new(r);
+    let mut writer = FrameWriter::new(w);
+    writer
+        .write_frame(&WireEnvelope {
+            protocol_version: PROTOCOL_VERSION,
+            message_id: farcooler_protocol::ids::new_id(),
+            body: Some(wire_envelope::Body::ClientHello(v1::ClientHello {
+                supported_protocol_versions: vec![PROTOCOL_VERSION],
+                client_name: "half".into(),
+                client_version: "0".into(),
+            })),
+        })
+        .await
+        .unwrap();
+    reader.read_frame().await.unwrap().expect("a server hello");
+
+    let (id, frame) = create();
+    writer.write_frame(&frame).await.unwrap();
+    writer.shutdown().await.unwrap();
+
+    let answer = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            match reader.read_frame().await.unwrap() {
+                Some(WireEnvelope { body: Some(wire_envelope::Body::Response(r)), .. }) => return Some(r),
+                Some(_) => continue,
+                None => return None,
+            }
+        }
+    })
+    .await
+    .expect("no answer within two seconds");
+    assert_eq!(answer.expect("closed without an answer").request_id, id);
+}
+
+/// **Revoking a device serves it nothing new** (ov-118 review). A request is
+/// running when the connection is closed from above. Nothing sent after the
+/// close is answered, nothing queued behind the running request is started,
+/// and the running one is finished — unanswered — before the server lets go.
+#[tokio::test]
+async fn a_revoked_connection_finishes_what_ran_and_starts_nothing_else() {
+    let handlers = Handlers::default();
+    let (mut client, serving) = connect_serving(handlers.clone()).await;
+
+    let (slow_id, frame) = slow(Some(b"pane"));
+    client.send(&frame).await.unwrap();
+    // Queued behind the slow one: same target.
+    client.send(&write(b"pane", "0:queued").1).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    handlers.revoked.close();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    client.send(&write(b"other", "0:after").1).await.unwrap();
+
+    let early = tokio::time::timeout(Duration::from_millis(300), client.recv()).await;
+    assert!(early.is_err(), "a revoked connection answered something: {early:?}");
+    assert!(!serving.is_finished(), "the running request was abandoned, not finished");
+
+    handlers.slow.add_permits(1);
+    tokio::time::timeout(Duration::from_secs(2), serving).await.expect("the server never let go").unwrap();
+    assert!(handlers.typed.lock().unwrap().is_empty(), "served after the close: {:?}", handlers.typed.lock().unwrap());
+    // Whatever arrives now is not an answer to the slow request.
+    while let Ok(Ok(frame)) = tokio::time::timeout(Duration::from_millis(50), client.recv()).await {
+        if let Some(wire_envelope::Body::Response(r)) = frame.body {
+            assert_ne!(r.request_id, slow_id, "a revoked device was answered");
+        }
+    }
+}
+
+/// At `MAX_REQUESTS_IN_FLIGHT` the connection stops reading: a 33rd request
+/// waits in the socket until one of the 32 finishes, then is served.
+#[tokio::test]
+async fn the_thirty_third_request_waits_for_one_of_the_thirty_two() {
+    const TARGETS: [&[u8]; 32] = [
+        b"t00", b"t01", b"t02", b"t03", b"t04", b"t05", b"t06", b"t07", b"t08", b"t09", b"t10",
+        b"t11", b"t12", b"t13", b"t14", b"t15", b"t16", b"t17", b"t18", b"t19", b"t20", b"t21",
+        b"t22", b"t23", b"t24", b"t25", b"t26", b"t27", b"t28", b"t29", b"t30", b"t31",
+    ];
+    assert_eq!(TARGETS.len(), farcooler_transport::connection::MAX_REQUESTS_IN_FLIGHT);
+
+    let handlers = Handlers::default();
+    let mut client = connect(handlers.clone()).await;
+    for target in TARGETS {
+        client.send(&slow(Some(target)).1).await.unwrap();
+    }
+    let (keystroke, frame) = write(b"pane", "0:ls");
+    client.send(&frame).await.unwrap();
+
+    let early = tokio::time::timeout(Duration::from_millis(300), client.recv()).await;
+    assert!(early.is_err(), "the 33rd request was read while 32 were running");
+    assert!(handlers.typed.lock().unwrap().is_empty());
+
+    handlers.slow.add_permits(1);
+    let mut answered_ids = Vec::new();
+    while !answered_ids.contains(&keystroke) {
+        answered_ids.push(answered(&mut client).await);
+    }
 }
