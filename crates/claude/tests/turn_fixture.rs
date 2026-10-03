@@ -7,7 +7,7 @@
 //! therefore the doubling those deltas invite, since the CLI sends the finished
 //! `assistant` message on top of them.
 
-use farcooler_agent_core::event::{AgentEvent, EndReason, Role};
+use farcooler_agent_core::event::{AgentEvent, EndReason, FailureKind, Role};
 use farcooler_claude::normalize::Live;
 
 /// The capture, through ONE `Live` in order — the way a pane sees it.
@@ -113,4 +113,43 @@ fn a_saved_transcript_restores_both_sides_of_the_conversation() {
     // which is a scissors icon between every restored turn.
     let gaps: Vec<_> = events.iter().filter(|e| matches!(e, AgentEvent::Gap { .. })).collect();
     assert!(gaps.is_empty(), "restoring history must not report loss: {gaps:?}");
+}
+
+/// A turn refused with a 401, through one `Live`.
+///
+/// `fixtures/synthetic_turn_401.jsonl` is SYNTHETIC: written by hand in the
+/// shape claude 2.x sends for a refused key — an `assistant` frame with
+/// `"model":"<synthetic>"` and an `error` word, then a `result` with
+/// `"subtype":"success","is_error":true` and `api_error_status`. Capturing a
+/// real one means running the real CLI with a bad key, which lanes may not.
+#[test]
+fn a_refused_key_ends_the_turn_failed_and_puts_no_words_in_the_agents_mouth() {
+    let mut live = Live::default();
+    let all: Vec<AgentEvent> = include_str!("fixtures/synthetic_turn_401.jsonl")
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str::<serde_json::Value>(l).expect("fixture line is JSON"))
+        .flat_map(|v| live.frame_to_events(&v))
+        .collect();
+
+    // Read only `stop_reason`, this turn ended as `EndTurn`: a pane whose key
+    // had been revoked reported every turn as a quiet success.
+    let ended: Vec<_> = all
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::TurnEnded { reason } => Some(reason),
+            _ => None,
+        })
+        .collect();
+    let [EndReason::Failed { kind, detail }] = ended.as_slice() else {
+        panic!("one turn, ended as failed: {all:?}");
+    };
+    assert_eq!(*kind, FailureKind::Auth);
+    assert!(detail.contains("401"), "the CLI's own sentence is kept for logs: {detail}");
+
+    // The CLI's error sentence is not the agent speaking.
+    assert!(
+        !all.iter().any(|e| matches!(e, AgentEvent::Message { role: Role::Agent, .. })),
+        "the API error was drawn as the agent's answer: {all:?}"
+    );
 }

@@ -9,6 +9,7 @@
 
 use farcooler_agent_core::event::{
     AgentChoice, AgentEvent, AgentGapReason, EndReason, PlanEntry, Role, ToolStatus,
+    classify_error,
 };
 use farcooler_agent_core::permission::{
     claude_task_key as task_key, claude_tool_title as tool_title, permission_options,
@@ -196,6 +197,14 @@ pub struct Live {
     drawn: std::collections::HashSet<String>,
     /// This process's running spend, which each turn's is the growth of.
     spend: crate::usage::Ledger,
+    /// The machine word off this turn's API-error `assistant` frame
+    /// (`authentication_failed`, `billing_error`, …), kept for the `result`
+    /// that follows it. The result carries a status and a sentence but not
+    /// this word, and the word is the most specific thing either says.
+    api_error: Option<String>,
+    /// A Stop was sent this turn. Whatever error the CLI ends an interrupted
+    /// turn with, the person asked for it: that is `Cancelled`, not `Failed`.
+    interrupted: bool,
 }
 
 impl Live {
@@ -214,6 +223,9 @@ impl Live {
             }
             "assistant" => {
                 self.spend.observe(frame);
+                if let Some(code) = api_error_of(frame) {
+                    self.api_error = Some(code.to_string());
+                }
                 let drawn = frame["message"]["id"]
                     .as_str()
                     .is_some_and(|id| self.drawn.contains(id));
@@ -224,15 +236,25 @@ impl Live {
                 // result, so holding these any longer only grows the set.
                 self.streaming = None;
                 self.drawn.clear();
-                // Live only: a restored transcript's results were recorded
-                // when they happened, and counting them again would double a
-                // report.
-                let mut events = frame_to_events_from(frame, Origin::Live);
-                events.extend(self.spend.observe(frame).map(|usage| AgentEvent::TurnUsage { usage }));
+                let code = self.api_error.take();
+                // Usage first: a failed or interrupted turn still spent tokens.
+                let usage = self.spend.observe(frame).map(|usage| AgentEvent::TurnUsage { usage });
+                let reason = if std::mem::take(&mut self.interrupted) && turn_failed(frame) {
+                    EndReason::Cancelled
+                } else {
+                    result_reason(frame, code.as_deref())
+                };
+                let mut events = vec![AgentEvent::TurnEnded { reason }];
+                events.extend(usage);
                 events
             }
             _ => frame_to_events_from(frame, Origin::Live),
         }
+    }
+
+    /// A Stop has been sent; see `interrupted`.
+    pub fn interrupting(&mut self) {
+        self.interrupted = true;
     }
 
     /// Note what a `stream_event` proves about the message in flight.
@@ -275,10 +297,7 @@ pub fn frame_to_events_from(frame: &serde_json::Value, origin: Origin) -> Vec<Ag
         "assistant" => assistant_to_events(frame, false),
         "user" => user_to_events(frame, origin),
         "stream_event" => stream_to_events(frame),
-        "result" => {
-            let reason = end_reason(frame["stop_reason"].as_str().unwrap_or_default());
-            vec![AgentEvent::TurnEnded { reason }]
-        }
+        "result" => vec![AgentEvent::TurnEnded { reason: result_reason(frame, None) }],
         // Everything else is judged by whether it CARRIES A MESSAGE, not by
         // whether its name is on a list.
         //
@@ -391,6 +410,14 @@ fn spoken_words(role: Role, text: &serde_json::Value, parent: &Option<String>) -
 /// ignores both, so the finished block is the only place a tool row ever comes
 /// from and suppressing it would lose the call entirely.
 fn assistant_to_events(frame: &serde_json::Value, already_drawn: bool) -> Vec<AgentEvent> {
+    // The CLI's own report of a failed API call, dressed as an answer:
+    // `"model":"<synthetic>"`, a text block reading "Invalid API key · Please
+    // run /login", and an `error` word beside the message. Drawn as the agent
+    // speaking, that sentence put words in its mouth it never said. The
+    // `result` after it ends the turn as `Failed`, which is where it belongs.
+    if api_error_of(frame).is_some() {
+        return Vec::new();
+    }
     let parent = parent_of(frame);
     let Some(blocks) = frame["message"]["content"].as_array() else { return Vec::new() };
 
@@ -549,6 +576,49 @@ fn tool_locations(input: &serde_json::Value) -> Vec<String> {
         .as_str()
         .map(|p| vec![p.to_string()])
         .unwrap_or_default()
+}
+
+/// The `error` word on an assistant frame that reports a failed API call
+/// rather than an answer (`SDKAssistantMessage.error` in the SDK's types).
+/// The on-disk transcript marks the same record `isApiErrorMessage`.
+fn api_error_of(frame: &serde_json::Value) -> Option<&str> {
+    match frame["error"].as_str() {
+        Some(code) if !code.is_empty() => Some(code),
+        _ if frame["isApiErrorMessage"].as_bool() == Some(true) => Some("unknown"),
+        _ => None,
+    }
+}
+
+/// Whether a `result` reports a turn that failed rather than one that ended.
+///
+/// `is_error` is the signal, and NOT `subtype`: a 401 arrives as
+/// `"subtype":"success","is_error":true`. The `error_*` subtypes are failures
+/// too.
+fn turn_failed(frame: &serde_json::Value) -> bool {
+    frame["is_error"].as_bool() == Some(true)
+        || frame["subtype"].as_str().is_some_and(|s| s.starts_with("error_"))
+}
+
+/// How the turn a `result` closes ended.
+///
+/// `code` is the word the turn's API-error `assistant` frame carried, when the
+/// caller saw one. A Stop still reads as `Cancelled` whatever else is set.
+fn result_reason(frame: &serde_json::Value, code: Option<&str>) -> EndReason {
+    let reason = end_reason(frame["stop_reason"].as_str().unwrap_or_default());
+    if reason == EndReason::Cancelled || !turn_failed(frame) {
+        return reason;
+    }
+    let detail = match &frame["result"] {
+        serde_json::Value::String(s) if !s.is_empty() => s.clone(),
+        _ => frame["errors"]
+            .as_array()
+            .map(|e| e.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join("; "))
+            .unwrap_or_default(),
+    };
+    let subtype = frame["subtype"].as_str().filter(|s| s.starts_with("error_"));
+    let status = frame["api_error_status"].as_u64().and_then(|s| u16::try_from(s).ok());
+    let kind = classify_error(code.filter(|c| *c != "unknown").or(subtype), status, &detail);
+    EndReason::Failed { kind, detail }
 }
 
 /// A turn's `stop_reason`, as the reason it ended.
@@ -1315,6 +1385,41 @@ mod tests {
         assert!(matches!(end_reason("something"), EndReason::EndTurn));
         assert!(matches!(end_reason("interrupted"), EndReason::Cancelled));
         assert!(matches!(end_reason("max_output_tokens"), EndReason::MaxTokens));
+    }
+
+    #[test]
+    fn an_overloaded_api_mid_turn_fails_the_turn_and_a_stop_does_not() {
+        // A 529 after some answer has already streamed: no `error` word was
+        // seen, so the status decides.
+        let overloaded = serde_json::json!({
+            "type": "result", "subtype": "success", "is_error": true,
+            "api_error_status": 529, "stop_reason": null,
+            "result": "API Error: 529 Overloaded"
+        });
+        let mut live = Live::default();
+        assert_eq!(
+            live.frame_to_events(&overloaded),
+            [AgentEvent::TurnEnded {
+                reason: EndReason::Failed {
+                    kind: farcooler_agent_core::event::FailureKind::Overloaded,
+                    detail: "API Error: 529 Overloaded".into(),
+                }
+            }]
+        );
+        // The same error after a Stop is the Stop.
+        live.interrupting();
+        let stopped = serde_json::json!({
+            "type": "result", "subtype": "error_during_execution", "is_error": true
+        });
+        assert_eq!(
+            live.frame_to_events(&stopped),
+            [AgentEvent::TurnEnded { reason: EndReason::Cancelled }]
+        );
+        // And only that turn: the flag does not outlive the result it was for.
+        assert!(matches!(
+            live.frame_to_events(&stopped).as_slice(),
+            [AgentEvent::TurnEnded { reason: EndReason::Failed { .. } }]
+        ));
     }
 
     /// An assistant message making one task tool call.

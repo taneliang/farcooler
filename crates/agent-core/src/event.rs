@@ -115,12 +115,205 @@ pub struct PermissionOption {
     pub kind: String,
 }
 
+/// How a turn ended.
+///
+/// On the wire this is TWO keys beside each other in `TurnEnded`, not one:
+/// `"reason"` is still the bare word every client already decodes as a string
+/// (`"EndTurn"`, …, and now `"Failed"`), and a failed end adds `"failure"`
+/// next to it. `Failed { kind, detail }` serialized the derived way would have
+/// turned `reason` into an object, and every app in the field decodes it as a
+/// string — one failed turn would have failed the whole batch it rode in.
+/// See `EndReasonWire`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(into = "EndReasonWire", from = "EndReasonWire")]
 pub enum EndReason {
     EndTurn,
     Cancelled,
     Refusal,
     MaxTokens,
+    /// The turn could not run, or stopped partway, because something between
+    /// the agent and its model failed: a bad key, no credit, a 5xx.
+    ///
+    /// Distinct from `Refusal`, which is the MODEL declining. Before this
+    /// existed a failure either ended the turn as if it had succeeded (Claude)
+    /// or put the adapter's raw sentence in the transcript as the agent's own
+    /// words (ACP, codex).
+    Failed {
+        /// What kind of failure, as one of a few stable words a client can
+        /// branch on.
+        kind: FailureKind,
+        /// The backend's own description, for logs. Never shown as the
+        /// agent's words, and not guaranteed to be a sentence.
+        detail: String,
+    },
+}
+
+/// Why a turn failed, in a small vocabulary no backend owns.
+///
+/// Deliberately coarse: each kind is one thing a person does about it —
+/// sign in, add credit, wait a minute, wait longer, check the connection. A
+/// finer split would be one nobody could act on differently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureKind {
+    /// Not signed in, or the key was refused.
+    Auth,
+    /// Out of credit, or over a usage or budget limit.
+    Quota,
+    /// Too many requests; retrying shortly will work.
+    RateLimited,
+    /// The provider is down or busy: an overloaded or 5xx answer.
+    Overloaded,
+    /// The provider could not be reached at all.
+    Network,
+    /// Anything else, including a kind a newer daemon names that this build
+    /// does not know.
+    #[serde(other)]
+    Other,
+}
+
+/// `EndReason` as JSON: the bare word, and the failure beside it.
+///
+/// Flattened into `TurnEnded`, so a clean end is byte-identical to what it
+/// always was — `{"reason":"EndTurn"}` — and every transcript in SQLite still
+/// decodes.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct EndReasonWire {
+    reason: EndWord,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    failure: Option<FailureWire>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+enum EndWord {
+    EndTurn,
+    Cancelled,
+    Refusal,
+    MaxTokens,
+    Failed,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct FailureWire {
+    kind: FailureKind,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    detail: String,
+}
+
+impl From<EndReason> for EndReasonWire {
+    fn from(reason: EndReason) -> Self {
+        let (reason, failure) = match reason {
+            EndReason::EndTurn => (EndWord::EndTurn, None),
+            EndReason::Cancelled => (EndWord::Cancelled, None),
+            EndReason::Refusal => (EndWord::Refusal, None),
+            EndReason::MaxTokens => (EndWord::MaxTokens, None),
+            EndReason::Failed { kind, detail } => {
+                (EndWord::Failed, Some(FailureWire { kind, detail }))
+            }
+        };
+        Self { reason, failure }
+    }
+}
+
+impl From<EndReasonWire> for EndReason {
+    fn from(wire: EndReasonWire) -> Self {
+        match wire.reason {
+            EndWord::EndTurn => EndReason::EndTurn,
+            EndWord::Cancelled => EndReason::Cancelled,
+            EndWord::Refusal => EndReason::Refusal,
+            EndWord::MaxTokens => EndReason::MaxTokens,
+            // A `Failed` with its detail lost is still a failure.
+            EndWord::Failed => {
+                let failure = wire.failure.unwrap_or(FailureWire {
+                    kind: FailureKind::Other,
+                    detail: String::new(),
+                });
+                EndReason::Failed { kind: failure.kind, detail: failure.detail }
+            }
+        }
+    }
+}
+
+/// Map one backend failure onto a `FailureKind`.
+///
+/// The ONE place the mapping lives, so Claude, codex, ACP and a dead adapter
+/// cannot drift into calling the same failure different things. Each backend
+/// passes what its own shape carries, most specific first:
+///
+/// - `code`: the backend's machine word, if it has one. Claude's assistant
+///   `error` (`authentication_failed`, `billing_error`, `rate_limit`, …) or
+///   result `subtype` (`error_max_budget_usd`); codex's `codexErrorInfo`
+///   (`unauthorized`, `usageLimitExceeded`, `serverOverloaded`,
+///   `httpConnectionFailed`, …); ACP's `auth_required` for JSON-RPC -32000.
+/// - `http_status`: the provider's status, when the backend forwards it
+///   (Claude's `api_error_status`, codex's `httpStatusCode`).
+/// - `message`: the human sentence, read for a few well-known phrases only
+///   when nothing better said what happened.
+///
+/// Unrecognized is `Other`, never a guess.
+pub fn classify_error(code: Option<&str>, http_status: Option<u16>, message: &str) -> FailureKind {
+    if let Some(kind) = code.and_then(kind_from_code) {
+        return kind;
+    }
+    if let Some(kind) = http_status.and_then(kind_from_status) {
+        return kind;
+    }
+    kind_from_message(message).unwrap_or(FailureKind::Other)
+}
+
+fn kind_from_code(code: &str) -> Option<FailureKind> {
+    // Compared without case or separators, so `rate_limit`, `rateLimit` and
+    // `RATE-LIMIT` are one word.
+    let word: String =
+        code.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_lowercase();
+    Some(match word.as_str() {
+        "authenticationfailed" | "authenticationerror" | "unauthorized" | "authrequired"
+        | "permissionerror" | "invalidapikey" => FailureKind::Auth,
+        "billingerror" | "usagelimitexceeded" | "sessionbudgetexceeded" | "insufficientquota"
+        | "errormaxbudgetusd" | "creditbalancetoolow" => FailureKind::Quota,
+        "ratelimit" | "ratelimiterror" | "ratelimited" | "toomanyrequests" => {
+            FailureKind::RateLimited
+        }
+        "serveroverloaded" | "overloaded" | "overloadederror" | "servererror"
+        | "internalservererror" | "apierror" => FailureKind::Overloaded,
+        "httpconnectionfailed" | "responsestreamconnectionfailed"
+        | "responsestreamdisconnected" | "connectionerror" | "networkerror" => {
+            FailureKind::Network
+        }
+        _ => return None,
+    })
+}
+
+fn kind_from_status(status: u16) -> Option<FailureKind> {
+    Some(match status {
+        401 | 403 => FailureKind::Auth,
+        402 => FailureKind::Quota,
+        429 => FailureKind::RateLimited,
+        500..=599 => FailureKind::Overloaded,
+        _ => return None,
+    })
+}
+
+fn kind_from_message(message: &str) -> Option<FailureKind> {
+    let m = message.to_ascii_lowercase();
+    let any = |needles: &[&str]| needles.iter().any(|n| m.contains(n));
+    if any(&["invalid api key", "/login", "codex login", "not authenticated", "unauthorized",
+        "authentication", "not logged in", "auth required"])
+    {
+        Some(FailureKind::Auth)
+    } else if any(&["credit balance", "quota", "billing", "usage limit", "budget"]) {
+        Some(FailureKind::Quota)
+    } else if any(&["rate limit", "rate_limit", "too many requests"]) {
+        Some(FailureKind::RateLimited)
+    } else if any(&["overloaded", "internal server error", "service unavailable", "bad gateway"]) {
+        Some(FailureKind::Overloaded)
+    } else if any(&["connection refused", "connection error", "network", "timed out",
+        "could not resolve", "econnrefused", "econnreset", "enotfound", "stream disconnected"])
+    {
+        Some(FailureKind::Network)
+    } else {
+        None
+    }
 }
 
 /// Why history is missing. Named so a client can explain itself to a user.
@@ -304,6 +497,9 @@ pub enum AgentEvent {
         commands: Vec<AgentChoice>,
     },
     TurnEnded {
+        /// Flattened: `reason` stays a bare string on the wire, and a failure
+        /// rides beside it as `failure`. See `EndReason`.
+        #[serde(flatten)]
         reason: EndReason,
     },
     /// What the turn that just ended spent, for the runner's store.
@@ -353,5 +549,65 @@ mod tests {
         // own seq cannot be replayed into the right place.
         let s = Sequenced { seq: 7, event: AgentEvent::TurnEnded { reason: EndReason::EndTurn } };
         assert_eq!(s.seq, 7);
+    }
+
+    #[test]
+    fn a_clean_end_is_the_same_bytes_it_always_was() {
+        // Every transcript in SQLite and every app in the field reads this
+        // shape. A failed end must not have changed it for the others.
+        let json = serde_json::to_string(&AgentEvent::TurnEnded { reason: EndReason::EndTurn })
+            .unwrap();
+        assert_eq!(json, r#"{"TurnEnded":{"reason":"EndTurn"}}"#);
+        let back: AgentEvent = serde_json::from_str(r#"{"TurnEnded":{"reason":"Cancelled"}}"#)
+            .unwrap();
+        assert_eq!(back, AgentEvent::TurnEnded { reason: EndReason::Cancelled });
+    }
+
+    #[test]
+    fn a_failed_end_keeps_reason_a_string_and_puts_the_failure_beside_it() {
+        // `reason` is decoded as a STRING by the iOS, Mac and Android apps
+        // (`TurnEndedPayload`, `body.string("reason")`). An object there would
+        // fail the whole batch on every client already shipped.
+        let event = AgentEvent::TurnEnded {
+            reason: EndReason::Failed { kind: FailureKind::Auth, detail: "Invalid API key".into() },
+        };
+        let value = serde_json::to_value(&event).unwrap();
+        assert_eq!(value["TurnEnded"]["reason"], "Failed");
+        assert_eq!(value["TurnEnded"]["failure"]["kind"], "auth");
+        assert_eq!(value["TurnEnded"]["failure"]["detail"], "Invalid API key");
+        assert_eq!(serde_json::from_value::<AgentEvent>(value).unwrap(), event);
+        // A kind a newer daemon invents is still a failure, not an error.
+        let newer: AgentEvent = serde_json::from_str(
+            r#"{"TurnEnded":{"reason":"Failed","failure":{"kind":"solar_flare"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            newer,
+            AgentEvent::TurnEnded {
+                reason: EndReason::Failed { kind: FailureKind::Other, detail: String::new() }
+            }
+        );
+    }
+
+    #[test]
+    fn each_backends_failure_word_lands_on_one_kind() {
+        let k = |code, status, message| classify_error(code, status, message);
+        // Claude's assistant `error`, and its status.
+        assert_eq!(k(Some("authentication_failed"), None, ""), FailureKind::Auth);
+        assert_eq!(k(Some("billing_error"), None, ""), FailureKind::Quota);
+        assert_eq!(k(Some("rate_limit"), None, ""), FailureKind::RateLimited);
+        assert_eq!(k(None, Some(401), ""), FailureKind::Auth);
+        assert_eq!(k(None, Some(529), ""), FailureKind::Overloaded);
+        // Codex's `codexErrorInfo`.
+        assert_eq!(k(Some("unauthorized"), None, ""), FailureKind::Auth);
+        assert_eq!(k(Some("usageLimitExceeded"), None, ""), FailureKind::Quota);
+        assert_eq!(k(Some("serverOverloaded"), None, ""), FailureKind::Overloaded);
+        assert_eq!(k(Some("httpConnectionFailed"), None, ""), FailureKind::Network);
+        // The code wins over a message that says something else.
+        assert_eq!(k(Some("rate_limit"), Some(401), "Invalid API key"), FailureKind::RateLimited);
+        // Only words, when nothing better was said.
+        assert_eq!(k(None, None, "Invalid API key · Please run /login"), FailureKind::Auth);
+        assert_eq!(k(None, None, "Credit balance is too low"), FailureKind::Quota);
+        assert_eq!(k(Some("contextWindowExceeded"), Some(400), "huh"), FailureKind::Other);
     }
 }

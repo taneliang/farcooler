@@ -661,6 +661,9 @@ impl AgentBackend for ClaudeBackend {
     }
 
     async fn cancel(&mut self) -> Result<(), BackendError> {
+        // Before the send, so a result racing the answer still reads as the
+        // Stop it was rather than as a failure.
+        self.live.interrupting();
         self.writer
             .control("interrupt", serde_json::json!({}))
             .await
