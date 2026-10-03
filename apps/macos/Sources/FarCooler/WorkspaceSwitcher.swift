@@ -26,6 +26,10 @@ struct WorkspaceSwitcherButton: View {
     /// Where the menu drops from, and what it sends.
     @State private var coordinator = Coordinator()
 
+    /// What the toolbar measures it by: a change in what it says
+    /// (`LeadingToolbar`).
+    var measuredIdentity: String { title + "\u{1}" + repository }
+
     /// What VoiceOver reads: the workspace, then its repository.
     static func accessibilityLabel(title: String, repository: String) -> String {
         repository.isEmpty ? "Workspace: \(title)" : "Workspace: \(title), \(repository)"
@@ -46,9 +50,9 @@ struct WorkspaceSwitcherButton: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
-            // Its whole width, always (ov-177): the toolbar squeezes an item
-            // that will shrink before it moves one to its overflow menu, and
-            // "Main · ov…" was the switcher squeezed.
+            // Its whole width: a toolbar short of room moves it to the
+            // overflow menu rather than squeezing it to "Main · ov…" (ov-177).
+            // What it's measured at is `LeadingToolbar`'s concern.
             .fixedSize()
             .background(MenuAnchor(coordinator: coordinator))
         }
@@ -299,7 +303,17 @@ struct LeadingToolbar: ToolbarContent {
     let switcher: WorkspaceSwitcherButton
 
     var body: some ToolbarContent {
-        ToolbarItem(placement: .navigation) { switcher }
+        // A new label is a new view, so the toolbar measures it again
+        // (ov-177, round 2). The toolbar sizes an item when the window's
+        // content is installed, and a label changed after that but before
+        // the window is on screen isn't measured again. A window starts at
+        // "Workspaces" and, when the store has already loaded (reopened from
+        // the Dock, or a second window), picks its workspace in its first
+        // `.task`, in that gap. The item stayed "Workspaces" wide, 102 pt,
+        // around a 114 pt "Main · overnight", clipped on both sides.
+        // A change once it's on screen was always measured
+        // (`SwitcherWidthTests`).
+        ToolbarItem(placement: .navigation) { switcher.id(switcher.measuredIdentity) }
         // The room the title held, which pushes what follows to the
         // trailing end. `.primaryAction` items stay before it whatever
         // their order, so the window's other items are `.automatic`, and
