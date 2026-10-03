@@ -11,7 +11,7 @@ worktrees, and a workspace owns the worktrees its agents are using.
 Every repository starts with one workspace, called Main. When a thread of work
 grows large enough to crowd out the rest, you split it off into a workspace of
 its own. A runner too old to know about workspaces still shows its repository's
-single board, with no orchestrator and no rail.
+single board, with no orchestrator.
 
 ## The words
 
@@ -101,21 +101,23 @@ status (`◌` when it has none), and how many items need you. Its menu has
 Charter**. With the sidebar hidden, ⌘F opens Go to Anything (⌘P), which finds
 the same workspaces, tasks and agents.
 
-Select a workspace to talk to its orchestrator. Its conversation fills the
-main area, and the board is a sidebar on the right. The board stays where it
-is whatever you open; drag its left edge to make it wider or narrower, and it
-remembers the width. When you open a task or a worktree, it takes the main
-area, and the orchestrator shrinks to a thin rail at the left edge, with its
-status and its dot. Click the rail (or press ⌥⌘1) to pop the conversation open
-over the task, and click the rail again, press ⌥⌘1 again, or press Esc to put
-it away. Close the task and the orchestrator fills the main
-area again.
+Select a workspace to talk to its orchestrator. The workspace's **navigator**
+is on the left, and the main area beside it shows whatever you select in it.
+The navigator has three sections:
 
-In a window too narrow for the board beside a usable terminal, the board
-collapses to a strip at the right edge, with "Board" down it and how many of
-its tasks are waiting on you. Click the strip (or press ⌥⌘2) to pop the board
-open over the main area; click outside it, press Esc or ⌥⌘2 again, or choose a
-task in it to put it away.
+- **Orchestrator**: one row, with the agent (claude or codex), what state it's
+  in (Working, Idle, Needs You, Stopped), what it's doing right now ("Running
+  the Mac tests for ov-91", or "Idle since 3:42 PM"), and how many tasks are in
+  progress. It's selected when you arrive, so the conversation is what you see
+  first. With no orchestrator, the row says **No Orchestrator** and offers
+  **Start Orchestrator** and **Use as Orchestrator…**.
+- **Tasks**: the board, by status, under what's changed since your last visit.
+- **Worktrees**: the worktrees no task has, and **New Worktree…**.
+
+Select a task or a worktree and it takes the main area; select the orchestrator
+again (or press ⌥⌘1, or Esc) and the conversation is back at once, exactly as
+you left it. Drag the navigator's right edge to make it wider or narrower; it
+remembers the width.
 
 **Talking to the orchestrator.** The conversation is the orchestrator's own
 terminal, or a chat view when it's in chat mode. The `⋯` menu in the
@@ -154,22 +156,22 @@ share. A task with nothing started is just that line.
   and layouts. The breadcrumb leads back to the task.
 - A task with no agent still reaches its worktree and changes, so a finished
   task in review is one click from its diff.
-- To glance at another task, click it in the list, or press ↑ or ↓ while the
-  list has the keyboard: it swaps in place, and the list keeps its scroll.
-- To close the task, click it again in the list, click the **×** at the end of
-  the breadcrumb, or press Esc (when no terminal or field has the keyboard).
-  The orchestrator fills the main area again. Return in the list, with a task
-  open, moves into it.
-- The orchestrator's rail pops open over the task. Esc stays with the terminal
-  you're typing in.
+- To glance at another task, click it in the navigator, or press ↑ or ↓ while
+  the navigator has the keyboard: it swaps in place, and the navigator keeps
+  its scroll. ↑ and ↓ walk the whole navigator: the orchestrator, then the
+  tasks, then the worktrees.
+- To go back to the orchestrator, select its row, click the task again, click
+  the **×** at the end of the breadcrumb, press ⌥⌘1, or press Esc (when no
+  terminal or field has the keyboard; Esc stays with the terminal you're typing
+  in). Return in the navigator moves into what's selected.
 - Back (⌃⌘←, in the Workspace menu) goes up one level, from a worktree to the
   task it was opened from, and from a task back to the orchestrator. The breadcrumb
   goes straight to any level. Focus (⌃⌘↩) gives the agent and changes the whole
-  view, without the rail or the board; press it again to bring them back.
-- ⌥⌘1, ⌥⌘2 and ⌥⌘3 give the keyboard to the orchestrator, the board and the
-  task.
+  view, without the navigator; press it again to bring it back.
+- ⌥⌘1 selects the orchestrator, ⌥⌘2 gives the keyboard to the navigator, and
+  ⌥⌘3 to the main area.
 - ⌃⌘↓ and ⌃⌘↑ (Workspace ▸ Next Worktree and Previous Worktree) go to the next
-  or previous worktree, in the order the board list draws them: each task's,
+  or previous worktree, in the order the navigator draws them: each task's,
   section by section (Done newest first), then the ones under Worktrees and
   Hidden. Tasks in a collapsed section, and older Done tasks the list leaves
   out, are walked too. A task's worktree opens as its task, with the worktree
@@ -180,20 +182,19 @@ Opening, closing and switching all move on one spring, and you can click again
 while something is still moving.
 
 A worktree with no workspace of its own opens the same way, in the main area
-beside its repository's board, with that board's orchestrator on the rail.
+beside its repository's navigator.
 
 ## Worktrees
 
 A worktree isn't a place of its own anymore; you reach it from what it's for.
-Inside a workspace, the board list is how you get around them.
+Inside a workspace, the navigator is how you get around them.
 
-- **Under a task**, with **Open Worktree**. Each task's row in the board list
+- **Under a task**, with **Open Worktree**. Each task's row in the navigator
   names its worktree beside its key (⎇ tax-rounding).
-- **Under Worktrees, at the bottom of the board list**: the ones no task has,
+- **Under Worktrees, at the bottom of the navigator**: the ones no task has,
   such as the main checkout (under Main) and scratch ones. Main's also lists
-  the repository's unclaimed worktrees. Click one to open it in the main area,
-  with the rail as usual. The **+** on the section's header is **New
-  Worktree…**. Control-click a row for what the sidebar's row offered: **Show
+  the repository's unclaimed worktrees. Click one to open it in the main area.
+  The section's last row is **New Worktree…**. Control-click a row for what the sidebar's row offered: **Show
   Changes**, **New Terminal**, **Move to Workspace**, **Use as Orchestrator**,
   **Hide** and **Remove Worktree…**. Control-click a task for the same, under
   **Worktree**. Hidden ones collapse under **Hidden**, each with **Unhide**.

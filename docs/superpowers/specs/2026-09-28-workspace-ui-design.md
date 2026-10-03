@@ -17,13 +17,14 @@ These are binding. The rest of this document works them out.
 1. **Direction A, with B's inbox.**
    - The Mac sidebar lists workspaces, per repository. Each workspace is one row, with its orchestrator's status
      and a needs-you count. A "Needs You" row sits at the top.
-   - Selecting a workspace shows its orchestrator filling the main area, with the board as a fixed sidebar on
-     the right (ov-89; ov-85 had the board fill the detail beside an orchestrator rail, and before that the
-     conversation was a column beside the board).
-   - Selecting a task opens it in the main area in the orchestrator's place, with its agent's terminal and
-     changes beneath it; the orchestrator springs down to a rail at the main area's leading edge, which pops it
-     open over the task. The board doesn't move (ov-89; ov-85 had the board narrow to a list on the left, and
-     ov-79 had the task take the whole detail). See §4.3.
+   - Selecting a workspace shows its navigator on the left, the board in three sections (the orchestrator, its
+     tasks and its worktrees), with the orchestrator selected in the main area beside it (ov-92; ov-89 had the
+     orchestrator fill the main area with the board as a sidebar on the right and a rail for the orchestrator,
+     ov-85 had the board fill the detail beside that rail, and before that the conversation was a column
+     beside the board).
+   - Selecting a task, or a worktree, in the navigator shows it in the main area in the orchestrator's place,
+     a task with its agent's terminal and changes beneath it. The orchestrator is kept, hidden, and comes back
+     selected with ⌥⌘1, Esc or its row. The navigator doesn't move. See §4.3.
 2. **A worktree is no longer a place of its own.** It's one click under a task, or under a workspace's
    disclosure of its worktrees, which also holds a shell in a branch that has no task. (The review called this
    disclosure "Helpers"; it's labeled "Worktrees", per ruling 9 in §12.)
@@ -376,9 +377,108 @@ enum Focus: Hashable {
 
 ### 4.3 The workspace view
 
-**The orchestrator is the main content; the board is a fixed sidebar on the right** (ov-89, superseding
-ov-85's chain of rail, board and work). The owner, 2 Oct: "the main workspace view should have the
-orchestrator open to fill the left side of the screen, with the tasks to the right side as a sidebar."
+**The board is the workspace's navigator, on the left; the main area shows what's selected in it** (ov-92,
+superseding ov-89's orchestrator-filling main area, board sidebar on the right and orchestrator rail). The
+owner, 2 Oct, of the rail: "the orchestrator's bar color makes it blend in with the sidebar and the area to the
+right… what about making the task list basically a second level sidebar almost, then have the orchestrator be
+somewhere in the board basically? it already has a worktrees section (which should probably be separated from
+the sections for tasks actually) so having the orchestrator in there might also work well."
+
+```
+┌ NAVIGATOR ─────────────┬ MAIN ───────────────────────────────┐
+│ ORCHESTRATOR           │                                      │
+│ ◉ claude · Working     │   whatever is selected on the left:  │
+│   Running the Mac      │   the orchestrator by default,       │
+│   tests for ov-91      │   or a task, or a worktree           │
+│   3 tasks in progress  │                                      │
+│ ────────────────────── │                                      │
+│ TASKS                  │                                      │
+│  Since Last Visit …    │                                      │
+│  Needs Decision 1 bil-7│                                      │
+│  In Progress 2   bil-3 │                                      │
+│  To Do · Done · …      │                                      │
+│ ────────────────────── │                                      │
+│ WORKTREES              │                                      │
+│  ⎇ main (main checkout)│                                      │
+│  ⎇ scratch             │                                      │
+│  + New Worktree…       │                                      │
+└────────────────────────┴──────────────────────────────────────┘
+```
+
+- **The navigator** is a source list on the left of the main area, the Mac's convention; the optional sidebar,
+  when shown, is to its left. 280 pt until its trailing edge is dragged, then the width it was dropped at
+  (`workspace.navigatorWidth`, per Mac), never under 240 pt, and never so wide that the main area loses its 58
+  columns. Below that, the main area gives way and the navigator keeps its minimum. It's on the board column's
+  grid (ov-83), under the shared column header (below), and keeps its scroll.
+- **Three sections**, each under its own header (small capitals, secondary, at column A) and a divider apart:
+  - **Orchestrator:** one row (`OrchestratorRowView`). Its harness (claude, codex); its state as an icon and a
+    word, from its own pane alone (`OrchestratorRow.state`): Working (a spinner), Starting (a spinner), Needs
+    You (the accent dot: it's blocked), Done (the amber dot: a turn nobody has seen), Idle, Stopped. A
+    **now-doing** line, one line, truncated, secondary (`OrchestratorRow.nowDoing`), from what the runner
+    already sends for the pane: blocked, the question; working, its hook-reported activity or plan position
+    (`line`), else the last thing it said (`said`); finished or idle, the last thing it said, else "Idle since
+    3:42 PM" (`activitySince`). No daemon change. Then "3 tasks in progress", counted off the board. With no
+    orchestrator, the row reads **No Orchestrator**, with **Start Orchestrator** ▸ and, for a claude running in
+    a shell here, **Use as Orchestrator…** ▸. A repository's implicit board, which can't have one, has no
+    Orchestrator section.
+  - **Tasks:** the status groups, as before (§5), under the Since Last Visit summary.
+  - **Worktrees:** the loose ones (ov-86), now a section of their own rather than a group among the statuses,
+    their hidden ones collapsed under them, and **New Worktree…** as the section's last row. A task's worktree
+    is named on its task's row, never here; the main checkout is listed without the orchestrators seated in it.
+- **The main area shows exactly one thing, what's selected:** the orchestrator (`focus` nil, the default), a
+  task, or a worktree. A task or a worktree is under the jump bar (Workspace › Task, Workspace › Task ›
+  Worktree, or Workspace › Worktree, with the worktree menu at its end, and its ×). A workspace without an
+  orchestrator draws the conversation's empty state, "No Orchestrator", with **Start Orchestrator** and **Use a
+  Running Terminal…** (ov-63). Only a repository's implicit board on a runner without `workstreams` says "No
+  Orchestrator" / "Update Far Cooler on this runner to use an orchestrator here." (`WorkspaceMain`).
+- **The orchestrator is mounted once and kept** at the main area's width, hidden (not destroyed) while a task
+  or a worktree is selected, so going back to it is instant and nothing in it re-wraps: its tmux window is
+  resized only when the window's width or the navigator's changes. Hidden, it takes no click, no keyboard
+  (`outOfSight`, disabled) and isn't seen or watched; selected, it's on screen by the selection's rule
+  (`WorkspaceScreen.visible`, `KeptOrchestrator`).
+- **Selecting** cross-fades the main area on the shared spring, interruptibly: what takes a click and the
+  keyboard follows the selection at once, never the fade.
+- **Keyboard:** ⌥⌘1 selects the orchestrator and gives it the keyboard; ⌥⌘2 gives the navigator the keyboard
+  (leaving Focus); ⌥⌘3 gives the main area the keyboard, whatever it shows. ↑/↓ while the navigator has the
+  keyboard walk the whole navigator, the orchestrator, then the tasks as the list shows them, then the
+  worktrees (`Navigator.items`, `Navigator.step`), held at either end. Return goes into what's selected. **Esc**
+  in the main area, when no terminal or field has the keyboard, goes back to the orchestrator (past the task a
+  worktree was opened from); ⌃⌘← goes up one level along the breadcrumb. ⌃⌘↑/↓, ⌘0 and ⌘1–9 are unchanged.
+- **Glancing:** a held arrow walks the navigator: the selection and a task's header and text change at once on
+  every step, and what costs something (its terminal mounted, its `task show` read, the changes read) waits
+  until the selection has stayed put for 150 ms (`WorkspaceMotion.settle`), so passing a row costs nothing. The
+  task leaving fades in 0.08 s while the next fades in on the spring, so two records never overprint for long
+  (ov-65's O2 still holds: no task ever draws another's record). The navigator keeps the keyboard throughout: a
+  click on a row, ⌥⌘2 and a close all give it to the navigator.
+- **Where the keyboard goes** for each command is one pure function, `WorkspaceNavigation.boardStep`
+  (`BoardKeyboardTests`): the navigator never holds the keyboard where it isn't drawn, and Focus with nothing
+  open changes nothing.
+- **A worktree opened** from a task (Open Worktree) is shown in the main area, as is one opened from the
+  sidebar. A **loose worktree** (one no workspace claims, or any on a runner without `workstreams`) is shown
+  there too, beside its repository's navigator (Main's, or the implicit one), with that board's orchestrator
+  kept behind it; an implicit board has none.
+- **Focus** (⌃⌘↩) shows what's selected alone: no navigator, and a task's terminals and changes at full height
+  without its text, in the same views. ⌃⌘↩ again, ⌥⌘2, or Esc when no terminal has the keyboard, puts the
+  navigator back.
+- **Column headers:** every column's header (the navigator's, the orchestrator's, the jump bar over a task or
+  a worktree) is drawn through one modifier, `columnHeader()`: 32 pt (`ColumnHeader.height`) over the one
+  divider, so their bottom edges are one straight line across the window (`ColumnHeaderTests`). The owner, 2
+  Oct: the board's "Main" header stood taller than the orchestrator's.
+- **The jump bar** is Xcode's: every segment at the header's one size (12 pt) on one baseline; the ancestors
+  secondary and regular, the current one primary; one tertiary chevron for every separator and for the
+  worktree menu's ⌄; the worktree's ⎇ at the text's size; a long task title truncated in its middle, never
+  resizing the other segments (`JumpBar`, `DrillBreadcrumb.pieces`). The owner, 2 Oct: "the text is different
+  font sizes etc it should be consistent size at least."
+- `WorkspaceColumns.layout(opened:hasConversation:hasBoard:focused:)` and `frames(width:arrangement:navigator:)`
+  decide all of this as values.
+
+| Part | Holds | Min | Default |
+|---|---|---|---|
+| **Navigator** | The board (§5) in three sections, Orchestrator, Tasks and Worktrees, on the left | 240 pt | 280 pt |
+| **Main area** | What's selected: the orchestrator, the task (§4.4) or the worktree | 58 columns: 489 pt, while the navigator can give way | the rest |
+
+**Wireframe before ov-92, the orchestrator filling the workspace** (ov-89; superseded: the board is the
+navigator on the left, and the orchestrator a row in it):
 
 ```
 Workspace (nothing open)                          A ticket or worktree open
@@ -391,87 +491,6 @@ Workspace (nothing open)                          A ticket or worktree open
 │                              │ Worktrees│      │ │                         │ Worktrees│
 └──────────────────────────────┴──────────┘      └─┴─────────────────────────┴──────────┘
 ```
-
-- **The board is a sidebar at the trailing edge**, 300 pt until its leading edge is dragged, then the width it
-  was dropped at (`workspace.boardListWidth`, per Mac), never under 260 pt, and never so wide that the rail and
-  what's opened lose their own. Its width depends only on the detail's, so it's the same with nothing open, a
-  task open, the orchestrator popped open and Focus left again: it never moves between states. Its header holds
-  the summary strip; it keeps its scroll and draws the open task selected (the task a worktree was opened from,
-  while that worktree is open).
-- **The main area shows exactly one thing:** the orchestrator by default, or the task or worktree opened.
-- **Nothing open** (`focus` nil): the orchestrator's conversation fills the main area, and counts as on screen
-  (seen, watched, given the keyboard by the selection's rule). There's no rail: the orchestrator *is* the main
-  area. ⌥⌘1 gives it the keyboard. It runs right up to the board. Its terminal keeps the grid it has beside a
-  task (below): the 29 pt the rail would take is drawn in the terminal's own background at its trailing edge
-  and never reported to tmux (`viewportSlack`), so its tmux window is one width in every state. A workspace without an orchestrator draws the
-  conversation's empty state here: "No Orchestrator", with **Start Orchestrator** and, for a claude already
-  running in a shell in the main checkout, **Use a Running Terminal…** (ov-63). Only a repository's implicit
-  board on a runner without `workstreams`, which can't run one, says "No Orchestrator" / "Update Far Cooler on
-  this runner to use an orchestrator here." (`WorkspaceMain`).
-- **A task or a worktree open** (`focus` set; a click, Return, Needs You, the palette, ⌘]): it takes the main
-  area under a breadcrumb (Workspace › Task, Workspace › Task › Worktree, or Workspace › Worktree, with the
-  worktree menu at its end), and the orchestrator springs down to a **28 pt rail** at the main area's leading
-  edge: its icon with its state on it (a spinner while it works, the amber dot when it needs you or has an
-  unseen turn), "Orchestrator · <agent>" set sideways, and a chevron that turns as it opens (ov-84). Clicking
-  the rail, or ⌥⌘1, pops the conversation open *over* what's opened, covering it at the same width it fills
-  the main area with (ov-89 review: at 48 columns, as ov-84 had it, every peek resized the orchestrator's tmux
-  window twice and a real TUI redrew), so nothing under it resizes, and gives it the keyboard. A click on the
-  rail, ⌥⌘1 again, Esc when no terminal has the keyboard, or going anywhere else puts it away. On its rail it
-  isn't on screen: not seen, not watched, no keyboard.
-- **Glancing:** clicking another task, or ↑/↓ while the board has the keyboard, swaps what's opened in place.
-  A held arrow walks the list: the selection and the task's header and text change at once on every step,
-  and what costs something (its terminal mounted, its `task show` read, the changes read) waits until the
-  selection has stayed put for 150 ms (`WorkspaceMotion.settle`), so passing a row costs nothing. The task
-  leaving fades in 0.08 s while the next fades in on the spring, so two records never overprint for long, and
-  while it fades it draws the record it showed, read-only (ov-65's O2 still holds: no task ever draws
-  another's record). The board keeps the keyboard throughout: a click on a row, ⌥⌘2 and a close all give it
-  to the board, where it's drawn.
-- **Closing:** Esc when no terminal or field has the keyboard, a click on the selected task, the **×** at the
-  breadcrumb's trailing end, or Back from a task. The orchestrator springs back to fill the main area over
-  what's leaving, on the same spring from wherever it was, popped open included. The board keeps the
-  keyboard where it's drawn; collapsed to its strip, the orchestrator takes it. While it springs back, a
-  click on what's leaving lands on nothing: clicks follow the window's state, not the motion.
-- **Where the keyboard goes** for each command is one pure function, `WorkspaceNavigation.boardStep`
-  (`BoardKeyboardTests`): the board never holds the keyboard where it isn't drawn, a popped board is put away
-  by ⌥⌘1, ⌥⌘3, Focus and a click on a task in it (a glance keeps it), and ⌥⌘3 and Focus with nothing open
-  change nothing.
-- **Narrow windows:** below `29 + 489 + 1 + 260 = 779` pt of detail (the rail, what's opened at its 58 columns,
-  and the board at its minimum, each with its divider; wider at a larger font), the board collapses to a
-  **28 pt strip** at the trailing edge, mirroring the rail: its icon, its needs-you count, "Board" set sideways
-  and a chevron. One threshold for every state, rail or not, so the board never comes and goes as a task opens
-  and closes, and the main area never drops below 58 columns past the rail. Clicking the strip, or ⌥⌘2, pops
-  the board open over the main area against the strip, at its remembered width or what the main area has, and
-  gives it the keyboard; a click outside it, Esc, ⌥⌘2 again, or a click on a task in it (which opens the task
-  and gives it the keyboard) puts it away. ↑/↓ in it glance and keep it open. Widening the window past the
-  threshold puts it back as the sidebar.
-- **A worktree opened** from a task (Open Worktree) stays in the main area, as does one opened from the
-  sidebar. A **loose worktree** (one no workspace claims, or any on a runner without `workstreams`) opens
-  there too, beside its repository's board (Main's, or the implicit one), with that board's orchestrator on
-  the rail; an implicit board has none.
-- **Focus** (⌃⌘↩) shows what's opened alone: no rail, no board, and a task's terminals and changes at full
-  height without its text, in the same views. ⌃⌘↩ again, or Esc when no terminal has the keyboard, puts the
-  rest back.
-- **Motion:** one spring (`WorkspaceMotion.spring`, response 0.32, damping 0.86, ov-84's) for every structural
-  change: the orchestrator springing down to its rail and back, a task switched for another cross-fading in
-  place, the orchestrator popping open from the rail, the board popping open from its strip, the board
-  collapsing and widening back, the rail leaving for Focus. Every part stays mounted while it moves, and
-  positions are driven from state (`WorkspaceStage`), a step behind the window's own; what takes clicks and
-  the keyboard follows the window's state at once, so nothing waits on the motion and a click mid-flight
-  retargets it. What's opened stands where it stands open, coming and going, and the orchestrator slides over
-  it and away, so the task's terminals aren't resized by the motion. The rail is drawn over the orchestrator
-  as it springs away, and under it as it comes back. **The orchestrator is one view** (`ConversationPanel`),
-  mounted with the workspace and moved, never recreated, between the main area and the rail's panel, at one
-  width in every state (`conversationWidth`: the main area less the rail), so its tmux window is resized only
-  when the window's width changes or the board collapses, and then it snaps rather than springs. The board is
-  never rebuilt.
-- `WorkspaceColumns.layout(width:opened:cell:hasConversation:hasBoard:focused:peek:boardOver:)` and
-  `frames(width:arrangement:board:)` decide all of this as values.
-
-| Part | Holds | Min | Default |
-|---|---|---|---|
-| **Orchestrator** | Its conversation: the main area with nothing open; beside what's opened, a rail that pops it open over it, at the same width | 28 pt (rail); 48 columns: 412 pt, which the main area always exceeds | the main area less the rail |
-| **Board** | The board (§5), a sidebar at the trailing edge; a strip below 779 pt | 260 pt (28 pt strip) | 300 pt |
-| **Opened** | The task (§4.4) or the worktree, in the main area past the rail | 58 columns: 489 pt | the rest |
 
 **Where the minimums come from.** Measured on 2026-09-28 (ov-55, 2A) against the app's own code, not estimated:
 - **A cell is 7.727 pt wide** at the default terminal font (SF Mono, 12.5 pt; `TerminalMetrics.cell`), not 7.5.
@@ -488,7 +507,7 @@ Workspace (nothing open)                          A ticket or worktree open
     columns. Narrowing the orchestrator to its minimum barely changes a phone that's showing it. See R2.
   - In chat mode, 412 pt leaves the transcript about 60 characters of 13 pt body text a line, and the composer
     shows one selector inline and folds the rest into its `⋯` menu (`AgentComposer.inlineCount`).
-- **The task's 58 columns** (measured for the old third column; now what's opened keeps them in the main area past the rail, which is what collapses the board, `WorkspaceColumns.openedColumns`). That's the width at which no fixed line of a permission prompt wraps, for all
+- **The task's 58 columns** (measured for the old third column; now what the main area keeps as the navigator is dragged wider, `WorkspaceColumns.openedColumns`). That's the width at which no fixed line of a permission prompt wraps, for all
   three harnesses:
 
   | Harness | Widest fixed line in its permission prompt | Columns, with its indent |
@@ -507,21 +526,21 @@ Workspace (nothing open)                          A ticket or worktree open
   620, and 69 again only at 839 pt. 2D has to decide whether the task column accepts that cliff or keeps
   `ChangesPane` compact below about 840 pt.
 - **The board's 280 pt** was one kanban column's outer width: the 260 pt card that held a task, plus its 10 pt
-  padding each side. The kanban is gone (ov-83). As the list beside what's opened (ov-85), and the sidebar since ov-89, it's 260 pt at the
-  least, which still holds a list card's key, a short title and its agent pill.
-- **The dividers cost 1 pt each**, the rail's and the list's. There's no `HSplitView` since ov-85 (it never
-  collapsed a child on its own, only overflowed and clipped): the parts are placed from
-  `WorkspaceColumns.frames`, so the collapse is a value.
+  padding each side. The kanban is gone (ov-83). As the navigator (ov-92) it's 280 pt by default and 240 pt at
+  the least, which still holds a list card's key, a short title and its agent pill, and the orchestrator's
+  state.
+- **The navigator's divider costs 1 pt.** There's no `HSplitView` since ov-85 (it never collapsed a child on
+  its own, only overflowed and clipped): the parts are placed from `WorkspaceColumns.frames`.
 - **The minimums are in columns.** At a larger font they're wider in points: at 13 pt, the conversation's 48
-  columns are 426 pt. `layout(width:opened:…)` takes the cell width, and its tests use the default font.
+  columns are 426 pt. `navigatorWidth(_:width:cell:)` takes the cell width, and its tests use the default font.
 
-**When the board doesn't fit as a sidebar** (`W < 29 + 489 + 1 + 260 = 779`, `W` the detail's width), it
-collapses to its strip. The window's minimum is 600 pt, so the detail can be 352 pt; there, the main area is
-323 pt, and what's opened 294 pt past the rail.
+**When the main area can't keep its 58 columns** (`W < 240 + 1 + 489 = 730`, `W` the detail's width), the
+navigator stays at its 240 pt minimum and the main area gives way; Focus (⌃⌘↩) gives it the whole detail. The
+window's minimum is 600 pt, so the detail can be 352 pt; there, the main area is 111 pt.
 
-At a 13-inch laptop's widths (the detail is the window less a 248 pt sidebar: 1222 pt full screen on an M2 Air,
-1192 pt on an M1, 1032 pt in a 1280 pt window), the orchestrator gets the detail less a 300 pt board, 921, 891
-or 731 pt, and a task opened that less the rail: 892, 862 or 702 pt.
+At a 13-inch laptop's widths (the detail is the window less the sidebar when it's out, 248 pt: 1222 pt full
+screen on an M2 Air, 1192 pt on an M1, 1032 pt in a 1280 pt window), the main area gets the detail less a
+281 pt navigator: 941, 911 or 751 pt, the same for the orchestrator, a task or a worktree.
 
 The sidebar narrows to min 220, ideal 248, max 360 (from 268/320/440, `ContentView.swift:1205`). It has to: at
 today's ideal of 320, a full-screen 1470 pt window leaves a 1150 pt detail, and all three columns don't fit even
@@ -678,9 +697,8 @@ filters workspace rows and Worktrees.
 - **⇧⌘B, Show Board:** selects the current workspace and focuses its board column. With nothing selected and one
   repository, it opens Main. The refusal copy "choose a project's Board" (`ContentView.swift:2693`) becomes
   "Select a workspace first."
-- **Focus shortcuts:** ⌥⌘1 the orchestrator (in the main area, or popped open from its rail beside what's
-  opened), ⌥⌘2 the board (popped open from its strip where it's collapsed, and put away pressed again), ⌥⌘3
-  the task or worktree opened (nothing with nothing open; ov-89). ⌘digits are the workspaces since ov-86 (§4.11); the terminals' moved to ⌃⌘digits.
+- **Focus shortcuts:** ⌥⌘1 selects the orchestrator, ⌥⌘2 the navigator, ⌥⌘3 the main area, whatever it shows
+  (ov-92; ov-89 popped the orchestrator open from its rail and the board from its strip). ⌘digits are the workspaces since ov-86 (§4.11); the terminals' moved to ⌃⌘digits.
 - **Back** is ⌃⌘← and **Focus** is ⌃⌘↩. The usual chords are taken: ⌘[ is Previous Terminal
   (`Commands.swift:136-137`) and ⇧⌘↩ is Zoom Pane (`:170-171`). ⌃⌘←, ⌃⌘↩ and ⌥⌘1–3 are unused in `Commands.swift`
   and aren't in `ShortcutSheetTests.systemChords`. Back goes from a worktree to the task it was opened from, and
@@ -725,19 +743,19 @@ sidebar becomes optional; everything it did is reachable without it.
   sidebar or not: the runners' state while it's trouble, Reconnect for each runner in trouble, and
   `DaemonUpdateBar`.
 - **Nothing is reachable only from the sidebar.** `SidebarAction` lists what it does; `SidebarParityTests`
-  checks the switcher, the banner and `WorktreeMenu` offer every one. A worktree's menu (`WorktreeMenu.items`:
+  checks the switcher, the banner, the navigator (`Navigator.offers`) and `WorktreeMenu` offer every one. A worktree's menu (`WorktreeMenu.items`:
   Open, Show Changes, New Terminal, Move to Workspace ▸, Use as Orchestrator, Hide or Unhide, Remove Worktree…)
   is on its row under Worktrees, on a task row (Worktree ▸) and at the end of the breadcrumb's menu. A
-  workspace row's Show Board, Start Orchestrator and Show Charter were already on the rail and the
-  conversation header. Settings ▸ Runners has Reconnect All; Remove Repository… is only in the switcher there,
+  workspace row's Show Board, Start Orchestrator and Show Charter are the navigator's orchestrator row (ov-92;
+  the rail until then) and the conversation header. Settings ▸ Runners has Reconnect All; Remove Repository… is only in the switcher there,
   since Settings has no fleet.
-- **The board list is the navigator inside a workspace.** Each task's row names its worktree after its key
-  (`⎇ tax-rounding`; the task's own worktree, else its agent's, as §4.4 draws beneath it). A **Worktrees**
-  section after the statuses lists the worktrees no task on the board names (`WorkspaceWorktrees.loose`):
-  those the workspace owns, and, for Main, its repository's unclaimed ones, which open beside Main's board as a
-  loose worktree. Selecting one opens it whole beside the list, with the rail. Its header's **+** is New
-  Worktree…; a row's menu has Hide (never the main checkout), and hidden ones collapse under **Hidden** with
-  Unhide. Rows are drawn without seated orchestrators (`ownTerminals`), so the orchestrator's terminal is never
+- **The board list is the navigator inside a workspace** (§4.3). Each task's row names its worktree after its
+  key (`⎇ tax-rounding`; the task's own worktree, else its agent's, as §4.4 draws beneath it). The
+  **Worktrees** section, apart from the tasks since ov-92, lists the worktrees no task on the board names
+  (`WorkspaceWorktrees.loose`): those the workspace owns, and, for Main, its repository's unclaimed ones, which
+  open beside Main's navigator as a loose worktree. Selecting one shows it whole in the main area. Its last row
+  is **New Worktree…**; a row's menu has Hide (never the main checkout), and hidden ones collapse under
+  **Hidden** with Unhide. Rows are drawn without seated orchestrators (`ownTerminals`), so the orchestrator's terminal is never
   listed there (§4.7's one place).
 - **The order** (`WorkspaceWorktrees.entries`): the order the list draws (review M2): sections in `order`, each
   section's rows as `visibleRows` draws them (Done newest first), a worktree once under its first task; then
@@ -974,6 +992,9 @@ sessions, windows, worktree order and claims are untouched.
   - Superseded again (ov-89), under `tips.orchestratorFillsWorkspace`: "The orchestrator now fills the
     workspace." / "Your board is on the right. Click a task to open it here, press ↑ or ↓ to look through the
     others, and Esc to go back to the orchestrator."
+  - Superseded again (ov-92), under `tips.workspaceNavigator`: "Your workspace has a navigator." / "The
+    orchestrator, your tasks and your worktrees are listed on the left. Pick one to show it here, use ↑ and ↓
+    to move through them, and press Esc to go back to the orchestrator."
 
 **iOS:**
 - Each worktree's remembered terminal (`ShellFleetMap.resume`, `ios/ShellScreen.swift:1943`) carries over to the
