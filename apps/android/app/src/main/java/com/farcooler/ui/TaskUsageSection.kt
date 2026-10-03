@@ -16,6 +16,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,10 +36,19 @@ import com.farcooler.model.TaskUsageState
  * header, since nothing here needs you. The words are [TaskUsageFormat]'s, the
  * same the Mac, iOS and `farcooler report` say.
  */
-fun LazyListScope.taskUsageItems(state: TaskUsageState, header: @Composable () -> Unit) {
+fun LazyListScope.taskUsageItems(state: TaskUsageState, onRetry: () -> Unit, header: @Composable () -> Unit) {
     when (state) {
-        // A runner older than spend, or a read that didn't come back: no section.
-        TaskUsageState.Unavailable -> return
+        TaskUsageState.NeedsUpdate -> item(key = "usage") {
+            header()
+            Quiet(TaskUsageFormat.NEEDS_UPDATE, Modifier.padding(horizontal = 16.dp).testTag("task-usage-needs-update"))
+        }
+        TaskUsageState.Failed -> item(key = "usage") {
+            header()
+            Quiet(TaskUsageFormat.COULDNT_READ, Modifier.padding(horizontal = 16.dp))
+            TextButton(onClick = onRetry, modifier = Modifier.padding(horizontal = 4.dp).testTag("task-usage-retry")) {
+                Text(TaskUsageFormat.TRY_AGAIN)
+            }
+        }
         TaskUsageState.Loading -> item(key = "usage") {
             header()
             CircularProgressIndicator(

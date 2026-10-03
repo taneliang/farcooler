@@ -40,7 +40,7 @@ class TaskUsageTest {
     @Test
     fun `each case's lines, provenance and breakdown read as the shared fixture says`() {
         val cases = fixture["cases"]!!.jsonArray.map { it.jsonObject }
-        assertTrue("the fixture has its cases", cases.size >= 8)
+        assertTrue("the fixture has its cases", cases.size >= 9)
         for (case in cases) {
             val name = case.string("case")
             val usage = TaskUsage.decode(case["usage"]!!.jsonObject)
@@ -64,6 +64,25 @@ class TaskUsageTest {
         val usage = TaskUsage.decode("""{"task":"t","price_table":"2026-09-25","totals":{},"by_harness_model":[]}""")
         assertTrue(usage.totals.isEmpty)
         assertEquals("No agent usage recorded yet.", TaskUsageFormat.NOTHING_YET)
+    }
+
+    @Test
+    fun `the section's sentences are the shared fixture's`() {
+        val words = fixture["words"]!!.jsonObject
+        assertEquals(words.string("nothing_yet"), TaskUsageFormat.NOTHING_YET)
+        assertEquals(words.string("needs_update"), TaskUsageFormat.NEEDS_UPDATE)
+        assertEquals(words.string("couldnt_read"), TaskUsageFormat.COULDNT_READ)
+        assertEquals(words.string("try_again"), TaskUsageFormat.TRY_AGAIN)
+    }
+
+    @Test
+    fun `an older runner needs an update, and a read that didn't come back failed`() {
+        val usage = TaskUsage("t", "", TaskSpend(), emptyList())
+        assertEquals(TaskUsageState.NeedsUpdate, TaskUsageState.after(null, runnerCan = false))
+        assertEquals(TaskUsageState.NeedsUpdate, TaskUsageState.after(usage, runnerCan = false))
+        assertEquals(TaskUsageState.Failed, TaskUsageState.after(null, runnerCan = true))
+        assertEquals(TaskUsageState.Failed, TaskUsageState.after(null, runnerCan = null))
+        assertEquals(TaskUsageState.Loaded(usage), TaskUsageState.after(usage, runnerCan = null))
     }
 
     @Test

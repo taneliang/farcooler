@@ -45,6 +45,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -696,8 +697,10 @@ fun TaskDetailScreen(
     // options, a review, or an ask its agent holds. Answered here as on Needs
     // You, by the same row.
     // What its agents spent (ov-195), read as it opens.
-    val usage by produceState<TaskUsageState>(TaskUsageState.Loading, taskId) {
-        value = connection.taskUsage(taskId)?.let { TaskUsageState.Loaded(it) } ?: TaskUsageState.Unavailable
+    var usageReads by remember { mutableIntStateOf(0) }
+    val usage by produceState<TaskUsageState>(TaskUsageState.Loading, taskId, usageReads) {
+        value = TaskUsageState.Loading
+        value = connection.taskUsage(taskId)
     }
     val asking = needsYou?.items?.firstOrNull { it.task?.id == taskId }
     val mayAnswer = daemon?.grantedScope != "read"
@@ -840,7 +843,7 @@ fun TaskDetailScreen(
                     )
                 }
             }
-            taskUsageItems(usage) { Section("Usage") }
+            taskUsageItems(usage, onRetry = { usageReads++ }) { Section("Usage") }
             if (row.labels.isNotEmpty()) {
                 item(key = "labels") {
                     Section("Labels")

@@ -676,12 +676,20 @@ class Connection(
     }
 
     /**
-     * What agents spent on [task] (`usage.task`, ov-195), or null from a runner too
-     * old to record it, or a read that didn't come back.
+     * What agents spent on [task] (`usage.task`, ov-195): the spend, or that this
+     * runner needs an update to record it, or that the read didn't come back
+     * (which the section offers to try again).
      */
-    suspend fun taskUsage(task: String): com.farcooler.model.TaskUsage? =
-        attempt { core.call("usage.task", args("task" to task)) }.getOrNull()
-            ?.let { runCatching { com.farcooler.model.TaskUsage.decode(it) }.getOrNull() }
+    suspend fun taskUsage(task: String): com.farcooler.model.TaskUsageState {
+        val can = daemonBuild.current.value?.can("agent_usage")
+        if (can == false) return com.farcooler.model.TaskUsageState.NeedsUpdate
+        val read = attempt { core.call("usage.task", args("task" to task)) }
+        if ((read.exceptionOrNull() as? com.farcooler.core.CoreException)?.word == "capability-unsupported") {
+            return com.farcooler.model.TaskUsageState.NeedsUpdate
+        }
+        val usage = read.getOrNull()?.let { runCatching { com.farcooler.model.TaskUsage.decode(it) }.getOrNull() }
+        return com.farcooler.model.TaskUsageState.after(usage, can)
+    }
 
     /**
      * New Task…: file a task titled [title] on [workspace]'s board, with

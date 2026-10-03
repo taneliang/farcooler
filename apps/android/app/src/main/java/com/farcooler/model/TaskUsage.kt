@@ -112,6 +112,11 @@ data class TaskUsage(
 object TaskUsageFormat {
     const val NOTHING_YET = "No agent usage recorded yet."
     const val NOT_REPORTED = "Not reported"
+    /** What a runner too old to record spend gets. */
+    const val NEEDS_UPDATE = "This runner needs an update to show spend."
+    /** What a read that didn't come back gets, beside [TRY_AGAIN]. */
+    const val COULDNT_READ = "Far Cooler couldn’t read this task’s usage."
+    const val TRY_AGAIN = "Try Again"
 
     /**
      * A token count, short, in [locale]'s digits: "999", "1.2K", "12K", "1M",
@@ -202,15 +207,24 @@ object TaskUsageFormat {
         return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
     }
 
-    /** "1.2M tokens · $3.20", "$0.42 estimated", "Cost not reported", or "Not reported". */
+    /**
+     * "1.2M tokens · $3.20", with "estimated", "partly estimated" and "partly not
+     * reported" as they apply to the row's own part; "Cost not reported"; or "Not
+     * reported" when the row stated nothing.
+     */
     fun detail(row: TaskSpendRow, locale: Locale = Locale.getDefault()): String {
         val s = row.totals
         if (s.totalTokens == 0L && s.pricedMicros <= 0) return NOT_REPORTED
-        val cost = when {
-            s.pricedMicros <= 0 -> "Cost not reported"
-            s.costReportedMicros == 0L -> "${dollars(s.pricedMicros, locale)} estimated"
-            s.costEstimatedMicros > 0 -> "${dollars(s.pricedMicros, locale)} partly estimated"
-            else -> dollars(s.pricedMicros, locale)
+        val cost = if (s.pricedMicros <= 0) {
+            "Cost not reported"
+        } else {
+            val words = buildList {
+                if (s.costReportedMicros == 0L) add("estimated")
+                else if (s.costEstimatedMicros > 0) add("partly estimated")
+                if (s.partlyUnknown) add("partly not reported")
+            }
+            val amount = dollars(s.pricedMicros, locale)
+            if (words.isEmpty()) amount else "$amount ${words.joinToString(", ")}"
         }
         return "${tokens(s.totalTokens, locale)} tokens · $cost"
     }
@@ -219,7 +233,22 @@ object TaskUsageFormat {
 /** What a Usage section shows. */
 sealed interface TaskUsageState {
     data object Loading : TaskUsageState
-    /** A runner older than spend, or a read that didn't come back: no section. */
-    data object Unavailable : TaskUsageState
+    /** The runner is older than spend: [TaskUsageFormat.NEEDS_UPDATE]. */
+    data object NeedsUpdate : TaskUsageState
+    /** The read didn't come back: [TaskUsageFormat.COULDNT_READ], with Try Again. */
+    data object Failed : TaskUsageState
     data class Loaded(val usage: TaskUsage) : TaskUsageState
+
+    companion object {
+        /**
+         * The state a read lands in. A runner that says it lacks `agent_usage`
+         * ([runnerCan] false) needs an update; one whose build isn't known yet is
+         * asked, and a refusal then reads as a failure.
+         */
+        fun after(usage: TaskUsage?, runnerCan: Boolean?): TaskUsageState = when {
+            runnerCan == false -> NeedsUpdate
+            usage != null -> Loaded(usage)
+            else -> Failed
+        }
+    }
 }
