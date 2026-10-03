@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 use crate::error::map_err;
 use crate::migrate;
+use crate::compat::DatabaseSchema;
 use crate::models::{
     IdempotencyRecord, PaneMode, Repository, RepositoryRoot, Terminal, TerminalRole, TerminalUpdate,
     Worktree, get_uuid, row_to_repository, row_to_repository_root, row_to_terminal, row_to_worktree,
@@ -27,68 +28,6 @@ use crate::models::{
 /// `now_millis` the caller supplies (the store never reads the wall clock
 /// itself, so tests can move time without waiting).
 pub const IDEMPOTENCY_RETENTION_MILLIS: i64 = 24 * 60 * 60 * 1000;
-
-/// What a database says about which builds may open it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DatabaseSchema {
-    /// The schema it is at. Zero for a file no build has written yet.
-    pub version: u32,
-    /// The oldest schema whose build may open it, as the build that wrote it
-    /// stamped it. `None` from a build older than the marker, which vouches
-    /// for no older build.
-    pub compatible_down_to: Option<u32>,
-}
-
-impl DatabaseSchema {
-    /// Whether THIS build opens it: anything at or below its own schema, and
-    /// a newer one only where the newer build vouched for this one.
-    pub fn opens_here(&self) -> bool {
-        let ours = migrate::CURRENT_SCHEMA_VERSION;
-        self.version <= ours || self.compatible_down_to.is_some_and(|floor| floor <= ours)
-    }
-
-    /// Whether it was written by a build newer than this one, whether or not
-    /// this one may still open it. The direction a "replace that daemon with
-    /// this build" must never go unasked: it is a downgrade.
-    pub fn newer_than_here(&self) -> bool {
-        self.version > migrate::CURRENT_SCHEMA_VERSION
-    }
-
-    /// The schema this build writes.
-    pub fn here() -> u32 {
-        migrate::CURRENT_SCHEMA_VERSION
-    }
-}
-
-/// Read a database file's schema without opening it as a store: read-only,
-/// nothing migrated, nothing stamped, and `None` where there is no file.
-///
-/// For deciding, BEFORE replacing a running daemon with this build, whether
-/// this build could serve that daemon's data at all
-/// (`daemon_link::ensure_local`). Safe beside the daemon that owns the file:
-/// a read-only connection takes no write lock.
-pub fn read_schema(path: impl AsRef<Path>) -> Result<Option<DatabaseSchema>> {
-    let path = path.as_ref();
-    if !path.exists() {
-        return Ok(None);
-    }
-    let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .map_err(map_err)?;
-    let has_meta: bool = conn
-        .query_row(
-            "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta')",
-            [],
-            |r| r.get(0),
-        )
-        .map_err(map_err)?;
-    if !has_meta {
-        return Ok(Some(DatabaseSchema { version: 0, compatible_down_to: None }));
-    }
-    Ok(Some(DatabaseSchema {
-        version: migrate::read_schema_version(&conn)?,
-        compatible_down_to: migrate::read_compatible_down_to(&conn)?,
-    }))
-}
 
 pub struct Store {
     /// Behind a mutex so the store is `Sync`.
@@ -155,25 +94,8 @@ impl Store {
 
         let current = migrate::read_schema_version(conn)?;
         if current > migrate::CURRENT_SCHEMA_VERSION {
-            // Written by a newer build. This build's code has never seen that
-            // schema, and running it there is how a rollback quietly breaks
-            // things: a newer trigger refusing writes this code thinks are
-            // fine, a constraint it doesn't know to satisfy. Only the newer
-            // build can say it's safe, and it says so in `compatible_down_to`.
-            // A database that says nothing vouches for nobody.
-            let schema = DatabaseSchema {
-                version: current,
-                compatible_down_to: migrate::read_compatible_down_to(conn)?,
-            };
-            if schema.opens_here() {
-                return Ok(());
-            }
-            tracing::error!(
-                database = current,
-                this_build = migrate::CURRENT_SCHEMA_VERSION,
-                "the database is at a newer schema than this build knows; refusing to open it"
-            );
-            return Err(DomainError::NewerData);
+            // Written by a newer build: see `compat`.
+            return crate::compat::open_newer(conn, current);
         }
         if current == migrate::CURRENT_SCHEMA_VERSION {
             // Already current: migrating again would be pure overhead, and
@@ -1851,118 +1773,5 @@ mod tests {
         assert_eq!(entries.len(), 1, "no backup file expected when reopening a current schema");
 
         std::fs::remove_dir_all(&dir).ok();
-    }
-
-    /// A fresh file holding a store, with its `meta` rewritten as given, the
-    /// way a newer build would have left it.
-    fn database_left_by_a_newer_build(schema: u32, floor: Option<u32>) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("farcooler-newer-{}", Uuid::now_v7()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("store.db");
-        drop(Store::open(&path).unwrap());
-        let conn = Connection::open(&path).unwrap();
-        conn.execute("UPDATE meta SET value = ?1 WHERE key = 'schema_version'", [schema.to_string()])
-            .unwrap();
-        conn.execute("DELETE FROM meta WHERE key = 'compatible_down_to'", []).unwrap();
-        if let Some(floor) = floor {
-            conn.execute(
-                "INSERT INTO meta (key, value) VALUES ('compatible_down_to', ?1)",
-                [floor.to_string()],
-            )
-            .unwrap();
-        }
-        path
-    }
-
-    /// The rollback this exists for: a build that finds a schema newer than
-    /// its own used to take `>=` for "current" and run against it. It refuses,
-    /// says so in words a person can act on, and leaves the file as it was.
-    #[test]
-    fn a_database_from_a_newer_build_is_refused() {
-        let newer = migrate::CURRENT_SCHEMA_VERSION + 1;
-        let path = database_left_by_a_newer_build(newer, None);
-
-        let err = Store::open(&path).err().expect("a newer schema must not open");
-        assert!(matches!(err, DomainError::NewerData), "{err:?}");
-        assert_eq!(
-            err.redacted_message(),
-            "This runner's data was written by a newer Far Cooler. Update Far Cooler to use it."
-        );
-
-        let conn = Connection::open(&path).unwrap();
-        assert_eq!(migrate::read_schema_version(&conn).unwrap(), newer, "the refusal wrote nothing");
-        std::fs::remove_dir_all(path.parent().unwrap()).ok();
-    }
-
-    /// A newer build can vouch for an older one, and when it does the older
-    /// one opens the file without touching its version.
-    #[test]
-    fn a_newer_database_that_vouches_for_this_build_opens() {
-        let current = migrate::CURRENT_SCHEMA_VERSION;
-        let path = database_left_by_a_newer_build(current + 2, Some(current));
-
-        Store::open(&path).expect("a newer schema compatible down to this build opens");
-        let conn = Connection::open(&path).unwrap();
-        assert_eq!(migrate::read_schema_version(&conn).unwrap(), current + 2);
-        assert_eq!(migrate::read_compatible_down_to(&conn).unwrap(), Some(current));
-        std::fs::remove_dir_all(path.parent().unwrap()).ok();
-    }
-
-    /// And when the floor it names is above this build, it doesn't.
-    #[test]
-    fn a_newer_database_whose_floor_is_above_this_build_is_refused() {
-        let current = migrate::CURRENT_SCHEMA_VERSION;
-        let path = database_left_by_a_newer_build(current + 2, Some(current + 1));
-
-        let err = Store::open(&path).err().expect("refused");
-        assert!(matches!(err, DomainError::NewerData), "{err:?}");
-        std::fs::remove_dir_all(path.parent().unwrap()).ok();
-    }
-
-    /// Every database this build leaves says how far back it can be read,
-    /// including one that was already current before the marker existed.
-    #[test]
-    fn opening_stamps_how_far_back_the_database_can_be_read() {
-        let current = migrate::CURRENT_SCHEMA_VERSION;
-        let path = database_left_by_a_newer_build(current, None);
-        {
-            let conn = Connection::open(&path).unwrap();
-            assert_eq!(migrate::read_compatible_down_to(&conn).unwrap(), None);
-        }
-
-        drop(Store::open(&path).unwrap());
-        let conn = Connection::open(&path).unwrap();
-        assert_eq!(
-            migrate::read_compatible_down_to(&conn).unwrap(),
-            Some(migrate::COMPATIBLE_DOWN_TO)
-        );
-
-        std::fs::remove_dir_all(path.parent().unwrap()).ok();
-    }
-
-    /// The pre-flight a CLI runs before replacing a daemon: read-only, so it
-    /// changes nothing it reads, and `None` where there's no database yet.
-    #[test]
-    fn a_database_s_schema_is_read_without_touching_it() {
-        let current = migrate::CURRENT_SCHEMA_VERSION;
-        let dir = std::env::temp_dir().join(format!("farcooler-schema-{}", Uuid::now_v7()));
-        std::fs::create_dir_all(&dir).unwrap();
-        assert_eq!(read_schema(dir.join("absent.db")).unwrap(), None);
-        assert!(!dir.join("absent.db").exists(), "reading made no file");
-
-        let path = database_left_by_a_newer_build(current + 1, None);
-        let schema = read_schema(&path).unwrap().unwrap();
-        assert_eq!(schema, DatabaseSchema { version: current + 1, compatible_down_to: None });
-        assert!(!schema.opens_here() && schema.newer_than_here());
-
-        let vouched = DatabaseSchema { version: current + 1, compatible_down_to: Some(current) };
-        assert!(vouched.opens_here() && vouched.newer_than_here());
-        let ours = DatabaseSchema { version: current, compatible_down_to: None };
-        assert!(ours.opens_here() && !ours.newer_than_here());
-
-        let conn = Connection::open(&path).unwrap();
-        assert_eq!(migrate::read_compatible_down_to(&conn).unwrap(), None, "nothing stamped");
-        std::fs::remove_dir_all(&dir).ok();
-        std::fs::remove_dir_all(path.parent().unwrap()).ok();
     }
 }

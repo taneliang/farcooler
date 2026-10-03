@@ -5,7 +5,7 @@
 //! no-op rather than reapplying DDL, which is what makes running migrations
 //! twice safe.
 
-use rusqlite::{Connection, OptionalExtension, Transaction};
+use rusqlite::{Connection, Transaction};
 
 use crate::error::map_err;
 
@@ -16,7 +16,7 @@ type Migration = fn(&Transaction) -> rusqlite::Result<()>;
 ///
 /// The second half is required, not defaulted, so a migration can't arrive
 /// without someone deciding. See `Older` and `COMPATIBLE_DOWN_TO`.
-const MIGRATIONS: &[(Migration, Older)] = &[
+pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (migration_0001_initial_schema, Older::Refused),
     (migration_0002_pane_groups, Older::Refused),
     (migration_0003_drop_pane_groups, Older::Refused),
@@ -53,77 +53,11 @@ const MIGRATIONS: &[(Migration, Older)] = &[
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
 
-/// Whether code written before a migration can run against the schema after
-/// it.
-///
-/// `Welcome` is for a migration an older build cannot tell happened: a new
-/// table it never touches, or a column it never names that has a default.
-/// Anything else is `Refused`: a new trigger or constraint the old code's
-/// writes would trip, a column it would leave empty that newer code relies
-/// on, a table it reads that was dropped or reshaped. When in doubt it is
-/// `Refused`, which costs a person an update; the other mistake costs them
-/// their data.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Older {
-    Refused,
-    Welcome,
-}
-
-/// The oldest schema whose build may open a database at this one.
-///
-/// Stamped into `meta` as `compatible_down_to` beside `schema_version`, and
-/// read by an OLDER build that finds a schema newer than its own: it opens the
-/// database only if its own version is at least this. So a downgrade across
-/// migrations that are all `Welcome` keeps working, and one across any
-/// `Refused` migration is refused with `DomainError::NewerData`.
-///
-/// Counted from the newest migration back, stopping at the first `Refused`
-/// one, rather than written as a number: a number set once for one
-/// compatible migration would go on vouching for whatever came after it.
-pub(crate) const COMPATIBLE_DOWN_TO: u32 = {
-    let mut v = MIGRATIONS.len();
-    while v > 0 && matches!(MIGRATIONS[v - 1].1, Older::Welcome) {
-        v -= 1;
-    }
-    v as u32
-};
-
 pub(crate) fn read_schema_version(conn: &Connection) -> farcooler_core::Result<u32> {
     Ok(read_meta_u32(conn, "schema_version")?.unwrap_or(0))
 }
 
-/// The `compatible_down_to` a newer build stamped, or `None` where no build
-/// did: every database written before the marker existed, which therefore
-/// vouches for no older build at all.
-pub(crate) fn read_compatible_down_to(conn: &Connection) -> farcooler_core::Result<Option<u32>> {
-    read_meta_u32(conn, "compatible_down_to")
-}
-
-fn read_meta_u32(conn: &Connection, key: &str) -> farcooler_core::Result<Option<u32>> {
-    let raw: Option<String> = conn
-        .query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0))
-        .optional()
-        .map_err(map_err)?;
-    Ok(raw.and_then(|s| s.parse().ok()))
-}
-
-/// Record `COMPATIBLE_DOWN_TO` for a database at this build's schema, if it
-/// doesn't say so already.
-///
-/// Read first so an ordinary open, which every `--stdio` and `--stream`
-/// process does, writes nothing.
-pub(crate) fn stamp_compatible_down_to(conn: &Connection) -> farcooler_core::Result<()> {
-    if read_compatible_down_to(conn)? == Some(COMPATIBLE_DOWN_TO) {
-        return Ok(());
-    }
-    conn.execute(
-        "INSERT INTO meta (key, value) VALUES ('compatible_down_to', ?1)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        [COMPATIBLE_DOWN_TO.to_string()],
-    )
-    .map_err(map_err)?;
-    Ok(())
-}
+pub(crate) use crate::compat::{Older, read_compatible_down_to, read_meta_u32, stamp_compatible_down_to};
 
 /// Apply every migration from `from_version` up to `CURRENT_SCHEMA_VERSION` in
 /// one transaction, then advance the watermark. A no-op when already current.
@@ -938,28 +872,6 @@ pub(crate) fn migrate_only_to(conn: &mut Connection, version: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Which migrations an older build may read past, pinned (ov-143).
-    ///
-    /// Each was checked for what an older build's code would meet: a column
-    /// it never names with a default or allowing NULL, an index, or a table it
-    /// never touches whose rows cascade with their task. Nothing here adds a
-    /// trigger or a constraint an old write could trip, drops anything, or
-    /// rewrites data. Changing a marking is a decision about every runner's
-    /// downgrade, so it has to change this list too.
-    #[test]
-    fn the_migrations_older_builds_may_read_past() {
-        let welcome: Vec<usize> = MIGRATIONS
-            .iter()
-            .enumerate()
-            .filter(|(_, (_, older))| *older == Older::Welcome)
-            .map(|(i, _)| i + 1)
-            .collect();
-        assert_eq!(welcome, vec![4, 11, 13, 16, 17, 18, 19, 20]);
-        // 0015 reshapes the board, so nothing before it may read past it,
-        // however many `Welcome` migrations follow.
-        assert_eq!(COMPATIBLE_DOWN_TO, 15);
-    }
 
     fn open() -> Connection {
         let conn = Connection::open_in_memory().unwrap();

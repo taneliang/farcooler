@@ -12,9 +12,10 @@
 //! checksummed backup written next to it before a migration touches it.
 //! A database at a NEWER schema than this build knows is refused
 //! (`DomainError::NewerData`) unless the build that wrote it stamped a
-//! `compatible_down_to` at or below this build's schema. See `migrate::Older`.
+//! `compatible_down_to` at or below this build's schema. See `compat`.
 
 mod backup;
+mod compat;
 mod error;
 mod migrate;
 pub mod review;
@@ -32,7 +33,8 @@ pub use models::{
     Task, TaskBlock, TaskNote, TaskStatus, TaskUpdate, Terminal, TerminalRole, TerminalUpdate, Workspace,
     Worktree,
 };
-pub use store::{DatabaseSchema, IDEMPOTENCY_RETENTION_MILLIS, Store, read_schema};
+pub use compat::{DatabaseSchema, read_schema};
+pub use store::{IDEMPOTENCY_RETENTION_MILLIS, Store};
 pub use tasks::{TaskScope, derive_prefix};
 pub use wakes::PendingWake;
 pub use workspaces::{Vacated, valid_prefix};
