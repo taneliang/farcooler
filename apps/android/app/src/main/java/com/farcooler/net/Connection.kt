@@ -671,7 +671,7 @@ class Connection(
      * item ends because the answer is newer than the question.
      */
     suspend fun answerDecision(task: String, body: String) {
-        core.call("task.note", args("task" to task, "kind" to "answer", "body" to body))
+        core.call(com.farcooler.model.TaskAnswer.METHOD, com.farcooler.model.TaskAnswer.request(task, body))
         readNeedsYou()
     }
 
@@ -689,18 +689,6 @@ class Connection(
         }
         val usage = read.getOrNull()?.let { runCatching { com.farcooler.model.TaskUsage.decode(it) }.getOrNull() }
         return com.farcooler.model.TaskUsageState.after(usage, can)
-    }
-
-    /**
-     * New Task…: file a task titled [title] on [workspace]'s board, with
-     * [details] as its intent, as the person. Throws on a refusal, whose
-     * [com.farcooler.core.CoreException.word] and `what` say why: see
-     * [com.farcooler.model.NewTask.refusal]. Reads the board again on the way
-     * back, so the card the runner keyed is the one drawn.
-     */
-    suspend fun createTask(workspace: WorkspaceSummary, title: String, details: String) {
-        core.call("task.create", com.farcooler.model.NewTask.request(workspace, title, details))
-        readBoard(workspace)
     }
 
     /**
