@@ -1345,7 +1345,9 @@ mod tests {
         let ingress = ingress_for_test();
         let events: Arc<Mutex<Vec<(Uuid, AgentEvent)>>> = Arc::new(Mutex::new(Vec::new()));
         let sink_events = events.clone();
-        ingress.install_sink(move |terminal, batch| {
+        // Kept, to count who else holds it: the ingress, this test, and each
+        // running tail's thread.
+        let sink = ingress.install_sink(move |terminal, batch| {
             let mut events = sink_events.lock().unwrap();
             for event in batch {
                 events.push((terminal, event));
@@ -1376,19 +1378,26 @@ mod tests {
         append("before forget");
         until_len(&events, 1, 20_000).await;
         assert_eq!(events.lock().unwrap().len(), 1, "the tail must be delivering before forget");
+        let with_the_tail = Arc::strong_count(&sink);
 
         ingress.forget(terminal);
         assert!(!ingress.is_tailing(terminal), "forget must clear the tracked tail");
 
+        // The positive event: the tail's thread ends and lets go of the sink.
+        // A sleep and an unchanged count would pass just as well for a tail
+        // still running that had not polled yet. Once the thread is gone,
+        // nothing is left that could deliver a line.
+        let start = std::time::Instant::now();
+        while Arc::strong_count(&sink) >= with_the_tail && start.elapsed() < std::time::Duration::from_secs(10) {
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert_eq!(Arc::strong_count(&sink), with_the_tail - 1, "the forgotten tail's thread is still running");
+
         append("after forget");
-        // Longer than `transcript_tail::WAIT_POLL_FALLBACK` (1s): if the
-        // background thread is still delivering, its own periodic fallback
-        // alone would have picked this up well within this wait.
-        tokio::time::sleep(std::time::Duration::from_millis(1_500)).await;
         assert_eq!(
             events.lock().unwrap().len(),
             1,
-            "a line appended after forget must never reach the sink, however long this waits"
+            "a line appended after forget must never reach the sink"
         );
     }
 
@@ -1449,17 +1458,31 @@ mod tests {
             })
         )
         .expect("append");
-
-        // Longer than `transcript_tail::WAIT_POLL_FALLBACK` (1s): the point
-        // is to give the tail's own poll loop every chance it would ever
-        // get to (wrongly) forward this line BEFORE the Stop payload below
-        // gives the real producer its turn — a race the other direction (Stop
-        // firing before the tail has even looked at the file) would prove
-        // nothing, since a dropped implementation and a correct one would
-        // both show one Message either way.
-        tokio::time::sleep(std::time::Duration::from_millis(1_500)).await;
+        // A commentary line after it, which the tail does forward. The tail
+        // reads the file in order, so once this has arrived the final_answer
+        // line has been read too, and anything it was going to send has been
+        // sent: the tail has had its turn BEFORE the Stop payload below gives
+        // the real producer its turn. A race the other direction (Stop firing
+        // before the tail has even looked at the file) would prove nothing,
+        // since a dropped implementation and a correct one would both show
+        // one Message either way. A fixed sleep here passed whether or not the
+        // tail had got that far.
+        let sentinel = "Reading the congestion window code.";
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": { "type": "agent_message", "phase": "commentary", "message": sentinel },
+            })
+        )
+        .expect("append");
+        until_len(&events, 1, 20_000).await;
         assert!(
-            events.lock().unwrap().is_empty(),
+            matches!(
+                events.lock().unwrap().as_slice(),
+                [(_, AgentEvent::Message { text, .. })] if text == sentinel
+            ),
             "codex's own final_answer line must never reach the sink by itself: {:?}",
             events.lock().unwrap()
         );
@@ -1481,7 +1504,7 @@ mod tests {
         let seen = events.lock().unwrap();
         let messages: Vec<_> = seen
             .iter()
-            .filter(|(_, e)| matches!(e, AgentEvent::Message { role: Role::Agent, .. }))
+            .filter(|(_, e)| matches!(e, AgentEvent::Message { role: Role::Agent, text, .. } if text != sentinel))
             .collect();
         assert_eq!(
             messages.len(),
