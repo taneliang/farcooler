@@ -676,6 +676,14 @@ class Connection(
     }
 
     /**
+     * What agents spent on [task] (`usage.task`, ov-195), or null from a runner too
+     * old to record it, or a read that didn't come back.
+     */
+    suspend fun taskUsage(task: String): com.farcooler.model.TaskUsage? =
+        attempt { core.call("usage.task", args("task" to task)) }.getOrNull()
+            ?.let { runCatching { com.farcooler.model.TaskUsage.decode(it) }.getOrNull() }
+
+    /**
      * New Task…: file a task titled [title] on [workspace]'s board, with
      * [details] as its intent, as the person. Throws on a refusal, whose
      * [com.farcooler.core.CoreException.word] and `what` say why: see

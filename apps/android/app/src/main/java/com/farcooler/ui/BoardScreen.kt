@@ -44,6 +44,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,6 +70,7 @@ import com.farcooler.model.GlancePalette
 import com.farcooler.model.Markdown
 import com.farcooler.model.RunnerBoards
 import com.farcooler.model.TaskAcceptanceProgress
+import com.farcooler.model.TaskUsageState
 import com.farcooler.model.TaskAgentLink
 import com.farcooler.model.TaskAgentPresence
 import com.farcooler.model.TaskBoard
@@ -693,6 +695,10 @@ fun TaskDetailScreen(
     // What this task asks of you, as the runner put it: a decision with its
     // options, a review, or an ask its agent holds. Answered here as on Needs
     // You, by the same row.
+    // What its agents spent (ov-195), read as it opens.
+    val usage by produceState<TaskUsageState>(TaskUsageState.Loading, taskId) {
+        value = connection.taskUsage(taskId)?.let { TaskUsageState.Loaded(it) } ?: TaskUsageState.Unavailable
+    }
     val asking = needsYou?.items?.firstOrNull { it.task?.id == taskId }
     val mayAnswer = daemon?.grantedScope != "read"
     val speaks = TaskAgentLink.speaksOfAgents(link, daemon)
@@ -834,6 +840,7 @@ fun TaskDetailScreen(
                     )
                 }
             }
+            taskUsageItems(usage) { Section("Usage") }
             if (row.labels.isNotEmpty()) {
                 item(key = "labels") {
                     Section("Labels")
