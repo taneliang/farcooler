@@ -1330,7 +1330,7 @@ async fn install_project_skill(
     deadline: tokio::time::Instant,
 ) {
     use crate::skill_install::{
-        Holds, Installed, PROJECT_SKILL_POLICY, crosses_a_symlink, holds, install_file, render,
+        Holds, Installed, PROJECT_SKILL_POLICY, crosses_a_symlink, holds, install_file_beneath, render,
     };
     let cli = shell_quote(&shim_binary(std::env::current_exe().ok().as_deref()));
     let mut files = render(harness, &cli);
@@ -1373,7 +1373,7 @@ async fn install_project_skill(
             );
             continue;
         }
-        if let Installed::LeftAlone(why) = install_file(&path, &file.contents) {
+        if let Installed::LeftAlone(why) = install_file_beneath(worktree, file.relative, &file.contents) {
             tracing::info!(path = %path.display(), why, "leaving somebody's skill file alone");
         }
     }
@@ -1592,18 +1592,7 @@ async fn install_project_hook_file(
         return;
     }
 
-    if let Some(dir) = path.parent()
-        && let Err(e) = std::fs::create_dir_all(dir)
-    {
-        tracing::warn!(
-            error = %e,
-            path = %dir.display(),
-            "could not make room for a hooks file; this worktree reports nothing for this agent"
-        );
-        return;
-    }
-
-    replace_hooks_file(path, merged.as_bytes(), &before, || {});
+    replace_hooks_file(worktree, relative, merged.as_bytes(), &before, || {});
 }
 
 /// Put `contents` at `path` if the file still holds `before` (or is still
@@ -1632,11 +1621,33 @@ async fn install_project_hook_file(
 ///
 /// `between` runs after the temporary file is written and before the read
 /// that decides, for a test to change the file in that window.
-fn replace_hooks_file(path: &Path, contents: &[u8], before: &[u8], between: impl FnOnce()) -> bool {
+fn replace_hooks_file(
+    worktree: &Path,
+    relative: &str,
+    contents: &[u8],
+    before: &[u8],
+    between: impl FnOnce(),
+) -> bool {
     use crate::codex_trust::Replaced;
-    use std::os::unix::fs::PermissionsExt;
-    let mode = std::fs::metadata(path).ok().map(|m| m.permissions().mode() & 0o7777);
-    match crate::codex_trust::replace(path, contents, mode, before, between) {
+    let path = &worktree.join(relative);
+    // The directory, opened from the worktree with no link followed and made
+    // if missing: the gits since `crosses_a_symlink` gave an agent time to
+    // swap `.codex` for a link (`beneath`).
+    let opened = crate::beneath::split(Path::new(relative))
+        .and_then(|(dirs, name)| Ok((crate::beneath::open_dir_beneath(worktree, dirs, true)?, name)));
+    let (dir, name) = match opened {
+        Ok(opened) => opened,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                path = %path.display(),
+                "could not make room for a hooks file without leaving the worktree; this worktree reports nothing for this agent"
+            );
+            return false;
+        }
+    };
+    let mode = rustix::fs::statat(&dir, name, rustix::fs::AtFlags::SYMLINK_NOFOLLOW).ok().map(|st| st.st_mode as u32 & 0o7777);
+    match crate::codex_trust::replace_at(&dir, name, contents, mode, before, between) {
         Ok(Replaced::Written) => true,
         Ok(Replaced::Changed) => {
             tracing::info!(
@@ -10300,10 +10311,10 @@ mod hook_file_tests {
         let repo = scratch("policy-first");
         // A slow git that does answer, as scripts `/bin/sh` runs from the
         // working directory: `ls-files` takes 0.4 s and finds nothing, and
-        // `rev-parse --git-common-dir` answers at once. 0.7 s is enough for
-        // one file's two gits and not for a second `ls-files`.
+        // `rev-parse --git-dir --git-common-dir` answers at once. 0.7 s is
+        // enough for one file's two gits and not for a second `ls-files`.
         std::fs::write(repo.join("ls-files"), "sleep 0.4\n").unwrap();
-        std::fs::write(repo.join("rev-parse"), "echo .git\n").unwrap();
+        std::fs::write(repo.join("rev-parse"), "echo \"$PWD/.git\"; echo \"$PWD/.git\"\n").unwrap();
         lists_no_hooks_or_filters(&repo);
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(700);
         with_git_as(
@@ -10386,16 +10397,35 @@ mod hook_file_tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("hooks.json");
         std::fs::write(&path, "{}").unwrap();
-        let wrote = replace_hooks_file(&path, b"ours", b"{}", || std::fs::write(&path, "theirs, saved just now").unwrap());
+        let wrote =
+            replace_hooks_file(dir.path(), "hooks.json", b"ours", b"{}", || std::fs::write(&path, "theirs, saved just now").unwrap());
         assert!(!wrote, "a file that changed is not replaced");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "theirs, saved just now");
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1, "no temporary file is left behind");
 
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
-        assert!(replace_hooks_file(&path, b"ours", b"theirs, saved just now", || {}), "unchanged, so written");
+        assert!(replace_hooks_file(dir.path(), "hooks.json", b"ours", b"theirs, saved just now", || {}), "unchanged, so written");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "ours");
         assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o7777, 0o640, "its mode kept");
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1, "renamed into place, nothing beside it");
+    }
+
+    /// ov-200: `.codex` swapped for a link to a directory outside, in either
+    /// spelling, after `crosses_a_symlink` looked and while the gits ran.
+    /// The write opens `.codex` from the worktree without following it, so
+    /// the hooks file outside is left as it was and nothing is made there.
+    #[test]
+    fn a_hooks_directory_swapped_for_a_link_is_not_followed() {
+        for spelling in [".codex", ".CODEX"] {
+            let worktree = tempfile::tempdir().unwrap();
+            let outside = tempfile::tempdir().unwrap();
+            std::fs::write(outside.path().join("hooks.json"), "{}").unwrap();
+            std::os::unix::fs::symlink(outside.path(), worktree.path().join(spelling)).unwrap();
+            let wrote = replace_hooks_file(worktree.path(), crate::hook_install::CODEX_HOOKS, b"ours", b"{}", || {});
+            assert!(!wrote, "{spelling}: written through the link");
+            assert_eq!(std::fs::read_to_string(outside.path().join("hooks.json")).unwrap(), "{}", "{spelling}");
+            assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 1, "{spelling}: something was made outside");
+        }
     }
 
     /// m7-r of the re-review: a hooks file this creates gets what any new
@@ -10415,8 +10445,7 @@ mod hook_file_tests {
             // SAFETY: `umask` can't fail, and this process runs this test alone.
             unsafe { libc::umask(0o027) };
             let dir = Path::new(&dir);
-            let path = dir.join("hooks.json");
-            assert!(replace_hooks_file(&path, b"ours", b"", || {}), "a missing file is written");
+            assert!(replace_hooks_file(dir, "hooks.json", b"ours", b"", || {}), "a missing file is written");
             std::fs::write(dir.join("plain"), "x").unwrap();
             return;
         }

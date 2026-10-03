@@ -82,10 +82,13 @@
 
 use std::ffi::{OsStr, OsString};
 use std::io::{Read, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::fd::OwnedFd;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
+
+use rustix::fs::{Mode, OFlags};
 
 /// What `trust_repository` did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -507,10 +510,19 @@ fn one_insertion(before: &str, after: &str) -> bool {
 /// it won't be edited. `O_NOFOLLOW` makes a symbolic link an error, not a
 /// read of whatever it points at.
 fn read_no_follow(path: &Path) -> Result<Option<(Vec<u8>, u32)>, &'static str> {
-    let mut file = match std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(path) {
-        Ok(file) => file,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) if e.raw_os_error() == Some(libc::ELOOP) => return Err("the config is a symbolic link"),
+    let (dir, name) = open_parent(path).map_err(|_| "the config can't be read")?;
+    read_no_follow_at(&dir, name)
+}
+
+/// `read_no_follow`, for `name` in the directory open as `dir`.
+pub(crate) fn read_no_follow_at(dir: &OwnedFd, name: &OsStr) -> Result<Option<(Vec<u8>, u32)>, &'static str> {
+    // `O_NONBLOCK`: `O_NOFOLLOW` says nothing about a FIFO, which would hang
+    // the open; the type check below then refuses it.
+    let flags = OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK;
+    let file = match rustix::fs::openat(dir, name, flags, Mode::empty()) {
+        Ok(file) => std::fs::File::from(file),
+        Err(rustix::io::Errno::NOENT) => return Ok(None),
+        Err(rustix::io::Errno::LOOP) => return Err("the config is a symbolic link"),
         Err(_) => return Err("the config can't be read"),
     };
     let meta = file.metadata().map_err(|_| "the config can't be read")?;
@@ -526,8 +538,16 @@ fn read_no_follow(path: &Path) -> Result<Option<(Vec<u8>, u32)>, &'static str> {
         return Err("the config is read-only");
     }
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).map_err(|_| "the config can't be read")?;
+    (&file).read_to_end(&mut bytes).map_err(|_| "the config can't be read")?;
     Ok(Some((bytes, meta.permissions().mode() & 0o7777)))
+}
+
+/// The directory `path` is in, opened, and the file's name in it.
+fn open_parent(path: &Path) -> std::io::Result<(OwnedFd, &OsStr)> {
+    let name = path.file_name().ok_or(std::io::ErrorKind::InvalidInput)?;
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let dir = rustix::fs::open(parent, OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC, Mode::empty())?;
+    Ok((dir, name))
 }
 
 /// Tells one write's temporary file from another's in the same process.
@@ -536,12 +556,18 @@ static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(
 /// A temporary name beside `path` no other write shares: the file's own
 /// name, the process id, a count of writes in this process, and the time,
 /// so a file left by a crash in an earlier process with the same id doesn't
-/// block this one.
+/// block this one. The name itself is `temporary_name`; this is for tests.
+#[cfg(test)]
 pub(crate) fn temporary_beside(path: &Path) -> Option<PathBuf> {
+    Some(path.parent()?.join(temporary_name(path.file_name()?)))
+}
+
+/// `temporary_beside`, as a name in the same directory.
+fn temporary_name(name: &OsStr) -> OsString {
     let write = WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-    let name = path.file_name()?.to_string_lossy();
-    Some(path.parent()?.join(format!(".{name}.farcooler-{}-{write}-{nanos}.tmp", std::process::id())))
+    let name = name.to_string_lossy();
+    OsString::from(format!(".{name}.farcooler-{}-{write}-{nanos}.tmp", std::process::id()))
 }
 
 /// What `replace` did, when nothing failed outright.
@@ -563,10 +589,6 @@ pub(crate) enum Replaced {
 /// `mode` `None` is for a file that doesn't exist yet and should get what
 /// any new file would: `0o666` less the process's umask, applied by the
 /// kernel when the temporary file is created.
-///
-/// Also how `service::replace_hooks_file` writes a hooks file. The read that
-/// decides refuses the same things for both (`read_no_follow`): a symbolic
-/// link, a file with more than one name, a read-only file.
 pub(crate) fn replace(
     path: &Path,
     contents: &[u8],
@@ -574,33 +596,49 @@ pub(crate) fn replace(
     before: &[u8],
     between: impl FnOnce(),
 ) -> std::io::Result<Replaced> {
-    let temp = temporary_beside(path).ok_or(std::io::ErrorKind::InvalidInput)?;
-    replace_through(path, &temp, contents, mode, before, between)
+    let (dir, name) = open_parent(path)?;
+    replace_at(&dir, name, contents, mode, before, between)
 }
 
-/// `replace`, through a temporary name the caller chose.
+/// `replace`, for `name` in the directory open as `dir`. Every step is
+/// relative to that descriptor, so nothing swapped in above it is followed.
 ///
-/// `create_new` with `O_NOFOLLOW` refuses anything already at `temp`, a
+/// Also how `service::replace_hooks_file` writes a hooks file into a
+/// worktree, with `dir` opened by `beneath::open_dir_beneath`. The read that
+/// decides refuses the same things for both (`read_no_follow_at`): a
+/// symbolic link, a file with more than one name, a read-only file.
+pub(crate) fn replace_at(
+    dir: &OwnedFd,
+    name: &OsStr,
+    contents: &[u8],
+    mode: Option<u32>,
+    before: &[u8],
+    between: impl FnOnce(),
+) -> std::io::Result<Replaced> {
+    replace_through(dir, name, &temporary_name(name), contents, mode, before, between)
+}
+
+/// `replace_at`, through a temporary name the caller chose.
+///
+/// `O_CREAT | O_EXCL` with `O_NOFOLLOW` refuses anything already at `temp`, a
 /// planted link included. The read just before the rename is what cancels
 /// the write when somebody saved the file meanwhile; see the module doc for
 /// what it doesn't cover.
 fn replace_through(
-    path: &Path,
-    temp: &Path,
+    dir: &OwnedFd,
+    name: &OsStr,
+    temp: &OsStr,
     contents: &[u8],
     mode: Option<u32>,
     before: &[u8],
     between: impl FnOnce(),
 ) -> std::io::Result<Replaced> {
     // With no mode to keep, the kernel applies the umask to `0o666` here.
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(if mode.is_some() { 0o600 } else { 0o666 })
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(temp)?;
+    let flags = OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC | OFlags::NOFOLLOW;
+    let created = Mode::from_raw_mode(if mode.is_some() { 0o600 } else { 0o666 });
+    let file = std::fs::File::from(rustix::fs::openat(dir, temp, flags, created)?);
     let written = (|| {
-        file.write_all(contents)?;
+        (&file).write_all(contents)?;
         if let Some(mode) = mode {
             file.set_permissions(std::fs::Permissions::from_mode(mode))?;
         }
@@ -608,25 +646,25 @@ fn replace_through(
     })();
     drop(file);
     between();
-    let verdict = match read_no_follow(path) {
+    let verdict = match read_no_follow_at(dir, name) {
         Ok(Some((now, _))) if now == before => Replaced::Written,
         Ok(None) if before.is_empty() => Replaced::Written,
         Ok(_) => Replaced::Changed,
         Err(why) => Replaced::Refused(why),
     };
     let renamed = match written {
-        Ok(()) if verdict == Replaced::Written => std::fs::rename(temp, path).map(|()| verdict),
+        Ok(()) if verdict == Replaced::Written => {
+            rustix::fs::renameat(dir, temp, dir, name).map(|()| verdict).map_err(std::io::Error::from)
+        }
         Ok(()) => Ok(verdict),
         Err(e) => Err(e),
     };
     if matches!(renamed, Ok(Replaced::Written)) {
         // The rename itself, on disk. Best effort: without it a crash can
         // only bring the old file back, and codex asks.
-        if let Some(dir) = path.parent().and_then(|d| std::fs::File::open(d).ok()) {
-            let _ = dir.sync_all();
-        }
+        let _ = rustix::fs::fsync(dir);
     } else {
-        let _ = std::fs::remove_file(temp);
+        let _ = rustix::fs::unlinkat(dir, temp, rustix::fs::AtFlags::empty());
     }
     renamed
 }
@@ -979,7 +1017,8 @@ mod tests {
         std::fs::write(&victim, "keep\n").unwrap();
         let temp = home.path().join(".config.toml.planted.tmp");
         std::os::unix::fs::symlink(&victim, &temp).unwrap();
-        let outcome = replace_through(&config, &temp, b"new\n", Some(0o600), OWNERS.as_bytes(), || {});
+        let (dir, name) = open_parent(&config).unwrap();
+        let outcome = replace_through(&dir, name, temp.file_name().unwrap(), b"new\n", Some(0o600), OWNERS.as_bytes(), || {});
         assert!(outcome.is_err(), "{outcome:?}");
         assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep\n");
         assert_eq!(read(&home), OWNERS);
@@ -987,7 +1026,8 @@ mod tests {
         // A plain file there is refused the same way.
         let plain = home.path().join(".config.toml.plain.tmp");
         std::fs::write(&plain, "somebody's\n").unwrap();
-        assert!(replace_through(&config, &plain, b"new\n", Some(0o600), OWNERS.as_bytes(), || {}).is_err());
+        let plain_name = plain.file_name().unwrap();
+        assert!(replace_through(&dir, name, plain_name, b"new\n", Some(0o600), OWNERS.as_bytes(), || {}).is_err());
         assert_eq!(std::fs::read_to_string(&plain).unwrap(), "somebody's\n");
         assert_eq!(read(&home), OWNERS);
     }

@@ -38,8 +38,11 @@
 //! empty one will do). Deleting our copy doesn't last, because the next codex
 //! launch writes it again.
 
+use std::ffi::OsStr;
+use std::os::fd::OwnedFd;
 use std::path::Path;
 
+use rustix::fs::{Mode, OFlags};
 use sha2::{Digest, Sha256};
 
 /// Which agent a copy of the skill is rendered for.
@@ -290,7 +293,23 @@ pub fn crosses_a_symlink(root: &Path, relative: &str) -> bool {
     false
 }
 
-/// Write `contents` to `path` unless somebody else's file is there.
+/// `install_file_beneath` for a test's absolute `path`, rooted at its parent,
+/// which is made first.
+#[cfg(test)]
+pub fn install_file(path: &Path, contents: &str) -> Installed {
+    install_file_at(path, contents, || {})
+}
+
+/// `install_file`, running `between` where `install_file_between` does.
+#[cfg(test)]
+fn install_file_at(path: &Path, contents: &str, between: impl FnOnce()) -> Installed {
+    let parent = path.parent().expect("a parent");
+    std::fs::create_dir_all(parent).unwrap();
+    install_file_between(parent, path.file_name().expect("a name"), contents, between)
+}
+
+/// Write `contents` to `relative` in `root`, a worktree, unless somebody
+/// else's file is there.
 ///
 /// - A missing file is written.
 /// - A file that already says `contents` is not touched at all. Every launch
@@ -309,15 +328,25 @@ pub fn crosses_a_symlink(root: &Path, relative: &str) -> bool {
 /// first read is kept rather than overwritten. That narrows the window between
 /// deciding and replacing to one read; it doesn't close it, and nothing short
 /// of a lock every editor honors could.
-pub fn install_file(path: &Path, contents: &str) -> Installed {
-    install_file_between(path, contents, || {})
+///
+/// The directory is opened from `root` with no link followed, and every read,
+/// write and rename is relative to it, so a directory swapped for a link
+/// while the launch's gits ran is refused rather than followed out of the
+/// worktree (`beneath`).
+pub fn install_file_beneath(root: &Path, relative: &str, contents: &str) -> Installed {
+    install_file_between(root, Path::new(relative), contents, || {})
 }
 
-/// `install_file`, running `between` after the temporary file is written and
-/// before the file is read again, which is where a test puts the owner's save.
-fn install_file_between(path: &Path, contents: &str, between: impl FnOnce()) -> Installed {
-    let before = match std::fs::read(path) {
-        Ok(existing) => {
+/// `install_file_beneath`, running `between` after the temporary file is
+/// written and before the file is read again, which is where a test puts the
+/// owner's save.
+fn install_file_between(root: &Path, relative: impl AsRef<Path>, contents: &str, between: impl FnOnce()) -> Installed {
+    let path = root.join(relative.as_ref());
+    let opened = crate::beneath::split(relative.as_ref())
+        .and_then(|(dirs, name)| Ok((crate::beneath::open_dir_beneath(root, dirs, true)?, name)));
+    let Ok((dir, name)) = opened else { return Installed::LeftAlone("unreadable") };
+    let before = match read_at(&dir, name) {
+        Ok(Some(existing)) => {
             if existing == contents.as_bytes() {
                 return Installed::Unchanged;
             }
@@ -328,14 +357,14 @@ fn install_file_between(path: &Path, contents: &str, between: impl FnOnce()) -> 
             }
             Some(existing)
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Ok(None) => None,
         Err(_) => return Installed::LeftAlone("unreadable"),
     };
     let unmoved = || {
         between();
-        std::fs::read(path).ok() == before
+        read_at(&dir, name).ok().flatten() == before
     };
-    match write_through_temp(path, contents, unmoved) {
+    match write_through_temp(&dir, name, contents, unmoved) {
         Ok(true) => Installed::Wrote,
         Ok(false) => Installed::LeftAlone("changed while writing"),
         Err(e) => {
@@ -345,34 +374,68 @@ fn install_file_between(path: &Path, contents: &str, between: impl FnOnce()) -> 
     }
 }
 
-/// Write through a sibling temporary file and a rename.
+/// `name` in `dir`, never through a link, or `None` when it isn't there.
+fn read_at(dir: &OwnedFd, name: &OsStr) -> std::io::Result<Option<Vec<u8>>> {
+    use std::io::Read;
+    let flags = OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK;
+    let file = match rustix::fs::openat(dir, name, flags, Mode::empty()) {
+        Ok(file) => std::fs::File::from(file),
+        Err(rustix::io::Errno::NOENT) => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    if !file.metadata()?.is_file() {
+        return Err(std::io::ErrorKind::InvalidInput.into());
+    }
+    let mut bytes = Vec::new();
+    (&file).read_to_end(&mut bytes)?;
+    Ok(Some(bytes))
+}
+
+/// Write through a sibling temporary file and a rename, making the
+/// directories above it.
 pub(crate) fn write_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
-    write_through_temp(path, contents, || true).map(|_| ())
+    let (dirs, name) = crate::beneath::split(path)?;
+    std::fs::create_dir_all(dirs)?;
+    let dirs = if dirs.as_os_str().is_empty() { Path::new(".") } else { dirs };
+    let dir = rustix::fs::open(dirs, OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC, Mode::empty())?;
+    write_through_temp(&dir, name, contents, || true).map(|_| ())
 }
 
 /// Tells one write's temporary file from another's in the same process.
 static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// Write `contents` to a temporary file beside `path`, then rename it over
-/// `path` if `still` says to, and say whether it did.
+/// Write `contents` to a temporary file beside `name` in `dir`, then rename
+/// it over `name` if `still` says to, and say whether it did.
 ///
 /// The temporary name carries the process id and a count of writes in this
 /// process, so no two writes share one: two panes launching at once in one
 /// daemon, each writing the plugin, would otherwise truncate the file the
-/// other was about to rename.
-fn write_through_temp(path: &Path, contents: &str, still: impl FnOnce() -> bool) -> std::io::Result<bool> {
-    let dir = path.parent().ok_or(std::io::ErrorKind::InvalidInput)?;
-    std::fs::create_dir_all(dir)?;
-    let name = path.file_name().ok_or(std::io::ErrorKind::InvalidInput)?.to_string_lossy();
+/// other was about to rename. It is made with `O_EXCL | O_NOFOLLOW`, so
+/// nothing already at that name is written through.
+fn write_through_temp(
+    dir: &OwnedFd,
+    name: &OsStr,
+    contents: &str,
+    still: impl FnOnce() -> bool,
+) -> std::io::Result<bool> {
+    use std::io::Write;
     let write = WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let temp = dir.join(format!(".{name}.farcooler-{}-{write}.tmp", std::process::id()));
-    std::fs::write(&temp, contents)?;
+    let temp = format!(".{}.farcooler-{}-{write}.tmp", name.to_string_lossy(), std::process::id());
+    let flags = OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC | OFlags::NOFOLLOW;
+    let unlink = || rustix::fs::unlinkat(dir, temp.as_str(), rustix::fs::AtFlags::empty());
+    let file = std::fs::File::from(rustix::fs::openat(dir, temp.as_str(), flags, Mode::from_raw_mode(0o666))?);
+    if let Err(e) = (&file).write_all(contents.as_bytes()) {
+        let _ = unlink();
+        return Err(e);
+    }
+    drop(file);
     if !still() {
-        let _ = std::fs::remove_file(&temp);
+        let _ = unlink();
         return Ok(false);
     }
-    std::fs::rename(&temp, path).map(|()| true).inspect_err(|_| {
-        let _ = std::fs::remove_file(&temp);
+    rustix::fs::renameat(dir, temp.as_str(), dir, name).map(|()| true).map_err(|e| {
+        let _ = unlink();
+        e.into()
     })
 }
 
@@ -410,6 +473,21 @@ pub fn remove_ours(path: &Path) -> bool {
 mod tests {
     use super::*;
     use std::os::unix::fs::MetadataExt;
+
+    /// ov-200: `.agents` swapped for a link to a directory outside, in either
+    /// spelling, after `crosses_a_symlink` looked and while the gits ran.
+    /// Nothing is made or written outside the worktree.
+    #[test]
+    fn a_skills_directory_swapped_for_a_link_is_not_followed() {
+        for spelling in [".agents", ".AGENTS"] {
+            let worktree = tempfile::tempdir().unwrap();
+            let outside = tempfile::tempdir().unwrap();
+            std::os::unix::fs::symlink(outside.path(), worktree.path().join(spelling)).unwrap();
+            let installed = install_file_beneath(worktree.path(), PROJECT_SKILL, &signed("# v1\n"));
+            assert_ne!(installed, Installed::Wrote, "{spelling}: written through the link");
+            assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0, "{spelling}: something was made outside");
+        }
+    }
 
     /// A file of ours with `body` above the marker, the shape `render` gives
     /// every file it writes into a worktree.
@@ -481,7 +559,7 @@ mod tests {
         install_file(&path, &signed("# v1\n"));
         let save = || std::fs::write(&path, "the owner's save\n").unwrap();
         assert_eq!(
-            install_file_between(&path, &signed("# v2\n"), save),
+            install_file_at(&path, &signed("# v2\n"), save),
             Installed::LeftAlone("changed while writing")
         );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "the owner's save\n");
