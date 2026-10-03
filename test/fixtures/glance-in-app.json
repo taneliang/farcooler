@@ -1,0 +1,27 @@
+{
+  "about": "One terminal's in-app glance mark: the daemon's activity word, how long ago that state began, and whether the runner is answering now. Read by AgentKit's GlanceInAppFixtureTests (GlanceMark(terminal:).said(answering:)) and Android's GlanceTest (GlanceMark.of(terminal).said(answering)). How long a state has lasted never dashes a ring: only a runner that isn't answering does. stateAgeSeconds is how long before 'now' activitySince lies, or null when the host sent no timestamp.",
+  "cases": [
+    { "name": "working for three hours on a live link", "activity": "working", "stateAgeSeconds": 10800, "answering": true,
+      "expect": { "attention": "quiet", "core": "producing", "link": "live" } },
+    { "name": "idle for three hours on a live link", "activity": "idle", "stateAgeSeconds": 10800, "answering": true,
+      "expect": { "attention": "quiet", "core": "atAPrompt", "link": "live" } },
+    { "name": "working for a minute past the old hour", "activity": "working", "stateAgeSeconds": 3660, "answering": true,
+      "expect": { "attention": "quiet", "core": "producing", "link": "live" } },
+    { "name": "working, just began", "activity": "working", "stateAgeSeconds": 2, "answering": true,
+      "expect": { "attention": "quiet", "core": "producing", "link": "live" } },
+    { "name": "working with no timestamp", "activity": "working", "stateAgeSeconds": null, "answering": true,
+      "expect": { "attention": "quiet", "core": "producing", "link": "live" } },
+    { "name": "blocked for three hours on a live link", "activity": "blocked", "stateAgeSeconds": 10800, "answering": true,
+      "expect": { "attention": "needsYou", "core": "atAPrompt", "link": "live" } },
+    { "name": "done for three hours on a live link", "activity": "done", "stateAgeSeconds": 10800, "answering": true,
+      "expect": { "attention": "toReview", "core": "atAPrompt", "link": "live" } },
+    { "name": "working, just began, runner not answering", "activity": "working", "stateAgeSeconds": 2, "answering": false,
+      "expect": { "attention": "quiet", "core": null, "link": "broken" } },
+    { "name": "idle for three hours, runner not answering", "activity": "idle", "stateAgeSeconds": 10800, "answering": false,
+      "expect": { "attention": "quiet", "core": null, "link": "broken" } },
+    { "name": "blocked, runner not answering", "activity": "blocked", "stateAgeSeconds": 10800, "answering": false,
+      "expect": { "attention": "needsYou", "core": "atAPrompt", "link": "live" } },
+    { "name": "done, runner not answering", "activity": "done", "stateAgeSeconds": 2, "answering": false,
+      "expect": { "attention": "toReview", "core": "atAPrompt", "link": "live" } }
+  ]
+}

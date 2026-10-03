@@ -148,7 +148,6 @@ fun WorkspaceListRow(row: WorkspaceRow, answering: Boolean, onOpen: () -> Unit) 
                 if (orchestrator != null) {
                     AgentMarkView(
                         terminal = orchestrator,
-                        now = rememberMinuteClock(),
                         size = GlanceMarkSize.ROW,
                         decorative = true,
                         answering = answering,

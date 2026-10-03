@@ -1031,13 +1031,6 @@ internal fun TerminalRow(
 ) {
     val kind = StateKind.parse(terminal.state)
     var menu by remember { mutableStateOf(false) }
-    // Not ticking, deliberately, where [ElapsedStatus] below does tick. The one
-    // question asked of this clock is whether the runner's last answer is over
-    // an hour old, and a value taken when this row was last composed is exact
-    // enough for an hour: a fleet poll recomposes it long before the threshold
-    // could be crossed unobserved. A second one-second timer per row, to move a
-    // dash that changes once an hour, is a timer for nothing.
-    val now by rememberNow(ticking = false)
 
     Row(
         Modifier
@@ -1140,7 +1133,6 @@ internal fun TerminalRow(
                         Spacer(Modifier.width(8.dp))
                         AgentMarkView(
                             terminal,
-                            now,
                             GlanceMarkSize.ROW,
                             answering = answering,
                             // Decorative, because the words are right there.

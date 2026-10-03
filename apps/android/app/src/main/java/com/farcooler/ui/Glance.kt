@@ -278,7 +278,6 @@ internal val FINISHED = Color(0xFF4CAF50)
 @Composable
 fun AgentMarkView(
     terminal: Terminal,
-    now: Long,
     size: GlanceMarkSize,
     modifier: Modifier = Modifier,
     decorative: Boolean = false,
@@ -296,7 +295,7 @@ fun AgentMarkView(
             ),
         contentAlignment = Alignment.Center,
     ) {
-        val mark = GlanceMark.of(terminal, now)?.said(answering)
+        val mark = GlanceMark.of(terminal)?.said(answering)
         if (mark != null) {
             // Decorative unconditionally: this composable has already said the
             // word above, and a mark that announced `phrase` too would make

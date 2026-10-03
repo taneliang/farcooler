@@ -8,6 +8,14 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 /**
  * The glance vocabulary, pinned.
@@ -306,11 +314,10 @@ class GlanceTest {
      */
     @Test
     fun `a runner that is not answering withdraws only the claim about now`() {
-        val now = 1_756_000_000_000L
-        val working = GlanceMark.of(terminal("working", since = now.toDouble()), now)!!
-        val idle = GlanceMark.of(terminal("idle", since = now.toDouble()), now)!!
-        val blocked = GlanceMark.of(terminal("blocked"), now)!!
-        val done = GlanceMark.of(terminal("done"), now)!!
+        val working = GlanceMark.of(terminal("working"))!!
+        val idle = GlanceMark.of(terminal("idle"))!!
+        val blocked = GlanceMark.of(terminal("blocked"))!!
+        val done = GlanceMark.of(terminal("done"))!!
 
         assertEquals(GlanceMark.UNSAID, working.said(answering = false))
         assertEquals(GlanceMark.UNSAID, idle.said(answering = false))
@@ -329,7 +336,7 @@ class GlanceTest {
 
     @Test
     fun `blocked is the heavy ring and no core`() {
-        val mark = GlanceMark.of(terminal("blocked"), now = 0L)!!
+        val mark = GlanceMark.of(terminal("blocked"))!!
         assertEquals(GlanceMark.Attention.NEEDS_YOU, mark.attention)
         assertEquals(GlanceMark.Core.AT_A_PROMPT, mark.core)
         assertEquals(GlanceMark.Link.LIVE, mark.link)
@@ -337,7 +344,7 @@ class GlanceTest {
 
     @Test
     fun `working is a hairline with a filled core`() {
-        val mark = GlanceMark.of(terminal("working"), now = 0L)!!
+        val mark = GlanceMark.of(terminal("working"))!!
         assertEquals(GlanceMark.Attention.QUIET, mark.attention)
         assertEquals(GlanceMark.Core.PRODUCING, mark.core)
     }
@@ -366,7 +373,7 @@ class GlanceTest {
      */
     @Test
     fun `a finished turn is the review ring and nothing else is`() {
-        val mark = GlanceMark.of(terminal("done"), now = 0L)!!
+        val mark = GlanceMark.of(terminal("done"))!!
         assertEquals(GlanceMark.Attention.TO_REVIEW, mark.attention)
         // The turn is over, so the agent is not producing.
         assertEquals(GlanceMark.Core.AT_A_PROMPT, mark.core)
@@ -377,7 +384,7 @@ class GlanceTest {
             assertNotEquals(
                 "$activity claimed the review tier",
                 GlanceMark.Attention.TO_REVIEW,
-                GlanceMark.of(terminal(activity), now = 0L)?.attention,
+                GlanceMark.of(terminal(activity))?.attention,
             )
         }
     }
@@ -390,9 +397,9 @@ class GlanceTest {
      */
     @Test
     fun `a finished turn reads with its hue removed`() {
-        val done = GlanceMark.of(terminal("done"), now = 0L)!!.attention
-        val quiet = GlanceMark.of(terminal("idle"), now = 0L)!!.attention
-        val blocked = GlanceMark.of(terminal("blocked"), now = 0L)!!.attention
+        val done = GlanceMark.of(terminal("done"))!!.attention
+        val quiet = GlanceMark.of(terminal("idle"))!!.attention
+        val blocked = GlanceMark.of(terminal("blocked"))!!.attention
         for (size in GlanceMarkSize.entries) {
             assertTrue(
                 "$size draws a finished turn at a quiet turn's weight",
@@ -470,12 +477,12 @@ class GlanceTest {
     @Test
     fun `a turn that died refuses the mark that a turn that worked now takes`() {
         assertEquals(AgentOutcome.FAILED, agentOutcome(terminal("done", failed = true)))
-        assertNull(GlanceMark.of(terminal("done", failed = true), now = 0L))
+        assertNull(GlanceMark.of(terminal("done", failed = true)))
 
         assertNull(agentOutcome(terminal("done")))
         assertEquals(
             GlanceMark.Attention.TO_REVIEW,
-            GlanceMark.of(terminal("done"), now = 0L)!!.attention,
+            GlanceMark.of(terminal("done"))!!.attention,
         )
         assertNotEquals(agentInk(terminal("done")), agentInk(terminal("done", failed = true)))
     }
@@ -495,7 +502,7 @@ class GlanceTest {
         for (activity in listOf("idle", "working", "blocked", "done", "unknown", "wat")) {
             for (failed in listOf(false, true)) {
                 val t = terminal(activity, failed = failed)
-                val mark = GlanceMark.of(t, now = 0L)
+                val mark = GlanceMark.of(t)
                 val outcome = agentOutcome(t)
                 assertTrue(
                     "$activity failed=$failed: mark=$mark outcome=$outcome",
@@ -513,47 +520,59 @@ class GlanceTest {
         // The mark still answers for a plain shell — it is the quiet hairline,
         // which is true of it — but no surface draws one: every call site guards
         // on `agent.isAgent` first, the way the fleet row does.
-        assertEquals(GlanceMark.Attention.QUIET, GlanceMark.of(shell, now = 0L)?.attention)
-    }
-
-    /** §08: "Blocked and to-review hold at any age; working and idle go dashed." */
-    @Test
-    fun `staleness dashes a quiet ring and never an attention one`() {
-        val now = 1_800_000_000_000L
-        val longAgo = (now - 3 * GlanceMark.STALE_AFTER_MS).toDouble()
-        assertEquals(
-            GlanceMark.Link.BROKEN,
-            GlanceMark.of(terminal("working", since = longAgo), now)!!.link,
-        )
-        assertEquals(
-            GlanceMark.Link.LIVE,
-            GlanceMark.of(terminal("blocked", since = longAgo), now)!!.link,
-        )
-        // "to-review" in §08's sentence is now reachable from an agent, and it
-        // holds the same way blocked does: a turn that ended an hour ago has
-        // still ended. `FleetSnapshot.Confidence` gives the same answer on the
-        // Apple side by vouching for `done` at any age.
-        assertEquals(
-            GlanceMark.Link.LIVE,
-            GlanceMark.of(terminal("done", since = longAgo), now)!!.link,
-        )
-        assertEquals(
-            GlanceMark.Link.BROKEN,
-            GlanceMark.of(terminal("idle", since = longAgo), now)!!.link,
-        )
+        assertEquals(GlanceMark.Attention.QUIET, GlanceMark.of(shell)?.attention)
     }
 
     /**
-     * Null means "not told", which is a different thing from "told a long time
-     * ago". An older daemon sends no timestamp for anything, and reading that as
-     * silence would draw a whole healthy fleet as unreachable.
+     * How long a state has lasted never dashes a ring; only a runner that isn't
+     * answering does. The cases are `test/fixtures/glance-in-app.json`, which
+     * AgentKit's `GlanceInAppFixtureTests` reads too, so the phones can't drift.
+     *
+     * Each case dates [Terminal.activitySince] `stateAgeSeconds` before the
+     * wall clock, so the rule that measured staleness from the last state
+     * change (an hour, against `activitySince`) is red here: "working for three
+     * hours on a live link" came out dashed.
      */
     @Test
-    fun `a terminal with no timestamp is not stale`() {
-        assertEquals(
-            GlanceMark.Link.LIVE,
-            GlanceMark.of(terminal("working", since = null), now = Long.MAX_VALUE / 2)!!.link,
-        )
+    fun `a long-lived state on a live link is not drawn stale`() {
+        val root = Json.parseToJsonElement(repositoryFile("test/fixtures/glance-in-app.json")).jsonObject
+        val cases = root.getValue("cases").jsonArray
+        assertTrue("the fixture has cases", cases.size >= 10)
+        val now = System.currentTimeMillis()
+        for (element in cases) {
+            val case = element.jsonObject
+            val name = case.getValue("name").jsonPrimitive.content
+            val age = case.getValue("stateAgeSeconds").jsonPrimitive.longOrNull
+            val since = age?.let { (now - it * 1000).toDouble() }
+            val answering = case.getValue("answering").jsonPrimitive.boolean
+            val expect = case.getValue("expect").jsonObject
+            val mark = GlanceMark.of(terminal(case.getValue("activity").jsonPrimitive.content, since = since))
+                ?.said(answering)
+            val drawn = mark?.let {
+                listOf(
+                    when (it.attention) {
+                        GlanceMark.Attention.NEEDS_YOU -> "needsYou"
+                        GlanceMark.Attention.TO_REVIEW -> "toReview"
+                        GlanceMark.Attention.QUIET -> "quiet"
+                    },
+                    when (it.core) {
+                        GlanceMark.Core.PRODUCING -> "producing"
+                        GlanceMark.Core.AT_A_PROMPT -> "atAPrompt"
+                        null -> null
+                    },
+                    when (it.link) {
+                        GlanceMark.Link.LIVE -> "live"
+                        GlanceMark.Link.BROKEN -> "broken"
+                    },
+                )
+            }
+            val expected = listOf(
+                expect.getValue("attention").jsonPrimitive.content,
+                expect.getValue("core").jsonPrimitive.contentOrNull,
+                expect.getValue("link").jsonPrimitive.content,
+            )
+            assertEquals(name, expected, drawn)
+        }
     }
 
     @Test
@@ -587,13 +606,13 @@ class GlanceTest {
     fun `only a finished turn reaches the review tier from a terminal`() {
         assertEquals(
             GlanceMark.Attention.TO_REVIEW,
-            GlanceMark.of(terminal("done"), now = 0L)?.attention,
+            GlanceMark.of(terminal("done"))?.attention,
         )
         for (activity in listOf("none", "idle", "working", "blocked", "unknown", "wat")) {
             assertNotEquals(
                 "$activity must not be able to draw the review ring",
                 GlanceMark.Attention.TO_REVIEW,
-                GlanceMark.of(terminal(activity), now = 0L)?.attention,
+                GlanceMark.of(terminal(activity))?.attention,
             )
         }
     }
@@ -684,14 +703,14 @@ class GlanceTest {
         assertEquals("52m ago", GlanceAge.stated(52 * 60_000L))
     }
 
-    /**
-     * Two minutes and an hour answer different questions, and a port that reused
-     * one constant for both would make a surface stop vouching for a working
-     * agent after two minutes.
-     */
-    @Test
-    fun `fresh and stale are different thresholds`() {
-        assertNotEquals(GlanceAge.FRESH_MS, GlanceMark.STALE_AFTER_MS)
-        assertTrue(GlanceAge.FRESH_MS < GlanceMark.STALE_AFTER_MS)
+    /** A file in this checkout, found by walking up from wherever Gradle runs. */
+    private fun repositoryFile(relative: String): String {
+        var directory: File? = File(System.getProperty("user.dir") ?: ".").absoluteFile
+        while (directory != null) {
+            val candidate = File(directory, relative)
+            if (candidate.isFile) return candidate.readText()
+            directory = directory.parentFile
+        }
+        throw AssertionError("Could not find $relative above ${System.getProperty("user.dir")}")
     }
 }

@@ -412,25 +412,6 @@ data class GlanceMark(
 
     companion object {
         /**
-         * How long a claim about the present may go unrefreshed before the ring
-         * goes dashed.
-         *
-         * An hour, matching `FleetSnapshot.staleAfter` and `ShellScreen`'s
-         * `staleAfter` on iOS to the second, because a phone and a watch looked
-         * at within a minute of each other must not disagree about which agents
-         * are still being vouched for.
-         *
-         * **This does not violate "the phone never computes a terminal's
-         * state".** It is the age of the DAEMON's own answer, rendered:
-         * [Terminal.activitySince] is a host-supplied timestamp, and a threshold
-         * on it says how long ago the runner last told us anything — a fact
-         * about our knowledge, which cannot disagree with the daemon about what
-         * the terminal is doing. It is drawn UNDER whatever the daemon's state
-         * already says, never replacing it.
-         */
-        const val STALE_AFTER_MS = 60L * 60L * 1000L
-
-        /**
          * "Can't say": a claim about the present from a runner that isn't
          * answering. A dashed hairline with no core.
          *
@@ -517,14 +498,19 @@ data class GlanceMark(
          * finished turn is a review ring here and a dead one is still red; the
          * two have never been the same dot and are not now.
          *
-         * A terminal the host has said nothing about at all — no
-         * [Terminal.activitySince] — is NOT stale. Null means "not told", which
-         * is a different thing from "told a long time ago" and must never be
-         * rendered as it: an older daemon sends no timestamp for anything, and
-         * reading that as silence would draw a whole healthy fleet as
-         * unreachable.
+         * **Never dashed here, at any age.** How long a state has lasted is not
+         * how long ago the runner was heard from: an agent working for three
+         * hours on a runner polled seconds ago is being vouched for right now.
+         * This used to dash a quiet ring once [Terminal.activitySince] was an
+         * hour old, which drew every long turn and every agent left idle over
+         * lunch as "Can't say" on a live link while the widget and the watch,
+         * measuring from when they last heard, drew it solid. AgentKit's
+         * `FleetSnapshot.lastHeard(of:)` names the same mistake. The one thing
+         * that may withdraw a claim about now is the runner not answering, and
+         * [said] applies that; `test/fixtures/glance-in-app.json` holds the
+         * cases, and AgentKit's `GlanceMark(terminal:)` reads the same file.
          */
-        fun of(terminal: Terminal, now: Long): GlanceMark? {
+        fun of(terminal: Terminal): GlanceMark? {
             if (agentOutcome(terminal) != null) return null
 
             // Blocked is the load-bearing mapping and it is identical on all
@@ -543,27 +529,7 @@ data class GlanceMark(
             }
             val core =
                 if (terminal.agent == AgentActivity.WORKING) Core.PRODUCING else Core.AT_A_PROMPT
-            // Only the claim about the present decays. Blocked is latched — an
-            // agent stopped an hour ago is still stopped — and so is done: a
-            // turn that ended an hour ago has still ended. So an attention mark
-            // keeps its solid ring however old the answer is, which is §08 word
-            // for word ("Blocked and to-review hold at any age; working and idle
-            // go dashed") and is the same answer `FleetSnapshot.Confidence`
-            // gives on the Apple side by vouching for both at any age.
-            //
-            // MILLISECONDS, both sides. [Terminal.activitySince] is Unix
-            // milliseconds off the host — `crates/cli`'s `activity_since` — and
-            // `now` is `System.currentTimeMillis()`, so this is a subtraction
-            // and not a conversion. It is called out because it was written as
-            // a conversion first, `since * 1000`, which put every timestamp
-            // seventeen centuries in the future and made the difference
-            // negative: no ring would ever have gone dashed, on any fleet, and
-            // nothing on screen would have said so.
-            val since = terminal.activitySince
-            val stale = attention == Attention.QUIET &&
-                since != null &&
-                now - since.toLong() > STALE_AFTER_MS
-            return GlanceMark(attention, core, if (stale) Link.BROKEN else Link.LIVE)
+            return GlanceMark(attention, core)
         }
 
         /**
@@ -957,10 +923,9 @@ object GlanceAge {
     /**
      * Under two minutes, which is §08's definition of a fresh snapshot.
      *
-     * Deliberately NOT [GlanceMark.STALE_AFTER_MS], which is an hour and answers
-     * a different question — whether a claim about the present may still be
-     * asserted at all. Two minutes is when a surface starts saying how old it
-     * is; an hour is when it stops vouching.
+     * Not a staleness threshold. Two minutes is when a surface starts saying
+     * how old it is; whether it may still vouch for the present is a separate
+     * question, answered by whether the runner is answering ([GlanceMark.said]).
      */
     const val FRESH_MS = 120L * 1000L
 }
