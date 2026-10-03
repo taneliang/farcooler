@@ -417,6 +417,14 @@ impl AgentSupervisor {
     /// delivery is the same lie with one more step in it.
     #[must_use = "a message the shim never got is not a message that was sent"]
     pub fn send(&self, terminal: Uuid, message: DaemonMessage) -> bool {
+        // A pane whose shim reported a failure has no agent to deliver to,
+        // whether it never started or died mid-session. Its shim keeps the
+        // link open (see `report_failure` and the shim's `host`), so the
+        // writer is live and a send would succeed — into nothing. Refused
+        // until a new shim's `Established` clears the word.
+        if self.failure(terminal).is_some() {
+            return false;
+        }
         let Ok(writers) = self.writers.lock() else { return false };
         let Some(tx) = writers.get(&terminal) else { return false };
         tx.send(message).is_ok()

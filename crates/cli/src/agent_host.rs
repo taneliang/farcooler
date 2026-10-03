@@ -453,7 +453,46 @@ pub async fn run(
         }
     };
     println!("{}", status_line(&Status::Connected { session_id: session_id.clone() }));
+    host(terminal, socket, backend, prelude, session_id, available_modes).await
+}
 
+/// Whether a command's error means the adapter is gone, rather than that it
+/// said no to this one command.
+///
+/// `Closed` and `Spawn` are the two a running backend reports when the
+/// process or its pipes have gone away. Everything else is the agent
+/// answering: a refused mode, a stale permission id. Those leave a perfectly
+/// good session behind, and ending it over one would be a worse failure than
+/// the one it reports.
+fn adapter_is_gone(error: &farcooler_agent_core::backend::BackendError) -> bool {
+    use farcooler_agent_core::backend::BackendError;
+    matches!(error, BackendError::Closed | BackendError::Spawn)
+}
+
+/// The hosting half of `run`: a started backend, pumped, and served to
+/// whichever daemon is connected, until the pane goes away.
+///
+/// Split out so a test can hand it a backend started against a fake adapter
+/// — `run` reads the runner's config to find a real one.
+///
+/// **An adapter that dies ends the turn and says so.** The pump used to log
+/// a warning and return. It sent no `TurnEnded` and no `Failed`, so a turn
+/// the adapter took with it stayed `Working` on every screen forever, and
+/// the daemon went on handing prompts to a task that no longer existed —
+/// each one answered as delivered and never seen again. Now the turn ends
+/// with an event every app already draws, the daemon is told
+/// `adapter-failed` (which is what makes it refuse later prompts, see
+/// `AgentSupervisor::send`), and the reason goes to this pane's log. Toggling
+/// the pane to a terminal and back starts a new adapter, which is how an
+/// adapter is restarted everywhere else.
+async fn host(
+    terminal: Uuid,
+    socket: PathBuf,
+    backend: farcooler_agent::dispatch::Backend,
+    prelude: Vec<farcooler_agent::event::AgentEvent>,
+    session_id: String,
+    available_modes: Vec<String>,
+) -> Fallible {
     let ring = Arc::new(Mutex::new(AgentRing::new()));
     {
         let mut ring = ring.lock().expect("ring mutex");
@@ -477,12 +516,17 @@ pub async fn run(
     // disconnected at push time — the very case Bug 2 is about — and be
     // delivered to whichever `serve` call is listening when it reconnects.
     let notify = Arc::new(Notify::new());
+    // Set once, when the adapter is gone. Every daemon connection from then
+    // on is told — see `serve` — so one that arrives after the death hears
+    // about it as surely as the one that was there.
+    let gone: Arc<Mutex<Option<AgentFailure>>> = Arc::new(Mutex::new(None));
 
     {
         let ring = ring.clone();
         let notify = notify.clone();
+        let gone = gone.clone();
         tokio::spawn(async move {
-            loop {
+            let error = loop {
                 tokio::select! {
                     // Both branches are `mpsc` receives and NOTHING ELSE. That
                     // is the whole point, and it is not a stylistic choice.
@@ -497,10 +541,7 @@ pub async fn run(
                     frame = chat.backend_mut().recv_frame() => {
                         let frame = match frame {
                             Ok(frame) => frame,
-                            Err(e) => {
-                                tracing::warn!(terminal = %terminal, error = %e, "agent adapter closed; nothing left to pump");
-                                return;
-                            }
+                            Err(e) => break e,
                         };
                         // Handled to completion, uncancellable by construction.
                         match chat.backend_mut().handle(frame).await {
@@ -518,10 +559,7 @@ pub async fn run(
                                 drop(ring);
                                 notify.notify_one();
                             }
-                            Err(e) => {
-                                tracing::warn!(terminal = %terminal, error = %e, "agent adapter closed; nothing left to pump");
-                                return;
-                            }
+                            Err(e) => break e,
                         }
                     }
                     cmd = cmd_rx.recv() => {
@@ -578,9 +616,6 @@ pub async fn run(
                             // this channel.
                             DaemonMessage::Subscribe { .. } => Ok(()),
                         };
-                        if let Err(e) = result {
-                            tracing::warn!(terminal = %terminal, error = %e, "a daemon command could not reach the agent");
-                        }
                         if !produced.is_empty() {
                             let mut ring = ring.lock().expect("ring mutex");
                             for event in produced {
@@ -589,7 +624,49 @@ pub async fn run(
                             drop(ring);
                             notify.notify_one();
                         }
+                        if let Err(e) = result {
+                            if adapter_is_gone(&e) {
+                                break e;
+                            }
+                            // Printed, not only traced: the pane is this
+                            // process's log surface, and a `tracing` warning
+                            // goes nowhere anyone looks. The app's half is
+                            // the agent's own reply, or its absence.
+                            println!("farcooler: the agent didn't accept that: {e}");
+                            tracing::warn!(terminal = %terminal, error = %e, "a daemon command could not reach the agent");
+                        }
                     }
+                }
+            };
+
+            tracing::warn!(terminal = %terminal, error = %error, "agent adapter closed; ending the turn");
+            println!(
+                "farcooler: the agent adapter stopped: {error}.\n\
+                 Switch this pane to terminal mode and back to start it again."
+            );
+            {
+                let mut ring = ring.lock().expect("ring mutex");
+                // `Cancelled`: the turn stopped before the agent finished it,
+                // which is what that reason already means to every app. Only
+                // when one was running — a `TurnEnded` with no turn before it
+                // would draw a seam under a conversation that was resting.
+                // Pushed straight to the ring rather than through `absorb`,
+                // which would hand the next queued prompt to the dead adapter.
+                if chat.turn_in_flight() {
+                    ring.push(farcooler_agent::event::AgentEvent::TurnEnded {
+                        reason: farcooler_agent::event::EndReason::Cancelled,
+                    });
+                }
+            }
+            *gone.lock().expect("gone mutex") = Some(AgentFailure::from(&error));
+            notify.notify_one();
+
+            // Commands still arrive until the daemon has heard; they are
+            // refused here, out loud, rather than left in a channel nobody
+            // reads.
+            while let Some(cmd) = cmd_rx.recv().await {
+                if !matches!(cmd, DaemonMessage::Subscribe { .. }) {
+                    println!("farcooler: the agent adapter has stopped, so this pane can't take that.");
                 }
             }
         });
@@ -605,7 +682,7 @@ pub async fn run(
             continue;
         };
         if let Err(e) =
-            serve(&session_id, &available_modes, &ring, &notify, &cmd_tx, stream, &mut cursor).await
+            serve(&session_id, &available_modes, &ring, &notify, &gone, &cmd_tx, stream, &mut cursor).await
         {
             tracing::warn!(terminal = %terminal, error = %e, "daemon link dropped; will reconnect");
         }
@@ -619,11 +696,13 @@ pub async fn run(
 /// session. That is what lets a daemon reconnect (a brand new call to this
 /// function, with a brand new socket) without any risk of two places racing
 /// to write to the agent's stdin at once.
+#[allow(clippy::too_many_arguments)]
 async fn serve(
     session_id: &str,
     available_modes: &[String],
     ring: &Arc<Mutex<AgentRing>>,
     notify: &Notify,
+    gone: &Mutex<Option<AgentFailure>>,
     cmd_tx: &mpsc::UnboundedSender<DaemonMessage>,
     stream: UnixStream,
     cursor: &mut u64,
@@ -654,6 +733,10 @@ async fn serve(
     // Waiting makes the order of a connection definite: established, asked,
     // answered once, and only then streamed.
     let mut subscribed = false;
+    // Whether THIS connection has been told the adapter is gone. Per
+    // connection, because `Established` clears a daemon's record of a failure
+    // and every connection opens with one.
+    let mut announced = false;
 
     loop {
         tokio::select! {
@@ -673,6 +756,7 @@ async fn serve(
                             message
                         };
                         write_half.write_all(encode_line(&message)?.as_bytes()).await?;
+                        announce_gone(gone, &mut announced, &mut write_half).await?;
                     }
                     // Prompt/Answer/SetMode/Cancel all need `RunningSession`,
                     // which only the session task in `run` is allowed to
@@ -687,21 +771,41 @@ async fn serve(
                 let message = {
                     let ring = ring.lock().expect("ring mutex");
                     match ring.since(*cursor) {
+                        AgentReplay::At { events } if events.is_empty() => None,
                         AgentReplay::At { events } => {
-                            if events.is_empty() { continue }
                             *cursor = ring.next_seq();
-                            ShimMessage::Events { events }
+                            Some(ShimMessage::Events { events })
                         }
                         AgentReplay::Gap { resumed_at, dropped, events } => {
                             *cursor = ring.next_seq();
-                            ShimMessage::Trimmed { resumed_at, dropped, events }
+                            Some(ShimMessage::Trimmed { resumed_at, dropped, events })
                         }
                     }
                 };
-                write_half.write_all(encode_line(&message)?.as_bytes()).await?;
+                if let Some(message) = message {
+                    write_half.write_all(encode_line(&message)?.as_bytes()).await?;
+                }
+                // After the events, so the turn's end reaches the daemon
+                // before the word that says there will be no more.
+                announce_gone(gone, &mut announced, &mut write_half).await?;
             }
         }
     }
+}
+
+/// Tell this connection the adapter is gone, once, if it is.
+async fn announce_gone(
+    gone: &Mutex<Option<AgentFailure>>,
+    announced: &mut bool,
+    write_half: &mut tokio::net::unix::OwnedWriteHalf,
+) -> Fallible {
+    if *announced {
+        return Ok(());
+    }
+    let Some(failure) = *gone.lock().expect("gone mutex") else { return Ok(()) };
+    write_half.write_all(encode_line(&ShimMessage::Failed { failure })?.as_bytes()).await?;
+    *announced = true;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -840,7 +944,8 @@ mod tests {
             let notify = Arc::clone(&notify);
             tokio::spawn(async move {
                 let mut cursor = 0;
-                let _ = serve("s", &[], &ring, &notify, &cmd_tx, shim_side, &mut cursor).await;
+                let gone = Mutex::new(None);
+                let _ = serve("s", &[], &ring, &notify, &gone, &cmd_tx, shim_side, &mut cursor).await;
             })
         };
 
@@ -869,6 +974,139 @@ mod tests {
         served.abort();
 
         assert_eq!(delivered, 1, "the ring was sent twice: once pushed, once asked for");
+    }
+
+    /// A fake ACP adapter: answers `initialize` and `session/new`, then does
+    /// whatever `after_prompt` says once a prompt arrives. Plain `/bin/sh`, so
+    /// no real agent is ever involved.
+    fn fake_adapter(after_prompt: &str) -> farcooler_core::activity::AdapterSpec {
+        let script = format!(
+            r#"answer() {{ id=$(printf '%s' "$1" | sed 's/.*"id":\([0-9]*\).*/\1/'); printf '{{"jsonrpc":"2.0","id":%s,"result":%s}}\n' "$id" "$2"; }}
+read l; answer "$l" '{{"protocolVersion":1,"agentCapabilities":{{}}}}'
+read l; answer "$l" '{{"sessionId":"fake"}}'
+read l
+{after_prompt}"#
+        );
+        let mut spec = resolve(&farcooler_core::activity::Registry::built_in(), Some("codex"))
+            .expect("a built-in spec to reshape");
+        spec.backend = farcooler_core::activity::AdapterBackend::Acp;
+        spec.program = "/bin/sh".into();
+        spec.args = vec!["-c".into(), script];
+        spec.env = Default::default();
+        spec
+    }
+
+    /// The shim, hosting a session against `spec`, served to a REAL
+    /// `AgentSupervisor` on a real socket. Returns the supervisor, the
+    /// terminal, and every event the daemon recorded.
+    async fn hosted(
+        spec: farcooler_core::activity::AdapterSpec,
+        dir: &std::path::Path,
+    ) -> (
+        farcooler_daemon::agent_supervisor::AgentSupervisor,
+        Uuid,
+        Arc<Mutex<Vec<farcooler_agent::event::AgentEvent>>>,
+    ) {
+        use farcooler_daemon::agent_supervisor::{AgentSupervisor, socket_path};
+
+        let terminal = Uuid::now_v7();
+        let supervisor = AgentSupervisor::new();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        {
+            let supervisor = supervisor.clone();
+            let root = dir.to_path_buf();
+            let seen = seen.clone();
+            tokio::spawn(async move {
+                let _ = supervisor
+                    .listen(&root, terminal, move |_, events| {
+                        seen.lock().unwrap().extend(events.into_iter().map(|s| s.event));
+                    })
+                    .await;
+            });
+        }
+        let socket = socket_path(dir, terminal);
+        eventually(|| socket.exists().then_some(())).await.expect("the daemon bound its socket");
+
+        let (backend, prelude, session_id, modes) =
+            start_backend("fake", spec, dir, None, Default::default())
+                .await
+                .expect("the fake adapter starts");
+        tokio::spawn(async move {
+            let _ = host(terminal, socket, backend, prelude, session_id, modes).await;
+        });
+        (supervisor, terminal, seen)
+    }
+
+    fn prompt() -> DaemonMessage {
+        DaemonMessage::Prompt { text: "go".into(), images: Vec::new() }
+    }
+
+    /// An adapter that dies mid-turn ends the turn, tells the daemon, and
+    /// the next prompt is refused rather than dropped.
+    ///
+    /// The pump used to log and return: no `TurnEnded`, no `Failed`. The pane
+    /// stayed `Working` on every screen forever, and every later prompt was
+    /// handed to a task that no longer existed and answered as delivered.
+    #[tokio::test]
+    async fn an_adapter_that_dies_mid_turn_ends_the_turn_and_refuses_the_next_prompt() {
+        use farcooler_agent::event::{AgentEvent, EndReason};
+        use farcooler_protocol::v1::AgentActivity;
+
+        let dir = tempfile::tempdir().expect("a runtime directory");
+        // Says something — so the turn is truly under way — and crashes.
+        let spec = fake_adapter(
+            r#"printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fake","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"working on it"}}}}\n'
+sleep 0.3
+exit 1"#,
+        );
+        let (supervisor, terminal, seen) = hosted(spec, dir.path()).await;
+
+        eventually(|| supervisor.send(terminal, prompt()).then_some(()))
+            .await
+            .expect("a live adapter takes the first prompt");
+        eventually(|| (supervisor.activity(terminal) == AgentActivity::Working).then_some(()))
+            .await
+            .expect("the fixture must reach a turn in flight");
+
+        assert_eq!(
+            eventually(|| supervisor.failure(terminal)).await,
+            Some(AgentFailure::AdapterFailed),
+            "the daemon has to learn the adapter is gone"
+        );
+        assert!(
+            seen.lock().unwrap().contains(&AgentEvent::TurnEnded { reason: EndReason::Cancelled }),
+            "the turn the adapter took with it has to end: {:?}",
+            seen.lock().unwrap()
+        );
+        assert_ne!(supervisor.activity(terminal), AgentActivity::Working);
+        assert!(
+            !supervisor.send(terminal, prompt()),
+            "a prompt for a dead adapter must be refused, not answered as delivered"
+        );
+    }
+
+    /// An adapter that exits while nobody is mid-turn is reported the same
+    /// way, without inventing a turn to end.
+    #[tokio::test]
+    async fn an_adapter_that_exits_between_turns_is_reported_without_a_turn_ending() {
+        use farcooler_agent::event::AgentEvent;
+
+        let dir = tempfile::tempdir().expect("a runtime directory");
+        // Never reaches a prompt: exits straight after the handshake.
+        let mut spec = fake_adapter("");
+        let handshake = spec.args[1].strip_suffix("read l\n").expect("the script ends waiting for a prompt");
+        spec.args[1] = format!("{handshake}exit 0\n");
+        let (supervisor, terminal, seen) = hosted(spec, dir.path()).await;
+
+        assert_eq!(
+            eventually(|| supervisor.failure(terminal)).await,
+            Some(AgentFailure::AdapterFailed),
+        );
+        assert!(
+            !seen.lock().unwrap().iter().any(|e| matches!(e, AgentEvent::TurnEnded { .. })),
+            "no turn was running, so none ends"
+        );
+        assert!(!supervisor.send(terminal, prompt()));
     }
 
     #[test]
