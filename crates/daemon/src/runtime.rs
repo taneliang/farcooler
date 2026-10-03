@@ -512,8 +512,12 @@ impl Runtime {
         // the fanout has to bind the socket this daemon will look for, and only
         // this daemon knows which install it is. An id is hex, so tmux has
         // nothing in it to expand.
+        //
+        // `#{pane_tty}` IS meant for tmux to expand: it is the pane's terminal
+        // device, which is where the fanout reads the pane's size so the stream
+        // can say what size its bytes were written for. See `fanout::PaneSize`.
         let command = format!(
-            "'{}' --fanout '{}' --install '{}'",
+            "'{}' --fanout '{}' --install '{}' --tty '#{{pane_tty}}'",
             exe.display(),
             pane_id.trim_start_matches('%'),
             install,

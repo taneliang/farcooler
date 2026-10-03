@@ -124,7 +124,11 @@ async fn run() -> Result<(), i32> {
             .and_then(|i| args.get(i + 1))
             .map(String::as_str)
             .unwrap_or("");
-        return farcooler_daemon::fanout::serve(install, pane).await.map_err(|e| {
+        // The pane's tty, where its size is read so the stream can carry it.
+        // Optional for the same reason `--install` is. See `fanout::PaneSize`.
+        let tty = args.iter().position(|a| a == "--tty").and_then(|i| args.get(i + 1));
+        let tty = tty.map(String::as_str);
+        return farcooler_daemon::fanout::serve(install, pane, tty).await.map_err(|e| {
             eprintln!("cannot serve that pane: {e}");
             1
         });
