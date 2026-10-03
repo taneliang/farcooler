@@ -55,3 +55,17 @@ pub(crate) fn split(relative: &Path) -> std::io::Result<(&Path, &OsStr)> {
 fn dir_flags() -> OFlags {
     OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW
 }
+
+/// Whether the volume holding `dir` folds case, as APFS does by default and
+/// ext4 doesn't: a probe file made in `dir` is looked up by its uppercase
+/// spelling. A link planted as `.AGENTS` names `.agents` only where this
+/// says yes; elsewhere it is an unrelated directory, and a test of a
+/// case-variant link has to know which it is testing.
+#[cfg(test)]
+pub(crate) fn folds_case(dir: &Path) -> bool {
+    let probe = dir.join(".folds-case-probe");
+    std::fs::write(&probe, "").expect("write the case probe");
+    let folds = std::fs::symlink_metadata(dir.join(".FOLDS-CASE-PROBE")).is_ok();
+    std::fs::remove_file(&probe).expect("remove the case probe");
+    folds
+}

@@ -474,19 +474,46 @@ mod tests {
     use super::*;
     use std::os::unix::fs::MetadataExt;
 
-    /// ov-200: `.agents` swapped for a link to a directory outside, in either
-    /// spelling, after `crosses_a_symlink` looked and while the gits ran.
-    /// Nothing is made or written outside the worktree.
+    /// ov-200: `.agents` swapped for a link to a directory outside, after
+    /// `crosses_a_symlink` looked and while the gits ran. Nothing is made or
+    /// written outside the worktree.
     #[test]
     fn a_skills_directory_swapped_for_a_link_is_not_followed() {
-        for spelling in [".agents", ".AGENTS"] {
-            let worktree = tempfile::tempdir().unwrap();
-            let outside = tempfile::tempdir().unwrap();
-            std::os::unix::fs::symlink(outside.path(), worktree.path().join(spelling)).unwrap();
-            let installed = install_file_beneath(worktree.path(), PROJECT_SKILL, &signed("# v1\n"));
+        skills_directory_swapped_for_a_link(".agents");
+    }
+
+    /// The same link spelled `.AGENTS`, its own test so that it goes red on
+    /// its own (ov-202).
+    #[test]
+    fn a_skills_directory_swapped_for_a_link_in_another_case_is_not_followed() {
+        skills_directory_swapped_for_a_link(".AGENTS");
+    }
+
+    /// A link at `spelling` in a fresh worktree, then an install.
+    ///
+    /// `.AGENTS` names `.agents` only on a volume that folds case (APFS by
+    /// default), where the install must refuse it as it refuses `.agents`. On
+    /// one that doesn't (ext4, Linux CI) it is an unrelated directory: the
+    /// right install makes the real `.agents` beside it and writes there. On
+    /// both, the link and the directory it points at are left alone.
+    fn skills_directory_swapped_for_a_link(spelling: &str) {
+        let worktree = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let link = worktree.path().join(spelling);
+        std::os::unix::fs::symlink(outside.path(), &link).unwrap();
+        let names_agents = spelling == ".agents" || crate::beneath::folds_case(worktree.path());
+        let v1 = signed("# v1\n");
+        let installed = install_file_beneath(worktree.path(), PROJECT_SKILL, &v1);
+        if names_agents {
             assert_ne!(installed, Installed::Wrote, "{spelling}: written through the link");
-            assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0, "{spelling}: something was made outside");
+        } else {
+            assert_eq!(installed, Installed::Wrote, "{spelling}: the real .agents beside the link was not written");
+            let real = std::fs::symlink_metadata(worktree.path().join(".agents")).unwrap();
+            assert!(real.is_dir(), "{spelling}: .agents is not a real directory");
+            assert_eq!(std::fs::read_to_string(worktree.path().join(PROJECT_SKILL)).unwrap(), v1, "{spelling}");
         }
+        assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink(), "{spelling}: the link was replaced");
+        assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0, "{spelling}: something was made outside");
     }
 
     /// A file of ours with `body` above the marker, the shape `render` gives

@@ -10419,22 +10419,49 @@ mod hook_file_tests {
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1, "renamed into place, nothing beside it");
     }
 
-    /// ov-200: `.codex` swapped for a link to a directory outside, in either
-    /// spelling, after `crosses_a_symlink` looked and while the gits ran.
-    /// The write opens `.codex` from the worktree without following it, so
-    /// the hooks file outside is left as it was and nothing is made there.
+    /// ov-200: `.codex` swapped for a link to a directory outside, after
+    /// `crosses_a_symlink` looked and while the gits ran. The write opens
+    /// `.codex` from the worktree without following it, so the hooks file
+    /// outside is left as it was and nothing is made there.
     #[test]
     fn a_hooks_directory_swapped_for_a_link_is_not_followed() {
-        for spelling in [".codex", ".CODEX"] {
-            let worktree = tempfile::tempdir().unwrap();
-            let outside = tempfile::tempdir().unwrap();
-            std::fs::write(outside.path().join("hooks.json"), "{}").unwrap();
-            std::os::unix::fs::symlink(outside.path(), worktree.path().join(spelling)).unwrap();
-            let wrote = replace_hooks_file(worktree.path(), crate::hook_install::CODEX_HOOKS, b"ours", b"{}", || {});
+        hooks_directory_swapped_for_a_link(".codex");
+    }
+
+    /// The same link spelled `.CODEX`, its own test so that it goes red on
+    /// its own (ov-202).
+    #[test]
+    fn a_hooks_directory_swapped_for_a_link_in_another_case_is_not_followed() {
+        hooks_directory_swapped_for_a_link(".CODEX");
+    }
+
+    /// A link at `spelling` to a directory holding a hooks file that says
+    /// `{}`, then a replace of the worktree's hooks file that expects `{}`:
+    /// followed, the link would hand it exactly the file it expects.
+    ///
+    /// `.CODEX` names `.codex` only on a volume that folds case (APFS by
+    /// default). On one that doesn't (ext4, Linux CI) it is an unrelated
+    /// directory, and there the replace expects no file, as a launch would
+    /// find, and must write the real `.codex` beside the link.
+    fn hooks_directory_swapped_for_a_link(spelling: &str) {
+        let worktree = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("hooks.json"), "{}").unwrap();
+        let link = worktree.path().join(spelling);
+        std::os::unix::fs::symlink(outside.path(), &link).unwrap();
+        let hooks = crate::hook_install::CODEX_HOOKS;
+        if spelling == ".codex" || crate::beneath::folds_case(worktree.path()) {
+            let wrote = replace_hooks_file(worktree.path(), hooks, b"ours", b"{}", || {});
             assert!(!wrote, "{spelling}: written through the link");
-            assert_eq!(std::fs::read_to_string(outside.path().join("hooks.json")).unwrap(), "{}", "{spelling}");
-            assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 1, "{spelling}: something was made outside");
+        } else {
+            let wrote = replace_hooks_file(worktree.path(), hooks, b"ours", b"", || {});
+            assert!(wrote, "{spelling}: the real .codex beside the link was not written");
+            assert!(std::fs::symlink_metadata(worktree.path().join(".codex")).unwrap().is_dir(), "{spelling}");
+            assert_eq!(std::fs::read_to_string(worktree.path().join(hooks)).unwrap(), "ours", "{spelling}");
         }
+        assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink(), "{spelling}: the link was replaced");
+        assert_eq!(std::fs::read_to_string(outside.path().join("hooks.json")).unwrap(), "{}", "{spelling}");
+        assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 1, "{spelling}: something was made outside");
     }
 
     /// m7-r of the re-review: a hooks file this creates gets what any new
