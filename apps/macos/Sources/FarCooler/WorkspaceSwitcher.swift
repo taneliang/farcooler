@@ -20,12 +20,19 @@ struct WorkspaceSwitcherButton: NSViewRepresentable {
     let openRequest: Int
     let perform: (SwitcherCommand) -> Void
 
+    /// The bezel (ov-91): borderless until the pointer is over it, then the
+    /// standard recessed highlight, and the pressed one while clicked.
+    static func configure(_ button: NSButton) {
+        button.isBordered = true
+        button.bezelStyle = .recessed
+        button.showsBorderOnlyWhileMouseInside = true
+    }
+
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> NSButton {
         let button = NSButton(title: "", target: context.coordinator, action: #selector(Coordinator.open(_:)))
-        button.isBordered = false
-        button.bezelStyle = .accessoryBarAction
+        Self.configure(button)
         button.imagePosition = .imageTrailing
         button.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
