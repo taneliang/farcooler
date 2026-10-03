@@ -51,6 +51,9 @@ jobs:
     # refuses such a commit too.
     if: github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
+    # A checkout, one API call and a push: minutes at most, and a hung one
+    # should not hold a runner for GitHub's six-hour default.
+    timeout-minutes: 10
     # `contents: write` to commit the baseline, `actions: read` to list the
     # Canary run's jobs. Held by this job's shell alone, not by a build.
     permissions:
