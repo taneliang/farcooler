@@ -34,9 +34,13 @@
 //!    empty. A menu, a picker, a prompt, an unfamiliar screen or a draft:
 //!    not typed into.
 //! 5. The agent has bracketed paste on, as tmux reports it. tmux older than
-//!    3.7 (Ubuntu 24.04 has 3.4) can't report it at all, so on such a runner
-//!    nothing is typed, and the task says so at once: "Not delivered: this
-//!    runner's tmux can't tell whether the agent takes a paste…".
+//!    3.7 (Ubuntu 24.04 has 3.4) can't report it, so there it's read from
+//!    the pane's own output (`paste_mode`), which the daemon follows for
+//!    every agent pane from when it starts the agent. Known only if the
+//!    daemon has seen every byte since the agent last set or reset it, and
+//!    the pane still runs that agent. Otherwise nothing is typed, and the
+//!    task says so at once: "Not delivered: Far Cooler can't tell whether
+//!    the agent takes a paste…".
 //!
 //! **Typing.** The row is claimed first, in its own write. The text goes in
 //! as one bracketed paste. The box is then read back until it holds exactly
@@ -95,8 +99,8 @@ const PASTE_LEFT: &str = "Paste left in the composer; not sent";
 const LEFT_AT_A_SHELL: &str = "Answer left at a shell prompt; not run";
 const SUPERSEDED: &str = "Not delivered: a newer answer replaced it.";
 const NOBODY: &str = "Nobody to tell about the decision";
-const OLD_TMUX: &str =
-    "Not delivered: this runner's tmux can't tell whether the agent takes a paste. tmux 3.7 or later can.";
+const OLD_TMUX: &str = "Not delivered: Far Cooler can't tell whether the agent takes a paste. It can for an \
+     agent started after Far Cooler on this runner, or on any agent with tmux 3.7 or later.";
 
 /// What the agent is told.
 pub(crate) fn message(key: &str, title: &str, answer: &str) -> String {
@@ -305,12 +309,20 @@ impl Watcher {
             Ok(Composer::Unrecognized) => return Pass::Waiting(Held::Unfamiliar),
             Err(held) => return Pass::Waiting(held),
         }
-        match self.service.pane_bracketed_paste(to.id).await {
-            Ok(Some(true)) => {}
-            // tmux can't say, and never will for this pane: say so now rather
-            // than after half an hour of waiting.
-            Ok(None) => return self.settle(wake, Some(task), Some(OLD_TMUX.into())),
-            Ok(Some(false)) | Err(_) => return Pass::Waiting(Held::Unfamiliar),
+        let bracketed = match self.service.pane_bracketed_paste(to.id).await {
+            Ok(Some(on)) => on,
+            // tmux can't say (older than 3.7): the pane's own output can, if
+            // this daemon has followed it since the agent last set the mode.
+            Ok(None) => match self.service.streamed_bracketed_paste(to.id).await {
+                Some(on) => on,
+                // Not known, and not about to be: say so now rather than
+                // after half an hour of waiting.
+                None => return self.settle(wake, Some(task), Some(OLD_TMUX.into())),
+            },
+            Err(_) => false,
+        };
+        if !bracketed {
+            return Pass::Waiting(Held::Unfamiliar);
         }
         match self.service.store.claim_answer_wake(wake.note) {
             Ok(true) => {}
@@ -447,7 +459,7 @@ impl Watcher {
 }
 
 /// Whether a preset launches an agent this module can type to.
-fn is_an_agent_preset(preset: &str) -> bool {
+pub(crate) fn is_an_agent_preset(preset: &str) -> bool {
     matches!(preset.split(':').next(), Some("claude" | "codex" | "cursor"))
 }
 

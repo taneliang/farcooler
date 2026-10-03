@@ -22,9 +22,10 @@ const STAND_IN: &str = include_str!("stand_in.pl");
 /// flag read can't switch the tests that need it off. A version it can't
 /// read counts as new enough: those tests run, and fail if it isn't.
 ///
-/// Only one of each pair below can run on a given host. Ubuntu's 3.4 runs
-/// the old-tmux test and macOS's current tmux runs the rest, so CI's two
-/// legs between them drive both paths through a real tmux.
+/// The typing tests run on both: below 3.7 the gate reads the pane's output
+/// (`paste_mode`), and `settle_stand_in` waits for that record. The tests
+/// of what that record can't know run only below 3.7, so Ubuntu's 3.4 leg
+/// of CI drives them and macOS's current tmux drives the flag.
 fn tmux_tells_bracketing() -> bool {
     static KNOWS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *KNOWS.get_or_init(|| {
@@ -116,11 +117,37 @@ impl Board {
         self.svc.start_orchestrator(self.task.workspace_id, "claude", false, None).await.expect("an orchestrator")
     }
 
-    /// Put `command` in `terminal`'s pane in place of what's there.
+    /// Put `command` in `terminal`'s pane in place of what's there, and
+    /// follow its output as the daemon does after its own respawns.
     async fn run_in(&self, terminal: &Terminal, command: &str) {
+        self.run_unfollowed(terminal, command).await;
+        self.svc.follow_paste_mode(terminal.id).await;
+    }
+
+    /// `run_in`, as someone else's `respawn-pane` would: nothing follows the
+    /// new program's output from its start.
+    async fn run_unfollowed(&self, terminal: &Terminal, command: &str) {
         let pane = self.svc.inventory_snapshot().claimants(terminal.id).into_iter().next().unwrap().pane_id.clone();
         self.svc.tmux.respawn_pane(&pane, &self.lane.worktree_path, command).await.unwrap();
         self.svc.inventory.refresh().await;
+    }
+
+    /// On a tmux that can't report bracketing, wait until the daemon's record
+    /// of `terminal`'s output says `known`: the bytes reach it a moment after
+    /// the program writes them. Panics if it never does.
+    async fn stream_says(&self, terminal: Uuid, known: Option<bool>) {
+        if tmux_tells_bracketing() {
+            return;
+        }
+        let mut now = None;
+        for _ in 0..100 {
+            now = self.svc.streamed_bracketed_paste(terminal).await;
+            if now == known {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("the stream record says {now:?}, not {known:?}");
     }
 
     /// The stand-in for `agent` in `terminal`, run as a program named
@@ -138,6 +165,15 @@ impl Board {
         let command =
             format!("{} {} {agent} {} {}", q(&program), q(&dir.join("stand_in.pl")), q(&si.control), q(&si.log));
         self.run_in(terminal, &command).await;
+        self.settle_stand_in(terminal, &si).await;
+        si
+    }
+
+    /// Wait for a stand-in to draw its box, then draw it again: the redraw
+    /// sets bracketing after the daemon has subscribed, which a stand-in's
+    /// start may have beaten (`stand_in_set_bracketing_before_anyone_followed`
+    /// is what that costs).
+    async fn settle_stand_in(&self, terminal: &Terminal, si: &StandIn) {
         self.screen_with(terminal.id, "stand-in").await;
         for _ in 0..100 {
             if si.log().contains("MODE idle") {
@@ -145,7 +181,9 @@ impl Board {
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        si
+        si.show("working").await;
+        si.show("idle").await;
+        self.stream_says(terminal.id, Some(true)).await;
     }
 
     /// The stand-in run as Node runs an npm install: a copy of perl named
@@ -161,13 +199,7 @@ impl Board {
         std::fs::write(&si.control, "idle").unwrap();
         let q = |p: &std::path::Path| format!("'{}'", p.display());
         self.run_in(terminal, &format!("{} {} claude {} {}", q(&node), q(&file), q(&si.control), q(&si.log))).await;
-        self.screen_with(terminal.id, "stand-in").await;
-        for _ in 0..100 {
-            if si.log().contains("MODE idle") {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+        self.settle_stand_in(terminal, &si).await;
         si
     }
 
@@ -306,9 +338,6 @@ fn the_process_in_front_is_the_one_under_the_shell() {
 /// submitted, once, and the task says so.
 #[tokio::test]
 async fn an_answer_is_pasted_into_an_idle_claude_and_submitted() {
-    if !tmux_tells_bracketing() {
-        return;
-    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
@@ -324,9 +353,6 @@ async fn an_answer_is_pasted_into_an_idle_claude_and_submitted() {
 /// codex too: its placeholder is dim, so its box reads empty.
 #[tokio::test]
 async fn an_answer_is_pasted_into_an_idle_codex() {
-    if !tmux_tells_bracketing() {
-        return;
-    }
     let b = board().await;
     let agent = b.agent("Agent 2", "codex").await;
     let si = b.stand_in(&agent, "codex", "codex").await;
@@ -340,9 +366,6 @@ async fn an_answer_is_pasted_into_an_idle_codex() {
 /// reads idle.
 #[tokio::test]
 async fn an_answer_waits_for_a_working_agent_to_go_idle() {
-    if !tmux_tells_bracketing() {
-        return;
-    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
@@ -359,9 +382,6 @@ async fn an_answer_waits_for_a_working_agent_to_go_idle() {
 /// last fifteen while the pane is on someone's screen.
 #[tokio::test]
 async fn nothing_is_typed_while_someone_is_typing() {
-    if !tmux_tells_bracketing() {
-        return;
-    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
@@ -469,9 +489,6 @@ async fn a_draft_is_never_touched() {
 /// left there rather than erased.
 #[tokio::test]
 async fn a_paste_the_box_doesnt_hold_exactly_is_not_sent() {
-    if !tmux_tells_bracketing() {
-        return;
-    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
@@ -512,9 +529,6 @@ async fn a_claim_left_by_a_crash_is_never_typed_again() {
 /// Queued before a restart, told once after it, and never again.
 #[tokio::test]
 async fn an_answer_is_told_exactly_once_across_a_restart() {
-    if !tmux_tells_bracketing() {
-        return;
-    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
@@ -529,6 +543,19 @@ async fn an_answer_is_told_exactly_once_across_a_restart() {
     for _ in 0..2 {
         let svc = Arc::new(Service::open_in(root.clone()).await.expect("the daemon again"));
         let watcher = Watcher::new(svc.clone());
+        if !tmux_tells_bracketing() {
+            // A daemon that has just started knows nothing of the agent's
+            // bracketing until the agent sets it again.
+            svc.follow_paste_mode(agent.id).await;
+            si.show("working").await;
+            si.show("idle").await;
+            for _ in 0..100 {
+                if svc.streamed_bracketed_paste(agent.id).await.is_some() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
         observe(&watcher, agent.id, AgentActivity::Idle).await;
         watcher.pump_wakes().await;
         watcher.pump_wakes().await;
@@ -542,9 +569,6 @@ async fn an_answer_is_told_exactly_once_across_a_restart() {
 /// told, and the older is noted as replaced.
 #[tokio::test]
 async fn a_newer_answer_replaces_one_not_yet_told() {
-    if !tmux_tells_bracketing() {
-        return;
-    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
@@ -563,9 +587,6 @@ async fn a_newer_answer_replaces_one_not_yet_told() {
 /// on catching the agent's turn.
 #[tokio::test]
 async fn two_answers_for_one_terminal_go_one_at_a_time() {
-    if !tmux_tells_bracketing() {
-        return;
-    }
     let b = board().await;
     let other = b.svc.store.create_task(b.task.workspace_id, "Tabs or spaces", Actor::Manager).unwrap();
     let orchestrator = b.orchestrator().await;
@@ -606,9 +627,6 @@ fn a_node_install_is_known_by_its_script() {
 /// claude under node, as npm installs it: told.
 #[tokio::test]
 async fn a_node_claude_is_told() {
-    if !tmux_tells_bracketing() {
-        return;
-    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.node_stand_in(&agent, "claude").await;
@@ -631,17 +649,26 @@ async fn a_node_running_something_else_is_never_typed_into() {
     assert_eq!(b.give_up().await, ["Not delivered: no agent was running in the pane."]);
 }
 
-/// A tmux too old to report bracketed paste can't prove the agent takes a
-/// paste: nothing is typed into an idle claude with an empty box, and the
-/// task says why at once rather than after half an hour.
+/// A tmux too old to report bracketed paste, and an agent that set it
+/// before the daemon was following its output (an agent started before this
+/// daemon): nothing proves the agent takes a paste, so nothing is typed into
+/// its idle, empty box, and the task says why at once rather than after half
+/// an hour.
 #[tokio::test]
-async fn a_tmux_too_old_to_tell_is_never_typed_through() {
+async fn stand_in_set_bracketing_before_anyone_followed() {
     if tmux_tells_bracketing() {
         return;
     }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
+    // The same agent, restarted by hand: it sets bracketing as it starts,
+    // and the daemon only follows it once it's up.
+    b.run_unfollowed(&agent, &si_command(&b, &agent)).await;
+    b.screen_with(agent.id, "stand-in").await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    b.svc.follow_paste_mode(agent.id).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
     b.doing(agent.id, AgentActivity::Idle).await;
     b.answer("Drill in");
     b.pump().await;
@@ -650,16 +677,69 @@ async fn a_tmux_too_old_to_tell_is_never_typed_through() {
     assert!(b.pending().is_empty(), "and never tried again");
 }
 
-/// Bracketed paste off: nothing.
+/// What the stream said about one program says nothing about the next:
+/// respawned by someone else, the new agent sets bracketing on the same
+/// pipe, and the record, kept for the program before, isn't used.
 #[tokio::test]
-async fn a_pane_without_bracketed_paste_is_never_typed_into() {
-    if !tmux_tells_bracketing() {
+async fn a_record_from_before_a_respawn_is_never_used() {
+    if tmux_tells_bracketing() {
         return;
     }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
+    b.run_unfollowed(&agent, &si_command(&b, &agent)).await;
+    b.screen_with(agent.id, "stand-in").await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    b.answer("Drill in");
+    b.pump().await;
+    assert!(!si.log().contains("PASTE") && !si.log().contains("ENTER"), "{}", si.log());
+    assert_eq!(b.progress(), [OLD_TMUX]);
+}
+
+/// A stream that broke: whatever came through the gap is unseen, so the
+/// record is worth nothing, even though it last read bracketing on.
+#[tokio::test]
+async fn a_broken_stream_proves_nothing() {
+    if tmux_tells_bracketing() {
+        return;
+    }
+    let b = board().await;
+    let agent = b.agent("Agent 2", "claude").await;
+    let si = b.stand_in(&agent, "claude", "claude").await;
+    let pane = b.svc.inventory_snapshot().claimants(agent.id).into_iter().next().unwrap().pane_id.clone();
+    // Closing the pane's pipe ends its fanout, and so every subscription.
+    b.svc.tmux.run(&["pipe-pane", "-t", &pane]).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    b.answer("Drill in");
+    b.pump().await;
+    assert!(!si.log().contains("PASTE") && !si.log().contains("ENTER"), "{}", si.log());
+    assert_eq!(b.progress(), [OLD_TMUX]);
+}
+
+/// The command `stand_in` put in `agent`'s pane, to run it again.
+fn si_command(b: &Board, agent: &Terminal) -> String {
+    let dir = b.dir.path().join(format!("si-{}", agent.id.simple()));
+    let q = |p: &std::path::Path| format!("'{}'", p.display());
+    format!(
+        "{} {} claude {} {}",
+        q(&dir.join("claude")),
+        q(&dir.join("stand_in.pl")),
+        q(&dir.join("control")),
+        q(&dir.join("log"))
+    )
+}
+
+/// Bracketed paste off: nothing.
+#[tokio::test]
+async fn a_pane_without_bracketed_paste_is_never_typed_into() {
+    let b = board().await;
+    let agent = b.agent("Agent 2", "claude").await;
+    let si = b.stand_in(&agent, "claude", "claude").await;
     si.show("nobracket").await;
+    b.stream_says(agent.id, Some(false)).await;
     b.doing(agent.id, AgentActivity::Idle).await;
     b.answer("Drill in");
     b.pump().await;
@@ -669,9 +749,6 @@ async fn a_pane_without_bracketed_paste_is_never_typed_into() {
 /// Someone types while the paste is being read back: no Enter.
 #[tokio::test]
 async fn typing_during_the_read_back_stops_the_enter() {
-    if !tmux_tells_bracketing() {
-        return;
-    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
@@ -698,9 +775,6 @@ async fn typing_during_the_read_back_stops_the_enter() {
 /// A paste that fails to send after the claim: never retried, and noted.
 #[tokio::test]
 async fn a_send_failing_after_the_claim_is_not_retried() {
-    if !tmux_tells_bracketing() {
-        return;
-    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
@@ -721,9 +795,6 @@ async fn a_send_failing_after_the_claim_is_not_retried() {
 /// No agent on the task: the orchestrator is told.
 #[tokio::test]
 async fn with_no_agent_the_orchestrator_is_told() {
-    if !tmux_tells_bracketing() {
-        return;
-    }
     let b = board().await;
     let orchestrator = b.orchestrator().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
@@ -778,9 +849,6 @@ async fn with_the_switch_off_nobody_is_told() {
 /// An answer carrying escape sequences reaches the agent as text.
 #[tokio::test]
 async fn control_characters_in_an_answer_arrive_as_text() {
-    if !tmux_tells_bracketing() {
-        return;
-    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
@@ -796,9 +864,6 @@ async fn control_characters_in_an_answer_arrive_as_text() {
 /// own paste and Enter don't.
 #[tokio::test]
 async fn typing_marks_the_pane_and_telling_does_not() {
-    if !tmux_tells_bracketing() {
-        return;
-    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;

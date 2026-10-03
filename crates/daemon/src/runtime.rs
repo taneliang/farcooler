@@ -493,7 +493,7 @@ impl Runtime {
     /// once anything is watching, and a connection succeeding is a better test
     /// that one is alive than any amount of asking tmux, which would happily
     /// report a pipe into a process that has since died.
-    async fn attach_to_fanout(&self, pane_id: &str) -> Result<tokio::net::UnixStream> {
+    pub(crate) async fn attach_to_fanout(&self, pane_id: &str) -> Result<tokio::net::UnixStream> {
         // Which install is asking. The tmux socket is already named for it —
         // `farcooler-<install id>` — so this is the identity we already hold
         // rather than a second answer to the same question, which could
@@ -668,8 +668,15 @@ impl Runtime {
 /// `farcoolerd` standing beside it in `~/.local/bin` would hand this pane's
 /// bytes to a daemon on the other side of the isolation — and the fanout
 /// socket it then bound would be one this daemon never looks at.
+///
+/// A unit test runs from `target/<profile>/deps`, and the daemon cargo built
+/// for the same run sits one directory up, so a test looks there too.
 pub fn fanout_binary() -> Option<std::path::PathBuf> {
-    fanout_binary_beside(&std::env::current_exe().ok()?)
+    let exe = std::env::current_exe().ok()?;
+    let found = fanout_binary_beside(&exe);
+    #[cfg(test)]
+    let found = found.or_else(|| fanout_binary_beside(&exe.parent()?.parent()?.join("a unit test")));
+    found
 }
 
 /// capture-pane separates lines with a bare LF. To a terminal that is line feed

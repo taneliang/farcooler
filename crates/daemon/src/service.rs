@@ -2170,6 +2170,12 @@ pub struct Service {
     /// tens, and a registry that removes entries has to prove nobody is waiting
     /// on the one it is removing.
     repo_locks: std::sync::Mutex<std::collections::HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>>,
+    /// Each followed agent pane's bracketed-paste record, by pane id, for a
+    /// tmux too old to report it (`paste_mode`).
+    paste_modes: std::sync::Mutex<std::collections::HashMap<String, Arc<crate::paste_mode::Record>>>,
+    /// Whether this runner's tmux reports `bracket_paste_flag`: 0 not yet
+    /// known, 1 it does, 2 it doesn't. Read once, from the first pane asked.
+    tmux_reports_bracketing: std::sync::atomic::AtomicU8,
 }
 
 /// A worktree plus its derived state and terminals.
@@ -2243,6 +2249,8 @@ impl Service {
             default_branches: std::sync::Mutex::new(std::collections::HashMap::new()),
             repo_urls: std::sync::Mutex::new(std::collections::HashMap::new()),
             repo_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
+            paste_modes: std::sync::Mutex::new(std::collections::HashMap::new()),
+            tmux_reports_bracketing: std::sync::atomic::AtomicU8::new(0),
         };
         Ok(service)
     }
@@ -3729,6 +3737,7 @@ impl Service {
         let proved = snapshot.claimants(term.id).iter().any(|p| p.proves_life());
 
         if proved {
+            self.follow_paste_mode(term.id).await;
             // 4. Only now is the runtime confirmed.
             return self.store.update_terminal(
                 term.id,
@@ -4245,6 +4254,7 @@ impl Service {
 
         let snapshot = self.inventory.refresh().await;
         if snapshot.claimants(term.id).iter().any(|p| p.proves_life()) {
+            self.follow_paste_mode(term.id).await;
             return self.store.update_terminal(
                 term.id,
                 term.resource_version,
@@ -4431,6 +4441,8 @@ impl Service {
         }
 
         self.inventory.refresh().await;
+        // Respawned as its TUI, whichever mode the record still says.
+        self.follow_tui_paste_mode(id, &term.command_preset).await;
 
         let restarted = self.store.update_terminal(
             id,
@@ -4841,6 +4853,9 @@ impl Service {
         refuse_a_real_agent(&command)?;
         self.tmux.respawn_pane(&pane.pane_id, &dir, &command).await?;
         let updated = self.record_pane_mode(&term, pane_mode, session_id)?;
+        if pane_mode == models::PaneMode::Terminal {
+            self.follow_paste_mode(id).await;
+        }
         // The shim died with the pane the line above respawned. Nothing told
         // the supervisor that, so everything it held for this terminal went on
         // answering for a process that no longer exists — see
@@ -4987,6 +5002,108 @@ impl Service {
     /// when this runner's tmux can't say (older than 3.7).
     pub async fn pane_bracketed_paste(&self, id: Uuid) -> Result<Option<bool>> {
         self.runtime().pane_bracketed_paste(id).await
+    }
+
+    /// Whether `id`'s program asked for bracketed paste, as its output says
+    /// (`paste_mode`): `None` unless this daemon has followed the pane's
+    /// stream, without a break, from before the program last set or reset
+    /// it, and the pane still runs that program. For a tmux that can't say
+    /// itself (`pane_bracketed_paste` gives `None`).
+    pub async fn streamed_bracketed_paste(&self, id: Uuid) -> Option<bool> {
+        let pane = self.inventory_snapshot().claimants(id).into_iter().find(|p| p.proves_life())?.pane_id.clone();
+        let record = self.paste_modes.lock().unwrap_or_else(|e| e.into_inner()).get(&pane).cloned()?;
+        let pid = self.tmux.pane_pid(&pane).await.ok()?;
+        let known = record.bracketed(pid);
+        if !record.is_live() || record.pid != pid {
+            // Respawned, or the stream broke: follow it afresh next sample.
+            record.end();
+            let mut records = self.paste_modes.lock().unwrap_or_else(|e| e.into_inner());
+            if records.get(&pane).is_some_and(|r| Arc::ptr_eq(r, &record)) {
+                records.remove(&pane);
+            }
+        }
+        known
+    }
+
+    /// Whether `id` is an agent's terminal whose pane this daemon should be
+    /// following for bracketed paste and isn't: this runner's tmux doesn't
+    /// report it (or hasn't been asked yet), and no live record covers the
+    /// pane. Cheap enough for every pane on every sample.
+    pub fn wants_paste_mode_followed(&self, terminal: &models::Terminal) -> bool {
+        use std::sync::atomic::Ordering;
+        if self.tmux_reports_bracketing.load(Ordering::SeqCst) == 1
+            || terminal.pane_mode != models::PaneMode::Terminal
+            || !crate::watch::answer_wake::is_an_agent_preset(&terminal.command_preset)
+        {
+            return false;
+        }
+        let Some(pane) = self.inventory_snapshot().claimants(terminal.id).into_iter().find(|p| p.proves_life()).cloned()
+        else {
+            return false;
+        };
+        !self.paste_modes.lock().unwrap_or_else(|e| e.into_inner()).get(&pane.pane_id).is_some_and(|r| r.is_live())
+    }
+
+    /// Start following `id`'s pane output for bracketed paste (`paste_mode`),
+    /// when it runs an agent in its terminal and this runner's tmux can't
+    /// report the mode. Returns once subscribed; the reading goes on in the
+    /// background for as long as the pane lives.
+    ///
+    /// Called right after the daemon starts a program in a pane, so the
+    /// subscription is in place before the program has set the mode, and on
+    /// each sample for a pane not yet followed (`wants_paste_mode_followed`).
+    /// A program that set it before the subscription stays `Unknown`, which
+    /// costs it its answers being typed, never a wrong paste.
+    pub async fn follow_paste_mode(&self, id: Uuid) {
+        let Ok(term) = self.store.get_terminal(id) else { return };
+        if term.pane_mode == models::PaneMode::Terminal {
+            self.follow_tui_paste_mode(id, &term.command_preset).await;
+        }
+    }
+
+    /// `follow_paste_mode`, for a caller that knows the pane runs a TUI
+    /// (`preset`) whatever its record says yet: a restart respawns a chat
+    /// pane as its TUI before the record is corrected.
+    async fn follow_tui_paste_mode(&self, id: Uuid, preset: &str) {
+        use std::sync::atomic::Ordering;
+        if !crate::watch::answer_wake::is_an_agent_preset(preset) {
+            return;
+        }
+        let Some(pane) = self.inventory_snapshot().claimants(id).into_iter().find(|p| p.proves_life()).cloned() else {
+            return;
+        };
+        let pane = pane.pane_id;
+        match self.tmux_reports_bracketing.load(Ordering::SeqCst) {
+            1 => return,
+            2 => {}
+            _ => match self.tmux.pane_bracketed_paste(&pane).await {
+                Ok(Some(_)) => {
+                    self.tmux_reports_bracketing.store(1, Ordering::SeqCst);
+                    return;
+                }
+                Ok(None) => self.tmux_reports_bracketing.store(2, Ordering::SeqCst),
+                Err(_) => return,
+            },
+        }
+        // The pid first: a respawn between this and the subscription leaves
+        // a record about the program before it, which is never used.
+        let Ok(pid) = self.tmux.pane_pid(&pane).await else { return };
+        let record = crate::paste_mode::Record::new(pid);
+        {
+            let mut records = self.paste_modes.lock().unwrap_or_else(|e| e.into_inner());
+            records.retain(|_, r| r.is_live());
+            if let Some(old) = records.get(&pane) {
+                if old.pid == pid {
+                    return;
+                }
+                old.end();
+            }
+            records.insert(pane.clone(), record.clone());
+        }
+        match self.runtime().attach_to_fanout(&pane).await {
+            Ok(stream) => record.read(stream),
+            Err(_) => record.end(),
+        }
     }
 
     /// Type a path into a terminal, as a paste.
