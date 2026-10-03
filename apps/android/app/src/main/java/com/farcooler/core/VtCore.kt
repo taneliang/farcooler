@@ -54,6 +54,17 @@ class VtCore(columns: Int, rows: Int) {
     }
 
     /**
+     * Whether the program has switched to the alternate screen (`less`, a
+     * full-screen TUI), where there is no scrollback behind the screen.
+     */
+    val isAlternateScreen: Boolean
+        get() {
+            val h = handle
+            if (h == 0L) return false
+            return NativeVt.nativeAltScreen(h)
+        }
+
+    /**
      * Jump back to the live screen. Call this on input: typing into a
      * scrolled-back view would show the user nothing of what they typed.
      */

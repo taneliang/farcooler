@@ -1177,19 +1177,22 @@ class TerminalSession(
     /**
      * Scroll by [lines], positive back into history.
      *
-     * Asks the core to encode a wheel event for the program running in this
-     * pane first. A full-screen program — `less`, an agent's TUI — gets mouse
-     * reports instead, because from inside an alternate screen a wheel means
-     * something to the program that this device's own scrollback cannot
-     * express. Only once the core says the program does not want the event does
-     * this fall back to scrolling the emulator's own history and redrawing
-     * locally, which sends nothing to the host at all.
+     * A full-screen program on the alternate screen — `less`, an agent's TUI —
+     * gets mouse reports, because there a wheel means something to the program
+     * that this device's own scrollback cannot express. Everywhere else the
+     * swipe scrolls the emulator's own history and redraws locally, sending
+     * nothing to the host. See [WheelRoute].
      */
     fun scroll(lines: Int, column: Int, row: Int) {
         if (lines == 0) return
         scope.launch {
             val emulator = vt ?: return@launch
             val button = if (lines > 0) Vt.MOUSE_WHEEL_UP else Vt.MOUSE_WHEEL_DOWN
+            val takes = emulator.encodeMouse(button, Vt.MOUSE_PRESS, column, row, 0) != null
+            if (!WheelRoute.toProgram(emulator.isAlternateScreen, takes)) {
+                scrollLocally(emulator, lines)
+                return@launch
+            }
             val bytes = ArrayList<Byte>()
             repeat(abs(lines)) {
                 val chunk = emulator.encodeMouse(button, Vt.MOUSE_PRESS, column, row, 0)
@@ -1207,8 +1210,9 @@ class TerminalSession(
      * Move this device's own view of the pane, and keep the poll loop in step
      * with where the reader now is.
      *
-     * Reached only when the program running in the pane has declined the wheel
-     * — a shell, not a full-screen TUI. See [scroll].
+     * Reached on the primary screen, whatever the program asked for, and on
+     * the alternate screen when the program has declined the wheel. See
+     * [scroll].
      */
     private fun scrollLocally(emulator: VtCore, lines: Int) {
         // Read BEFORE the scroll, because "we are at the bottom" and "we have
