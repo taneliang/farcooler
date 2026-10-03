@@ -79,6 +79,7 @@ fn empty_report(since: i64, until: i64) -> Report {
         by_area: Vec::new(),
         by_label: Vec::new(),
         notable: Notable::default(),
+        spend: None,
     }
 }
 
@@ -157,7 +158,80 @@ fn the_summary_says_what_happened_in_plain_words() {
 fn usage_gets_a_line_once_the_runner_records_it() {
     let mut r = a_week();
     r.totals.usage = Some(Usage { input_tokens: Some(2_000_000), output_tokens: Some(100_000), agent_ms: Some(41 * HOUR), ..Usage::default() });
-    assert!(render(&r, None).lines().any(|l| l == "Agent time 41 h · 2.1 M tokens"), "{}", render(&r, None));
+    assert!(render(&r, None).lines().any(|l| l == "Agent time 41 h · 2.1M tokens"), "{}", render(&r, None));
+}
+
+/// A week's spend, as the shared fixture's mixed cases word it.
+fn a_week_of_spend() -> SpendReport {
+    use farcooler_core::usage_words::Spend;
+    let spend = |turns, active_ms, input, output, reported, estimated, unpriced| Spend {
+        turns,
+        active_ms,
+        input_tokens: input,
+        output_tokens: output,
+        cost_reported_micros: reported,
+        cost_estimated_micros: estimated,
+        unpriced_tokens: unpriced,
+        ..Spend::default()
+    };
+    let line = |name: &str, title: Option<&str>, s: Spend| SpendLine { name: name.into(), title: title.map(Into::into), spend: s };
+    let claude = spend(9, 2 * HOUR, 1_100_000, 40_000, 3_000_000, 200_000, 0);
+    let codex = spend(3, 41 * HOUR, 800_000, 30_000, 0, 0, 830_000);
+    SpendReport {
+        total: spend(12, 43 * HOUR, 1_900_000, 70_000, 3_000_000, 200_000, 830_000),
+        by_task: vec![
+            line("ov-195", Some("Apps: each task shows its tokens and cost"), claude.clone()),
+            line("ov-188", Some("CLI: farcooler report"), codex.clone()),
+        ],
+        other_tasks: 11,
+        by_harness: vec![line("claude", None, claude.clone()), line("codex", None, codex.clone())],
+        by_model: vec![line("claude-opus-5", None, claude.clone()), line("", None, codex.clone())],
+        period_unit: "week".into(),
+        by_period: vec![line("2026-09-21", None, codex), line("2026-09-28", None, claude)],
+        price_table: "2026-09-25".into(),
+    }
+}
+
+#[test]
+fn spend_reads_by_harness_model_period_and_task_with_its_provenance() {
+    let mut r = a_week();
+    r.totals.usage = Some(Usage { input_tokens: Some(1), agent_ms: Some(HOUR), ..Usage::default() });
+    r.spend = Some(a_week_of_spend());
+    let text = render(&r, None);
+    let at = text.find("Agent spend").unwrap_or_else(|| panic!("no spend section:\n{text}"));
+    let section: Vec<&str> = text[at..].lines().take_while(|l| !l.is_empty()).collect();
+    assert_eq!(
+        section,
+        vec![
+            "Agent spend",
+            "  2M tokens (1.9M input · 70K output · 0 cache)",
+            "  $3.20 · API-equivalent, partly estimated, partly not reported",
+            "  Agent time 43 h · 12 turns",
+            "  By harness",
+            "    claude  1.1M tokens · $3.20 partly estimated",
+            "    codex   830K tokens · Cost not reported",
+            "  By model",
+            "    claude-opus-5  1.1M tokens · $3.20 partly estimated",
+            "    Unnamed model  830K tokens · Cost not reported",
+            "  By week, from each Monday",
+            "    2026-09-21  830K tokens · Cost not reported",
+            "    2026-09-28  1.1M tokens · $3.20 partly estimated",
+            "  By task",
+            "    ov-195    Apps: each task shows its tokens and cost  1.1M tokens · $3.20 partly estimated",
+            "    ov-188    CLI: farcooler report                      830K tokens · Cost not reported",
+            "    and 11 tasks more",
+        ]
+    );
+    assert!(!text.contains("Agent time 1 h"), "the headline leaves it to the section:\n{text}");
+}
+
+#[test]
+fn a_period_with_only_spend_is_not_empty() {
+    let mut r = empty_report(NOW - DAY, NOW);
+    r.spend = Some(a_week_of_spend());
+    let text = render(&r, None);
+    assert!(!text.contains("Nothing happened"), "{text}");
+    assert!(text.contains("Agent spend"), "{text}");
 }
 
 #[test]

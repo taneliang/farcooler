@@ -60,7 +60,7 @@ fn seed(h: &Harness) -> (Repo, Uuid) {
 }
 
 fn asking(since: i64, until: i64) -> ReportRequest {
-    ReportRequest { since, until, repository_id: None, workspace_id: None }
+    ReportRequest { since, until, repository_id: None, workspace_id: None, utc_offset_minutes: 0 }
 }
 
 async fn report(link: &mut Link, ask: ReportRequest) -> Result<Report, ClientError> {

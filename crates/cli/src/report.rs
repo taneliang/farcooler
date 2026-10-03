@@ -10,6 +10,8 @@ use std::error::Error;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::Args;
+use farcooler_core::usage_words::tokens;
+use farcooler_daemon::report::spend::{SpendLine, SpendReport};
 use farcooler_daemon::report::{Group, Report, Spread, Tally};
 use farcooler_protocol::v1::{self as pb, request, result};
 use farcooler_transport::ClientError;
@@ -76,6 +78,7 @@ async fn report_read<L: DispatchLink>(
         until: period.until,
         repository_id: repository_id.map(|id| bytes::Bytes::copy_from_slice(id.as_bytes())),
         workspace_id: workspace_id.map(|id| bytes::Bytes::copy_from_slice(id.as_bytes())),
+        utc_offset_minutes: utc_offset_minutes(period.until),
     };
     let r = link
         .call(with(req("report.get"), request::Payload::ReportRequest(ask)))
@@ -257,6 +260,12 @@ fn to_millis(year: i32, month: i32, day: i32, hour: i32, minute: i32) -> Option<
     (seconds >= 0).then_some(seconds as i64 * 1000)
 }
 
+/// This machine's offset from UTC at `millis`, in minutes: where the
+/// report's days begin.
+fn utc_offset_minutes(millis: i64) -> i32 {
+    (broken_down(millis).tm_gmtoff / 60) as i32
+}
+
 // The libc crate marks `time_t` deprecated on musl only, warning that it will
 // follow musl 1.2's move to 64 bits. On the 64-bit targets we ship it is
 // `c_long`, already 64 bits, so there is nothing to act on.
@@ -329,22 +338,13 @@ fn plural(n: u32, one: &str, many: &str) -> String {
     if n == 1 { format!("1 {one}") } else { format!("{n} {many}") }
 }
 
-/// `12.4 M`, `830 K`, `512`.
-fn tokens(n: u64) -> String {
-    match n {
-        n if n >= 1_000_000 => format!("{:.1} M", n as f64 / 1e6),
-        n if n >= 10_000 => format!("{} K", n / 1000),
-        n => n.to_string(),
-    }
-}
-
 fn median_line(spread: &Option<Spread>) -> Option<String> {
     spread.map(|s| span(s.median_ms))
 }
 
 /// One line per thing that happened, in plain words. Lines about nothing are
 /// left out.
-fn headline(t: &Tally) -> Vec<String> {
+fn headline(t: &Tally, spent: bool) -> Vec<String> {
     let mut lines = Vec::new();
     let mut moved = vec![format!("{} done", t.completed)];
     if t.canceled > 0 {
@@ -381,7 +381,8 @@ fn headline(t: &Tally) -> Vec<String> {
             plural(t.completed - a.tasks_without_lines, "task", "tasks")
         ));
     }
-    if let Some(u) = t.usage {
+    // With the spend section below, it says this and more.
+    if let Some(u) = t.usage.filter(|_| !spent) {
         let mut used = Vec::new();
         if let Some(ms) = u.agent_ms {
             used.push(format!("Agent time {}", hours(ms)));
@@ -484,6 +485,47 @@ fn shorten(title: &str, max: usize) -> String {
     format!("{}…", title.chars().take(max - 1).collect::<String>().trim_end())
 }
 
+/// What agents spent: the whole, then by harness, model, period and task,
+/// in `usage_words`' wording, as each task's Usage section has it.
+fn spend_lines(s: &SpendReport) -> Vec<String> {
+    let t = &s.total;
+    let mut out = vec!["Agent spend".to_string()];
+    out.push(match t.token_detail() {
+        Some(detail) => format!("  {} ({detail})", t.tokens_line()),
+        None => format!("  {}", t.tokens_line()),
+    });
+    out.push(format!("  {}", t.cost_line()));
+    out.extend(t.time_line().map(|l| format!("  {l}")));
+
+    let section = |out: &mut Vec<String>, heading: &str, lines: &[SpendLine], name: &dyn Fn(&SpendLine) -> String| {
+        if lines.is_empty() {
+            return;
+        }
+        out.push(format!("  {heading}"));
+        let names: Vec<String> = lines.iter().map(name).collect();
+        let width = names.iter().map(|n| n.chars().count()).max().unwrap_or(0);
+        for (line, name) in lines.iter().zip(names) {
+            out.push(format!("    {name:width$}  {}", line.spend.line_detail()));
+        }
+    };
+    section(&mut out, "By harness", &s.by_harness, &|l| l.name.clone());
+    section(&mut out, "By model", &s.by_model, &|l| if l.name.is_empty() { "Unnamed model".into() } else { l.name.clone() });
+    let by_period = match s.period_unit.as_str() {
+        "week" => "By week, from each Monday",
+        "month" => "By month",
+        _ => "By day",
+    };
+    section(&mut out, by_period, &s.by_period, &|l| l.name.clone());
+    section(&mut out, "By task", &s.by_task, &|l| match &l.title {
+        Some(title) => format!("{:8}  {}", l.name, shorten(title, 44)),
+        None => l.name.clone(),
+    });
+    if s.other_tasks > 0 {
+        out.push(format!("    and {} more", plural(s.other_tasks, "task", "tasks")));
+    }
+    out
+}
+
 /// The summary `farcooler report` prints.
 fn render(r: &Report, label: Option<&str>) -> String {
     let mut out = Vec::new();
@@ -501,7 +543,8 @@ fn render(r: &Report, label: Option<&str>) -> String {
     out.push(String::new());
 
     let t = &r.totals;
-    let nothing = t.created + t.completed + t.filed_done + t.canceled + t.reopened + t.decisions.asked + t.decisions.answered == 0
+    let nothing = r.spend.is_none()
+        && t.created + t.completed + t.filed_done + t.canceled + t.reopened + t.decisions.asked + t.decisions.answered == 0
         && t.needs_you.times + t.needs_you.waiting == 0
         && t.time_in_status.is_empty();
     if nothing {
@@ -509,7 +552,7 @@ fn render(r: &Report, label: Option<&str>) -> String {
         return out.join("\n");
     }
 
-    out.extend(headline(t));
+    out.extend(headline(t, r.spend.is_some()));
     let asked = people(t);
     if !asked.is_empty() {
         out.push(String::new());
@@ -527,6 +570,11 @@ fn render(r: &Report, label: Option<&str>) -> String {
                 plural(s.tasks, "task", "tasks")
             ));
         }
+    }
+
+    if let Some(spend) = &r.spend {
+        out.push(String::new());
+        out.extend(spend_lines(spend));
     }
 
     if r.by_repository.len() > 1 {

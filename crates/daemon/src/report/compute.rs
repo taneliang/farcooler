@@ -138,6 +138,7 @@ pub fn compute(inputs: &Inputs, period: Period, now: i64) -> Report {
         }),
         by_label: grouped(&|r| r.facts.task.labels.iter().map(|l| (l.clone(), None)).collect()),
         notable: notable(&all, period, horizon),
+        spend: inputs.spend.clone(),
     }
 }
 

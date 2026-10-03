@@ -7,7 +7,7 @@ use farcooler_store::models::{Task, TaskStatus};
 use farcooler_store::{Store, TaskScope};
 use uuid::Uuid;
 
-use super::{Inputs, Period, Scope, TaskFacts, Usage};
+use super::{Inputs, Period, Scope, TaskFacts, spend};
 
 /// Which of the runner's boards a report covers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,9 +19,10 @@ pub enum Narrowing {
 }
 
 /// Every task in `narrowing` that the period could have touched, with its
-/// record. A repository or workspace that isn't on the runner is
-/// `NotFound`.
-pub fn gather(store: &Store, narrowing: Narrowing, period: Period) -> Result<Inputs> {
+/// record, and what agents spent in it. A repository or workspace that isn't
+/// on the runner is `NotFound`. `utc_offset_minutes` is where the client's
+/// days begin, for the spend's by-period lines.
+pub fn gather(store: &Store, narrowing: Narrowing, period: Period, utc_offset_minutes: i32) -> Result<Inputs> {
     let mut workspaces = store.list_workspaces(None)?;
     let scope = match narrowing {
         Narrowing::Runner => Scope::default(),
@@ -38,6 +39,8 @@ pub fn gather(store: &Store, narrowing: Narrowing, period: Period) -> Result<Inp
         }
     };
 
+    let (spend, usage) = spend::read(store, narrowing, period, utc_offset_minutes)?;
+
     let mut repository_names: HashMap<Uuid, String> = HashMap::new();
     let mut tasks = Vec::new();
     for workspace in workspaces {
@@ -50,7 +53,8 @@ pub fn gather(store: &Store, narrowing: Narrowing, period: Period) -> Result<Inp
             }
         };
         for task in store.list_tasks(TaskScope::Workspace(workspace.id), None)? {
-            if !could_touch(&task, period) {
+            // An agent working a task the board didn't move still touched it.
+            if !could_touch(&task, period) && !usage.contains_key(&task.id) {
                 continue;
             }
             let notes = store.notes_for(task.id, None)?;
@@ -58,8 +62,7 @@ pub fn gather(store: &Store, narrowing: Narrowing, period: Period) -> Result<Inp
         }
     }
 
-    let usage = usage_in(store, &tasks, period)?;
-    Ok(Inputs { tasks, usage, scope })
+    Ok(Inputs { tasks, usage, spend, scope })
 }
 
 /// Whether anything about `task` could fall inside `period`: filed before it
@@ -69,16 +72,4 @@ pub fn gather(store: &Store, narrowing: Narrowing, period: Period) -> Result<Inp
 fn could_touch(task: &Task, period: Period) -> bool {
     let open = !matches!(task.status, TaskStatus::Done | TaskStatus::Cancelled);
     task.created_at < period.until && (open || task.status_since >= period.since || task.updated_at >= period.since)
-}
-
-/// Token usage and agent time inside `period`, per task: THE SEAM for
-/// ov-194.
-///
-/// Empty today, because the store records no usage yet. When ov-194's
-/// per-turn records land, this sums each task's turns that ended inside the
-/// period into a `Usage` (leaving a field `None` when no turn reported it)
-/// and `compute` carries the sums into every tally and nothing else
-/// changes. Read-only, like everything here.
-fn usage_in(_store: &Store, _tasks: &[TaskFacts], _period: Period) -> Result<HashMap<Uuid, Usage>> {
-    Ok(HashMap::new())
 }

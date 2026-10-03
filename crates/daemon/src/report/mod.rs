@@ -17,10 +17,10 @@
 //! [`SCHEMA`] moves only when a field changes meaning; adding one does not
 //! move it, and a reader ignores fields it doesn't know.
 //!
-//! **Token usage and agent time are a seam, not a feature.** ov-194 records
-//! per-turn usage in the store. Until it lands every `usage` here is `null`;
-//! when it does, `gather::usage_in` fills [`Inputs::usage`] per task and the
-//! tallies sum it with no other change. See [`Usage`].
+//! **What agents spent** comes from ov-194's per-turn records (ov-195).
+//! `spend::read` fills [`Report::spend`], the scope's tokens, cost and agent
+//! time by task, harness, model and period, and [`Inputs::usage`] per task,
+//! which every tally sums. See [`Usage`] and [`spend::SpendReport`].
 //!
 //! A period is `[since, until)` in Unix milliseconds. An event counts when it
 //! happened inside it; a span (time in a status, a wait) counts only the part
@@ -29,6 +29,9 @@
 mod compute;
 mod gather;
 mod serve;
+pub mod spend;
+#[cfg(test)]
+mod spend_tests;
 #[cfg(test)]
 mod tests;
 
@@ -70,6 +73,10 @@ pub struct Report {
     pub by_area: Vec<Group>,
     pub by_label: Vec<Group>,
     pub notable: Notable,
+    /// What agents spent in the period. `None` when no turn in scope ended
+    /// in it, and from a runner older than ov-195.
+    #[serde(default)]
+    pub spend: Option<spend::SpendReport>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,8 +141,8 @@ pub struct Tally {
     pub needs_you: NeedsYou,
     /// The acceptance lines of the tasks completed in the period.
     pub acceptance: Acceptance,
-    /// Tokens and agent time. `None` until ov-194's per-turn usage reaches
-    /// the store, and for a set of tasks none of which has any.
+    /// Tokens, cost and agent time, from ov-194's per-turn records. `None`
+    /// for a set of tasks none of which has any.
     pub usage: Option<Usage>,
 }
 
@@ -240,6 +247,18 @@ pub struct Usage {
     pub cache_write_tokens: Option<u64>,
     /// Milliseconds an agent spent working: turn start to turn end.
     pub agent_ms: Option<i64>,
+    /// Finished turns.
+    #[serde(default)]
+    pub turns: Option<u64>,
+    /// Millionths of a dollar, kept apart by provenance as `usage_words`
+    /// says them: what the agents reported, what the price table estimated.
+    #[serde(default)]
+    pub cost_reported_micros: Option<i64>,
+    #[serde(default)]
+    pub cost_estimated_micros: Option<i64>,
+    /// Tokens with no known price.
+    #[serde(default)]
+    pub unpriced_tokens: Option<u64>,
 }
 
 impl Usage {
@@ -257,6 +276,10 @@ impl Usage {
             cache_read_tokens: sum(self.cache_read_tokens, other.cache_read_tokens),
             cache_write_tokens: sum(self.cache_write_tokens, other.cache_write_tokens),
             agent_ms: sum(self.agent_ms, other.agent_ms),
+            turns: sum(self.turns, other.turns),
+            cost_reported_micros: sum(self.cost_reported_micros, other.cost_reported_micros),
+            cost_estimated_micros: sum(self.cost_estimated_micros, other.cost_estimated_micros),
+            unpriced_tokens: sum(self.unpriced_tokens, other.unpriced_tokens),
         }
     }
 }
@@ -316,9 +339,10 @@ pub struct TaskFacts {
 #[derive(Debug, Clone, Default)]
 pub struct Inputs {
     pub tasks: Vec<TaskFacts>,
-    /// Token usage and agent time inside the period, per task. Empty until
-    /// ov-194 lands; see `gather::usage_in`.
+    /// Token usage, cost and agent time inside the period, per task.
     pub usage: HashMap<Uuid, Usage>,
+    /// The period's spend, as the report carries it.
+    pub spend: Option<spend::SpendReport>,
     pub scope: Scope,
 }
 

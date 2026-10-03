@@ -147,6 +147,15 @@ impl Spend {
         }
     }
 
+    /// One line of a breakdown: "1.2M tokens · $3.20", or "Not reported"
+    /// when it stated nothing.
+    pub fn line_detail(&self) -> String {
+        if self.total_tokens() == 0 && self.priced_micros() <= 0 {
+            return NOT_REPORTED.to_string();
+        }
+        format!("{} tokens · {}", tokens(self.total_tokens()), self.row_cost())
+    }
+
     /// "Agent time 3 h 10 min · 12 turns", either half alone, or nothing.
     pub fn time_line(&self) -> Option<String> {
         let mut parts = Vec::new();
@@ -170,11 +179,7 @@ impl SpendRow {
 
     /// "1.2M tokens · $3.20", or "Not reported" when it stated nothing.
     pub fn detail(&self) -> String {
-        let t = &self.totals;
-        if t.total_tokens() == 0 && t.priced_micros() <= 0 {
-            return NOT_REPORTED.to_string();
-        }
-        format!("{} tokens · {}", tokens(t.total_tokens()), t.row_cost())
+        self.totals.line_detail()
     }
 }
 

@@ -3254,6 +3254,10 @@ message ReportRequest {
   // At most one of these narrows the report; neither is the whole runner.
   optional bytes repository_id = 3;
   optional bytes workspace_id = 4;
+  // The client's offset from UTC, in minutes, where the period falls: what
+  // the spend's by-day, by-week and by-month lines (ov-195) are cut by.
+  // Zero, as an older client sends, is UTC.
+  int32 utc_offset_minutes = 5;
 }
 
 message Report {

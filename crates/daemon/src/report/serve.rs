@@ -24,7 +24,7 @@ pub fn serve(store: &Store, req: &pb::ReportRequest, now: i64) -> Result<pb::Rep
         (Some(_), Some(_)) => return Err(DomainError::InvalidArgument { what: "workspace_id" }),
     };
     let period = Period { since: req.since, until: req.until };
-    let report = compute(&gather(store, narrowing, period)?, period, now);
+    let report = compute(&gather(store, narrowing, period, req.utc_offset_minutes)?, period, now);
     let report_json = serde_json::to_string(&report).map_err(|_| DomainError::OperationFailed)?;
     Ok(pb::Report { report_json })
 }
