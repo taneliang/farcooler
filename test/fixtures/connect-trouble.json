@@ -1,0 +1,26 @@
+{
+  "trouble": {
+    "unreachable": "unreachable",
+    "handshake_failed": "other",
+    "key_rejected": "key_rejected",
+    "bad_key": "other",
+    "host_key_changed": "host_key_changed",
+    "host_key_unknown": "question",
+    "exec_failed": "other",
+    "tunnel": "tunnel",
+    "tunnel_port_closed": "other",
+    "protocol": "other",
+    "wrong_result": "other",
+    "daemon_missing": "daemon_missing",
+    "version_mismatch": "other",
+    "refused": "other",
+    "disconnected": "other",
+    "bad_config": "other"
+  },
+  "tunnel": {
+    "no_answer": "no_answer",
+    "derp": "rendezvous",
+    "no_tailcat": "not_in_this_build",
+    "io": "unspecified"
+  }
+}

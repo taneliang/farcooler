@@ -15,38 +15,71 @@ struct RunnerTroubleTests {
 
     // MARK: - Reading the core's word
 
-    /// Every `trouble` word the core can send on a failed connect: the arms of
-    /// `SshError::word` and `SessionError::word` in `crates/client`, whose
-    /// test holds each failure to a word of its own. Copied by hand — the
-    /// Rust test is what stops two failures sharing one; this is what stops a
-    /// word this table expects from going unread.
-    static let everyCoreWord = [
-        "unreachable", "handshake_failed", "key_rejected", "bad_key", "host_key_changed",
-        "host_key_unknown", "exec_failed", "tunnel", "tunnel_port_closed", "protocol",
-        "wrong_result", "daemon_missing", "version_mismatch", "refused", "disconnected",
-        "bad_config",
-    ]
+    /// `test/fixtures/connect-trouble.json`: every `trouble` word the core
+    /// sends on a failed connect, and every `tunnel` word, each with what the
+    /// phones must make of it. Rust's `the_connect_words_are_the_shared_fixture`
+    /// holds the core to the same file and `TunnelWordTest` holds Android, so
+    /// a word renamed on any side fails somewhere (ov-127).
+    struct ConnectWords: Decodable {
+        var trouble: [String: String]
+        var tunnel: [String: String]
 
-    /// The kinds a word decides, by the word and never by the prose around
-    /// it (ov-127). These were phrases matched out of the middle of Rust's
-    /// `Display` strings, so a reword there changed the button.
-    @Test(arguments: [
-        ("key_rejected", RunnerTrouble.keyRejected),
-        ("host_key_changed", RunnerTrouble.hostKeyChanged),
-        ("unreachable", RunnerTrouble.unreachable),
-        ("daemon_missing", RunnerTrouble.daemonMissing),
-    ])
-    func aFailureIsClassifiedByTheCoresWord(word: String, kind: RunnerTrouble) {
-        #expect(RunnerTrouble(trouble: word) == kind)
+        static func load() throws -> ConnectWords {
+            var root = URL(fileURLWithPath: #filePath)
+            // …/apps/shared/AgentKit/Tests/AgentKitTests/<this file>
+            for _ in 0..<6 { root.deleteLastPathComponent() }
+            let data = try Data(
+                contentsOf: root.appendingPathComponent("test/fixtures/connect-trouble.json"))
+            return try JSONDecoder().decode(ConnectWords.self, from: data)
+        }
     }
 
-    /// Every other word, no word, and a word from a newer core are `other`,
-    /// which is the only kind that puts the core's own words on screen — the
-    /// right reading of a failure this app cannot explain.
-    @Test func aWordWithNoCaseIsUndiagnosed() {
-        for word in ["handshake_failed", "bad_key", "exec_failed", "tunnel_port_closed", "quic"] {
-            #expect(RunnerTrouble(trouble: word) == .other, "\(word)")
+    /// Every `trouble` word, from the fixture.
+    static var everyCoreWord: [String] {
+        (try? ConnectWords.load().trouble.keys.sorted()) ?? []
+    }
+
+    private static let kinds: [String: RunnerTrouble] = [
+        "key_rejected": .keyRejected, "host_key_changed": .hostKeyChanged,
+        "unreachable": .unreachable, "daemon_missing": .daemonMissing, "other": .other,
+    ]
+    private static let tunnelWords: [String: RunnerTrouble.TunnelWord] = [
+        "no_answer": .noAnswer, "rendezvous": .rendezvous,
+        "not_in_this_build": .notInThisBuild, "unspecified": .unspecified,
+    ]
+
+    /// Every word in the fixture means here what the fixture says it means.
+    @Test func everyCoreWordMeansWhatTheSharedFixtureSays() throws {
+        let words = try ConnectWords.load()
+        #expect(words.trouble.count > 10, "the fixture lists too little to be the table")
+        for (word, meaning) in words.trouble {
+            switch meaning {
+            case "question":
+                #expect(
+                    RunnerTrouble.hostKeyQuestion(trouble: word, fingerprint: "SHA256:x") != nil,
+                    "\(word)")
+            case "tunnel":
+                for (tunnel, named) in words.tunnel {
+                    let expected = try #require(Self.tunnelWords[named], "\(named)")
+                    #expect(
+                        RunnerTrouble(trouble: word, tunnel: tunnel) == .tunnelFailed(expected),
+                        "\(word) \(tunnel)")
+                }
+            default:
+                let expected = try #require(Self.kinds[meaning], "unknown meaning \(meaning)")
+                #expect(RunnerTrouble(trouble: word) == expected, "\(word)")
+                #expect(
+                    RunnerTrouble.hostKeyQuestion(trouble: word, fingerprint: "SHA256:x") == nil,
+                    "\(word)")
+            }
         }
+    }
+
+    /// No word, and a word from a newer core, are `other`, which is the only
+    /// kind that puts the core's own words on screen — the right reading of a
+    /// failure this app cannot explain.
+    @Test func aWordWithNoCaseIsUndiagnosed() {
+        #expect(RunnerTrouble(trouble: "quic") == .other)
         #expect(RunnerTrouble(trouble: nil) == .other)
         #expect(RunnerTrouble(trouble: nil).showsTheRunnersOwnWords)
     }

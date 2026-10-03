@@ -339,7 +339,7 @@ pub unsafe extern "C" fn farcooler_client_connect(
                 // A config this boundary could not read never left the
                 // device, so it is no failure of the runner's; it gets a word
                 // of its own rather than none, on `trouble`'s terms.
-                Err(message) => Err(json!({ "error": message, "trouble": "bad_config" })),
+                Err(message) => Err(json!({ "error": message, "trouble": BAD_CONFIG })),
             };
             push_connect(&finished, ticket, outcome);
         });
@@ -2477,6 +2477,9 @@ fn connect_failure(error: &SessionError) -> Value {
     line
 }
 
+/// The `trouble` for a connect config this boundary could not read.
+const BAD_CONFIG: &str = "bad_config";
+
 /// A connect's answer: the result, or `connect_failure`'s fields with the
 /// ticket and `"ok": false` added.
 fn push_connect(queue: &Arc<Mutex<VecDeque<String>>>, ticket: u64, outcome: Result<Value, Value>) {
@@ -2600,6 +2603,82 @@ mod tests {
 
         let missing = line(SessionError::DaemonMissing { daemon: "farcoolerd" });
         assert_eq!(missing["trouble"], "daemon_missing");
+    }
+
+    /// **Every connect word the phones read, pinned in one file** (ov-127).
+    ///
+    /// `test/fixtures/connect-trouble.json` lists each `trouble` word with
+    /// what the phones must make of it, and each `tunnel` word likewise.
+    /// `RunnerTroubleTests` (AgentKit) and `TunnelWordTest` (Android) read the
+    /// same file and hold their tables to it. So a word renamed here fails
+    /// this test, and a word renamed in the fixture fails both of theirs: a
+    /// rename cannot leave all three languages green while both phones fall
+    /// back to "undiagnosed".
+    #[test]
+    fn the_connect_words_are_the_shared_fixture() {
+        use std::collections::BTreeSet;
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../test/fixtures/connect-trouble.json"
+        ))
+        .expect("the fixture is JSON");
+        let keys = |section: &str| -> BTreeSet<String> {
+            fixture[section].as_object().expect("an object").keys().cloned().collect()
+        };
+
+        let mut produced: BTreeSet<String> = crate::ssh::tests::every_ssh_error()
+            .iter()
+            .map(|e| e.word().to_string())
+            .collect();
+        // Every `SessionError` that is not an `SshError`; the `match` has no
+        // wildcard, so a new variant is a compile error here until it is listed.
+        let session = [
+            SessionError::Protocol("x".into()),
+            SessionError::WrongResult { expected: "a", got: "b" },
+            SessionError::DaemonMissing { daemon: "farcoolerd" },
+            SessionError::VersionMismatch { daemon: 1, client: 2 },
+            SessionError::Refused { code: 1, retryable: false, message: "x".into(), what: String::new() },
+            SessionError::Disconnected("x".into()),
+        ];
+        for e in &session {
+            match e {
+                SessionError::Ssh(_)
+                | SessionError::Protocol(_)
+                | SessionError::WrongResult { .. }
+                | SessionError::DaemonMissing { .. }
+                | SessionError::VersionMismatch { .. }
+                | SessionError::Refused { .. }
+                | SessionError::Disconnected(_) => {}
+            }
+            produced.insert(e.word().to_string());
+        }
+        produced.insert(BAD_CONFIG.to_string());
+        assert_eq!(
+            produced,
+            keys("trouble"),
+            "the connect words and test/fixtures/connect-trouble.json disagree; \
+             change the fixture, RunnerTrouble(trouble:) and Connection.Failure.of together"
+        );
+
+        use farcooler_tailcat::TunnelError;
+        let tunnel: BTreeSet<String> = [
+            TunnelError::NoTailcatLinked,
+            TunnelError::Derp,
+            TunnelError::NoAnswer,
+            TunnelError::Io(std::io::Error::from(std::io::ErrorKind::Other)),
+        ]
+        .iter()
+        .map(|e| {
+            // No wildcard: a fifth variant is a compile error until listed.
+            match e {
+                TunnelError::NoTailcatLinked
+                | TunnelError::Derp
+                | TunnelError::NoAnswer
+                | TunnelError::Io(_) => {}
+            }
+            e.code().to_string()
+        })
+        .collect();
+        assert_eq!(tunnel, keys("tunnel"), "TunnelError::code and the fixture disagree");
     }
 
     /// See `NOT_CONNECTED`: both phones compare against this exact text.

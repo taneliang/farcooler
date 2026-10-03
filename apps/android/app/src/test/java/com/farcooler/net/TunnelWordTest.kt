@@ -1,5 +1,10 @@
 package com.farcooler.net
 
+import java.io.File
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
@@ -22,17 +27,69 @@ import org.junit.Test
 class TunnelWordTest {
 
     /**
-     * Every `trouble` word the core can send. Copied by hand from the arms of
-     * `SshError::word` and `SessionError::word`; the Rust test stops two
-     * failures sharing a word, this stops a word this table expects going
-     * unread.
+     * `test/fixtures/connect-trouble.json`: every `trouble` word the core sends
+     * and every `tunnel` word, each with what the phones must make of it. Rust's
+     * `the_connect_words_are_the_shared_fixture` holds the core to the same
+     * file and AgentKit's `RunnerTroubleTests` holds iOS, so a word renamed on
+     * any side fails somewhere (ov-127).
      */
-    private val everyCoreWord = listOf(
-        "unreachable", "handshake_failed", "key_rejected", "bad_key", "host_key_changed",
-        "host_key_unknown", "exec_failed", "tunnel", "tunnel_port_closed", "protocol",
-        "wrong_result", "daemon_missing", "version_mismatch", "refused", "disconnected",
-        "bad_config",
+    private val fixture: JsonObject by lazy {
+        Json.parseToJsonElement(repositoryFile("test/fixtures/connect-trouble.json")).jsonObject
+    }
+
+    private fun section(name: String): Map<String, String> =
+        fixture.getValue(name).jsonObject.mapValues { it.value.jsonPrimitive.content }
+
+    private val everyCoreWord: List<String> by lazy { section("trouble").keys.sorted() }
+
+    private val kinds = mapOf(
+        "key_rejected" to Connection.Failure.KEY_REJECTED,
+        "host_key_changed" to Connection.Failure.HOST_KEY_CHANGED,
+        "unreachable" to Connection.Failure.UNREACHABLE,
+        "daemon_missing" to Connection.Failure.DAEMON_MISSING,
+        "other" to Connection.Failure.OTHER,
     )
+    private val tunnelKinds = mapOf(
+        "no_answer" to Connection.Failure.TUNNEL_NO_ANSWER,
+        "rendezvous" to Connection.Failure.TUNNEL_RENDEZVOUS,
+        "not_in_this_build" to Connection.Failure.TUNNEL_NOT_IN_THIS_BUILD,
+        "unspecified" to Connection.Failure.TUNNEL_UNSPECIFIED,
+    )
+
+    /** Every word in the fixture means here what the fixture says it means. */
+    @Test
+    fun everyCoreWordMeansWhatTheSharedFixtureSays() {
+        val trouble = section("trouble")
+        assertTrue("the fixture lists too little to be the table", trouble.size > 10)
+        for ((word, meaning) in trouble) {
+            when (meaning) {
+                "question" -> assertEquals(
+                    word, "SHA256:x", Connection.Failure.hostKeyQuestion(word, "SHA256:x"),
+                )
+                "tunnel" -> for ((tunnel, named) in section("tunnel")) {
+                    assertEquals(
+                        "$word $tunnel",
+                        tunnelKinds.getValue(named),
+                        Connection.Failure.of(word, tunnel),
+                    )
+                }
+                else -> {
+                    assertEquals(word, kinds.getValue(meaning), Connection.Failure.of(word))
+                    assertNull(word, Connection.Failure.hostKeyQuestion(word, "SHA256:x"))
+                }
+            }
+        }
+    }
+
+    private fun repositoryFile(relative: String): String {
+        var directory: File? = File(System.getProperty("user.dir") ?: ".").absoluteFile
+        while (directory != null) {
+            val candidate = File(directory, relative)
+            if (candidate.isFile) return candidate.readText()
+            directory = directory.parentFile
+        }
+        throw AssertionError("Could not find $relative above ${System.getProperty("user.dir")}.")
+    }
 
     @Test
     fun eachStableWordNamesItsOwnFailure() {

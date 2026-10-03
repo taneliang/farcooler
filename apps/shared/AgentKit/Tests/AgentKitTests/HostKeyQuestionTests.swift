@@ -57,6 +57,7 @@ struct HostKeyQuestionTests {
     /// for a failure the runner reported, or the other way round.
     @Test func decliningIsAKindNoCoreWordProduces() {
         #expect(HostKeyQuestion.declining == .keyNotTrusted)
+        #expect(!RunnerTroubleTests.everyCoreWord.isEmpty, "the shared fixture did not load")
         for word in RunnerTroubleTests.everyCoreWord {
             #expect(RunnerTrouble(trouble: word) != HostKeyQuestion.declining, "\(word)")
         }
@@ -133,6 +134,7 @@ struct HostKeyQuestionTests {
     /// landing, or "Stopped waiting", on a screen nobody chose.
     @Test func noCoreWordIsAKindTheAppRaises() {
         let raised: [RunnerTrouble] = [.keyNotTrusted, .stopped, .noIdentity, .noNodeKey]
+        #expect(!RunnerTroubleTests.everyCoreWord.isEmpty, "the shared fixture did not load")
         for word in RunnerTroubleTests.everyCoreWord {
             #expect(!raised.contains(RunnerTrouble(trouble: word)), "\(word)")
         }

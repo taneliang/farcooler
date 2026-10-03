@@ -591,7 +591,7 @@ pub(crate) fn decode_key_for_test(text: &str) -> Result<ssh_key::PrivateKey, Ssh
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -709,7 +709,26 @@ mod tests {
     }
 
     /// One of every failure, for the tests that hold each to its word.
-    fn every_ssh_error() -> Vec<SshError> {
+    ///
+    /// The `match` below has no wildcard, so a new variant does not compile
+    /// until it is added here too — and then to
+    /// `test/fixtures/connect-trouble.json`, which `ffi`'s
+    /// `the_connect_words_are_the_shared_fixture` holds this list to.
+    pub(crate) fn every_ssh_error() -> Vec<SshError> {
+        fn listed(e: &SshError) {
+            match e {
+                SshError::Connect { .. }
+                | SshError::Handshake(_)
+                | SshError::AuthRejected { .. }
+                | SshError::BadKey(_)
+                | SshError::HostKeyChanged { .. }
+                | SshError::HostKeyUnknown { .. }
+                | SshError::Exec(_)
+                | SshError::Tunnel { .. }
+                | SshError::TunnelPortClosed { .. } => {}
+            }
+        }
+        let _ = listed;
         let io = || std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
         vec![
             SshError::Connect { host: "box".into(), port: 22, source: io() },
