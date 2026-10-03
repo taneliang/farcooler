@@ -1,4 +1,4 @@
-// Shipped by Canary at b1d7914eb8e8653d3746b2e2069fa051ac80daa7. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 9081593449153b812e18cd6ffcd02b1180fa3fa7. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -188,6 +188,8 @@ message Request {
     WorkspaceStartOrchestrator workspace_start_orchestrator = 86;
     // Behind the `wake_on_answer` capability.
     WorkspaceSetSettings workspace_set_settings = 87;
+    // `report.get`. Behind the `report` capability.
+    ReportRequest report_request = 88;
   }
 }
 
@@ -273,6 +275,9 @@ message Result {
     // `needs_you.list`: this runner's items, in rank order. Behind the
     // `needs_you` capability.
     NeedsYouList needs_you_list = 45;
+    // `report.get`: what got done in a period. Behind the `report`
+    // capability.
+    Report report = 46;
   }
 }
 
@@ -3219,3 +3224,32 @@ message WorktreeRef {
 }
 
 message NeedsYouList { repeated NeedsYouItem items = 1; }
+
+// ---------------------------------------------------------------------------
+// Reports
+// ---------------------------------------------------------------------------
+
+// `report.get`: what the agents on this runner achieved in a period, computed
+// from the board's own record. Read-only.
+message ReportRequest {
+  // Unix milliseconds: the period is `[since, until)`. A client works out
+  // "the last 7 days" in its own time zone and sends the two instants.
+  int64 since = 1;
+  int64 until = 2;
+  // At most one of these narrows the report; neither is the whole runner.
+  optional bytes repository_id = 3;
+  optional bytes workspace_id = 4;
+}
+
+message Report {
+  // The report, as JSON.
+  //
+  // JSON rather than generated messages, for `AgentEventFrame.payload_json`'s
+  // reason: the shape is `farcooler_daemon::report::Report`, the one Rust
+  // definition the CLI and the apps decode. It is a tree of optional, growing
+  // parts (token usage arrives with a later runner), and restating it here
+  // would be a second definition to keep in step. Its `schema` field moves
+  // only when a field changes meaning; a reader ignores fields it doesn't
+  // know.
+  string report_json = 1;
+}
