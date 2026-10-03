@@ -32,6 +32,9 @@ struct ActionOutcomeTests {
             if words == ["worktree", "list"] {
                 return (Data(#"{"runtime_healthy":true,"live_panes":0,"worktrees":[]}"#.utf8), nil)
             }
+            if words.first == "layout" {
+                return (Data(#"{"worktree":"w-1","groups":[]}"#.utf8), nil)
+            }
             return (Data(), nil)
         }
     }
@@ -100,22 +103,21 @@ struct ActionOutcomeTests {
     }
 
     /// The other half of the bug: a failure from before the action, here a
-    /// background read and a layout read made outside any action, did not
-    /// happen to the action, and doesn't show on it.
+    /// layout read made outside any action, did not happen to the action,
+    /// and doesn't show on it. The action is a layout command, which reads
+    /// no fleet after it, so nothing in between clears an old failure.
     @Test func aStaleFailureDoesNotShowOnALaterAction() async {
         let runner = Runner()
-        runner.fails["terminal seen"] = "ssh: connect to host runner port 22: Connection refused"
         runner.fails["layout show"] = "error: no such worktree\ncode: not-found"
         let client = client(runner)
         let outcomes = ActionOutcomes()
+        let worktree = Worktree(
+            id: "w-1", short: "w1", task: "fix-it", branch: "fix-it", repository: "repo",
+            host: "", path: "/tmp/fix-it", state: "active", terminals: [])
 
-        await client.markSeen("t1")
-        await client.refreshLayout(
-            Worktree(
-                id: "w-1", short: "w1", task: "fix-it", branch: "fix-it", repository: "repo",
-                host: "", path: "/tmp/fix-it", state: "active", terminals: []))
-        await outcomes.perform(Self.key(.hide, "w-1"), subject: "“fix it”", on: client) {
-            await $0.hideWorktree("w1")
+        await client.refreshLayout(worktree)
+        await outcomes.perform(Self.key(.arrange, "w-1"), subject: "“fix it”", on: client) {
+            await $0.selectLayout("@2", in: worktree)
         }
 
         #expect(outcomes.shown.isEmpty, "\(outcomes.shown)")
