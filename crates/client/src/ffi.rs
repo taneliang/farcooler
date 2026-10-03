@@ -2449,14 +2449,6 @@ fn push_line(queue: &Arc<Mutex<VecDeque<String>>>, line: String) {
     locked(queue).push_back(line);
 }
 
-fn push(queue: &Arc<Mutex<VecDeque<String>>>, ticket: u64, outcome: Result<Value, String>) {
-    let payload = match outcome {
-        Ok(value) => json!({ "ticket": ticket, "ok": true, "result": value }),
-        Err(message) => json!({ "ticket": ticket, "ok": false, "error": message }),
-    };
-    locked(queue).push_back(payload.to_string());
-}
-
 /// A failed connect, in words a phone can switch on (ov-127).
 ///
 /// ```text
@@ -2485,7 +2477,8 @@ fn connect_failure(error: &SessionError) -> Value {
     line
 }
 
-/// `push`'s envelope around `connect_failure`'s fields.
+/// A connect's answer: the result, or `connect_failure`'s fields with the
+/// ticket and `"ok": false` added.
 fn push_connect(queue: &Arc<Mutex<VecDeque<String>>>, ticket: u64, outcome: Result<Value, Value>) {
     let payload = match outcome {
         Ok(value) => json!({ "ticket": ticket, "ok": true, "result": value }),
@@ -3091,8 +3084,8 @@ mod tests {
         assert!(!handle.is_null());
 
         let h = unsafe { as_handle(handle) }.unwrap();
-        push(&h.finished, 1, Ok(json!({"a": 1})));
-        push(&h.finished, 2, Err("nope".into()));
+        push_connect(&h.finished, 1, Ok(json!({"a": 1})));
+        push_connect(&h.finished, 2, Err(json!({"error": "nope", "trouble": "protocol"})));
 
         let first = unsafe { farcooler_client_poll(handle) };
         let first = unsafe { CStr::from_ptr(first) }.to_str().unwrap().to_string();
