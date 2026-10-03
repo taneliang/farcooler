@@ -172,7 +172,11 @@ impl Held {
             Held::Typing => "someone is typing there",
             Held::NotAnAgent => "no agent is running in its pane",
             Held::Unfamiliar => "its screen isn't one Far Cooler recognizes",
-            Held::Unproven => "Far Cooler can't tell yet whether it takes a paste",
+            // Only a tmux older than 3.7 leaves it unproven: say so now,
+            // not first at the deadline.
+            Held::Unproven => {
+                "this runner's tmux is older than 3.7, so Far Cooler can't tell yet whether the agent takes a paste"
+            }
         }
     }
 

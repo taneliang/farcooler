@@ -719,7 +719,15 @@ async fn stand_in_set_bracketing_before_anyone_followed() {
     b.answer("Drill in");
     b.pump().await;
     b.untouched(&si);
+    assert_eq!(b.progress(), [format!("Waiting to tell Agent 2 about the decision: {}.", Held::Unproven.now())]);
     assert_eq!(b.give_up().await, [unproven()]);
+}
+
+/// Waiting on an unproven paste names the tmux reason from the first note,
+/// on any host.
+#[test]
+fn waiting_on_an_unproven_paste_names_tmux() {
+    assert!(Held::Unproven.now().contains("tmux is older than 3.7"), "{}", Held::Unproven.now());
 }
 
 /// What the stream said about one program says nothing about the next:
@@ -1036,6 +1044,58 @@ async fn an_adopted_orchestrator_at_its_shell_waits_and_says_so() {
     assert_eq!(pending.len(), 1, "{pending:?}");
     assert_eq!(pending[0].claimed_at, None, "claimed a shell");
     assert_eq!(b.progress(), ["Waiting to tell the orchestrator about the decision: no agent is running in its pane."]);
+}
+
+/// A pane launched as one agent and running another is never typed into,
+/// whether it works a task or was adopted as the orchestrator: only a pane
+/// launched as something that isn't an agent is read as what it runs.
+#[tokio::test]
+async fn a_pane_launched_as_codex_running_claude_is_never_told() {
+    for adopt in [false, true] {
+        let b = board().await;
+        let pane = if adopt {
+            let t = b.svc.create_terminal_with_prompt(b.lane.id, "Orchestrator", "codex", None, None).await.unwrap();
+            b.svc.set_terminal_role(t.id, TerminalRole::Orchestrator).await.expect("adopted")
+        } else {
+            b.agent("Agent 2", "codex").await
+        };
+        let si = b.stand_in(&pane, "claude", "claude").await;
+        b.doing(pane.id, AgentActivity::Idle).await;
+        b.answer("Drill in");
+        b.pump().await;
+        b.untouched(&si);
+        assert_eq!(b.give_up().await, ["Not delivered: no agent was running in the pane."], "adopted: {adopt}");
+    }
+}
+
+/// The waiting note is said once per answer, not again by a restarted
+/// daemon still waiting on it.
+#[tokio::test]
+async fn waiting_is_said_once_across_a_restart() {
+    let b = board().await;
+    let orchestrator = b.adopted_shell().await;
+    b.screen_with(orchestrator.id, "").await;
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    b.answer("Drill in");
+    b.pump().await;
+    let waiting = ["Waiting to tell the orchestrator about the decision: no agent is running in its pane."];
+    assert_eq!(b.progress(), waiting);
+    let Board { dir, svc, watcher, task, .. } = b;
+    let root = svc.root_dir().to_path_buf();
+    drop(watcher);
+    drop(svc);
+    for _ in 0..2 {
+        let svc = Arc::new(Service::open_in(root.clone()).await.expect("the daemon again"));
+        let watcher = Watcher::new(svc.clone());
+        observe(&watcher, orchestrator.id, AgentActivity::Idle).await;
+        watcher.pump_wakes().await;
+        watcher.pump_wakes().await;
+        assert_eq!(svc.store.pending_answer_wakes().unwrap().len(), 1);
+        let said: Vec<String> =
+            svc.store.notes_for(task.id, Some(NoteKind::Progress)).unwrap().into_iter().map(|n| n.body).collect();
+        assert_eq!(said, waiting);
+    }
+    drop(dir);
 }
 
 /// Nobody running: the task says so, and nothing waits.
