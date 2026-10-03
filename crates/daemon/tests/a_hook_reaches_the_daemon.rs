@@ -224,6 +224,37 @@ async fn send(socket: &std::path::Path, line: &HookLine) {
     stream.shutdown().await.expect("shutdown");
 }
 
+/// What a "nothing reached the sink" test sends AFTER the frame that must
+/// reach nothing: a prompt from a session that IS bound.
+///
+/// A fixed sleep and an empty sink pass whether the daemon dropped the frame
+/// or simply had not got to it yet. `serve` reads one connection's frames in
+/// order and calls the sink before it reads the next, so once this one has
+/// arrived, anything the frame before it was going to deliver already has.
+fn sentinel(agent: Agent, payload: serde_json::Value) -> HookLine {
+    let mut payload = payload;
+    payload["prompt"] = serde_json::json!(SENTINEL);
+    HookLine { agent, event: "UserPromptSubmit".to_string(), payload }
+}
+
+const SENTINEL: &str = "the sentinel, sent last";
+
+/// Everything the sink got, once the sentinel is among it.
+async fn through_the_sentinel(seen: &Seen) -> Vec<(Uuid, Vec<AgentEvent>)> {
+    let is_sentinel = |e: &AgentEvent| matches!(e, AgentEvent::Message { text, .. } if text == SENTINEL);
+    eventually(|| {
+        let got = seen.lock().unwrap().clone();
+        got.iter().any(|(_, e)| e.iter().any(is_sentinel)).then_some(got)
+    })
+    .await
+    .expect("the sentinel sent after it never arrived, so the test proved nothing")
+}
+
+/// The sentinel's own delivery, for comparing against everything the sink got.
+fn only_the_sentinel(terminal: Uuid) -> Vec<(Uuid, Vec<AgentEvent>)> {
+    vec![(terminal, vec![AgentEvent::Message { role: Role::User, text: SENTINEL.to_string(), parent: None }])]
+}
+
 #[tokio::test]
 async fn a_claude_session_in_a_known_worktree_binds_to_its_terminal() {
     let dir = tempfile::tempdir().unwrap();
@@ -264,21 +295,27 @@ async fn a_session_nothing_claims_is_dropped_rather_than_attached() {
     let (store, terminal) = store_with_terminal("/wt/unclaimed", "claude", Some("sess-1"));
     let (socket, seen) = listening(store, &[terminal], dir.path()).await;
 
-    send(
+    send_all(
         &socket,
-        &HookLine {
-            agent: Agent::Claude,
-            event: "UserPromptSubmit".to_string(),
-            payload: serde_json::json!({
-                "session_id": "a-session-nobody-declared",
-                "prompt": "hi",
-            }),
-        },
+        &[
+            HookLine {
+                agent: Agent::Claude,
+                event: "UserPromptSubmit".to_string(),
+                payload: serde_json::json!({
+                    "session_id": "a-session-nobody-declared",
+                    "prompt": "hi",
+                }),
+            },
+            sentinel(Agent::Claude, serde_json::json!({ "session_id": "sess-1" })),
+        ],
     )
     .await;
 
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(seen.lock().unwrap().is_empty(), "an unmatched session reaches no terminal at all");
+    assert_eq!(
+        through_the_sentinel(&seen).await,
+        only_the_sentinel(terminal),
+        "an unmatched session reaches no terminal at all"
+    );
 }
 
 /// The property `hook.rs`'s `converse` doc asserts on this side's behalf.
@@ -313,9 +350,21 @@ async fn half_a_frame_with_no_newline_is_discarded_rather_than_acted_on() {
     stream.write_all(truncated.as_bytes()).await.expect("write");
     stream.shutdown().await.expect("shutdown");
 
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(
-        seen.lock().unwrap().is_empty(),
+    // The daemon hanging up is `serve` having returned, so whatever it was
+    // going to do with the fragment is done. A frame with no newline can't be
+    // followed on the same connection, so the sentinel goes on the next one.
+    let mut rest = Vec::new();
+    let closed = tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio::io::AsyncReadExt::read_to_end(&mut stream, &mut rest),
+    )
+    .await;
+    assert!(matches!(closed, Ok(Ok(0))), "the daemon never hung up on the fragment: {closed:?}");
+    send(&socket, &sentinel(Agent::Claude, serde_json::json!({ "session_id": "sess-1" }))).await;
+
+    assert_eq!(
+        through_the_sentinel(&seen).await,
+        only_the_sentinel(terminal),
         "a frame that never ended is not a frame the daemon may act on"
     );
 }
@@ -1051,7 +1100,7 @@ fn a_permission_request(agent: Agent, session: &str) -> HookLine {
 /// connection open, reading, as `farcooler hook` does.
 struct Asking {
     reader: tokio::io::BufReader<tokio::net::unix::OwnedReadHalf>,
-    _writer: tokio::net::unix::OwnedWriteHalf,
+    writer: tokio::net::unix::OwnedWriteHalf,
 }
 
 impl Asking {
@@ -1059,7 +1108,12 @@ impl Asking {
         let stream = tokio::net::UnixStream::connect(socket).await.expect("connect");
         let (read, mut write) = stream.into_split();
         write.write_all(encode_line(line).unwrap().as_bytes()).await.expect("write");
-        Asking { reader: tokio::io::BufReader::new(read), _writer: write }
+        Asking { reader: tokio::io::BufReader::new(read), writer: write }
+    }
+
+    /// Another frame on the same connection, after the first.
+    async fn then(&mut self, line: &HookLine) {
+        self.writer.write_all(encode_line(line).unwrap().as_bytes()).await.expect("write");
     }
 
     /// The daemon's next line, or `None` if none came within `within`.
@@ -1163,8 +1217,12 @@ async fn a_permission_request_nobody_claims_is_told_no_decision_at_once() {
 
     let first = asking.line(FIRST_CONTACT).await.expect("no decision, said at once");
     assert_eq!(first, "{}\n");
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(seen.lock().unwrap().is_empty(), "an ask nobody can answer offers nothing");
+    asking.then(&sentinel(Agent::Claude, serde_json::json!({ "session_id": "sess-1" }))).await;
+    assert_eq!(
+        through_the_sentinel(&seen).await,
+        only_the_sentinel(terminal),
+        "an ask nobody can answer offers nothing"
+    );
 }
 
 /// A chat pane's permissions arrive over its shim. A hook ask there would be
@@ -1172,17 +1230,19 @@ async fn a_permission_request_nobody_claims_is_told_no_decision_at_once() {
 #[tokio::test]
 async fn a_permission_request_from_a_chat_pane_is_told_no_decision_at_once() {
     let dir = tempfile::tempdir().unwrap();
-    let (store, terminal) = store_with_terminal("/wt/chat", "claude", Some("sess-1"));
+    // A second, ordinary pane beside the chat, for the sentinel to reach.
+    let (store, ids) = store_with("/wt/chat", &[("claude", Some("sess-1")), ("claude", Some("sess-2"))]);
+    let (terminal, beside) = (ids[0], ids[1]);
     let row = store.get_terminal(terminal).unwrap();
     store
         .set_pane_mode(terminal, row.resource_version, PaneMode::Agent, Some("sess-1".to_string()), false)
         .unwrap();
-    let (socket, seen) = listening(store, &[terminal], dir.path()).await;
+    let (socket, seen) = listening(store, &ids, dir.path()).await;
     let mut asking = Asking::open(&socket, &a_permission_request(Agent::Claude, "sess-1")).await;
 
     assert_eq!(asking.line(FIRST_CONTACT).await.as_deref(), Some("{}\n"));
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(!any_permission(&seen));
+    asking.then(&sentinel(Agent::Claude, serde_json::json!({ "session_id": "sess-2" }))).await;
+    assert_eq!(through_the_sentinel(&seen).await, only_the_sentinel(beside), "the chat's ask was offered");
 }
 
 /// Codex registers no gate. Its `PermissionRequest` is an ordinary hook line.
@@ -1194,9 +1254,15 @@ async fn a_codex_permission_request_is_never_held() {
     let mut line = a_permission_request(Agent::Codex, "codex-sess");
     line.payload["cwd"] = serde_json::json!("/wt/codex-ask");
     let mut asking = Asking::open(&socket, &line).await;
+    let mut after = sentinel(Agent::Codex, serde_json::json!({ "session_id": "codex-sess", "cwd": "/wt/codex-ask" }));
+    after.payload["hook_event_name"] = serde_json::json!("UserPromptSubmit");
+    asking.then(&after).await;
 
-    assert_eq!(asking.line(Duration::from_millis(500)).await, None, "no reply to a hook that does not gate");
-    assert!(!any_permission(&seen));
+    let got = through_the_sentinel(&seen).await;
+    assert!(!any_permission(&seen), "{got:?}");
+    // A reply to the request would have been written before the sentinel was
+    // read, so it is already waiting here if there is one.
+    assert_eq!(asking.line(Duration::ZERO).await, None, "no reply to a hook that does not gate");
 }
 
 #[tokio::test]
@@ -1267,8 +1333,9 @@ async fn a_permission_request_that_is_not_a_tool_permission_is_never_held() {
         let mut asking = Asking::open(&socket, &line).await;
 
         assert_eq!(asking.line(FIRST_CONTACT).await.as_deref(), Some("{}\n"), "{tool}: no decision, at once");
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        asking.then(&sentinel(Agent::Claude, serde_json::json!({ "session_id": "sess-1" }))).await;
+        let got = through_the_sentinel(&seen).await;
         assert!(!ingress.asks().is_holding(terminal), "{tool} reached the ledger");
-        assert!(!any_permission(&seen), "{tool} reached the phones");
+        assert_eq!(got, only_the_sentinel(terminal), "{tool} reached the phones");
     }
 }
