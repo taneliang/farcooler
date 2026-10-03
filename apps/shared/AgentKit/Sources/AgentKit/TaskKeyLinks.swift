@@ -212,7 +212,7 @@ public enum TaskKeyLinks {
 
 /// What a view's text links keys to, and what opening one does: set where
 /// the runner is known, read by `MarkdownText` and a task's own lines.
-public struct TaskKeyLinker: Sendable {
+public struct TaskKeyLinker: Equatable, Sendable {
     public var index: TaskKeyIndex
     public var open: @MainActor (TaskKeyTarget) -> Void
 
@@ -220,6 +220,11 @@ public struct TaskKeyLinker: Sendable {
         self.index = index
         self.open = open
     }
+
+    /// Equal when they link the same keys to the same tasks. The opener is
+    /// left out, as a closure can't be compared: a screen makes a new one
+    /// on every pass, and a transcript's text shouldn't redraw for that.
+    public static func == (a: TaskKeyLinker, b: TaskKeyLinker) -> Bool { a.index == b.index }
 
     /// No keys, nothing to open: what a view gets when no one set it.
     public static let none = TaskKeyLinker(index: .empty, open: { _ in })
@@ -245,4 +250,10 @@ extension EnvironmentValues {
     /// The keys this view's text links, and where they go. `.none` unless a
     /// screen that knows its runner sets it.
     @Entry public var taskKeyLinker: TaskKeyLinker = .none
+}
+
+extension TaskKeyTarget {
+    /// Where a phone opens it: the task, pushed over the screen showing, as
+    /// a pane's task chip opens one (`ShellPaneBar.chipTitle`).
+    var phoneRoute: PhoneRoute { .task(PhoneWorkspace(runner: runner, workspace: workspace), task: task) }
 }

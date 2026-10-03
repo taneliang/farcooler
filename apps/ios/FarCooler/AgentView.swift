@@ -28,6 +28,7 @@ struct AgentView: View {
     /// How far the keyboard — the docked composer included — reaches up the
     /// screen. See `KeyboardInset`.
     @StateObject private var keyboard = KeyboardInset()
+    @Environment(\.phoneNavigator) private var navigator
     /// How tall the docked composer measured. Reported up out of `DockedBar`.
     @State private var barHeight: CGFloat = 0
     // MARK: What a conversation's scrolling has to do
@@ -351,6 +352,8 @@ struct AgentView: View {
     var body: some View {
         VStack(spacing: 0) {
             transcriptBody
+                // "ov-190" in a reply opens that task (ov-196).
+                .environment(\.taskKeyLinker, connection.taskKeyLinker(navigator))
                 .modifier(
                     AgentLayoutProbe(
                         keyboardHeight: keyboard.height, barHeight: barHeight,

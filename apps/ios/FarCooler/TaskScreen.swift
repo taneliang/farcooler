@@ -125,7 +125,7 @@ struct TaskScreen: View {
                             // and struck through, quietly.
                             Image(systemName: line.met ? "checkmark.square" : "square")
                                 .foregroundStyle(.secondary)
-                            Text(TaskProse.acceptance(line.text, met: line.met))
+                            Text(linker.linked(TaskProse.acceptance(line.text, met: line.met)))
                                 .font(.body)
                                 .foregroundStyle(line.met ? Color.secondary : Color.primary)
                         }
@@ -166,10 +166,14 @@ struct TaskScreen: View {
             }
         }
         .listStyle(.insetGrouped)
-        // Links in task text open on the web or in mail, nothing else
-        // (`Markdown.opens`).
-        .environment(\.openURL, Markdown.openGuard)
+        // Links in task text open on the web or in mail, or a task key's
+        // task, pushed (ov-196), nothing else (`Markdown.opens`).
+        .environment(\.openURL, Markdown.openGuard(linker))
+        .environment(\.taskKeyLinker, linker)
     }
+
+    /// What "ov-190" in this task's text links to.
+    private var linker: TaskKeyLinker { connection.taskKeyLinker(navigator) }
 
     /// The question it's waiting on, and its answers: the options as
     /// buttons (a menu past three), else Answer… for words of your own.

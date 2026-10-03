@@ -101,6 +101,8 @@ SOURCES = [
     "TaskScreen.swift",
     # A task's Usage section: what its agents spent (ov-195).
     "TaskUsageSection.swift",
+    # Task keys in a runner's text as links, pushing the task (ov-196).
+    "TaskKeyLinking.swift",
     # The same stack over a canned runner, for the UI suite. DEBUG only.
     "PhoneHarness.swift",
     "ShellHarness.swift",

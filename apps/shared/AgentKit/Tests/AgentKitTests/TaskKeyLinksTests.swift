@@ -141,5 +141,8 @@ struct TaskKeyLinksTests {
         // Through the guard a view draws under: the task opens, in the app.
         Markdown.openGuard(linker)(URL(string: "farcooler://task/r1/lo-3")!)
         #expect(opened.last?.key == "lo-3")
+
+        // A phone pushes it as the task it is, on its runner's workspace.
+        #expect(opened.last?.phoneRoute == .task(PhoneWorkspace(runner: "r1", workspace: "w-lo"), task: "t3"))
     }
 }
