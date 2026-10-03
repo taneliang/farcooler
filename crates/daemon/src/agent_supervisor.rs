@@ -154,11 +154,8 @@ struct SessionState {
     /// a pane that is starting normally is also what it looks like, so a
     /// client draws the spinner until this is set or the transcript arrives.
     failure: Option<AgentFailure>,
-    /// The last turn that ended ended as `EndReason::Failed`.
-    ///
-    /// Held until the next turn ends, and read only while the row is `Done`
-    /// (`wire::failure_narrowed`), so it is the outcome of the turn the row is
-    /// announcing and nothing older.
+    /// The last turn ended `EndReason::Failed`. Held until the next turn
+    /// ends, and read only while the row is `Done` (`wire::failure_narrowed`).
     turn_failed: bool,
     /// How many turns have ended `Failed`, ever. A count rather than a flag
     /// so `watch` can tell a NEW failure from the one it already showed.
@@ -728,9 +725,7 @@ impl AgentSupervisor {
                     AgentEvent::TurnEnded { reason } => {
                         entry.turn_failed = matches!(reason, EndReason::Failed { .. });
                         entry.failed_turns += u64::from(entry.turn_failed);
-                        // The backend's own words go to the log and nowhere
-                        // else: they are for whoever is debugging this, not
-                        // the agent's to have said.
+                        // The backend's own words go to the log, nowhere else.
                         if let EndReason::Failed { kind, detail } = reason {
                             tracing::warn!(
                                 terminal = %terminal,
@@ -959,38 +954,6 @@ mod tests {
         });
         current = fold_activity(current, &AgentEvent::TurnEnded { reason: EndReason::Refusal });
         assert_eq!(current, AgentActivity::Done, "a stopped agent must not report itself working");
-    }
-
-    #[test]
-    fn a_failed_turn_with_nothing_before_it_still_reaches_somebody() {
-        // A refused key now ends the turn as `Failed` with no words in front
-        // of it. From Idle, an ordinary end folds to Idle: nobody is told.
-        let failed = AgentEvent::TurnEnded {
-            reason: EndReason::Failed {
-                kind: farcooler_agent::event::FailureKind::Auth,
-                detail: "401".into(),
-            },
-        };
-        assert_eq!(fold_activity(AgentActivity::Idle, &failed), AgentActivity::Done);
-        assert_eq!(fold_activity(AgentActivity::Idle, &AgentEvent::TurnEnded { reason: EndReason::EndTurn }), AgentActivity::Idle);
-    }
-
-    #[test]
-    fn the_last_turns_failure_is_held_until_the_next_turn_ends() {
-        let supervisor = AgentSupervisor::new();
-        let terminal = Uuid::now_v7();
-        let failed = AgentEvent::TurnEnded {
-            reason: EndReason::Failed {
-                kind: farcooler_agent::event::FailureKind::Quota,
-                detail: String::new(),
-            },
-        };
-        supervisor.record(terminal, vec![failed], &|_, _| {});
-        assert!(supervisor.turn_failed(terminal), "a failed turn has to reach the row");
-        assert_eq!(supervisor.failed_turns(terminal), 1);
-        assert_eq!(supervisor.activity(terminal), AgentActivity::Done);
-        supervisor.record(terminal, vec![AgentEvent::TurnEnded { reason: EndReason::EndTurn }], &|_, _| {});
-        assert!(!supervisor.turn_failed(terminal), "and stop once a turn works");
     }
 
     #[test]
@@ -1665,6 +1628,9 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod failed_turn_tests;
 
 #[cfg(test)]
 mod gap_tests {
