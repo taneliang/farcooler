@@ -2424,8 +2424,9 @@ function numeric(value: unknown): number | null {
 
 /// Order the rows, count the tiers, and total what they changed.
 ///
-/// Ordering is `tier` then longest-waiting, so the agent that needs a person
-/// never falls off the bottom and a chatty one cannot climb past a stuck one.
+/// Ordering is `tier` then longest-waiting, in whole seconds (see `waited`), so
+/// the agent that needs a person never falls off the bottom and a chatty one
+/// cannot climb past a stuck one.
 /// Ties break on terminal, because `all()` does not promise an order and a card
 /// whose rows shuffled between two identical pushes would be a card that
 /// flickers for no reason.
@@ -2457,8 +2458,8 @@ export function composeFleet(
   const all = [...rows].sort((a, b) => {
     const byTier = tier(a.status) - tier(b.status)
     if (byTier !== 0) return byTier
-    const bySince = (a.status_since ?? a.updated_at) - (b.status_since ?? b.updated_at)
-    if (bySince !== 0) return bySince
+    const byWait = waited(b, now) - waited(a, now)
+    if (byWait !== 0) return byWait
     return a.terminal < b.terminal ? -1 : a.terminal > b.terminal ? 1 : 0
   })
 
@@ -2500,6 +2501,18 @@ export function composeFleet(
     commits,
     quiet: quiet.names,
   }
+}
+
+/// How long a row has been in its tier at `now`, in WHOLE seconds.
+///
+/// Seconds, and floored, because that is how the daemon measures the same wait
+/// for `rank` (`farcooler_core::feed::rank`, `state_age.as_secs()`), and the
+/// app's widgets sort by that rank. Sorted on milliseconds, two agents that
+/// entered a tier within one second of each other were ordered by the wait on
+/// the card and by terminal in the widget, so the two could lead with
+/// different agents (ov-166). Equal seconds fall to the terminal on both.
+function waited(row: AgentRow, now: number): number {
+  return Math.floor((now - (row.status_since ?? row.updated_at)) / 1000)
 }
 
 /// Whether a row's runner has already counted it, in its own `needsYou`.

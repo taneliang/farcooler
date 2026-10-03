@@ -22,6 +22,7 @@ private struct Table: Decodable, Sendable {
         var runner: String
         var status: String
         var sinceS: Int
+        var sinceMs: Int?
         var heardS: Int
         var rank: UInt32
     }
@@ -71,7 +72,8 @@ private func published(_ fleet: Table.Case, now: Date) -> FleetSnapshot {
                 id: agent.terminal, label: agent.terminal, machine: runner.id,
                 status: agent.status, glyph: "", headline: agent.terminal, line: "", feed: [],
                 rank: agent.rank, turnFailed: false,
-                activityChangedAt: now.addingTimeInterval(-TimeInterval(agent.sinceS)),
+                activityChangedAt: now.addingTimeInterval(
+                    -(agent.sinceMs.map { TimeInterval($0) / 1000 } ?? TimeInterval(agent.sinceS))),
                 observedAt: now.addingTimeInterval(-TimeInterval(agent.heardS)),
                 runner: runner.id)
         }

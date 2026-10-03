@@ -1925,7 +1925,10 @@ mod tests {
                     "idle" => AgentState::Idle,
                     other => panic!("a status the table should not hold: {other}"),
                 };
-                let since = Duration::from_secs(agent["sinceS"].as_u64().expect("sinceS"));
+                let since = match agent["sinceMs"].as_u64() {
+                    Some(ms) => Duration::from_millis(ms),
+                    None => Duration::from_secs(agent["sinceS"].as_u64().expect("sinceS")),
+                };
                 let subject = Subject::Agent {
                     name: "claude".to_string(),
                     state,

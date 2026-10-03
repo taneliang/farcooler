@@ -22,6 +22,7 @@ interface Agent {
   runner: string
   status: string
   sinceS: number
+  sinceMs?: number
   heardS: number
 }
 
@@ -76,7 +77,7 @@ function row(agent: Agent): AgentRow {
     trace: null,
     trace_anchor: null,
     started_at: null,
-    status_since: now - agent.sinceS * 1000,
+    status_since: now - (agent.sinceMs ?? agent.sinceS * 1000),
     updated_at: now - agent.heardS * 1000,
     ask_id: null,
     ask_tool: null,

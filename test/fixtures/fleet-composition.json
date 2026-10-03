@@ -2,9 +2,10 @@
   "_about": [
     "How a fleet is ranked and counted, once, for every side that does it (ov-166).",
     "The relay composes the lock screen card (composeFleet in services/relay/src/index.ts); the app composes the widgets, the watch and the Island's fallback (FleetPublication and FleetSnapshot in AgentKit); the daemon ranks each agent (farcooler_core::feed::rank). Read by services/relay/test/fleet-composition.test.ts, apps/shared/AgentKit/Tests/AgentKitTests/FleetCompositionTests.swift and crates/core/src/feed.rs's tests.",
-    "Times are seconds before `now`: `sinceS` is how long the agent has been in its status, `heardS` how long since anything said so. `rank` is what the daemon sends for that status and `sinceS`; the relay ignores it and sorts on the status and its own clock, which is what this table holds the two to.",
+    "Times are seconds before `now`: `sinceS` is how long the agent has been in its status, `heardS` how long since anything said so. `sinceMs`, where given, is `sinceS` to the millisecond, and wins. `rank` is what the daemon sends for that status and `sinceS`; the relay ignores it and sorts on the status and its own clock, which is what this table holds the two to.",
     "A runner's `needsYou` is the count (relay) or the length of the list (app) it sent, null when it sent none. `quiet` is a runner that stopped beating (relay) or whose link was lost (app).",
-    "Expected: `order` every agent, as each side ranks them. `blocked`, `working` and `needsYou` as the card's header and the widgets count them, and `header` the number they lead with: `needsYou` when any runner counted, else `blocked`. `review` (done agents) and `shown` (the card's lines, at most four) are the relay's alone: the app's widgets count reviews by worktree, and draw every agent.",
+    "Expected: `order` every agent, as each side ranks them. `blocked`, `working` and `needsYou` as the card's header and the widgets count them, and `header` the number they lead with: `needsYou` when any runner counted, else `blocked`. `shown` (the card's lines, at most four) is the relay's alone: the app's widgets draw every agent.",
+    "`review` is the relay's alone too, and it is a known disagreement, not a choice. The card counts done AGENTS; the app counts WORKTREES whose diff moved since it was reviewed (`reviewsWaiting`, from each runner's `changes.inbox`). The relay can't count worktrees: no notice carries that number (an agent notice has its terminal, status and diff totals, a `count` notice only `needsYou`; see `Outgoing` in crates/daemon/src/push.rs), the `daemons` table has nowhere to keep it, and nothing tells the relay when a diff moves or is reviewed. Closing it needs the runner to send its review count, a migration to keep it per runner, and `composeFleet` to sum it the way it sums `needsYou`. When that lands, `review` belongs on both sides of this table.",
     "No `failed` agent yet: ov-125 adds the relay's failed outcome and should add its cases here."
   ],
   "now": 1790000000000,
@@ -97,6 +98,20 @@
         "order": ["s-b"],
         "blocked": 1, "review": 0, "working": 0, "needsYou": 0, "header": 0,
         "shown": ["s-b"]
+      }
+    },
+    {
+      "name": "a wait is whole seconds, as the daemon ranks it: under a second apart is a tie, and the terminal breaks it",
+      "runners": [{ "id": "studio", "needsYou": null, "quiet": false }],
+      "agents": [
+        { "terminal": "a", "runner": "studio", "status": "working", "sinceS": 10, "sinceMs": 10200, "heardS": 1, "rank": 299999989 },
+        { "terminal": "b", "runner": "studio", "status": "working", "sinceS": 10, "sinceMs": 10700, "heardS": 1, "rank": 299999989 },
+        { "terminal": "c", "runner": "studio", "status": "working", "sinceS": 11, "sinceMs": 11100, "heardS": 1, "rank": 299999988 }
+      ],
+      "expect": {
+        "order": ["c", "a", "b"],
+        "blocked": 0, "review": 0, "working": 3, "needsYou": null, "header": 0,
+        "shown": ["c", "a", "b"]
       }
     },
     {
