@@ -1,0 +1,16 @@
+-- How each agent's last turn ended, so the card can draw a turn that died as
+-- failed rather than as a calm "to review" (ov-125).
+--
+-- Additive only, same as 0002 through 0017: the previous worker is still
+-- serving requests while a deploy rolls out, and it never reads or writes
+-- this column.
+--
+-- 1 for a `done` turn that failed, 0 for one that finished, NULL for every
+-- other status and for a `done` from a runner too old to send `failed`. The
+-- card carries NULL as no key at all, and the app then falls back to its own
+-- snapshot.
+--
+-- Overwritten on every notice rather than coalesced, like `workspace` (0011):
+-- a successful turn after a failed one is a statement that it did not fail,
+-- whether or not anybody was alerted about it.
+ALTER TABLE live_activities ADD COLUMN failed INTEGER;

@@ -322,6 +322,11 @@ export interface ActivityState {
   /// runner's hold ends, in Unix milliseconds. No option name and no command
   /// line: for Bash, the option name IS the command line. See migration 0014.
   ask?: CardAsk
+  /// How the HEADLINE's turn ended, on a `done` headline whose runner said:
+  /// true for a turn that failed, false for one that finished. Absent
+  /// otherwise, and from a relay older than this, which the app reads as "not
+  /// told" and answers from its own snapshot (ov-125).
+  failed?: boolean
 
   /// How many agents are in each tier, for the header: `2 need you / 3 to
   /// review · 3 in flight`.
@@ -338,7 +343,13 @@ export interface ActivityState {
   /// while three agents were waiting, which is the specific lie `+N more`
   /// exists to prevent.
   blocked?: number
+  /// Every `done` agent, failed or not, so an app too old to know
+  /// `failedTurns` still counts a failed one somewhere.
   review?: number
+  /// The `done` agents whose turn failed: a SUBSET of `review`, which a new app
+  /// subtracts and draws as its own clause, "1 failed" (ov-125). Absent when
+  /// none did.
+  failedTurns?: number
   working?: number
   /// How many things need a person across the account, per runner: each
   /// runner's own count of its asks, blocked agents, decisions and reviews where
@@ -443,6 +454,9 @@ export interface ActivityRow {
   /// "pack from the newest end", the drawing it had before this existed. See
   /// migration 0009 and `AgentKit.AgentCardLayout`.
   traceAnchor?: number
+  /// How this agent's turn ended, on a `done` row whose runner said. Absent
+  /// otherwise; see `ActivityState.failed`. Migration 0018.
+  failed?: boolean
 }
 
 /// What is fixed for the life of an install's card, which is now almost nothing.

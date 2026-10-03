@@ -958,8 +958,10 @@ interface Notification {
   version?: string
   status?: string
   label?: string
-  /// Whether the turn behind a `done` ended badly, for the notification service
-  /// extension's mark. Forwarded and never acted on here — see `push.ts`.
+  /// Whether the turn behind a `done` ended badly. Forwarded to the
+  /// notification service extension's mark, and stored on the agent's row so
+  /// the card can draw it — see `failedOf` and migration 0018. Never decides
+  /// whether or how anything is sent.
   failed?: boolean
   /// When the turn began, in Unix milliseconds, for the card's own clock.
   ///
@@ -1985,6 +1987,20 @@ interface AgentRow {
   ask_id: string | null
   ask_tool: string | null
   ask_until: number | null
+  /// How the last turn ended: 1 failed, 0 finished, NULL unknown or not
+  /// `done`. See migration 0018 and `failedOf`.
+  failed: number | null
+}
+
+/// How a row's turn ended, as the card carries it: true or false on a `done`
+/// row whose runner said, and undefined otherwise — which the app reads as "not
+/// told" and answers from its own snapshot.
+///
+/// Gated on `done` here as well as where the column is written, so a row that
+/// has gone back to work never carries an old failure.
+function failedOf(row: AgentRow | undefined): boolean | undefined {
+  if (!row || row.status !== 'done' || row.failed === null) return undefined
+  return row.failed === 1
 }
 
 /// Which tier a row sorts into. Lower is more urgent.
@@ -2033,7 +2049,11 @@ interface Fleet {
   /// The ones that get a line. See `ROWS_SHOWN` and `STATE_BUDGET`.
   shown: AgentRow[]
   blocked: number
+  /// Every `done` row, failed or not. See `failed`.
   review: number
+  /// The `done` rows whose turn failed: a subset of `review`, not a fourth tier,
+  /// so an app too old to know this count still counts them somewhere.
+  failed: number
   working: number
   /// Each machine's needs-you count where it sent a fresh one, plus the blocked
   /// rows of the machines that did not; NULL when none did. It counts items,
@@ -2101,7 +2121,7 @@ async function readFleet(
   const rows = await env.DB.prepare(
     `SELECT terminal, label, machine, daemon_id, workspace, status, detail, insertions, deletions,
             commits, trace, trace_anchor, started_at, status_since, updated_at,
-            ask_id, ask_tool, ask_until
+            ask_id, ask_tool, ask_until, failed
      FROM live_activities WHERE account_id = ?`,
   )
     .bind(account)
@@ -2364,14 +2384,19 @@ async function rememberAgent(
     // Overwritten, never carried forward: a blocked notice with no ask says
     // none is open now, and any other status has none. See migration 0014.
     ...askColumns(status === 'blocked' ? askOf(body.ask) : null),
+    // Overwritten, never carried forward: a turn that finished after one that
+    // failed has not failed, alerted or not. NULL where it is not a `done` or
+    // the runner sent no word. See migration 0018.
+    failed: status === 'done' && typeof body.failed === 'boolean' ? (body.failed ? 1 : 0) : null,
   }
 
   await env.DB.prepare(
     `INSERT INTO live_activities
        (id, account_id, terminal, update_token, environment, updated_at,
         label, machine, daemon_id, workspace, status, detail, insertions, deletions,
-        commits, trace, trace_anchor, started_at, status_since, ask_id, ask_tool, ask_until)
-     VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        commits, trace, trace_anchor, started_at, status_since, ask_id, ask_tool, ask_until,
+        failed)
+     VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (account_id, terminal)
      DO UPDATE SET updated_at = excluded.updated_at,
                    label = excluded.label,
@@ -2391,7 +2416,8 @@ async function rememberAgent(
                    status_since = excluded.status_since,
                    ask_id = excluded.ask_id,
                    ask_tool = excluded.ask_tool,
-                   ask_until = excluded.ask_until`,
+                   ask_until = excluded.ask_until,
+                   failed = excluded.failed`,
   )
     .bind(
       crypto.randomUUID(),
@@ -2425,6 +2451,7 @@ async function rememberAgent(
       mine.ask_id,
       mine.ask_tool,
       mine.ask_until,
+      mine.failed,
     )
     .run()
   return mine
@@ -2654,6 +2681,7 @@ function composeFleet(
     shown: all.filter(row => speaks(row, now, quiet)).slice(0, ROWS_SHOWN),
     blocked: all.filter(row => row.status === 'blocked').length,
     review: all.filter(row => row.status === 'done').length,
+    failed: all.filter(row => failedOf(row) === true).length,
     // Only the working rows that still speak. Working is the one tier that is
     // a claim about now, and a row quiet for `ROW_QUIET_AFTER_MS` is one
     // nothing has vouched for in that long: a runner that went down stops
@@ -2705,7 +2733,11 @@ function fleetHeader(fleet: Fleet): string {
   // none did — the same fallback the card makes. See `composeFleet`.
   const waiting = fleet.needsYou ?? fleet.blocked
   if (waiting > 0) parts.push(`${waiting} need${waiting === 1 ? 's' : ''} you`)
-  if (fleet.review > 0) parts.push(`${fleet.review} to review`)
+  // A turn that died is not a calm "to review": it is its own clause, after
+  // what needs you, and out of the review count. See `Fleet.failed`.
+  if (fleet.failed > 0) parts.push(`${fleet.failed} failed`)
+  const reviews = fleet.review - fleet.failed
+  if (reviews > 0) parts.push(`${reviews} to review`)
   if (fleet.working > 0) parts.push(`${fleet.working} in flight`)
   return parts.length > 0 ? parts.join(' · ') : 'Your agents'
 }
@@ -2724,7 +2756,16 @@ function fleetHeader(fleet: Fleet): string {
 function withFleet(state: ActivityState, fleet: Fleet): ActivityState {
   state.blocked = fleet.blocked
   state.review = fleet.review
+  // Only when a turn failed: an absent count is zero to an app that knows it,
+  // and nothing at all to one that does not. See `ActivityState.failedTurns`.
+  if (fleet.failed > 0) state.failedTurns = fleet.failed
+  else delete state.failedTurns
   state.working = fleet.working
+  // How the HEADLINE's turn ended, whichever row that is. Set here because
+  // both callers have settled the headline by now, and the row is in `all`.
+  const lead = failedOf(fleet.all.find(row => row.terminal === state.terminal))
+  if (lead !== undefined) state.failed = lead
+  else delete state.failed
   // Absent, never 0, when no machine has a fresh count: the app then reads
   // `blocked` as it always did, and a 0 here would say nothing needs anyone.
   if (fleet.needsYou !== null) state.needsYou = fleet.needsYou
@@ -2753,6 +2794,8 @@ function withFleet(state: ActivityState, fleet: Fleet): ActivityState {
       ...(row.trace ? { trace: row.trace } : {}),
       // Never without the trace it places. See migration 0009.
       ...(row.trace && row.trace_anchor !== null ? { traceAnchor: row.trace_anchor } : {}),
+      // Only on a `done` row whose runner said. See `failedOf`.
+      ...(failedOf(row) !== undefined ? { failed: failedOf(row) } : {}),
     })
     if (new TextEncoder().encode(JSON.stringify({ ...state, rows })).length > STATE_BUDGET) {
       rows.pop()

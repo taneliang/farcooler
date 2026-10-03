@@ -4727,6 +4727,97 @@ describe('/v1/notify and Live Activities', () => {
       expect('workspace' in card.rows[1]).toBe(false)
     })
 
+    it('carries how each done turn ended, on its row and on the headline (ov-125)', async () => {
+      // The card's push said `done` for a turn that died exactly as for one
+      // that worked, so the phone could only learn the difference from a file
+      // the notification extension writes, and only when an alert was sent.
+      // The runner sends `failed` on every agent notice; the row keeps it.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      // A working agent first, so the card outlives the two endings.
+      await post('/v1/notify', { title: 'gemini', terminal: 'term-3', status: 'working', label: 'gemini', failed: false }, 'mine')
+      await post(
+        '/v1/notify',
+        { title: 'claude failed', terminal: 'term-1', status: 'done', label: 'claude', failed: true },
+        'mine',
+      )
+      await post(
+        '/v1/notify',
+        { title: 'codex finished', terminal: 'term-2', status: 'done', label: 'codex', failed: false },
+        'mine',
+      )
+
+      const card = lastCard(calls).body.aps['content-state']
+      const byTerminal = Object.fromEntries(card.rows.map((row: any) => [row.terminal, row]))
+      expect(byTerminal['term-1'].failed).toBe(true)
+      expect(byTerminal['term-2'].failed).toBe(false)
+      // Only a `done` row says how its turn ended.
+      expect('failed' in byTerminal['term-3']).toBe(false)
+      // `review` still counts both, for an app too old to know `failedTurns`.
+      expect(card.review).toBe(2)
+      expect(card.failedTurns).toBe(1)
+    })
+
+    it('clears a failure when the next turn finishes, alerted or not (ov-125)', async () => {
+      // The case the phone's own file got wrong: a failed turn, then a
+      // successful one nobody was alerted about. The row is overwritten.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post('/v1/notify', { title: 'codex', terminal: 'term-2', status: 'working', label: 'codex' }, 'mine')
+      await post(
+        '/v1/notify',
+        { title: 'claude failed', terminal: 'term-1', status: 'done', label: 'claude', failed: true },
+        'mine',
+      )
+      // Straight from one ending to the next, with no notice between them.
+      await post(
+        '/v1/notify',
+        { title: 'claude finished', terminal: 'term-1', status: 'done', label: 'claude', failed: false, alert: false },
+        'mine',
+      )
+      // Another agent speaks, so term-1's row is read back from the table
+      // rather than from the notice that just wrote it. A new agent, because a
+      // second `working` from term-2 would be coalesced and push nothing.
+      await post('/v1/notify', { title: 'gemini', terminal: 'term-3', status: 'working', label: 'gemini' }, 'mine')
+
+      const card = lastCard(calls).body.aps['content-state']
+      const row = card.rows.find((row: any) => row.terminal === 'term-1')
+      expect(row.failed).toBe(false)
+      expect('failedTurns' in card).toBe(false)
+    })
+
+    it('carries no outcome from a runner that sent none (ov-125)', async () => {
+      // NULL in the column and no key on the card: the app answers "not told"
+      // from its own snapshot rather than reading a finish into silence.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post('/v1/notify', { title: 'claude finished', terminal: 'term-1', status: 'done', label: 'claude' }, 'mine')
+      await post('/v1/notify', { title: 'codex', terminal: 'term-2', status: 'working', label: 'codex' }, 'mine')
+
+      const card = lastCard(calls).body.aps['content-state']
+      const row = card.rows.find((row: any) => row.terminal === 'term-1')
+      expect('failed' in row).toBe(false)
+      expect('failedTurns' in card).toBe(false)
+    })
+
+    it('puts the headline\'s outcome on the card when the headline is done (ov-125)', async () => {
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post(
+        '/v1/notify',
+        { title: 'claude failed', terminal: 'term-1', status: 'done', label: 'claude', failed: true },
+        'mine',
+      )
+
+      const card = lastCard(calls).body.aps['content-state']
+      expect(card.terminal).toBe('term-1')
+      expect(card.failed).toBe(true)
+    })
+
     it('forgets a workspace the agent has left', async () => {
       // Overwritten, never carried forward like the counts are. A notice with
       // no workspace is a runner saying this agent is in none, not a runner that
