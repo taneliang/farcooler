@@ -441,6 +441,19 @@ pub mod capability {
     /// out Start Orchestrator on a runner that can start one. A client that
     /// reads it absent offers every agent, as it always did.
     pub const AGENTS_FOUND: &str = "agents_found";
+    /// When a task will start (ov-212): `task.set_wait`, `task.set_line`,
+    /// and `Task.wait` and `Task.waiting_on`.
+    ///
+    /// Its own capability because an older runner drops the fields: a CLI
+    /// that reads it absent refuses before sending, saying the runner needs
+    /// an update to record when a task starts.
+    pub const TASK_WAITS: &str = "task_waits";
+    /// Subagents as task workers (ov-213): `task.worker` and `Task.workers`.
+    ///
+    /// Apart from `TASK_WAITS` so either half can ship alone. A CLI that
+    /// reads it absent says the runner needs an update to record subagents;
+    /// an app keeps its old "No Agent" rule.
+    pub const TASK_WORKERS: &str = "task_workers";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -453,6 +466,7 @@ pub mod capability {
             LAUNCH_PROMPT, TERMINAL_TASK, WORKTREE_FORK_ONLY, WORKSTREAMS, ORCHESTRATOR_HANDOFF,
             NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES, REPORT, AGENT_USAGE,
             AGENTS_FOUND,
+            TASK_WAITS, TASK_WORKERS,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -619,6 +633,9 @@ pub mod method {
         ReportGet = "report.get" => REPORT,
         UsageReport = "usage.report" => AGENT_USAGE,
         UsageTask = "usage.task" => AGENT_USAGE,
+        TaskSetWait = "task.set_wait" => TASK_WAITS,
+        TaskSetLine = "task.set_line" => TASK_WAITS,
+        TaskWorker = "task.worker" => TASK_WORKERS,
     }
 }
 
@@ -665,6 +682,9 @@ pub const MIN_COLUMNS: u32 = 20;
 pub const MAX_COLUMNS: u32 = 500;
 pub const MIN_ROWS: u32 = 5;
 pub const MAX_ROWS: u32 = 200;
+
+#[cfg(test)]
+mod task_starts_tests;
 
 #[cfg(test)]
 mod tests {

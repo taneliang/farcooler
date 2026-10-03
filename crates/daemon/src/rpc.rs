@@ -472,7 +472,10 @@ fn scope_of(method: Method) -> Scope {
         | Method::TaskUpdate
         | Method::TaskSetStatus
         | Method::TaskNote
-        | Method::TaskBlock => Scope::Control,
+        | Method::TaskBlock
+        | Method::TaskSetWait
+        | Method::TaskSetLine
+        | Method::TaskWorker => Scope::Control,
         // Workspaces: the list is the shape of the fleet, like
         // `worktree.list`; paths in it are redacted below `host_admin` by the
         // converter, as everywhere.
@@ -2030,6 +2033,28 @@ impl Rpc {
                     &self.watcher,
                     &p,
                 )?))
+            }
+
+            "task.set_wait" => {
+                let Some(request::Payload::TaskSetWait(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::Task(crate::task_starts::set_wait(svc, &self.watcher, &p)?))
+            }
+
+            "task.set_line" => {
+                let Some(request::Payload::TaskSetLine(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::TaskList(crate::task_starts::set_line(svc, &self.watcher, &p)?))
+            }
+
+            "task.worker" => {
+                let Some(request::Payload::TaskWorkerSet(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let pane = crate::task_starts::orchestrator_pane(svc, &p).await;
+                Ok(result::Value::Task(crate::task_starts::worker(svc, &self.watcher, &p, pane)?))
             }
 
             // ---- workspaces ----

@@ -35,6 +35,7 @@ use crate::service::Service;
 use crate::wire;
 
 pub(crate) mod answer_wake;
+mod holds;
 pub(crate) mod task_notice;
 mod reap;
 
@@ -4323,6 +4324,8 @@ impl Watcher {
                     // After the sample, so an agent that just went idle is
                     // told on the tick that saw it.
                     self.spawn_wake_pump();
+                    // A held task whose time came (ov-212): an indexed probe.
+                    self.release_due_holds(now_millis());
                     // Gated: a drained set lookup per repository, and a git
                     // process only for repositories the filesystem says
                     // actually gained or lost a worktree. The separate forced

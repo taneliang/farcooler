@@ -531,6 +531,10 @@ fn route(method: Method) -> Option<&'static str> {
         // runner's through `Session`. A task's own is the task screen's
         // Usage section (ov-195), routed above.
         Method::UsageReport => None,
+        // When a task starts and who works it (ov-212, ov-213): the CLI
+        // writes them, from the orchestrator's session. The phones only read
+        // the board (ov-184), and the board's rows carry both.
+        Method::TaskSetWait | Method::TaskSetLine | Method::TaskWorker => None,
     }
 }
 

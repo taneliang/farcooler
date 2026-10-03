@@ -78,6 +78,8 @@ fn pb_note_kind(kind: NoteKind) -> i32 {
         NoteKind::Comment => pb::TaskNoteKind::Comment,
         NoteKind::StatusChange => pb::TaskNoteKind::StatusChange,
         NoteKind::Created => pb::TaskNoteKind::Created,
+        NoteKind::Wait => pb::TaskNoteKind::Wait,
+        NoteKind::Worker => pb::TaskNoteKind::Worker,
     }) as i32
 }
 
@@ -94,6 +96,8 @@ fn note_kind_from_wire(raw: i32) -> Option<NoteKind> {
         pb::TaskNoteKind::Comment => Some(NoteKind::Comment),
         pb::TaskNoteKind::StatusChange => Some(NoteKind::StatusChange),
         pb::TaskNoteKind::Created => Some(NoteKind::Created),
+        pb::TaskNoteKind::Wait => Some(NoteKind::Wait),
+        pb::TaskNoteKind::Worker => Some(NoteKind::Worker),
     }
 }
 
@@ -210,6 +214,10 @@ pub(crate) fn pb_task(task: &Task) -> pb::Task {
         created_at: task.created_at,
         updated_at: task.updated_at,
         workspace_id: id_bytes(task.workspace_id),
+        // The derived half, which needs the store: `task_starts::pb_tasks`.
+        wait: None,
+        waiting_on: Vec::new(),
+        workers: Vec::new(),
     }
 }
 
@@ -303,7 +311,7 @@ pub fn list(svc: &Service, req: &pb::TaskListRequest) -> Result<pb::TaskList> {
         Some(millis) => svc.store.list_tasks_stale_for(scope, std::time::Duration::from_millis(millis))?,
         None => svc.store.list_tasks(scope, status_from_wire(req.status))?,
     };
-    Ok(pb::TaskList { items: tasks.iter().map(pb_task).collect() })
+    Ok(pb::TaskList { items: crate::task_starts::pb_tasks(svc, &tasks)? })
 }
 
 /// `task.get`: one task, its record and what it waits on, in a single read.
@@ -315,7 +323,7 @@ pub fn get(svc: &Service, req: &pb::TaskGetRequest) -> Result<pb::TaskDetail> {
     let notes = svc.store.notes_for(id, note_kind_from_wire(req.note_kind))?;
     let blocks = svc.store.blocks_for(id)?;
     Ok(pb::TaskDetail {
-        task: Some(pb_task(&task)),
+        task: Some(crate::task_starts::pb_one(svc, &task)?),
         notes: notes.iter().map(pb_note).collect(),
         blocks: blocks.iter().map(pb_block).collect(),
     })
@@ -346,7 +354,7 @@ pub fn get_by_key(svc: &Service, req: &pb::TaskGetByKeyRequest) -> Result<pb::Ta
         "repository_id",
     )?;
     let tasks = svc.store.tasks_with_key(repository, key)?;
-    Ok(pb::TaskList { items: tasks.iter().map(pb_task).collect() })
+    Ok(pb::TaskList { items: crate::task_starts::pb_tasks(svc, &tasks)? })
 }
 
 /// `task.search`: every note in a repository whose body carries a phrase.
@@ -443,7 +451,7 @@ pub fn create(svc: &Service, watcher: &Watcher, req: &pb::TaskCreate) -> Result<
     }
     // New Task, for the devices that want it (ov-94).
     watcher.task_event(&task, TaskEvent::Created, actor);
-    Ok(pb_task(&task))
+    crate::task_starts::pb_one(svc, &task)
 }
 
 /// What a freshly created task's revisable half already is, so `create` can
@@ -498,7 +506,7 @@ pub fn update(svc: &Service, watcher: &Watcher, req: &pb::TaskUpdate) -> Result<
             }
         }
     }
-    Ok(pb_task(&task))
+    crate::task_starts::pb_one(svc, &task)
 }
 
 /// `task.set_status`: move a task, and record the move in the same
@@ -526,6 +534,10 @@ pub fn set_status(svc: &Service, watcher: &Watcher, req: &pb::TaskSetStatus) -> 
     {
         watcher.announce_worktree_changed(lane);
     }
+    // And the tasks blocked on it read differently (`Task.waiting_on`).
+    if is_closed(before) != is_closed(task.status) {
+        crate::task_starts::announce_dependents(svc, watcher, &task, actor)?;
+    }
     if before != task.status && (is_an_item(before) || is_an_item(task.status)) {
         watcher.announce_needs_you();
     }
@@ -534,7 +546,7 @@ pub fn set_status(svc: &Service, watcher: &Watcher, req: &pb::TaskSetStatus) -> 
     if before != task.status {
         watcher.task_event(&task, TaskEvent::Moved { to: task.status }, actor);
     }
-    Ok(pb_task(&task))
+    crate::task_starts::pb_one(svc, &task)
 }
 
 /// `task.note`: append one entry to a task's record.

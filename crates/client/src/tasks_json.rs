@@ -49,6 +49,8 @@ pub fn note_kind_word(raw: i32) -> &'static str {
         Ok(pb::TaskNoteKind::Comment) => "comment",
         Ok(pb::TaskNoteKind::StatusChange) => "status_change",
         Ok(pb::TaskNoteKind::Created) => "created",
+        Ok(pb::TaskNoteKind::Wait) => "wait",
+        Ok(pb::TaskNoteKind::Worker) => "worker",
         Ok(pb::TaskNoteKind::Unspecified) | Err(_) => "unknown",
     }
 }

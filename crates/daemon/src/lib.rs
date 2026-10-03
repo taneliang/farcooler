@@ -45,6 +45,7 @@ pub mod session_discovery;
 pub mod skill_install;
 pub mod task_link;
 pub mod task_ops;
+pub mod task_starts;
 pub mod usage;
 #[cfg(test)]
 pub(crate) mod test_support;

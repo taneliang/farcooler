@@ -35,6 +35,7 @@ fn task(key: &str, title: &str, created: i64) -> Seed {
         resource_version: 1,
         created_at: created * H,
         updated_at: created * H,
+        wait: None,
     };
     let mut seed = Seed {
         facts: TaskFacts { task, workspace: "Main".into(), repository: "overnight".into(), notes: Vec::new() },
