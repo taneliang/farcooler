@@ -487,6 +487,9 @@ class Connection(
     /** A new link, which has read nothing yet: the fleet on screen is an earlier one's. */
     private fun linkCameUp() {
         _fleetRead.value = _fleetRead.value.onNewLink()
+        // Whatever build answered before belongs to the previous link: the
+        // runner may have been upgraded while it was away. See [DaemonBuildSlot].
+        daemonBuild.linkCameUp()
     }
 
     private val _repositories = MutableStateFlow<List<Repository>>(emptyList())
@@ -514,8 +517,13 @@ class Connection(
     private val _inbox = MutableStateFlow<Map<String, InboxRow>>(emptyMap())
     val inbox: StateFlow<Map<String, InboxRow>> = _inbox.asStateFlow()
 
-    private val _daemon = MutableStateFlow<DaemonBuild?>(null)
-    val daemon: StateFlow<DaemonBuild?> = _daemon.asStateFlow()
+    private val daemonBuild = DaemonBuildSlot()
+
+    /** The build read on this link, or null until it lands. See [DaemonBuildSlot.current]. */
+    val daemon: StateFlow<DaemonBuild?> = daemonBuild.current
+
+    /** The last build any link reported, kept through a reconnect. See [DaemonBuildSlot.last]. */
+    val lastDaemon: StateFlow<DaemonBuild?> = daemonBuild.last
 
     /**
      * Not private: a terminal screen talks to the same runner through this
@@ -541,7 +549,7 @@ class Connection(
      */
     private val boardReads = BoardReads(
         scope = scope,
-        canRead = { _phase.value is Phase.Connected && _daemon.value?.can("tasks") == true },
+        canRead = { _phase.value is Phase.Connected && daemonBuild.current.value?.can("tasks") == true },
         read = { workspace ->
             attempt { core.call("task.list", BoardReads.request(workspace)) }
                 .getOrNull()
@@ -617,7 +625,7 @@ class Connection(
     /** Read what needs you now, from the runner or, on an older one, from the fleet. */
     suspend fun readNeedsYou() {
         if (_phase.value !is Phase.Connected) return
-        val build = _daemon.value ?: return
+        val build = daemonBuild.current.value ?: return
         needsYouOwed = false
         if (!build.can(NEEDS_YOU_CAPABILITY)) {
             if (_fleetRead.value == FleetRead.THIS_LINK) {
@@ -1094,16 +1102,19 @@ class Connection(
     }
 
     /**
-     * What the daemon on the other end is, asked once per connection.
+     * What the daemon on the other end is, asked once per link.
      *
      * Cached because it cannot change while connected — a daemon that restarted
      * is a connection that dropped — and because the settings screen should not
-     * cost a round trip every time it opens.
+     * cost a round trip every time it opens. Forgotten by every new link
+     * ([DaemonBuildSlot.linkCameUp]), so a runner upgraded while this app ran is
+     * read again when it comes back.
      */
     suspend fun loadDaemonBuild() {
-        if (_phase.value !is Phase.Connected || _daemon.value != null) return
+        if (_phase.value !is Phase.Connected || daemonBuild.current.value != null) return
+        val link = daemonBuild.link
         val body = attempt { core.call("host") }.getOrNull() ?: return
-        _daemon.value = DaemonBuild(
+        val build = DaemonBuild(
             version = body["daemonVersion"]?.jsonPrimitive?.contentOrNull ?: "unknown",
             matches = body["buildsMatch"]?.jsonPrimitive?.booleanOrNull ?: true,
             platform = body["platform"]?.jsonPrimitive?.contentOrNull.orEmpty(),
@@ -1127,6 +1138,8 @@ class Connection(
             // Whether its task notices reach this phone as pushes (ov-107).
             pushPaired = body["pushPaired"]?.jsonPrimitive?.booleanOrNull ?: false,
         )
+        // A read that set out on the previous link answers into nothing.
+        if (!daemonBuild.land(link, build)) return
         // Read from the same call, which is already made once per connection.
         //
         // Defaulted to the daemon's own default rather than to no prefix: an
@@ -1211,11 +1224,11 @@ class Connection(
         // A build the first read on this link could not get, asked again on
         // the poll — which is what lets a late build read its boards (see
         // [loadDaemonBuild]).
-        if (_daemon.value == null) loadDaemonBuild()
+        if (daemonBuild.current.value == null) loadDaemonBuild()
         // What needs you: derived from this very fleet on a runner that can't
         // say, owed after a notice nobody read, and on the poll when no event
         // channel would bring the notice.
-        val derives = _daemon.value?.can(NEEDS_YOU_CAPABILITY) == false
+        val derives = daemonBuild.current.value?.can(NEEDS_YOU_CAPABILITY) == false
         if (derives || needsYouOwed || (polls % INBOX_EVERY == 1L && !core.eventsLive())) readNeedsYou()
         // No event channel: nothing will say a board moved, so read them on
         // the poll, at most once a minute.
@@ -1375,7 +1388,7 @@ class Connection(
         // without the check it would spend a failing round trip every few
         // seconds, for as long as a pane is on screen, to be refused the same
         // way every time.
-        if (_daemon.value?.can("watching") != true) return
+        if (daemonBuild.current.value?.can("watching") != true) return
         // Backgrounded is not watching, and that is the half of the request
         // that matters most: an agent finishing while the phone is in a pocket
         // is exactly what the push exists for. A screen still composed behind a

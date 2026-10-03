@@ -543,7 +543,7 @@ class AppModel(
         while (true) {
             val over = System.currentTimeMillis() - began >= ANSWER_FIND_MS
             val sources = fleet.active.value.map {
-                DecisionSource(it.host.id, it.needsYou.value, it.boards.value, it.daemon.value?.runnerId)
+                DecisionSource(it.host.id, it.needsYou.value, it.boards.value, it.lastDaemon.value?.runnerId)
             }
             val target = DecisionLink.find(answer.key, sources, answer.runner, over)
             val connection = target?.let { t -> fleet.active.value.firstOrNull { it.host.id == t.hostId } }
@@ -563,7 +563,7 @@ class AppModel(
     private fun resolvePendingTask(waitEnded: Boolean = false) {
         val key = pendingTask ?: return
         val sources = fleet.active.value.map {
-            DecisionSource(it.host.id, it.needsYou.value, it.boards.value, it.daemon.value?.runnerId)
+            DecisionSource(it.host.id, it.needsYou.value, it.boards.value, it.lastDaemon.value?.runnerId)
         }
         val target = DecisionLink.find(key, sources, pendingTaskRunner, waitEnded) ?: return
         pendingTask = null
