@@ -102,7 +102,7 @@ fn a_week() -> Report {
             recorded: 4,
             ..Decisions::default()
         },
-        needs_you: NeedsYou { times: 3, decisions: 2, reviews: 1, cleared: 2, waiting: 1, time_to_clear: None },
+        needs_you: NeedsYou { times: 3, cleared: 2, waiting: 1, time_to_clear: None },
         acceptance: Acceptance { met: 4, total: 5, tasks_fully_met: 1, tasks_without_lines: 1 },
         usage: None,
     };
@@ -136,7 +136,7 @@ fn the_summary_says_what_happened_in_plain_words() {
         "Acceptance: 4 of 5 lines met; 1 of 2 tasks finished every line",
         "Questions: 2 asked, 1 answered, 1 still open",
         "  You answered 1, in a median of 6 min",
-        "Needs you: 3 times (2 for a decision, 1 for review); 1 waiting",
+        "Needs you: 3 times; 1 waiting",
         "Decisions recorded: 4",
         "  In Progress     41 h across 4 tasks",
         "    ov-178    Mac: retire the old fleet sidebar             2 d 5 h",

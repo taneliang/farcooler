@@ -83,7 +83,7 @@ async fn a_read_client_gets_the_boards_numbers() {
     let t = &r.totals;
     assert_eq!((t.created, t.completed, t.canceled), (4, 1, 1));
     assert_eq!((t.decisions.asked, t.decisions.answered, t.decisions.answered_by_you), (1, 1, 1));
-    assert_eq!(t.needs_you.decisions, 1);
+    assert_eq!((t.needs_you.times, t.needs_you.cleared), (1, 1));
     assert_eq!((t.acceptance.met, t.acceptance.total), (2, 3));
     assert!(t.time_to_done.is_some());
     assert_eq!(r.scope.kind, "runner");

@@ -183,16 +183,17 @@ pub struct Decisions {
     pub recorded: u32,
 }
 
-/// Spells a task waited on a person: in Needs Decision or In Review, the two
-/// statuses the needs-you rollup calls a person's.
+/// Spells a task waited on a person: in Needs Decision, with a question
+/// only a person can answer.
+///
+/// In Review is not one. On a board the orchestrator owns, the orchestrator
+/// does the reviewing, so a spell in review waits on it, not on you. The
+/// board has no marker yet for a review a person must do; when it gets one,
+/// those spells belong here too (future work, ov-188 phase 2).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NeedsYou {
     /// Spells that began in the period.
     pub times: u32,
-    /// Of those, in Needs Decision.
-    pub decisions: u32,
-    /// Of those, in In Review.
-    pub reviews: u32,
     /// Spells that ended in the period, whenever they began.
     pub cleared: u32,
     /// Spells still open when the period ended.
@@ -253,9 +254,8 @@ impl Usage {
 pub struct Notable {
     /// Completed in the period, longest from filed to done first.
     pub slowest: Vec<NotableTask>,
-    /// The longest a person was waited on: a question until its answer, or a
-    /// review until it ended. One still open counts up to the end of the
-    /// period.
+    /// The longest a person was waited on: a question until its answer. One
+    /// still open counts up to the end of the period.
     pub longest_waits: Vec<NotableWait>,
     /// Moved out of Done in the period: the closest thing to a failure the
     /// board records today.
@@ -282,7 +282,8 @@ pub struct NotableWait {
     pub key: String,
     pub title: String,
     pub workspace: String,
-    /// `question` or `review`.
+    /// `question`, today the only kind. A person's review would be another,
+    /// once the board can mark one.
     pub kind: String,
     pub ms: i64,
     /// Whether it was still open when the period ended.

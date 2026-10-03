@@ -414,12 +414,7 @@ fn people(t: &Tally) -> Vec<String> {
         }
     }
     if n.times + n.cleared + n.waiting > 0 {
-        let mut line = format!(
-            "Needs you: {} ({} for a decision, {} for review)",
-            plural(n.times, "time", "times"),
-            n.decisions,
-            n.reviews
-        );
+        let mut line = format!("Needs you: {}", plural(n.times, "time", "times"));
         if let Some(m) = median_line(&n.time_to_clear) {
             line.push_str(&format!("; cleared in a median of {m}"));
         }
@@ -550,9 +545,8 @@ fn render(r: &Report, label: Option<&str>) -> String {
         n.longest_waits
             .iter()
             .map(|w| {
-                let what = if w.kind == "review" { "review" } else { "question" };
                 let still = if w.open { ", still waiting" } else { "" };
-                (w.key.clone(), w.title.clone(), format!("{what}, {}{still}", span(w.ms)))
+                (w.key.clone(), w.title.clone(), format!("{}, {}{still}", w.kind, span(w.ms)))
             })
             .collect(),
     );

@@ -241,14 +241,15 @@ fn a_withdrawn_question_is_not_counted() {
 }
 
 #[test]
-fn needs_you_counts_spells_in_needs_decision_and_review() {
+fn needs_you_counts_spells_in_needs_decision_only() {
     let n = compute(&board(), PERIOD, NOW).totals.needs_you;
-    // ov-1's two reviews, ov-2's decision, ov-5's decision.
-    assert_eq!((n.times, n.decisions, n.reviews), (4, 2, 2));
-    // 5 and 10 hours of review, 3 of decision. ov-5 is still waiting.
-    assert_eq!(n.cleared, 3);
+    // ov-2's decision and ov-5's. Not ov-1's two reviews: the orchestrator
+    // reviews, so those waited on it, not on a person.
+    assert_eq!(n.times, 2);
+    // ov-2's, after 3 hours. ov-5 is still waiting.
+    assert_eq!(n.cleared, 1);
     assert_eq!(n.waiting, 1);
-    assert_eq!(n.time_to_clear, Some(Spread { count: 3, median_ms: 5 * H, p90_ms: 10 * H }));
+    assert_eq!(n.time_to_clear, Some(Spread { count: 1, median_ms: 3 * H, p90_ms: 3 * H }));
 }
 
 #[test]
@@ -283,16 +284,9 @@ fn notable_names_the_slowest_and_the_longest_waits() {
     let slowest: Vec<_> = n.slowest.iter().map(|t| (t.key.as_str(), t.ms)).collect();
     assert_eq!(slowest, [("ov-1", Some(50 * H)), ("bil-1", Some(45 * H)), ("ov-2", Some(20 * H))]);
     // ov-5's open question counts to the end of the period, not to now.
+    // ov-1's reviews are not waits on a person.
     let waits: Vec<_> = n.longest_waits.iter().map(|w| (w.key.as_str(), w.kind.as_str(), w.ms, w.open)).collect();
-    assert_eq!(
-        waits,
-        [
-            ("ov-1", "review", 10 * H, false),
-            ("ov-5", "question", 10 * H, true),
-            ("ov-1", "review", 5 * H, false),
-            ("ov-2", "question", 3 * H, false),
-        ]
-    );
+    assert_eq!(waits, [("ov-5", "question", 10 * H, true), ("ov-2", "question", 3 * H, false)]);
     assert_eq!(n.reopened.iter().map(|t| (t.key.as_str(), t.count)).collect::<Vec<_>>(), [("bil-1", Some(1))]);
     assert_eq!(n.most_fix_rounds.iter().map(|t| t.key.as_str()).collect::<Vec<_>>(), ["ov-1"]);
     assert_eq!(n.canceled.iter().map(|t| t.key.as_str()).collect::<Vec<_>>(), ["ov-3"]);

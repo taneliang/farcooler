@@ -275,8 +275,6 @@ fn tally(readings: &[&Reading], inputs: &Inputs, period: Period, horizon: i64) -
         for s in r.spells.iter().filter(|s| waits_on_you(s.status)) {
             if period.contains(s.start) {
                 t.needs_you.times += 1;
-                t.needs_you.decisions += u32::from(s.status == TaskStatus::NeedsDecision);
-                t.needs_you.reviews += u32::from(s.status == TaskStatus::InReview);
             }
             match s.end {
                 Some(end) if period.contains(end) => {
@@ -312,10 +310,10 @@ fn tally(readings: &[&Reading], inputs: &Inputs, period: Period, horizon: i64) -
     t
 }
 
-/// Needs Decision and In Review: the two statuses the needs-you rollup
-/// counts as a person's to act on.
+/// Needs Decision: a question only a person can answer. Not In Review,
+/// which the orchestrator works through on a board it owns; see `NeedsYou`.
 fn waits_on_you(status: TaskStatus) -> bool {
-    matches!(status, TaskStatus::NeedsDecision | TaskStatus::InReview)
+    status == TaskStatus::NeedsDecision
 }
 
 /// Nothing happened and nothing was worked on: no event in the period, and
@@ -387,14 +385,6 @@ fn notable(readings: &[&Reading], period: Period, horizon: i64) -> Notable {
             match q.answer {
                 Some((at, _)) if period.contains(at) => waits.push(wait("question", at - q.asked, false)),
                 _ if q.open_at(period.until) => waits.push(wait("question", horizon - q.asked, true)),
-                _ => {}
-            }
-        }
-        for s in r.spells.iter().filter(|s| s.status == TaskStatus::InReview) {
-            match s.end {
-                Some(end) if period.contains(end) => waits.push(wait("review", end - s.start, false)),
-                Some(end) if end < period.until => {}
-                _ if s.start < period.until => waits.push(wait("review", horizon - s.start, true)),
                 _ => {}
             }
         }
