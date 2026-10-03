@@ -1344,6 +1344,14 @@ final class ChangesStore: ObservableObject {
         await select(commit: previous.sha)
     }
 
+    /// Where a test answers a file's diff from, in place of the daemon.
+    var diffSource: ((String) async -> FileDiff)?
+
+    /// What a file with no lines says: a new empty file is not "unchanged".
+    func emptyNote(_ path: String) -> String {
+        isUntracked(path) ? "Empty file" : "No textual changes"
+    }
+
     /// Read one file's diff, if it has not been read already.
     ///
     /// Idempotent and safe to call from `onAppear` on every section, which is
@@ -1388,7 +1396,8 @@ final class ChangesStore: ObservableObject {
     /// effect of asking for a patch — so a per-file read inside a commit
     /// repainted rather more than the file it was for.
     private func diff(_ path: String, context: Int = 0) async -> FileDiff {
-        await client.changesDiff(
+        if let diffSource { return await diffSource(path) }
+        return await client.changesDiff(
             worktree: worktree.short, path: path, scope: scope, context: context,
             commit: selectedCommit)
     }

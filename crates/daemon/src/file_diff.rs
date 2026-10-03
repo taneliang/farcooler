@@ -119,12 +119,67 @@ async fn is_untracked(repo: &Path, path: &str) -> bool {
     }
 }
 
-/// An untracked file too big to hand to a diff: the cap the patch parser
-/// applies, checked on the file's size so it is never read. The link itself is
-/// measured, not what it points at.
-fn untracked_too_large(repo: &Path, path: &str) -> Option<Truncation> {
-    let meta = std::fs::symlink_metadata(repo.join(path)).ok()?;
-    (meta.len() > farcooler_review::limits::MAX_BYTES as u64).then_some(Truncation::ByteCap)
+/// What reading an untracked file gave.
+enum Untracked {
+    TooLarge,
+    Binary,
+    /// A unified patch adding every line (or, for a link, its target).
+    Patch(String),
+}
+
+/// Read an untracked file for diffing, without git.
+///
+/// Read here rather than by `git diff --no-index` so the read is bounded
+/// (`take(MAX_BYTES + 1)`, never the whole of a file that grew) and so the
+/// type is checked on the opened handle: the path is `lstat`ed, opened, and the
+/// handle's device and inode must match, so a swap to something else between
+/// the check and the read is refused. A symlink is never opened; its target
+/// text is the content. Only the final component is guarded; the parent
+/// directories are the agent's own and `is_untracked` has already refused any
+/// that git does not walk.
+fn read_untracked(repo: &Path, path: &str) -> std::io::Result<Untracked> {
+    use std::io::Read;
+    use std::os::unix::fs::MetadataExt;
+    let full = repo.join(path);
+    let before = std::fs::symlink_metadata(&full)?;
+    let max = farcooler_review::limits::MAX_BYTES;
+    if before.file_type().is_symlink() {
+        let target = std::fs::read_link(&full)?;
+        let text = target.to_string_lossy();
+        return Ok(Untracked::Patch(format!("@@ -0,0 +1 @@\n+{text}\n")));
+    }
+    if !before.is_file() {
+        return Err(std::io::Error::other("not a regular file"));
+    }
+    let file = std::fs::File::open(&full)?;
+    let held = file.metadata()?;
+    if !held.is_file() || held.dev() != before.dev() || held.ino() != before.ino() {
+        return Err(std::io::Error::other("the file changed under the read"));
+    }
+    let mut bytes = Vec::new();
+    file.take(max as u64 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > max {
+        return Ok(Untracked::TooLarge);
+    }
+    if bytes.iter().take(8000).any(|b| *b == 0) {
+        return Ok(Untracked::Binary);
+    }
+    let text = String::from_utf8_lossy(&bytes);
+    if text.is_empty() {
+        return Ok(Untracked::Patch(String::new()));
+    }
+    let unterminated = !text.ends_with('\n');
+    let lines: Vec<&str> = text.lines().collect();
+    let mut patch = format!("@@ -0,0 +1,{} @@\n", lines.len());
+    for l in &lines {
+        patch.push('+');
+        patch.push_str(l);
+        patch.push('\n');
+    }
+    if unterminated {
+        patch.push_str("\\ No newline at end of file\n");
+    }
+    Ok(Untracked::Patch(patch))
 }
 
 /// One file's diff.
@@ -141,22 +196,30 @@ pub async fn file_diff(
     // answer for it, so it is diffed against nothing instead.
     let working_tree_view = matches!(selector, Selector::Local | Selector::Unstaged);
     let untracked = working_tree_view && is_untracked(repo, path).await;
+    let mut untracked_patch: Option<String> = None;
     if untracked {
-        if let Some(too_large) = untracked_too_large(repo, path) {
-            return Ok(FileDiffResult {
-                diff: FileDiff {
-                    path: path.to_string(),
-                    hunks: Vec::new(),
-                    truncated: Some(too_large),
-                    next_hunk: None,
-                },
-                first_parent_of_merge,
-                unsupported: None,
-            });
+        let (repo_owned, path_owned) = (repo.to_path_buf(), path.to_string());
+        let read = tokio::task::spawn_blocking(move || read_untracked(&repo_owned, &path_owned))
+            .await
+            .map_err(|_| DomainError::OperationFailed)?
+            .map_err(|_| DomainError::OperationFailed)?;
+        let empty = |truncated, unsupported| FileDiffResult {
+            diff: FileDiff {
+                path: path.to_string(),
+                hunks: Vec::new(),
+                truncated,
+                next_hunk: None,
+            },
+            first_parent_of_merge,
+            unsupported,
+        };
+        match read {
+            Untracked::TooLarge => return Ok(empty(Some(Truncation::ByteCap), None)),
+            Untracked::Binary => return Ok(empty(None, Some(Unsupported::Binary))),
+            Untracked::Patch(p) => untracked_patch = Some(p),
         }
     }
 
-    let context_arg_for_untracked = format!("-U{}", context.min(50_000));
     let mut args: Vec<&str> = vec!["diff", "--no-color", "--find-renames"];
     // Capped rather than passed through. A client asking to open one gap sends
     // a number big enough to cover it; an unbounded one would let a caller ask
@@ -174,33 +237,18 @@ pub async fn file_diff(
     args.push("--");
     args.push(path);
 
-    let raw = if untracked {
-        // `--no-index` exits 1 when the sides differ, which here is every
-        // non-empty file, so success is "printed a patch", not the exit code.
-        // The index is not touched (`add -N` would write it). A symlink is
-        // diffed as the link itself, so its patch is one line: the target.
-        let mut a: Vec<&str> = vec!["diff", "--no-color", "--no-index"];
-        if context > 0 {
-            a.push(&context_arg_for_untracked);
-        }
-        a.extend(["--", "/dev/null", path]);
-        let r = git_bytes(repo, &a).await?;
-        if r.stdout.is_empty() && !r.ok && !r.stderr.is_empty() {
-            return Err(DomainError::OperationFailed);
-        }
-        r
+    let patch = if let Some(p) = untracked_patch {
+        p
     } else {
-        let r = git_bytes(repo, &args).await?;
-        if !r.ok {
+        let raw = git_bytes(repo, &args).await?;
+        if !raw.ok {
             return Err(DomainError::OperationFailed);
         }
-        r
+        // Patch text is read lossily on purpose: a file whose CONTENT is not
+        // UTF-8 still deserves a hunk count and a "binary" verdict, and the
+        // path was already carried separately by the change set.
+        String::from_utf8_lossy(&raw.stdout).into_owned()
     };
-
-    // Patch text is read lossily on purpose: a file whose CONTENT is not UTF-8
-    // still deserves a hunk count and a "binary" verdict, and the path was
-    // already carried separately by the change set.
-    let patch = String::from_utf8_lossy(&raw.stdout).into_owned();
 
     if patch.contains("\nGIT binary patch") || patch.contains("Binary files ") {
         return Ok(FileDiffResult {

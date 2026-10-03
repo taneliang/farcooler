@@ -1428,7 +1428,7 @@ struct ChangesPane: View {
         // which meets exactly that — and "No textual changes" is the one thing
         // a diff too big to render is not.
         if diff.lines.isEmpty && !diff.truncated {
-            out.append(note(f, "No textual changes", "empty"))
+            out.append(note(f, changes.emptyNote(f.path), "empty"))
         } else {
             out.append(contentsOf: body(of: f, lines: diff.lines))
         }

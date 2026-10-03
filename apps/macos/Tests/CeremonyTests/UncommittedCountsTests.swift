@@ -1,3 +1,4 @@
+import AgentKit
 import Foundation
 import Testing
 
@@ -58,10 +59,29 @@ struct UncommittedCountsTests {
     /// content under the label rather than a placeholder in its place.
     @Test func anUntrackedFileIsReadAndKeepsItsLabel() async throws {
         let s = try store(Self.dirty)
+        var asked: [String] = []
+        s.diffSource = { path in
+            asked.append(path)
+            return FileDiff(lines: [
+                DiffComputation.Line(id: 0, kind: .added, oldNumber: nil, newNumber: 1, text: "alpha"),
+                DiffComputation.Line(id: 1, kind: .added, oldNumber: nil, newNumber: 2, text: "beta"),
+            ])
+        }
         #expect(s.untrackedLabel("new.txt") == "Untracked")
         #expect(s.untrackedLabel("README.md") == nil)
         await s.ensure("new.txt")
-        #expect(s.fileDiffs["new.txt"] != nil, "the diff was asked for, not skipped")
+        #expect(asked == ["new.txt"], "the diff was asked for, not skipped")
+        let lines = try #require(s.fileDiffs["new.txt"]?.lines)
+        #expect(lines.map(\.text) == ["alpha", "beta"])
+        #expect(lines.allSatisfy { $0.kind == .added })
+        #expect(s.fileDiffs["new.txt"]?.unsupported == nil)
+    }
+
+    /// A new file with nothing in it says so, rather than "No textual changes".
+    @Test func anEmptyUntrackedFileSaysEmptyFile() throws {
+        let s = try store(Self.dirty)
+        #expect(s.emptyNote("new.txt") == "Empty file")
+        #expect(s.emptyNote("README.md") == "No textual changes")
     }
 
     /// What the pane's header sums. `+6 -3` on a worktree nobody has scrolled.

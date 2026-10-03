@@ -429,13 +429,13 @@ async fn an_untracked_symlink_shows_its_target_and_never_follows_it() {
     std::os::unix::fs::symlink(outside.path().join("secret"), p.join("escape")).expect("symlink");
     let r = file_diff(p, &Selector::Local, "escape", 0, 0).await.expect("diff");
     let texts: Vec<&str> = r.diff.hunks.iter().flat_map(|h| h.lines.iter()).map(|l| l.text.as_str()).collect();
-    assert!(!texts.contains(&"hunter2"), "{texts:?}");
+    assert_eq!(texts, [outside.path().join("secret").to_string_lossy().as_ref()]);
 
     // And a directory that is a link out is not walked into.
     std::os::unix::fs::symlink(outside.path(), p.join("dirlink")).expect("symlink");
     let r = file_diff(p, &Selector::Local, "dirlink/secret", 0, 0).await;
-    let leaked = r.map(|r| r.diff.hunks.iter().flat_map(|h| h.lines.iter()).any(|l| l.text == "hunter2"));
-    assert_ne!(leaked.ok(), Some(true));
+    let r = r.expect("a file behind a link is simply not an untracked file");
+    assert!(r.diff.hunks.is_empty() && r.unsupported.is_none() && r.diff.truncated.is_none());
 }
 
 #[tokio::test]
@@ -449,7 +449,25 @@ async fn a_path_that_leaves_the_worktree_is_refused() {
         "a/../../o.txt".to_string(),
     ] {
         let r = file_diff(dir.path(), &Selector::Local, &bad, 0, 0).await;
-        let shows = r.map(|r| !r.diff.hunks.is_empty()).unwrap_or(false);
-        assert!(!shows, "{bad}");
+        assert!(matches!(r, Err(farcooler_core::DomainError::OperationFailed)), "{bad}: {r:?}");
     }
+}
+
+#[tokio::test]
+async fn an_empty_untracked_file_has_no_hunks_and_no_reason() {
+    let dir = repo();
+    let p = dir.path();
+    write(p, "empty.txt", "");
+    let r = file_diff(p, &Selector::Local, "empty.txt", 0, 0).await.expect("diff");
+    assert!(r.diff.hunks.is_empty() && r.unsupported.is_none() && r.diff.truncated.is_none());
+}
+
+#[tokio::test]
+async fn an_untracked_file_without_a_final_newline_keeps_its_last_line() {
+    let dir = repo();
+    let p = dir.path();
+    write(p, "tail.txt", "one\ntwo");
+    let r = file_diff(p, &Selector::Local, "tail.txt", 0, 0).await.expect("diff");
+    let texts: Vec<&str> = r.diff.hunks[0].lines.iter().map(|l| l.text.as_str()).collect();
+    assert_eq!(texts, ["one", "two"]);
 }
