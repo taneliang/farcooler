@@ -1144,6 +1144,8 @@ struct WorktreeDetail: View {
     let onUnhide: () -> Void
     let onRemove: () -> Void
     let onOpenTerminal: (Terminal) -> Void
+    /// Restart or Dismiss, from a card's context menu (ov-191).
+    var onTerminalAction: (TerminalAction, Terminal) -> Void = { _, _ in }
     /// Show Changes, which opens its changes pane on its own when it has no
     /// terminal (ov-78); nil when its runner can't read changes.
     var onShowChanges: (() -> Void)?
@@ -1313,6 +1315,21 @@ struct WorktreeDetail: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu { cardMenu(t) }
+    }
+
+    /// Open, and for a terminal with no running pane the page's own two
+    /// answers (ov-191): a lost card used to do nothing, clicked or not.
+    @ViewBuilder
+    private func cardMenu(_ t: Terminal) -> some View {
+        Button("Open") { onOpenTerminal(t) }
+        if let kind = LostPane.Kind(state: t.state) {
+            Divider()
+            Button("Restart") { onTerminalAction(.restart, t) }
+            if LostPane.actions(for: kind).contains(.dismiss) {
+                Button("Dismiss") { onTerminalAction(.dismissLost, t) }
+            }
+        }
     }
 
     /// The path, demoted to where it belongs.

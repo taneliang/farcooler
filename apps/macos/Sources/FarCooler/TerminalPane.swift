@@ -117,36 +117,10 @@ struct TerminalPane: View {
         .navigationSubtitle(worktree.windowSubtitle)
     }
 
-    /// The only state left that needs saying out loud.
-    ///
-    /// Everything else removes itself: a terminal is its process, and when that
-    /// exits there is nothing to look at. `lost` is the exception, because it
-    /// is the one case Far Cooler cannot explain and will not pretend to.
-    ///
-    /// Two answers, because there are two: restart it from the same preset, or
-    /// be rid of the row. Dismiss used to be the only one and it did nothing
-    /// visible — it set a flag and left the terminal listed as lost forever.
+    /// The only state left that needs saying out loud: a terminal with no
+    /// running pane. Its own page, with why, and Restart and Dismiss
+    /// (ov-191). See `LostTerminalPage`.
     private var inactive: some View {
-        VStack(spacing: 12) {
-            Spacer()
-            StatusGlyph(status: terminal.status, size: .lone)
-            Text(terminal.status.label).font(.title3.weight(.medium))
-            Text("The session ended or the runner can’t be reached.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 420)
-
-            HStack(spacing: 10) {
-                Button("Restart") { onAction(.restart) }
-                Button("Dismiss") { onAction(.dismissLost) }
-            }
-            .padding(.top, 4)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: Palette.background))
-        .navigationTitle(worktree.windowTitle)
-        .navigationSubtitle(worktree.windowSubtitle)
+        LostTerminalPage(terminal: terminal, worktree: worktree, hasKeyboard: hasKeyboard, onAction: onAction)
     }
 }

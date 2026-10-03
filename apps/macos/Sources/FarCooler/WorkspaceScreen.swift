@@ -135,6 +135,27 @@ enum WorkspaceScreen {
         }
     }
 
+    /// The terminal `selection` names when it has no pane to draw: lost,
+    /// ended or failed (`LostPane.Kind`), and in no layout on screen
+    /// (ov-191).
+    ///
+    /// A lost terminal has no tmux pane, so no layout holds it, and a
+    /// worktree opened with one named used to fall through to the
+    /// worktree's card of terminals: the card it was clicked on. Clicking
+    /// it did nothing. This is the page it opens to instead, with Restart
+    /// and Dismiss. An exited pane kept by `remain-on-exit` is still in its
+    /// layout, and stays drawn there.
+    static func paneless(_ selection: ContentView.Selection?, in fleet: Fleet, shown: ShownLayout?) -> BoardPane? {
+        guard let named = namedTerminal(selection),
+            let worktree = fleet.worktrees.first(where: { ($0.host ?? "") == named.host && $0.id == named.worktree }),
+            let terminal = worktree.terminals.first(where: { $0.id == named.terminal }),
+            LostPane.Kind(state: terminal.state) != nil
+        else { return nil }
+        let ref = PaneRef(host: named.host, worktree: named.worktree, terminal: named.terminal)
+        if let shown, shown.contains(ref) { return nil }
+        return BoardPane(terminal: terminal, worktree: worktree)
+    }
+
     /// The seat whose window `terminal` shares in `worktree`, or nil when it
     /// shares none (or is a seat itself). A terminal in that window is drawn
     /// in the conversation column, not the checkout, until it's moved to its

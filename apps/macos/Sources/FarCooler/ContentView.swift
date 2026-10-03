@@ -2760,6 +2760,10 @@ struct ContentView: View {
             if !settled {
                 // Passed on the way: its terminals wait until it settles.
                 Color.clear
+            } else if let paneless = WorkspaceScreen.paneless(place, in: store.fleet, shown: shown) {
+                // A lost terminal clicked on its card: its own page, with
+                // Restart and Dismiss, not the card again (ov-191).
+                bareTerminal(paneless, keyboard: current)
             } else if let shown {
                 tiled(shown, titled: false, keyboard: current)
             } else if let ws = worktree(host: host, id: wt) {
@@ -3017,6 +3021,7 @@ struct ContentView: View {
             onUnhide: { Task { await act(on: ws) { c in await c.unhideWorktree(ws.short) } } },
             onRemove: { removeWorktree = ws },
             onOpenTerminal: { t in open(ws, terminal: t.id) },
+            onTerminalAction: { action, t in Task { await run(action, on: t, in: ws) } },
             onShowChanges: showChangesAction(for: ws, usable: store.refusal(for: host) == nil)
         )
     }

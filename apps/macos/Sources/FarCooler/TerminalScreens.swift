@@ -81,6 +81,27 @@ final class TerminalScreens {
     /// of the policy; a second way to drop one would be a method with no caller
     /// pretending to be a lifecycle.
     var count: Int { kept.count }
+
+    /// A kept screen as plain text, a line per row, without taking it: for
+    /// a lost terminal's page (ov-191), which shows what its pane last held
+    /// and keeps it for the next look. Trailing blank rows are dropped.
+    func lastLines(_ terminal: String) -> [String]? {
+        guard let core = kept[terminal]?.core else { return nil }
+        return core.withSnapshot { snapshot in
+            var lines = (0..<snapshot.rows).map { row in
+                var line = ""
+                var column = 0
+                while column < snapshot.columns {
+                    let cell = snapshot[row, column]
+                    line.append(cell.character ?? " ")
+                    column += cell.isWide ? 2 : 1
+                }
+                return line.trimmingTrailingWhitespace()
+            }
+            while lines.last?.isEmpty == true { lines.removeLast() }
+            return lines
+        }
+    }
     func holds(_ terminal: String) -> Bool { kept[terminal] != nil }
 
     /// Drop the least recently kept, down to the budget.
