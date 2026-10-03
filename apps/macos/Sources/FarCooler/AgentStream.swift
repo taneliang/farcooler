@@ -35,7 +35,39 @@ final class AgentStream: ObservableObject {
     /// the stream and a change means "you are holding a different
     /// conversation; take this one instead".
     private var epoch: UInt64 = 0
+    /// Why this chat has stopped updating, in this app's words, or nil while
+    /// it is. Drawn by `AgentComposer.activity`.
+    ///
+    /// Only the subscription writes it. It used to carry the refusals of
+    /// `send`, `answer` and the rest too, and nothing drew it at all, so every
+    /// one of them was lost (ov-136). A refusal now stays on the thing that
+    /// was refused: `answering` for an answer, `failure` for everything else.
     @Published private(set) var connectionError: String?
+    /// Polls that have failed in a row. One failed `agent-subscribe` among
+    /// five a second is noise, and a line that flashed up and away for it
+    /// would say something was wrong when nothing lasting was.
+    private var failedPolls = 0
+    /// How many failed polls in a row it takes to say so: about a second.
+    static let pollsBeforeSaying = 4
+
+    /// The answer to a permission ask, while it is out and after it failed.
+    /// AgentKit's, as on iOS and Android: the card stays up until the runner
+    /// takes the answer.
+    @Published private(set) var answering = PermissionAnswering()
+    /// The option last chosen for the ask whose answer failed, for Try Again.
+    private var failedAnswer: (request: String, option: String)?
+
+    /// Whether a prompt is out. A second send while one is out is refused, so
+    /// Return pressed twice, or Try Again pressed during a send, sends once.
+    @Published private(set) var sending = false
+
+    /// The last send, setting or queue change that did not land.
+    @Published private(set) var failure: AgentActionFailure?
+
+    /// Runs the CLI in tests instead of a subprocess, the way
+    /// `DaemonClient.commandRunnerForTesting` does. Throws `StreamError` as the
+    /// subprocess would.
+    var runnerForTesting: (@MainActor ([String]) async throws -> Data)?
 
     private let terminal: String
     private var binary: String?
@@ -53,7 +85,7 @@ final class AgentStream: ObservableObject {
     /// runner already `.unreachable` burned a full `ConnectTimeout` finding
     /// that out the hard way, with no banner, for a refusal `FleetStore`
     /// already had the answer to.
-    private var refusal: () -> String? = { nil }
+    var refusal: () -> String? = { nil }
 
     init(terminal: String) {
         self.terminal = terminal
@@ -93,7 +125,7 @@ final class AgentStream: ObservableObject {
     /// The cursor comes from the transcript rather than from a counter kept
     /// here, so a reconnect cannot skip or repeat events after a gap — the
     /// same reason `Transcript.cursor` exists rather than a second count.
-    private func pump() async {
+    func pump() async {
         do {
             let batch = try await agentSubscribe(fromSeq: transcript.cursor)
 
@@ -112,6 +144,7 @@ final class AgentStream: ObservableObject {
                 // poll that returns nothing is the healthy case, and leaving a
                 // previous failure's message up through it meant the banner
                 // stayed on screen forever once anything had ever gone wrong.
+                failedPolls = 0
                 connectionError = nil
                 return
             }
@@ -126,10 +159,24 @@ final class AgentStream: ObservableObject {
                 return Sequenced(seq: frame.seq, event: event)
             }
             transcript.apply(decoded)
+            failedPolls = 0
             connectionError = nil
         } catch {
-            connectionError = String(describing: error)
+            // A sentence, never the error. This was `String(describing:)`,
+            // which would have drawn `failed("error: …")` had anything drawn it.
+            failedPolls += 1
+            if failedPolls >= Self.pollsBeforeSaying {
+                connectionError = Self.pollTrouble(error)
+            }
         }
+    }
+
+    /// What the composer says while this chat can't be read.
+    static func pollTrouble(_ error: Error) -> String {
+        if case StreamError.cliMissing = error {
+            return "Far Cooler’s command-line tool isn’t installed, so this chat can’t update."
+        }
+        return "This chat isn’t updating. Trying again…"
     }
 
     // MARK: - Calls
@@ -159,20 +206,33 @@ final class AgentStream: ObservableObject {
         return try JSONDecoder().decode(Batch.self, from: data)
     }
 
-    /// True, and `connectionError` set, when this session's runner already
-    /// refuses. Every mutating call below starts with this — before any
-    /// local, optimistic transcript edit as well as before the CLI call —
-    /// so a message typed to a runner already known to be gone gets an
-    /// immediate, honest banner instead of either a silent hang or a local
-    /// echo of something that was never sent.
-    private func refuseIfNeeded() -> Bool {
-        guard let why = refusal() else { return false }
-        connectionError = why
-        return true
-    }
+    /// Whether a call is refused before it is made, because this session's
+    /// runner is already known to be gone.
+    ///
+    /// Every mutating call below asks this first, before any local,
+    /// optimistic transcript edit as well as before the CLI call, so a message
+    /// typed to a runner already known to be gone is refused at once instead
+    /// of hanging for a `ConnectTimeout` or drawing a local echo of something
+    /// that was never sent. The runner's own reason is not repeated: the
+    /// composer already shows it above the field.
+    private func refusedHere() -> Bool { refusal() != nil }
 
-    func send(_ text: String, images: [ComposerImage] = []) async {
-        guard !refuseIfNeeded() else { return }
+    /// Send a prompt. True once the runner has it; false, with `failure` saying
+    /// why, when it didn't go or another send was still out.
+    ///
+    /// The composer keeps its text until this says true (ov-136). It used to
+    /// clear first and send with `try?`, so a message that never left was gone
+    /// from the field and drawn in the conversation as if it had been sent.
+    @discardableResult
+    func send(_ text: String, images: [ComposerImage] = []) async -> Bool {
+        guard !sending else { return false }
+        guard !refusedHere() else {
+            failure = AgentActionFailure(.send, Self.sentence(.send, refusedWith: nil))
+            return false
+        }
+        sending = true
+        defer { sending = false }
+        if failure?.action == .send { failure = nil }
         // Always drawn, never predicted.
         //
         // This used to echo only when the composer believed no turn was
@@ -180,15 +240,17 @@ final class AgentStream: ObservableObject {
         // the agent channel. Guessing wrong meant the message reached the
         // model and was drawn by nobody. The daemon answers with a
         // `PromptQueue` if it held the message, and `Transcript` withdraws the
-        // row then; until it does, what you typed is on screen.
-        transcript.appendLocalUserMessage(text)
+        // row then; until it does, what you typed is on screen. Drawn BEFORE
+        // the call for that reason: a queue report that beat a later echo
+        // would leave the words in the conversation and the queue both.
+        let echo = transcript.appendLocalUserMessage(text)
         // Written to a temp file and handed to the CLI by path.
         //
         // The CLI reads the bytes and puts them in the prompt as image blocks;
         // the path never leaves this machine. Passing base64 as an argument
         // instead would put a megabyte on a command line, which is the one
         // thing an argv is guaranteed to be bad at.
-        var arguments = ["terminal", "agent-prompt", terminal, text]
+        var arguments = AgentAction.send.arguments(terminal: terminal) + [text]
         var scratch: [URL] = []
         for image in images {
             let url = FileManager.default.temporaryDirectory
@@ -198,59 +260,145 @@ final class AgentStream: ObservableObject {
             scratch.append(url)
             arguments += ["--image", url.path]
         }
-        _ = try? await runCLI(arguments)
-        for url in scratch { try? FileManager.default.removeItem(at: url) }
+        defer { for url in scratch { try? FileManager.default.removeItem(at: url) } }
+        do {
+            _ = try await runCLI(arguments + ["--json"])
+            return true
+        } catch {
+            // The words are still in the composer, so the echo comes back
+            // out: left in, a Try Again that worked would draw them twice.
+            transcript.withdrawLocalUserMessage(rowID: echo)
+            failure = AgentActionFailure(.send, Self.sentence(.send, for: error))
+            return false
+        }
     }
 
     /// Rewrite a message that has not gone out yet.
     func editQueued(_ id: String, _ text: String) async {
-        guard !refuseIfNeeded() else { return }
-        _ = try? await runCLI(["terminal", "agent-edit-queued", terminal, id, text])
+        await perform(.editQueued(id: id, text: text))
     }
 
     /// Send a queued message into the turn already running.
     func steerQueued(_ id: String) async {
-        guard !refuseIfNeeded() else { return }
-        _ = try? await runCLI(["terminal", "agent-steer-queued", terminal, id])
+        await perform(.steerQueued(id: id))
     }
 
     /// Take back a message that has not gone out yet.
     func cancelQueued(_ id: String) async {
-        guard !refuseIfNeeded() else { return }
-        _ = try? await runCLI(["terminal", "agent-cancel-queued", terminal, id])
-    }
-
-    func setModel(_ model: String) async {
-        guard !refuseIfNeeded() else { return }
-        _ = try? await runCLI(["terminal", "agent-set-model", terminal, model])
+        await perform(.cancelQueued(id: id))
     }
 
     func setConfig(_ id: String, _ value: String) async {
-        guard !refuseIfNeeded() else { return }
-        // Shown before it is confirmed. The adapter applies the change without
-        // announcing it, so waiting for an echo left the picker snapping back
-        // to its old value — which reads as the control doing nothing at all.
-        transcript.selectConfigOptionLocally(id: id, value: value)
-        _ = try? await runCLI(["terminal", "agent-set-config", terminal, id, value])
+        await perform(.config(id: id, value: value))
     }
 
+    /// Answer the pending permission ask.
+    ///
+    /// The card comes down when the runner takes the answer, or refuses it as
+    /// one nothing holds any more, never on the click. It used to come down
+    /// on the click with the call's error dropped, so a refused ⌘↩ left the
+    /// agent blocked on an ask this pane could no longer show: its
+    /// `Permission` is behind the cursor. See AgentKit's `PermissionAnswering`,
+    /// which iOS and Android follow too.
     func answer(_ requestID: String, _ optionID: String) async {
-        guard !refuseIfNeeded() else { return }
-        // Taken down on click, not on an echo. The agent resumes without
-        // acknowledging the request it was blocked on, so a card that waited
-        // for confirmation sat there after the work it gated had happened.
-        transcript.clearPendingPermission()
-        _ = try? await runCLI(["terminal", "agent-answer", terminal, requestID, optionID])
+        guard answering.begin(requestID) else { return }
+        failedAnswer = nil
+        let outcome: PermissionAnswering.Outcome
+        if refusedHere() {
+            outcome = .failed("Couldn’t reach this runner. Your answer wasn’t sent.")
+        } else {
+            do {
+                _ = try await runCLI(["terminal", "agent-answer", terminal, requestID, optionID, "--json"])
+                outcome = .sent
+            } catch {
+                outcome = PermissionAnswering.outcome(refusedWith: Self.word(of: error))
+            }
+        }
+        guard answering.finish(requestID, outcome) else {
+            failedAnswer = (requestID, optionID)
+            return
+        }
+        // The agent resumes without acknowledging the request it was blocked
+        // on (ACP sends no `Resolved`), so the card comes down here, and only
+        // if it is still the one this answered.
+        if transcript.pendingPermission?.id == requestID {
+            transcript.clearPendingPermission()
+        }
     }
 
-    func setMode(_ mode: String) async {
-        guard !refuseIfNeeded() else { return }
-        _ = try? await runCLI(["terminal", "agent-set-mode", terminal, mode])
+    /// Send the failed answer again, with the option chosen the first time.
+    func retryAnswer() async {
+        guard let failed = failedAnswer, answering.sending == nil else { return }
+        await answer(failed.request, failed.option)
     }
 
-    func cancel() async {
-        guard !refuseIfNeeded() else { return }
-        _ = try? await runCLI(["terminal", "agent-cancel", terminal])
+    /// Run the failed action again. Only the call: a failed send's words are
+    /// in the composer, which sends them itself.
+    ///
+    /// The failure is taken down before the call, so a second click while the
+    /// first is out finds nothing to run. A failure puts it back.
+    func retry() async {
+        guard let failed = failure, failed.action != .send else { return }
+        failure = nil
+        await perform(failed.action)
+    }
+
+    /// Put the failure away without trying again.
+    func dismissFailure() { failure = nil }
+
+    /// One mutating call other than a send or an answer, said if it fails.
+    private func perform(_ action: AgentAction) async {
+        guard !refusedHere() else {
+            failure = AgentActionFailure(action, Self.sentence(action, refusedWith: nil))
+            return
+        }
+        if failure?.action == action { failure = nil }
+        var previous: String?
+        if case let .config(id, value) = action {
+            // Shown before it is confirmed. The adapter applies the change
+            // without announcing it, so waiting for an echo left the picker
+            // snapping back to its old value — which reads as the control
+            // doing nothing at all. Put back if the runner refuses it.
+            previous = transcript.configOptions.first { $0.id == id }?.currentValue
+            transcript.selectConfigOptionLocally(id: id, value: value)
+        }
+        do {
+            _ = try await runCLI(action.arguments(terminal: terminal) + ["--json"])
+        } catch {
+            if case let .config(id, value) = action, let previous,
+                transcript.configOptions.first(where: { $0.id == id })?.currentValue == value
+            {
+                transcript.selectConfigOptionLocally(id: id, value: previous)
+            }
+            failure = AgentActionFailure(action, Self.sentence(action, for: error))
+        }
+    }
+
+    /// The runner's refusal word on a failed call: the `code:` line `--json`
+    /// puts on the CLI's stderr. Nil for a failure that never reached it.
+    static func word(of error: Error) -> String? {
+        guard case let StreamError.failed(message) = error else { return nil }
+        return TaskFailure.code(in: message)
+    }
+
+    /// What to say about a failed `action`, from how it failed.
+    static func sentence(_ action: AgentAction, for error: Error) -> String {
+        if action == .send, case let StreamError.failed(message) = error {
+            // The size ceiling is refused by the CLI before anything reaches a
+            // runner, so it has no word; read off the prose, as on iOS.
+            let lower = message.lowercased()
+            if lower.contains("too large") || lower.contains("payload") {
+                return "That was too large to send. Try a smaller image."
+            }
+        }
+        return sentence(action, refusedWith: word(of: error))
+    }
+
+    /// What to say about a failed `action`, from the runner's word. No word
+    /// means it never reached a runner that could refuse it.
+    static func sentence(_ action: AgentAction, refusedWith word: String?) -> String {
+        guard let word, !word.isEmpty else { return "Couldn’t reach this runner. " + action.unsent }
+        return RunnerRefusal.trouble(forWord: word, message: "", after: action.unsent).sentence
     }
 
     // MARK: - Subprocess
@@ -276,6 +424,7 @@ final class AgentStream: ObservableObject {
     }
 
     private func runCLI(_ args: [String]) async throws -> Data {
+        if let stub = runnerForTesting { return try await stub(args) }
         guard let binary else { throw StreamError.cliMissing }
         let env = environment
         let command = hostArguments + args
@@ -314,5 +463,57 @@ final class AgentStream: ObservableObject {
                 continuation.resume(returning: stdout)
             }
         }
+    }
+}
+
+/// One thing a chat pane asks its agent's runner to do, other than answer a
+/// permission ask (AgentKit's `PermissionAnswering` holds that one).
+enum AgentAction: Equatable {
+    case send
+    case config(id: String, value: String)
+    case editQueued(id: String, text: String)
+    case steerQueued(id: String)
+    case cancelQueued(id: String)
+
+    /// The CLI call. For `.send` only its start: `AgentStream.send` adds the
+    /// composer's words and pictures.
+    func arguments(terminal: String) -> [String] {
+        switch self {
+        case .send: return ["terminal", "agent-prompt", terminal]
+        case let .config(id, value): return ["terminal", "agent-set-config", terminal, id, value]
+        case let .editQueued(id, text): return ["terminal", "agent-edit-queued", terminal, id, text]
+        case let .steerQueued(id): return ["terminal", "agent-steer-queued", terminal, id]
+        case let .cancelQueued(id): return ["terminal", "agent-cancel-queued", terminal, id]
+        }
+    }
+
+    /// What didn't happen, as the end of a sentence that says why.
+    var unsent: String {
+        switch self {
+        case .send: return "Your message wasn’t sent."
+        case .config: return "The setting wasn’t changed."
+        case .editQueued: return "Your edit to the queued message wasn’t saved."
+        case .steerQueued: return "The queued message wasn’t sent."
+        case .cancelQueued: return "The queued message wasn’t removed."
+        }
+    }
+
+    /// The queued message this is about, so its row can carry the failure.
+    var queuedID: String? {
+        switch self {
+        case let .editQueued(id, _), let .steerQueued(id), let .cancelQueued(id): return id
+        case .send, .config: return nil
+        }
+    }
+}
+
+/// An action that didn't land, and what to say about it.
+struct AgentActionFailure: Equatable {
+    let action: AgentAction
+    let sentence: String
+
+    init(_ action: AgentAction, _ sentence: String) {
+        self.action = action
+        self.sentence = sentence
     }
 }

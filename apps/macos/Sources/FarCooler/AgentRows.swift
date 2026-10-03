@@ -56,8 +56,26 @@ struct AgentRowView: View {
 struct ApprovalControls: View {
     let options: [PermissionOption]
     let onChoose: (String) -> Void
+    /// How the answer is going. From the environment rather than a parameter,
+    /// because the controls sit on whichever row the ask gates, one or two
+    /// views down from the pane that knows (`AgentSurface`).
+    @Environment(\.approvalState) private var state
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            buttons
+                // Off while an answer is out: a second click would be a
+                // second answer to the same ask.
+                .disabled(state.sending)
+            // Under the buttons it failed from, which stay up: the ask may
+            // still be waiting (ov-136).
+            if let failure = state.failure {
+                AgentFailureLine(sentence: failure, onRetry: state.onRetry, onDismiss: nil)
+            }
+        }
+    }
+
+    private var buttons: some View {
         // Ordered by what the question actually is.
         //
         // ACP hands back a flat list and rendering it flat gave every option
@@ -136,6 +154,58 @@ struct ApprovalControls: View {
         if option.id == allowOption?.id { return "⌘↩" }
         if option.id == rejectOption?.id { return "⌘⌫" }
         return nil
+    }
+}
+
+/// How the answer to the ask on screen is going, for `ApprovalControls`.
+struct ApprovalState {
+    /// An answer is out.
+    var sending = false
+    /// The last answer didn't land, and why, in this app's words.
+    var failure: String?
+    /// Send that answer again.
+    var onRetry: (() -> Void)?
+}
+
+extension EnvironmentValues {
+    @Entry var approvalState = ApprovalState()
+}
+
+/// Something this pane asked for that didn't happen, said on the thing it
+/// was asked from, with the way to try it again (ov-136).
+///
+/// Red, not amber: amber says an agent is waiting on you, and this says a
+/// request of yours failed. The color is on the mark only; the sentence is
+/// the app's own and reads in the ordinary ink.
+struct AgentFailureLine: View {
+    let sentence: String
+    var onRetry: (() -> Void)?
+    var onDismiss: (() -> Void)?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+                .accessibilityHidden(true)
+            Text(sentence)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 6)
+            if let onRetry {
+                Button("Try Again", action: onRetry)
+                    .controlSize(.small)
+            }
+            if let onDismiss {
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Dismiss")
+                .accessibilityLabel("Dismiss")
+            }
+        }
+        .font(.caption)
+        .accessibilityElement(children: .contain)
     }
 }
 

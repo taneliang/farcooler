@@ -94,6 +94,19 @@ struct AgentComposer: View {
             // wedged between two controls.
             activity
 
+            // A send or a setting that didn't land, on the composer that sent
+            // it, with the way to try again (ov-136).
+            if let failure = stream.failure, failure.action.queuedID == nil {
+                AgentFailureLine(
+                    sentence: failure.sentence,
+                    onRetry: {
+                        // A send's words are in the field: sending them again
+                        // is Return. Anything else, the stream runs again.
+                        if failure.action == .send { send() } else { Task { await stream.retry() } }
+                    },
+                    onDismiss: { stream.dismissFailure() })
+            }
+
             AgentComposerField(
                 text: $text,
                 cursor: $cursor,
@@ -676,6 +689,15 @@ struct AgentComposer: View {
             }
             .font(.caption)
             .help("This chat reconnects on its own once the runner answers")
+        } else if let trouble = stream.connectionError {
+            // The runner answers but this chat's own reads don't. Drawn at
+            // last (ov-136): it was set and never read, so a chat that had
+            // stopped updating looked like an agent with nothing to say.
+            HStack(spacing: 5) {
+                StatusGlyph(status: .lost)
+                Text(trouble)
+            }
+            .font(.caption)
         } else if let failure = terminal.chatFailure, stream.transcript.rows.isEmpty {
             // Never the spinner over a failure. All three ways of failing to
             // start an adapter used to leave this row reading "Starting the
@@ -735,7 +757,7 @@ struct AgentComposer: View {
                 .foregroundStyle(empty ? AnyShapeStyle(.tertiary) : AnyShapeStyle(Color.accentColor))
         }
         .buttonStyle(.plain)
-        .disabled(empty)
+        .disabled(empty || stream.sending)
         .help("Send (return)")
     }
 
@@ -744,6 +766,10 @@ struct AgentComposer: View {
     private func send() {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !attachments.isEmpty else { return }
+        // One send at a time: Return pressed again, or Try Again, while one is
+        // out would send the same words twice. `AgentStream.send` refuses it
+        // too; this keeps the picker and the field as they are meanwhile.
+        guard !stream.sending else { return }
 
         // The BYTES, not the path.
         //
@@ -756,13 +782,38 @@ struct AgentComposer: View {
             return ComposerImage(mime: mimeType(for: attachment.url), data: data)
         }
         let body = trimmed
+        let sentIDs = attachments.map(\.id)
 
-        text = ""
-        cursor = 0
-        attachments = []
         suggestions = []
-        Task { await stream.send(body, images: images) }
+        // The words stay in the field until the runner has them (ov-136).
+        // They used to be cleared here, before the send, which was `try?`:
+        // a message that never left was gone from the field and drawn as
+        // sent. A send that fails leaves them here, with a line saying so.
+        Task {
+            guard await stream.send(body, images: images),
+                composerClears(
+                    afterSending: body, attachments: sentIDs,
+                    current: text, currentAttachments: attachments.map(\.id))
+            else { return }
+            text = ""
+            cursor = 0
+            attachments = []
+        }
     }
+}
+
+/// Whether the composer empties once a send has gone: only if it still holds
+/// exactly what was sent.
+///
+/// The field stays live while the send is out, so what is there when it
+/// returns can be the start of the next message, and clearing that would lose
+/// it. Pulled out of `AgentComposer.send` so `AgentSendFailureTests` can pin it.
+func composerClears(
+    afterSending sent: String, attachments sentAttachments: [UUID],
+    current: String, currentAttachments: [UUID]
+) -> Bool {
+    current.trimmingCharacters(in: .whitespacesAndNewlines) == sent
+        && currentAttachments == sentAttachments
 }
 
 /// What should land in an empty composer for `pane`, or nil to leave the field

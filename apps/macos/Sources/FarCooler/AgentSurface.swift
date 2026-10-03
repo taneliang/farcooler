@@ -156,6 +156,14 @@ struct AgentSurface: View {
                                 onCancel: { Task { await stream.cancelQueued(queued.id) } },
                                 onSteer: { Task { await stream.steerQueued(queued.id) } })
                                 .padding(.horizontal, 10)
+                            // Under the queued message it was about (ov-136).
+                            if let failure = stream.failure, failure.action.queuedID == queued.id {
+                                AgentFailureLine(
+                                    sentence: failure.sentence,
+                                    onRetry: { Task { await stream.retry() } },
+                                    onDismiss: { stream.dismissFailure() })
+                                    .padding(.horizontal, 14)
+                            }
                         }
 
                         // Only when there is no tool call to hang it on. A
@@ -205,6 +213,10 @@ struct AgentSurface: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // How the answer to the ask is going, for every `ApprovalControls`
+            // in the pane: the inline row, the fallback card. See
+            // `AgentStream.answer`.
+            .environment(\.approvalState, approvalState)
             // The native content background, NOT `Palette.background`.
             //
             // That constant is the VT grid's own near-black, and it is right
@@ -394,6 +406,15 @@ struct AgentSurface: View {
                 AgentFailureRow(failure: failure, agent: terminal.agentLabel)
             }
         }
+    }
+
+    /// The pending ask's answer, as its controls draw it.
+    private var approvalState: ApprovalState {
+        guard let pending = stream.transcript.pendingPermission else { return ApprovalState() }
+        return ApprovalState(
+            sending: stream.answering.sending == pending.id,
+            failure: stream.answering.sentence(for: pending.id),
+            onRetry: { Task { await stream.retryAnswer() } })
     }
 
     /// The end of the transcript's content.
