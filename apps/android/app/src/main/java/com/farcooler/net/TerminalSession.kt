@@ -205,6 +205,9 @@ class TerminalSession(
     private var failedAttaches = 0
     private var started = false
 
+    /** The re-attach waiting to happen, if any. Cancelled by [teardown]. See [StreamRetry]. */
+    private val streamRetry = StreamRetry(scope, wanted = { started })
+
     /**
      * Whether this session was stopped BY A SCREEN that still exists.
      *
@@ -512,6 +515,13 @@ class TerminalSession(
         // that stops updating and never says why.
         core.stopStream(terminalId)
         val screen = prime() ?: return
+        // Re-checked after every suspension above, not only when a retry
+        // wakes. [stop] can land while this is waiting on `stopStream` or
+        // [prime], and its own `stopStream` has already gone by then:
+        // attaching anyway opens an SSH channel for a pane nobody is looking
+        // at, and nothing releases it until the pane is opened again. A
+        // default sshd gives the whole phone ten.
+        if (!started) return
         if (attach()) {
             watchGeometry()
             return
@@ -637,8 +647,7 @@ class TerminalSession(
             startLoop()
             return
         }
-        delay(STREAM_RETRY_MS)
-        open()
+        streamRetry.schedule(STREAM_RETRY_MS) { open() }
     }
 
     // MARK: - Geometry
@@ -1168,6 +1177,10 @@ class TerminalSession(
     private fun teardown() {
         poller?.cancel()
         poller = null
+        // An `open` in progress is an attempt, and a retry firing on top of it
+        // would fork the chain in two; a stop with one waiting would have it
+        // open a channel after the stop. See [StreamRetry].
+        streamRetry.cancel()
         // The scrollback refresh goes with the loop it was lining up work for.
         // Left running it would answer into a pane nobody is looking at,
         // holding an SSH round trip open on a connection whose sessions are the
