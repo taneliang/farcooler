@@ -9,11 +9,14 @@ so every feature added another screen to the one file it touched.
 The rule:
 
   - a Rust, Swift, Kotlin or TypeScript source file is at most 1,500 lines;
-  - a file already over that on the day this landed is grandfathered at its
-    size then, in scripts/file-size-budget.txt. It may shrink, never grow;
-  - when one shrinks, `--update` lowers its entry to the new size, so the
-    lines it gave up can't quietly come back. `--update` never raises an
-    entry and never adds one: growing past the budget means splitting.
+  - a file already over that on the day this landed is grandfathered in
+    scripts/file-size-budget.txt with a ceiling: its size then plus a
+    headroom of max(2%, 50 lines). A bug fix may add a few lines; a feature
+    can't keep piling in. It may grow up to its ceiling, never past it;
+  - when one shrinks, `--update` lowers its ceiling to the new size plus
+    headroom, so the lines it gave up can't quietly come back. `--update`
+    never raises a ceiling and never adds an entry: growing past it means
+    splitting. A new file gets no headroom: 1,500 is its limit.
 
 What counts: every tracked or untracked-but-not-ignored source file, except
 
@@ -26,9 +29,9 @@ What counts: every tracked or untracked-but-not-ignored source file, except
   - vendor/: copied in from upstream (regen-backend-types.sh), not written here.
 
   ./scripts/file-size-budget.py              check the tree; exit 1 on a breach
-  ./scripts/file-size-budget.py --update     lower grandfathered entries to
-                                             their files' current sizes, drop
-                                             the ones now under budget or gone
+  ./scripts/file-size-budget.py --update     lower grandfathered ceilings to
+                                             size plus headroom, drop the
+                                             files now under budget or gone
   ./scripts/file-size-budget.py --self-test  check the rule against known cases
   ./scripts/file-size-budget.py --seed       write the first manifest (once;
                                              refuses if one exists)
@@ -48,11 +51,21 @@ TEST_SUFFIXES = ("Tests.swift", "Test.kt", ".test.ts", ".test.tsx", ".spec.ts")
 SKIP_PREFIXES = ("vendor/",)
 
 HEADER = """\
-# Source files over the 1,500-line budget, grandfathered at their size when
-# the budget landed (ov-169). Each may shrink, never grow. Lower an entry with
+# Source files over the 1,500-line budget when it landed (ov-169), each with a
+# ceiling: its size then plus max(2%, 50 lines) of headroom. A file may grow
+# to its ceiling, never past it. Lower ceilings with
 # `./scripts/file-size-budget.py --update` after a split; never raise one by
-# hand. Format: <max lines> <path>
+# hand. Format: <ceiling> <path>
 """
+
+
+def headroom(n: int) -> int:
+    """Room a grandfathered file of n lines has to grow: max(2%, 50)."""
+    return max(-(-n * 2 // 100), 50)
+
+
+def ceiling(n: int) -> int:
+    return n + headroom(n)
 
 
 def counted(path: str) -> bool:
@@ -118,12 +131,12 @@ def breaches(found: dict[str, int], allowed: dict[str, int]) -> list[str]:
             cap = allowed[path]
             if n > cap:
                 msgs.append(
-                    f"{path}: {n:,} lines, up from its grandfathered {cap:,}.\n"
-                    f"  This file is already over the {BUDGET:,}-line budget and may only shrink.\n"
+                    f"{path}: {n:,} lines, past its grandfathered ceiling of {cap:,}.\n"
+                    f"  This file is already over the {BUDGET:,}-line budget and has used its headroom.\n"
                     f"  Move at least {n - cap} line{'s' if n - cap != 1 else ''} out into a\n"
                     f"  new file: a type, a handler group or an inline test module that\n"
                     f"  stands on its own. Then run ./scripts/file-size-budget.py --update\n"
-                    f"  if it ends up below {cap:,}. Don't raise the number in\n"
+                    f"  if it shrinks. Don't raise the number in\n"
                     f"  {MANIFEST.relative_to(ROOT)}: that is the growth this check exists to stop."
                 )
         elif n > BUDGET:
@@ -138,15 +151,14 @@ def breaches(found: dict[str, int], allowed: dict[str, int]) -> list[str]:
 
 
 def updated(found: dict[str, int], allowed: dict[str, int]) -> dict[str, int]:
-    """Entries lowered to current sizes; entries for files now under budget
-    or gone are dropped. Never raises one, never adds one."""
+    """Ceilings lowered to size plus headroom; entries for files now under
+    budget or gone are dropped. Never raises one, never adds one."""
     out = {}
     for path, cap in allowed.items():
         if path not in found:
             continue
-        n = min(found[path], cap)
-        if n > BUDGET:
-            out[path] = n
+        if found[path] > BUDGET:
+            out[path] = min(ceiling(found[path]), cap)
     return out
 
 
@@ -159,7 +171,8 @@ def check() -> int:
     if msgs:
         print(f"file-size-budget: {len(msgs)} file(s) over budget.", file=sys.stderr)
         return 1
-    slack = [p for p, cap in allowed.items() if p in found and found[p] < cap]
+    slack = [p for p, cap in allowed.items()
+             if p in found and (found[p] <= BUDGET or ceiling(found[p]) < cap)]
     stale = [p for p in allowed if p not in found]
     if slack or stale:
         # Not a failure: a shrink is good. But lock it in.
@@ -210,23 +223,29 @@ def self_test() -> int:
     ]:
         expect(counted(path) == want, f"counted({path!r}) should be {want}")
 
-    allowed = {"big.rs": 3000}
-    # A grandfathered file at, or under, its size passes; one line more fails.
+    # Headroom: max(2%, 50), rounded up.
+    expect(headroom(1501) == 50, "headroom of a small file is 50")
+    expect(headroom(12509) == 251, "headroom of 12,509 lines is 2%, rounded up")
+    expect(ceiling(3000) == 3060, "ceiling of 3,000 is 3,060")
+    allowed = {"big.rs": ceiling(3000)}
+    # Growth within the headroom passes, to the line; one past the ceiling fails.
     expect(not breaches({"big.rs": 3000}, allowed), "grandfathered at its size should pass")
+    expect(not breaches({"big.rs": 3060}, allowed), "growth to the ceiling should pass")
     expect(not breaches({"big.rs": 2000}, allowed), "grandfathered and shrunk should pass")
-    grew = breaches({"big.rs": 3001}, allowed)
-    expect(len(grew) == 1 and "may only shrink" in grew[0], "grandfathered growth should fail")
+    grew = breaches({"big.rs": 3061}, allowed)
+    expect(len(grew) == 1 and "ceiling" in grew[0], "growth past the ceiling should fail")
     expect(grew and "new file" in grew[0], "growth message should say to split")
     # A new file: at the budget passes, one over fails, and says to split.
     expect(not breaches({"new.rs": BUDGET}, {}), "a new file at the budget should pass")
     new = breaches({"new.rs": BUDGET + 1}, {})
     expect(len(new) == 1 and "Split it" in new[0], "a new file over budget should fail with a split hint")
     # --update lowers, drops, never raises, never adds.
-    expect(updated({"big.rs": 2500}, allowed) == {"big.rs": 2500}, "update should lower")
-    expect(updated({"big.rs": 3500}, allowed) == {"big.rs": 3000}, "update must not raise")
+    expect(updated({"big.rs": 2500}, allowed) == {"big.rs": 2550}, "update should lower to size plus headroom")
+    expect(updated({"big.rs": 3040}, allowed) == {"big.rs": 3060}, "update must not raise, inside the headroom")
+    expect(updated({"big.rs": 3500}, allowed) == {"big.rs": 3060}, "update must not raise, past the ceiling")
     expect(updated({"big.rs": 1200}, allowed) == {}, "update should drop a file under budget")
     expect(updated({}, allowed) == {}, "update should drop a file that's gone")
-    expect(updated({"big.rs": 2500, "new.rs": 9000}, allowed) == {"big.rs": 2500}, "update must not add")
+    expect(updated({"big.rs": 2500, "new.rs": 9000}, allowed) == {"big.rs": 2550}, "update must not add")
     # The manifest round-trips.
     expect(read_manifest(write_manifest({"a b.rs": 1600, "c.rs": 2000})) == {"a b.rs": 1600, "c.rs": 2000},
            "manifest should round-trip")
@@ -244,7 +263,7 @@ def seed() -> int:
     the budget landed; refuses to run over an existing manifest."""
     if MANIFEST.exists():
         raise SystemExit(f"{MANIFEST.name} exists; seeding again would grandfather new growth.")
-    over = {p: n for p, n in sizes().items() if n > BUDGET}
+    over = {p: ceiling(n) for p, n in sizes().items() if n > BUDGET}
     MANIFEST.write_text(write_manifest(over))
     print(f"grandfathered {len(over)} files")
     return 0

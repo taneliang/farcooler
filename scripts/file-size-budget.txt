@@ -1,41 +1,42 @@
-# Source files over the 1,500-line budget, grandfathered at their size when
-# the budget landed (ov-169). Each may shrink, never grow. Lower an entry with
+# Source files over the 1,500-line budget when it landed (ov-169), each with a
+# ceiling: its size then plus max(2%, 50 lines) of headroom. A file may grow
+# to its ceiling, never past it. Lower ceilings with
 # `./scripts/file-size-budget.py --update` after a split; never raise one by
-# hand. Format: <max lines> <path>
-12509 crates/daemon/src/service.rs
-8911 crates/daemon/src/watch.rs
-5303 crates/cli/src/main.rs
-4718 crates/cli/src/tasks.rs
-4657 apps/macos/Sources/FarCooler/ContentView.swift
-3677 apps/ios/FarCooler/AgentView.swift
-3546 crates/client/src/ffi.rs
-3458 services/relay/src/index.ts
-3300 crates/client/src/session.rs
-3209 apps/macos/Sources/FarCooler/DaemonClient.swift
-3181 crates/store/src/tasks.rs
-3088 crates/daemon/src/rpc.rs
-2934 apps/ios/FarCooler/ChangesView.swift
-2743 apps/ios/FarCooler/TerminalView.swift
-2581 apps/macos/Sources/FarCooler/ChangesPane.swift
-2324 apps/shared/AgentKit/Sources/AgentKit/ShellNavigation.swift
-2308 apps/android/app/src/main/java/com/farcooler/net/Connection.kt
-2271 apps/ios/FarCooler/Connection.swift
-2201 apps/ios/FarCooler/TerminalSession.swift
-2065 apps/android/app/src/main/java/com/farcooler/ui/ChangesScreen.kt
-1907 crates/core/src/feed.rs
-1899 crates/core/src/activity.rs
-1857 apps/macos/Sources/FarCooler/TaskBoard.swift
-1846 apps/macos/Sources/FarCooler/SidebarViews.swift
-1806 apps/shared/AgentKit/Sources/AgentKit/FleetSnapshot.swift
-1787 crates/fence/src/lib.rs
-1758 crates/store/src/store.rs
-1752 crates/store/src/migrate.rs
-1743 crates/daemon/src/hook_ingress.rs
-1724 crates/codex/src/backend.rs
-1724 crates/daemon/src/agent_supervisor.rs
-1650 crates/claude/src/normalize.rs
-1599 apps/ios/FarCooler/Changes.swift
-1593 apps/android/app/src/main/java/com/farcooler/net/TerminalSession.kt
-1584 crates/daemon/src/hook_install.rs
-1573 apps/macos/Sources/FarCooler/ChangesModel.swift
-1504 crates/daemon/src/push.rs
+# hand. Format: <ceiling> <path>
+12760 crates/daemon/src/service.rs
+9090 crates/daemon/src/watch.rs
+5410 crates/cli/src/main.rs
+4813 crates/cli/src/tasks.rs
+4751 apps/macos/Sources/FarCooler/ContentView.swift
+3751 apps/ios/FarCooler/AgentView.swift
+3617 crates/client/src/ffi.rs
+3528 services/relay/src/index.ts
+3366 crates/client/src/session.rs
+3274 apps/macos/Sources/FarCooler/DaemonClient.swift
+3245 crates/store/src/tasks.rs
+3150 crates/daemon/src/rpc.rs
+2993 apps/ios/FarCooler/ChangesView.swift
+2798 apps/ios/FarCooler/TerminalView.swift
+2633 apps/macos/Sources/FarCooler/ChangesPane.swift
+2374 apps/shared/AgentKit/Sources/AgentKit/ShellNavigation.swift
+2358 apps/android/app/src/main/java/com/farcooler/net/Connection.kt
+2321 apps/ios/FarCooler/Connection.swift
+2251 apps/ios/FarCooler/TerminalSession.swift
+2115 apps/android/app/src/main/java/com/farcooler/ui/ChangesScreen.kt
+1957 crates/core/src/feed.rs
+1949 crates/core/src/activity.rs
+1907 apps/macos/Sources/FarCooler/TaskBoard.swift
+1896 apps/macos/Sources/FarCooler/SidebarViews.swift
+1856 apps/shared/AgentKit/Sources/AgentKit/FleetSnapshot.swift
+1837 crates/fence/src/lib.rs
+1808 crates/store/src/store.rs
+1802 crates/store/src/migrate.rs
+1793 crates/daemon/src/hook_ingress.rs
+1774 crates/codex/src/backend.rs
+1774 crates/daemon/src/agent_supervisor.rs
+1700 crates/claude/src/normalize.rs
+1649 apps/ios/FarCooler/Changes.swift
+1643 apps/android/app/src/main/java/com/farcooler/net/TerminalSession.kt
+1634 crates/daemon/src/hook_install.rs
+1623 apps/macos/Sources/FarCooler/ChangesModel.swift
+1554 crates/daemon/src/push.rs
