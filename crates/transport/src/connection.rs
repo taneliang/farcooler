@@ -759,8 +759,8 @@ mod tests {
             fn peer(&self) -> crate::Peer {
                 crate::Peer { client_id: None, scope: Scope::Control }
             }
-            fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
-                async move { Response { request_id: req.request_id, outcome: None } }
+            async fn handle(&self, req: Request) -> Response {
+                Response { request_id: req.request_id, outcome: None }
             }
             fn pushes(&self) -> Option<PushReceiver> {
                 self.0.lock().unwrap().take()
