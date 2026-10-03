@@ -16,7 +16,7 @@ class RunnerLinkTest {
         assertEquals(RunnerLink.ANSWERING, Connection.Phase.Connected.link)
         assertEquals(RunnerLink.CONNECTING, Connection.Phase.Connecting.link)
         assertEquals(RunnerLink.AWAY, Connection.Phase.Reconnecting(attempt = 3).link)
-        assertEquals(RunnerLink.AWAY, Connection.Phase.Failed("The runner didn’t answer.").link)
+        assertEquals(RunnerLink.AWAY, Connection.Phase.Failed("The runner didn’t answer.", Connection.Failure.UNREACHABLE).link)
         assertEquals(RunnerLink.AWAY, Connection.Phase.NeedsApproval("SHA256:abc").link)
     }
 }

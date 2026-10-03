@@ -96,15 +96,12 @@ class HostKeyQuestionTest {
     // MARK: the circle
 
     /**
-     * Backing out has to land somewhere the app can name. The sentence is
-     * written in one file and matched in the same one, and this is what stops a
-     * reword turning a decision somebody made into "Can't connect".
+     * Backing out has to land somewhere the app can name, and it is named by
+     * kind beside its sentence, never read back out of it (ov-127).
      */
     @Test
-    fun decliningClassifiesAsKeyNotTrusted() {
-        val said = Connection.Failure.Said.declined(runner.named)
-        assertEquals(Connection.Failure.KEY_NOT_TRUSTED, Connection.Failure.of(said))
-        assertEquals(HostKeyQuestion.declining, Connection.Failure.of(said))
+    fun decliningIsKeyNotTrusted() {
+        assertEquals(Connection.Failure.KEY_NOT_TRUSTED, HostKeyQuestion.declining)
     }
 
     /**
@@ -143,55 +140,16 @@ class HostKeyQuestionTest {
     // MARK: the sentences this app writes
 
     /**
-     * The two sentences `abandon` composes, read back through the classifier
-     * that has to recognize them. A reword breaks exactly one of these, by
-     * name.
-     *
-     * Only two, deliberately. Everywhere else this app writes its own failure
-     * text it states the kind beside it — `NO_NODE_KEY_SENTENCE` and the
-     * no-identity arm of `Connection.start` both pass one — so those words are
-     * read by a person and by nothing else. These two are the ones whose
-     * meaning is recovered from their own wording.
-     */
-    @Test
-    fun bothSentencesTheAppWritesClassifyBack() {
-        assertEquals(
-            Connection.Failure.KEY_NOT_TRUSTED,
-            Connection.Failure.of(Connection.Failure.Said.declined("box.local")),
-        )
-        assertEquals(
-            Connection.Failure.STOPPED,
-            Connection.Failure.of(Connection.Failure.Said.stoppedWaiting("box.local")),
-        )
-    }
-
-    /**
-     * They are told APART, not merely recognized. A phrase generic enough to
-     * match both would pass the test above and still send somebody to the wrong
-     * button — "Show the key again" for a runner nobody ever asked about.
+     * The two sentences `abandon` composes are raised beside their kinds, so
+     * the only thing left to hold is that they are different sentences: one
+     * read for the other would tell a person they stopped waiting when they
+     * declined a key.
      */
     @Test
     fun theTwoSentencesAreNotConfusedForEachOther() {
-        val declined = Connection.Failure.of(Connection.Failure.Said.declined("box.local"))
-        val stopped = Connection.Failure.of(Connection.Failure.Said.stoppedWaiting("box.local"))
-        assertNotEquals(declined, stopped)
-        assertNotEquals(Connection.Failure.OTHER, declined)
-        assertNotEquals(Connection.Failure.OTHER, stopped)
-    }
-
-    /**
-     * And neither is recovered from the runner's name, which a person chooses.
-     *
-     * A runner labelled "Stopped waiting" is absurd and a runner reached at an
-     * address containing "has not been trusted" is not something this app can
-     * rule out — what matters is that the phrase the classifier looks for comes
-     * from the sentence and not from the substitution in the middle of it.
-     */
-    @Test
-    fun aRunnerNamedAfterAPhraseDoesNotChangeWhatTheSentenceMeans() {
-        assertEquals(
-            Connection.Failure.KEY_NOT_TRUSTED,
-            Connection.Failure.of(Connection.Failure.Said.declined("Stopped waiting")),
+        assertNotEquals(
+            Connection.Failure.Said.declined("box.local"),
+            Connection.Failure.Said.stoppedWaiting("box.local"),
         )
     }
 

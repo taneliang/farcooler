@@ -119,17 +119,16 @@ class Connection(
         /**
          * Stopped, with a reason, and a next move that depends on which reason.
          *
-         * [kind] is what that reason MEANS. Defaulted to reading it off
-         * [message], which is right for everything the core hands back and
-         * wrong for the sentences this app writes itself: [Identity]'s three
-         * name the exact key step that failed and none of them contains the
-         * substring [Failure.of] looks for, so they used to be filed under
-         * "Can't connect" — an unclassified failure — with the app's own
-         * diagnosis sitting in the slot reserved for a runner's output.
+         * [kind] is what that reason MEANS, and it is always named where the
+         * failure is raised — the core's word through [Failure.of], or the
+         * app's own decision — and never read back out of [message] (ov-127).
+         * It used to default to exactly that, which filed [Identity]'s three
+         * sentences under "Can't connect" and let a reworded Rust error change
+         * the button.
          */
         data class Failed(
             val message: String,
-            val kind: Failure = Failure.of(message),
+            val kind: Failure,
         ) : Phase
 
         data object Connected : Phase
@@ -183,36 +182,25 @@ class Connection(
      * authorized with, or a host key that changed underneath us. Each of these
      * has exactly one useful next move and they are not the same move.
      *
-     * Read off the message rather than a typed error because the message is all
-     * that crosses the FFI boundary on the connect path — `SessionError::Ssh`
-     * is `#[error(transparent)]` and `farcooler_client_connect` hands back
-     * `e.to_string()`, so what arrives here is a Rust `Display` string with
-     * nothing beside it. The substrings are the ones in
-     * `crates/client/src/ssh.rs` and `session.rs`; each is a distinctive phrase
-     * from the middle of its message rather than a prefix, so wrapping the
-     * error in more context does not stop it matching.
+     * **Read off the core's word, never its message** (ov-127). A failed
+     * connect crosses the FFI as `{"error": <prose>, "trouble": <word>}`, plus
+     * `tunnel` for a tunnel failure — `SshError::word` and `SessionError::word`
+     * in `crates/client`, whose tests hold each failure to a word of its own —
+     * and [com.farcooler.core.UnreachedException] carries them here. This used
+     * to match phrases out of the middle of Rust's `Display` strings, so a
+     * reword there changed which button a person was offered and every test on
+     * both sides stayed green. The prose still crosses, for the two kinds that
+     * show it: a changed host key, whose text carries the two fingerprints
+     * being compared, and the undiagnosed failure.
      *
-     * **One of them is not a phrase, and must not be read as one.**
-     * `SshError::Tunnel` renders as `cannot open the tunnel: <word>`, and the
-     * word is `farcooler_tailcat::TunnelError::code` — a stable machine word
-     * that already crosses the FFI on purpose, wrapped in a sentence for a log.
-     * So the tunnel failures are classified by READING THAT WORD ([tunnelWord]
-     * and [TUNNEL_MARKER]), never by matching the English around it. That prose
-     * can be reworded; the word is the thing whose own doc promises it will not
-     * be. `RunnerTrouble.TunnelWord` in `apps/shared/AgentKit` is the same
+     * The tunnel failures are named by the tunnel's own stable word
+     * ([tunnelWord]). `RunnerTrouble` in `apps/shared/AgentKit` is the same
      * table for the Apple apps and `crates/cli/src/runner_pipe.rs`'s `sentence`
      * is the same table for the terminal — one dialect, three readers.
      *
-     * **The FFI is deliberately not widened to carry a code beside the message
-     * here.** [com.farcooler.core.CoreException] already does exactly that for
-     * a call on a live session, and says why the connect path is the exception:
-     * a connect failure genuinely arrives as prose, because two of these have
-     * nothing but the message to show — a changed host key, whose text carries
-     * the two fingerprints being compared and must not be paraphrased, and the
-     * undiagnosed failure, where the core's account is the only account there
-     * is. A code cannot replace those. What a code CAN do is stop a code being
-     * recovered from the sentence printed around it, and that is the whole of
-     * the change this seam needed.
+     * The kinds this APP raises — [NO_IDENTITY], [NO_NODE_KEY],
+     * [KEY_NOT_TRUSTED], [STOPPED] — are named by the code that raises them,
+     * beside the sentence in [Said], and never recovered from that sentence.
      */
     enum class Failure(
         /**
@@ -337,90 +325,61 @@ class Connection(
          * The sentences this app writes itself, as opposed to the ones the core
          * hands back.
          *
-         * Two, and exactly the two [Connection.abandon] produces. Everywhere
-         * else this app composes its own failure text it states the kind beside
-         * it — `Phase.Failed(NO_NODE_KEY_SENTENCE, Failure.NO_NODE_KEY)` and the
-         * [NO_IDENTITY] arm of [Connection.start] both do — so those words are
-         * read by a person and by nothing else. These two are different:
-         * `abandon` files them under `Phase.Failed(message)`, which asks [of]
-         * what they mean, so the sentence and the phrase below it have to keep
-         * agreeing. Reword one and a decision somebody made turns into
-         * [OTHER] — "Can't connect", the core's own headline, with "Try again"
-         * under it for a question nobody answered.
-         *
-         * That is a round trip with a seam in the middle, and nothing about the
-         * seam is visible in a diff or a build. So the sentences live here, next
-         * to the phrases that classify them, rather than at the methods that
-         * raise them: a [Connection] holds a
+         * Each is raised beside the kind it belongs to — [Connection.abandon]
+         * takes both — so a reword is a reword and cannot reclassify anything.
+         * They used to be matched back by phrase, which is how a decision
+         * somebody made could turn into [OTHER] (ov-127). Here rather than at
+         * the methods that raise them because a [Connection] holds a
          * [com.farcooler.core.ClientCore] and a coroutine scope, so no JVM test
-         * can call [Connection.declineHostKey] or [Connection.giveUp] at all,
-         * and copy nothing reads back is copy that drifts. `HostKeyQuestionTest`
-         * reads each one back through [of].
+         * can call [Connection.declineHostKey] or [Connection.giveUp] at all.
          */
         object Said {
             /**
              * A fingerprint was shown and the person backed out of the question
-             * without answering it. Matches on "has not been trusted".
+             * without answering it. [KEY_NOT_TRUSTED].
              */
             fun declined(runner: String): String =
                 "The key $runner presented has not been trusted on this device. " +
                     "Far Cooler won’t connect until it is."
 
-            /**
-             * Somebody stopped waiting out a dial. Matches on "Stopped
-             * waiting".
-             */
+            /** Somebody stopped waiting out a dial. [STOPPED]. */
             fun stoppedWaiting(runner: String): String =
                 "Stopped waiting for $runner. It may be asleep or off the network."
         }
 
         companion object {
             /**
-             * What `SshError::Tunnel`'s `Display` puts in front of the word.
+             * What the core's word for a failed connect means.
              *
-             * The one string in this file that has to match Rust exactly.
-             * `crates/client/src/ssh.rs`'s
-             * `the_tunnel_message_carries_the_word_the_apps_read` is the other
-             * half of that pair, and it names the Apple copy of this constant —
-             * because a reword on either side is silent everywhere else.
+             * [trouble] is the connect line's `trouble` and [tunnel] its
+             * `tunnel`. A word this build has no case for — `handshake_failed`,
+             * `bad_key`, a word added in Rust next year, or none at all — is
+             * [OTHER], the one kind that shows the core's own words. A tunnel
+             * word this build has never seen, or none, is [TUNNEL_UNSPECIFIED]:
+             * a sentence this app wrote, never the word itself on a screen.
              */
-            const val TUNNEL_MARKER = "cannot open the tunnel: "
-
-            fun of(message: String): Failure =
-                // First, and by the machine word rather than by a phrase. See
-                // the header: the word is what the core promises to keep
-                // stable, and the sentence printed around it is not.
-                tunnelWordIn(message) ?: when {
-                    message.contains("rejected this key") -> KEY_REJECTED
-                    message.contains("is not the one Far Cooler has recorded") -> HOST_KEY_CHANGED
-                    message.contains("cannot reach") -> UNREACHABLE
-                    message.contains("did not answer") -> DAEMON_MISSING
-                    message.contains("no SSH key") -> NO_IDENTITY
-                    message.contains("no tunnel key") -> NO_NODE_KEY
-                    message.contains("has not been trusted") -> KEY_NOT_TRUSTED
-                    message.contains("Stopped waiting") -> STOPPED
+            fun of(trouble: String?, tunnel: String? = null): Failure =
+                when (trouble) {
+                    "key_rejected" -> KEY_REJECTED
+                    "host_key_changed" -> HOST_KEY_CHANGED
+                    "unreachable" -> UNREACHABLE
+                    "daemon_missing" -> DAEMON_MISSING
+                    "tunnel" -> entries.firstOrNull { it.tunnelWord != null && it.tunnelWord == tunnel }
+                        ?: TUNNEL_UNSPECIFIED
                     else -> OTHER
                 }
 
             /**
-             * The failure named by the word inside a tunnel message, or null if
-             * this is not a tunnel message at all.
+             * The fingerprint to put to a person, when the core's word says this
+             * failure is the first-contact question rather than a failure.
              *
-             * The marker is looked for anywhere in the message rather than at
-             * the front, for the reason every phrase above is: wrapping the
-             * error in more context must not stop it matching. The word runs to
-             * the first space or the end, so trailing context does not become
-             * part of it.
+             * A field of its own on the connect line. It used to be the first
+             * word starting `SHA256:` in a message containing "is unknown", which
+             * a reword of `SshError::HostKeyUnknown` would have turned into
+             * "Can't connect" for every new runner.
              */
-            private fun tunnelWordIn(message: String): Failure? {
-                val marker = message.indexOf(TUNNEL_MARKER)
-                if (marker < 0) return null
-                val word = message.substring(marker + TUNNEL_MARKER.length)
-                    .takeWhile { !it.isWhitespace() }
-                // Never null past this point: an unknown word is a sentence
-                // this app wrote, never the word itself on a screen.
-                return entries.firstOrNull { it.tunnelWord == word } ?: TUNNEL_UNSPECIFIED
-            }
+            fun hostKeyQuestion(trouble: String?, fingerprint: String?): String? =
+                fingerprint?.takeIf { trouble == "host_key_unknown" && it.isNotEmpty() }
         }
     }
 
@@ -892,7 +851,7 @@ class Connection(
             core.connect(withHost.config(key, nodeKey, rendezvous.value))
         } catch (e: Exception) {
             e.rethrowIfCancellation()
-            if (mine == attempt) _phase.value = classify(e.message.orEmpty())
+            if (mine == attempt) _phase.value = classify(e)
             return
         }
 
@@ -992,7 +951,7 @@ class Connection(
             // crossing the network. Its answer is the current one; this one
             // must not reach up and overwrite it.
             if (_phase.value !is Phase.Reconnecting) return
-            retryOrGiveUp(e.message.orEmpty(), attempt)
+            retryOrGiveUp(e, attempt)
             return
         }
 
@@ -1029,8 +988,8 @@ class Connection(
      * It is the difference between a screen that explains what to fix and one
      * that spins forever over something retrying will never fix.
      */
-    private fun retryOrGiveUp(message: String, attempt: Int) {
-        val next = classify(message)
+    private fun retryOrGiveUp(error: Exception, attempt: Int) {
+        val next = classify(error)
         if (next !is Phase.Failed) {
             // The host key is unknown again, which is a question for a human
             // and not something to retry past.
@@ -1062,7 +1021,7 @@ class Connection(
      * about to succeed.
      */
     fun giveUp() {
-        abandon(Failure.Said.stoppedWaiting(host.named))
+        abandon(Failure.STOPPED, Failure.Said.stoppedWaiting(host.named))
     }
 
     /**
@@ -1075,9 +1034,9 @@ class Connection(
      * that ran and did nothing — and both of this app's call sites already fire
      * the retry beside the forget.
      *
-     * The wording is [Failure.Said.declined], next to the phrase
-     * [Failure.KEY_NOT_TRUSTED] matches it on, so a reword cannot quietly
-     * reclassify a decision somebody made.
+     * The wording is [Failure.Said.declined], raised beside
+     * [HostKeyQuestion.declining] rather than read back out of the sentence,
+     * so a reword cannot reclassify a decision somebody made.
      *
      * **Had no callers at all until the answer that calls it was put back**, on
      * either surface, which is the same fact as `RunnerStatusRow` offering only
@@ -1085,34 +1044,36 @@ class Connection(
      * apart again.
      */
     fun declineHostKey() {
-        abandon(Failure.Said.declined(host.named))
+        abandon(HostKeyQuestion.declining, Failure.Said.declined(host.named))
     }
 
-    private fun abandon(message: String) {
+    private fun abandon(kind: Failure, message: String) {
         attempt += 1
         poller?.cancel()
         // The armed retry too. "Stop waiting" that leaves a backoff ticking
         // underneath would put the spinner back thirty seconds later, which is
         // the opposite of what was asked for.
         reconnector?.cancel()
-        _phase.value = Phase.Failed(message)
+        _phase.value = Phase.Failed(message, kind)
     }
 
     /**
-     * Turn the core's message into a phase a screen can act on.
+     * Turn the core's answer into a phase a screen can act on.
      *
      * The unknown-host case is not a failure — it is a question — and it has to
      * be told apart from one, or the user is shown "try again" for something
-     * retrying will never fix.
+     * retrying will never fix. Both are read off the core's words
+     * ([com.farcooler.core.UnreachedException]), never its prose.
      */
-    private fun classify(message: String): Phase {
-        fingerprint(message)?.let { return Phase.NeedsApproval(it) }
-        return Phase.Failed(message)
-    }
-
-    private fun fingerprint(message: String): String? {
-        if (!message.contains("is unknown")) return null
-        return message.split(" ").firstOrNull { it.startsWith("SHA256:") }
+    private fun classify(error: Exception): Phase {
+        val unreached = error as? com.farcooler.core.UnreachedException
+            ?: return Phase.Failed(error.message.orEmpty(), Failure.OTHER)
+        Failure.hostKeyQuestion(unreached.trouble, unreached.fingerprint)
+            ?.let { return Phase.NeedsApproval(it) }
+        return Phase.Failed(
+            unreached.message.orEmpty(),
+            Failure.of(unreached.trouble, unreached.tunnel),
+        )
     }
 
     /**
@@ -2214,7 +2175,7 @@ class Connection(
          * minting a fresh pair here would produce a key nobody has authorized,
          * and tailcat ignores a client it does not recognize without answering
          * — so the symptom would be a spinner, then a timeout, and nothing
-         * anywhere saying why. [Failure.of] matches on "no tunnel key".
+         * anywhere saying why. Raised beside [Failure.NO_NODE_KEY].
          */
         const val NO_NODE_KEY_SENTENCE =
             "This runner is reached through the tunnel, and this device has no tunnel key. " +

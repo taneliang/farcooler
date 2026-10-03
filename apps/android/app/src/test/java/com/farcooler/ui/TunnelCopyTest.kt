@@ -64,8 +64,8 @@ class TunnelCopyTest {
 
     private fun assertNoMachineWord(where: String, text: String) {
         assertFalse(
-            "$where printed the marker the core wraps the word in: $text",
-            text.contains(Connection.Failure.TUNNEL_MARKER),
+            "$where printed the core's log line around the word: $text",
+            text.contains("cannot open the tunnel"),
         )
         val leaked = words(text).filter { it in machineWords }
         assertTrue("$where printed the machine word $leaked: $text", leaked.isEmpty())
@@ -197,17 +197,18 @@ class TunnelCopyTest {
     }
 
     /**
-     * The whole path, end to end: the string the core really hands up, through
+     * The whole path, end to end: the words the core really hands up, through
      * the classifier, to the two lines a person reads.
      *
      * The tests above name the kind directly, which would go on passing if
      * [Connection.Failure.of] stopped producing it. This one starts where the
-     * app starts.
+     * app starts: `"trouble": "tunnel", "tunnel": "no_answer"`, and the core's
+     * log line as the message.
      */
     @Test
     fun aRevokedDeviceReadsASentenceAndNotAWord() {
         val message = "cannot open the tunnel: no_answer"
-        val kind = Connection.Failure.of(message)
+        val kind = Connection.Failure.of("tunnel", "no_answer")
         assertEquals(Connection.Failure.TUNNEL_NO_ANSWER, kind)
         assertEquals("Can’t reach Studio", failureHeadline(kind, tunneled))
         assertEquals(

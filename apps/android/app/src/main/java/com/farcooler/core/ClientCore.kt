@@ -48,12 +48,26 @@ open class CoreException(
  * The link is gone, as opposed to the request being refused.
  *
  * Answered by the core rather than worked out from the message here: Rust
- * still has the error's type at the moment it is produced, and
- * [com.farcooler.net.Connection.Failure] matching substrings is a compromise
- * the connect path makes because a connect failure genuinely arrives as prose.
- * A call on a live session need not make it.
+ * still has the error's type at the moment it is produced.
  */
 class DisconnectedException(message: String) : CoreException(message)
+
+/**
+ * A connect that failed, with the core's stable word for why (ov-127).
+ *
+ * [trouble] is the connect line's `trouble` (`SessionError::word` in
+ * `crates/client`), [tunnel] the tunnel's own word beside it, and
+ * [fingerprint] the host's key when [trouble] is `host_key_unknown`.
+ * [com.farcooler.net.Connection] reads these through
+ * [com.farcooler.net.Connection.Failure.of] and never the message, which it
+ * keeps only to show.
+ */
+class UnreachedException(
+    message: String,
+    val trouble: String,
+    val tunnel: String? = null,
+    val fingerprint: String? = null,
+) : CoreException(message)
 
 /** The runner's word for a refusal, or null if this is not one. */
 val Throwable.refusalWord: String?
@@ -345,9 +359,19 @@ class ClientCore : TerminalTransport {
                     line["error"]?.jsonPrimitive?.contentOrNull ?: "the host refused the request"
                 val lost = line["disconnected"]?.jsonPrimitive?.booleanOrNull == true
                 val word = com.farcooler.model.RunnerRefusal.wordInAnswerLine(line)
+                // Only a connect's answer carries `trouble`.
+                val trouble = line["trouble"]?.jsonPrimitive?.contentOrNull
                 waiter.completeExceptionally(
-                    if (lost) DisconnectedException(message)
-                    else CoreException(message, word, line["what"]?.jsonPrimitive?.contentOrNull)
+                    when {
+                        lost -> DisconnectedException(message)
+                        trouble != null -> UnreachedException(
+                            message,
+                            trouble,
+                            line["tunnel"]?.jsonPrimitive?.contentOrNull,
+                            line["fingerprint"]?.jsonPrimitive?.contentOrNull,
+                        )
+                        else -> CoreException(message, word, line["what"]?.jsonPrimitive?.contentOrNull)
+                    }
                 )
             }
         }
