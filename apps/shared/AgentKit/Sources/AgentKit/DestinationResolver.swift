@@ -41,13 +41,13 @@ public enum DestinationResolver {
 
     /// How long each arrival waits for its runner and its place.
     public enum Deadline {
-        /// `PhoneLaunch.decideWithin` and Android's `LaunchRule.WINDOW_MS`.
+        /// `PhoneLaunch.decideWithin`: a launch that can't hear from its
+        /// runner in ten seconds stays where it is.
         public static let restore: TimeInterval = 10
-        /// `TaskNoticeOpen.waitsAtMost`: a runner the Mac reaches answers in
-        /// seconds.
+        /// A runner the Mac reaches answers in seconds; a task that turned up
+        /// half a minute later would move a window somebody is already using.
         public static let notificationMac: TimeInterval = 30
-        /// `PhoneDecisionLink.followWithin`: a phone's cold launch can take
-        /// most of a minute to reach a runner.
+        /// A phone's cold launch can take most of a minute to reach a runner.
         public static let notificationPhone: TimeInterval = 60
     }
 

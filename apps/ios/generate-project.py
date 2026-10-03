@@ -420,6 +420,16 @@ AGENTKIT_SOURCES = [
     # decision's answer buttons (ov-94). Here and in `notify_build_ids`: the
     # service extension makes a decision's category from its options.
     "TaskNotifications.swift",
+    # Where a tapped notification, a card's link and a relaunch open (ov-182,
+    # ov-183): the destination, every spelling of it a push carries, the
+    # resolver that holds it for its runner, and the phone's half that turns
+    # what the runners hold into the resolver's world and a resolved place into
+    # the stack. App only: the extensions post notifications and open nothing.
+    "Destination.swift",
+    "DestinationMigration.swift",
+    "DestinationPayloads.swift",
+    "DestinationResolver.swift",
+    "PhoneDestination.swift",
     "RelaySection.swift",
     # Beside `RelaySection.swift` because it is the same screen and the same
     # shape of setting: which rendezvous tunneled runners and this phone meet

@@ -600,7 +600,7 @@ struct ShellRootView<Pane: View>: View {
             // request ALREADY set — so there is no change for `onChange` to
             // see, and the tap would open the app onto whatever it would have
             // opened onto anyway. Which is the failure the deep link exists to
-            // remove. See `FleetView.dropUnknownTerminal`.
+            // remove. See `PhoneRoot.follow`.
             honorRequest()
         }
         .onChange(of: position) { _, at in settle(at, in: fleet, as: .moved) }

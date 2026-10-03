@@ -58,12 +58,12 @@ struct TaskNotificationsTests {
     @Test("A tap on a task notice opens its task, never a terminal named after its thread")
     func aTapOnATaskNotice() {
         #expect(
-            PushTap(userInfo: ["kind": "task", "task": "ov-90", "runner": "r-1", "event": "review"], thread: "t:r-1:ov-90")
-                == .task(DecisionPush(key: "ov-90", runner: "r-1")))
+            Destination(userInfo: ["kind": "task", "task": "ov-90", "runner": "r-1", "event": "review"], thread: "t:r-1:ov-90")
+                == Destination(runner: .init(id: "r-1"), place: .task(workspace: nil, task: .init(key: "ov-90"))))
         // A task's thread is not a terminal id, whatever arrives with it.
-        #expect(PushTap(userInfo: [:], thread: "t:r-1:ov-90") == nil)
-        #expect(PushTap(userInfo: ["kind": "task"], thread: "t:r-1:ov-90") == nil)
-        #expect(PushTap(userInfo: [:], thread: "a:term-1") == nil)
+        #expect(Destination(userInfo: [:], thread: "t:r-1:ov-90") == nil)
+        #expect(Destination(userInfo: ["kind": "task"], thread: "t:r-1:ov-90") == nil)
+        #expect(Destination(userInfo: [:], thread: "a:term-1") == nil)
     }
 
     @Test("A decision's buttons are its options and Answer…, under a category named for them")

@@ -209,8 +209,7 @@ final class WatchLinkHost: NSObject {
     ///
     /// EVERY runner, not any: a fleet of three where two have come back cannot
     /// say a pane does not exist, because it might be on the third.
-    /// `FleetView.dropUnknownTerminal` reaches for the same predicate for the
-    /// same reason. A phone with no runners answers true, which is honest —
+    /// `PhoneRoot.follow` waits on the same thing for the same reason. A phone with no runners answers true, which is honest —
     /// there is nothing coming.
     private var everyRunnerHasAnswered: Bool {
         guard let fleet else { return false }

@@ -16,44 +16,22 @@ struct PhoneFollowUpTests {
 
     static func decide(
         _ runners: [PhoneLaunch.Reading] = [.read], elapsed: TimeInterval = 1,
-        moved: Bool = false, linking: Bool = false, items: Int = 2,
-        saved: [PhoneRoute] = saved,
-        presence: @escaping (PhoneRoute) -> PhoneLaunch.Presence = { _ in .here }
+        moved: Bool = false, linking: Bool = false, items: Int = 2
     ) -> PhoneLaunch.Decision {
         PhoneLaunch.decide(
             runners, elapsed: elapsed, moved: moved, linking: linking, itemCount: items,
-            last: place, exists: { _ in true }, saved: saved, presence: presence)
+            last: place, exists: { _ in true })
     }
 
     // MARK: - Reopening where it was
 
-    /// **A relaunch reopens the stack it was killed on**: workspace, task and
-    /// worktree, over Needs You, even with items waiting there (ruling 1).
-    @Test("A saved stack reopens as it was, whatever Needs You holds")
-    func aSavedStackReopens() {
-        #expect(Self.decide() == .open(Self.saved))
-        #expect(Self.decide(items: 0) == .open(Self.saved))
-        // Nothing saved: ruling 4 decides, as before.
-        #expect(Self.decide(items: 2, saved: []) == .open([]))
-        #expect(Self.decide(items: 0, saved: []) == .open([.workspace(Self.place)]))
-    }
-
-    /// **A saved stack with any screen gone falls back to Needs You**, and
-    /// says nothing; one still being read waits, until the limit.
-    @Test("A saved stack whose screen is gone falls back to Needs You")
-    func aGoneScreenFallsBackToNeedsYou() {
-        let taskGone: (PhoneRoute) -> PhoneLaunch.Presence = {
-            if case .task = $0 { return .gone }
-            return .here
-        }
-        #expect(Self.decide(presence: taskGone) == .stay)
-        #expect(Self.decide(items: 0, presence: taskGone) == .stay)
-        let boardUnread: (PhoneRoute) -> PhoneLaunch.Presence = {
-            if case .task = $0 { return .unknown }
-            return .here
-        }
-        #expect(Self.decide(presence: boardUnread) == .wait)
-        #expect(Self.decide(elapsed: 10, presence: boardUnread) == .stay)
+    /// **A launch with nothing saved is ruling 4's**: Needs You while it
+    /// holds anything, else the last workspace over it. A saved stack is
+    /// `DestinationResolver`'s, not this rule's (`PhoneDestinationTests`).
+    @Test("With nothing saved, a launch opens on Needs You or the last workspace")
+    func aLaunchWithNothingSaved() {
+        #expect(Self.decide(items: 2) == .open([]))
+        #expect(Self.decide(items: 0) == .open([.workspace(Self.place)]))
         // Every runner first, as ever; and a link or a move still wins.
         #expect(Self.decide([.read, .waiting]) == .wait)
         #expect(Self.decide(linking: true) == .stay)
@@ -172,33 +150,6 @@ struct PhoneFollowUpTests {
         #expect(PhoneDecisionLink.find(Self.push("bil-7", runner: "host-runner-b"), in: [a, bare], waitEnded: true) == nil)
         #expect(PhoneDecisionLink.find(Self.push("bil-7"), in: [a, b]) == nil)
         #expect(PhoneDecisionLink.find(Self.push("bil-7", runner: "host-runner-c"), in: [a, b]) == nil)
-        #expect(
-            PushTap(userInfo: ["kind": "decision", "task": "bil-7", "runner": "host-runner-b"], thread: "")
-                == .task(Self.push("bil-7", runner: "host-runner-b")))
-    }
-
-    /// **A push waits for its runners, not ten seconds**: on a cold launch
-    /// over a slow network it keeps looking until every runner has said
-    /// what needs you and read its boards, or a minute has gone.
-    @Test("A decision push waits until the runners have settled, or a minute")
-    func aDecisionPushWaitsForTheRunners() {
-        #expect(!PhoneDecisionLink.givesUp(settled: false, elapsed: 30))
-        #expect(!PhoneDecisionLink.givesUp(settled: false, elapsed: 59))
-        #expect(PhoneDecisionLink.givesUp(settled: false, elapsed: 60))
-        #expect(PhoneDecisionLink.givesUp(settled: true, elapsed: 1))
-    }
-
-    /// **A tap says which it is**: a decision's task by key, else an agent's
-    /// terminal, from the push or from the banner this app posted.
-    @Test("A tapped notification is a decision's task or an agent's terminal")
-    func aTapIsATaskOrATerminal() {
-        #expect(
-            PushTap(userInfo: ["kind": "decision", "task": "bil-7", "terminal": ""], thread: "")
-                == .task(DecisionPush(key: "bil-7", runner: nil)))
-        #expect(PushTap(userInfo: ["terminal": "d002", "status": "blocked"], thread: "x") == .terminal("d002"))
-        #expect(PushTap(userInfo: [:], thread: "d003") == .terminal("d003"))
-        #expect(PushTap(userInfo: ["kind": "decision"], thread: "d004") == .terminal("d004"))
-        #expect(PushTap(userInfo: [:], thread: "") == nil)
     }
 
     // MARK: - Answering, the one task write (ov-184)

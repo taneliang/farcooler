@@ -120,6 +120,11 @@
 		10B3AFDCB5755BDD9B0095D2 /* FirstRun.swift in Sources */ = {isa = PBXBuildFile; fileRef = 003725D9F3AA54C5BEB37330; };
 		567BDDDD0E795261AED9597D /* FirstRunCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A2BF95A4CC5CF5A47C737A; };
 		37C3ACF7082C5998B7A4C6A8 /* TaskNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FEC309CC0E45A6D9129F45B; };
+		85ECB2F74F815BDC90C0A823 /* Destination.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99D874BB22DB53DCB6AC80EC; };
+		64CA1AADB5AD58D18421A952 /* DestinationMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA566C0A624A52C481DD51E8; };
+		3B48B0E89D385D139BCC80A2 /* DestinationPayloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2033CF18ABD5EDDAEDF06AF; };
+		30CFC377BDC85FB1B4A87EFF /* DestinationResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EA3A5FBCB2D5F65971F83CA; };
+		708406F43B4A5D618DF2CD14 /* PhoneDestination.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0EF6C96D0A3518493A41811; };
 		6ED88B8CE5605E7382A93B98 /* RelaySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35606FB34F805ACB98820C9C; };
 		7F50BDA139E953BEA2EDF9A5 /* RendezvousSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3BF5056BFE7554194A85BFB; };
 		AB9359A5A5535D729E5F1D73 /* NodeKeyStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2F5748E1CFA592593C8099D; };
@@ -330,6 +335,11 @@
 		003725D9F3AA54C5BEB37330 /* FirstRun.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstRun.swift; sourceTree = "<group>"; };
 		C5A2BF95A4CC5CF5A47C737A /* FirstRunCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstRunCopy.swift; sourceTree = "<group>"; };
 		8FEC309CC0E45A6D9129F45B /* TaskNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskNotifications.swift; sourceTree = "<group>"; };
+		99D874BB22DB53DCB6AC80EC /* Destination.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Destination.swift; sourceTree = "<group>"; };
+		DA566C0A624A52C481DD51E8 /* DestinationMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DestinationMigration.swift; sourceTree = "<group>"; };
+		F2033CF18ABD5EDDAEDF06AF /* DestinationPayloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DestinationPayloads.swift; sourceTree = "<group>"; };
+		6EA3A5FBCB2D5F65971F83CA /* DestinationResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DestinationResolver.swift; sourceTree = "<group>"; };
+		A0EF6C96D0A3518493A41811 /* PhoneDestination.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneDestination.swift; sourceTree = "<group>"; };
 		35606FB34F805ACB98820C9C /* RelaySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySection.swift; sourceTree = "<group>"; };
 		B3BF5056BFE7554194A85BFB /* RendezvousSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendezvousSection.swift; sourceTree = "<group>"; };
 		A2F5748E1CFA592593C8099D /* NodeKeyStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NodeKeyStatus.swift; sourceTree = "<group>"; };
@@ -640,6 +650,11 @@
 				003725D9F3AA54C5BEB37330 /* FirstRun.swift */,
 				C5A2BF95A4CC5CF5A47C737A /* FirstRunCopy.swift */,
 				8FEC309CC0E45A6D9129F45B /* TaskNotifications.swift */,
+				99D874BB22DB53DCB6AC80EC /* Destination.swift */,
+				DA566C0A624A52C481DD51E8 /* DestinationMigration.swift */,
+				F2033CF18ABD5EDDAEDF06AF /* DestinationPayloads.swift */,
+				6EA3A5FBCB2D5F65971F83CA /* DestinationResolver.swift */,
+				A0EF6C96D0A3518493A41811 /* PhoneDestination.swift */,
 				35606FB34F805ACB98820C9C /* RelaySection.swift */,
 				B3BF5056BFE7554194A85BFB /* RendezvousSection.swift */,
 				A2F5748E1CFA592593C8099D /* NodeKeyStatus.swift */,
@@ -1053,6 +1068,11 @@
 				10B3AFDCB5755BDD9B0095D2 /* FirstRun.swift in Sources */,
 				567BDDDD0E795261AED9597D /* FirstRunCopy.swift in Sources */,
 				37C3ACF7082C5998B7A4C6A8 /* TaskNotifications.swift in Sources */,
+				85ECB2F74F815BDC90C0A823 /* Destination.swift in Sources */,
+				64CA1AADB5AD58D18421A952 /* DestinationMigration.swift in Sources */,
+				3B48B0E89D385D139BCC80A2 /* DestinationPayloads.swift in Sources */,
+				30CFC377BDC85FB1B4A87EFF /* DestinationResolver.swift in Sources */,
+				708406F43B4A5D618DF2CD14 /* PhoneDestination.swift in Sources */,
 				6ED88B8CE5605E7382A93B98 /* RelaySection.swift in Sources */,
 				7F50BDA139E953BEA2EDF9A5 /* RendezvousSection.swift in Sources */,
 				AB9359A5A5535D729E5F1D73 /* NodeKeyStatus.swift in Sources */,

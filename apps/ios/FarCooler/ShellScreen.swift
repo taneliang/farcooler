@@ -1105,8 +1105,9 @@ struct ShellScreen: View {
     /// Which TAB the pending deep link names, in the fleet this pass mapped.
     ///
     /// The whole of the two-phase dance, as a derivation rather than as a
-    /// sequence of steps. `FleetView` holds the terminal id from the moment the
-    /// URL arrives — see `FleetView.dropUnknownTerminal` — and this is nil for
+    /// sequence of steps. A caller holds the terminal id from the moment the
+    /// URL arrives (`PhoneRoot` holds it as a destination now, and passes none
+    /// here) — and this is nil for
     /// as long as the runner has not answered with a fleet containing it. When
     /// one does arrive, this stops being nil, and `ShellRootView` honors it on
     /// the next change or on its own appearance, whichever comes first.

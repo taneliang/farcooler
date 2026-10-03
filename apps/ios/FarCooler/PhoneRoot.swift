@@ -121,14 +121,14 @@ struct PhoneWorktree: Identifiable, Equatable {
 struct PhoneRoot: View {
     @ObservedObject var fleet: FleetStore
     @ObservedObject var hosts: RunnerStore
-    /// A tapped notification or card's terminal, held by `FleetView` until a
-    /// runner's fleet has it. See `followLink`.
-    @Binding var pendingTerminal: String?
-    /// A tapped decision push's task, held until a runner has it. See
-    /// `followTask`.
-    @Binding var pendingTask: DecisionPush?
+    /// What a tapped notification or card is about, held by `FleetView` until
+    /// this takes it up. See `follow`.
+    @Binding var pendingDestination: Destination?
 
     @StateObject private var navigator = PhoneNavigator()
+    /// What waits for its runner to open: the tap just taken up, or the place
+    /// the last run was in. One at a time, and a tap outranks a relaunch.
+    @State private var waiting: PhoneWaiting?
 
     var body: some View {
         NavigationStack(path: $navigator.path) {
@@ -157,7 +157,7 @@ struct PhoneRoot: View {
         .overlay(alignment: .topLeading) { PhoneProbeView().offset(y: 2) }
         #endif
         .onAppear {
-            followLink()
+            takeArrival()
             decideLaunch()
         }
         .task {
@@ -170,10 +170,9 @@ struct PhoneRoot: View {
                 decideLaunch()
             }
         }
-        .task(id: pendingTask) { await followTask() }
+        .task(id: waiting?.id) { await follow() }
         .onChange(of: fleet.needsYouReadings) { _, _ in decideLaunch() }
-        .onChange(of: pendingTerminal) { _, _ in followLink() }
-        .onChange(of: fleet.entries.count) { _, _ in followLink() }
+        .onChange(of: pendingDestination) { _, _ in takeArrival() }
     }
 
     @ViewBuilder
@@ -204,19 +203,26 @@ struct PhoneRoot: View {
         }
     }
 
-    /// Where the app opens, once every runner has said what needs you
-    /// (ruling 4). Nothing is pushed over a stack somebody has already moved.
+    /// Where the app opens (ruling 4, ov-182). Nothing is pushed over a stack
+    /// somebody has already moved.
+    ///
+    /// A place the last run kept reopens where it was, whatever is waiting
+    /// on Needs You (ruling 1): held for its runner, then opened, or opened
+    /// at the nearest level still there when it's gone (`follow`). With none
+    /// kept, Needs You decides once every runner has said what it holds, as
+    /// `PhoneLaunch.decide` says.
     private func decideLaunch() {
-        guard !navigator.decided else { return }
-        let last = UserDefaults.standard.string(forKey: PhoneLaunch.lastWorkspaceKey)
-            .flatMap(PhoneWorkspace.init(stored:))
+        guard !navigator.decided, waiting == nil else { return }
+        let saved = PhoneLaunch.decode(UserDefaults.standard.data(forKey: PhoneLaunch.stackKey))
+        if let kept = Destination(phoneStack: saved) {
+            waiting = PhoneWaiting(destination: kept, arrival: .restore, stack: saved)
+            return
+        }
         switch PhoneLaunch.decide(
             fleet.needsYouReadings, elapsed: Date().timeIntervalSince(navigator.began),
-            moved: navigator.moved, linking: pendingTerminal != nil || pendingTask != nil,
-            itemCount: fleet.needsYou.count, last: last,
-            exists: { fleet.connection(for: $0)?.workspace($0.workspace) != nil },
-            saved: PhoneLaunch.decode(UserDefaults.standard.data(forKey: PhoneLaunch.stackKey)),
-            presence: presence)
+            moved: navigator.moved, linking: false,
+            itemCount: fleet.needsYou.count, last: lastWorkspace,
+            exists: { fleet.connection(for: $0)?.workspace($0.workspace) != nil })
         {
         case .wait:
             return
@@ -231,87 +237,109 @@ struct PhoneRoot: View {
         }
     }
 
-    /// Whether one screen of a kept stack is still on its runner.
-    private func presence(_ route: PhoneRoute) -> PhoneLaunch.Presence {
-        switch route {
-        case .workspace(let place):
-            return fleet.connection(for: place)?.workspace(place.workspace) != nil ? .here : .gone
-        case .task(let place, let task):
-            guard let connection = fleet.connection(for: place),
-                connection.workspace(place.workspace) != nil
-            else { return .gone }
-            guard let board = connection.boards[place.workspace] else { return .unknown }
-            return board.rows.contains { $0.id == task } ? .here : .gone
-        case .history(let place, _):
-            return fleet.connection(for: place)?.workspace(place.workspace) != nil ? .here : .gone
-        case .worktree(let runner, let worktree, _):
-            guard let connection = UUID(uuidString: runner).flatMap({ fleet.connection(for: $0) })
-            else { return .gone }
-            return connection.fleet.worktrees.contains { $0.id == worktree } ? .here : .gone
-        }
+    /// The workspace last opened, which a restore falls back to.
+    private var lastWorkspace: PhoneWorkspace? {
+        UserDefaults.standard.string(forKey: PhoneLaunch.lastWorkspaceKey)
+            .flatMap(PhoneWorkspace.init(stored:))
     }
 
-    /// A tapped decision push (ruling 3): its task, with its workspace under
-    /// it, once a runner has it (`PhoneDecisionLink`). Tried as the runners
-    /// answer, and dropped, leaving Needs You, once every runner has said
-    /// what needs you and read its boards without it, or after a minute
-    /// (`PhoneDecisionLink.givesUp`): a cold launch on a slow network can
-    /// take most of that to reach anyone, and a task nobody has by then
-    /// would be jumped to long after anybody tapped anything.
-    private func followTask() async {
-        let began = Date()
-        while let push = pendingTask, !Task.isCancelled {
-            let sources = fleet.runners.map { runner in
-                PhoneDecisionLink.Source(
-                    runner: runner.host.id.uuidString, items: runner.connection.needsYou,
-                    boards: runner.connection.boards,
-                    implicit: runner.connection.fleet.workspaces == nil,
-                    hostRunner: runner.connection.lastDaemon?.runnerId)
-            }
-            let over = PhoneDecisionLink.givesUp(
-                settled: settled, elapsed: Date().timeIntervalSince(began))
-            if let stack = PhoneDecisionLink.find(push, in: sources, waitEnded: over) {
-                pendingTask = nil
-                navigator.go(stack)
+    /// A tapped notification or card (ruling 3, ov-183), taken from
+    /// `FleetView`, which holds it from the moment it arrives, a cold launch
+    /// included. It outranks a relaunch still waiting.
+    private func takeArrival() {
+        guard let destination = pendingDestination else { return }
+        pendingDestination = nil
+        waiting = PhoneWaiting(destination: destination, arrival: .notification)
+    }
+
+    /// What the phone holds now, for the resolver: the runners being talked
+    /// to, and the paired ones nothing is connecting, which a tap is told to
+    /// connect when it names one.
+    private func destinationSources() -> [PhoneDestination.Source] {
+        let everyRunner = FleetSettings.allRunnersAtOnce
+        var sources = fleet.runners.map { runner in
+            let connection = runner.connection
+            return PhoneDestination.Source(
+                host: runner.host.id.uuidString, runnerId: connection.lastDaemon?.runnerId,
+                ready: connection.phase == .connected && connection.hasFleet && connection.lastDaemon != nil,
+                idle: false, fleet: connection.fleet, boardList: connection.boardList,
+                boards: connection.boards)
+        }
+        for host in hosts.hosts where !sources.contains(where: { $0.host == host.id.uuidString }) {
+            sources.append(
+                PhoneDestination.Source(
+                    host: host.id.uuidString, runnerId: nil, ready: false,
+                    idle: !everyRunner && host.id != hosts.selected?.id, fleet: nil))
+        }
+        return sources
+    }
+
+    /// Open what waits, asked again as the runners come up, until it opens
+    /// or the resolver drops it (`DestinationResolver`): a tap waits a minute
+    /// for a runner and its task or pane, a relaunch ten seconds, and neither
+    /// opens late, over something somebody has gone on to read.
+    private func follow() async {
+        while let current = waiting, !Task.isCancelled {
+            let sources = destinationSources()
+            let deadline =
+                current.arrival == .restore
+                ? DestinationResolver.Deadline.restore : DestinationResolver.Deadline.notificationPhone
+            switch DestinationResolver.resolve(
+                current.destination, arrival: current.arrival,
+                in: PhoneDestination.world(sources, last: lastWorkspace),
+                elapsed: Date().timeIntervalSince(current.began), deadline: deadline,
+                interrupted: navigator.moved)
+            {
+            case .wait:
+                break
+            case .connect(let host):
+                // Paired, and nothing is dialing it: dial it, and ask again.
+                hosts.selected = hosts.hosts.first { $0.id.uuidString == host }
+            case .open(let open, let fellBack):
+                let link = PhoneDestination.link(
+                    for: open, fleet: sources.first { $0.host == open.runner.host }?.fleet)
+                if let segment = link.segment, case .workspace(let place)? = link.stack.last {
+                    segment.remember(for: place)
+                }
+                waiting = nil
+                navigator.decided = true
+                if current.arrival == .restore {
+                    // What was kept, whole, while its deepest screen is still
+                    // there: the task a worktree was opened from stays under
+                    // it. Gone, the nearest level that is.
+                    navigator.reopen(fellBack ? link.stack : current.stack ?? link.stack)
+                } else {
+                    navigator.go(link.stack)
+                }
                 return
-            }
-            if over {
-                pendingTask = nil
+            case .stay:
+                // A tap whose subject isn't to be found, or a relaunch somebody
+                // moved past: the app stays where it is, and the kept stack
+                // stays kept.
+                waiting = nil
+                navigator.decided = true
                 return
             }
             try? await Task.sleep(for: .milliseconds(500))
         }
     }
+}
 
-    /// Whether every runner has said what needs you, or won't, and every
-    /// board of every runner answering has been read or failed: all there
-    /// is to look for a decision's task in.
-    private var settled: Bool {
-        PhoneLaunch.canDecide(fleet.needsYouReadings)
-            && fleet.runners.allSatisfy { runner in
-                let connection = runner.connection
-                return connection.boardList.allSatisfy {
-                    connection.boards[$0.id] != nil || connection.unreadBoards.contains($0.id)
-                }
-            }
-    }
+/// A destination waiting for its runner, and how it came: a tapped
+/// notification, or the last run's place on a relaunch.
+struct PhoneWaiting: Identifiable, Equatable {
+    let id = UUID()
+    let destination: Destination
+    let arrival: DestinationResolver.Arrival
+    /// The stack a relaunch kept, whole, for `follow` to reopen when its
+    /// deepest screen is still there.
+    let stack: [PhoneRoute]?
+    let began = Date()
 
-    /// A tapped notification, once a runner's fleet has its terminal: its
-    /// workspace, its task, then the pane (`Fleet.phoneLink`).
-    private func followLink() {
-        guard let id = pendingTerminal else { return }
-        for runner in fleet.runners {
-            guard
-                let link = runner.connection.fleet.phoneLink(
-                    toTerminal: id, runner: runner.host.id.uuidString)
-            else { continue }
-            if let segment = link.segment, case .workspace(let place)? = link.stack.last {
-                segment.remember(for: place)
-            }
-            pendingTerminal = nil
-            navigator.go(link.stack)
-            return
-        }
+    init(destination: Destination, arrival: DestinationResolver.Arrival, stack: [PhoneRoute]? = nil) {
+        self.destination = destination
+        self.arrival = arrival
+        self.stack = stack
     }
 }
 

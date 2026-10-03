@@ -159,7 +159,6 @@ struct DestinationTests {
         // An older reader of the legacy keys still finds the pane.
         let pane = Destination(runner: .init(id: "r1"), place: .terminal("t-1"))
         #expect(pane.userInfo["terminal"] as? String == "t-1")
-        #expect(PushTap(userInfo: pane.userInfo, thread: "t-1") == .terminal("t-1"))
     }
 
     @Test func linksRoundTrip() throws {
@@ -209,7 +208,7 @@ struct DestinationTests {
 
     @Test func theDeadlinesAreTheOnesEachPlatformAlreadyKeeps() {
         #expect(DestinationResolver.Deadline.restore == PhoneLaunch.decideWithin)
-        #expect(DestinationResolver.Deadline.notificationPhone == PhoneDecisionLink.followWithin)
+        #expect(DestinationResolver.Deadline.notificationPhone == 60)
         #expect(DestinationResolver.Deadline.notificationMac == 30)
     }
 }

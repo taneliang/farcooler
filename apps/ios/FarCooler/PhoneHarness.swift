@@ -42,8 +42,7 @@ struct PhoneHarness: View {
     @StateObject private var hosts = RunnerStore()
     @StateObject private var fleet: FleetStore
     @State private var runner: HarnessRunner
-    @State private var pendingTerminal: String?
-    @State private var pendingTask: DecisionPush?
+    @State private var pendingDestination: Destination?
     /// Whether the canned runner has been stood up: its fleet, its list and
     /// its boards. A UI test waits on this (`phone-harness-ready`) before
     /// anything else, rather than on a guess at how long a first launch
@@ -56,11 +55,9 @@ struct PhoneHarness: View {
         _runner = State(initialValue: runner)
         _fleet = StateObject(
             wrappedValue: FleetStore.standIn(on: connection, host: HarnessRunner.host))
-        _pendingTerminal = State(
-            initialValue: UserDefaults.standard.string(forKey: "deep-link"))
-        _pendingTask = State(
-            initialValue: UserDefaults.standard.string(forKey: "push-task")
-                .map { DecisionPush(key: $0, runner: nil) })
+        _pendingDestination = State(
+            initialValue: UserDefaults.standard.string(forKey: "deep-link").map(Self.pane)
+                ?? UserDefaults.standard.string(forKey: "push-task").map(Self.task))
         Self.forgetOnce()
         _ = HarnessTaps.listening
     }
@@ -95,10 +92,19 @@ struct PhoneHarness: View {
 
     private static func forgetOnce() { _ = forgotten }
 
+    /// What a tapped agent notification or card names: a pane, on no runner
+    /// in particular, as a push from an older runner does.
+    private static func pane(_ terminal: String) -> Destination {
+        Destination(place: .terminal(terminal))
+    }
+
+    /// What a tapped decision push names: a task by its key.
+    private static func task(_ key: String) -> Destination {
+        Destination(place: .task(workspace: nil, task: .init(key: key)), question: true)
+    }
+
     var body: some View {
-        PhoneRoot(
-            fleet: fleet, hosts: hosts, pendingTerminal: $pendingTerminal, pendingTask: $pendingTask
-        )
+        PhoneRoot(fleet: fleet, hosts: hosts, pendingDestination: $pendingDestination)
             .overlay(alignment: .topLeading) { snapshotProbe }
             .overlay(alignment: .bottomLeading) { sentProbe }
             // A notification tapped while the app is open: an agent's, by
@@ -106,10 +112,10 @@ struct PhoneHarness: View {
             // decision, by its task. Posted by the UI test as a Darwin
             // notification (`HarnessTaps`).
             .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.agent)) { _ in
-                pendingTerminal = HarnessRunner.agent
+                pendingDestination = Self.pane(HarnessRunner.agent)
             }
             .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.decision)) { _ in
-                pendingTask = DecisionPush(key: "bil-7", runner: nil)
+                pendingDestination = Self.task("bil-7")
             }
             .overlay(alignment: .topTrailing) {
                 if ready {

@@ -199,9 +199,9 @@ private final class ForegroundPresenter: NSObject, UNUserNotificationCenterDeleg
         return subject == visible ? [] : [.banner, .sound]
     }
 
-    /// A tapped notification: its agent's pane, or a decision's task, over
-    /// the screens that lead to it (ruling 3). Handed to `FleetView` through
-    /// `NotificationTaps`, which routes it as it routes a card's link.
+    /// A tapped notification: what it's about, a pane or a task, over the
+    /// screens that lead to it (ruling 3, ov-183). Handed to `FleetView`
+    /// through `NotificationTaps`, which routes it as it routes a card's link.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
@@ -218,7 +218,7 @@ private final class ForegroundPresenter: NSObject, UNUserNotificationCenterDeleg
             return
         }
         guard response.actionIdentifier == UNNotificationDefaultActionIdentifier,
-            let tap = PushTap(userInfo: content.userInfo, thread: content.threadIdentifier)
+            let tap = Destination(userInfo: content.userInfo, thread: content.threadIdentifier)
         else { return }
         await MainActor.run { NotificationTaps.shared.tap = tap }
     }
@@ -228,7 +228,7 @@ private final class ForegroundPresenter: NSObject, UNUserNotificationCenterDeleg
 @MainActor
 final class NotificationTaps: ObservableObject {
     static let shared = NotificationTaps()
-    @Published var tap: PushTap?
+    @Published var tap: Destination?
 }
 
 

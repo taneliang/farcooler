@@ -1870,43 +1870,27 @@ enum PhoneLaunch {
         case open([PhoneRoute])
     }
 
-    /// Where a launch opens, `elapsed` seconds after it began (ruling 4).
+    /// Where a launch opens when there's no saved place to go back to,
+    /// `elapsed` seconds after it began (ruling 4).
     ///
     /// Decided once. A stack somebody already moved, or a notification's
     /// link, wins outright. Past `decideWithin` with a runner still silent,
     /// the launch stays where it is rather than deciding late.
     ///
-    /// **A stack saved by the last run reopens where it was** (ov-66, the
-    /// owner's ruling 1), as the Mac restores its selection: its workspace,
-    /// its task, its worktree, over Needs You, whatever is waiting there.
-    /// Only once every screen in it is still on its runner; one that's gone
-    /// sends the launch back to Needs You, and says nothing about it. A
-    /// screen that can't be answered for yet (a task whose board hasn't been
-    /// read) holds the decision, until `decideWithin`. An empty saved stack
-    /// was Needs You itself, and the rule above decides.
+    /// **A stack saved by the last run isn't decided here** (ov-66's ruling 1,
+    /// ov-182): it reopens where it was whatever is waiting on Needs You, as a
+    /// `Destination` held for its runner by `DestinationResolver`, which
+    /// opens the nearest level that's still there when the screen it names is
+    /// gone. An empty saved stack was Needs You itself, and the rule above
+    /// decides.
     static func decide(
         _ runners: [Reading], elapsed: TimeInterval, moved: Bool, linking: Bool,
-        itemCount: Int, last: PhoneWorkspace?, exists: (PhoneWorkspace) -> Bool,
-        saved: [PhoneRoute] = [], presence: (PhoneRoute) -> Presence = { _ in .here }
+        itemCount: Int, last: PhoneWorkspace?, exists: (PhoneWorkspace) -> Bool
     ) -> Decision {
         if moved || linking { return .stay }
         let late: Decision = elapsed >= decideWithin ? .stay : .wait
         guard canDecide(runners) else { return late }
-        guard !saved.isEmpty else {
-            return .open(stack(itemCount: itemCount, last: last, exists: exists))
-        }
-        let found = saved.map(presence)
-        if found.contains(.gone) { return .stay }
-        if found.contains(.unknown) { return late }
-        return .open(saved)
-    }
-
-    /// Whether one screen of a saved stack is still on its runner.
-    enum Presence: Equatable, Sendable {
-        case here
-        case gone
-        /// Not known yet: its board hasn't been read.
-        case unknown
+        return .open(stack(itemCount: itemCount, last: last, exists: exists))
     }
 
     /// Where the stack is kept between runs, as `encode` writes it.
@@ -1971,39 +1955,6 @@ extension Fleet {
             return PhoneLink(stack: stack, segment: nil)
         }
         return nil
-    }
-}
-
-/// What a tapped notification asks for (ov-66, the owner's ruling 3).
-///
-/// A decision names a task by its key and no terminal: the relay sends
-/// `kind: "decision"` and `task: "bil-7"` (`services/relay/src/push.ts`,
-/// `Payload.kind` and `.task`). Anything else is about an agent, by its
-/// terminal: the push's `terminal`, else the thread a banner this app
-/// posted itself was filed under (`Notifier.report`), which is the
-/// terminal's id.
-///
-/// A task notice (`kind: "task"`, ov-94) opens its task the way a decision
-/// does. Its thread is `t:<runner>:<key>`, which is no terminal, so a thread
-/// spelled as a notice id (`t:` or `a:`) is never read as one.
-enum PushTap: Equatable, Sendable {
-    case terminal(String)
-    case task(DecisionPush)
-
-    init?(userInfo: [AnyHashable: Any], thread: String) {
-        let kind = userInfo["kind"] as? String
-        if kind == "decision" || kind == "task",
-            let key = userInfo["task"] as? String, !key.isEmpty
-        {
-            let runner = (userInfo["runner"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            self = .task(DecisionPush(key: key, runner: runner))
-            return
-        }
-        let named = (userInfo["terminal"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        let threaded = thread.hasPrefix("t:") || thread.hasPrefix("a:") ? "" : thread
-        let terminal = named ?? threaded
-        guard !terminal.isEmpty else { return nil }
-        self = .terminal(terminal)
     }
 }
 
@@ -2084,17 +2035,6 @@ enum PhoneDecisionLink {
             return [.workspace(place), .task(place, task: row.id)]
         }
         return nil
-    }
-
-    /// How long a push waits for its task at most: a cold launch on a slow
-    /// network may take most of a minute to reach any runner at all.
-    static let followWithin: TimeInterval = 60
-
-    /// Whether to stop looking and leave the phone on Needs You: once
-    /// every runner has said what needs you and read its boards (`settled`)
-    /// and the task still isn't found, or past `followWithin`.
-    static func givesUp(settled: Bool, elapsed: TimeInterval) -> Bool {
-        settled || elapsed >= followWithin
     }
 }
 

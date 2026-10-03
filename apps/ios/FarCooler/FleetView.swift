@@ -37,21 +37,17 @@ struct FleetView: View {
     /// argument any more because there is no one runner this screen is about.
     @ObservedObject var fleet: FleetStore
 
-    /// The terminal a tapped Live Activity card asked for, held until a fleet
-    /// arrives that has it.
+    /// What a tapped notification, or a Live Activity card, is about, held
+    /// until `PhoneRoot` takes it up (ov-183).
     ///
-    /// A card tapped at COLD LAUNCH delivers its URL before the first
-    /// connection has produced a fleet, so looking the id up as it arrives
-    /// finds nothing and the tap opens the app onto whatever it would have
-    /// opened onto anyway. That is indistinguishable from a card that ignored
-    /// the tap, which is the failure this whole task exists to remove — so the
-    /// id is remembered instead, and the shell picks it up the moment there is
-    /// a fleet to look in. See `dropUnknownTerminal`.
-    @State private var pendingTerminal: String?
-
-    /// A tapped decision push's task, by its key, held for `PhoneRoot` to
-    /// find on whichever runner has it (ruling 3).
-    @State private var pendingTask: DecisionPush?
+    /// A tap at COLD LAUNCH delivers its destination before the first
+    /// connection has produced a fleet, so looking it up as it arrives finds
+    /// nothing and the tap opens the app onto whatever it would have opened
+    /// onto anyway. That is indistinguishable from a tap that was ignored, which
+    /// is the failure this exists to remove: it is remembered here, and
+    /// `PhoneRoot` holds it for its runner (`DestinationResolver`), then
+    /// opens it, or drops it quietly when it's gone.
+    @State private var pendingDestination: Destination?
 
     /// Whether to offer a way off the spinner yet. See `waitedLongEnough`.
     @State private var stalled = false
@@ -144,40 +140,22 @@ struct FleetView: View {
             // its own, so a canary build cannot be handed a stable link in the
             // first place.
             .onOpenURL { url in
-                guard url.host() == "terminal" else { return }
-                let terminal = url.lastPathComponent
-                guard !terminal.isEmpty else { return }
-                pendingTerminal = terminal
-                // Not resolved here. `ShellScreen` derives the tab this id is
-                // from the fleet it already holds and honors it on the next
-                // body pass, which is the same code path a cold launch takes
-                // once its first fleet lands. See `dropUnknownTerminal`.
-                dropUnknownTerminal()
+                // Any scheme: iOS only hands over the ones this app registered.
+                // The bare `terminal/<id>` form every card has carried still
+                // reads, and so does one that names its runner.
+                guard let destination = Destination(url: url) else { return }
+                pendingDestination = destination
             }
-            // The runner has answered and does not have it, so it is never
-            // coming. Watched on the fleet's own generation rather than on
-            // `hasFleet` alone, because the pane a card names can also be
-            // stopped between the tap and the answer.
-            // Any runner's poll is a fresh answer to "does anybody have this
-            // pane". `entries` is republished on every one of them.
-            // A tapped notification: an agent's, by its terminal, the way a
-            // card's link arrives; a decision's, by its task (ruling 3).
+            // A tapped notification: what it's about, by the destination it
+            // carries or by the push's own spelling of it (`Destination`).
             // Published by the notification center's delegate, which is
             // there before this view is, so a tap that launched the app is
             // still waiting here when it appears.
             .onReceive(NotificationTaps.shared.$tap) { tap in
                 guard let tap else { return }
                 NotificationTaps.shared.tap = nil
-                switch tap {
-                case .terminal(let terminal):
-                    pendingTerminal = terminal
-                    dropUnknownTerminal()
-                case .task(let push):
-                    pendingTask = push
-                }
+                pendingDestination = tap
             }
-            .onChange(of: fleet.entries.count) { _, _ in dropUnknownTerminal() }
-            .onChange(of: fleet.hasFleet) { _, _ in dropUnknownTerminal() }
     }
 
     /// Two branches, and the one place a `NavigationStack` is still declared.
@@ -327,52 +305,6 @@ struct FleetView: View {
         .task { await waitedLongEnough() }
     }
 
-    /// Hand the shell the terminal a card asked for, if this runner has it.
-    ///
-    /// The two-phase dance survives the shell unchanged, because what made it
-    /// necessary has not changed: a card tapped at COLD LAUNCH delivers its URL
-    /// before the first connection has produced a fleet, so an id looked up as
-    /// it arrives finds nothing and the tap opens the app onto whatever it
-    /// would have opened onto anyway — indistinguishable from a card that
-    /// ignored the tap.
-    ///
-    /// What changed is where the second phase lives. It used to be
-    /// `openRequested()`, run again on `hasFleet`, resolving the id against the
-    /// fleet and then choosing between a push, a route replacement and a
-    /// retarget — three answers, because there were three shapes a screen could
-    /// be in. There is nothing to push any more, and every pane on this runner
-    /// is one position in one shell: `ShellScreen` reads `pendingTerminal` as a
-    /// DERIVED value, the tab id that terminal is once the fleet has one, so
-    /// "run it again when a fleet arrives" is simply that derivation
-    /// re-evaluating. The shell honors it on appearance as well as on change,
-    /// which covers the cold-launch case where the fleet and the shell arrive
-    /// in the same turn and there is no change to observe. See
-    /// `ShellScreen.requestedTab` and `ShellRootView.honorRequest`.
-    ///
-    /// The id is held HERE rather than inside the shell because this is the
-    /// view that receives the URL: `.onOpenURL` has to be attached above a
-    /// screen that only exists once a fleet does, or a card tapped at a cold
-    /// launch would be delivered to nothing.
-    ///
-    /// Dropped, and not kept waiting, once the runner has answered without it:
-    /// the pane is gone, or the card was about another runner entirely — the
-    /// URL carries an id and no host, so there is nothing here to switch to.
-    /// Held open, a pane created much later would be jumped to long after
-    /// anybody tapped anything.
-    private func dropUnknownTerminal() {
-        // Across every runner, and only once every one of them has answered.
-        // A card carries a terminal id and no host, so "no runner has it" is
-        // the only form the answer can take — and a runner still connecting has
-        // not answered, so dropping the link on the strength of the two that
-        // have would throw away a card about a pane on the third.
-        guard let id = pendingTerminal, !fleet.runners.isEmpty,
-            fleet.runners.allSatisfy({ $0.connection.hasFleet })
-        else { return }
-        let all = fleet.entries.flatMap(\.worktree.terminals)
-        guard !all.contains(where: { $0.id == id }) else { return }
-        pendingTerminal = nil
-    }
-
     /// Every screen shown BEFORE a connection exists, wrapped in the ways out of
     /// it.
     ///
@@ -444,8 +376,7 @@ struct FleetView: View {
     /// worktree pushed over it; a worktree is the shell scoped to that
     /// worktree. See `PhoneRoot`.
     private var connected: some View {
-        PhoneRoot(
-            fleet: fleet, hosts: store, pendingTerminal: $pendingTerminal, pendingTask: $pendingTask)
+        PhoneRoot(fleet: fleet, hosts: store, pendingDestination: $pendingDestination)
     }
 
     // MARK: - What used to stand in front of a runner
