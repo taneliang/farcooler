@@ -54,6 +54,13 @@ struct DestinationOpen: Equatable, Sendable {
         var task: String
         var workspace: String
 
+        /// The memberwise init, spelled out: `init?(show:)` below would
+        /// otherwise take it away.
+        init(task: String, workspace: String) {
+            self.task = task
+            self.workspace = workspace
+        }
+
         /// Nil for a read that names no task, or one under another key or,
         /// when `repository` is said, in another repository.
         init?(show data: Data, key: String, repository: String? = nil) {
