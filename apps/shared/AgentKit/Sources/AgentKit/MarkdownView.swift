@@ -87,7 +87,11 @@ public enum Markdown {
             paragraph = []
         }
 
-        var lines = text.components(separatedBy: .newlines)[...]
+        // `.newlines` counts the \r and the \n of a Windows line ending as
+        // two separators, which read one break as a blank line between
+        // paragraphs (ov-198). Android's `split("\n")` never did.
+        var lines = text.replacingOccurrences(of: "\r\n", with: "\n")
+            .components(separatedBy: .newlines)[...]
         while let line = lines.first {
             lines = lines.dropFirst()
             let trimmed = line.trimmingCharacters(in: .whitespaces)

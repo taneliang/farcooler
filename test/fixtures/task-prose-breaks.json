@@ -1,0 +1,158 @@
+{
+  "_comment": [
+    "How a task's text (intent, notes, answers) splits into blocks, ov-198.",
+    "Read by AgentKit (TaskProseBreaksTests) and Kotlin (TaskProseBreaksTest).",
+    "A single newline is a line break inside its paragraph; a blank line starts a new one.",
+    "blocks: what Markdown.blocks returns. plain: each paragraph's words without markup, in order."
+  ],
+  "cases": [
+    {
+      "case": "a single newline breaks the line and stays in the paragraph",
+      "text": "Owner, 3 Oct, correcting the memo: runner terminals in ~ only doesn't work.\nWork proxies run via convenience scripts that live in the repo.\nNew direction: terminals stay available in every worktree.",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "text": "Owner, 3 Oct, correcting the memo: runner terminals in ~ only doesn't work.\nWork proxies run via convenience scripts that live in the repo.\nNew direction: terminals stay available in every worktree."
+        }
+      ],
+      "plain": [
+        "Owner, 3 Oct, correcting the memo: runner terminals in ~ only doesn't work.\nWork proxies run via convenience scripts that live in the repo.\nNew direction: terminals stay available in every worktree."
+      ]
+    },
+    {
+      "case": "a blank line makes a new paragraph",
+      "text": "Memo v2 accepts the correction.\n\nRecommendation: a Keep Running flag on any terminal.\n\n\nQuestions put to the owner.",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "text": "Memo v2 accepts the correction."
+        },
+        {
+          "kind": "paragraph",
+          "text": "Recommendation: a Keep Running flag on any terminal."
+        },
+        {
+          "kind": "paragraph",
+          "text": "Questions put to the owner."
+        }
+      ],
+      "plain": [
+        "Memo v2 accepts the correction.",
+        "Recommendation: a Keep Running flag on any terminal.",
+        "Questions put to the owner."
+      ]
+    },
+    {
+      "case": "a Windows line ending is one break, not a paragraph",
+      "text": "Pasted from a Windows editor.\r\nStill the same paragraph.\r\n\r\nA second paragraph.",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "text": "Pasted from a Windows editor.\nStill the same paragraph."
+        },
+        {
+          "kind": "paragraph",
+          "text": "A second paragraph."
+        }
+      ],
+      "plain": [
+        "Pasted from a Windows editor.\nStill the same paragraph.",
+        "A second paragraph."
+      ]
+    },
+    {
+      "case": "lists right under a line stay lists",
+      "text": "Phases:\n1. Keep Running\n2. Run in review\n- Mac: a Services group\n  - per repository",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "text": "Phases:"
+        },
+        {
+          "kind": "numbered",
+          "number": "1",
+          "text": "Keep Running",
+          "depth": 0
+        },
+        {
+          "kind": "numbered",
+          "number": "2",
+          "text": "Run in review",
+          "depth": 0
+        },
+        {
+          "kind": "bullet",
+          "text": "Mac: a Services group",
+          "depth": 0
+        },
+        {
+          "kind": "bullet",
+          "text": "per repository",
+          "depth": 1
+        }
+      ],
+      "plain": [
+        "Phases:"
+      ]
+    },
+    {
+      "case": "a fenced block keeps its own lines",
+      "text": "Run it:\n```sh\nfarcooler task show ov-198\n\nfarcooler task list\n```\nThen look.",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "text": "Run it:"
+        },
+        {
+          "kind": "code",
+          "text": "farcooler task show ov-198\n\nfarcooler task list",
+          "language": "sh"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Then look."
+        }
+      ],
+      "plain": [
+        "Run it:",
+        "Then look."
+      ]
+    },
+    {
+      "case": "inline code and links are unchanged across a break",
+      "text": "Findings: `core/src/ports.rs` and [the spec](https://example.com/spec).\nMail [the owner](mailto:owner@example.com) with **one** question.",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "text": "Findings: `core/src/ports.rs` and [the spec](https://example.com/spec).\nMail [the owner](mailto:owner@example.com) with **one** question."
+        }
+      ],
+      "plain": [
+        "Findings: core/src/ports.rs and the spec.\nMail the owner with one question."
+      ]
+    },
+    {
+      "case": "a heading still ends the paragraph above it",
+      "text": "Recommendation first.\n## Findings\nThe daemon already detects listening ports.\nRemoving a worktree stops its terminals.",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "text": "Recommendation first."
+        },
+        {
+          "kind": "heading",
+          "level": 2,
+          "text": "Findings"
+        },
+        {
+          "kind": "paragraph",
+          "text": "The daemon already detects listening ports.\nRemoving a worktree stops its terminals."
+        }
+      ],
+      "plain": [
+        "Recommendation first.",
+        "The daemon already detects listening ports.\nRemoving a worktree stops its terminals."
+      ]
+    }
+  ]
+}
