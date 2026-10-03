@@ -690,7 +690,7 @@ mod tests {
         }
         let link = dir.join("git");
         std::os::unix::fs::symlink(dir.join("1/git"), &link).unwrap();
-        let resolved = Resolved::of(&[link.clone()]);
+        let resolved = Resolved::of(std::slice::from_ref(&link));
         assert!(resolved.unchanged());
         std::fs::remove_file(&link).unwrap();
         std::os::unix::fs::symlink(dir.join("2/git"), &link).unwrap();
