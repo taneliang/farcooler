@@ -156,50 +156,66 @@ def compare(baseline, current):
 def capability_problems(scope_table=None, cap_table=None):
     """Methods the daemon dispatches that no capability accounts for.
 
-    Reads the daemon's own scope table, which is the list of methods that
-    actually exist, and checks each against the capability table. A method with
-    no capability cannot be asked for by a client that checks first, so it would
-    ship as a feature nobody can discover.
+    Every method is one row of `methods!` in the protocol crate,
+    `Variant = "name" => CAPABILITY,`, and the daemon's `required_scope` reads
+    `Method::parse`, so the compiler already refuses a row without a
+    capability, or naming a constant `capability` lacks. What it does not
+    refuse, and this does:
 
-    Both tables can be passed in, so the self-test can hand it a method the
-    real tables do not have.
+      - a capability missing from `capability::ALL`, which the daemon
+        advertises from: its methods exist, and no client can discover them
+      - one wire name on two rows, where the second is only a warning
+      - a `required_scope` that names methods itself again instead of going
+        through `Method::parse`, so a method can be dispatched outside the
+        table, which is the drift the table was made to end
+
+    Both files can be passed in, so the self-test can hand it rows the real
+    tables do not have.
     """
     if scope_table is None:
         scope_table = (ROOT / "crates" / "daemon" / "src" / "rpc.rs").read_text()
     if cap_table is None:
         cap_table = (ROOT / "crates" / "protocol" / "src" / "lib.rs").read_text()
 
-    # Method names are string literals in `required_scope`'s match arms. Digits
-    # included: `v2.anything` or `host.get_v2` is as much a method as any other,
-    # and a pattern without 0-9 simply never saw one.
-    method = r'"([a-z0-9_]+\.[a-z0-9_.]+)"'
+    # The invocation, not the macro_rules! that defines it.
+    invocation = re.search(r"^\s*methods!\s*\{(.*?)^\s*\}", cap_table, re.M | re.S)
+    # Digits included: `v2.anything` or `host.get_v2` is as much a method as
+    # any other, and a pattern without 0-9 simply never saw one.
+    rows = re.findall(r'(\w+)\s*=\s*"([a-z0-9_]+\.[a-z0-9_.]+)"\s*=>\s*(\w+)\s*,', invocation.group(1)) if invocation else []
+    module = re.search(r"pub mod capability \{(.*?)\n\}", cap_table, re.S)
+    constants = set(re.findall(r"pub const ([A-Z][A-Z0-9_]*): &str\b", module.group(1))) if module else set()
+    advertised = re.search(r"pub const ALL: &\[&str\]\s*=\s*&\[(.*?)\]", module.group(1), re.S) if module else None
     start = scope_table.find("fn required_scope")
     end = scope_table.find("\n}", start)
-    methods = set(re.findall(method, scope_table[start:end])) if start >= 0 else set()
-
-    cap_start = cap_table.find("pub fn for_method")
-    cap_end = cap_table.find("\n    }", cap_start)
-    cap_body = cap_table[cap_start:cap_end] if cap_start >= 0 else ""
-    covered = set(re.findall(method, cap_body))
-    prefixes = re.findall(r'm\.starts_with\("([a-z0-9_]+\.)"\)', cap_body)
+    scope_body = scope_table[start:end] if start >= 0 else ""
 
     # A slice that found nothing checks nothing and would pass. Say so instead.
-    if not methods or not covered:
+    if not rows or not constants or not advertised or not scope_body:
         return [
-            "found no methods in `required_scope` or no capabilities in "
-            "`capability::for_method`; the tables moved and this check went blind."
+            "found no methods in `methods!`, no capabilities in `capability`, no "
+            "`capability::ALL` or no `required_scope`; the tables moved and this check went blind."
         ]
 
-    missing = sorted(
-        m
-        for m in methods - covered
-        if not any(m.startswith(p) for p in prefixes)
-    )
-    return [
-        f"`{m}` is dispatched by the daemon but names no capability. "
-        f"Add it to `capability::for_method`, or a client cannot discover it."
-        for m in missing
-    ]
+    problems = []
+    if "Method::parse" not in scope_body or re.search(r'"[a-z0-9_]+\.[a-z0-9_.]+"', scope_body):
+        problems.append(
+            "`required_scope` does not read `Method::parse`, so the daemon can dispatch a method "
+            "outside `methods!` that names no capability."
+        )
+    listed = set(re.findall(r"\b[A-Z][A-Z0-9_]*\b", advertised.group(1)))
+    seen = set()
+    for variant, name, capability in rows:
+        if name in seen:
+            problems.append(f"`{name}` is on two rows of `methods!`; the second is never reached.")
+        seen.add(name)
+        if capability not in constants:
+            problems.append(f"`{name}` names capability `{capability}`, which `capability` does not declare.")
+        elif capability not in listed:
+            problems.append(
+                f"`{name}` belongs to `{capability}`, which is not in `capability::ALL`, "
+                f"so no client can discover it."
+            )
+    return problems
 
 
 def workflow_jobs(text):
@@ -435,34 +451,51 @@ def self_test():
             f"but the parser found {parsed}; some shape is invisible to it"
         )
 
-    # The capability check, which had no test at all. A method whose name has a
-    # digit was never extracted from the scope table, so it could ship with no
-    # capability and pass.
+    # The capability check. Fixtures in the shape of the real tables: a method
+    # whose capability is undeclared, one whose capability is never advertised,
+    # one name on two rows, and digits in names, which a pattern without 0-9
+    # once never saw.
     scope_fixture = (
         "fn required_scope(method: &str) -> Option<Scope> {\n"
-        "    Some(match method {\n"
-        '        "host.get" | "zzz.brand_new" | "v2.brand_new" | "host.get_v2" => Scope::Read,\n'
-        "        _ => return None,\n"
-        "    })\n"
+        "    Method::parse(method).map(scope_of)\n"
         "}\n"
     )
     cap_fixture = (
-        "    pub fn for_method(method: &str) -> Option<&'static str> {\n"
-        "        Some(match method {\n"
-        '            "host.get" => WORKTREES,\n'
-        "            _ => return None,\n"
-        "        })\n"
+        "pub mod capability {\n"
+        '    pub const WORKTREES: &str = "workspaces";\n'
+        '    pub const HIDDEN: &str = "hidden";\n'
+        "    pub const ALL: &[&str] =\n"
+        "        &[\n"
+        "            WORKTREES,\n"
+        "        ];\n"
+        "}\n"
+        "pub mod method {\n"
+        "    macro_rules! methods {\n"
+        "        ($($variant:ident = $name:literal => $capability:ident,)*) => {};\n"
         "    }\n"
+        "    methods! {\n"
+        '        HostGet = "host.get" => WORKTREES,\n'
+        '        HostGetV2 = "host.get_v2" => MISSING,\n'
+        '        V2BrandNew = "v2.brand_new" => HIDDEN,\n'
+        '        HostGetAgain = "host.get" => WORKTREES,\n'
+        "    }\n"
+        "}\n"
     )
     flagged = capability_problems(scope_fixture, cap_fixture)
-    for method in ["zzz.brand_new", "v2.brand_new", "host.get_v2"]:
+    for method, why in [("host.get_v2", "does not declare"), ("v2.brand_new", "not in `capability::ALL`"), ("host.get", "two rows")]:
         count += 1
-        if not any(f"`{method}`" in p for p in flagged):
-            failures.append(f"a method with no capability, {method}, was not flagged: {flagged}")
+        if not any(f"`{method}`" in p and why in p for p in flagged):
+            failures.append(f"{method} ({why}) was not flagged: {flagged}")
     count += 1
-    if any("`host.get`" in p for p in flagged):
-        failures.append(f"host.get has a capability and was flagged anyway: {flagged}")
-
+    clean = cap_fixture.replace('        HostGetV2 = "host.get_v2" => MISSING,\n', "").replace(
+        '        V2BrandNew = "v2.brand_new" => HIDDEN,\n', "").replace('        HostGetAgain = "host.get" => WORKTREES,\n', "")
+    if capability_problems(scope_fixture, clean):
+        failures.append(f"a clean table was flagged: {capability_problems(scope_fixture, clean)}")
+    # A scope table that names methods itself again bypasses the table.
+    count += 1
+    hand_typed = 'fn required_scope(method: &str) -> Option<Scope> {\n    match method { "host.get" => Some(Scope::Read), _ => None }\n}\n'
+    if not capability_problems(hand_typed, clean):
+        failures.append("a required_scope that matches method names itself passed")
     # Tables the slicing cannot find must fail, not check nothing and pass.
     count += 1
     if not capability_problems("", ""):
