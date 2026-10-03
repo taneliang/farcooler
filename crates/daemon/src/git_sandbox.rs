@@ -160,7 +160,7 @@ fn unavailable(why: &str) {
 }
 
 /// Whether `path` starts with `#!`.
-fn is_script(path: &Path) -> bool {
+pub(crate) fn is_script(path: &Path) -> bool {
     use std::io::Read;
     let mut head = [0u8; 2];
     std::fs::File::open(path).and_then(|mut f| f.read_exact(&mut head)).is_ok() && head == *b"#!"
@@ -194,6 +194,24 @@ pub fn allowlist<P: AsRef<Path>>(programs: &[P]) -> Vec<PathBuf> {
         }
     }
     out
+}
+
+/// Paths a resolve read, each with the file it resolved to then, so a cached
+/// allowlist can tell it's stale: a Homebrew upgrade repoints
+/// `/opt/homebrew/bin/git` at a new Cellar directory, and the old one may
+/// stay behind, so "the old path still exists" isn't enough.
+#[derive(Debug, Default)]
+pub struct Resolved(Vec<(PathBuf, Option<PathBuf>)>);
+
+impl Resolved {
+    pub fn of(paths: &[PathBuf]) -> Resolved {
+        Resolved(paths.iter().map(|p| (p.clone(), p.canonicalize().ok())).collect())
+    }
+
+    /// Whether every path still resolves where it did.
+    pub fn unchanged(&self) -> bool {
+        self.0.iter().all(|(path, then)| path.canonicalize().ok() == *then)
+    }
 }
 
 /// The real git behind `found`: `<found --exec-path>/git` with its symlinks
@@ -252,7 +270,7 @@ pub fn on_path(name: &str, path: &OsStr) -> Option<PathBuf> {
         .find(|p| is_executable(p))
 }
 
-fn is_executable(path: &Path) -> bool {
+pub(crate) fn is_executable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
@@ -654,6 +672,24 @@ mod tests {
         std::os::unix::fs::symlink(&real, &link).unwrap();
         let list = allowlist(&[link.clone(), dir.join("absent"), real.clone()]);
         assert_eq!(list, [link, real]);
+    }
+
+    /// A repointed symlink is a change; the same target is not.
+    #[test]
+    fn a_resolve_is_stale_once_a_symlink_points_elsewhere() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path().canonicalize().unwrap();
+        for v in ["1", "2"] {
+            std::fs::create_dir(dir.join(v)).unwrap();
+            std::fs::write(dir.join(v).join("git"), "").unwrap();
+        }
+        let link = dir.join("git");
+        std::os::unix::fs::symlink(dir.join("1/git"), &link).unwrap();
+        let resolved = Resolved::of(&[link.clone()]);
+        assert!(resolved.unchanged());
+        std::fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(dir.join("2/git"), &link).unwrap();
+        assert!(!resolved.unchanged(), "the old Cellar path is still there, and stale");
     }
 
     /// A script can't run without its interpreter, and no interpreter is

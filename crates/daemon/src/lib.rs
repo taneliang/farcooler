@@ -11,6 +11,7 @@ pub mod foreground;
 pub mod fs_watch;
 pub mod git;
 pub mod git_guard;
+pub mod git_lfs;
 pub mod git_sandbox;
 pub mod hook_asks;
 pub mod hook_ingress;

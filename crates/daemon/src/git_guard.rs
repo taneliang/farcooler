@@ -45,16 +45,16 @@
 //! - Every config hook gets `hook.<name>.enabled=false`. A hook from the
 //!   user's own config is turned off too, like the hooks directory is.
 //! - Every filter, whoever configured it, gets `clean`, `smudge` and
-//!   `process` emptied and `required=false`. That includes the user's own
-//!   git-lfs. git starts a filter with arguments (`git-lfs filter-process`)
-//!   through `sh -c`, and the exec allowlist (`crate::git_sandbox`) never
-//!   allows a shell, so not even a git-lfs at a trusted absolute path could
-//!   run; left configured, a `required` filter would fail the call instead.
-//!   Emptied, git reads the file as it is. What that changes: a worktree the
-//!   daemon creates holds LFS pointer files, not their content (the agent
-//!   runs `git lfs pull` itself), and an LFS file whose content was fetched
-//!   shows as changed once its mtime moves. It also closes git-lfs's own
-//!   reach: custom transfer agents named in the repository's config.
+//!   `process` emptied and `required=false`. git starts a filter with
+//!   arguments through `sh -c`, and the exec allowlist (`crate::git_sandbox`)
+//!   never allows a shell; left configured, a `required` filter would fail
+//!   the call instead. Emptied, git reads the file as it is.
+//! - Except `lfs`, which is in the fixed set: `process` is the daemon's own
+//!   `farcooler-lfs-filter`, and `clean`, `smudge` and `required` are off,
+//!   whoever configured them (`crate::git_lfs`, which says why not git-lfs).
+//!   So a worktree the daemon makes gets the content of every LFS file whose
+//!   object is in the local store, and review compares a hydrated file by its
+//!   pointer, as git-lfs would.
 //!
 //! **Passed on a diff** (`args`): `--no-ext-diff --no-textconv`. These are
 //! also what keeps the patch parseable at all; a user whose global config
@@ -162,9 +162,11 @@ pub fn args<'a>(args: &[&'a str]) -> Vec<&'a str> {
     out
 }
 
-/// [`FIXED`] as pins.
+/// [`FIXED`] as pins, and `filter.lfs` (`crate::git_lfs::pins`).
 pub fn fixed() -> Vec<Pin> {
-    FIXED.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect()
+    let mut pins: Vec<Pin> = FIXED.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect();
+    pins.extend(crate::git_lfs::pins());
+    pins
 }
 
 /// Strip every inherited `GIT_` variable from `cmd`, then give it `pins` as
@@ -223,7 +225,8 @@ pub fn pin_work_tree(cmd: &mut std::process::Command, cwd: &std::path::Path) {
 }
 
 /// The by-name pins for what `git config` printed for [`LISTING`]: every
-/// config hook off, and every filter, whoever configured it, emptied.
+/// config hook off, and every filter, whoever configured it, emptied. All but
+/// `lfs`, which [`fixed`] pins.
 ///
 /// The listing is `scope NUL key LF value NUL` per entry, or `scope NUL key
 /// NUL` for a key written with no value at all.
@@ -246,6 +249,9 @@ pub fn pins_from(listing: &[u8]) -> Vec<Pin> {
         let (section, name) = (&key[..first], &key[first + 1..last]);
         let seen = match section {
             b"hook" => &mut hooks,
+            // `lfs` is in the fixed set, pinned to the daemon's own filter;
+            // emptied here, after it, it would be off again.
+            b"filter" if name == b"lfs" => continue,
             b"filter" => &mut filters,
             _ => continue,
         };
@@ -305,26 +311,44 @@ mod tests {
         );
     }
 
+    /// `lfs` is left to [`fixed`]: emptied here, after it, the daemon's own
+    /// filter would be off again.
     #[test]
-    fn every_filter_is_emptied_whoever_wrote_it_lfs_included() {
+    fn every_filter_but_lfs_is_emptied_whoever_wrote_it() {
         let listing = b"global\0filter.lfs.clean\ngit-lfs clean -- %f\0\
                         global\0filter.lfs.process\ngit-lfs filter-process\0\
                         global\0filter.lfs.required\0\
                         local\0filter.lfs.process\n./evil\0\
+                        local\0filter.LFS.process\n./evil\0\
                         worktree\0filter.x.clean\n./evil\0";
         assert_eq!(
             pins_from(listing),
             [
-                pin("filter.lfs.clean", ""),
-                pin("filter.lfs.smudge", ""),
-                pin("filter.lfs.process", ""),
-                pin("filter.lfs.required", "false"),
+                pin("filter.LFS.clean", ""),
+                pin("filter.LFS.smudge", ""),
+                pin("filter.LFS.process", ""),
+                pin("filter.LFS.required", "false"),
                 pin("filter.x.clean", ""),
                 pin("filter.x.smudge", ""),
                 pin("filter.x.process", ""),
                 pin("filter.x.required", "false"),
             ]
         );
+    }
+
+    /// The fixed set ends with `filter.lfs`, which every listing's pins come
+    /// after and never name.
+    #[test]
+    fn the_fixed_set_pins_lfs_to_the_daemons_own_filter_or_off() {
+        let pins = fixed();
+        let get = |k: &str| pins.iter().rev().find(|(key, _)| key == k).map(|(_, v)| v.clone());
+        let process = get("filter.lfs.process").unwrap();
+        assert!(process == crate::git_lfs::NAME || process.is_empty(), "{process:?}");
+        assert_eq!(process.is_empty(), crate::git_lfs::helper().is_none());
+        for var in ["clean", "smudge"] {
+            assert_eq!(get(&format!("filter.lfs.{var}")).as_deref(), Some(OsStr::new("")));
+        }
+        assert_eq!(get("filter.lfs.required").as_deref(), Some(OsStr::new("false")));
     }
 
     #[test]

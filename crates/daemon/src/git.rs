@@ -132,19 +132,23 @@ impl Launch {
 ///
 /// The program is the real git behind the one found (`git_sandbox::real_git`;
 /// on a Mac that skips the `/usr/bin/git` shim), and the allowlist is that
-/// git and the one found. Resolved once, and again only if the program is
-/// gone (an upgrade moved it).
+/// git, the one found, and the daemon's LFS filter (`crate::git_lfs`).
+/// Resolved once, and again when the program is gone or the git found now
+/// resolves elsewhere (`brew upgrade git` moves the Cellar path its symlink
+/// names, and may leave the old one behind).
 pub fn git_launch() -> Result<Arc<Launch>> {
-    static CACHE: Mutex<Option<Arc<Launch>>> = Mutex::new(None);
+    static CACHE: Mutex<Option<(Arc<Launch>, crate::git_sandbox::Resolved)>> = Mutex::new(None);
     let mut cache = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(launch) = cache.as_ref().filter(|l| l.program.exists()) {
+    if let Some((launch, _)) = cache.as_ref().filter(|(l, r)| l.program.exists() && r.unchanged()) {
         return Ok(launch.clone());
     }
     let found = PathBuf::from(absolute_git()?);
     let program = crate::git_sandbox::real_git(&found);
-    let sandbox = crate::git_sandbox::Sandbox::new(&program, crate::git_sandbox::allowlist(&[&program, &found]));
+    let mut programs = vec![program.clone(), found.clone()];
+    programs.extend(crate::git_lfs::helper().map(|h| h.program.clone()));
+    let sandbox = crate::git_sandbox::Sandbox::new(&program, crate::git_sandbox::allowlist(&programs));
     let launch = Arc::new(Launch { program, sandbox });
-    *cache = Some(launch.clone());
+    *cache = Some((launch.clone(), crate::git_sandbox::Resolved::of(&[found])));
     Ok(launch)
 }
 
@@ -152,26 +156,47 @@ pub fn git_launch() -> Result<Arc<Launch>> {
 /// it's handed (`git remote -v`, `git config`, and `ssh -G <host>` for a
 /// remote URL's host alias), and on a Mac `/usr/bin/security`, which reads
 /// gh's token from the login keychain. `None` when there's no gh, or no git.
+///
+/// gh is started by the path found, not the one it resolves to: a multicall
+/// shim (mise's, snap's) dispatches on `argv[0]`, and started as itself it
+/// reads `pr list` as its own command. Both paths are on the list. Such a
+/// shim starts the real gh, which isn't, so it still fails there, closed;
+/// the daemon says so once.
+///
+/// Resolved again when any of gh, git or ssh found on the `PATH` now
+/// resolves elsewhere, or git's own launch did: an upgrade that moves a
+/// Cellar path would otherwise leave gh unable to start the new git.
 pub fn gh_launch() -> Option<Arc<Launch>> {
-    static CACHE: Mutex<Option<Arc<Launch>>> = Mutex::new(None);
+    type Cached = (Arc<Launch>, Arc<Launch>, crate::git_sandbox::Resolved);
+    static CACHE: Mutex<Option<Cached>> = Mutex::new(None);
+    let git = git_launch().ok()?;
     let mut cache = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(launch) = cache.as_ref().filter(|l| l.program.exists()) {
+    if let Some((launch, _, _)) =
+        cache.as_ref().filter(|(l, g, r)| l.program.exists() && Arc::ptr_eq(g, &git) && r.unchanged())
+    {
         return Some(launch.clone());
     }
-    let found = farcooler_core::programs::find("gh")?;
-    let program = found.canonicalize().unwrap_or(found);
-    let git = git_launch().ok()?;
+    let program = farcooler_core::programs::find("gh")?;
+    if program.canonicalize().is_ok_and(|real| real.file_name().is_some_and(|n| n != "gh")) {
+        tracing::warn!(
+            gh = %program.display(),
+            "gh is a shim for another program, which may start a gh that isn't on its exec allowlist"
+        );
+    }
     let path = crate::git_guard::child_path().unwrap_or_else(|| "/usr/bin:/bin".into());
+    let (path_git, path_ssh) =
+        (crate::git_sandbox::on_path("git", &path), crate::git_sandbox::on_path("ssh", &path));
     let mut programs: Vec<PathBuf> = vec![program.clone()];
-    programs.extend(crate::git_sandbox::on_path("git", &path));
+    programs.extend(path_git.clone());
     programs.extend(git.sandbox.as_ref().map(|s| s.allowed().to_vec()).unwrap_or_else(|| vec![git.program.clone()]));
-    programs.extend(crate::git_sandbox::on_path("ssh", &path));
+    programs.extend(path_ssh.clone());
     if cfg!(target_os = "macos") {
         programs.push(PathBuf::from("/usr/bin/security"));
     }
     let sandbox = crate::git_sandbox::Sandbox::new(&program, crate::git_sandbox::allowlist(&programs));
+    let watched: Vec<PathBuf> = [Some(program.clone()), path_git, path_ssh].into_iter().flatten().collect();
     let launch = Arc::new(Launch { program, sandbox });
-    *cache = Some(launch.clone());
+    *cache = Some((launch.clone(), git, crate::git_sandbox::Resolved::of(&watched)));
     Some(launch)
 }
 
@@ -274,6 +299,9 @@ async fn spawn_bounded(
     if let Some(pins) = pins {
         crate::git_guard::apply(&mut cmd, pins);
         crate::git_guard::pin_work_tree(&mut cmd, cwd);
+        if let Some(path) = crate::git_lfs::path(crate::git_guard::child_path()) {
+            cmd.env("PATH", path);
+        }
     }
     let child = Command::from(cmd)
         .current_dir(cwd)
