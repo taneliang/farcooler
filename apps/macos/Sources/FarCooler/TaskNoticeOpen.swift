@@ -197,7 +197,11 @@ final class TaskNoticeOpener: ObservableObject {
             case .read(let host):
                 let data = await read(host, open.key)
                 guard pending?.id == open.id else { return }
-                if let data, let place = TaskNoticeOpen.Place(show: data, key: open.key) {
+                // The deadline holds for the read too: a task that turns up
+                // after it would move a window somebody has gone on using.
+                if now().timeIntervalSince(open.since) >= TaskNoticeOpen.waitsAtMost {
+                    NSLog("Far Cooler: a notice's task %@ was read too late to open.", open.key)
+                } else if let data, let place = TaskNoticeOpen.Place(show: data, key: open.key) {
                     land(host, place)
                 } else {
                     NSLog("Far Cooler: a notice's task %@ couldn't be read.", open.key)
