@@ -99,8 +99,10 @@ struct TaskNoticeTests {
         #expect(!Notifier.foldsIntoTask(loose, in: bare, runnerSendsNotices: true))
         // Opened by hand in a lane with one open task: the runner folds it,
         // so its banner is the task's too (ov-107). Not in the main checkout.
-        #expect(Notifier.foldsIntoTask(loose, in: try lane(openTasks: 1), runnerSendsNotices: true))
-        #expect(!Notifier.foldsIntoTask(loose, in: try lane(openTasks: 2), runnerSendsNotices: true))
-        #expect(!Notifier.foldsIntoTask(loose, in: try lane(openTasks: 1, checkout: true), runnerSendsNotices: true))
+        let one = try lane(openTasks: 1), two = try lane(openTasks: 2)
+        let checkout = try lane(openTasks: 1, checkout: true)
+        #expect(Notifier.foldsIntoTask(loose, in: one, runnerSendsNotices: true))
+        #expect(!Notifier.foldsIntoTask(loose, in: two, runnerSendsNotices: true))
+        #expect(!Notifier.foldsIntoTask(loose, in: checkout, runnerSendsNotices: true))
     }
 }
