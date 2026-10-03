@@ -11,37 +11,107 @@ use crate::error::map_err;
 
 type Migration = fn(&Transaction) -> rusqlite::Result<()>;
 
-const MIGRATIONS: &[Migration] = &[
-    migration_0001_initial_schema,
-    migration_0002_pane_groups,
-    migration_0003_drop_pane_groups,
-    migration_0004_pane_mode,
-    migration_0005_drop_loss_dismissed,
-    migration_0006_worktrees_are_managed,
-    migration_0007_review,
-    migration_0008_drop_task_name,
-    migration_0009_workspace_order,
-    migration_0010_the_board,
-    migration_0011_terminal_task,
-    migration_0012_every_board_has_a_prefix,
-    migration_0013_task_edited_at,
-    migration_0014_worktrees,
-    migration_0015_workspaces,
-    migration_0016_tasks_by_worktree,
-    migration_0017_terminal_split_of,
-    migration_0018_terminal_split_of_orchestrator,
-    migration_0019_wake_on_answer,
-    crate::usage::migration_0020_agent_turns,
+/// Every migration, in order, each with whether a build from before it may
+/// still open the database after it.
+///
+/// The second half is required, not defaulted, so a migration can't arrive
+/// without someone deciding. See `Older` and `COMPATIBLE_DOWN_TO`.
+const MIGRATIONS: &[(Migration, Older)] = &[
+    (migration_0001_initial_schema, Older::Refused),
+    (migration_0002_pane_groups, Older::Refused),
+    (migration_0003_drop_pane_groups, Older::Refused),
+    (migration_0004_pane_mode, Older::Refused),
+    (migration_0005_drop_loss_dismissed, Older::Refused),
+    (migration_0006_worktrees_are_managed, Older::Refused),
+    (migration_0007_review, Older::Refused),
+    (migration_0008_drop_task_name, Older::Refused),
+    (migration_0009_workspace_order, Older::Refused),
+    (migration_0010_the_board, Older::Refused),
+    (migration_0011_terminal_task, Older::Refused),
+    (migration_0012_every_board_has_a_prefix, Older::Refused),
+    (migration_0013_task_edited_at, Older::Refused),
+    (migration_0014_worktrees, Older::Refused),
+    (migration_0015_workspaces, Older::Refused),
+    (migration_0016_tasks_by_worktree, Older::Refused),
+    (migration_0017_terminal_split_of, Older::Refused),
+    (migration_0018_terminal_split_of_orchestrator, Older::Refused),
+    (migration_0019_wake_on_answer, Older::Refused),
+    (crate::usage::migration_0020_agent_turns, Older::Refused),
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
 
+/// Whether code written before a migration can run against the schema after
+/// it.
+///
+/// `Welcome` is for a migration an older build cannot tell happened: a new
+/// table it never touches, or a column it never names that has a default.
+/// Anything else is `Refused`: a new trigger or constraint the old code's
+/// writes would trip, a column it would leave empty that newer code relies
+/// on, a table it reads that was dropped or reshaped. When in doubt it is
+/// `Refused`, which costs a person an update; the other mistake costs them
+/// their data.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Older {
+    Refused,
+    #[allow(dead_code)] // No migration is one yet; the decision is per migration.
+    Welcome,
+}
+
+/// The oldest schema whose build may open a database at this one.
+///
+/// Stamped into `meta` as `compatible_down_to` beside `schema_version`, and
+/// read by an OLDER build that finds a schema newer than its own: it opens the
+/// database only if its own version is at least this. So a downgrade across
+/// migrations that are all `Welcome` keeps working, and one across any
+/// `Refused` migration is refused with `DomainError::NewerData`.
+///
+/// Counted from the newest migration back, stopping at the first `Refused`
+/// one, rather than written as a number: a number set once for one
+/// compatible migration would go on vouching for whatever came after it.
+pub(crate) const COMPATIBLE_DOWN_TO: u32 = {
+    let mut v = MIGRATIONS.len();
+    while v > 0 && matches!(MIGRATIONS[v - 1].1, Older::Welcome) {
+        v -= 1;
+    }
+    v as u32
+};
+
 pub(crate) fn read_schema_version(conn: &Connection) -> farcooler_core::Result<u32> {
+    Ok(read_meta_u32(conn, "schema_version")?.unwrap_or(0))
+}
+
+/// The `compatible_down_to` a newer build stamped, or `None` where no build
+/// did: every database written before the marker existed, which therefore
+/// vouches for no older build at all.
+pub(crate) fn read_compatible_down_to(conn: &Connection) -> farcooler_core::Result<Option<u32>> {
+    read_meta_u32(conn, "compatible_down_to")
+}
+
+fn read_meta_u32(conn: &Connection, key: &str) -> farcooler_core::Result<Option<u32>> {
     let raw: Option<String> = conn
-        .query_row("SELECT value FROM meta WHERE key = 'schema_version'", [], |r| r.get(0))
+        .query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0))
         .optional()
         .map_err(map_err)?;
-    Ok(raw.and_then(|s| s.parse().ok()).unwrap_or(0))
+    Ok(raw.and_then(|s| s.parse().ok()))
+}
+
+/// Record `COMPATIBLE_DOWN_TO` for a database at this build's schema, if it
+/// doesn't say so already.
+///
+/// Read first so an ordinary open, which every `--stdio` and `--stream`
+/// process does, writes nothing.
+pub(crate) fn stamp_compatible_down_to(conn: &Connection) -> farcooler_core::Result<()> {
+    if read_compatible_down_to(conn)? == Some(COMPATIBLE_DOWN_TO) {
+        return Ok(());
+    }
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('compatible_down_to', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [COMPATIBLE_DOWN_TO.to_string()],
+    )
+    .map_err(map_err)?;
+    Ok(())
 }
 
 /// Apply every migration from `from_version` up to `CURRENT_SCHEMA_VERSION` in
@@ -52,7 +122,7 @@ pub(crate) fn migrate(conn: &mut Connection, from_version: u32) -> farcooler_cor
     }
 
     let tx = conn.transaction().map_err(map_err)?;
-    for m in &MIGRATIONS[from_version as usize..] {
+    for (m, _) in &MIGRATIONS[from_version as usize..] {
         m(&tx).map_err(map_err)?;
     }
     tx.execute(
@@ -843,7 +913,7 @@ fn migration_0019_wake_on_answer(tx: &Transaction) -> rusqlite::Result<()> {
 #[cfg(any(test, feature = "testing"))]
 pub(crate) fn migrate_only_to(conn: &mut Connection, version: u32) {
     let tx = conn.transaction().unwrap();
-    for m in &MIGRATIONS[..version as usize] {
+    for (m, _) in &MIGRATIONS[..version as usize] {
         m(&tx).unwrap();
     }
     tx.execute(
@@ -928,7 +998,7 @@ mod tests {
     fn archived_rows_become_hidden() {
         let mut conn = open();
         // Everything up to and including 0005, which is where `archived` lived.
-        for m in &MIGRATIONS[..5] {
+        for (m, _) in &MIGRATIONS[..5] {
             let tx = conn.transaction().unwrap();
             m(&tx).unwrap();
             tx.commit().unwrap();
@@ -963,7 +1033,7 @@ mod tests {
     #[test]
     fn dropping_the_name_keeps_the_workspace_and_its_terminals() {
         let mut conn = open();
-        for m in &MIGRATIONS[..7] {
+        for (m, _) in &MIGRATIONS[..7] {
             let tx = conn.transaction().unwrap();
             m(&tx).unwrap();
             tx.commit().unwrap();
@@ -1011,7 +1081,7 @@ mod tests {
     #[test]
     fn existing_workspaces_are_ranked_main_checkout_first_then_by_path() {
         let mut conn = open();
-        for m in &MIGRATIONS[..8] {
+        for (m, _) in &MIGRATIONS[..8] {
             let tx = conn.transaction().unwrap();
             m(&tx).unwrap();
             tx.commit().unwrap();
@@ -1254,7 +1324,7 @@ mod tests {
         let mut conn = open();
         {
             let tx = conn.transaction().unwrap();
-            for m in &MIGRATIONS[..10] {
+            for (m, _) in &MIGRATIONS[..10] {
                 m(&tx).unwrap();
             }
             tx.execute_batch(
@@ -1298,7 +1368,7 @@ mod tests {
     /// migration gives the word a meaning again.
     fn migrate_between(conn: &mut Connection, from: u32, to: u32) {
         let tx = conn.transaction().unwrap();
-        for m in &MIGRATIONS[from as usize..to as usize] {
+        for (m, _) in &MIGRATIONS[from as usize..to as usize] {
             m(&tx).unwrap();
         }
         tx.execute("UPDATE meta SET value = ?1 WHERE key = 'schema_version'", [to.to_string()])

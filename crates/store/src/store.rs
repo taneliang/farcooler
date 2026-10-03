@@ -81,10 +81,31 @@ impl Store {
         .map_err(map_err)?;
 
         let current = migrate::read_schema_version(conn)?;
-        if current >= migrate::CURRENT_SCHEMA_VERSION {
+        if current > migrate::CURRENT_SCHEMA_VERSION {
+            // Written by a newer build. This build's code has never seen that
+            // schema, and running it there is how a rollback quietly breaks
+            // things: a newer trigger refusing writes this code thinks are
+            // fine, a constraint it doesn't know to satisfy. Only the newer
+            // build can say it's safe, and it says so in `compatible_down_to`.
+            // A database that says nothing vouches for nobody.
+            return match migrate::read_compatible_down_to(conn)? {
+                Some(floor) if floor <= migrate::CURRENT_SCHEMA_VERSION => Ok(()),
+                _ => {
+                    tracing::error!(
+                        database = current,
+                        this_build = migrate::CURRENT_SCHEMA_VERSION,
+                        "the database is at a newer schema than this build knows; refusing to open it"
+                    );
+                    Err(DomainError::NewerData)
+                }
+            };
+        }
+        if current == migrate::CURRENT_SCHEMA_VERSION {
             // Already current: migrating again would be pure overhead, and
             // running it is exactly what must stay safe if it does happen.
-            return Ok(());
+            // Stamped here too, so a database migrated before the marker
+            // existed carries it from its next open.
+            return migrate::stamp_compatible_down_to(conn);
         }
 
         // A version above zero means real prior schema state worth
@@ -96,7 +117,8 @@ impl Store {
             crate::backup::write_checksummed_backup(path, current)?;
         }
 
-        migrate::migrate(conn, current)
+        migrate::migrate(conn, current)?;
+        migrate::stamp_compatible_down_to(conn)
     }
 
     /// Runs a versioned mutation whose WHERE clause already encodes the
@@ -1754,5 +1776,93 @@ mod tests {
         assert_eq!(entries.len(), 1, "no backup file expected when reopening a current schema");
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A fresh file holding a store, with its `meta` rewritten as given, the
+    /// way a newer build would have left it.
+    fn database_left_by_a_newer_build(schema: u32, floor: Option<u32>) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("farcooler-newer-{}", Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("store.db");
+        drop(Store::open(&path).unwrap());
+        let conn = Connection::open(&path).unwrap();
+        conn.execute("UPDATE meta SET value = ?1 WHERE key = 'schema_version'", [schema.to_string()])
+            .unwrap();
+        conn.execute("DELETE FROM meta WHERE key = 'compatible_down_to'", []).unwrap();
+        if let Some(floor) = floor {
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES ('compatible_down_to', ?1)",
+                [floor.to_string()],
+            )
+            .unwrap();
+        }
+        path
+    }
+
+    /// The rollback this exists for: a build that finds a schema newer than
+    /// its own used to take `>=` for "current" and run against it. It refuses,
+    /// says so in words a person can act on, and leaves the file as it was.
+    #[test]
+    fn a_database_from_a_newer_build_is_refused() {
+        let newer = migrate::CURRENT_SCHEMA_VERSION + 1;
+        let path = database_left_by_a_newer_build(newer, None);
+
+        let err = Store::open(&path).err().expect("a newer schema must not open");
+        assert!(matches!(err, DomainError::NewerData), "{err:?}");
+        assert_eq!(
+            err.redacted_message(),
+            "This runner's data was written by a newer Far Cooler. Update Far Cooler to use it."
+        );
+
+        let conn = Connection::open(&path).unwrap();
+        assert_eq!(migrate::read_schema_version(&conn).unwrap(), newer, "the refusal wrote nothing");
+        std::fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    /// A newer build can vouch for an older one, and when it does the older
+    /// one opens the file without touching its version.
+    #[test]
+    fn a_newer_database_that_vouches_for_this_build_opens() {
+        let current = migrate::CURRENT_SCHEMA_VERSION;
+        let path = database_left_by_a_newer_build(current + 2, Some(current));
+
+        Store::open(&path).expect("a newer schema compatible down to this build opens");
+        let conn = Connection::open(&path).unwrap();
+        assert_eq!(migrate::read_schema_version(&conn).unwrap(), current + 2);
+        assert_eq!(migrate::read_compatible_down_to(&conn).unwrap(), Some(current));
+        std::fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    /// And when the floor it names is above this build, it doesn't.
+    #[test]
+    fn a_newer_database_whose_floor_is_above_this_build_is_refused() {
+        let current = migrate::CURRENT_SCHEMA_VERSION;
+        let path = database_left_by_a_newer_build(current + 2, Some(current + 1));
+
+        let err = Store::open(&path).err().expect("refused");
+        assert!(matches!(err, DomainError::NewerData), "{err:?}");
+        std::fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    /// Every database this build leaves says how far back it can be read,
+    /// including one that was already current before the marker existed.
+    #[test]
+    fn opening_stamps_how_far_back_the_database_can_be_read() {
+        let current = migrate::CURRENT_SCHEMA_VERSION;
+        let path = database_left_by_a_newer_build(current, None);
+        {
+            let conn = Connection::open(&path).unwrap();
+            assert_eq!(migrate::read_compatible_down_to(&conn).unwrap(), None);
+        }
+
+        drop(Store::open(&path).unwrap());
+        let conn = Connection::open(&path).unwrap();
+        assert_eq!(
+            migrate::read_compatible_down_to(&conn).unwrap(),
+            Some(migrate::COMPATIBLE_DOWN_TO)
+        );
+        // Every migration so far is `Refused`, so no older build may open it.
+        assert_eq!(migrate::COMPATIBLE_DOWN_TO, current);
+        std::fs::remove_dir_all(path.parent().unwrap()).ok();
     }
 }

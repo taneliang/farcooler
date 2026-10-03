@@ -144,6 +144,22 @@ pub enum DomainError {
     /// finished dialing and which will be there a second later.
     #[error("no agent is connected to this pane")]
     AgentNotConnected,
+
+    /// The database on this runner was written by a newer Far Cooler than
+    /// this one, at a schema this build doesn't know.
+    ///
+    /// Refused rather than opened, because a schema this build has never seen
+    /// can carry triggers and constraints its code would trip over, or worse,
+    /// quietly work around. Raised only when the store is opened, so it ends a
+    /// daemon's start, and the daemon then answers every connection with it
+    /// (`farcooler_daemon::refusal`) instead of exiting into a restart loop.
+    ///
+    /// The `Display` text is the sentence itself, not log prose: this is the
+    /// one error whose whole audience is a person deciding what to install,
+    /// and it reaches them through the CLI, the Mac's runner status and a
+    /// phone's connect screen, all of which show a runner's own words.
+    #[error("This runner's data was written by a newer Far Cooler. Update Far Cooler to use it.")]
+    NewerData,
 }
 
 impl DomainError {
@@ -186,6 +202,10 @@ impl DomainError {
             DomainError::DispatchUnknown => (ErrorCode::DispatchUnknown, true),
             // Never retryable: no amount of retrying updates the other side.
             DomainError::CapabilityUnsupported { .. } => (ErrorCode::CapabilityUnsupported, false),
+            // The handshake's own code, naming which in `what`, the way
+            // `Conflict` shares `ResourceConflict`'s: the two sides disagree
+            // about versions, and only installing something fixes it.
+            DomainError::NewerData => (ErrorCode::VersionIncompatible, false),
         }
     }
 
@@ -212,6 +232,7 @@ impl DomainError {
     pub fn what(&self) -> &'static str {
         match self {
             DomainError::InvalidArgument { what } | DomainError::Conflict { what } => what,
+            DomainError::NewerData => "newer_data",
             DomainError::AuthRequired
             | DomainError::ScopeDenied { .. }
             | DomainError::VersionIncompatible
@@ -428,6 +449,7 @@ mod tests {
             DomainError::CapabilityUnsupported { needed: "changes" },
             DomainError::AgentNotConnected,
             DomainError::Conflict { what: "not_held" },
+            DomainError::NewerData,
         ]
     }
 
@@ -459,7 +481,11 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         // `Conflict` is `ResourceConflict`'s code on purpose, naming which in
         // `what`; `a_named_conflict_keeps_the_conflict_code_and_says_which`.
-        for e in all_variants().into_iter().filter(|e| !matches!(e, DomainError::Conflict { .. })) {
+        // `NewerData` is `VersionIncompatible`'s the same way.
+        for e in all_variants()
+            .into_iter()
+            .filter(|e| !matches!(e, DomainError::Conflict { .. } | DomainError::NewerData))
+        {
             assert!(seen.insert(e.code() as i32), "{e:?} reuses a wire code");
         }
     }
@@ -486,8 +512,9 @@ mod tests {
             let w = word(e.code());
             assert_ne!(w, "unspecified", "{e:?} has no word");
             assert_ne!(w, UNRECOGNIZED_WORD, "{e:?} has no word");
-            // `Conflict` shares `resource-conflict` by design; see above.
-            if matches!(e, DomainError::Conflict { .. }) {
+            // `Conflict` shares `resource-conflict` by design, and `NewerData`
+            // `version-incompatible`; see above.
+            if matches!(e, DomainError::Conflict { .. } | DomainError::NewerData) {
                 continue;
             }
             assert!(seen.insert(w), "{e:?} reuses the word {w}");
@@ -543,7 +570,10 @@ mod tests {
     #[test]
     fn every_other_refusal_carries_no_argument() {
         for e in all_variants() {
-            if matches!(e, DomainError::InvalidArgument { .. } | DomainError::Conflict { .. }) {
+            if matches!(
+                e,
+                DomainError::InvalidArgument { .. } | DomainError::Conflict { .. } | DomainError::NewerData
+            ) {
                 continue;
             }
             assert_eq!(e.what(), "", "{e:?} started carrying an argument");
