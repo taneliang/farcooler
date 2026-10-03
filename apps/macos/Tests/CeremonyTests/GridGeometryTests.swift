@@ -239,8 +239,10 @@ struct GridGeometryTests {
             "header.text": ColumnGrid.b,
             "summary.chevron": ColumnGrid.a,
             "summary.text": ColumnGrid.b,
-            "section.chevron": ColumnGrid.a,
-            "section.text": ColumnGrid.b,
+            "status.chevron": ColumnGrid.a,
+            "tasks.chevron": ColumnGrid.a,
+            "tasks.text": ColumnGrid.b,
+            "status.text": ColumnGrid.b,
             "card.text": ColumnGrid.b,
         ]
         if !collapsedSummary {

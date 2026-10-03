@@ -41,9 +41,21 @@ struct BoardSummaryStrip: View {
             let since = BoardSummary.start(of: period, lastVisit: store.visitBaseline, now: now)
             let summary = BoardSummary.make(
                 rows: store.board.rows, notes: store.summaryNotes, since: since)
-            VStack(alignment: .leading, spacing: 0) {
-                header(summary)
-                if !collapsed {
+            // Through the board's one collapsible section (ov-92): it opens
+            // and closes on the shared spring, as every other one does.
+            CollapsibleSection(
+                id: "summary",
+                isExpanded: Binding(
+                    get: { !collapsed },
+                    set: { open in
+                        collapsed = !open
+                        defaults.set(collapsed, forKey: Self.collapsedKey(store))
+                    }),
+                accessibilityLabel: "Summary", fillsRow: collapsed,
+                label: { open in headerLabel(summary, open: open) },
+                accessory: { periodMenu }
+            ) {
+              VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
                     if summary.isEmpty {
                         Text(BoardSummary.nothingNew)
                             .font(.system(size: WorkspaceStyle.PaneText.body))
@@ -61,7 +73,7 @@ struct BoardSummaryStrip: View {
                         group("New", summary.created, keys: keys)
                         group("Decisions and Findings", summary.notes, keys: keys)
                     }
-                }
+              }
             }
             // Measured from the board column's edge, as the list below is:
             // the disclosure at column A, everything else at B.
@@ -153,74 +165,55 @@ struct BoardSummaryStrip: View {
     /// lines beside a picker saying "Since Last Visit" (ov-81 P5), so the
     /// same idea cost a line and was said twice. Open, the period is a menu;
     /// closed, the strip is one quiet line saying how much is new (ov-83).
-    private func header(_ summary: BoardSummary) -> some View {
-        HStack(spacing: 0) {
+    @ViewBuilder
+    private func headerLabel(_ summary: BoardSummary, open: Bool) -> some View {
+        if !open {
+            Text(
+                Self.collapsedLine(
+                    count: summary.finished.count + summary.moved.count + summary.created.count, period: period)
+            )
+            .font(.system(size: WorkspaceStyle.PaneText.body))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .gridMark("summary", .text)
+        }
+    }
+
+    /// Open, the period is the heading, as a menu.
+    @ViewBuilder
+    private var periodMenu: some View {
+        if !collapsed {
+            // A real menu, popped at its words, rather than a `Picker`:
+            // a pop-up button's bezel would put its words past column B
+            // by an inset nobody chose (see `SidebarMenuButton`).
             Button {
-                collapsed.toggle()
-                defaults.set(collapsed, forKey: Self.collapsedKey(store))
+                SidebarMenuItem.popUp(
+                    BoardSummary.Period.allCases.map { choice in
+                        SidebarMenuItem(
+                            title: choice.title, action: { choose(choice) },
+                            isChecked: choice == period)
+                    },
+                    under: periodAnchor)
             } label: {
-                HStack(spacing: 0) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
-                        .rotationEffect(.degrees(collapsed ? 0 : 90))
-                        .foregroundStyle(.secondary)
-                        .frame(width: ColumnGrid.step, alignment: .leading)
-                        .gridMark("summary", .chevron)
-                    if collapsed {
-                        Text(
-                            Self.collapsedLine(
-                                count: summary.finished.count + summary.moved.count
-                                    + summary.created.count,
-                                period: period)
-                        )
-                        .font(.system(size: WorkspaceStyle.PaneText.body))
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Text(period.title)
+                        .font(.system(size: WorkspaceStyle.PaneText.body, weight: .semibold))
                         .lineLimit(1)
-                        .truncationMode(.tail)
                         .gridMark("summary", .text)
-                    }
-                    if collapsed { Spacer(minLength: 0) }
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.secondary)
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Summary")
-            .accessibilityValue(collapsed ? "Collapsed" : "Expanded")
-            .accessibilityIdentifier("board-summary-toggle")
-            if !collapsed {
-                // A real menu, popped at its words, rather than a `Picker`:
-                // a pop-up button's bezel would put its words past column B
-                // by an inset nobody chose (see `SidebarMenuButton`).
-                Button {
-                    SidebarMenuItem.popUp(
-                        BoardSummary.Period.allCases.map { choice in
-                            SidebarMenuItem(
-                                title: choice.title, action: { choose(choice) },
-                                isChecked: choice == period)
-                        },
-                        under: periodAnchor)
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(period.title)
-                            .font(.system(size: WorkspaceStyle.PaneText.body, weight: .semibold))
-                            .lineLimit(1)
-                            .gridMark("summary", .text)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(.secondary)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .background(MenuAnchorView(anchor: periodAnchor))
-                .help("Choose the period")
-                .accessibilityLabel("Period")
-                .accessibilityValue(period.title)
-                .accessibilityIdentifier("board-summary-period")
-                Spacer(minLength: 0)
-            }
+            .background(MenuAnchorView(anchor: periodAnchor))
+            .help("Choose the period")
+            .accessibilityLabel("Period")
+            .accessibilityValue(period.title)
+            .accessibilityIdentifier("board-summary-period")
         }
-        .frame(minHeight: ColumnGrid.rowHeight)
     }
 
     private func choose(_ choice: BoardSummary.Period) {
@@ -281,7 +274,6 @@ struct BoardSummaryStrip: View {
                 }
             }
             .padding(.leading, ColumnGrid.step)
-            .padding(.top, ColumnGrid.rhythm)
         }
     }
 }

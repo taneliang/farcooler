@@ -35,7 +35,7 @@ struct BoardWorktrees {
 /// worktrees no task has, the main checkout and scratch ones, each opened
 /// in the main area on a click, with the hidden ones collapsed under them,
 /// and New Worktree… trailing. Its header is the navigator's
-/// (`NavigatorSectionHeader`), apart from the tasks' status groups.
+/// (`CollapsibleSection`, in the navigator style), apart from the tasks' status groups.
 ///
 /// On the navigator's grid: its rows' branch glyph at B and names at C.
 struct BoardWorktreesSection: View {
@@ -93,32 +93,11 @@ struct BoardWorktreesSection: View {
     /// The hidden ones, collapsed under a "Hidden 2" line, each with
     /// Unhide, as the sidebar keeps them.
     private var hiddenGroup: some View {
-        VStack(alignment: .leading, spacing: ColumnGrid.rhythm / 2) {
-            Button {
-                withAnimation(Motion.snap) { hiddenExpanded.toggle() }
-            } label: {
-                HStack(spacing: 0) {
-                    Image(systemName: "eye.slash")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .frame(width: ColumnGrid.step, alignment: .leading)
-                    Text("Hidden")
-                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: SidebarGrid.gap)
-                    Text("\(worktrees.hidden.count)")
-                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.leading, ColumnGrid.step)
-                .frame(minHeight: ColumnGrid.rowHeight)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Hidden, \(worktrees.hidden.count)")
-            .accessibilityValue(hiddenExpanded ? "Expanded" : "Collapsed")
-            if hiddenExpanded {
+        CollapsibleSection(
+            "Hidden", id: "worktrees.hidden", style: .minor, isExpanded: $hiddenExpanded,
+            count: worktrees.hidden.count
+        ) {
+            VStack(alignment: .leading, spacing: ColumnGrid.rhythm / 2) {
                 ForEach(worktrees.hidden) { worktree in
                     HStack(spacing: SidebarGrid.gap) {
                         Text(worktree.task)
@@ -133,7 +112,7 @@ struct BoardWorktreesSection: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    .padding(.leading, ColumnGrid.c - ColumnGrid.a)
+                    .padding(.leading, ColumnGrid.step)
                     .frame(minHeight: ColumnGrid.rowHeight)
                 }
             }
@@ -188,16 +167,7 @@ private struct BoardWorktreeRow: View {
                     .help(status.label)
             }
         }
-        .padding(.horizontal, ColumnGrid.step)
-        .padding(.vertical, ColumnGrid.rhythm / 2)
-        .frame(minHeight: ColumnGrid.twoLineRowHeight)
-        .background {
-            if selected {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(keyed ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.08))
-            }
-        }
-        .contentShape(Rectangle())
+        .navigatorRow(selected: selected, keyed: keyed)
     }
 }
 

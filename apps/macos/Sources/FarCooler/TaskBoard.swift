@@ -663,6 +663,9 @@ struct TaskBoardView: View {
     /// The list's collapsed sections: read from `defaults` in `init`, and
     /// again when the view is handed another board.
     @State private var collapsed: Set<TaskStatus>
+    /// The navigator's sections closed on this Mac: Orchestrator, Tasks,
+    /// Worktrees. Their rows leave ↑ and ↓'s walk while closed.
+    @State private var closedSections: Set<String>
     @State private var newTaskOpen = false
     /// Done showing all of its tasks, not just the recent: kept here, not
     /// in its section, since ↑ and ↓ walk the rows it shows.
@@ -735,6 +738,7 @@ struct TaskBoardView: View {
         _collapsed = State(
             initialValue: BoardForm.collapsed(
                 host: store.hostKey, workspace: store.workspace.id, from: defaults))
+        _closedSections = State(initialValue: Self.closedSections(store, defaults))
     }
 
     var body: some View {
@@ -772,6 +776,7 @@ struct TaskBoardView: View {
             BoardVisit.write(Date(), host: old.host, workspace: old.workspace, in: defaults)
             store.beginVisit(in: defaults)
             collapsed = BoardForm.collapsed(host: key.host, workspace: key.workspace, from: defaults)
+            closedSections = Self.closedSections(store, defaults)
         }
     }
 
@@ -816,7 +821,7 @@ struct TaskBoardView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
                     if let orchestrator {
-                        section("Orchestrator") {
+                        section("Orchestrator", id: "orchestrator") {
                             OrchestratorRowView(
                                 model: orchestrator, inProgress: inProgress, selected: current == .orchestrator,
                                 keyed: hasKeyboard)
@@ -824,47 +829,47 @@ struct TaskBoardView: View {
                         }
                         Divider()
                     }
-                    section("Tasks") { EmptyView() }
-                    if store.hasRead {
-                        BoardSummaryStrip(store: store, defaults: defaults)
-                            .id(ObjectIdentifier(store))
-                    }
-                    Group {
-                        if !store.hasRead && store.reading {
-                            centered { ProgressView() }
-                        } else if let trouble = store.trouble, !store.hasRead {
-                            centered {
-                                VStack(spacing: 10) {
-                                    Text(trouble)
-                                    Button("Try Again") { Task { await store.reload() } }
+                    section("Tasks", id: "tasks") {
+                        VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
+                            if store.hasRead {
+                                // Edge to edge, its own inset at column A.
+                                BoardSummaryStrip(store: store, defaults: defaults)
+                                    .id(ObjectIdentifier(store))
+                                    .padding(.horizontal, -ColumnGrid.a)
+                            }
+                            if !store.hasRead && store.reading {
+                                centered { ProgressView() }
+                            } else if let trouble = store.trouble, !store.hasRead {
+                                centered {
+                                    VStack(spacing: 10) {
+                                        Text(trouble)
+                                        Button("Try Again") { Task { await store.reload() } }
+                                    }
                                 }
-                            }
-                        } else {
-                            ForEach(store.board.sections) { section in
-                                TaskListSection(
-                                    section: section,
-                                    expanded: BoardForm.isExpanded(section, collapsed: collapsed),
-                                    onToggle: { toggle(section.status) },
-                                    store: store, agents: agents, onGoTo: onGoTo,
-                                    selected: selected, keyed: hasKeyboard,
-                                    worktrees: worktrees,
-                                    showingAllDone: $showingAllDone,
-                                    onChoose: { row in
-                                        listFocused = true
-                                        store.choose(row)
-                                    })
-                            }
-                            if !store.board.unreadable.isEmpty {
-                                UnreadableColumnView(rows: store.board.unreadable)
+                            } else {
+                                ForEach(store.board.sections) { section in
+                                    TaskListSection(
+                                        section: section,
+                                        expanded: BoardForm.isExpanded(section, collapsed: collapsed),
+                                        onToggle: { toggle(section.status) },
+                                        store: store, agents: agents, onGoTo: onGoTo,
+                                        selected: selected, keyed: hasKeyboard,
+                                        worktrees: worktrees,
+                                        showingAllDone: $showingAllDone,
+                                        onChoose: { row in
+                                            listFocused = true
+                                            store.choose(row)
+                                        })
+                                }
+                                if !store.board.unreadable.isEmpty {
+                                    UnreadableColumnView(rows: store.board.unreadable)
+                                }
                             }
                         }
                     }
-                    // Measured from the navigator's edge: the sections'
-                    // chevrons and the cards' edges at column A.
-                    .padding(.horizontal, ColumnGrid.a)
                     if !worktrees.isEmpty {
                         Divider()
-                        section("Worktrees") {
+                        section("Worktrees", id: "worktrees", count: worktrees.shown.count) {
                             BoardWorktreesSection(worktrees: worktrees, keyed: hasKeyboard)
                         }
                     }
@@ -923,19 +928,40 @@ struct TaskBoardView: View {
     }
 
     /// The rows the navigator shows, top to bottom: what ↑ and ↓ walk.
+    /// A closed section's rows aren't shown, so they aren't walked.
     private func items(worktrees: BoardWorktrees) -> [NavigatorItem] {
         Navigator.items(
-            orchestrator: orchestrator != nil,
-            tasks: BoardKeys.rows(store.board, collapsed: collapsed, showingAllDone: showingAllDone, now: Date()),
-            worktrees: BoardWorktreesSection.rows(worktrees).map(\.id))
+            orchestrator: orchestrator != nil && !closedSections.contains("orchestrator"),
+            tasks: closedSections.contains("tasks")
+                ? [] : BoardKeys.rows(store.board, collapsed: collapsed, showingAllDone: showingAllDone, now: Date()),
+            worktrees: closedSections.contains("worktrees") ? [] : BoardWorktreesSection.rows(worktrees).map(\.id))
     }
 
-    /// A navigator section: its header, and what's under it, at column A.
-    private func section<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: ColumnGrid.rhythm / 2) {
-            NavigatorSectionHeader(title: title)
-            content()
-        }
+    private static func closedSections(_ store: TaskBoardStore, _ defaults: UserDefaults) -> Set<String> {
+        Set(navigatorSections.filter { defaults.bool(forKey: closedKey($0, store: store)) })
+    }
+
+    /// Where a navigator section's being closed is kept, per board.
+    static func closedKey(_ id: String, store: TaskBoardStore) -> String {
+        "navigator.closed.\(store.hostKey).\(store.workspace.id).\(id)"
+    }
+
+    static let navigatorSections = ["orchestrator", "tasks", "worktrees"]
+
+    /// A navigator section (ov-92): the one collapsible section, in the
+    /// navigator's style, its open state kept per board on this Mac.
+    private func section<Content: View>(
+        _ title: String, id: String, count: Int? = nil, @ViewBuilder _ content: @escaping () -> Content
+    ) -> some View {
+        CollapsibleSection(
+            title, id: id, style: .navigator,
+            isExpanded: Binding(
+                get: { !closedSections.contains(id) },
+                set: { open in
+                    if open { closedSections.remove(id) } else { closedSections.insert(id) }
+                    defaults.set(!open, forKey: Self.closedKey(id, store: store))
+                }),
+            count: count, content: content)
         .padding(.horizontal, ColumnGrid.a)
     }
 
@@ -1093,55 +1119,29 @@ private struct TaskListSection: View {
     private var leads: Bool { section.status == .needsDecision }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
-            Button(action: onToggle) {
-                // Chevron at column A, title at B, count trailing (ov-83).
-                HStack(spacing: 0) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
-                        .rotationEffect(.degrees(expanded ? 90 : 0))
-                        .foregroundStyle(.secondary)
-                        .opacity(BoardForm.canExpand(section) ? 1 : 0.35)
-                        .frame(width: ColumnGrid.step, alignment: .leading)
-                        .gridMark("section", .chevron)
-                    Text(section.title)
-                        .font(WorkspaceStyle.sectionTitle)
-                        .foregroundStyle(
-                            section.count == 0
-                                ? Color.secondary : leads ? Color.accentColor : Color.primary)
-                        .gridMark("section", .text)
-                    Spacer(minLength: SidebarGrid.gap)
-                    Text("\(section.count)")
-                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
+        // Its chevron at column A, its title at B, its count trailing
+        // (ov-83), through the board's one collapsible section (ov-92).
+        CollapsibleSection(
+            section.title, id: "status.\(section.status.rawValue)",
+            tone: section.count == 0 ? .quiet : leads ? .accent : .primary,
+            isExpanded: Binding(get: { expanded }, set: { open in if open != expanded { onToggle() } }),
+            canExpand: BoardForm.canExpand(section), count: section.count
+        ) {
+            VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
+                ForEach(section.visibleRows(showingAllDone: showingAllDone, now: Date())) { row in
+                    TaskListRow(
+                        row: row, prominent: leads, store: store,
+                        live: agents.live(for: row), presence: agents.presence(for: row),
+                        onGoTo: onGoTo, selected: row.id == selected, keyed: keyed,
+                        worktree: worktrees.byTask[row.id],
+                        worktreeMenu: worktrees.byTask[row.id].map(worktrees.menu) ?? [],
+                        performOnWorktree: { item in
+                            if let worktree = worktrees.byTask[row.id] { worktrees.perform(item, worktree) }
+                        },
+                        onChoose: { onChoose(row) })
+                    .id(row.id)
                 }
-                .frame(minHeight: ColumnGrid.rowHeight)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!BoardForm.canExpand(section))
-            .animation(Motion.snap, value: expanded)
-            .accessibilityLabel("\(section.title), \(section.count)")
-            .accessibilityValue(BoardForm.canExpand(section) ? (expanded ? "Expanded" : "Collapsed") : "")
-            .accessibilityIdentifier("board-section-\(section.id)")
-            if expanded {
-                VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
-                    ForEach(section.visibleRows(showingAllDone: showingAllDone, now: Date())) { row in
-                        TaskListRow(
-                            row: row, prominent: leads, store: store,
-                            live: agents.live(for: row), presence: agents.presence(for: row),
-                            onGoTo: onGoTo, selected: row.id == selected, keyed: keyed,
-                            worktree: worktrees.byTask[row.id],
-                            worktreeMenu: worktrees.byTask[row.id].map(worktrees.menu) ?? [],
-                            performOnWorktree: { item in
-                                if let worktree = worktrees.byTask[row.id] { worktrees.perform(item, worktree) }
-                            },
-                            onChoose: { onChoose(row) })
-                        .id(row.id)
-                    }
-                    ShowAllDoneButton(section: section, showingAll: $showingAllDone)
-                }
+                ShowAllDoneButton(section: section, showingAll: $showingAllDone)
             }
         }
     }

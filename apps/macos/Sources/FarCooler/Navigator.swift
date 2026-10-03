@@ -141,23 +141,6 @@ enum OrchestratorRow {
     }
 }
 
-/// A navigator section's own header: its name at column A, in the
-/// source list's quiet small caps, apart from the status groups' titles
-/// under Tasks.
-struct NavigatorSectionHeader: View {
-    let title: String
-
-    var body: some View {
-        Text(title)
-            .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .semibold))
-            .foregroundStyle(.secondary)
-            .textCase(.uppercase)
-            .kerning(0.4)
-            .frame(maxWidth: .infinity, minHeight: ColumnGrid.rowHeight, alignment: .bottomLeading)
-            .accessibilityAddTraits(.isHeader)
-    }
-}
-
 /// What the window hands the navigator for its orchestrator row.
 struct NavigatorOrchestrator {
     var state: OrchestratorRow.State
@@ -219,16 +202,7 @@ struct OrchestratorRowView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, ColumnGrid.step)
-        .padding(.vertical, ColumnGrid.rhythm)
-        .frame(minHeight: ColumnGrid.twoLineRowHeight)
-        .background {
-            if selected {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(keyed ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.08))
-            }
-        }
-        .contentShape(Rectangle())
+        .navigatorRow(selected: selected, keyed: keyed)
         .onTapGesture(perform: model.onSelect)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(OrchestratorRow.accessibilityLabel(agent: model.agent, state: model.state))
