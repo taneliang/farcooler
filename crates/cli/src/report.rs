@@ -394,10 +394,13 @@ fn people(t: &Tally) -> Vec<String> {
     let d = &t.decisions;
     let n = &t.needs_you;
     let mut lines = Vec::new();
-    if d.asked + d.answered + d.unanswered > 0 {
+    if d.asked + d.answered + d.unanswered + d.closed_unanswered > 0 {
         let mut q = format!("Questions: {} asked, {} answered", d.asked, d.answered);
         if d.unanswered > 0 {
             q.push_str(&format!(", {} still open", d.unanswered));
+        }
+        if d.closed_unanswered > 0 {
+            q.push_str(&format!(", {} closed without an answer", d.closed_unanswered));
         }
         lines.push(q);
         if let Some(m) = median_line(&d.latency_you) {

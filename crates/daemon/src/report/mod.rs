@@ -169,8 +169,12 @@ pub struct Decisions {
     /// Of those, answered by the orchestrator (`manager`), which is also how
     /// a ruling it relays from a person is recorded today.
     pub answered_by_orchestrator: u32,
-    /// Questions still without an answer when the period ended.
+    /// Questions still without an answer when the period ended. A question
+    /// on a task that was done or canceled without one is not waiting.
     pub unanswered: u32,
+    /// Questions whose task was done or canceled in the period with no
+    /// answer note: settled some other way, or dropped.
+    pub closed_unanswered: u32,
     /// Question to answer, for every question answered in the period.
     pub latency: Option<Spread>,
     /// The same, for the ones a person answered.

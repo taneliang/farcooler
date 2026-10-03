@@ -392,3 +392,17 @@ fn an_area_is_a_short_name_before_a_colon() {
     assert_eq!(area_of("ov-12: fix"), None, "a key, not an area");
     assert_eq!(area_of("2026: plans"), None);
 }
+
+#[test]
+fn a_task_finished_without_an_answer_is_waiting_on_nobody() {
+    // Asked at 120, done at 150 with no answer note: settled some other way.
+    let seed = task("ov-9", "Daemon: settled without an answer", 110).ask(120).to(150, Done);
+    let inputs = Inputs { tasks: vec![seed.facts], ..Inputs::default() };
+    let r = compute(&inputs, PERIOD, NOW);
+    let d = r.totals.decisions;
+    assert_eq!((d.asked, d.answered, d.unanswered, d.closed_unanswered), (1, 0, 0, 1));
+    assert!(r.notable.longest_waits.is_empty(), "{:?}", r.notable.longest_waits);
+    // Until it was done, it was waiting.
+    let before = compute(&inputs, Period { since: 100 * H, until: 140 * H }, NOW).totals.decisions;
+    assert_eq!((before.unanswered, before.closed_unanswered), (1, 0));
+}

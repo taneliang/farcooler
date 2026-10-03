@@ -37,6 +37,17 @@ struct Spell {
 struct Question {
     asked: i64,
     answer: Option<(i64, Actor)>,
+    /// When the task was done or canceled with this still unanswered: the
+    /// question went away without an answer note, and nobody waits on it.
+    closed: Option<i64>,
+}
+
+impl Question {
+    /// Still waiting at `at`: asked before it, and neither answered nor
+    /// closed by then.
+    fn open_at(&self, at: i64) -> bool {
+        self.asked < at && self.answer.is_none_or(|(a, _)| a >= at) && self.closed.is_none_or(|c| c >= at)
+    }
 }
 
 /// One task's record, read once.
@@ -154,6 +165,11 @@ fn read(facts: &TaskFacts, period: Period) -> Reading<'_> {
                 let from = current.status;
                 current.end = Some(at);
                 r.spells.push(Spell { status: to, start: at, end: None });
+                if matches!(to, TaskStatus::Done | TaskStatus::Cancelled) {
+                    for i in open_questions.drain(..) {
+                        r.questions[i].closed = Some(at);
+                    }
+                }
                 if !period.contains(at) {
                     continue;
                 }
@@ -169,7 +185,7 @@ fn read(facts: &TaskFacts, period: Period) -> Reading<'_> {
             }
             NoteKind::Question if !withdrawn.contains(&note.id) => {
                 open_questions.push(r.questions.len());
-                r.questions.push(Question { asked: note.at, answer: None });
+                r.questions.push(Question { asked: note.at, answer: None, closed: None });
             }
             NoteKind::Answer => {
                 for i in open_questions.drain(..) {
@@ -247,9 +263,10 @@ fn tally(readings: &[&Reading], inputs: &Inputs, period: Period, horizon: i64) -
                     }
                     t.decisions.answered_by_orchestrator += u32::from(actor == Actor::Manager);
                 }
-                Some((at, _)) if at < period.until => {}
-                _ => t.decisions.unanswered += u32::from(q.asked < period.until),
+                _ => {}
             }
+            t.decisions.unanswered += u32::from(q.open_at(period.until));
+            t.decisions.closed_unanswered += u32::from(q.answer.is_none() && q.closed.is_some_and(|c| period.contains(c)));
         }
 
         for s in r.spells.iter().filter(|s| waits_on_you(s.status)) {
@@ -304,6 +321,7 @@ fn waits_on_you(status: TaskStatus) -> bool {
 fn quiet(t: &Tally) -> bool {
     let events = t.created + t.completed + t.canceled + t.reopened + t.fix_rounds
         + t.decisions.asked + t.decisions.answered + t.decisions.unanswered + t.decisions.recorded
+        + t.decisions.closed_unanswered
         + t.needs_you.times + t.needs_you.cleared + t.needs_you.waiting;
     let worked = t.time_in_status.iter().any(|s| s.status != "backlog" && s.status != "todo");
     events == 0 && !worked && t.usage.is_none()
@@ -365,8 +383,7 @@ fn notable(readings: &[&Reading], period: Period, horizon: i64) -> Notable {
         for q in &r.questions {
             match q.answer {
                 Some((at, _)) if period.contains(at) => waits.push(wait("question", at - q.asked, false)),
-                Some((at, _)) if at < period.until => {}
-                _ if q.asked < period.until => waits.push(wait("question", horizon - q.asked, true)),
+                _ if q.open_at(period.until) => waits.push(wait("question", horizon - q.asked, true)),
                 _ => {}
             }
         }
