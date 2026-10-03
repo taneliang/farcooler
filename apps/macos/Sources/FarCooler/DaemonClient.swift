@@ -135,7 +135,10 @@ final class DaemonClient: ObservableObject {
     /// direction that would be embarrassing — a runner someone has just
     /// updated by hand would otherwise go on being reported as behind until
     /// the app was relaunched.
-    @Published private(set) var daemonBuild: DaemonBuild? {
+    ///
+    /// Settable in the module, not only here, so a test can stand in a
+    /// runner's build and drive `apply` as the event stream does (ov-107).
+    @Published var daemonBuild: DaemonBuild? {
         // Terminal streams are opened far from here, by host arguments alone.
         // `"stream_size_markers"` is `farcooler_protocol::capability::STREAM_SIZE_MARKERS`.
         didSet {
@@ -619,7 +622,9 @@ final class DaemonClient: ObservableObject {
     ///
     /// Applied in place rather than triggering a full re-read: a re-read per
     /// event would make a busy fleet slower than the polling this replaced.
-    private func apply(_ event: TerminalEvent) {
+    /// Internal rather than private so a test can drive it as the event
+    /// stream does (ov-107: `TaskNoticeTests`).
+    func apply(_ event: TerminalEvent) {
         for w in fleet.worktrees.indices {
             guard
                 let t = fleet.worktrees[w].terminals.firstIndex(where: { $0.id == event.id })
@@ -686,8 +691,7 @@ final class DaemonClient: ObservableObject {
             Notifier.shared.report(
                 terminal: terminal,
                 place: Notifier.place(of: terminal, in: fleet.worktrees[w], workspaces: fleet.workspaces),
-                foldsIntoTask: Notifier.foldsIntoTask(
-                    terminal, in: fleet.worktrees[w], runnerSendsNotices: daemonBuild?.can("task_notices") == true))
+                in: fleet.worktrees[w], runner: daemonBuild)
             reapIfExited(terminal)
             return
         }

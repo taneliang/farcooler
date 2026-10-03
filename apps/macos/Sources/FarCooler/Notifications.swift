@@ -269,19 +269,44 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             }
     }
 
+    /// What `report` did with a pane's change.
+    enum Report: Equatable {
+        /// Left to its task's notice (`foldsIntoTask`).
+        case leftToTask
+        /// Anything else: posted, or not worth a banner.
+        case ownBanner
+    }
+
     /// Announce a change, if it is worth announcing.
     ///
     /// `place` is where the pane is, workspace first — see `place(of:in:workspaces:)`.
-    /// `foldsIntoTask` is `Notifier.foldsIntoTask`'s answer for this pane:
-    /// its blocked and done banners are its task's notice's to give.
-    func report(terminal: Terminal, place: String, foldsIntoTask: Bool = false) {
+    /// `worktree` is the one the pane runs in, and `runner` the build of the
+    /// runner it's on: with them, `foldsIntoTask` decides here whether its
+    /// blocked and done banners are its task's notice's to give (ov-107), so
+    /// no caller can leave the fold out.
+    @discardableResult
+    func report(terminal: Terminal, place: String, in worktree: Worktree, runner: DaemonBuild?) -> Report {
         reportFailedExit(terminal: terminal, place: place)
 
         let activity = terminal.agent
         defer { announced[terminal.id] = activity }
 
+        if Self.foldsIntoTask(terminal, in: worktree, runnerSendsNotices: runner?.can("task_notices") == true) {
+            lastReport[terminal.id] = .leftToTask
+            return .leftToTask
+        }
+        lastReport[terminal.id] = .ownBanner
+        postOwnBanner(terminal: terminal, place: place, activity: activity)
+        return .ownBanner
+    }
+
+    /// What `report` last did per terminal, so a test can see what a caller
+    /// like `DaemonClient.apply` made of a change without a notification
+    /// centre. Cleared with the terminal by `forget`.
+    private(set) var lastReport: [String: Report] = [:]
+
+    private func postOwnBanner(terminal: Terminal, place: String, activity: AgentActivity) {
         guard Preferences.shared.notifyOnAttention else { return }
-        guard !foldsIntoTask else { return }
         guard activity.wantsAttention else { return }
         guard activity != announced[terminal.id] else { return }
         if activity == .done && !Preferences.shared.notifyOnDone { return }
@@ -360,6 +385,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// the announcement history of the terminal it replaced.
     func forget(_ terminalID: String) {
         announced.removeValue(forKey: terminalID)
+        lastReport.removeValue(forKey: terminalID)
         announcedFailure.remove(terminalID)
         guard Self.canNotify else { return }
         UNUserNotificationCenter.current()

@@ -105,4 +105,49 @@ struct TaskNoticeTests {
         #expect(!Notifier.foldsIntoTask(loose, in: two, runnerSendsNotices: true))
         #expect(!Notifier.foldsIntoTask(loose, in: checkout, runnerSendsNotices: true))
     }
+
+    /// The notifier's own entry point, as `DaemonClient` calls it: a blocked
+    /// agent on a task gets no banner of its own from a runner that sends
+    /// task notices (ov-107).
+    @Test("Notifier.report leaves a task-bound agent's banner to its task")
+    @MainActor
+    func reportLeavesATaskBoundAgentToItsTask() throws {
+        var agent = Terminal(id: "ov107-a1", short: "a1", title: "claude", preset: "claude", state: "running", epoch: 0)
+        agent.taskId = "task-1"
+        agent.activity = "blocked"
+        let json = #"{"id":"w-1","short":"w1","task":"lane","branch":"b","worktree":"/tmp/w","state":"active","open_tasks":[],"terminals":[]}"#
+        let lane = try JSONDecoder().decode(Worktree.self, from: Data(json.utf8))
+        let sends = DaemonBuild(version: "v", matches: true, platform: "linux", capabilities: ["tasks", "task_notices"])
+        let older = DaemonBuild(version: "v", matches: true, platform: "linux", capabilities: ["tasks"])
+        #expect(Notifier.shared.report(terminal: agent, place: "p", in: lane, runner: sends) == .leftToTask)
+        agent.id = "ov107-a2"
+        #expect(Notifier.shared.report(terminal: agent, place: "p", in: lane, runner: older) == .ownBanner)
+    }
+
+    /// The call site: a terminal event applied by `DaemonClient`, as the
+    /// event stream applies it, from a runner that sends task notices. The
+    /// agent is opened by hand in a lane with one open task, so only the
+    /// pane's worktree and the runner's build can fold it.
+    @Test("DaemonClient.apply leaves a task-bound agent's banner to its task")
+    @MainActor
+    func applyLeavesATaskBoundAgentToItsTask() throws {
+        let fleetJSON = #"""
+            {"runtime_healthy":true,"live_panes":1,"worktrees":[{"id":"w-107","short":"w","task":"lane",
+              "branch":"b","worktree":"/tmp/w","state":"active","open_tasks":[{"id":"t-9","key":"ov-9",
+              "title":"T","status":"in_progress"}],
+              "terminals":[{"id":"ov107-c1","short":"c1","title":"claude","preset":"claude","state":"running","epoch":0}]}]}
+            """#
+        let event = try JSONDecoder().decode(TerminalEvent.self, from: Data(#"""
+            {"kind":"terminal","id":"ov107-c1","short":"c1","worktree":"w-107","title":"claude",
+             "preset":"claude","state":"running","activity":"blocked"}
+            """#.utf8))
+        let client = DaemonClient(target: "", notifications: NotificationCenter())
+        client.fleet = try JSONDecoder().decode(Fleet.self, from: Data(fleetJSON.utf8))
+        client.daemonBuild = DaemonBuild(
+            version: "v", matches: true, platform: "linux", capabilities: ["tasks", "task_notices"])
+        client.apply(event)
+        #expect(Notifier.shared.lastReport["ov107-c1"] == .leftToTask)
+        Notifier.shared.forget("ov107-c1")
+    }
 }
+
