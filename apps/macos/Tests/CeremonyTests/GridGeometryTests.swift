@@ -155,7 +155,7 @@ struct GridGeometryTests {
         let board = TaskBoardView(
             store: store, client: store.client, agents: .none, onGoTo: { _ in },
             defaults: UserDefaults(suiteName: "grid-\(UUID().uuidString)")!,
-            orchestrator: Self.orchestrator(running: true), worktrees: { _ in worktrees })
+            worktrees: { _ in worktrees }, orchestrator: Self.orchestrator(running: true))
         let found = await marks(board, width: WorkspaceColumns.navigatorDefault, height: 1400)
         check(
             found,
