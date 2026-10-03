@@ -171,13 +171,19 @@ pub async fn serve(install: &str, pane_id: &str, tty: Option<&str>) -> std::io::
 /// have a new path or, as often, the same one, so a path says nothing about
 /// whether the pane was respawned. And a path left behind may already be the
 /// next terminal anyone opened: a different size there would be announced as
-/// this pane's, and the same size would hide every resize after it. What a
-/// respawn always changes is the pane's process. So a size is
-/// trusted without asking only when it is the size already announced and the
-/// process tmux last named for the pane is still alive, which is one syscall.
-/// Otherwise tmux is asked for the pane's `#{pane_tty}` and `#{pane_pid}`
-/// first, and the fanout follows the pane; if tmux cannot say, nothing is
-/// announced, and a client falls back to its layout replies.
+/// this pane's, and the same size would hide every resize after it.
+///
+/// A respawn changes the pane's process, and it hangs up the old tty: tmux
+/// closes its side. Neither alone is enough. A program that ignores the hangup
+/// outlives the respawn, still holding the old tty, which then keeps reading
+/// the size last announced; and a tty that is not hung up may be a stranger's
+/// that took the old number. So a size is trusted without asking only when it
+/// is the size already announced, the tty is not hung up, and the process tmux
+/// last named for the pane still exists: one `poll` on the descriptor already
+/// open and one `kill(pid, 0)`, no tmux. Otherwise tmux is asked for the
+/// pane's `#{pane_tty}` and `#{pane_pid}` first, and the fanout follows the
+/// pane; if tmux cannot say, nothing is announced, and a client falls back to
+/// its layout replies.
 pub struct PaneSize {
     source: SizeSource,
 }
@@ -214,7 +220,9 @@ impl PaneSize {
         }
         // Changed, unreadable, or respawned: which tty is the pane's now?
         let Some((owner, now)) = pane_tty(socket, pane).await else {
-            // Asked again next time, rather than trusting a pane that may be gone.
+            // Asked again next time, rather than trusting a pane that may be
+            // gone. That is a tmux process on every read until it answers, but
+            // a pane tmux cannot name is about to close the pipe anyway.
             *pid = None;
             return None;
         };
@@ -228,7 +236,11 @@ impl PaneSize {
     }
 }
 
-/// The size of the terminal device at `path`.
+/// The size of the terminal device at `path`, unless it has been hung up.
+///
+/// Hung up means nothing holds its other side any more: the pane was respawned
+/// off it, whoever still has it open. `poll` with no wait says so without
+/// reading, so input typed into the pane is never consumed here.
 ///
 /// Opened for each look and closed straight after, never held. A pty reports
 /// end-of-file to tmux only once every handle on its other side is closed, so
@@ -240,15 +252,35 @@ fn tty_size(path: &std::path::Path) -> Option<(u16, u16)> {
     use rustix::fs::{Mode, OFlags};
     let flags = OFlags::RDONLY | OFlags::NOCTTY | OFlags::NONBLOCK | OFlags::CLOEXEC;
     let fd = rustix::fs::open(path, flags, Mode::empty()).ok()?;
+    if hung_up(&fd) {
+        return None;
+    }
     let size = rustix::termios::tcgetwinsize(&fd).ok()?;
     (size.ws_col > 0 && size.ws_row > 0).then_some((size.ws_col, size.ws_row))
 }
 
-/// Whether process `pid` is still ours to signal. A respawned pane's old
-/// program is gone, whatever tty its replacement was given; a pid that is
-/// someone else's now means the same.
+/// Whether the terminal `fd` has lost its other side, or cannot be asked.
+fn hung_up(fd: &std::os::fd::OwnedFd) -> bool {
+    use rustix::event::{PollFd, PollFlags};
+    let mut fds = [PollFd::new(fd, PollFlags::IN)];
+    let now = rustix::event::Timespec { tv_sec: 0, tv_nsec: 0 };
+    match rustix::event::poll(&mut fds, Some(&now)) {
+        Ok(_) => fds[0].revents().intersects(PollFlags::HUP | PollFlags::ERR | PollFlags::NVAL),
+        Err(_) => true,
+    }
+}
+
+/// Whether process `pid` still exists. `EPERM` means it does, and is another
+/// user's: a pane that ran `sudo`. Taking that for gone would ask tmux on
+/// every read. A pid reused by someone else would pass, but only if the old
+/// tty's number had also been taken, both between a respawn and the new
+/// program's first byte: the first read after that asks tmux, and the pid
+/// space would have to wrap in between.
 fn alive(pid: rustix::process::Pid) -> bool {
-    rustix::process::test_kill_process(pid).is_ok()
+    match rustix::process::test_kill_process(pid) {
+        Ok(()) => true,
+        Err(e) => e == rustix::io::Errno::PERM,
+    }
 }
 
 /// Which tty and process tmux says `pane` has now. One tmux process, so only
@@ -993,5 +1025,68 @@ mod tests {
     fn a_pane_id_and_its_number_name_the_same_socket() {
         assert_eq!(socket_path("01a00995", "%17"), socket_path("01a00995", "17"));
         assert_eq!(socket_path("01a00995", "%0"), socket_path("01a00995", "0"));
+    }
+
+    /// A pty of the test's own: its master, its terminal side held open (as a
+    /// pane's program holds it) at `columns` by `rows`, and that side's path.
+    fn pty(columns: u16, rows: u16) -> (std::os::fd::OwnedFd, std::fs::File, PathBuf) {
+        use std::os::fd::{FromRawFd, OwnedFd};
+        use std::os::unix::fs::OpenOptionsExt;
+        // `ptsname` shares one buffer across threads, and tests run in parallel.
+        static NAMING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let naming = NAMING.lock().expect("pty lock");
+        // SAFETY: plain libc calls on a descriptor this function owns; the
+        // name `ptsname` returns is copied out under `NAMING`.
+        let (master, path) = unsafe {
+            let fd = libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY);
+            assert!(fd >= 0, "posix_openpt: {}", std::io::Error::last_os_error());
+            let master = OwnedFd::from_raw_fd(fd);
+            assert_eq!(libc::grantpt(fd), 0, "grantpt");
+            assert_eq!(libc::unlockpt(fd), 0, "unlockpt");
+            let name = libc::ptsname(fd);
+            assert!(!name.is_null(), "ptsname");
+            (master, PathBuf::from(std::ffi::CStr::from_ptr(name).to_string_lossy().into_owned()))
+        };
+        drop(naming);
+        let terminal = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOCTTY | libc::O_NONBLOCK)
+            .open(&path)
+            .expect("open the terminal side");
+        let size = rustix::termios::Winsize { ws_row: rows, ws_col: columns, ws_xpixel: 0, ws_ypixel: 0 };
+        rustix::termios::tcsetwinsize(&terminal, size).expect("size the pty");
+        (master, terminal, path)
+    }
+
+    /// A respawn closes tmux's side of the old pty, but a program that ignores
+    /// the hangup lives on holding the terminal side, and that keeps reading
+    /// the size the pane last had. Taken as the pane's, it hid every resize
+    /// after the respawn. Hung up, it has no size.
+    #[test]
+    fn a_hung_up_tty_has_no_size() {
+        let (master, _lingering, path) = pty(80, 24);
+        assert_eq!(tty_size(&path), Some((80, 24)));
+        drop(master);
+        assert_eq!(tty_size(&path), None, "a hung-up tty still read as the pane's");
+    }
+
+    /// A pane whose program runs as someone else (`sudo -s`) cannot be
+    /// signalled, but its program is there: its size is trusted without
+    /// asking tmux, rather than asking on every read. The tmux here cannot
+    /// answer, so asking shows as no size at all.
+    #[tokio::test]
+    async fn a_pane_running_as_another_user_is_trusted_without_asking() {
+        let (_master, _terminal, path) = pty(80, 24);
+        // Init: there, and root's. As root this cannot tell, and passes.
+        let init = rustix::process::Pid::from_raw(1).expect("pid 1");
+        let mut size = PaneSize {
+            source: SizeSource::Pane {
+                tty: path,
+                pid: Some(init),
+                socket: format!("farcooler-nobody-{}", std::process::id()),
+                pane: "%0".to_string(),
+            },
+        };
+        assert_eq!(size.read(Some((80, 24))).await, Some((80, 24)), "asked tmux about a live pane");
     }
 }
