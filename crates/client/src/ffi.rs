@@ -1485,11 +1485,15 @@ fn optional_id(
     }
 }
 
-/// `task.note`'s arguments: `{task, kind, body}`, as the note a phone writes.
+/// `task.note`'s arguments: `{task, kind, body}`, as the one note a phone
+/// writes: an answer to an agent's question.
 ///
-/// `kind` is `tasks_json`'s word for it. The two kinds only the runner writes,
-/// `status_change` and `created`, are refused here: a phone that sent one
-/// would be forging the record's own bookkeeping.
+/// The orchestrator owns the task list (ov-184), so a phone only reads it and
+/// answers. `kind` must be `answer`, `tasks_json`'s word for it; every other
+/// kind is refused here, before the round trip, so no phone screen can add a
+/// comment, a finding or a status change to the record. The runner itself
+/// takes every kind, because the CLI, which agents work the list through,
+/// needs them.
 fn task_note_of(args: &Value) -> Result<farcooler_protocol::v1::TaskNoteAppend, SessionError> {
     use farcooler_protocol::v1::TaskNoteKind;
     let refused = |key: &str| SessionError::Protocol(format!("task.note needs a {key}"));
@@ -1498,54 +1502,12 @@ fn task_note_of(args: &Value) -> Result<farcooler_protocol::v1::TaskNoteAppend, 
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<uuid::Uuid>().ok())
         .ok_or_else(|| refused("task"))?;
-    let kind = match args.get("kind").and_then(|v| v.as_str()).unwrap_or_default() {
-        "answer" => TaskNoteKind::Answer,
-        "question" => TaskNoteKind::Question,
-        "decision" => TaskNoteKind::Decision,
-        "finding" => TaskNoteKind::Finding,
-        "progress" => TaskNoteKind::Progress,
-        "comment" => TaskNoteKind::Comment,
-        _ => return Err(refused("kind")),
-    };
+    if args.get("kind").and_then(|v| v.as_str()) != Some("answer") {
+        return Err(SessionError::Protocol("task.note from a phone is an answer, and only an answer".into()));
+    }
+    let kind = TaskNoteKind::Answer;
     let body = args.get("body").and_then(|v| v.as_str()).unwrap_or_default();
     Ok(crate::session::task_note_append(task, kind, body))
-}
-
-/// `task.create`'s arguments: `{repository, workspace?, title, intent?,
-/// acceptance?}`, as New Task… sends them. `workspace` absent or null is the
-/// repository's Main, as for `task.list`; `acceptance` is a list of lines.
-/// See `session::new_task` for the rest of the rule.
-fn task_create_of(args: &Value) -> Result<farcooler_protocol::v1::TaskCreate, SessionError> {
-    const METHOD: &str = "task.create";
-    let repository = optional_id(args, "repository", METHOD)?
-        .ok_or_else(|| SessionError::Protocol(format!("{METHOD} needs a repository")))?;
-    let workspace = optional_id(args, "workspace", METHOD)?;
-    // A key that is absent or null is left out; a key of the wrong type is a
-    // fault in the caller, not a task filed without what it tried to say.
-    let text = |key: &str| -> Result<&str, SessionError> {
-        match args.get(key) {
-            None | Some(Value::Null) => Ok(""),
-            Some(Value::String(s)) => Ok(s),
-            Some(_) => Err(SessionError::Protocol(format!("{METHOD} needs {key} as a string"))),
-        }
-    };
-    let acceptance: Vec<String> = match args.get("acceptance") {
-        None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(lines)) => lines
-            .iter()
-            .map(|v| {
-                v.as_str().map(str::to_string).ok_or_else(|| {
-                    SessionError::Protocol(format!("{METHOD} needs acceptance as a list of strings"))
-                })
-            })
-            .collect::<Result<_, _>>()?,
-        Some(_) => {
-            return Err(SessionError::Protocol(format!(
-                "{METHOD} needs acceptance as a list of strings"
-            )));
-        }
-    };
-    crate::session::new_task(repository, workspace, text("title")?, text("intent")?, &acceptance)
 }
 
 /// `workspace.start_orchestrator`'s arguments: `{workspace, harness,
@@ -1966,10 +1928,12 @@ async fn dispatch(
 
         // ---- the board ----
         //
-        // A phone reads a board, goes from a card to the agent on it, answers
-        // a decision (`task.note`) and files a task (`task.create`). Moving a
-        // card is a write with its own rules — a status change is a note —
-        // and it gets an arm when a phone has a screen that makes it.
+        // A phone reads a board, goes from a card to the agent on it, and
+        // answers a decision (`task.note`, answers only). It never creates,
+        // edits, moves or deletes a task: the orchestrator owns the task list
+        // (ov-184), and works it through the CLI. So `task.create`,
+        // `task.update`, `task.set_status`, `task.move` and `task.block` have
+        // no arm here, and come back as `unknown method`.
         //
         // Both answer in the CLI's shapes (`tasks_json`), because AgentKit has
         // ONE decoder for a board and the Mac feeds it the CLI's output. Both
@@ -1998,16 +1962,11 @@ async fn dispatch(
             Ok(crate::usage_json::task_spend_json(&usage))
         }
 
-        // The first board write a phone makes: answering a decision, as
+        // The only board write a phone makes: answering a decision, as
         // `{task, kind: "answer", body}`, which takes the decision off Needs
-        // You. Always as `user`; see `task_note_of`.
+        // You and wakes the agent waiting on it. Always as `user`; see
+        // `task_note_of`.
         "task.note" => Ok(session.task_note(task_note_of(args)?).await?),
-
-        // New Task…: a task filed on a board, as `user`. `{repository,
-        // workspace?, title, intent?, acceptance?}`; see `task_create_of`.
-        "task.create" => {
-            Ok(session.create_task(task_create_of(args)?).await?)
-        }
 
         // Ruling 8: a phone may start a workspace's orchestrator. `{workspace,
         // harness, replace?}`; `replace` stops a live one first.
@@ -2673,79 +2632,15 @@ mod tests {
         assert_eq!(note.actor, "user", "a phone answers as the person holding it");
         assert_eq!((note.extra_json.as_str(), note.supersedes.as_ref()), ("", None));
 
-        for forged in ["status_change", "created", "", "Answer"] {
+        // The orchestrator owns the task list (ov-184): a phone answers and
+        // writes nothing else to the record, not even a comment.
+        let kinds = ["comment", "question", "decision", "finding", "progress", "status_change", "created", "", "Answer"];
+        for forged in kinds {
             let refused = task_note_of(&json!({ "task": task.to_string(), "kind": forged, "body": "x" }));
             assert!(refused.is_err(), "{forged:?} was accepted");
         }
+        assert!(task_note_of(&json!({ "task": task.to_string(), "body": "x" })).is_err(), "no kind");
         assert!(task_note_of(&json!({ "kind": "answer", "body": "x" })).is_err(), "no task");
-    }
-
-    /// New Task… on a phone sends what `farcooler task create` sends: the
-    /// title trimmed, the details as the intent, acceptance lines the runner
-    /// mints ids for, the board it was chosen from, and `user` as the actor.
-    #[test]
-    fn task_create_files_a_title_on_its_board_as_the_user() {
-        let (repository, billing) = (uuid::Uuid::now_v7(), uuid::Uuid::now_v7());
-        let create = task_create_of(&json!({
-            "repository": repository.to_string(),
-            "workspace": billing.to_string(),
-            "title": "  Fix the flaky test \n",
-            "intent": "It fails one run in ten.",
-            "acceptance": ["CI is green ten times running"],
-        }))
-        .expect("a create");
-        assert_eq!(create.repository_id.as_ref(), repository.as_bytes());
-        assert_eq!(create.workspace_id.as_deref(), Some(billing.as_bytes().as_slice()));
-        assert_eq!(create.title, "Fix the flaky test");
-        assert_eq!(create.intent, "It fails one run in ten.");
-        assert_eq!(create.acceptance.len(), 1);
-        assert_eq!(create.acceptance[0].text, "CI is green ten times running");
-        assert!(create.acceptance[0].id.is_empty(), "a new line; the runner mints its id");
-        assert_eq!(create.actor, "user", "a phone files as the person holding it");
-        assert!(create.worktree_id.is_none() && create.constraints.is_empty() && create.labels.is_empty());
-
-        // Only a title: Main's board, no intent, no acceptance.
-        for workspace in [None, Some(Value::Null)] {
-            let mut args = json!({ "repository": repository.to_string(), "title": "t" });
-            if let Some(null) = workspace {
-                args["workspace"] = null;
-            }
-            let plain = task_create_of(&args).expect("a plain create");
-            assert!(plain.workspace_id.is_none(), "absent is Main, which the runner picks");
-            assert_eq!((plain.intent.as_str(), plain.acceptance.len()), ("", 0));
-        }
-
-        // Refused as the runner would refuse it: `invalid-argument`, `title`.
-        let title_refused = |title: String| {
-            match task_create_of(&json!({ "repository": repository.to_string(), "title": title })) {
-                Err(SessionError::Refused { code, what, .. }) => {
-                    code == farcooler_protocol::v1::ErrorCode::InvalidArgument as i32 && what == "title"
-                }
-                _ => false,
-            }
-        };
-        assert!(title_refused("   ".into()), "a blank title");
-        assert!(title_refused(String::new()), "no title");
-        assert!(title_refused("a".repeat(201)), "201 scalars");
-        assert!(!title_refused(format!("  {}  ", "a".repeat(200))), "200, once trimmed");
-        // Scalars, as `checked_title` counts: a flag is two.
-        assert!(title_refused("\u{1F1F8}\u{1F1EC}".repeat(101)), "202 scalars in 101 flags");
-
-        assert!(task_create_of(&json!({ "title": "t" })).is_err(), "no repository");
-        // A wrong type is a Protocol error, never a task filed without it.
-        let repo = repository.to_string();
-        for (what, args) in [
-            ("intent", json!({ "repository": repo, "title": "t", "intent": 7 })),
-            ("acceptance", json!({ "repository": repo, "title": "t", "acceptance": "one line" })),
-            ("acceptance", json!({ "repository": repo, "title": "t", "acceptance": ["ok", 3] })),
-        ] {
-            assert!(
-                matches!(task_create_of(&args), Err(SessionError::Protocol(_))),
-                "a wrong-typed {what} was not refused"
-            );
-        }
-        let malformed = json!({ "repository": repository.to_string(), "workspace": "billing", "title": "t" });
-        assert!(task_create_of(&malformed).is_err(), "never widened to Main");
     }
 
     #[test]

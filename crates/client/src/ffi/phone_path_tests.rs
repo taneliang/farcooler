@@ -274,7 +274,7 @@ async fn is_routed(session: &mut Session, name: &str) -> bool {
 ///
 /// The phone apps only. AgentKit is shared with the Mac, which reaches its
 /// runner through the CLI, and names `task.set_status` as data for a board
-/// menu no phone calls.
+/// menu no phone calls (until the Mac's half of ov-184 removes it).
 fn the_wire_methods_the_phones_name() -> std::collections::BTreeMap<Method, String> {
     let apps = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps");
     let mut found = std::collections::BTreeMap::new();
@@ -392,7 +392,6 @@ fn route(method: Method) -> Option<&'static str> {
         | Method::WorktreeReorder
         | Method::TaskList
         | Method::TaskGet
-        | Method::TaskCreate
         | Method::TaskNote
         | Method::WorkspaceStartOrchestrator
         | Method::TerminalWatching
@@ -426,16 +425,19 @@ fn route(method: Method) -> Option<&'static str> {
         | Method::LayoutZoom
         | Method::LayoutSwap
         | Method::LayoutGroupSelect => None,
-        // The board's and the workspaces' writes beyond a note and a new task,
-        // and the stack's: the Mac and the CLI make them, and no phone screen
-        // offers them yet. `workspace.list` is read inside `worktree.create`.
-        Method::StackSetParent
-        | Method::TaskGetByKey
+        // The orchestrator owns the task list (ov-184): a phone never
+        // creates, edits, moves or blocks a task. `PHONES_NEVER_WRITE_A_TASK`.
+        Method::TaskCreate
         | Method::TaskUpdate
         | Method::TaskSetStatus
         | Method::TaskBlock
+        | Method::TaskMove => None,
+        // The workspaces' writes and the stack's, and two board reads: the
+        // Mac and the CLI make them, and no phone screen offers them yet.
+        // `workspace.list` is read inside `worktree.create`.
+        Method::StackSetParent
+        | Method::TaskGetByKey
         | Method::TaskSearch
-        | Method::TaskMove
         | Method::WorkspaceList
         | Method::WorkspaceCreate
         | Method::WorkspaceRename
@@ -472,4 +474,62 @@ async fn every_route_has_an_arm() {
         }
     }
     assert!(missing.is_empty(), "declared routes `dispatch` has no arm for: {missing:#?}");
+}
+
+/// The task writes the orchestrator owns (ov-184). The CLI makes them; a
+/// phone, through this library, never can.
+const PHONES_NEVER_WRITE_A_TASK: [Method; 5] =
+    [Method::TaskCreate, Method::TaskUpdate, Method::TaskSetStatus, Method::TaskMove, Method::TaskBlock];
+
+/// **No phone can create, edit, re-status, move or block a task** (ov-184).
+///
+/// Three ways a write could come back: a route declared for it, an arm in
+/// `dispatch` under its wire name, and a phone source naming it. Each is
+/// checked, so re-adding any one of them fails here. Answering stays, through
+/// `task.note`, which `task_note_of` holds to answers.
+#[tokio::test]
+async fn no_phone_can_write_a_task() {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("r.sock");
+    a_runner_that_refuses_everything(&socket).await;
+    let mut session = Session::connect_local(&socket).await.expect("connect");
+
+    for method in PHONES_NEVER_WRITE_A_TASK {
+        assert_eq!(route(method), None, "{} has a phone route", method.name());
+        assert!(!is_routed(&mut session, method.name()).await, "`dispatch` has an arm for {}", method.name());
+    }
+    let phones = the_wire_methods_the_phones_name();
+    let named: Vec<_> = PHONES_NEVER_WRITE_A_TASK
+        .iter()
+        .filter_map(|m| phones.get(m).map(|file| format!("{} in {file}", m.name())))
+        .collect();
+    assert!(named.is_empty(), "a phone names a task write the orchestrator owns: {named:#?}");
+
+    // The answer path is still routed, so the check above is not passing on
+    // a session that refuses every name.
+    assert!(is_routed(&mut session, "task.note").await, "answering lost its arm");
+}
+
+/// **A phone's answer still goes out; nothing else on a task does** (ov-184).
+///
+/// Through `dispatch`, as an app calls it: an `answer` reaches the runner
+/// (this one refuses everything, so reaching it is a refusal, not a protocol
+/// error), as the user, which is what wakes the agent waiting on it
+/// (`Store::add_note_waking`). Every other kind stops here, before the wire.
+#[tokio::test]
+async fn a_phone_answer_reaches_the_runner_and_no_other_note_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("r.sock");
+    a_runner_that_refuses_everything(&socket).await;
+    let mut session = Session::connect_local(&socket).await.expect("connect");
+    let task = uuid::Uuid::now_v7().to_string();
+
+    let answer = dispatch(&mut session, "task.note", &json!({ "task": task, "kind": "answer", "body": "Postgres" }))
+        .await;
+    assert!(matches!(answer, Err(SessionError::Refused { .. })), "the answer never reached the runner: {answer:?}");
+
+    for kind in ["comment", "progress", "finding", "question", "decision", "status_change", "created"] {
+        let note = dispatch(&mut session, "task.note", &json!({ "task": task, "kind": kind, "body": "x" })).await;
+        assert!(matches!(note, Err(SessionError::Protocol(_))), "a {kind} note went out: {note:?}");
+    }
 }
