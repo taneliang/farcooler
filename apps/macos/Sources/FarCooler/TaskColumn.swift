@@ -267,6 +267,8 @@ struct TaskWorkHeader: View {
             }
         }
         .padding(.horizontal, 12)
+        // Not a column header (`ColumnHeader`): a row inside the task, under
+        // the jump bar, so it keeps its own height.
         .frame(height: 30)
         .background(WorkspaceStyle.canvas)
     }

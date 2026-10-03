@@ -564,23 +564,22 @@ the right, and the task takes the main area):
 └───────────────────┴──┴──────── 300 pt ──────────┴─────────────────────────────────────────────────────┘
 ```
 
-**Wireframe before ov-85, drilled into a task** (superseded: the board is now the list beside the task):
+**A task selected** (ov-92; before ov-85 a task was drilled into beside an orchestrator rail, and the rail is
+gone):
 
 ```
-┌ Sidebar ──────────┬ ‹ Billing › bil-9 Invoice PDF export ─────────────────────────────────────────┐
-│ ◉ Needs You     3 │● │ bil-9 Invoice PDF export                                   In Progress ▾ │
-│                   │• │ Intent  Customers can download any invoice as a PDF.                     │
-│ overnight         │  │ Acceptance  ◉ renders line items  ○ matches the HTML  ○ under 1 s         │
-│   Main        ●  1│  │ Record  Plan · agent · 2 h ago  …                                        │
-│ ▸ Billing  ●  2   │  ├──────────────────────────────────────────────────────────────────────────┤
-│   Relay   ◌       │  │ ⑂ Worktree fc-3-webhooks  2 terminals      agent · claude  Open Worktree │
-│ ＋ New Workspace… │  │ ❯ writing render_invoice()…                                              │
-│                   │  │ ── Changes  +42 −7 ──────────────────────────────────────────────────── │
-│                   │› │ + fn render_invoice(…)                                                   │
-└───────────────────┴──┴──────────────────────────────────────────────────────────────────────────┘
+┌ Navigator ──────────────┬ Billing › bil-9 Invoice PDF export › ⎇ fc-3-webhooks ⌄ ─────────────── × ┐
+│ ▾ ORCHESTRATOR          │ bil-9 Invoice PDF export                                   In Progress ▾ │
+│   ◌ claude · Working    │ Intent  Customers can download any invoice as a PDF.                     │
+│     Writing render_inv… │ Acceptance  ◉ renders line items  ○ matches the HTML  ○ under 1 s         │
+│ ▾ TASKS                 │ Record  Plan · agent · 2 h ago  …                                        │
+│   ▾ In Progress      2  ├──────────────────────────────────────────────────────────────────────────┤
+│   ▸ bil-9 Invoice PDF ◀ │ ⑂ Worktree fc-3-webhooks  2 terminals      agent · claude  Open Worktree │
+│     bil-3 Tax rounding  │ ❯ writing render_invoice()…                                              │
+│ ▾ WORKTREES          1  │ ── Changes  +42 −7 ──────────────────────────────────────────────────── │
+│   ⎇ main (checkout)     │ + fn render_invoice(…)                                                   │
+└─────────────────────────┴──────────────────────────────────────────────────────────────────────────┘
 ```
-
-(The rail's `●` is the orchestrator's status and `•` its needs-you dot; `›` pops it open.)
 
 ### 4.4 The task view
 

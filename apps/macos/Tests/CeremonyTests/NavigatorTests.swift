@@ -129,26 +129,36 @@ struct NavigatorTests {
         #expect(OrchestratorRow.accessibilityLabel(agent: "claude", state: .working) == "Orchestrator, claude, Working")
     }
 
-    /// What it's doing now, from what its pane already carries: the question
-    /// it's blocked on; working, its hook-reported activity or plan position
-    /// (`line`), else what it last said; finished or idle, what it last
-    /// said, else "Idle since" its last change. Nothing when stopped,
-    /// starting, or with none.
-    @Test("The now-doing line comes from the pane's own line, question and last words")
+    /// What it's doing now, from what its pane already carries, as the
+    /// daemon sends it: with no signal, `line` is the headline ("claude 4m",
+    /// "claude needs you", `feed::line`), which counts as nothing, so the
+    /// last thing it said shows instead (ov-92 review). Blocked, the
+    /// question; idle, what it last said, else "Idle since", with the day
+    /// when it isn't today. Nothing when stopped, starting, or with none.
+    @Test("The now-doing line: the signal, else what it last said, never the headline")
     func theNowDoingLine() {
+        let now = Date(timeIntervalSince1970: 1_759_412_520)  // the day the "since" below falls on
         func doing(_ seat: BoardPane?) -> String? {
-            OrchestratorRow.nowDoing(seat?.terminal, state: OrchestratorRow.state(seat: seat), time: { _ in "3:42 PM" })
+            OrchestratorRow.nowDoing(
+                seat?.terminal, state: OrchestratorRow.state(seat: seat), now: now,
+                time: { _, today in today ? "3:42 PM" : "Tue 3:42 PM" })
         }
         #expect(doing(Self.seat(activity: "working", line: "Running the Mac tests for ov-91", said: "Next")) == "Running the Mac tests for ov-91")
-        #expect(doing(Self.seat(activity: "working", line: "  ", said: "Reading the brief")) == "Reading the brief")
+        #expect(doing(Self.seat(activity: "working", line: "2/5 · Writing tests · 1 agent", said: "Next")) == "2/5 · Writing tests · 1 agent")
+        for headline in ["claude 4m", "claude 1h 5m", "claude 12s", "claude working"] {
+            #expect(doing(Self.seat(activity: "working", line: headline, said: "Reading the brief")) == "Reading the brief", "\(headline)")
+        }
         #expect(doing(Self.seat(activity: "blocked", line: "claude needs you", question: "Ship ov-92?")) == "Ship ov-92?")
-        #expect(doing(Self.seat(activity: "blocked", line: "claude needs you")) == "claude needs you")
+        #expect(doing(Self.seat(activity: "blocked", line: "claude needs you")) == nil)
         #expect(doing(Self.seat(activity: "idle", line: "claude idle", said: "All three lanes are merged.")) == "All three lanes are merged.")
         #expect(doing(Self.seat(activity: "done", line: "claude done", said: "Done: ov-90 landed.")) == "Done: ov-90 landed.")
         #expect(doing(Self.seat(activity: "idle", line: "claude idle", since: 1_759_412_520_000)) == "Idle since 3:42 PM")
-        #expect(doing(Self.seat(activity: "idle")) == nil)
+        #expect(doing(Self.seat(activity: "idle", line: "claude idle", since: 1_759_412_520_000 - 3 * 86_400_000)) == "Idle since Tue 3:42 PM")
+        #expect(doing(Self.seat(activity: "idle", line: "claude idle")) == nil)
         #expect(doing(Self.seat(activity: nil, state: "lost", line: "x", said: "y")) == nil)
         #expect(doing(nil) == nil)
+        // A line that only starts with the name is a signal.
+        #expect(!OrchestratorRow.isHeadline("claude 4 files changed", agent: "claude"))
         #expect(OrchestratorRow.inProgress(0) == nil)
         #expect(OrchestratorRow.inProgress(1) == "1 task in progress")
         #expect(OrchestratorRow.inProgress(3) == "3 tasks in progress")

@@ -101,29 +101,51 @@ enum OrchestratorRow {
     /// The one line under its name: what it's doing now, from what the
     /// runner already sends for its pane. The question it's blocked on;
     /// working, its hook-reported activity or plan position (`line`), else
-    /// the last thing it said; finished or idle, the last thing it said,
-    /// else "Idle since 3:42 PM". Nil with nothing to say.
+    /// the last thing it said (`lastSaid`); finished or idle, the last thing
+    /// it said, else "Idle since 3:42 PM" ("Idle since Tue 3:42 PM" before
+    /// today). Nil with nothing to say.
+    ///
+    /// A `line` that's only the runner's headline ("claude 4m", "claude
+    /// needs you": what `feed::line` falls back to with no signal) says
+    /// nothing the state word doesn't, and counts as none (ov-92 review).
     static func nowDoing(
-        _ terminal: Terminal?, state: State,
-        time: (Date) -> String = { $0.formatted(date: .omitted, time: .shortened) }
+        _ terminal: Terminal?, state: State, now: Date = Date(), calendar: Calendar = .current,
+        time: (Date, _ today: Bool) -> String = { date, today in
+            today
+                ? date.formatted(date: .omitted, time: .shortened)
+                : date.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+        }
     ) -> String? {
         guard let terminal else { return nil }
         func text(_ s: String?) -> String? {
             guard let s = s?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
             return s
         }
+        let signal = text(terminal.line).flatMap { isHeadline($0, agent: Terminal.name(of: terminal.preset)) ? nil : $0 }
         switch state {
         case .none, .starting, .stopped:
             return nil
         case .needsYou:
-            return text(terminal.blockedQuestion) ?? text(terminal.line)
+            return text(terminal.blockedQuestion) ?? signal
         case .working:
-            return text(terminal.line) ?? text(terminal.said) ?? text(terminal.feed?.last)
+            return signal ?? text(terminal.lastSaid)
         case .idle, .unread:
-            if let said = text(terminal.said) { return said }
+            if let said = text(terminal.lastSaid) { return said }
             guard let since = terminal.activitySince else { return nil }
-            return "Idle since \(time(Date(timeIntervalSince1970: since / 1000)))"
+            let date = Date(timeIntervalSince1970: since / 1000)
+            return "Idle since \(time(date, calendar.isDate(date, inSameDayAs: now)))"
         }
+    }
+
+    /// Whether `line` is only the runner's headline for `agent`: its name and
+    /// a state word, or its name and how long its turn has run ("claude 4m",
+    /// "claude 1h 5m", "claude 12s"). See `farcooler_core::feed::headline`.
+    static func isHeadline(_ line: String, agent: String) -> Bool {
+        let prefix = agent + " "
+        guard line.hasPrefix(prefix) else { return false }
+        let rest = String(line.dropFirst(prefix.count))
+        if ["working", "needs you", "done", "idle", "failed"].contains(rest) { return true }
+        return rest.wholeMatch(of: /\d+[hms]( \d+[ms])?/) != nil
     }
 
     /// "3 tasks in progress", or nil with none.
@@ -204,7 +226,8 @@ struct OrchestratorRowView: View {
         }
         .navigatorRow(selected: selected, keyed: keyed)
         .onTapGesture(perform: model.onSelect)
-        .accessibilityElement(children: .combine)
+        // With no orchestrator its two menus stay reachable on their own.
+        .accessibilityElement(children: model.state == .none ? .contain : .combine)
         .accessibilityLabel(OrchestratorRow.accessibilityLabel(agent: model.agent, state: model.state))
         .accessibilityValue(model.nowDoing ?? "")
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)

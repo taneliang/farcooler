@@ -919,10 +919,9 @@ struct TaskBoardView: View {
         .onChange(of: listFocused) { _, focused in if focused { onKeyboard() } }
         .onChange(of: hasKeyboard, initial: true) { _, keyed in heard.keyed = keyed }
         .onChange(of: items(worktrees: worktreesOf(store.board)), initial: true) { _, items in heard.items = items }
-        .onChange(of: ObjectIdentifier(store), initial: true) { _, _ in
-            heard.store = store
-            heard.onStep = onStep
-        }
+        .onChange(of: ObjectIdentifier(store), initial: true) { _, _ in heard.store = store }
+        // On every update, so a later capture in it can never go stale.
+        .background { let _ = heard.onStep = onStep; Color.clear }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("board-list")
     }

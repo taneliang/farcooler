@@ -108,8 +108,13 @@ struct WorkspaceView<
             let drawn = arrangement(open: stage.open != nil, focused: stage.focused)
             let remembered = dragging ?? CGFloat(navigatorWidth)
             let frames = WorkspaceColumns.frames(width: width, arrangement: drawn, navigator: remembered, cell: cell)
+            // The orchestrator's one width: the main area's beside the
+            // navigator, in Focus too, where it's hidden, so going into Focus
+            // and out never resizes its tmux window (ov-92 review).
+            let kept = WorkspaceColumns.frames(
+                width: width, arrangement: arrangement(open: false, focused: false), navigator: remembered, cell: cell)
             ZStack(alignment: .topLeading) {
-                main(now: now, drawn: drawn, height: height)
+                main(now: now, drawn: drawn, height: height, kept: kept.main)
                     .frame(width: frames.main, height: height)
                     .clipShape(Rectangle())
                     .offset(x: frames.mainX)
@@ -156,13 +161,14 @@ struct WorkspaceView<
     /// over it. Both the main area's one width, so neither resizes as the
     /// selection moves between them.
     private func main(
-        now: WorkspaceColumns.Arrangement, drawn: WorkspaceColumns.Arrangement, height: CGFloat
+        now: WorkspaceColumns.Arrangement, drawn: WorkspaceColumns.Arrangement, height: CGFloat, kept: CGFloat
     ) -> some View {
         let shown = now.conversation == .main
         return ZStack(alignment: .topLeading) {
             if hasConversation {
                 conversation()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(width: kept)
+                    .frame(maxHeight: .infinity)
                     .background(WorkspaceStyle.canvas)
                     .opacity(drawn.conversation == .main ? 1 : 0)
                     .allowsHitTesting(shown)

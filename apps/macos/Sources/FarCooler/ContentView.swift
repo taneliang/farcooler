@@ -2190,8 +2190,9 @@ struct ContentView: View {
 
     /// The scene `selection` draws, from `fleet`: a workspace's own board
     /// and orchestrator; for a loose worktree, its repository's board
-    /// (`boardWorkspace(for:in:)`) and that board's orchestrator on the
-    /// rail, so the rail never comes and goes between the two.
+    /// (`boardWorkspace(for:in:)`) and that board's orchestrator, kept
+    /// mounted, so neither the navigator nor the orchestrator comes and goes
+    /// between the two.
     nonisolated static func workspaceScene(
         _ selection: Selection, in fleet: Fleet, repositories: [String]
     ) -> WorkspaceScene? {

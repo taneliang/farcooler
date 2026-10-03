@@ -48,6 +48,7 @@ struct WorkspaceMotionTests {
     @MainActor
     final class Level: ObservableObject {
         @Published var opened: String?
+        @Published var focused = false
     }
 
     /// A workspace 1032 pt wide: the navigator at 0–280 in every state, and
@@ -245,8 +246,8 @@ struct WorkspaceMotionTests {
     /// The orchestrator is the main area's one width with nothing open, and
     /// stays that width, hidden, with a task open and back again, so its
     /// terminal never resizes, nor its tmux window, as the selection moves
-    /// (ov-92). (Fails with the hidden orchestrator drawn at any other
-    /// width, as on ov-89's rail.)
+    /// (ov-92), Focus included. (Fails with the hidden orchestrator drawn at
+    /// any other width, as on ov-89's rail, or at the main area's in Focus.)
     @Test("The orchestrator keeps one width as the selection moves")
     func theOrchestratorKeepsOneWidth() async {
         final class Seen { var drawn: [CGFloat] = [] }
@@ -268,7 +269,7 @@ struct WorkspaceMotionTests {
             var body: some View {
                 WorkspaceView(
                     opened: level.opened, hasConversation: true, cell: WorkspaceColumns.defaultCell,
-                    focused: false, navigatorWidth: .constant(280),
+                    focused: level.focused, navigatorWidth: .constant(280),
                     conversation: { Probe(seen: seen) }, navigator: { Color.clear },
                     breadcrumb: { _ in Color.clear }, detail: { _, _ in Color.clear },
                     motion: .linear(duration: 0.02))
@@ -291,6 +292,11 @@ struct WorkspaceMotionTests {
         level.opened = "bil-3"
         await settle()
         level.opened = "bil-7"
+        await settle()
+        // Focus, hidden behind what's opened, and out of it.
+        level.focused = true
+        await settle()
+        level.focused = false
         await settle()
         level.opened = nil
         await settle()
