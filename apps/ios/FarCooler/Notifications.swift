@@ -199,6 +199,16 @@ private final class ForegroundPresenter: NSObject, UNUserNotificationCenterDeleg
         didReceive response: UNNotificationResponse
     ) async {
         let content = response.notification.request.content
+        // A task decision's answer button (ov-94): written as the person,
+        // through the runner the task is on, without opening the app.
+        if let notice = TaskNotice(userInfo: content.userInfo),
+            let answer = TaskDecisionActions.answer(
+                action: response.actionIdentifier, options: notice.options,
+                typed: (response as? UNTextInputNotificationResponse)?.userText)
+        {
+            await WatchLinkHost.shared.answerDecision(notice, with: answer)
+            return
+        }
         guard response.actionIdentifier == UNNotificationDefaultActionIdentifier,
             let tap = PushTap(userInfo: content.userInfo, thread: content.threadIdentifier)
         else { return }

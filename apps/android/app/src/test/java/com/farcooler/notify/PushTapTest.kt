@@ -33,3 +33,21 @@ class PushTapTest {
         assertNull(tap("kind" to "done", "task" to "ov-1"))
     }
 }
+
+/** A task notice's tap (ov-94): its task, like a decision's, never a terminal. */
+class TaskPushTapTest {
+    private fun tap(vararg extras: Pair<String, String>) = PushTap.from(mapOf(*extras)::get)
+
+    @Test
+    fun aTaskNoticeOpensItsTaskOnItsRunner() {
+        assertEquals(
+            PushTap.Task("ov-90", "r-1"),
+            tap("kind" to "task", "task" to "ov-90", "runner" to "r-1", "event" to "review", "noticeId" to "t:r-1:ov-90"),
+        )
+    }
+
+    @Test
+    fun aTaskNoticeWithNoTaskIsNothing() {
+        assertNull(tap("kind" to "task", "noticeId" to "t:r-1:ov-90"))
+    }
+}

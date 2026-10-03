@@ -23,7 +23,9 @@ sealed interface PushTap {
             val terminal = (extra(Notifier.EXTRA_TERMINAL) ?: extra(Notifier.PUSH_EXTRA_TERMINAL))
                 ?.takeIf { it.isNotEmpty() }
             if (terminal != null) return Terminal(terminal)
-            if (extra(Notifier.PUSH_EXTRA_KIND) != Notifier.KIND_DECISION) return null
+            // A decision, or a task notice (ov-94): both name a task to open.
+            val kind = extra(Notifier.PUSH_EXTRA_KIND)
+            if (kind != Notifier.KIND_DECISION && kind != TaskNotices.KIND_TASK) return null
             val task = extra(Notifier.PUSH_EXTRA_TASK)?.takeIf { it.isNotEmpty() } ?: return null
             return Task(task, extra(Notifier.PUSH_EXTRA_RUNNER)?.takeIf { it.isNotEmpty() })
         }

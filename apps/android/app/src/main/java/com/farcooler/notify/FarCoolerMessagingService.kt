@@ -62,6 +62,16 @@ class FarCoolerMessagingService : FirebaseMessagingService() {
         val data = message.data
         val title = data["title"] ?: message.notification?.title ?: return
         val body = data["body"] ?: message.notification?.body.orEmpty()
+        // A task notice (ov-94): one card per task, under its notice id, and a
+        // decision's answers as buttons. A decision arrives as data, so this
+        // runs for it with the app in the background too.
+        TaskNotice.of(data)?.let { notice ->
+            val settings = com.farcooler.data.Settings(this)
+            if (notice.event != null && settings.wantsTaskEvent(notice.event)) {
+                TaskNotices.post(this, notice, title, body)
+            }
+            return
+        }
         val terminal = data[Notifier.PUSH_EXTRA_TERMINAL].orEmpty()
         // `blocked` is the state worth a high-importance channel; anything else
         // the daemon chose to send is news that can wait.

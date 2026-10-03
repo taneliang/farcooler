@@ -220,8 +220,25 @@ struct SettingsView: View {
                 Text("New devices can access only the runners you select.")
             }
 
+            // The task classes (ov-94), each under its own key, and all of
+            // them under the master switch below.
+            Section {
+                ForEach(TaskNoticeEvent.allCases, id: \.self) { event in
+                    TaskNoticeToggle(event: event)
+                        .disabled(!notifyOnAttention)
+                }
+            } header: {
+                Text("Tasks")
+            } footer: {
+                Text("An agent working on a task notifies through its task.")
+            }
+
             Section {
                 Toggle("When an agent needs you", isOn: $notifyOnAttention)
+                    // The relay hears the master switch as "no task classes".
+                    .onChange(of: notifyOnAttention) { _, _ in
+                        Task { await PushRegistration.shared.sendIfPossible() }
+                    }
                 // "or fails", because a turn that failed IS a turn that ended:
                 // the daemon reports both as `done` with failure carried
                 // beside it, and one toggle has always governed the pair. The
@@ -238,7 +255,7 @@ struct SettingsView: View {
                         Task { await PushRegistration.shared.sendIfPossible() }
                     }
             } header: {
-                Text("Notifications")
+                Text("Agents Without a Task")
             } footer: {
                 Text("Far Cooler doesn’t send notifications while an agent is working.")
             }
@@ -405,5 +422,24 @@ struct SettingsView: View {
                 Button("Done") { dismiss() }
             }
         }
+    }
+}
+
+/// One task class's switch, kept under its own key (`TaskNoticeEvent`), and
+/// sent to the relay when it changes, since the relay is what filters pushes.
+private struct TaskNoticeToggle: View {
+    let event: TaskNoticeEvent
+    @AppStorage private var on: Bool
+
+    init(event: TaskNoticeEvent) {
+        self.event = event
+        _on = AppStorage(wrappedValue: event.onByDefault, event.defaultsKey)
+    }
+
+    var body: some View {
+        Toggle(event.title, isOn: $on)
+            .onChange(of: on) { _, _ in
+                Task { await PushRegistration.shared.sendIfPossible() }
+            }
     }
 }

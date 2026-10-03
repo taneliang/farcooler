@@ -335,6 +335,7 @@ fun SettingsScreen(
     val fontSize by model.settings.fontSize.collectAsStateWithLifecycle()
     val onAttention by model.settings.notifyOnAttention.collectAsStateWithLifecycle()
     val onDone by model.settings.notifyOnDone.collectAsStateWithLifecycle()
+    val taskEvents by model.settings.taskEvents.collectAsStateWithLifecycle()
     val allRunners by model.settings.allRunnersAtOnce.collectAsStateWithLifecycle()
     val reshape by model.settings.reshapePanes.collectAsStateWithLifecycle()
     val email by model.account.email.collectAsStateWithLifecycle()
@@ -410,9 +411,31 @@ fun SettingsScreen(
             }
 
             HorizontalDivider()
-            SectionTitle("Notifications")
+            // The task classes (ov-94), each under its own key, all under the
+            // master switch below, and sent to the relay when they change.
+            SectionTitle("Tasks")
+            for (event in com.farcooler.notify.TaskNotices.EVENTS) {
+                SettingRow(
+                    com.farcooler.notify.TaskNotices.title(event),
+                    taskEvents[event] == true,
+                    enabled = onAttention,
+                ) {
+                    model.settings.setTaskEvent(event, it)
+                    scope.launch { model.push.sendIfPossible() }
+                }
+            }
+            Text(
+                "An agent working on a task notifies through its task.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            HorizontalDivider()
+            SectionTitle("Agents Without a Task")
             SettingRow("When an agent needs you", onAttention) {
                 model.settings.setNotifyOnAttention(it)
+                // The relay hears the master switch as "no task classes".
+                scope.launch { model.push.sendIfPossible() }
             }
             // "or fails", because a turn that failed IS a turn that ended: the
             // runner reports both as `done` with failure carried beside it, and

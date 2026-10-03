@@ -117,6 +117,9 @@ class PushRegistration(
             // Read here rather than held, so a re-registration triggered by the
             // toggle carries the answer the person just gave.
             notifyOnDone = settings.notifyOnDone.value,
+            // The task classes this phone keeps on (ov-94), and none with
+            // the master switch off.
+            notifyEvents = settings.notifyEvents(),
         )
         _registered.value = ok
         _lastError.value =

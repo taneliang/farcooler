@@ -164,8 +164,15 @@ object NotificationCopy {
      * [channelFor] over a push's `data` as [FarCoolerMessagingService] receives
      * it, reading the keys under this app's names for the relay's.
      */
-    fun channelForPush(data: Map<String, String>): String =
-        channelFor(data[Notifier.PUSH_EXTRA_STATUS], data[Notifier.PUSH_EXTRA_KIND])
+    fun channelForPush(data: Map<String, String>): String {
+        // A task notice goes on its class's own channel (ov-94), as the relay
+        // names it for a card Firebase draws.
+        val event = data[TaskNotices.EXTRA_EVENT]
+        if (data[Notifier.PUSH_EXTRA_KIND] == TaskNotices.KIND_TASK && event in TaskNotices.EVENTS) {
+            return TaskNotices.channelFor(event!!)
+        }
+        return channelFor(data[Notifier.PUSH_EXTRA_STATUS], data[Notifier.PUSH_EXTRA_KIND])
+    }
 
     /**
      * One notification body: which pane this is about, what there is to say

@@ -129,6 +129,33 @@ class Settings(context: Context) {
         preferences.edit().putBoolean(KEY_DONE, on).apply()
     }
 
+    /**
+     * The five task classes (ov-94), each under its own key with its own
+     * default: Needs a Decision, Ready for Review and Blocked on; Done and New
+     * Task off. See [TaskNotices].
+     */
+    private val _taskEvents = MutableStateFlow(readTaskEvents())
+    val taskEvents: StateFlow<Map<String, Boolean>> = _taskEvents.asStateFlow()
+
+    private fun readTaskEvents(): Map<String, Boolean> =
+        com.farcooler.notify.TaskNotices.EVENTS.associateWith {
+            preferences.getBoolean(taskKey(it), com.farcooler.notify.TaskNotices.onByDefault(it))
+        }
+
+    fun setTaskEvent(event: String, on: Boolean) {
+        _taskEvents.value = _taskEvents.value + (event to on)
+        preferences.edit().putBoolean(taskKey(event), on).apply()
+    }
+
+    /** What registration sends the relay: none with the master switch off. */
+    fun notifyEvents(): List<String> =
+        com.farcooler.notify.TaskNotices.events(notifyOnAttention.value) { _taskEvents.value[it] == true }
+
+    /** Whether a task notice of [event] may be drawn here. */
+    fun wantsTaskEvent(event: String): Boolean = event in notifyEvents()
+
+    private fun taskKey(event: String) = "notify.tasks.$event"
+
     fun setAllRunnersAtOnce(on: Boolean) {
         _allRunnersAtOnce.value = on
         preferences.edit().putBoolean(KEY_ALL_RUNNERS, on).apply()

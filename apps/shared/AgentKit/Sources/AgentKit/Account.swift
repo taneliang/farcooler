@@ -359,8 +359,27 @@ public final class Account: NSObject, ObservableObject {
         environment: String,
         liveActivityStartToken: String? = nil,
         notifyOnDone: Bool = true,
+        notifyEvents: [String]? = nil,
         pulseToken: String? = nil
     ) async -> Result<Void, AccountError> {
+        let payload = Self.registration(
+            pushToken: pushToken, platform: platform, label: label, environment: environment,
+            liveActivityStartToken: liveActivityStartToken, notifyOnDone: notifyOnDone,
+            notifyEvents: notifyEvents, pulseToken: pulseToken)
+        return await authenticatedPost("/v1/devices", payload).map { _ in () }
+    }
+
+    /// What `registerDevice` sends the relay's `/v1/devices`.
+    nonisolated static func registration(
+        pushToken: String,
+        platform: String,
+        label: String,
+        environment: String,
+        liveActivityStartToken: String?,
+        notifyOnDone: Bool,
+        notifyEvents: [String]?,
+        pulseToken: String?
+    ) -> [String: Any] {
         var payload: [String: Any] = [
             "pushToken": pushToken, "platform": platform, "label": label,
             // "When an agent finishes or fails", so the toggle reaches the
@@ -397,7 +416,11 @@ public final class Account: NSObject, ObservableObject {
         // registration, so two in flight at launch can't strand the widget.
         // Only the phone sends one; the relay keeps its hash.
         if let pulseToken { payload["pulseToken"] = pulseToken }
-        return await authenticatedPost("/v1/devices", payload).map { _ in () }
+        // The task notice classes this device keeps on (ov-94), sent whole
+        // every time: the relay keeps what an older build, which sends none,
+        // can't say. An empty list is every class off, not "say nothing".
+        if let notifyEvents { payload["notifyEvents"] = notifyEvents }
+        return payload
     }
 
     /// File the push token for one running Live Activity, or clear it.

@@ -201,6 +201,12 @@ struct ConnectedRoot: View {
             // with the device so the relay can honor it while the app is
             // closed, and the key it lives under is this app's, not AgentKit's.
             PushRegistration.shared.notifyOnDone = { NotificationSettings.onDone }
+            // The task classes this phone keeps on (ov-94), and none at all
+            // with the master switch off, so a phone in a pocket stays as
+            // quiet as Settings says.
+            PushRegistration.shared.notifyEvents = {
+                TaskNotifications.events(master: NotificationSettings.onAttention)
+            }
             // So the widget can ask the relay which runners are still beating
             // while this app is suspended (ov-53). See `PulseStore`.
             PushRegistration.shared.wantsPulse = true

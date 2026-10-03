@@ -72,6 +72,14 @@
             Pushes from the relay, about an agent on a runner this phone is not
             watching. Not exported: only the messaging library binds to it.
         -->
+        <!--
+            A decision card's answer buttons (ov-94). Not exported: only this
+            app's own notifications send to it.
+        -->
+        <receiver
+            android:name=".notify.AnswerReceiver"
+            android:exported="false" />
+
         <service
             android:name=".notify.FarCoolerMessagingService"
             android:exported="false">

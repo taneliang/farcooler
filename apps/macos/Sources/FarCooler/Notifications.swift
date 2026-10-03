@@ -64,12 +64,146 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         presence.isPresent && watching.contains(terminalID) ? [.list] : [.banner, .list, .sound]
     }
 
+    /// The terminal a notification is about, for `presentation`: the push's
+    /// or the local post's `terminal`, else its thread, which `report` files
+    /// under the terminal's id. Never a task notice's thread (`t:…`) or an
+    /// agent notice id (`a:…`), which name no terminal (ov-94).
+    nonisolated static func terminalID(userInfo: [AnyHashable: Any], thread: String) -> String? {
+        if let named = userInfo["terminal"] as? String, !named.isEmpty { return named }
+        if userInfo["kind"] as? String == "task" { return nil }
+        if thread.isEmpty || thread.hasPrefix("t:") || thread.hasPrefix("a:") { return nil }
+        return thread
+    }
+
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        let terminalID = notification.request.content.threadIdentifier
+        let content = notification.request.content
+        // A task notice has no pane to be on screen: it banners, and the
+        // runner's coalescing is what keeps that to one per burst.
+        guard let terminalID = Self.terminalID(userInfo: content.userInfo, thread: content.threadIdentifier) else {
+            return content.interruptionLevel == .passive ? [.banner, .list] : [.banner, .list, .sound]
+        }
         return await MainActor.run {
             Self.presentation(terminalID: terminalID, watching: watching, presence: .live)
+        }
+    }
+
+    /// A notification's button, or a click on it.
+    ///
+    /// A task decision's answer buttons write the answer as an ANSWER note
+    /// through the runner that posted it, the same note the Needs You rows
+    /// write; the runner then tells the agent waiting on it (ov-90). Any
+    /// other click just brings the app forward, as it always has.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
+    ) async {
+        let info = response.notification.request.content.userInfo
+        let action = response.actionIdentifier
+        let typed = (response as? UNTextInputNotificationResponse)?.userText
+        let target = info["target"] as? String
+        guard let notice = TaskNotice(userInfo: info),
+            let answer = TaskDecisionActions.answer(action: action, options: notice.options, typed: typed)
+        else { return }
+        await send(answer, to: notice, target: target)
+    }
+
+    /// Send `answer` to `notice`'s task, or say it wasn't sent.
+    private func send(_ answer: String, to notice: TaskNotice, target: String?) async {
+        let client = target.flatMap { answerers[$0]?.client }
+        let refusal: String? =
+            if let client {
+                await client.answerTask(key: notice.key, body: answer)
+            } else {
+                "No runner to send it through."
+            }
+        guard let refusal else { return }
+        NSLog("Far Cooler: an answer to %@ wasn't sent: %@", notice.key, refusal)
+        guard Self.canNotify else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Couldn’t Send Your Answer"
+        content.body = "Open Far Cooler to answer \(notice.key) again."
+        content.userInfo = notice.userInfo
+        // Under the task's own id, so it replaces the decision whose buttons
+        // didn't work rather than sitting beside it.
+        if let id = notice.noticeId { content.threadIdentifier = id }
+        try? await UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: notice.noticeId ?? UUID().uuidString, content: content, trigger: nil))
+    }
+
+    /// The runner each task notice was posted from, by `DaemonClient.target`,
+    /// so its answer goes back the same way. Weak: a client that has gone
+    /// has no runner to answer through.
+    private var answerers: [String: WeakClient] = [:]
+
+    private struct WeakClient {
+        weak var client: DaemonClient?
+    }
+
+    /// Whether a task notice is posted here rather than left to the relay.
+    ///
+    /// Left to the relay only when both ends are set up for it: the runner is
+    /// paired (`Host.push_paired`) AND this Mac has registered for pushes. The
+    /// push and a local post share an identifier, so one would replace the
+    /// other anyway, but a replacement alerts again: posting both would be two
+    /// sounds for one notice.
+    static func postsLocally(pushPaired: Bool, registered: Bool) -> Bool {
+        !(pushPaired && registered)
+    }
+
+    /// Whether `terminal`'s own banner is left to its task's notice (ov-94).
+    ///
+    /// An agent working on a task is told about through the task, worded in
+    /// terms of the task, once its runner sends task notices at all
+    /// (`task_notices`). An orchestrator is never a task's agent, and an agent
+    /// with no task notifies as it always has.
+    static func foldsIntoTask(_ terminal: Terminal, runnerSendsNotices: Bool) -> Bool {
+        runnerSendsNotices && terminal.taskId != nil && !terminal.isOrchestrator
+    }
+
+    /// The notification for `notice`, posted from the runner `target` names.
+    ///
+    /// Under the notice's own id, as identifier and thread both, so a newer
+    /// notice about the same task replaces this one, and so does the relay's
+    /// push about it. A decision gets its options' category, whose buttons
+    /// are its answers (`TaskDecisionActions`).
+    static func request(for notice: NoticeEvent, target: String) -> UNNotificationRequest {
+        let content = UNMutableNotificationContent()
+        content.title = notice.title
+        content.body = notice.body
+        content.threadIdentifier = notice.noticeId
+        let task = TaskNotice(
+            key: notice.task, runner: notice.runner, event: TaskNoticeEvent(rawValue: notice.event),
+            noticeId: notice.noticeId, options: notice.event == "decision" ? notice.options : [])
+        var info = task.userInfo
+        info["target"] = target
+        content.userInfo = info
+        switch notice.level {
+        case "time-sensitive": content.interruptionLevel = .timeSensitive
+        case "passive": content.interruptionLevel = .passive
+        default: content.interruptionLevel = .active
+        }
+        if notice.level != "passive" { content.sound = .default }
+        if !task.options.isEmpty {
+            content.categoryIdentifier = TaskDecisionActions.category(for: task.options)
+        }
+        return UNNotificationRequest(identifier: notice.noticeId, content: content, trigger: nil)
+    }
+
+    /// Post a task notice the runner behind `client` composed, if this Mac
+    /// wants its class and the relay won't deliver it anyway.
+    func post(notice: NoticeEvent, from client: DaemonClient) {
+        answerers[client.target] = WeakClient(client: client)
+        guard
+            TaskNotifications.wants(notice.event, master: Preferences.shared.notifyOnAttention),
+            Self.postsLocally(pushPaired: client.pushPaired, registered: PushRegistration.shared.registered),
+            Self.canNotify, authorized
+        else { return }
+        let request = Self.request(for: notice, target: client.target)
+        let options = TaskNotice(userInfo: request.content.userInfo)?.options ?? []
+        Task {
+            if !options.isEmpty { _ = await TaskDecisionActions.register(options: options) }
+            try? await UNUserNotificationCenter.current().add(request)
         }
     }
 
@@ -111,6 +245,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }()
 
     func requestAuthorization() {
+        // The task classes this Mac keeps on, filed with the device so the
+        // relay honors them while the app is closed (ov-94). Set here rather
+        // than beside `notifyOnDone` so the notifier owns its own settings.
+        PushRegistration.shared.notifyEvents = {
+            TaskNotifications.events(master: Preferences.shared.notifyOnAttention)
+        }
         guard Self.canNotify else { return }
         UNUserNotificationCenter.current().delegate = self
         UNUserNotificationCenter.current()
@@ -129,13 +269,16 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// Announce a change, if it is worth announcing.
     ///
     /// `place` is where the pane is, workspace first — see `place(of:in:workspaces:)`.
-    func report(terminal: Terminal, place: String) {
+    /// `foldsIntoTask` is `Notifier.foldsIntoTask`'s answer for this pane:
+    /// its blocked and done banners are its task's notice's to give.
+    func report(terminal: Terminal, place: String, foldsIntoTask: Bool = false) {
         reportFailedExit(terminal: terminal, place: place)
 
         let activity = terminal.agent
         defer { announced[terminal.id] = activity }
 
         guard Preferences.shared.notifyOnAttention else { return }
+        guard !foldsIntoTask else { return }
         guard activity.wantsAttention else { return }
         guard activity != announced[terminal.id] else { return }
         if activity == .done && !Preferences.shared.notifyOnDone { return }

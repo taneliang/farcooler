@@ -21,6 +21,21 @@ final class NotificationService: UNNotificationServiceExtension {
         _ request: UNNotificationRequest,
         withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void
     ) {
+        // A task decision gets its answers as buttons (ov-94). A category's
+        // actions can't be named in the payload, so the category is made here,
+        // from the options the push carries, and registered beside every one
+        // already registered. The words stay the daemon's.
+        if let notice = TaskNotice(userInfo: request.content.userInfo), notice.event == .decision,
+            !notice.options.isEmpty,
+            let content = request.content.mutableCopy() as? UNMutableNotificationContent
+        {
+            Task {
+                content.categoryIdentifier = await TaskDecisionActions.register(options: notice.options)
+                contentHandler(content)
+            }
+            return
+        }
+
         // The banner is untouched. This extension exists to update a file, not
         // to rewrite what the notification says — the daemon composed that
         // sentence and it is already right.

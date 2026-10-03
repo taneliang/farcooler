@@ -456,10 +456,27 @@ struct SettingsView: View {
                 }
             }
 
+            // The task classes (ov-94): one switch each, in the order the
+            // phones list them, all under the master switch below.
+            Section {
+                ForEach(TaskNoticeEvent.allCases, id: \.self) { event in
+                    TaskNoticeToggle(event: event)
+                        .disabled(!preferences.notifyOnAttention)
+                }
+            } header: {
+                Text("Tasks")
+            } footer: {
+                Text("An agent working on a task notifies through its task.")
+            }
+
             // A section footer, not a row: this one line covers both toggles,
             // and a `Text` written beside them would become a third setting.
             Section {
                 Toggle("Notify when an agent needs you", isOn: $preferences.notifyOnAttention)
+                    // The relay hears the master switch as "no task classes".
+                    .onChange(of: preferences.notifyOnAttention) { _, _ in
+                        Task { await PushRegistration.shared.sendIfPossible() }
+                    }
                 // "or fails", because a turn that failed IS a turn that ended:
                 // the daemon reports both as `done` with failure carried beside
                 // it, and one toggle has always governed the pair. The label
@@ -475,6 +492,8 @@ struct SettingsView: View {
                     .onChange(of: preferences.notifyOnDone) { _, _ in
                         Task { await PushRegistration.shared.sendIfPossible() }
                     }
+            } header: {
+                Text("Agents Without a Task")
             } footer: {
                 Text("Far Cooler doesn’t send notifications while an agent is working.")
             }
@@ -485,6 +504,25 @@ struct SettingsView: View {
     }
 }
 
+
+/// One task class's switch, kept under its own key (`TaskNoticeEvent`), and
+/// sent to the relay when it changes so pushes honor it too.
+private struct TaskNoticeToggle: View {
+    let event: TaskNoticeEvent
+    @AppStorage private var on: Bool
+
+    init(event: TaskNoticeEvent) {
+        self.event = event
+        _on = AppStorage(wrappedValue: event.onByDefault, event.defaultsKey)
+    }
+
+    var body: some View {
+        Toggle(event.title, isOn: $on)
+            .onChange(of: on) { _, _ in
+                Task { await PushRegistration.shared.sendIfPossible() }
+            }
+    }
+}
 
 /// The app's appearance, independent of the system's.
 enum Appearance: String, CaseIterable, Identifiable {

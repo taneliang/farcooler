@@ -1979,19 +1979,26 @@ extension Fleet {
 /// terminal: the push's `terminal`, else the thread a banner this app
 /// posted itself was filed under (`Notifier.report`), which is the
 /// terminal's id.
+///
+/// A task notice (`kind: "task"`, ov-94) opens its task the way a decision
+/// does. Its thread is `t:<runner>:<key>`, which is no terminal, so a thread
+/// spelled as a notice id (`t:` or `a:`) is never read as one.
 enum PushTap: Equatable, Sendable {
     case terminal(String)
     case task(DecisionPush)
 
     init?(userInfo: [AnyHashable: Any], thread: String) {
-        if userInfo["kind"] as? String == "decision",
+        let kind = userInfo["kind"] as? String
+        if kind == "decision" || kind == "task",
             let key = userInfo["task"] as? String, !key.isEmpty
         {
             let runner = (userInfo["runner"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             self = .task(DecisionPush(key: key, runner: runner))
             return
         }
-        let terminal = (userInfo["terminal"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? thread
+        let named = (userInfo["terminal"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let threaded = thread.hasPrefix("t:") || thread.hasPrefix("a:") ? "" : thread
+        let terminal = named ?? threaded
         guard !terminal.isEmpty else { return nil }
         self = .terminal(terminal)
     }

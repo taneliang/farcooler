@@ -152,6 +152,59 @@ struct TaskEvent: Sendable, Decodable {
     }
 }
 
+/// A task notice the runner composed (ov-94): `farcooler events`' `notice`
+/// line. The runner decided it, worded it and named it, so the Mac posts it
+/// as it arrives, under `noticeId`, and a newer notice about the same task
+/// replaces the older one here exactly as the relay's push does on a phone.
+/// See `Notifier.post(notice:from:)`.
+struct NoticeEvent: Sendable, Decodable, Equatable {
+    /// `t:<runner id>:<task key>`: the notification's identifier and thread.
+    var noticeId: String
+    /// `decision`, `review`, `blocked`, `done` or `new`.
+    var event: String
+    /// `time-sensitive`, `active` or `passive`.
+    var level: String
+    var title: String
+    var body: String
+    /// The task's key.
+    var task: String
+    /// The runner's `Host.runner_id`.
+    var runner: String?
+    /// A decision's answer options, for its buttons.
+    var options: [String]
+
+    init(
+        noticeId: String, event: String, level: String, title: String, body: String, task: String,
+        runner: String?, options: [String]
+    ) {
+        self.noticeId = noticeId
+        self.event = event
+        self.level = level
+        self.title = title
+        self.body = body
+        self.task = task
+        self.runner = runner
+        self.options = options
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case event, level, title, body, task, runner, options
+        case noticeId = "notice_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        noticeId = try c.decode(String.self, forKey: .noticeId)
+        event = try c.decode(String.self, forKey: .event)
+        level = try c.decodeIfPresent(String.self, forKey: .level) ?? "active"
+        title = try c.decode(String.self, forKey: .title)
+        body = try c.decodeIfPresent(String.self, forKey: .body) ?? ""
+        task = try c.decode(String.self, forKey: .task)
+        runner = try c.decodeIfPresent(String.self, forKey: .runner)
+        options = try c.decodeIfPresent([String].self, forKey: .options) ?? []
+    }
+}
+
 /// Which resource a line is about.
 private struct EventKind: Decodable {
     var kind: String
@@ -201,6 +254,8 @@ final class EventStream {
     /// `needs-you`. Carries nothing, as `fleet` doesn't: the list is small and
     /// read whole.
     private let onNeedsYou: @Sendable () -> Void
+    /// A task notice to post (`notice`, ov-94).
+    private let onNotice: @Sendable (NoticeEvent) -> Void
     private let onEnd: @Sendable () -> Void
 
     init(
@@ -211,6 +266,7 @@ final class EventStream {
         onTask: @escaping @Sendable (TaskEvent) -> Void = { _ in },
         onMissed: @escaping @Sendable () -> Void = {},
         onNeedsYou: @escaping @Sendable () -> Void = {},
+        onNotice: @escaping @Sendable (NoticeEvent) -> Void = { _ in },
         onEnd: @escaping @Sendable () -> Void = {}
     ) {
         self.onEvent = onEvent
@@ -220,6 +276,7 @@ final class EventStream {
         self.onTask = onTask
         self.onMissed = onMissed
         self.onNeedsYou = onNeedsYou
+        self.onNotice = onNotice
         self.onEnd = onEnd
     }
 
@@ -246,7 +303,7 @@ final class EventStream {
         let handle = out.fileHandleForReading
         outputHandle = handle
         handle.readabilityHandler = {
-            [onEvent, onLayout, onFleet, onChangeSet, onTask, onMissed, onNeedsYou] h in
+            [onEvent, onLayout, onFleet, onChangeSet, onTask, onMissed, onNeedsYou, onNotice] h in
             let chunk = h.availableData
             if chunk.isEmpty { return }
             let decoder = JSONDecoder()
@@ -254,7 +311,7 @@ final class EventStream {
                 Self.dispatch(
                     line, decoder: decoder, onEvent: onEvent, onLayout: onLayout,
                     onFleet: onFleet, onChangeSet: onChangeSet, onTask: onTask,
-                    onMissed: onMissed, onNeedsYou: onNeedsYou)
+                    onMissed: onMissed, onNeedsYou: onNeedsYou, onNotice: onNotice)
             }
         }
 
@@ -287,7 +344,8 @@ final class EventStream {
         onChangeSet: () -> Void = {},
         onTask: (TaskEvent) -> Void = { _ in },
         onMissed: () -> Void = {},
-        onNeedsYou: () -> Void = {}
+        onNeedsYou: () -> Void = {},
+        onNotice: (NoticeEvent) -> Void = { _ in }
     ) {
         // Dispatched on `kind` rather than by trying each shape in turn.
         // Guessing worked while there was one shape; with two, a layout
@@ -319,6 +377,11 @@ final class EventStream {
         // The CLI's name for `needs_you_changed`.
         case "needs_you":
             onNeedsYou()
+        // A task notice the runner composed (ov-94).
+        case "notice":
+            if let notice = try? decoder.decode(NoticeEvent.self, from: line) {
+                onNotice(notice)
+            }
         // Resources this app does not track yet are skipped, not an error.
         default: return
         }

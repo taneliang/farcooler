@@ -1,5 +1,6 @@
 import ActivityKit
 import Foundation
+import UserNotifications
 import WatchConnectivity
 
 /// The phone's half of the watch link: push the fleet, and perform what the
@@ -52,6 +53,11 @@ final class WatchLinkHost: NSObject {
     /// `@StateObject` owned by `ConnectedRoot`, and a strong reference here
     /// would keep every runner's SSH session alive for the life of the process.
     private weak var fleet: FleetStore?
+
+    /// The decisions this phone has answered from a notification's button,
+    /// by notice and runner, so a second tap sends nothing
+    /// (`answerDecision(_:with:)`).
+    private var answeredDecisions: Set<String> = []
 
     /// The last snapshot actually handed to the system, and when.
     ///
@@ -1287,4 +1293,92 @@ extension WatchLinkHost: WCSessionDelegate {
 /// string.
 private var appName: String {
     Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "Far Cooler"
+}
+
+// MARK: - Answering a decision from its notification (ov-94)
+
+extension WatchLinkHost {
+    /// Answer `notice`'s decision with `answer`, from the notification's own
+    /// button, the way a lock screen card answers a permission
+    /// (`answerFromGlance`), in its order:
+    ///
+    ///   1. **Claim, or stop.** One answer per notice from this phone, so a
+    ///      second tap on a notification still on screen sends nothing.
+    ///   2. **A connection, or a sentence.** The runner the push names, found
+    ///      as a tapped decision is found (`PhoneDecisionLink`), given the
+    ///      fleet a moment to arrive: a button launches the app.
+    ///   3. **Verify before writing.** The decision must still be waiting on
+    ///      that runner's Needs You list. Answered somewhere else, it isn't
+    ///      answered twice.
+    ///   4. **One attempt.** `task.note`, the note the Needs You row writes;
+    ///      the runner tells the agent waiting on it (ov-90).
+    ///   5. **Say so when it didn't.** A notification, under the task's own
+    ///      id so it replaces the one whose button didn't work.
+    func answerDecision(_ notice: TaskNotice, with answer: String) async {
+        let claim = "\(notice.noticeId ?? notice.key)\u{1f}\(notice.runner ?? "")"
+        guard !answeredDecisions.contains(claim) else { return }
+        answeredDecisions.insert(claim)
+
+        guard let fleet else {
+            await couldNotAnswer(notice, "Open Far Cooler to answer \(notice.key).")
+            return
+        }
+        let push = DecisionPush(key: notice.key, runner: notice.runner)
+        let deadline = Date().addingTimeInterval(Self.decisionFleetBudget)
+        var found: (Connection, String)?
+        while found == nil {
+            let over = Date() >= deadline
+            let sources = fleet.runners.map { runner in
+                PhoneDecisionLink.Source(
+                    runner: runner.host.id.uuidString, items: runner.connection.needsYou,
+                    boards: runner.connection.boards,
+                    implicit: runner.connection.fleet.workspaces == nil,
+                    hostRunner: runner.connection.lastDaemon?.runnerId)
+            }
+            if let stack = PhoneDecisionLink.find(push, in: sources, waitEnded: over),
+                case .task(let place, let task)? = stack.last,
+                let connection = fleet.connection(for: place)
+            {
+                found = (connection, task)
+            } else if over {
+                break
+            } else {
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+        }
+        guard let (connection, task) = found else {
+            answeredDecisions.remove(claim)
+            await couldNotAnswer(notice, "Your \(DeviceKind.current) couldn’t find \(notice.key). Open Far Cooler to answer it.")
+            return
+        }
+        guard await ready(connection, within: Self.glanceConnectBudget) else {
+            answeredDecisions.remove(claim)
+            await couldNotAnswer(notice, "Your \(DeviceKind.current) can’t reach that runner right now.")
+            return
+        }
+        guard connection.needsYou.contains(where: { $0.kind == .decision && $0.task?.id == task }) else {
+            await couldNotAnswer(notice, "\(notice.key) isn’t waiting on a decision anymore.")
+            return
+        }
+        if let refused = await connection.answerDecision(task: task, with: answer) {
+            answeredDecisions.remove(claim)
+            await couldNotAnswer(notice, refused)
+        }
+    }
+
+    /// How long an answer waits for its runner to be found: a button press
+    /// launches the app, and the fleet is younger than the push.
+    private static let decisionFleetBudget: TimeInterval = 10
+
+    /// Say an answer wasn't sent, replacing the decision's notification.
+    private func couldNotAnswer(_ notice: TaskNotice, _ why: String) async {
+        let content = UNMutableNotificationContent()
+        content.title = "Couldn’t Send Your Answer"
+        content.body = why
+        content.userInfo = notice.userInfo
+        if let id = notice.noticeId { content.threadIdentifier = id }
+        try? await UNUserNotificationCenter.current().add(
+            UNNotificationRequest(
+                identifier: notice.noticeId ?? UUID().uuidString, content: content, trigger: nil))
+    }
 }

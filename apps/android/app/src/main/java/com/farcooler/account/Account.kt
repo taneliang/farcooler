@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -258,6 +259,7 @@ class Account(context: Context) {
         platform: String,
         label: String,
         notifyOnDone: Boolean = true,
+        notifyEvents: List<String>? = null,
     ): Boolean {
         val token = accessToken() ?: return false
         val body = post(
@@ -282,6 +284,11 @@ class Account(context: Context) {
                 // too old to know about this and wrong for one turning the
                 // setting back ON.
                 put("notifyOnDone", JsonPrimitive(notifyOnDone))
+                // The task notice classes this device keeps on (ov-94), sent
+                // whole; an empty list is every class off.
+                if (notifyEvents != null) {
+                    put("notifyEvents", JsonArray(notifyEvents.map(::JsonPrimitive)))
+                }
             },
             bearer = token,
         )

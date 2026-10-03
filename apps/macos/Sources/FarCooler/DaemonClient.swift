@@ -518,6 +518,15 @@ final class DaemonClient: ObservableObject {
                     await self.refreshNeedsYou()
                 }
             },
+            onNotice: { [weak self] notice in
+                Task { @MainActor in
+                    // A task notice the runner composed (ov-94). Stale-guarded
+                    // like every other arm here, for the reason `onEvent`
+                    // states.
+                    guard let self, self.streamGeneration == generation else { return }
+                    Notifier.shared.post(notice: notice, from: self)
+                }
+            },
             onEnd: { [weak self] in
                 Task { @MainActor in
                     // Stale: either this stream was deliberately stopped, or
@@ -676,7 +685,9 @@ final class DaemonClient: ObservableObject {
             let terminal = fleet.worktrees[w].terminals[t]
             Notifier.shared.report(
                 terminal: terminal,
-                place: Notifier.place(of: terminal, in: fleet.worktrees[w], workspaces: fleet.workspaces))
+                place: Notifier.place(of: terminal, in: fleet.worktrees[w], workspaces: fleet.workspaces),
+                foldsIntoTask: Notifier.foldsIntoTask(
+                    terminal, runnerSendsNotices: daemonBuild?.can("task_notices") == true))
             reapIfExited(terminal)
             return
         }
@@ -912,7 +923,14 @@ final class DaemonClient: ObservableObject {
             // `reportWatching`'s gate was therefore closed on every Mac.
             capabilities: Set(body["capabilities"] as? [String] ?? []))
         servedNeedsYou = daemonBuild?.can("needs_you") == true
+        pushPaired = body["pushPaired"] as? Bool ?? false
     }
+
+    /// Whether this runner is paired with a relay (`Host.push_paired`), so its
+    /// task notices reach this Mac as pushes and needn't be posted here too
+    /// (`Notifier.postsLocally`). False until read, and from a runner too old
+    /// to say: then the Mac posts, as it always has.
+    private(set) var pushPaired = false
 
     /// Replace the daemon on this runner with the build this app ships.
     ///
@@ -1228,8 +1246,15 @@ final class DaemonClient: ObservableObject {
     /// it is, because moving it on is the orchestrator's call once it has
     /// read the answer.
     func answerDecision(key: String, body: String, repository: String) async -> String? {
+        await answerTask(key: key, body: body, repository: repository)
+    }
+
+    /// `answerDecision` for a task known only by its key, as a notification
+    /// knows it (ov-94): the runner finds the key on its boards.
+    func answerTask(key: String, body: String, repository: String? = nil) async -> String? {
+        let board = repository.map { ["--repo", $0] } ?? []
         let (data, message) = await runRaw(
-            ["task", "note", key, "--kind", "answer", "--body", body, "--repo", repository, "--json"],
+            ["task", "note", key, "--kind", "answer", "--body", body] + board + ["--json"],
             background: true)
         if data != nil { return nil }
         return message ?? "The answer wasn’t written."

@@ -44,6 +44,11 @@ public final class PushRegistration: ObservableObject {
     /// every install has always had.
     public var notifyOnDone: () -> Bool = { true }
 
+    /// The task notice classes this device wants (ov-94), read at
+    /// registration time like `notifyOnDone`: `TaskNotifications.events`. Set
+    /// once at launch by each app; until then, the relay's own defaults.
+    public var notifyEvents: () -> [String]? = { nil }
+
     /// Whether to send the phone's pulse token at registration, making it the
     /// first time, so the widget can ask which runners are beating (ov-53).
     /// Set by the phone at launch; the Mac has no widget that reads one.
@@ -101,6 +106,7 @@ public final class PushRegistration: ObservableObject {
             environment: Self.environment,
             liveActivityStartToken: liveActivityStartToken,
             notifyOnDone: notifyOnDone(),
+            notifyEvents: notifyEvents(),
             pulseToken: pulseToken)
         {
         case .success:

@@ -179,6 +179,18 @@ class AppModel(
         // connected to before this device had an identity to offer.
         viewModelScope.launch { Identity.publicKey }
 
+        // Answers from a decision card's buttons (ov-94), sent through the
+        // runner the task is on while this model runs. See [AnswerReceiver].
+        com.farcooler.notify.TaskAnswers.shared.attached = true
+        viewModelScope.launch {
+            com.farcooler.notify.TaskAnswers.shared.pending.collect { pending ->
+                if (pending.isEmpty()) return@collect
+                com.farcooler.notify.TaskAnswers.shared.deliver({ sendAnswer(it) }) { answer, why ->
+                    com.farcooler.notify.TaskNotices.couldNotAnswer(getApplication(), answer, why)
+                }
+            }
+        }
+
         fleet.onFleet = { host, snapshot ->
             for (worktree in snapshot.worktrees) {
                 for (terminal in worktree.terminals) {
@@ -519,6 +531,34 @@ class AppModel(
     private var pendingTask: String? = null
     private var pendingTaskRunner: String? = null
 
+    /**
+     * Send one answer from a decision card: find its task as a tapped
+     * decision is found, on a runner that's connected, check the decision is
+     * still waiting there, and write it once. Null when it landed, else the
+     * sentence for why not.
+     */
+    private suspend fun sendAnswer(answer: com.farcooler.notify.TaskAnswer): String? {
+        val began = System.currentTimeMillis()
+        while (true) {
+            val over = System.currentTimeMillis() - began >= ANSWER_FIND_MS
+            val sources = fleet.active.value.map {
+                DecisionSource(it.host.id, it.needsYou.value, it.boards.value, it.daemon.value?.runnerId)
+            }
+            val target = DecisionLink.find(answer.key, sources, answer.runner, over)
+            val connection = target?.let { t -> fleet.active.value.firstOrNull { it.host.id == t.hostId } }
+            if (target != null && connection != null && connection.phase.value is Connection.Phase.Connected) {
+                val waiting = connection.needsYou.value?.items.orEmpty().any {
+                    it.kindValue == NeedsYouKind.DECISION && it.task?.id == target.taskId
+                }
+                if (!waiting) return "${answer.key} isn’t waiting on a decision anymore."
+                return runCatching { connection.answerDecision(target.taskId, answer.body) }
+                    .fold({ null }, { "Far Cooler couldn’t send your answer to ${answer.key}." })
+            }
+            if (over) return "Your phone can’t reach the runner ${answer.key} is on right now."
+            delay(500)
+        }
+    }
+
     private fun resolvePendingTask(waitEnded: Boolean = false) {
         val key = pendingTask ?: return
         val sources = fleet.active.value.map {
@@ -758,6 +798,7 @@ class AppModel(
 
     override fun onCleared() {
         super.onCleared()
+        com.farcooler.notify.TaskAnswers.shared.attached = false
         reachability.stop()
         // The scope is cancelled either way, but a native handle and an SSH
         // session are not the garbage collector's to reclaim.
@@ -767,6 +808,9 @@ class AppModel(
     private companion object {
         /** How long a decision push waits for its task at most, as on iOS. */
         const val DECISION_FOLLOW_MS = 60_000L
+
+        /** How long an answer from a decision card looks for its runner. */
+        const val ANSWER_FIND_MS = 15_000L
 
         // Namespaced, because a `SavedStateHandle` is one bundle shared with
         // anything else that ever writes to this activity's saved state.

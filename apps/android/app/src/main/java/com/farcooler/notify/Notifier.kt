@@ -122,6 +122,19 @@ class Notifier(
                     "An agent finished the task you gave it, or its last turn didn’t finish."
             }
         )
+        // One channel per task class (ov-94), so the phone's own switch for
+        // each agrees with the app's. The relay names the same ids for a card
+        // Firebase draws, and FCM drops a card naming a channel that doesn't
+        // exist, so these are spelled out, never built.
+        for ((id, name, importance) in listOf(
+            Triple("tasks.decision", "Tasks that need a decision", NotificationManager.IMPORTANCE_HIGH),
+            Triple("tasks.review", "Tasks ready for review", NotificationManager.IMPORTANCE_DEFAULT),
+            Triple("tasks.blocked", "Blocked tasks", NotificationManager.IMPORTANCE_DEFAULT),
+            Triple("tasks.done", "Finished tasks", NotificationManager.IMPORTANCE_LOW),
+            Triple("tasks.new", "New tasks", NotificationManager.IMPORTANCE_LOW),
+        )) {
+            system.createNotificationChannel(NotificationChannel(id, name, importance))
+        }
     }
 
     /** Announce a change, if it is worth announcing. */

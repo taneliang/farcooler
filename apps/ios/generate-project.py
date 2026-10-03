@@ -401,6 +401,10 @@ AGENTKIT_SOURCES = [
     # When the phone asks for notification permission, and the line it says
     # first. See `NotificationAskTests`.
     "NotificationAsk.swift",
+    # The five task notice classes, a task push read off its payload, and a
+    # decision's answer buttons (ov-94). Here and in `notify_build_ids`: the
+    # service extension makes a decision's category from its options.
+    "TaskNotifications.swift",
     "RelaySection.swift",
     # Beside `RelaySection.swift` because it is the same screen and the same
     # shape of setting: which rendezvous tunneled runners and this phone meet
@@ -819,7 +823,8 @@ activity_build_ids = {
 # this extension can write a snapshot the widget will understand.
 notify_build_ids = {
     name: oid("notify-build/" + name)
-    for name in NOTIFY_SOURCES + ["FleetSnapshot.swift", "NeedsYou.swift", "SnapshotStore.swift"]
+    for name in NOTIFY_SOURCES
+    + ["FleetSnapshot.swift", "NeedsYou.swift", "SnapshotStore.swift", "TaskNotifications.swift"]
 }
 
 # A fourth set, on exactly the reasoning above. `FleetSnapshot.swift` and
