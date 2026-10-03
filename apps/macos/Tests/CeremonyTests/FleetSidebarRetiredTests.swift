@@ -69,6 +69,7 @@ struct FleetSidebarRetiredTests {
             defaults.set(old, forKey: "window.sidebar")
             defaults.set("\u{1}ws", forKey: "sidebar.openWorktrees")
             defaults.set("\u{1}overnight", forKey: "sidebar.collapsedProjects")
+            defaults.set(true, forKey: "tips.workspaceNavigator")
             defaults.set(
                 ["0.000000, 0.000000, 320.000000, 1130.000000, YES, NO"],
                 forKey: "NSSplitView Subview Frames X-1-AppWindow-1, SidebarNavigationSplitView")
@@ -158,13 +159,22 @@ struct FleetSidebarRetiredTests {
             "struct SidebarSearchRow", "struct SidebarTitleRow", "struct SidebarGroupSection", "struct SidebarEntry",
             "struct SidebarRow", "struct SidebarMenuButton", "struct WorkspaceHeaderActions", "struct DaemonUpdateBar",
             "final class WorktreeDrag", "enum SidebarDefault", "enum SidebarMetrics", "enum WorkspacesTip",
-            "func sidebarRows", "func reorderWorktrees", "NavigationSplitView(", "toggleSidebar(_:)",
+            "func sidebarRows", "func reorderWorktrees", "NavigationSplitView", "toggleSidebar(_:)",
         ]
-        let keys = ["\"window.sidebar\"", "\"sidebar.openWorktrees\"", "\"sidebar.collapsedProjects\""]
+        let keys = [
+            "\"window.sidebar\"", "\"sidebar.openWorktrees\"", "\"sidebar.collapsedProjects\"",
+            "\"tips.workspaceNavigator\"",
+        ]
         let files = try Self.sources()
         #expect(files.count > 50, "found \(files.count) source files")
-        for (name, text) in files {
-            for declaration in declarations where text.contains(declaration) {
+        for (name, source) in files {
+            // Code only: a comment may say what went.
+            let text = source.split(separator: "\n").filter {
+                !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//")
+            }.joined(separator: "\n")
+            // NavigatorVisibility names the old split view's saved frames
+            // only to remove them.
+            for declaration in declarations where text.contains(declaration) && name != "NavigatorVisibility.swift" {
                 Issue.record("\(name) still has \(declaration)")
             }
             for key in keys where text.contains(key) && name != "NavigatorVisibility.swift" {

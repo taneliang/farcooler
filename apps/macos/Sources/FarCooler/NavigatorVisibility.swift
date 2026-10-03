@@ -16,8 +16,11 @@ enum NavigatorVisibility {
     static let key = "window.navigator"
 
     /// What the retired sidebar left in this app's defaults: its own
-    /// visibility, its open workspaces, its collapsed repositories.
-    static let retiredKeys = ["window.sidebar", "sidebar.openWorktrees", "sidebar.collapsedProjects"]
+    /// visibility, its open workspaces, its collapsed repositories, and the
+    /// dismissal of the one-time tip drawn over it.
+    static let retiredKeys = [
+        "window.sidebar", "sidebar.openWorktrees", "sidebar.collapsedProjects", "tips.workspaceNavigator",
+    ]
 
     /// Whether a new window opens with its navigator put away: only when
     /// it was put away last, in the navigator's own key. The retired
