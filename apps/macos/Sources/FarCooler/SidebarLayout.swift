@@ -43,30 +43,53 @@ enum ColumnGrid {
     static let twoLineRowHeight: CGFloat = 5 * rhythm
 }
 
-/// The navigator's grid: two lines down the board column, and nothing
-/// between them (ov-177, round 2).
+/// The navigator's grid: two lines down the board column, and a box that
+/// breathes past them (ov-177 round 2, ov-230).
 ///
-/// - `edge`: where everything drawn full width starts. A section's chevron,
-///   the filter field's box, and a row's selection (the orchestrator's
-///   included) all start here.
+/// - `edge`: where a section's chevron starts, and the margin the column's
+///   content is measured from.
 /// - `text`: where every word starts. The header's title, a section's and a
 ///   group's title, a task's key, the filter's text and the orchestrator's
 ///   title all start here.
+/// - `outset`: how far a box (the filter field, the orchestrator's card, a
+///   row's selection, the focus ring) reaches past `edge` into the margin,
+///   on both sides: half of it. The owner's screenshot of 3 October
+///   ("hella cramped") showed boxes sitting exactly on the grid, their glyphs
+///   squeezed against their edges.
+/// - the glyph column, `edge` to `text`: where a chevron sits, and where
+///   every glyph inside a box sits too, centered on the same x
+///   (`glyphCenter`), so the pulsating dot lines up with the carets over it.
 ///
-/// A mark (chevron, filter glyph, orchestrator status) sits in the one cell
-/// between the two lines. The owner's screenshot of 3 October showed the
-/// filter's text and the orchestrator's title a column further in, at C,
-/// with their glyphs on the rows' text column. Their boxes looked indented
-/// as a result.
+/// Nothing in a view carries a number of its own for any of these.
 enum NavigatorGrid {
-    /// The leading edge of full-width things: column A.
+    /// The leading edge of the content column: column A.
     static let edge: CGFloat = ColumnGrid.a
-    /// The mark cell, from `edge` to `text`: one step.
+    /// The glyph column's width, from `edge` to `text`: one step.
     static let mark: CGFloat = ColumnGrid.step
     /// The text column: column B.
     static let text: CGFloat = edge + mark
-    /// How far into a box drawn from `edge` its text starts.
+    /// How far into a row drawn from `edge` its text starts.
     static let textInset: CGFloat = text - edge
+    /// How far a box reaches past `edge`, on each side: half the margin.
+    static let outset: CGFloat = edge / 2
+    /// Where a box starts, in the column's coordinates.
+    static let boxEdge: CGFloat = edge - outset
+    /// The x a chevron and every glyph in a box is centered on.
+    static let glyphCenter: CGFloat = edge + mark / 2
+}
+
+extension View {
+    /// Put this glyph (or chevron) in the navigator's glyph column: a cell
+    /// from `edge` to `text`, the glyph centered in it.
+    func glyphColumn() -> some View {
+        frame(width: NavigatorGrid.mark, alignment: .center)
+    }
+
+    /// Let a box's shape (a fill, a focus ring) reach `NavigatorGrid.outset`
+    /// past the content it surrounds, on both sides.
+    func boxOutset() -> some View {
+        padding(.horizontal, -NavigatorGrid.outset)
+    }
 }
 
 /// What a mark in a row is, for `GridGeometryTests`. `box` is the leading

@@ -97,13 +97,13 @@ struct BoardWorktreesSection: View {
                     HStack(spacing: 0) {
                         Image(systemName: "plus")
                             .font(.system(size: 10, weight: .medium))
-                            .frame(width: NavigatorGrid.mark, alignment: .leading)
+                            .glyphColumn()
+                            .gridMark("boardWorktreeNew", .icon)
                         Text("New Worktree…")
                             .font(.system(size: WorkspaceStyle.PaneText.body))
                         Spacer(minLength: 0)
                     }
                     .foregroundStyle(.secondary)
-                    .padding(.leading, NavigatorGrid.textInset)
                     .frame(minHeight: ColumnGrid.rowHeight)
                     .contentShape(Rectangle())
                 }
@@ -175,7 +175,7 @@ private struct BoardWorktreeRow: View {
             Image(systemName: WorktreeSection.glyph)
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.secondary)
-                .frame(width: NavigatorGrid.mark, alignment: .leading)
+                .glyphColumn()
                 .gridMark("boardWorktree", .icon)
             VStack(alignment: .leading, spacing: 2) {
                 Text(worktree.isMainCheckout ? "\(worktree.task) (main checkout)" : worktree.task)
@@ -196,7 +196,7 @@ private struct BoardWorktreeRow: View {
                     .help(status.label)
             }
         }
-        .navigatorRow(selected: selected, keyed: keyed)
+        .navigatorRow(selected: selected, keyed: keyed, leading: 0, box: "boardWorktree")
     }
 }
 

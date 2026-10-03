@@ -22,13 +22,18 @@ struct GridGeometryTests {
         let row: String
         let role: GridRole
         let x: CGFloat
-        var description: String { "\(row).\(role.rawValue) at \(x)" }
+        let width: CGFloat
+        var midX: CGFloat { x + width / 2 }
+        var description: String { "\(row).\(role.rawValue) at \(x), \(width) wide" }
     }
 
     final class Box {
         var marks: [Mark] = []
         func record(_ marks: [GridMark], _ proxy: GeometryProxy) {
-            self.marks = marks.map { Mark(row: $0.row, role: $0.role, x: proxy[$0.bounds].minX) }
+            self.marks = marks.map { 
+                let bounds = proxy[$0.bounds]
+                return Mark(row: $0.row, role: $0.role, x: bounds.minX, width: bounds.width)
+            }
         }
     }
 
@@ -70,7 +75,7 @@ struct GridGeometryTests {
     /// Every mark on a column, each named one on its own, and every named
     /// one drawn.
     private func check(_ marks: [Mark], expect: [String: CGFloat]) {
-        for mark in marks {
+        for mark in marks where mark.role != .box {
             #expect(ColumnGrid.isColumn(mark.x), "\(mark) is between columns")
         }
         for (name, column) in expect.sorted(by: { $0.key < $1.key }) {
@@ -112,6 +117,57 @@ struct GridGeometryTests {
             : NavigatorOrchestrator(state: .none, offers: [.start(.claude)])
     }
 
+    /// ov-230: every box reaches `outset` past the edge, every chevron
+    /// starts at the edge, every word at the text column, and every glyph in
+    /// a box is centered on the carets' x.
+    private func checkTheLines(_ found: [Mark]) {
+        let boxes = Set(found.filter { $0.role == .box }.map(\.x))
+        let chevrons = Set(found.filter { $0.role == .chevron }.map(\.x))
+        let words = Set(found.filter { $0.role == .text && $0.row != "summary.title" }.map(\.x))
+        #expect(NavigatorGrid.outset == NavigatorGrid.edge / 2, "an outset of half the margin")
+        #expect(boxes == [NavigatorGrid.edge - NavigatorGrid.outset], "boxes at \(boxes.sorted())")
+        #expect(chevrons == [NavigatorGrid.edge], "chevrons at \(chevrons.sorted())")
+        #expect(words == [NavigatorGrid.text], "text starts at \(words.sorted())")
+        let carets = Set(found.filter { $0.role == .chevron }.map(\.midX))
+        #expect(carets == [NavigatorGrid.glyphCenter], "caret centers at \(carets.sorted())")
+        for icon in found where icon.role == .icon {
+            #expect(abs(icon.midX - NavigatorGrid.glyphCenter) < 0.5, "\(icon) isn't centered on the carets")
+            for caret in found where caret.role == .chevron {
+                #expect(abs(icon.midX - caret.midX) < 0.5, "\(icon) vs \(caret)")
+            }
+        }
+    }
+
+    /// The Terminals and Worktrees sections follow the same lines (ov-230):
+    /// each row's box past the edge, its glyph over the carets, its name at B.
+    @Test("Terminals and worktrees rows sit on the same lines")
+    func terminalsAndWorktreesAreOnTheGrid() async {
+        let store = await Self.store()
+        var terminals = ProjectTerminals(
+            terminals: [Terminal(id: "t1", short: "t1", title: "proxy", preset: "zsh", state: "running", epoch: 0)],
+            selected: "t1")
+        terminals.onNew = {}
+        let loose = Worktree(
+            id: "w1", short: "w1", task: "ov-9", branch: "ov-9", repository: "r", host: "", path: "/tmp/w1",
+            state: "active", terminals: [], repositoryID: "r", workspace: nil)
+        var worktrees = BoardWorktrees(shown: [loose], selected: "w1", terminals: terminals)
+        worktrees.onNew = {}
+        let board = TaskBoardView(
+            store: store, client: store.client, agents: .none, onGoTo: { _ in },
+            defaults: UserDefaults(suiteName: "grid-\(UUID().uuidString)")!,
+            orchestrator: Self.orchestrator(running: true), worktrees: { _ in worktrees })
+        let found = await marks(board, width: WorkspaceColumns.navigatorDefault, height: 1400)
+        check(
+            found,
+            expect: [
+                "projectTerminal.box": NavigatorGrid.boxEdge, "projectTerminal.icon": NavigatorGrid.edge,
+                "projectTerminal.text": NavigatorGrid.text, "projectTerminalNew.icon": NavigatorGrid.edge,
+                "projectTerminalNew.text": NavigatorGrid.text, "boardWorktree.box": NavigatorGrid.boxEdge,
+                "boardWorktree.icon": NavigatorGrid.edge, "boardWorktree.text": NavigatorGrid.text,
+            ])
+        checkTheLines(found)
+    }
+
     @Test(
         "Every board row's chevron and text is on the board column's grid",
         arguments: [(false, true), (true, false)])
@@ -126,15 +182,15 @@ struct GridGeometryTests {
         let found = await marks(board, width: WorkspaceColumns.navigatorDefault)
         var expect: [String: CGFloat] = [
             "header.text": NavigatorGrid.text,
-            // Round 2 of ov-177: the filter's box and the orchestrator's
-            // from the grid's edge, their glyphs in the mark cell, and their
-            // words on the text column every row's words start on. Round 1
-            // had their text a column further in, at C, which read as an
-            // indent.
-            "filter.box": NavigatorGrid.edge,
+            // ov-177 round 2: the words of the filter and the orchestrator
+            // on the text column every row's words start on. ov-230: their
+            // boxes reach half a margin past the grid's edge, and their
+            // glyphs sit in the glyph column, checked below against the
+            // carets.
+            "filter.box": NavigatorGrid.boxEdge,
             "filter.icon": NavigatorGrid.edge,
             "filter.text": NavigatorGrid.text,
-            "orchestrator.box": NavigatorGrid.edge,
+            "orchestrator.box": NavigatorGrid.boxEdge,
             "orchestrator.icon": NavigatorGrid.edge,
             "orchestrator.text": NavigatorGrid.text,
             "summary.chevron": ColumnGrid.a,
@@ -150,13 +206,7 @@ struct GridGeometryTests {
             expect["summary.key.text"] = ColumnGrid.b
         }
         check(found, expect: expect)
-        // Two lines, and only two: every box and chevron at the edge, every
-        // word at the text column.
-        let edges = Set(found.filter { $0.role == .box || $0.role == .chevron }.map(\.x))
-        let words = Set(
-            found.filter { $0.role == .text && $0.row != "summary.title" }.map(\.x))
-        #expect(edges == [NavigatorGrid.edge], "boxes and chevrons at \(edges.sorted())")
-        #expect(words == [NavigatorGrid.text], "text starts at \(words.sorted())")
+        checkTheLines(found)
         // The items' titles in one column after the widest key, "ov-1234":
         // past the key, and the same x for every item.
         let titles = Set(found.filter { $0.row == "summary.title" }.map(\.x))

@@ -69,7 +69,7 @@ struct ProjectTerminals {
 /// trailing. Its header is the navigator's (`CollapsibleSection`), between
 /// Tasks and Worktrees.
 ///
-/// On the navigator's grid: a terminal's glyph in the mark cell, its name on
+/// On the navigator's grid: a terminal's glyph in the glyph column, its name on
 /// the text column.
 struct ProjectTerminalsSection: View {
     let terminals: ProjectTerminals
@@ -88,7 +88,7 @@ struct ProjectTerminalsSection: View {
                     HStack(spacing: 0) {
                         Image(systemName: "plus")
                             .font(.system(size: 10, weight: .medium))
-                            .frame(width: NavigatorGrid.mark, alignment: .leading)
+                            .glyphColumn()
                             .gridMark("projectTerminalNew", .icon)
                         Text("New Terminal")
                             .font(.system(size: WorkspaceStyle.PaneText.body))
@@ -96,7 +96,6 @@ struct ProjectTerminalsSection: View {
                         Spacer(minLength: 0)
                     }
                     .foregroundStyle(.secondary)
-                    .padding(.leading, NavigatorGrid.textInset)
                     .frame(minHeight: ColumnGrid.rowHeight)
                     .contentShape(Rectangle())
                 }
@@ -127,7 +126,7 @@ private struct ProjectTerminalRow: View {
                 Image(systemName: "terminal")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary)
-                    .frame(width: NavigatorGrid.mark, alignment: .leading)
+                    .glyphColumn()
                     .gridMark("projectTerminal", .icon)
                 Text(terminal.label)
                     .font(.system(size: WorkspaceStyle.PaneText.body))
@@ -138,7 +137,7 @@ private struct ProjectTerminalRow: View {
                 StatusGlyph(status: terminal.status)
                     .help(terminal.status.label)
             }
-            .navigatorRow(selected: selected, keyed: keyed, minHeight: ColumnGrid.rowHeight)
+            .navigatorRow(selected: selected, keyed: keyed, minHeight: ColumnGrid.rowHeight, leading: 0, box: "projectTerminal")
         }
         .buttonStyle(.plain)
         .contextMenu { menu }

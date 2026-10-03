@@ -1,3 +1,4 @@
+import AgentKit
 import SwiftUI
 
 // The board's shared components (ov-92): one collapsible section, one section
@@ -76,6 +77,9 @@ struct SectionMetrics: Equatable {
     var spacing: CGFloat
     /// The chevron's cell, which is one column of the grid where there is one.
     var chevronWidth: CGFloat = ColumnGrid.step
+    /// Where the chevron sits in its cell: the navigator's is centered in
+    /// the glyph column, so it shares an x with the glyphs in boxes.
+    var chevronAlignment: Alignment = .leading
     var minHeight: CGFloat = ColumnGrid.rowHeight
     /// Around the header alone: the content keeps its own.
     var headerInsets = EdgeInsets()
@@ -84,7 +88,8 @@ struct SectionMetrics: Equatable {
     var isHeading = false
 
     /// The board's navigator: its sections, task statuses and groups.
-    static let navigator = SectionMetrics(spacing: ColumnGrid.rhythm, chevronWidth: NavigatorGrid.mark, isHeading: true)
+    static let navigator = SectionMetrics(
+        spacing: ColumnGrid.rhythm, chevronWidth: NavigatorGrid.mark, chevronAlignment: .center, isHeading: true)
     /// A small disclosure in running text: a thought, a card's details, a
     /// settings row's.
     static let inline = SectionMetrics(spacing: 6, chevronWidth: 14, minHeight: 0)
@@ -339,7 +344,7 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
 
     private var chevron: some View {
         DisclosureChevron(expanded: expanded, visible: canExpand)
-            .frame(width: metrics.chevronWidth, alignment: .leading)
+            .frame(width: metrics.chevronWidth, alignment: metrics.chevronAlignment)
             .gridMark(Self.gridRow(id), .chevron)
     }
 
@@ -559,13 +564,16 @@ struct CollapsibleSectionsKey: PreferenceKey {
 extension View {
     /// A row in the navigator (the orchestrator's, a worktree's): its inset
     /// on the grid, and its selection drawn as a Mac list draws one, in the
-    /// accent while the navigator has the keyboard, else gray.
+    /// accent while the navigator has the keyboard, else gray, reaching
+    /// `NavigatorGrid.outset` past the row's content on both sides. `box`
+    /// names the row for `GridGeometryTests`, which reads where it starts.
     func navigatorRow(
         selected: Bool, keyed: Bool, minHeight: CGFloat = ColumnGrid.twoLineRowHeight,
-        leading: CGFloat = NavigatorGrid.textInset, trailing: CGFloat = ColumnGrid.step
+        leading: CGFloat = NavigatorGrid.textInset, trailing: CGFloat = ColumnGrid.step, box: String? = nil
     ) -> some View {
         modifier(
-            NavigatorRowStyle(selected: selected, keyed: keyed, minHeight: minHeight, leading: leading, trailing: trailing))
+            NavigatorRowStyle(
+                selected: selected, keyed: keyed, minHeight: minHeight, leading: leading, trailing: trailing, box: box))
     }
 }
 
@@ -573,18 +581,17 @@ struct NavigatorRowStyle: ViewModifier {
     let selected: Bool
     let keyed: Bool
     let minHeight: CGFloat
-    /// Its content's inset from the selection's leading edge: the text
+    /// Its content's inset from the content column's edge: the text
     /// column's (`NavigatorGrid.textInset`), or 0 for a row that draws its
-    /// own mark cell first, as the orchestrator's does.
+    /// own glyph column first, as the orchestrator's does.
     var leading: CGFloat = NavigatorGrid.textInset
     /// Its inset at the trailing edge: a task row's runs to the header's
     /// count, a rhythm in, rather than a step (ov-104).
     var trailing: CGFloat = ColumnGrid.step
+    var box: String?
 
-    /// The selection's fill, shared with the task cards'.
-    static func fill(keyed: Bool) -> Color {
-        keyed ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.08)
-    }
+    /// The selection's fill: `Fill.selection`, shared with the task cards'.
+    static func fill(keyed: Bool) -> Color { Fill.selection(active: keyed) }
 
     func body(content: Content) -> some View {
         content
@@ -593,7 +600,11 @@ struct NavigatorRowStyle: ViewModifier {
             .padding(.vertical, ColumnGrid.rhythm / 2)
             .frame(minHeight: minHeight)
             .background {
-                if selected { RoundedRectangle(cornerRadius: 8).fill(Self.fill(keyed: keyed)) }
+                ZStack {
+                    if selected { RoundedRectangle.control.fill(Self.fill(keyed: keyed)) }
+                    if let box { Color.clear.gridMark(box, .box) }
+                }
+                .boxOutset()
             }
             .contentShape(Rectangle())
     }

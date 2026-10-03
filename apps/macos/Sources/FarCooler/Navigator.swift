@@ -227,10 +227,10 @@ struct OrchestratorRowView: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
-            // In the mark cell, so its title is on the text column with
-            // every other row's (`NavigatorGrid`).
+            // In the glyph column, centered under the carets, so its title is
+            // on the text column with every other row's (`NavigatorGrid`).
             icon
-                .frame(width: NavigatorGrid.mark)
+                .glyphColumn()
                 .gridMark("orchestrator", .icon)
             VStack(alignment: .leading, spacing: 2) {
                 if model.state == .none {
@@ -270,8 +270,7 @@ struct OrchestratorRowView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .navigatorRow(selected: selected, keyed: keyed, leading: 0)
-        .gridMark("orchestrator", .box)
+        .navigatorRow(selected: selected, keyed: keyed, leading: 0, box: "orchestrator")
         .onTapGesture(perform: model.onSelect)
         // With no orchestrator its two menus stay reachable on their own.
         .accessibilityElement(children: model.state == .none ? .contain : .combine)
@@ -348,8 +347,9 @@ struct OrchestratorRowView: View {
 /// (`onLeave`), as the sidebar's search does (`SearchEscape`).
 ///
 /// Laid out on the navigator's grid (`NavigatorGrid`, ov-177): one row tall,
-/// its box from the grid's edge, its glyph centered in the mark cell, and
-/// its text on the text column, where every row's text starts.
+/// its box reaching `NavigatorGrid.outset` past the grid's edge, its glyph
+/// centered in the glyph column (under the carets), and its text on the text
+/// column, where every row's text starts.
 struct NavigatorFilterField: View {
     @Binding var text: String
     var focused: FocusState<Bool>.Binding
@@ -357,12 +357,14 @@ struct NavigatorFilterField: View {
     var glyph = "line.3.horizontal.decrease"
     let onLeave: () -> Void
 
+    @Environment(\.colorSchemeContrast) private var contrast
+
     var body: some View {
         HStack(spacing: 0) {
             Image(systemName: glyph)
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
-                .frame(width: NavigatorGrid.mark)
+                .glyphColumn()
                 .gridMark("filter", .icon)
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
@@ -388,11 +390,18 @@ struct NavigatorFilterField: View {
         }
         .padding(.trailing, ColumnGrid.rhythm)
         .frame(height: ColumnGrid.rowHeight)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
-        .gridMark("filter", .box)
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(focused.wrappedValue ? Color.accentColor.opacity(0.6) : WorkspaceStyle.hairline, lineWidth: focused.wrappedValue ? 1 : 0.5))
+        .background {
+            RoundedRectangle.control.fill(Fill.inset(contrast))
+                .boxOutset()
+                .gridMark("filter", .box)
+        }
+        .overlay {
+            RoundedRectangle.control
+                .strokeBorder(
+                    focused.wrappedValue ? Color.accentColor.opacity(0.6) : WorkspaceStyle.hairline,
+                    lineWidth: focused.wrappedValue ? 1 : 0.5)
+                .boxOutset()
+        }
         .help("Filter tasks by key or title (⌘F)")
     }
 }

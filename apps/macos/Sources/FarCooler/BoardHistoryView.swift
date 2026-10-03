@@ -95,7 +95,7 @@ struct BoardHistoryView: View {
             ) {
                 searchFocused = false
             }
-            .padding(.leading, ColumnGrid.step)
+            .padding(.horizontal, ColumnGrid.step)
         }
     }
 

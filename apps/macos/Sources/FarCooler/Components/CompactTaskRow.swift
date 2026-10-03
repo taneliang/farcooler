@@ -1,3 +1,4 @@
+import AgentKit
 import AppKit
 import SwiftUI
 
@@ -58,10 +59,11 @@ struct CompactTaskRow<Second: View>: View {
             }
         }
         .help(title)
-        .navigatorRow(selected: selected, keyed: keyed, trailing: ColumnGrid.rhythm)
+        .navigatorRow(selected: selected, keyed: keyed, trailing: ColumnGrid.rhythm, box: keyMark)
         .background {
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle.control
                 .fill(Color.accentColor.opacity(highlighted ? 0.16 : 0))
+                .boxOutset()
         }
     }
 }
