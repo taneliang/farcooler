@@ -229,7 +229,6 @@ class ChangesStore(
      */
     suspend fun ensure(path: String) {
         val before = _state.value
-        if (before.isUntracked(path)) return
         if (before.fileDiffs.containsKey(path) || path in before.loadingFiles) return
         val asked = before.generation
         _state.update { it.copy(loadingFiles = it.loadingFiles + path) }

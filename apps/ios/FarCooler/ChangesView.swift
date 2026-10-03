@@ -1565,6 +1565,11 @@ private struct ChangesFileHeading: View {
                         .lineLimit(1)
                         .truncationMode(.head)
                 }
+                if file.status == .untracked {
+                    Text(ChangedFileStatus.untracked.label)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Spacer(minLength: 4)
@@ -1652,14 +1657,6 @@ private struct ChangesFileBody: View {
                     .padding(12)
                 } else if let why = store.unsupported[file.path] {
                     Text(why)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(12)
-                } else if store.isUntracked(file.path) {
-                    // A file git has never seen has no diff and cannot be given
-                    // one. Saying which kind of nothing this is beats an empty
-                    // card that reads as a bug.
-                    Text("New file — git has no earlier version to compare against.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(12)

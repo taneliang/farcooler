@@ -364,3 +364,92 @@ async fn one_commit_that_adds_deletes_and_renames_reports_three_distinct_statuse
     assert_eq!(status_of(&files, "moved.txt").old_path.as_deref(), Some("mover.txt"));
     assert_eq!(files.len(), 3);
 }
+
+// ---------------------------------------------------------------------------
+// untracked files: git has nothing to compare against, so the daemon diffs
+// them against nothing and every line is an addition.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn an_untracked_text_file_is_one_all_added_hunk() {
+    let dir = repo();
+    let p = dir.path();
+    write(p, "fresh.txt", "alpha\nbeta\ngamma\n");
+
+    for sel in [Selector::Local, Selector::Unstaged] {
+        let r = file_diff(p, &sel, "fresh.txt", 0, 0).await.expect("diff");
+        assert!(r.unsupported.is_none());
+        assert_eq!(r.diff.hunks.len(), 1, "{sel:?}");
+        let h = &r.diff.hunks[0];
+        assert_eq!(h.lines.len(), 3);
+        assert!(h.lines.iter().all(|l| l.new_no.is_some() && l.old_no.is_none()));
+        assert_eq!(h.lines[0].text, "alpha");
+    }
+    // The index is untouched: no intent-to-add was written to make this work.
+    assert_eq!(capture(p, &["status", "--porcelain"]), "?? fresh.txt");
+}
+
+#[tokio::test]
+async fn an_untracked_binary_file_is_named_as_binary() {
+    let dir = repo();
+    let p = dir.path();
+    std::fs::write(p.join("blob.bin"), [0u8, 159, 146, 150, 0, 1, 2, 3]).expect("write");
+    let r = file_diff(p, &Selector::Local, "blob.bin", 0, 0).await.expect("diff");
+    assert_eq!(r.unsupported, Some(Unsupported::Binary));
+    assert!(r.diff.hunks.is_empty());
+}
+
+#[tokio::test]
+async fn an_untracked_file_over_the_cap_is_too_large_not_read() {
+    use farcooler_review::Truncation;
+    let dir = repo();
+    let p = dir.path();
+    let big = "x\n".repeat(farcooler_review::limits::MAX_BYTES / 2 + 10);
+    write(p, "huge.txt", &big);
+    let r = file_diff(p, &Selector::Local, "huge.txt", 0, 0).await.expect("diff");
+    assert_eq!(r.diff.truncated, Some(Truncation::ByteCap));
+    assert!(r.diff.hunks.is_empty());
+    assert!(r.unsupported.is_none());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn an_untracked_symlink_shows_its_target_and_never_follows_it() {
+    let dir = repo();
+    let p = dir.path();
+    std::os::unix::fs::symlink("shared.txt", p.join("link")).expect("symlink");
+    let r = file_diff(p, &Selector::Local, "link", 0, 0).await.expect("diff");
+    assert_eq!(r.diff.hunks.len(), 1);
+    assert_eq!(r.diff.hunks[0].lines.len(), 1);
+    assert_eq!(r.diff.hunks[0].lines[0].text, "shared.txt");
+
+    // A link out of the worktree is shown as a target, not as the file there.
+    let outside = tempfile::tempdir().expect("outside");
+    std::fs::write(outside.path().join("secret"), "hunter2\n").expect("write");
+    std::os::unix::fs::symlink(outside.path().join("secret"), p.join("escape")).expect("symlink");
+    let r = file_diff(p, &Selector::Local, "escape", 0, 0).await.expect("diff");
+    let texts: Vec<&str> = r.diff.hunks.iter().flat_map(|h| h.lines.iter()).map(|l| l.text.as_str()).collect();
+    assert!(!texts.contains(&"hunter2"), "{texts:?}");
+
+    // And a directory that is a link out is not walked into.
+    std::os::unix::fs::symlink(outside.path(), p.join("dirlink")).expect("symlink");
+    let r = file_diff(p, &Selector::Local, "dirlink/secret", 0, 0).await;
+    let leaked = r.map(|r| r.diff.hunks.iter().flat_map(|h| h.lines.iter()).any(|l| l.text == "hunter2"));
+    assert_ne!(leaked.ok(), Some(true));
+}
+
+#[tokio::test]
+async fn a_path_that_leaves_the_worktree_is_refused() {
+    let dir = repo();
+    let outer = tempfile::tempdir().expect("outer");
+    std::fs::write(outer.path().join("o.txt"), "outside\n").expect("write");
+    for bad in [
+        outer.path().join("o.txt").to_string_lossy().into_owned(),
+        "../o.txt".to_string(),
+        "a/../../o.txt".to_string(),
+    ] {
+        let r = file_diff(dir.path(), &Selector::Local, &bad, 0, 0).await;
+        let shows = r.map(|r| !r.diff.hunks.is_empty()).unwrap_or(false);
+        assert!(!shows, "{bad}");
+    }
+}

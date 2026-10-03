@@ -233,11 +233,11 @@ class ChangesStoreTest {
     }
 
     /**
-     * `git diff` compares against something recorded and nothing is recorded for a
-     * file only just written, so there is no round trip to spend.
+     * The daemon diffs a file git has never seen against nothing, so it is
+     * fetched like any other and arrives as an added patch.
      */
     @Test
-    fun `an untracked file is never fetched`() = runTest {
+    fun `an untracked file is fetched like any other`() = runTest {
         val source = FakeSource().apply {
             set = ChangeSet(
                 workingTree = WorkingTree(untracked = listOf("notes/new.md")),
@@ -247,7 +247,7 @@ class ChangesStoreTest {
         store.load()
         store.showUncommitted()
         store.ensure("notes/new.md")
-        assertTrue(source.diffCalls.isEmpty())
+        assertEquals(1, source.diffCalls.size)
     }
 
     @Test

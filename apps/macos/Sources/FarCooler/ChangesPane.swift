@@ -1387,12 +1387,6 @@ struct ChangesPane: View {
                 // which is why this arm comes first and shares its sentence
                 // with the one the patch itself can carry.
                 out.append(note(f, FileDiff.binaryNote))
-            } else if changes.isUntracked(f.path) {
-                // Listed but not diffed, and it says so. git has nothing to
-                // compare a brand new file against, and "No textual changes"
-                // under the name of a file somebody just wrote is the most
-                // wrong thing this view could say.
-                out.append(note(f, "New file — git isn’t tracking it yet"))
             } else if let diff = changes.fileDiffs[f.path] {
                 out.append(contentsOf: rows(of: f, diff: diff))
             } else {
@@ -1635,6 +1629,12 @@ struct ChangesPane: View {
             Text(counts(f))
                 .font(.system(size: WorkspaceStyle.PaneText.body, design: .monospaced))
                 .foregroundStyle(.secondary)
+            if let tag = changes.untrackedLabel(f.path) {
+                Text(tag)
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+            }
             Spacer(minLength: 0)
             // Always drawn, unlike the line and hunk anchors, which appear on
             // hover. One per file is not chrome — and if every way into this

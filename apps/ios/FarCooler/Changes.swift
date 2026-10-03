@@ -766,11 +766,8 @@ final class ChangesStore: ObservableObject {
 
     /// Whether git has never seen this file.
     ///
-    /// It has no diff and cannot be given one — `git diff` compares against
-    /// something recorded, and nothing is recorded for a file only just
-    /// written. It still belongs in the list, since a file an agent created is
-    /// the most interesting thing in a local change set, so the row says which
-    /// kind of nothing it is showing.
+    /// The daemon diffs it against nothing, so it reads as an all-added file;
+    /// the row keeps a small "Untracked" label.
     func isUntracked(_ path: String) -> Bool {
         // Nothing inside a commit is untracked — committing is what tracking IS
         // — and the working tree's list is about right now, not about then.
@@ -1368,7 +1365,6 @@ final class ChangesStore: ObservableObject {
     /// Idempotent and safe to call from `onAppear` on every row, which is
     /// exactly how it is called: the scroll decides what gets read.
     func ensure(_ path: String) async {
-        guard !isUntracked(path) else { return }
         guard fileDiffs[path] == nil, !loadingFiles.contains(path) else { return }
         let asked = generation
         loadingFiles.insert(path)

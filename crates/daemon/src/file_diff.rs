@@ -94,6 +94,39 @@ async fn diff_args(repo: &Path, selector: &Selector) -> Result<(Vec<String>, boo
     })
 }
 
+/// Whether `path` is a file git lists as untracked (and not ignored).
+///
+/// Also the confinement check for the untracked read: `ls-files` refuses a
+/// pathspec outside the worktree, matches nothing for a `..` that climbs out,
+/// and does not list a file behind a symlinked directory, because git sees the
+/// link and never walks into it. The absolute and `..` forms are refused
+/// outright first, so nothing depends on that alone.
+async fn is_untracked(repo: &Path, path: &str) -> bool {
+    let p = Path::new(path);
+    let confined = !path.is_empty()
+        && p.components().all(|c| matches!(c, std::path::Component::Normal(_)));
+    if !confined {
+        return false;
+    }
+    match git_bytes(
+        repo,
+        &["ls-files", "--others", "--exclude-standard", "-z", "--full-name", "--", path],
+    )
+    .await
+    {
+        Ok(r) => r.ok && r.stdout.split(|b| *b == 0).any(|n| n == path.as_bytes()),
+        Err(_) => false,
+    }
+}
+
+/// An untracked file too big to hand to a diff: the cap the patch parser
+/// applies, checked on the file's size so it is never read. The link itself is
+/// measured, not what it points at.
+fn untracked_too_large(repo: &Path, path: &str) -> Option<Truncation> {
+    let meta = std::fs::symlink_metadata(repo.join(path)).ok()?;
+    (meta.len() > farcooler_review::limits::MAX_BYTES as u64).then_some(Truncation::ByteCap)
+}
+
 /// One file's diff.
 pub async fn file_diff(
     repo: &Path,
@@ -104,6 +137,26 @@ pub async fn file_diff(
 ) -> Result<FileDiffResult> {
     let (rev_args, first_parent_of_merge) = diff_args(repo, selector).await?;
 
+    // A working-tree view of a file git does not track yet. `git diff` has no
+    // answer for it, so it is diffed against nothing instead.
+    let working_tree_view = matches!(selector, Selector::Local | Selector::Unstaged);
+    let untracked = working_tree_view && is_untracked(repo, path).await;
+    if untracked {
+        if let Some(too_large) = untracked_too_large(repo, path) {
+            return Ok(FileDiffResult {
+                diff: FileDiff {
+                    path: path.to_string(),
+                    hunks: Vec::new(),
+                    truncated: Some(too_large),
+                    next_hunk: None,
+                },
+                first_parent_of_merge,
+                unsupported: None,
+            });
+        }
+    }
+
+    let context_arg_for_untracked = format!("-U{}", context.min(50_000));
     let mut args: Vec<&str> = vec!["diff", "--no-color", "--find-renames"];
     // Capped rather than passed through. A client asking to open one gap sends
     // a number big enough to cover it; an unbounded one would let a caller ask
@@ -121,10 +174,28 @@ pub async fn file_diff(
     args.push("--");
     args.push(path);
 
-    let raw = git_bytes(repo, &args).await?;
-    if !raw.ok {
-        return Err(DomainError::OperationFailed);
-    }
+    let raw = if untracked {
+        // `--no-index` exits 1 when the sides differ, which here is every
+        // non-empty file, so success is "printed a patch", not the exit code.
+        // The index is not touched (`add -N` would write it). A symlink is
+        // diffed as the link itself, so its patch is one line: the target.
+        let mut a: Vec<&str> = vec!["diff", "--no-color", "--no-index"];
+        if context > 0 {
+            a.push(&context_arg_for_untracked);
+        }
+        a.extend(["--", "/dev/null", path]);
+        let r = git_bytes(repo, &a).await?;
+        if r.stdout.is_empty() && !r.ok && !r.stderr.is_empty() {
+            return Err(DomainError::OperationFailed);
+        }
+        r
+    } else {
+        let r = git_bytes(repo, &args).await?;
+        if !r.ok {
+            return Err(DomainError::OperationFailed);
+        }
+        r
+    };
 
     // Patch text is read lossily on purpose: a file whose CONTENT is not UTF-8
     // still deserves a hunk count and a "binary" verdict, and the path was

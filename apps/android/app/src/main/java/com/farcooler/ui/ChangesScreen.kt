@@ -646,6 +646,13 @@ private fun FileHeading(file: ChangedFile, expanded: Boolean, onClick: () -> Uni
                     overflow = TextOverflow.StartEllipsis,
                 )
             }
+            if (file.status == ChangedFileStatus.UNTRACKED) {
+                Text(
+                    file.status.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         Spacer(Modifier.width(8.dp))
         FileCounts(file)
@@ -694,10 +701,9 @@ internal fun FileCounts(file: ChangedFile) {
  *
  * The order of these branches is the whole of their correctness. A file being
  * READ has no lines yet and is not an empty file; a file the daemon would not
- * render has no lines and is not an empty file either; and a file git has never
- * seen cannot be given a diff at all, because `git diff` compares against
- * something recorded and nothing is recorded for a file only just written. An
- * empty card in any of those cases reads as a bug.
+ * render has no lines and is not an empty file either, and an empty card in
+ * either case reads as a bug. A file git has never seen is diffed against
+ * nothing by the daemon, so it arrives as an all-added patch like any other.
  *
  * [ChangesState.fileNotices] is a separate thing again, and the distinction is
  * the one an earlier audit got backwards: `truncated` and `firstParentOfMerge`
@@ -733,13 +739,6 @@ private fun FileBody(
 
             state.unsupported[path] != null -> Text(
                 state.unsupported.getValue(path),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            )
-
-            state.isUntracked(path) -> Text(
-                "New file — git has no earlier version to compare against.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),

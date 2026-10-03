@@ -53,6 +53,17 @@ struct UncommittedCountsTests {
         #expect(byPath["new.txt"]?.insertions == 3, "a file git has never seen still has lines")
     }
 
+    /// An untracked file is read like any other, and its row keeps a small
+    /// "Untracked" label. The daemon diffs it against nothing, so there is
+    /// content under the label rather than a placeholder in its place.
+    @Test func anUntrackedFileIsReadAndKeepsItsLabel() async throws {
+        let s = try store(Self.dirty)
+        #expect(s.untrackedLabel("new.txt") == "Untracked")
+        #expect(s.untrackedLabel("README.md") == nil)
+        await s.ensure("new.txt")
+        #expect(s.fileDiffs["new.txt"] != nil, "the diff was asked for, not skipped")
+    }
+
     /// What the pane's header sums. `+6 -3` on a worktree nobody has scrolled.
     @Test func theHeaderTotalIsWholeAtRest() throws {
         let s = try store(Self.dirty)
