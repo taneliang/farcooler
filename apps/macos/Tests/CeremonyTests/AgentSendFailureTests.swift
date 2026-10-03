@@ -153,10 +153,15 @@ struct AgentSendFailureTests {
         let first = Task { await stream.answer("req-1", "allow") }
         await untilHeld(runner)
         #expect(stream.answering.sending == "req-1")
-        await stream.answer("req-1", "allow")
-        await stream.retryAnswer()
+        let again = Task {
+            await stream.answer("req-1", "allow")
+            await stream.retryAnswer()
+        }
+        for _ in 0..<50 { await Task.yield() }
+        #expect(runner.calls("agent-answer").count == 1)
         runner.open()
         await first.value
+        await again.value
 
         #expect(runner.calls("agent-answer").count == 1)
         #expect(stream.transcript.pendingPermission == nil)
@@ -215,10 +220,15 @@ struct AgentSendFailureTests {
         let first = Task { await stream.send("add tests") }
         await untilHeld(runner)
         #expect(stream.sending)
-        #expect(!(await stream.send("add tests")))
+        // In a task of its own, so a second send that does go out is held
+        // too, and counted, rather than waited on here for good.
+        let second = Task { await stream.send("add tests") }
+        for _ in 0..<50 { await Task.yield() }
+        #expect(runner.calls("agent-prompt").count == 1)
         runner.open()
 
         #expect(await first.value)
+        #expect(!(await second.value))
         #expect(!stream.sending)
         #expect(runner.calls("agent-prompt").count == 1)
     }
