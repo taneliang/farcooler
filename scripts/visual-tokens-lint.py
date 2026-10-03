@@ -24,18 +24,18 @@ or the line above (a menu's `Divider()` is `// style-exempt: menu`).
 
 Sites that predate the tokens are grandfathered by COUNT, per file and rule, in
 scripts/visual-tokens-baseline.json, which this script generates. Counts, not
-line numbers, so an unrelated edit doesn't churn it. It is a ratchet:
+line numbers, so an unrelated edit doesn't churn it. Like file-size-budget.py:
 
-  - a file with more hits of a rule than its baseline fails (a new site);
-  - a file with fewer fails too, until the baseline is lowered in the same
-    commit (run --write-baseline, review the diff, and it can only have shrunk);
-  - a baseline entry for a file that no longer exists fails.
+  - a file with MORE hits of a rule than its baseline fails (a new site);
+  - a file with fewer passes, with an advisory to run --update and commit the
+    baseline, which only ever shrinks (--update never raises a count);
+  - an `// style-exempt:` with no reason fails.
 
-A surface lane that converts a file lowers its counts; when the baseline is
-empty the last lane deletes it and the scan requires zero.
+When the baseline is empty the last surface lane deletes it and the scan
+requires zero.
 
   ./scripts/visual-tokens-lint.py                  scan the tree; exit 1 on a new site
-  ./scripts/visual-tokens-lint.py --write-baseline regenerate the baseline from the tree
+  ./scripts/visual-tokens-lint.py --update         lower the baseline to the tree (never raises it)
   ./scripts/visual-tokens-lint.py --self-test      check the rules against known cases
 """
 
@@ -72,6 +72,18 @@ RULES: dict[str, re.Pattern] = {
         rf"\.{INK}\.opacity\(|\bColor\(white:|\bGlancePalette\.\w+\([^()]*\)\.opacity\("),
 }
 EXEMPT = re.compile(r"//\s*style-exempt\s*:\s*\S")
+EMPTY_EXEMPT = re.compile(r"//\s*style-exempt\s*:?\s*$")
+
+# What to do about a new site, by rule.
+USE = {
+    "radius": "use Radius.small/.medium/.large via .control, .card or .floating (or .concentric)",
+    "material": "use .surface(.content/.floating, in:) (a frosted plane draws nothing)",
+    "glass": "use .surface(.floating, in:), or one GlassEffectContainer of floating members",
+    "separator": "use Spacing, or .separator(.grid/.split/.listEdge); a menu Divider is exempt",
+    "stroke": "drop it: .surface supplies the edge; a state stroke (drop target) is exempt",
+    "shadow": "drop it: .surface(.floating) draws its own",
+    "fill": "use Fill.inset, Fill.hover, Fill.selection or Tint.attentionFill",
+}
 
 
 def code_of(line: str) -> str:
@@ -154,26 +166,42 @@ def write_baseline(counts: dict[str, dict[str, int]]) -> None:
     BASELINE.write_text("{\n" + body + "\n}\n" if counts else "{}\n", encoding="utf-8")
 
 
-def compare(tree: dict, baseline: dict, exists=lambda f: True) -> list[str]:
-    """Problems between the tree's counts and the baseline's."""
-    problems = []
+def compare(tree: dict, baseline: dict) -> tuple[list[str], int]:
+    """(problems, number of grandfathered sites that can be lowered). Only an
+    increase is a problem."""
+    problems, lowerable = [], 0
     for f in sorted(set(tree) | set(baseline)):
-        if f in baseline and not exists(f):
-            problems.append(f"{f}: in the baseline but no longer in the tree; remove it "
-                            "(run --write-baseline)")
-            continue
         for rule in RULES:
             have, allowed = tree.get(f, {}).get(rule, 0), baseline.get(f, {}).get(rule, 0)
             if have > allowed:
                 problems.append(
-                    f"{f}: {have - allowed} new {rule} site(s) ({have}, baseline {allowed}). "
-                    "Use the tokens in DesignTokens.swift, or mark a deliberate one "
-                    "`// style-exempt: <reason>`.")
+                    f"{f}: {have - allowed} new {rule} site(s) ({have}, baseline {allowed}).\n"
+                    f"    Fix: {USE[rule]}.\n"
+                    "    Or, if it is deliberate, put `// style-exempt: <reason>` on the line "
+                    "or the line above (the reason must not be empty).")
             elif have < allowed:
-                problems.append(
-                    f"{f}: {rule} is down to {have} (baseline {allowed}). Lower the baseline "
-                    "in this commit: run ./scripts/visual-tokens-lint.py --write-baseline.")
-    return problems
+                lowerable += allowed - have
+    return problems, lowerable
+
+
+def lowered(tree: dict, baseline: dict) -> dict:
+    """The baseline brought down to the tree; never raised, never a new file."""
+    out = {}
+    for f, rules in baseline.items():
+        kept = {r: min(n, tree.get(f, {}).get(r, 0)) for r, n in rules.items()}
+        kept = {r: n for r, n in kept.items() if n}
+        if kept:
+            out[f] = kept
+    return out
+
+
+def empty_exempts() -> list[str]:
+    out = []
+    for path in files():
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if EMPTY_EXEMPT.search(line):
+                out.append(f"{path.relative_to(ROOT)}:{number}: `// style-exempt:` needs a reason")
+    return out
 
 
 def scan() -> int:
@@ -181,7 +209,8 @@ def scan() -> int:
     if scanned < MIN_FILES:
         print(f"visual-tokens-lint: scanned only {scanned} files; the roots are wrong")
         return 1
-    problems = compare(tree, load_baseline(), lambda f: (ROOT / f).exists())
+    problems, lowerable = compare(tree, load_baseline())
+    problems += empty_exempts()
     for line in problems:
         print(line)
     if problems:
@@ -190,6 +219,9 @@ def scan() -> int:
     total = sum(sum(c.values()) for c in tree.values())
     print(f"visual-tokens-lint: no new sites ({total} grandfathered in {len(tree)} files, "
           f"{scanned} scanned)")
+    if lowerable:
+        print(f"{lowerable} grandfathered sites can be lowered; run "
+              "./scripts/visual-tokens-lint.py --update and commit the baseline")
     return 0
 
 
@@ -245,21 +277,36 @@ def self_test() -> int:
     if not hits("/* old\n Divider()\n*/\nDivider()").get("separator") == 1:
         print("self-test: a block comment was scanned")
         failed += 1
-    # The ratchet: more fails, fewer fails, the same passes, a gone file fails.
+    # The ratchet goes one way: an increase is red, a decrease is green with an
+    # advisory, and --update never raises.
     base = {"A.swift": {"radius": 2}}
-    for label, tree, bl, expect in [
-        ("a new site", {"A.swift": {"radius": 3}}, base, 1),
-        ("a new file", {"A.swift": {"radius": 2}, "B.swift": {"fill": 1}}, base, 1),
-        ("a site fixed without lowering the baseline", {"A.swift": {"radius": 1}}, base, 1),
-        ("the same", {"A.swift": {"radius": 2}}, base, 0),
-        ("all fixed and baseline emptied", {}, {}, 0),
+    for label, tree, expect_problems, expect_lowerable in [
+        ("a new site", {"A.swift": {"radius": 3}}, 1, 0),
+        ("a new file", {"A.swift": {"radius": 2}, "B.swift": {"fill": 1}}, 1, 0),
+        ("a decrease", {"A.swift": {"radius": 1}}, 0, 1),
+        ("a deleted file", {}, 0, 2),
+        ("the same", {"A.swift": {"radius": 2}}, 0, 0),
     ]:
-        got = len(compare(tree, bl))
-        if got != expect:
-            print(f"self-test: ratchet, {label}: {got} problem(s), wanted {expect}")
+        problems, lowerable = compare(tree, base)
+        if (len(problems), lowerable) != (expect_problems, expect_lowerable):
+            print(f"self-test: ratchet, {label}: got {(len(problems), lowerable)}, "
+                  f"wanted {(expect_problems, expect_lowerable)}")
             failed += 1
-    if not compare({}, base, exists=lambda f: False):
-        print("self-test: a baseline entry for a missing file passed")
+    problems, _ = compare({"A.swift": {"radius": 3}}, base)
+    if "Radius." not in problems[0] or "style-exempt" not in problems[0]:
+        print("self-test: the error doesn't say which token or how to exempt")
+        failed += 1
+    if lowered({"A.swift": {"radius": 1}, "B.swift": {"fill": 4}}, base) != {"A.swift": {"radius": 1}}:
+        print("self-test: --update didn't lower, or let a new file in")
+        failed += 1
+    if lowered({"A.swift": {"radius": 9}}, base) != base:
+        print("self-test: --update raised a count")
+        failed += 1
+    if lowered({}, base) != {}:
+        print("self-test: --update kept a deleted file")
+        failed += 1
+    if not EMPTY_EXEMPT.search("Divider() // style-exempt:") or EMPTY_EXEMPT.search("x // style-exempt: menu"):
+        print("self-test: an empty exemption isn't detected")
         failed += 1
     # The real scan must see the real tree, or a broken root would pass green.
     if sum(1 for _ in files()) < MIN_FILES:
@@ -272,10 +319,16 @@ def self_test() -> int:
 if __name__ == "__main__":
     if "--self-test" in sys.argv[1:]:
         sys.exit(self_test())
-    if "--write-baseline" in sys.argv[1:]:
+    if "--write-baseline" in sys.argv[1:] and not BASELINE.exists():
         counts, _ = tree_counts()
         write_baseline(counts)
-        print(f"wrote {BASELINE.relative_to(ROOT)}: {sum(sum(c.values()) for c in counts.values())} "
+        print(f"wrote {BASELINE.relative_to(ROOT)}")
+        sys.exit(0)
+    if "--update" in sys.argv[1:]:
+        tree, _ = tree_counts()
+        counts = lowered(tree, load_baseline())
+        write_baseline(counts)
+        print(f"updated {BASELINE.relative_to(ROOT)}: {sum(sum(c.values()) for c in counts.values())} "
               f"sites in {len(counts)} files")
         sys.exit(0)
     sys.exit(scan())
