@@ -91,17 +91,32 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// A notification's button, or a click on it.
     ///
-    /// Read here, off the main actor, into what `respond` acts on: the
-    /// notification's `userInfo` can't cross to it.
+    /// Read here, off the main actor, into what `respond` and `click` act on:
+    /// the notification's `userInfo` can't cross to them. A task notice's
+    /// buttons answer it; a click on anything else, an agent's banner, a
+    /// failed command's, a relay push or a legacy decision, opens what it's
+    /// about, as a task notice's click does (ov-183).
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
     ) async {
-        let info = response.notification.request.content.userInfo
+        let content = response.notification.request.content
+        let info = content.userInfo
+        let thread = content.threadIdentifier
         let typed = (response as? UNTextInputNotificationResponse)?.userText
-        guard let notice = TaskNotice(userInfo: info) else { return }
-        await respond(
-            to: notice, target: info["target"] as? String, repository: info["repository"] as? String,
-            action: response.actionIdentifier, typed: typed)
+        if let notice = TaskNotice(userInfo: info) {
+            await respond(
+                to: notice, target: info["target"] as? String, repository: info["repository"] as? String,
+                action: response.actionIdentifier, typed: typed)
+            return
+        }
+        await click(userInfo: info, thread: thread, action: response.actionIdentifier)
+    }
+
+    /// A click on a notification that isn't a task notice: open what it's
+    /// about, once its runner is connected (`DestinationOpener`).
+    func click(userInfo: [AnyHashable: Any], thread: String, action: String, now: Date = Date()) {
+        guard let open = DestinationOpen(userInfo: userInfo, thread: thread, action: action, now: now) else { return }
+        DestinationOpener.shared.request(open)
     }
 
     /// What a task notice's button or click does.
@@ -110,8 +125,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// through the runner that posted it, the same note the Needs You rows
     /// write; the runner then tells the agent waiting on it (ov-90). A click
     /// opens the task, as choosing it in its workspace's navigator does
-    /// (`TaskNoticeOpener`, ov-106), once its runner is connected. Any other
-    /// notification's click just brings the app forward, as it always has.
+    /// (`DestinationOpener`, ov-106), once its runner is connected.
     func respond(
         to notice: TaskNotice, target: String?, repository: String? = nil, action: String, typed: String?,
         now: Date = Date()
@@ -120,11 +134,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             await send(answer, to: notice, target: target, repository: repository)
             return
         }
-        guard
-            let open = TaskNoticeOpen(
-                notice: notice, target: target, repository: repository, action: action, now: now)
-        else { return }
-        TaskNoticeOpener.shared.request(open)
+        guard action == UNNotificationDefaultActionIdentifier else { return }
+        DestinationOpener.shared.request(
+            DestinationOpen(
+                destination: Destination(notice: notice, target: target, repository: repository),
+                arrival: .notification, since: now))
     }
 
     /// Be the notification center's delegate, before the app finishes
@@ -320,7 +334,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// no caller can leave the fold out.
     @discardableResult
     func report(terminal: Terminal, place: String, in worktree: Worktree, runner: DaemonBuild?) -> Report {
-        reportFailedExit(terminal: terminal, place: place)
+        let host = worktree.host ?? ""
+        reportFailedExit(terminal: terminal, place: place, host: host, runnerId: runner?.runnerId)
 
         let activity = terminal.agent
         defer { announced[terminal.id] = activity }
@@ -330,7 +345,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             return .leftToTask
         }
         lastReport[terminal.id] = .ownBanner
-        postOwnBanner(terminal: terminal, place: place, activity: activity)
+        postOwnBanner(terminal: terminal, place: place, activity: activity, host: host, runnerId: runner?.runnerId)
         return .ownBanner
     }
 
@@ -339,7 +354,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// center. Cleared with the terminal by `forget`.
     private(set) var lastReport: [String: Report] = [:]
 
-    private func postOwnBanner(terminal: Terminal, place: String, activity: AgentActivity) {
+    private func postOwnBanner(
+        terminal: Terminal, place: String, activity: AgentActivity, host: String, runnerId: String?
+    ) {
         guard Preferences.shared.notifyOnAttention else { return }
         guard activity.wantsAttention else { return }
         guard activity != announced[terminal.id] else { return }
@@ -353,6 +370,19 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         // The words are `words(for:place:)`'s, in `WorkspaceActions.swift`,
         // where they can be tested without a notification centre.
         guard let words = Self.words(for: terminal, place: place) else { return }
+        UNUserNotificationCenter.current().add(
+            Self.ownBanner(
+                terminal: terminal, words: words, activity: activity, host: host, runnerId: runnerId))
+    }
+
+    /// The notification for an agent that's blocked or done: its words, filed
+    /// under its terminal, and carrying where a click goes (`Destination`):
+    /// the pane, on the runner it's on (ov-183). Without it a click only
+    /// brought the app forward.
+    static func ownBanner(
+        terminal: Terminal, words: (title: String, body: String), activity: AgentActivity, host: String,
+        runnerId: String?
+    ) -> UNNotificationRequest {
         let content = UNMutableNotificationContent()
         content.title = words.title
         content.body = words.body
@@ -361,12 +391,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         // Keyed by terminal so a later state replaces the earlier notification
         // for the same one instead of stacking up.
         content.threadIdentifier = terminal.id
-
-        UNUserNotificationCenter.current().add(
-            UNNotificationRequest(
-                identifier: "\(terminal.id)-\(activity.rawValue)",
-                content: content,
-                trigger: nil))
+        content.userInfo = Destination(
+            runner: .init(host: host, id: runnerId?.lowercased()), place: .terminal(terminal.id)
+        ).userInfo
+        return UNNotificationRequest(
+            identifier: "\(terminal.id)-\(activity.rawValue)", content: content, trigger: nil)
     }
 
     /// Announce a command that ran and came back badly, if that hasn't
@@ -379,7 +408,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// command has no agent to be blocked or done — so it needs its own guard
     /// and its own dedup, not a case squeezed into an enum it doesn't belong
     /// to.
-    private func reportFailedExit(terminal: Terminal, place: String) {
+    private func reportFailedExit(terminal: Terminal, place: String, host: String, runnerId: String?) {
         guard terminal.status == .failedRun else {
             // Cleared rather than left set, so a terminal that is rerun after
             // a failure — same pane, same id, `exit` and the command run
@@ -393,8 +422,16 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         announcedFailure.insert(terminal.id)
         guard Self.canNotify, authorized else { return }
 
+        UNUserNotificationCenter.current().add(
+            Self.failedExit(terminal: terminal, place: place, host: host, runnerId: runnerId))
+    }
+
+    /// The notification for a command that ran and came back badly, filed
+    /// under its terminal and carrying where a click goes, as `ownBanner`'s
+    /// does (ov-183).
+    static func failedExit(terminal: Terminal, place: String, host: String, runnerId: String?) -> UNNotificationRequest {
         let content = UNMutableNotificationContent()
-        content.title = "\(Self.speaker(terminal)) failed"
+        content.title = "\(speaker(terminal)) failed"
         // The code or the signal, whichever the command actually left behind
         // — never both, since a signal means there is no exit code to show.
         if let signal = terminal.exitSignal {
@@ -407,12 +444,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.sound = .default
         content.interruptionLevel = .timeSensitive
         content.threadIdentifier = terminal.id
-
-        UNUserNotificationCenter.current().add(
-            UNNotificationRequest(
-                identifier: "\(terminal.id)-failedRun",
-                content: content,
-                trigger: nil))
+        content.userInfo = Destination(
+            runner: .init(host: host, id: runnerId?.lowercased()), place: .terminal(terminal.id)
+        ).userInfo
+        return UNNotificationRequest(identifier: "\(terminal.id)-failedRun", content: content, trigger: nil)
     }
 
     /// Forget a terminal that no longer exists, so a reused id cannot inherit

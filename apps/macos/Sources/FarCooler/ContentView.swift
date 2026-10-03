@@ -9,8 +9,8 @@ struct ContentView: View {
     @State private var windowID = UUID()
     @ObservedObject private var preferences = Preferences.shared
     @ObservedObject private var themes = Themes.shared
-    /// A click on a task notice, waiting to be opened (ov-106).
-    @ObservedObject private var noticeOpener = TaskNoticeOpener.shared
+    /// A click on a notification, waiting to be opened (ov-106, ov-183).
+    @ObservedObject private var noticeOpener = DestinationOpener.shared
     @Environment(\.openSettings) private var openSettings
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -76,18 +76,24 @@ struct ContentView: View {
     /// closing and reopening.
     @StateObject private var taskSubmission = TaskSubmission()
     @AppStorage("tasks.lastProject") private var lastProject = ""
-    /// The workspace selection that was on screen when the app last closed,
-    /// as `SelectionMemory.encode` writes it. Recorded as it changes rather
+    /// Where the window was when the app last closed, as a `Destination`'s
+    /// encoding: the workspace and what's open in it, a task's tab and agent,
+    /// the pane the keyboard was in (ov-182). Recorded as it changes rather
     /// than on quit: an app that is force quit, crashes, or is killed by a
     /// rebuild never gets a last word.
     ///
     /// Reopening somewhere else is a small thing that costs a real one: the
-    /// workspace you were in is the reason you came back. It replaces
-    /// `fleet.lastTerminal`, which `SelectionMemory.migrate` maps once.
+    /// workspace you were in is the reason you came back.
+    @AppStorage(SelectionMemory.destinationKey) private var lastDestination = ""
+    /// What an earlier build kept, the selection alone: read when no
+    /// `lastDestination` has been written yet. It replaced `fleet.lastTerminal`,
+    /// which `SelectionMemory.migrate` maps once.
     @AppStorage(SelectionMemory.key) private var lastSelection = ""
-    /// Whether the launch rule has chosen where the window opens. See
+    /// Whether the launch has chosen where the window opens. See
     /// `settleLaunch`.
     @State private var launched = false
+    /// Where this window is going back to, while it waits for its runner.
+    @State private var restoring: DestinationOpen?
     /// Bumped by ⌘F in a workspace: its navigator's filter takes the
     /// keyboard (ov-103).
     @State private var boardFilterRequest = 0
@@ -372,8 +378,8 @@ struct ContentView: View {
         // A task's agent is on screen only behind its Agent tab (ov-98).
         .onChange(of: taskTabs) { _, _ in markVisibleSeen() }
         .onChange(of: store.needsYouSettled) { _, _ in settleLaunch() }
-        .onChange(of: selection) { _, now in
-            if let saved = SelectionMemory.encode(now) { lastSelection = saved }
+        .onChange(of: keptPlace) { _, now in
+            if let now { lastDestination = now }
         }
         // Coming back to the app is reading whatever it comes back to. The
         // notification did its job while you were away; leaving the row lit
@@ -1300,7 +1306,9 @@ struct ContentView: View {
     /// property because `body`'s chain is already at the type checker's
     /// limit: one more modifier there and it gives up.
     private var detailOpeningNotices: some View {
-        detail.task(id: noticeOpener.pending?.id) { await openNoticedTask() }
+        detail
+            .task(id: noticeOpener.pending?.id) { await openNoticedTask() }
+            .task(id: restoring?.id) { await restoreWhereYouWere() }
     }
 
     @ViewBuilder
@@ -2533,14 +2541,17 @@ struct ContentView: View {
         store.fleet.worktrees.first { ($0.host ?? "") == host && $0.id == id }
     }
 
-    /// Where the window opens: Needs You when anything is waiting, else the
-    /// last workspace selection (spec §4.6, ruling 4). See
+    /// Where the window opens (spec §4.6, ov-182): where it was when the app
+    /// last closed, whatever is waiting on Needs You; with nowhere kept, Needs
+    /// You while anything is waiting, else the first workspace. See
     /// `SelectionMemory.launch`.
     ///
-    /// Asked on every fleet and Needs You change until it has an answer, since
-    /// each runner comes up on its own schedule, and never again after: a
-    /// window that has opened somewhere, or where somebody already clicked,
-    /// isn't moved by a count that rises later.
+    /// A place kept is held for its runner, which comes up on its own
+    /// schedule, and opened when it has (`restoreWhereYouWere`), or at the
+    /// nearest level of it that's still there when it's gone. Asked on every
+    /// fleet and Needs You change until it has an answer, and never again
+    /// after: a window that has opened somewhere, or where somebody already
+    /// clicked, isn't moved by a count that rises later.
     private func settleLaunch() {
         SelectionMemory.migrate(
             .standard, fleet: store.fleet, ready: { host in store.clients[host]?.hasLoaded ?? true })
@@ -2549,13 +2560,70 @@ struct ContentView: View {
             launched = true
             return
         }
+        if let kept = SelectionMemory.kept(destination: lastDestination, legacy: lastSelection) {
+            launched = true
+            restoring = DestinationOpen(destination: kept, arrival: .restore, since: Date())
+            return
+        }
         guard
             let decided = SelectionMemory.launch(
-                needsYou: store.needsYou.count, settled: store.needsYouSettled,
-                last: SelectionMemory.decode(lastSelection), in: store.fleet)
+                needsYou: store.needsYou.count, settled: store.needsYouSettled, in: store.fleet)
         else { return }
         launched = true
         selection = decided
+    }
+
+    /// Go back to `restoring`: resolved as the runners come up, with what the
+    /// fleet doesn't hold read from them, and opened where the window was or,
+    /// when that's gone, at its nearest level that isn't. A window somebody
+    /// has already moved is left alone.
+    private func restoreWhereYouWere() async {
+        guard let open = restoring else { return }
+        _ = await DestinationOpener.run(
+            open, isCurrent: { restoring?.id == open.id }, interrupted: { selection != nil },
+            world: destinationWorld, read: { await DestinationReads.read($1, from: store.clients[$0], fleet: store.fleet) },
+            land: { land($0, arrival: .restore) })
+        if restoring?.id == open.id { restoring = nil }
+    }
+
+    /// What this window holds now, as the resolver reads it.
+    private func destinationWorld() -> DestinationResolver.World {
+        MacDestination.world(
+            runners: store.clients.values.sorted { $0.target < $1.target }.map { MacDestination.Runner($0) },
+            fleet: store.fleet)
+    }
+
+    /// Open a resolved destination here. A relaunch sets the selection and
+    /// leaves the keyboard where the window put it; a click goes where the
+    /// navigator would (`openTask`, `navigate`) and brings the window forward.
+    private func land(_ destination: Destination, arrival: DestinationResolver.Arrival) {
+        let host = destination.runner.host ?? ""
+        let click = arrival == .notification
+        var opened: String?
+        if click, case .task(let workspace?, let ref) = destination.place, let id = ref.id {
+            openTask(id, host: host, workspace: workspace)
+            opened = id
+        } else if let next = MacDestination.selection(for: destination, in: store.fleet) {
+            let pane = MacDestination.pane(of: destination)
+            if click {
+                navigate(to: next, key: pane)
+            } else {
+                selection = next
+                if let pane { keyPane = pane }
+            }
+            if case .workspace(_, _, .task(let id)?) = next { opened = id }
+        }
+        // What was open on the task comes back with it, where the task still offers it.
+        if let id = opened {
+            if let tab = destination.tab.flatMap({ TaskTab(rawValue: $0.rawValue) }) { taskTabs.choose(tab, for: id) }
+            if let agent = destination.agent { chosenAgents[id] = agent }
+        }
+        if click { windowBox.window?.makeKeyAndOrderFront(nil) }
+    }
+
+    /// Where this window is, as `lastDestination` keeps it.
+    private var keptPlace: String? {
+        MacDestination.destination(selection, tabs: taskTabs, agents: chosenAgents, keyPane: keyPane)?.encoded
     }
 
     // MARK: - Commands
@@ -3137,17 +3205,17 @@ struct ContentView: View {
         key(opened.step.keyboard)
     }
 
-    /// Open the task a notice was clicked for, in this window if it's the
-    /// one to (`TaskNoticeOpener.claim`), through `openTask`, the palette's
-    /// way and the navigator's selection.
+    /// Open what a notification was clicked for, in this window if it's the
+    /// one to (`DestinationOpener.claim`): a task through `openTask`, the
+    /// palette's way and the navigator's selection, a pane where going to it
+    /// lands, whatever kind of notification it was (ov-183).
     private func openNoticedTask() async {
         guard let open = noticeOpener.pending else { return }
         await noticeOpener.drive(
-            open, window: windowID, isKey: { windowBox.window?.isKeyWindow == true }, clients: { store.clients },
-            land: { host, place in
-                openTask(place.task, host: host, workspace: place.workspace)
-                windowBox.window?.makeKeyAndOrderFront(nil)
-            })
+            open, window: windowID, isKey: { windowBox.window?.isKeyWindow == true },
+            world: destinationWorld,
+            read: { await DestinationReads.read($1, from: store.clients[$0], fleet: store.fleet) },
+            land: { land($0, arrival: .notification) })
     }
 
     /// A finished status's History page, in the main area (ov-103). The

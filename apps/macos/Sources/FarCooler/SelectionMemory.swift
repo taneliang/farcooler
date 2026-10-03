@@ -3,16 +3,23 @@ import Foundation
 
 // Where the window reopens (spec §4.6 and §9).
 //
-// The last workspace selection is kept in `workspace.lastSelection`. It
-// replaces `fleet.lastTerminal`, which named a terminal: the old key is read
-// once, mapped by `WorkspaceSelection.mapping`, and removed. And the window
-// opens on Needs You while anything is waiting, as the iPhone does (ruling
-// 4), rather than on the first terminal wanting attention.
+// Where the window was is kept as a `Destination`, in `nav.destination.v1`
+// (ov-182): the workspace and what's open in it, a task's tab and agent, the
+// pane the keyboard was in. It replaces `workspace.lastSelection`, the
+// selection alone, which is still read when nothing has been kept yet; and
+// that replaced `fleet.lastTerminal`, which named a terminal: the old key is
+// read once, mapped by `WorkspaceSelection.mapping`, and removed. A window
+// goes back to where it was whatever is waiting on Needs You, as the iPhone
+// does (ruling 1); with nowhere kept, it opens on Needs You while anything is
+// waiting, rather than on the first terminal wanting attention.
 
 enum SelectionMemory {
     typealias Selection = ContentView.Selection
 
-    /// Where the last workspace selection is kept, as `encode` writes it.
+    /// Where the window was is kept, as a `Destination`'s encoding.
+    static let destinationKey = "nav.destination.v1"
+    /// Where the last workspace selection was kept by a build before that,
+    /// as `encode` writes it: read, never written.
     static let key = "workspace.lastSelection"
     /// The key it replaces: `host/worktree/terminal`.
     static let legacyKey = "fleet.lastTerminal"
@@ -91,44 +98,23 @@ enum SelectionMemory {
         return true
     }
 
-    /// Where the window opens, or nil while that can't be said yet.
-    ///
-    /// Needs You when anything is waiting. Otherwise, once every runner
-    /// that's answering has said what's waiting (`settled`), the last
-    /// workspace selection if it's still there (`restored`), else the first
-    /// workspace the sidebar lists, else nothing (`.some(nil)`).
-    static func launch(needsYou count: Int, settled: Bool, last: Selection?, in fleet: Fleet) -> Selection?? {
-        if count > 0 { return .some(.needsYou) }
-        guard settled else { return nil }
-        if let last, let restored = restored(last, in: fleet) { return .some(restored) }
-        return .some(first(in: fleet))
+    /// Where the window goes back to: what `destination` kept if it reads,
+    /// else what `legacy` kept, the selection alone. Nil with neither.
+    static func kept(destination: String, legacy: String) -> Destination? {
+        if let kept = Destination(encoded: destination) { return kept }
+        return decode(legacy).flatMap { MacDestination.destination($0) }
     }
 
-    /// `last` as the fleet has it now: its workspace still there, with a
-    /// worktree it opened closed again when that's gone. A task is kept: the
-    /// task's view says so when it's gone. Nil when the workspace or the
-    /// loose worktree is gone.
-    static func restored(_ last: Selection, in fleet: Fleet) -> Selection? {
-        switch last {
-        case .needsYou:
-            return nil
-        case .looseWorktree(let host, let id, let terminal):
-            guard let worktree = WorkspaceSelection.worktree(host: host, id: id, in: fleet) else { return nil }
-            let live = terminal.flatMap { t in worktree.terminals.contains { $0.id == t } ? t : nil }
-            return .looseWorktree(host: host, worktree: id, terminal: live)
-        case .workspace(let host, let id, let focus):
-            let exists: Bool = {
-                if let listed = fleet.runnerWorkspaces[host] { return listed.contains { $0.id == id } }
-                return fleet.worktrees.contains { ($0.host ?? "") == host && $0.repositoryID == id }
-            }()
-            guard exists else { return nil }
-            if case .worktree(let worktree, _)? = focus,
-                WorkspaceSelection.worktree(host: host, id: worktree, in: fleet) == nil
-            {
-                return .workspace(host: host, workspace: id, focus: nil)
-            }
-            return last
-        }
+    /// Where a window with nowhere to go back to opens, or nil while that
+    /// can't be said yet.
+    ///
+    /// Needs You when anything is waiting. Otherwise, once every runner
+    /// that's answering has said what's waiting (`settled`), the first
+    /// workspace, else nothing (`.some(nil)`).
+    static func launch(needsYou count: Int, settled: Bool, in fleet: Fleet) -> Selection?? {
+        if count > 0 { return .some(.needsYou) }
+        guard settled else { return nil }
+        return .some(first(in: fleet))
     }
 
     /// The first workspace the sidebar lists: a repository's Main, on the

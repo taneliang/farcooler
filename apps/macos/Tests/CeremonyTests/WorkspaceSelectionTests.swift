@@ -206,30 +206,19 @@ struct WorkspaceSelectionTests {
         #expect(SelectionMemory.encode(.needsYou) == nil)
     }
 
-    /// Needs You when anything is waiting, as the iPhone opens (ruling 4).
-    /// Otherwise, once every runner has said, the last workspace selection
-    /// while it's still there, else the first workspace; and nothing is
-    /// decided while a runner hasn't said yet, so the window doesn't open on
-    /// a workspace a moment before a decision arrives.
-    @Test("Launch opens Needs You when it has items, else the last workspace")
-    func launchOpensNeedsYouWhenItHasItemsElseTheLastWorkspace() {
+    /// With nowhere kept to go back to (ov-182: a window that has one goes
+    /// back to it, `MacDestinationTests`), Needs You when anything is waiting,
+    /// as the iPhone opens (ruling 4). Otherwise, once every runner has said,
+    /// the first workspace; and nothing is decided while a runner hasn't said
+    /// yet, so the window doesn't open on a workspace a moment before a
+    /// decision arrives.
+    @Test("With nowhere kept, launch opens Needs You when it has items, else the first workspace")
+    func launchOpensNeedsYouWhenItHasItemsElseTheFirstWorkspace() {
         let fleet = Self.fleet()
-        let last = Selection.workspace(host: "", workspace: Self.billing, focus: .worktree("scratch", terminal: nil))
-        #expect(SelectionMemory.launch(needsYou: 2, settled: false, last: last, in: fleet) == .some(.needsYou))
-        #expect(SelectionMemory.launch(needsYou: 0, settled: false, last: last, in: fleet) == nil)
-        #expect(SelectionMemory.launch(needsYou: 0, settled: true, last: last, in: fleet) == .some(last))
-        // Its opened worktree gone: the workspace, with the column closed.
-        let goneLane = Selection.workspace(host: "", workspace: Self.billing, focus: .worktree("gone", terminal: nil))
+        #expect(SelectionMemory.launch(needsYou: 2, settled: false, in: fleet) == .some(.needsYou))
+        #expect(SelectionMemory.launch(needsYou: 0, settled: false, in: fleet) == nil)
         #expect(
-            SelectionMemory.launch(needsYou: 0, settled: true, last: goneLane, in: fleet)
-                == .some(.workspace(host: "", workspace: Self.billing, focus: nil)))
-        // Its workspace gone, or nothing saved: the first workspace listed.
-        let gone = Selection.workspace(host: "", workspace: "0198f2c0-0000-7000-8000-0000000000ee", focus: nil)
-        #expect(
-            SelectionMemory.launch(needsYou: 0, settled: true, last: gone, in: fleet)
-                == .some(.workspace(host: "", workspace: Self.main, focus: nil)))
-        #expect(
-            SelectionMemory.launch(needsYou: 0, settled: true, last: nil, in: fleet)
+            SelectionMemory.launch(needsYou: 0, settled: true, in: fleet)
                 == .some(.workspace(host: "", workspace: Self.main, focus: nil)))
         // And a runner still making its first connection holds it open.
         #expect(!FleetStore.settled([(.connected, true), (.connecting, false)]))

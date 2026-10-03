@@ -959,7 +959,7 @@ final class DaemonClient: ObservableObject {
             // `reportWatching`'s gate was therefore closed on every Mac.
             capabilities: Set(body["capabilities"] as? [String] ?? []),
             // Which runner this is, by the id a task notice names it by, so a
-            // click on a pushed notice finds it (`TaskNoticeOpen`, ov-106).
+            // click on a pushed notice finds it (`DestinationOpen`, ov-106).
             runnerId: (body["runnerId"] as? String).flatMap { $0.isEmpty ? nil : $0 },
             // Which way a mismatch goes (ov-143). Absent from an older CLI,
             // which then reads as before.

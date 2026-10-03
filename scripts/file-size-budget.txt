@@ -19,8 +19,8 @@
 2798 apps/ios/FarCooler/TerminalView.swift
 2633 apps/macos/Sources/FarCooler/ChangesPane.swift
 2333 apps/android/app/src/main/java/com/farcooler/net/Connection.kt
-2326 apps/shared/AgentKit/Sources/AgentKit/ShellNavigation.swift
 2321 apps/ios/FarCooler/Connection.swift
+2314 apps/shared/AgentKit/Sources/AgentKit/ShellNavigation.swift
 2251 apps/ios/FarCooler/TerminalSession.swift
 2115 apps/android/app/src/main/java/com/farcooler/ui/ChangesScreen.kt
 1957 crates/core/src/feed.rs
