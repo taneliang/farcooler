@@ -355,7 +355,8 @@ struct ContentView: View {
         // Tells the menu bar the main window is key, and whether an overlay
         // is open over it. See `MainWindowFocus`.
         .focusedSceneValue(
-            \.mainWindow, MainWindowFocus(overlayOpen: showQuickCreate || showPalette))
+            \.mainWindow,
+            MainWindowFocus(overlayOpen: showQuickCreate || showPalette, taskOpen: Self.taskOpen(selection)))
         // The key window's alone: with two windows, both heard every
         // command, and ⌘B toggled one sidebar twice (review m2).
         .onCommand { command in if isKeyWindow { run(command) } }
@@ -2124,20 +2125,27 @@ struct ContentView: View {
         return taskTabs.tab(for: id, agentWorking: agentWorking(id, host: host))
     }
 
+    /// Whether `selection` has a task open, with its tabs.
+    nonisolated static func taskOpen(_ selection: Selection?) -> Bool {
+        if case .workspace(_, _, .task?)? = selection { return true }
+        return false
+    }
+
     /// Show `tab` for `task`, chosen; to the Agent tab, the keyboard goes
-    /// with it, into the terminal.
+    /// with it, into the terminal. Leaving Changes, its diff gives up the
+    /// Diff menu's keys.
     private func choose(_ tab: TaskTab, for task: String) {
         taskTabs.choose(tab, for: task)
+        if tab != .changes, changesFocus == task { changesFocus = nil }
         if tab == .agent { DispatchQueue.main.async { keyOpened() } }
     }
 
     /// ⌃⌘] and ⌃⌘[: the task open steps to its next or previous tab.
     private func stepTaskTab(by offset: Int) {
         guard case .workspace(let host, _, .task(let id)?)? = selection else { return }
-        taskTabs.step(id, by: offset, agentWorking: agentWorking(id, host: host))
-        if taskTabs.tab(for: id, agentWorking: agentWorking(id, host: host)) == .agent {
-            DispatchQueue.main.async { keyOpened() }
-        }
+        var stepped = taskTabs
+        stepped.step(id, by: offset, agentWorking: agentWorking(id, host: host))
+        choose(stepped.tab(for: id, agentWorking: agentWorking(id, host: host)), for: id)
     }
 
     /// What the detail draws now.
@@ -2935,24 +2943,19 @@ struct ContentView: View {
                 // until it settles. Mounted once, then kept behind the other
                 // tabs (`TaskTabs`); on screen and given the keyboard only
                 // in front.
-                if let chosen {
-                    if !settled {
-                        Color.clear
-                    } else if let shown {
-                        tiled(shown, titled: false, keyboard: keyboard && tab == .agent)
-                    } else {
-                        // Working the task, and in no layout read yet.
-                        bareTerminal(chosen, keyboard: keyboard && tab == .agent)
-                    }
-                } else {
-                    start
+                switch TaskColumnModel.agentView(hasAgent: chosen != nil, settled: settled, hasLayout: shown != nil) {
+                case .start: start
+                case .waiting: Color.clear
+                case .tiled: if let shown { tiled(shown, titled: false, keyboard: keyboard && tab == .agent) }
+                // Working the task, and in no layout read yet.
+                case .bare: if let chosen { bareTerminal(chosen, keyboard: keyboard && tab == .agent) }
                 }
             } changes: {
                 if let lane, showsChanges {
                     if settled {
                         TaskColumnChanges(
                             changes: changesStore(for: lane, client: client),
-                            isFocused: changesFocus == row.id,
+                            isFocused: TaskColumnModel.changesFocused(focus: changesFocus, task: row.id, tab: tab),
                             agents: lane.reviewAgentTargets(), onFocus: { changesFocus = row.id })
                     }
                 } else if lane != nil {

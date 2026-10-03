@@ -62,6 +62,34 @@ enum TaskColumnModel {
         }
     }
 
+    /// What the Agent tab draws.
+    enum AgentView: Equatable {
+        /// No agent: Start Agent… and Open Worktree…, or why not.
+        case start
+        /// A task passed on the way, glancing: nothing mounted until it
+        /// settles.
+        case waiting
+        /// The layout holding the agent.
+        case tiled
+        /// The agent's terminal alone, in no layout read yet.
+        case bare
+    }
+
+    /// The Agent tab's view, from the agent, the glance and the layout, and
+    /// never from which tab is in front, so a tab switch can't swap one
+    /// view for another and re-wrap the terminal.
+    static func agentView(hasAgent: Bool, settled: Bool, hasLayout: Bool) -> AgentView {
+        guard hasAgent else { return .start }
+        guard settled else { return .waiting }
+        return hasLayout ? .tiled : .bare
+    }
+
+    /// Whether the task's diff has the Diff menu's keys: it was clicked
+    /// into (`focus`), and Changes is in front.
+    static func changesFocused(focus: String?, task: String, tab: TaskTab) -> Bool {
+        focus == task && tab == .changes
+    }
+
     /// "1 terminal", "3 terminals", "No terminals".
     static func terminalCount(_ n: Int) -> String {
         switch n {
@@ -247,7 +275,8 @@ struct TaskViewHeader: View {
             .help("Move this task")
             .disabled(!store.offersWrites)
         }
-        .padding(.horizontal, ColumnGrid.a)
+        // The overview's own margin, so the key sits over its text.
+        .padding(.horizontal, TaskTypography.inset.leading)
         // Six rhythms: a title2 line with a rhythm and a half each side.
         .frame(maxWidth: .infinity, minHeight: 6 * ColumnGrid.rhythm, alignment: .leading)
         .background(WorkspaceStyle.canvas)
@@ -311,7 +340,7 @@ struct TaskTabBar: View {
                     .help("Show this task’s worktree full size, with all its layouts")
             }
         }
-        .padding(.horizontal, ColumnGrid.a)
+        .padding(.horizontal, TaskTypography.inset.leading)
         .columnHeader()
     }
 }
@@ -383,13 +412,15 @@ struct TaskTabs<Overview: View, Agent: View, Changes: View>: View {
     @ViewBuilder let changes: () -> Changes
 
     @State private var changesShown = false
+    /// The pane's own: a task leaving the main area is out of sight whole.
+    @Environment(\.outOfSight) private var paneOutOfSight
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            overview().modifier(TabLayer(shown: tab == .overview))
-            agent().modifier(TabLayer(shown: tab == .agent))
+            overview().modifier(TabLayer(shown: tab == .overview, paneOutOfSight: paneOutOfSight))
+            agent().modifier(TabLayer(shown: tab == .agent, paneOutOfSight: paneOutOfSight))
             if changesShown || tab == .changes {
-                changes().modifier(TabLayer(shown: tab == .changes))
+                changes().modifier(TabLayer(shown: tab == .changes, paneOutOfSight: paneOutOfSight))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -398,9 +429,13 @@ struct TaskTabs<Overview: View, Agent: View, Changes: View>: View {
         }
     }
 
-    /// One tab in the stack: in front, or kept out of sight behind.
+    /// One tab in the stack: in front, or kept out of sight behind. Out of
+    /// sight adds to the pane's (`paneOutOfSight`) and never replaces it:
+    /// the front tab of a task leaving the main area lets go of the
+    /// keyboard too (ov-98 review M1).
     private struct TabLayer: ViewModifier {
         let shown: Bool
+        let paneOutOfSight: Bool
 
         func body(content: Content) -> some View {
             content
@@ -408,7 +443,7 @@ struct TaskTabs<Overview: View, Agent: View, Changes: View>: View {
                 .opacity(shown ? 1 : 0)
                 .allowsHitTesting(shown)
                 .accessibilityHidden(!shown)
-                .environment(\.outOfSight, !shown)
+                .environment(\.outOfSight, paneOutOfSight || !shown)
                 .disabled(!shown)
         }
     }

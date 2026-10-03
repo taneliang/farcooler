@@ -69,6 +69,9 @@ struct ChangesPane: View {
     @State private var highlightedCommit = 0
     @State private var lastHunkJump: String?
 
+    /// Kept mounted out of sight, behind a task's other tabs.
+    @Environment(\.outOfSight) private var outOfSight
+
     private var codeFont: Font { Font(preferences.terminalFont() as CTFont) }
 
     var body: some View {
@@ -100,8 +103,12 @@ struct ChangesPane: View {
         .background(WorkspaceStyle.document)
         .task(id: changes.worktree.id) { await changes.loadIfNeeded() }
         // Cancelled with the view, which is what keeps this honest: the poll
-        // exists only while somebody is reading the diff.
-        .task(id: changes.worktree.id) { await changes.follow() }
+        // exists only while somebody is reading the diff. Kept behind a
+        // task's other tabs (`outOfSight`, ov-98), nobody is: it stops, and
+        // starts again when Changes comes back to the front.
+        .task(id: outOfSight ? nil : changes.worktree.id) {
+            if !outOfSight { await changes.follow() }
+        }
         .onCommand { command in
             guard isFocused else { return }
             switch command {

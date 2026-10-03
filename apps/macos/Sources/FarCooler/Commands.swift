@@ -183,10 +183,10 @@ struct FarCoolerCommands: Commands {
             Section {
                 Button("Next Task Tab") { AppCommand.nextTaskTab.post() }
                     .keyboardShortcut("]", modifiers: [.command, .control])
-                    .disabled(!MainWindowFocus.navigates(mainWindow))
+                    .disabled(!MainWindowFocus.stepsTaskTabs(mainWindow))
                 Button("Previous Task Tab") { AppCommand.previousTaskTab.post() }
                     .keyboardShortcut("[", modifiers: [.command, .control])
-                    .disabled(!MainWindowFocus.navigates(mainWindow))
+                    .disabled(!MainWindowFocus.stepsTaskTabs(mainWindow))
             }
             // Only while the main window is key with nothing over it: with
             // the palette open or Settings key, they moved the window behind.

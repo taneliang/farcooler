@@ -152,4 +152,78 @@ struct TaskTabsTests {
         let characters = TaskTypography.measure / perCharacter
         #expect((65...75).contains(characters), "\(characters) characters at \(TaskTypography.measure) pt")
     }
+
+    /// A task leaving the main area is out of sight as a whole: its front
+    /// tab included (review M1). The tabs' own `outOfSight` adds to the
+    /// pane's rather than replacing it, so a terminal on the Agent tab of a
+    /// task switched away from lets go of the keyboard.
+    @Test("The front tab of a leaving task is out of sight too")
+    func theFrontTabOfALeavingTaskIsOutOfSight() async {
+        final class Seen { var outOfSight: [Bool] = [] }
+        struct Probe: NSViewRepresentable {
+            let seen: Seen
+            func makeNSView(context: Context) -> NSView { NSView() }
+            func updateNSView(_ nsView: NSView, context: Context) {
+                seen.outOfSight.append(context.environment.outOfSight)
+            }
+        }
+        for leaving in [false, true] {
+            let seen = Seen()
+            let view = TaskTabs(tab: .agent) {
+                Text("Overview")
+            } agent: {
+                Probe(seen: seen)
+            } changes: {
+                Text("Changes")
+            }
+            .environment(\.outOfSight, leaving)
+            .frame(width: 300, height: 200)
+            let host = NSHostingView(rootView: view)
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.borderless],
+                backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = host
+            for _ in 0..<5 {
+                host.layoutSubtreeIfNeeded()
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            window.close()
+            #expect(seen.outOfSight.last == leaving, "leaving \(leaving): the agent tab saw \(seen.outOfSight)")
+        }
+    }
+
+    /// What the Agent tab draws: the start panel with no agent, nothing
+    /// while a glance passes over the task, the agent's layout once read,
+    /// else its terminal alone. The same whichever tab is in front, so
+    /// switching tabs never swaps one view for another (no re-wrap).
+    @Test("The Agent tab's view doesn't depend on which tab is in front")
+    func theAgentTabsView() {
+        typealias Model = TaskColumnModel
+        #expect(Model.agentView(hasAgent: false, settled: true, hasLayout: false) == .start)
+        #expect(Model.agentView(hasAgent: false, settled: false, hasLayout: true) == .start)
+        #expect(Model.agentView(hasAgent: true, settled: false, hasLayout: true) == .waiting)
+        #expect(Model.agentView(hasAgent: true, settled: true, hasLayout: true) == .tiled)
+        #expect(Model.agentView(hasAgent: true, settled: true, hasLayout: false) == .bare)
+    }
+
+    /// The diff's keys (⌥⌘↓, ⌥⌘], ⌃⌥⌘], Mark as Reviewed) are for a diff
+    /// you can see: only while Changes is in front (review minor 2).
+    @Test("A diff behind another tab doesn't take the Diff menu's keys")
+    func aHiddenDiffTakesNoKeys() {
+        #expect(TaskColumnModel.changesFocused(focus: "t-1", task: "t-1", tab: .changes))
+        #expect(!TaskColumnModel.changesFocused(focus: "t-1", task: "t-1", tab: .overview))
+        #expect(!TaskColumnModel.changesFocused(focus: "t-1", task: "t-1", tab: .agent))
+        #expect(!TaskColumnModel.changesFocused(focus: "t-2", task: "t-1", tab: .changes))
+        #expect(!TaskColumnModel.changesFocused(focus: nil, task: "t-1", tab: .changes))
+    }
+
+    /// ⌃⌘] and ⌃⌘[ are enabled only with a task open (review minor 3).
+    @Test("The tab shortcuts are enabled only with a task open")
+    func tabShortcutsNeedATask() {
+        #expect(MainWindowFocus.stepsTaskTabs(MainWindowFocus(overlayOpen: false, taskOpen: true)))
+        #expect(!MainWindowFocus.stepsTaskTabs(MainWindowFocus(overlayOpen: false, taskOpen: false)))
+        #expect(!MainWindowFocus.stepsTaskTabs(MainWindowFocus(overlayOpen: true, taskOpen: true)))
+        #expect(!MainWindowFocus.stepsTaskTabs(nil))
+    }
 }

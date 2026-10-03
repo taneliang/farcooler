@@ -1507,6 +1507,9 @@ struct TaskCard: View {
         }
         .frame(maxWidth: TaskTypography.measure, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Links in task text open on the web or in mail, nothing else
+        // (`Markdown.opens`), here as in `MarkdownText`.
+        .environment(\.openURL, Markdown.openGuard)
     }
 
     /// What a card offers for its question, which is all `QuestionAnswers`

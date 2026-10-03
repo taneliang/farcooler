@@ -14,6 +14,14 @@ import SwiftUI
 struct MainWindowFocus: Equatable {
     /// The ⌘N task panel or the ⌘P palette is open over the window.
     var overlayOpen: Bool
+    /// A task is open in the main area, with its tabs (ov-98).
+    var taskOpen = false
+
+    /// A task's next or previous tab (⌃⌘] and ⌃⌘[) acts only with a task
+    /// open in the key main window, nothing over it.
+    static func stepsTaskTabs(_ focus: MainWindowFocus?) -> Bool {
+        navigates(focus) && focus?.taskOpen == true
+    }
 
     /// Close Terminal (⌘W) acts only when the main window is key.
     static func closesTerminal(_ focus: MainWindowFocus?) -> Bool {
