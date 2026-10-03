@@ -55,14 +55,24 @@ jobs:
   # checks. This takes seconds and needs no toolchain. `linux` and `ios` need
   # it, and `macos` needs `linux`, so no ship job starts until it passes.
   # proto-lint.py's self-test fails if either `needs` goes.
+  #
+  # AND EVERY PROTO SINCE THE BASELINE. canary-baseline.yml records the
+  # baseline when a run ends, so while the previous push's run is still going
+  # (its Mac build, after its TestFlight upload) the baseline lacks what that
+  # push shipped. `--since-baseline` checks this proto against each version on
+  # main after the recorded commit as well, which is strict whatever the
+  # recording's timing. It reads git history, hence the full checkout, and
+  # refuses a shallow one rather than pass.
   wire:
     name: Wire compatibility
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - run: ./scripts/proto-lint.py --self-test
-      - run: ./scripts/proto-lint.py --channel canary
+      - run: ./scripts/proto-lint.py --channel canary --since-baseline
       - run: ./scripts/proto-lint.py --channel preview
       - run: ./scripts/proto-lint.py --channel stable
 
@@ -272,8 +282,8 @@ jobs:
 
       # Its own step, after the build, because this is the moment the build
       # reaches the field. canary-baseline.yml records the wire from the steps
-      # of a cancelled run: a cancel during the archive shipped nothing, and a
-      # cancel during this step may have, so it counts. One step for both could
+      # of a run: a cancel or failure during the archive shipped nothing, and
+      # one during this step may have, so it counts. One step for both could
       # not tell them apart. scripts/canary-shipped.py names this step.
       - name: Upload to TestFlight
         working-directory: apps/ios

@@ -15,8 +15,9 @@
 # EVERY CONCLUSION, not only success: a cancelled or failed run can have
 # shipped (the iOS job fails on the upload limit while the Mac one ships).
 # scripts/canary-shipped.py reads the run's jobs and steps to decide, and says
-# why. The cost is that recording waits for the whole run, not each ship job;
-# a run the next push cancels ends, and records, as soon as it is cancelled.
+# why. The cost is that recording waits for the whole run, not each ship job,
+# so canary.yml's `wire` job does not trust the baseline alone: it also checks
+# every proto on main since the recorded commit (proto-lint --since-baseline).
 #
 # NO CONCURRENCY GROUP, deliberately. A group queues one run and cancels any
 # older one still pending, which would drop a recording outright. Recorders

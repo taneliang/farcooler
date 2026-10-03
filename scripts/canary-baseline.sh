@@ -24,7 +24,9 @@
 #     both are in the field now, so the recorded proto must read what the older
 #     one shipped. Recordings arrive out of order whenever two Canary runs end
 #     close together, and skipping the older one unchecked let a field it
-#     shipped be renumbered by the newer one with nothing going red.
+#     shipped be renumbered by the newer one with nothing going red. On such a
+#     break the newer baseline stays: the field updates toward it, and the job
+#     going red is what asks a person to restore what the older one shipped.
 #   - NEVER OVER A BREAK. The proto that shipped is checked against the one
 #     recorded, by proto-lint's own rules, before it replaces it. Copied
 #     unchecked, a break that shipped became the baseline, and every later lint

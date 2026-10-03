@@ -19,11 +19,14 @@ job fails on App Store Connect's upload limit while the Mac one ships, so a
 and that same cancel took them down with the run, after the ship.
 
 WHAT COUNTS. A ship step that succeeded, in any attempt. And one that was
-CANCELLED once it had started, because an upload cut off part way may still
-have landed: recording a proto that never shipped only makes the baseline
+CANCELLED or FAILED once it had started, because an upload cut off part way
+may still have landed, and altool can report an error for an upload App Store
+Connect kept (the upload step says as much). The API cannot tell those from
+the daily upload limit, which shipped nothing, so a failed upload counts as
+shipped too: recording a proto that never shipped only makes the baseline
 stricter, while missing one that did lets the next push break it unseen.
 "Started" is every step before it ending in success or skipped, so a run
-cancelled during the build, which is most of them, records nothing.
+cancelled or failed during the build, which is most of them, records nothing.
 """
 
 import importlib.util
@@ -65,8 +68,8 @@ def shipped(jobs):
             started = all(s.get("conclusion") in ("success", "skipped") for s in steps[:i])
             if step.get("conclusion") == "success":
                 reasons.append(f"{where}: {step['name']} succeeded")
-            elif started and step.get("conclusion") in ("cancelled", None):
-                reasons.append(f"{where}: {step['name']} was cancelled part way, so it may have landed")
+            elif started and step.get("conclusion") in ("cancelled", "failure", None):
+                reasons.append(f"{where}: {step['name']} ended {step.get('conclusion') or 'unfinished'} part way, so it may have landed")
     return reasons
 
 
@@ -120,15 +123,17 @@ def self_test():
         ("Sparkle off, cancelled during the disk image upload", [mac("cancelled", "success", "skipped", "cancelled")], True),
         ("cancelled during the build, later steps skipped", [ios("cancelled", "cancelled", "skipped")], False),
         ("cancelled during the build, later steps cancelled", [ios("cancelled", "cancelled", "cancelled")], False),
-        ("the upload limit, and the Mac job cancelled in its build",
-         [ios("failure", "success", "failure"), mac("cancelled", "cancelled", "cancelled", "cancelled")], False),
+        ("a failed upload, which may have landed",
+         [ios("failure", "success", "failure"), mac("cancelled", "cancelled", "cancelled", "cancelled")], True),
+        ("a failed archive, and the Mac job cancelled in its build",
+         [ios("failure", "failure", "skipped"), mac("cancelled", "cancelled", "cancelled", "cancelled")], False),
         ("the upload limit, and the Mac job shipped",
          [ios("failure", "success", "failure"), mac("success", "success", "success", "success")], True),
         ("Sparkle off, the disk image uploaded", [mac("success", "success", "skipped", "success")], True),
         ("Sparkle published, then cancelled in the artifact upload",
          [mac("cancelled", "success", "success", "cancelled")], True),
         ("iOS job skipped for want of the key", [{"name": "iOS (internal TestFlight)", "conclusion": "skipped", "steps": []}], False),
-        ("a re-run attempt shipped", [ios("failure", "success", "failure"), ios("success", "success", "success", 2)], True),
+        ("a re-run attempt shipped", [ios("failure", "failure", "skipped"), ios("success", "success", "success", 2)], True),
         ("a job not in SHIP_STEPS, whatever its steps", [linux], False),
         ("a successful ship job the API listed without steps",
          [{"name": "macOS (signed disk image)", "conclusion": "success", "steps": []}], True),

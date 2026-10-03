@@ -22,6 +22,7 @@ version.sh already carries a comment about shallow clones failing silently.
     ./scripts/proto-lint.py                 # against the preview baseline
     ./scripts/proto-lint.py --channel stable
     ./scripts/proto-lint.py --channel canary
+    ./scripts/proto-lint.py --channel canary --since-baseline   # and main since it
     ./scripts/proto-lint.py --self-test     # the lint's own tests
     ./scripts/proto-lint.py --compare OLD NEW   # two files, wire rules only
 
@@ -52,6 +53,7 @@ nothing has shipped, so nothing is owed compatibility.
 import argparse
 import pathlib
 import re
+import subprocess
 import sys
 import tempfile
 
@@ -278,6 +280,12 @@ def canary_gate_problems(text):
         problems.append(f"`{gate}` swallows a lint failure with `|| true`")
     if "if" in body or re.search(r"^\s*(-\s*)?if:", body.get("steps", ""), re.M):
         problems.append(f"`{gate}` has an `if`, so the lint can be skipped")
+    # The baseline is recorded when a run ends, so on its own it lags what the
+    # previous push shipped; the lint must also walk main since it.
+    if not re.search(r"proto-lint\.py --channel canary --since-baseline\b", body.get("steps", "")):
+        problems.append(f"`{gate}` lints against the baseline alone, which lags the run still shipping; add --since-baseline")
+    if not re.search(r"^fetch-depth:\s*0$", body.get("steps", ""), re.M):
+        problems.append(f"`{gate}` checks out shallow, so --since-baseline cannot read main's history")
     for job, keys in jobs.items():
         if job == gate:
             continue
@@ -372,6 +380,8 @@ def recorder_problems(text, canary_text):
     for want in ("contents: write", "actions: read"):
         if want not in job.get("permissions", ""):
             problems.append(f"`{writers[0]}` lacks `{want}`")
+    if not re.fullmatch(r"github\.event\.workflow_run\.head_branch == 'main'(\s*&&.*)?", job.get("if", ""), re.S):
+        problems.append(f"`{writers[0]}` must run only for main (`if: github.event.workflow_run.head_branch == 'main'`)")
     if re.search(r"conclusion|\b(success|always|cancelled|failure)\(\)", job.get("if", "")):
         problems.append(f"`{writers[0]}`'s `if` filters on the run's outcome, but a cancelled run can have shipped")
     if "scripts/canary-shipped.py" not in job.get("steps", ""):
@@ -379,6 +389,55 @@ def recorder_problems(text, canary_text):
     if "workflow_run.head_sha" not in job.get("steps", "") or "github.sha" in job.get("steps", ""):
         problems.append(f"`{writers[0]}` must record workflow_run.head_sha; github.sha is main's head, not what shipped")
     return problems
+
+
+class Unchecked(Exception):
+    """The commits since the baseline could not be read, so nothing was checked."""
+
+
+RECORDED = re.compile(r"^// Shipped by Canary at ([0-9a-f]{40})\.")
+
+
+def since_baseline_problems(repo, baseline_text, current_text, proto="proto/farcooler.proto"):
+    """The current proto against every version of it on main since the baseline.
+
+    The baseline is recorded when a Canary run ENDS, so for most of a run the
+    commit it shipped is not yet in it, and a push in that window was linted
+    against the one before: a field the previous push added and this one
+    renumbered went to TestFlight clean. Every commit after the recorded one,
+    up to HEAD's parent, may have shipped, so each distinct proto among them
+    is owed compatibility too. Commits that never shipped (a run cancelled in
+    its build) are checked all the same: the wire is additive-only from the
+    moment a field lands on main, and the way out of a red here is to restore
+    the field, or reserve its tag, as for any other break.
+    """
+    def git(*args):
+        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+
+    match = RECORDED.match(baseline_text)
+    if not match:
+        return [], "the baseline names no commit, so only it was compared"
+    recorded = match.group(1)
+    if git("rev-parse", "--is-shallow-repository").stdout.strip() != "false":
+        raise Unchecked("this checkout is shallow, so the commits since the canary baseline cannot be read. Check out with fetch-depth: 0.")
+    if git("cat-file", "-e", f"{recorded}^{{commit}}").returncode != 0:
+        # Full history without it: rewritten, as canary-baseline.sh allows.
+        return [], f"the baseline's commit {recorded[:10]} is not in this history, so only the baseline was compared"
+    log = git("log", "--format=%H", f"{recorded}..HEAD^", "--", proto)
+    if log.returncode != 0:
+        raise Unchecked(f"git log failed: {log.stderr.strip()}")
+    problems, current, seen = [], parse(current_text), []
+    for sha in log.stdout.split():
+        shown = git("show", f"{sha}:{proto}")
+        if shown.returncode != 0:
+            continue
+        # A comment or a reordering is the same wire; check each wire once.
+        version = parse(shown.stdout)
+        if version in seen:
+            continue
+        seen.append(version)
+        problems += [f"{p} (against {sha[:10]}, on main since the baseline)" for p in compare(version, current)]
+    return problems, f"and with the {len(seen)} other version(s) of the wire on main since it"
 
 
 def lint(channel, baseline_dir):
@@ -629,10 +688,13 @@ def self_test():
         ("macos's needs removed", "    needs: linux\n", "", 1),
         ("always() on ios", "    if: vars.CANARY_TESTFLIGHT == 'true'\n", "    if: always() && vars.CANARY_TESTFLIGHT == 'true'\n", 1),
         ("!cancelled() on linux", "  linux:\n    needs: wire\n", "  linux:\n    needs: wire\n    if: ${{ !cancelled() }}\n", 1),
-        ("|| true on the lint", "--channel canary\n", "--channel canary || true\n", 1),
+        ("|| true on the lint", "--channel canary --since-baseline\n", "--channel canary --since-baseline || true\n", 1),
         ("continue-on-error on the lint job", "  wire:\n    name: Wire compatibility\n", "  wire:\n    name: Wire compatibility\n    continue-on-error: true\n", 1),
-        ("continue-on-error on a lint step", "      - run: ./scripts/proto-lint.py --channel canary\n", "      - run: ./scripts/proto-lint.py --channel canary\n        continue-on-error: true\n", 1),
+        ("continue-on-error on a lint step", "      - run: ./scripts/proto-lint.py --channel canary --since-baseline\n", "      - run: ./scripts/proto-lint.py --channel canary --since-baseline\n        continue-on-error: true\n", 1),
         ("needs as a block list", "  linux:\n    needs: wire\n", "  linux:\n    needs:\n      - wire\n", 0),
+        ("--since-baseline dropped", "--channel canary --since-baseline\n", "--channel canary\n", 1),
+        ("a shallow checkout", "          fetch-depth: 0\n      - run: ./scripts/proto-lint.py --self-test\n",
+         "      - run: ./scripts/proto-lint.py --self-test\n", 1),
         ("needs as a flow list", "    needs: linux\n", "    needs: [wire, linux]\n", 0),
     ]
     for what, old, new, want in gate_cases:
@@ -672,6 +734,61 @@ def self_test():
         if len(got) != want:
             failures.append(f"timeout case {what!r}: expected {want} problem(s), got {got}")
 
+    # Every proto on main since the baseline, not just the baseline. A git
+    # repository of four commits: R is recorded, S adds `beta` (and may have
+    # shipped before its run ended), T adds a comment only, H is the candidate.
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = pathlib.Path(tmp) / "r"
+        env = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "PATH": "/usr/bin:/bin:/opt/homebrew/bin"}
+
+        def git(*args):
+            return subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                                  capture_output=True, text=True, env=env, check=True).stdout.strip()
+
+        def land(text):
+            (repo / "proto").mkdir(parents=True, exist_ok=True)
+            (repo / "proto" / "farcooler.proto").write_text(text)
+            git("add", "-A")
+            git("commit", "--quiet", "--allow-empty", "-m", "x")
+            return git("rev-parse", "HEAD")
+
+        repo.mkdir()
+        git("init", "--quiet")
+        alpha = "message A { string alpha = 1; }\n"
+        r = land(alpha)
+        land(alpha + "message B { string beta = 1; }\n")
+        land(alpha + "message B { string beta = 1; }\n// note\n")
+        land(alpha)  # the candidate H, as HEAD: beta removed
+        header = f"// Shipped by Canary at {r}. Written by canary-baseline.yml.\n" + alpha
+        since_cases = [
+            ("a field added since the baseline, then removed", header, alpha, 1),
+            ("the same, kept", header, alpha + "message B { string beta = 1; }\n", 0),
+            ("a baseline naming no commit", alpha, alpha, 0),
+            ("a baseline commit not in history", header.replace(r, "0" * 40), alpha, 0),
+        ]
+        for what, base, current, want in since_cases:
+            count += 1
+            got, _ = since_baseline_problems(repo, base, current)
+            if len(got) != want:
+                failures.append(f"since-baseline case {what!r}: expected {want} problem(s), got {got}")
+        # HEAD's own change is the candidate, not a version it owes: with H
+        # adding gamma, a current proto without gamma is not refused for it.
+        count += 1
+        land(alpha + "message B { string beta = 1; }\nmessage C { string gamma = 1; }\n")
+        got, _ = since_baseline_problems(repo, header, alpha + "message B { string beta = 1; }\n")
+        if got:
+            failures.append(f"since-baseline: HEAD's own proto was treated as shipped: {got}")
+        # A shallow clone cannot see the commits, and says so rather than passing.
+        count += 1
+        shallow = pathlib.Path(tmp) / "s"
+        subprocess.run(["git", "clone", "--quiet", "--depth", "1", f"file://{repo}", str(shallow)],
+                       capture_output=True, env=env, check=True)
+        try:
+            since_baseline_problems(shallow, header, alpha)
+            failures.append("since-baseline: a shallow clone passed instead of refusing")
+        except Unchecked:
+            pass
+
     # The recorder: canary.yml cancels its own run when the next push lands,
     # after a build may have shipped, so the baseline is recorded by a workflow
     # outside that run. Its trigger and permissions are what make it run at all.
@@ -697,6 +814,8 @@ def self_test():
          "    if: github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success'\n", 1),
         ("github.sha recorded", "${{ github.event.workflow_run.head_sha }}", "${{ github.sha }}", 1),
         ("workflows as a block list", "workflows: [Canary]", "workflows:\n      - Canary", 0),
+        ("main-only dropped", "    if: github.event.workflow_run.head_branch == 'main'\n", "", 1),
+        ("main-only widened", "head_branch == 'main'\n", "head_branch == 'main' || true\n", 1),
     ]
     for what, old, new, want in recorder_cases:
         count += 1
@@ -718,6 +837,10 @@ def main():
     ap.add_argument("--channel", default="preview", choices=sorted(CHANNELS))
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--compare", nargs=2, metavar=("OLD", "NEW"), type=pathlib.Path)
+    ap.add_argument(
+        "--since-baseline", action="store_true",
+        help="also check every proto on main since the baseline's commit (needs full history)",
+    )
     args = ap.parse_args()
 
     if args.self_test:
@@ -729,6 +852,15 @@ def main():
         verdict = f"{new} is compatible with {old}"
     else:
         problems, verdict = lint(args.channel, ROOT / "proto" / "baseline")
+        baseline = ROOT / "proto" / "baseline" / f"{args.channel}.proto"
+        if args.since_baseline and baseline.exists():
+            try:
+                more, note = since_baseline_problems(ROOT, baseline.read_text(), PROTO.read_text())
+            except Unchecked as e:
+                print(f"::error::{e}", file=sys.stderr)
+                return 1
+            problems += more
+            verdict = f"{verdict}, {note}"
     if problems:
         print(f"\n{len(problems)} wire compatibility problem(s):\n", file=sys.stderr)
         for p in problems:
