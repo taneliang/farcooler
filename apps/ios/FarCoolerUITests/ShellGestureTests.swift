@@ -38,7 +38,7 @@ final class ShellGestureTests: XCTestCase {
     private func launch(_ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-shell-harness"] + extra
-        app.launch()
+        app.launchDrawn()
         return app
     }
 

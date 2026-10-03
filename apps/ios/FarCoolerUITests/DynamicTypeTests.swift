@@ -38,7 +38,7 @@ final class DynamicTypeTests: XCTestCase {
     func testTheQueueAndTheChipsAreNotBroken() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-agent-layout-harness"] + Self.size
-        app.launch()
+        app.launchDrawn()
         let send = app.buttons["Send Now"]
         XCTAssertTrue(send.waitForExistence(timeout: 30), "the queued message was not drawn")
         let edit = app.buttons["Edit"]

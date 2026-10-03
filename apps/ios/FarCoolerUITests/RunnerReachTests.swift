@@ -48,7 +48,7 @@ final class RunnerReachTests: XCTestCase {
 
         let app = XCUIApplication()
         app.launchArguments += ["-hosts", "<\(hex)>", "-hosts.last", id]
-        app.launch()
+        app.launchDrawn()
 
         // **The subject has not changed; the sentence carrying it has.**
         //

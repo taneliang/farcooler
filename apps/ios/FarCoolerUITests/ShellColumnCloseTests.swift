@@ -31,7 +31,7 @@ final class ShellColumnCloseTests: XCTestCase {
     private func launch() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-shell-harness"]
-        app.launch()
+        app.launchDrawn()
         return app
     }
 

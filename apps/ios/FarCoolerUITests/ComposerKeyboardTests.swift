@@ -14,7 +14,7 @@ final class ComposerKeyboardTests: XCTestCase {
     func testTheComposersHideKeyboardKeyPutsTheKeyboardAway() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-agent-layout-harness", "-plain"]
-        app.launch()
+        app.launchDrawn()
 
         let field = app.textViews.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 30), "the agent pane drew no composer")
@@ -42,7 +42,7 @@ final class ComposerKeyboardTests: XCTestCase {
     func testTheAgentPaneAtRestIsClaimedAsRead() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-agent-layout-harness", "-plain"]
-        app.launch()
+        app.launchDrawn()
 
         let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
         XCTAssertTrue(probe.waitForExistence(timeout: 30), "the shell never stood up")

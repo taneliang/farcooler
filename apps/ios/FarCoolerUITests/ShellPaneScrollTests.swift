@@ -35,7 +35,7 @@ final class ShellPaneScrollTests: XCTestCase {
     private func launch(_ extra: [String]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments += extra
-        app.launch()
+        app.launchDrawn()
         return app
     }
 

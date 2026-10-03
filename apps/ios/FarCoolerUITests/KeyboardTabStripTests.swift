@@ -36,7 +36,7 @@ final class KeyboardTabStripTests: XCTestCase {
         #endif
 
         let app = XCUIApplication()
-        app.launch()
+        app.launchDrawn()
 
         let composer = app.textViews.firstMatch
         guard composer.waitForExistence(timeout: 10) else {
@@ -158,7 +158,7 @@ final class AgentTranscriptScrollTests: XCTestCase {
     private func launch() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-agent-layout-harness", "-plain"]
-        app.launch()
+        app.launchDrawn()
         return app
     }
 
@@ -288,7 +288,7 @@ final class AgentTranscriptScrollTests: XCTestCase {
     func testTheDockedComposerClearsTheShellsBar() throws {
         let shell = XCUIApplication()
         shell.launchArguments = ["-shell-harness"]
-        shell.launch()
+        shell.launchDrawn()
         let bar = shell.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
         XCTAssertTrue(bar.waitForExistence(timeout: 30), "the shell never drew its bar")
         let barTop = bar.frame.minY
@@ -434,7 +434,7 @@ final class AgentEmptyStateTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments =
             ["-agent-layout-harness", "-empty-\(state)"] + (native ? ["-native"] : [])
-        app.launch()
+        app.launchDrawn()
         return app
     }
 
@@ -495,7 +495,7 @@ final class AgentEmptyStateTests: XCTestCase {
     func testTheComposerNamesTheAdapterInUse() {
         let acp = XCUIApplication()
         acp.launchArguments = ["-agent-layout-harness", "-plain"]
-        acp.launch()
+        acp.launchDrawn()
         let acpBadge = acp.staticTexts["adapter-badge"]
         XCTAssertTrue(acpBadge.waitForExistence(timeout: 30), "No adapter badge on an ACP session")
         XCTAssertTrue(
@@ -504,7 +504,7 @@ final class AgentEmptyStateTests: XCTestCase {
 
         let native = XCUIApplication()
         native.launchArguments = ["-agent-layout-harness", "-plain", "-native"]
-        native.launch()
+        native.launchDrawn()
         let nativeBadge = native.staticTexts["adapter-badge"]
         XCTAssertTrue(nativeBadge.waitForExistence(timeout: 30))
         XCTAssertTrue(
@@ -542,7 +542,7 @@ final class AgentEndedSessionTests: XCTestCase {
     private func launch(_ arguments: [String]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-agent-layout-harness"] + arguments
-        app.launch()
+        app.launchDrawn()
         return app
     }
 

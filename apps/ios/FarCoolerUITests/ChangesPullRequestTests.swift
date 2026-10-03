@@ -20,7 +20,7 @@ final class ChangesPullRequestTests: XCTestCase {
     private func launch(_ pullRequest: String...) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments += ["-changes-layout-harness"] + pullRequest
-        app.launch()
+        app.launchDrawn()
         return app
     }
 

@@ -63,7 +63,7 @@ final class TerminalLigatureTests: XCTestCase {
         // itself, so this test cannot skip for want of a demo daemon and
         // cannot pass because one was missing.
         app.launchArguments += ["-terminal-ligature"]
-        app.launch()
+        app.launchDrawn()
 
         let fixture = app.otherElements["terminal-ligature-fixture"]
         XCTAssertTrue(

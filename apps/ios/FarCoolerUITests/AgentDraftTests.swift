@@ -35,7 +35,7 @@ final class AgentDraftTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments =
             ["-agent-layout-harness", "-plain"] + (keepingDrafts ? ["-keep-drafts"] : [])
-        app.launch()
+        app.launchDrawn()
         return app
     }
 
