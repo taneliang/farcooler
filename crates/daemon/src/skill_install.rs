@@ -920,11 +920,13 @@ mod tests {
     /// until the split section (spec, "Splitting is done by agents") and
     /// finding the board from the home added about 35; the split and the
     /// interview are read only when they're needed. The ticket title rule
-    /// (ov-96) added 11 more, and it is read on every `task create`.
+    /// (ov-96) added 11 more, and it is read on every `task create`. How a
+    /// note is laid out for the owner, with a heredoc to carry its lines
+    /// (ov-198), added 15, and it is read on every note.
     #[test]
     fn the_skill_is_short() {
         let lines = skill_body(Harness::Claude).lines().count();
-        assert!(lines <= 175, "{lines} lines");
+        assert!(lines <= 186, "{lines} lines");
     }
 
     /// Not a check: the pressure harness's way to get the skill exactly as an

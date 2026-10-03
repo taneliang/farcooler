@@ -76,6 +76,21 @@ what done means, what it may not do, and where the task goes when it's done.
 {{cli}} task block <key> --repo <repo> --on <other-key> --reason "<why it waits>" --actor manager
 ```
 
+The owner reads notes, intents and asks in the app's task view, which breaks
+lines where you do: a one-sentence lead, short paragraphs split by blank lines,
+`-` lists for findings and follow-ups, SHAs and paths in backticks, under ~120
+words, and a link to a report, not its contents. Pass the lines in a file:
+
+```
+cat > "${TMPDIR:-/tmp}/note.md" <<'EOF'
+Lane done: a note's line breaks now show in the record.
+
+- `f0a5ce74`: one fixture, read by both apps.
+- Next: the same rule for intents. Report: `.claude/agent/reports/ov-198/report.md`.
+EOF
+{{cli}} task note <key> --repo <repo> --kind progress --body "$(cat "${TMPDIR:-/tmp}/note.md")" --actor manager
+```
+
 Titles show in a narrow list, where only the first 40 characters fit. Shape
 each as `<Area>: <outcome>` in sentence case, 45 characters or fewer and never
 over 60. Area is one of Mac, iOS, Android, Phones, Watch, Daemon, Relay, CLI,
