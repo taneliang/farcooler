@@ -80,6 +80,7 @@ TOKEN = re.compile(
     r"""
       (?P<open>\b(?:message|enum|oneof)\s+(?P<block>\w+)\s*\{)
     | (?P<close>\})
+    | (?P<reserved>\breserved\s+(?P<reserved_list>[^;{}]*);)
     | (?P<field>
         \b(?:(?P<qualifier>optional|repeated)\s+)?
         (?P<type>map\s*<\s*[\w.]+\s*,\s*[\w.]+\s*>|[\w.]+)\s+
@@ -88,6 +89,26 @@ TOKEN = re.compile(
     """,
     re.VERBOSE,
 )
+
+
+class Fields(dict):
+    """`Message.tag` to (name, type), plus each scope's `reserved` tags.
+
+    A dict, so everything that counts or compares fields sees fields only;
+    the reservations ride alongside, for `compare` alone.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.reserved = {}  # scope -> [(low, high)], `max` as infinity
+
+    def reserve(self, scope, listed):
+        for low, high in re.findall(r"\b(\d+)(?:\s+to\s+(\d+|max))?", listed):
+            top = float("inf") if high == "max" else int(high or low)
+            self.reserved.setdefault(scope, []).append((int(low), top))
+
+    def is_reserved(self, scope, tag):
+        return any(low <= int(tag) <= high for low, high in self.reserved.get(scope, []))
 
 
 def parse(text):
@@ -101,7 +122,7 @@ def parse(text):
     """
     # Comments first, so a brace or an `= 1;` in prose is not read as syntax.
     text = "\n".join(line.split("//", 1)[0] for line in text.splitlines())
-    fields = {}
+    fields = Fields()
     # (kind, name) per open block. A oneof is a block of its own, so its `}`
     # closes it and not the message around it, but it is not a scope: its
     # members share the message's tag numbers, so they key under the message.
@@ -119,6 +140,9 @@ def parse(text):
         if not names:
             continue
         scope = ".".join(names)
+        if m.group("reserved"):
+            fields.reserve(scope, m.group("reserved_list"))
+            continue
         if m.group("field"):
             qualifier, type_name = m.group("qualifier"), m.group("type")
             type_name = re.sub(r"\s+", "", type_name).replace(",", ", ")
@@ -139,9 +163,14 @@ def compare(baseline, current):
     for key, (name, kind) in sorted(baseline.items()):
         scope, tag = key.rsplit(".", 1)
         if key not in current:
+            # Protobuf's own rule: a removed field whose number is reserved is
+            # compatible. An older client still sends it, a newer one skips it
+            # as unknown, and the reservation stops the number being reused.
+            if getattr(current, "is_reserved", lambda *_: False)(scope, tag):
+                continue
             problems.append(
-                f"{scope} tag {tag} ({name}) was removed. "
-                f"Reserve it instead — a client in the field still sends it."
+                f"{scope} tag {tag} ({name}) was removed. Restore it, or reserve "
+                f"its number (`reserved {tag};`) — a client in the field still sends it."
             )
             continue
         now_name, now_kind = current[key]
@@ -155,6 +184,19 @@ def compare(baseline, current):
                 f"{scope} tag {tag} was renamed from {name} to {now_name}. "
                 f"Add a new field instead."
             )
+    # A reservation is a promise to every client that read the field before
+    # it; dropping it lets the number be reused for something else.
+    reserved = getattr(baseline, "reserved", {})
+    for key, (now_name, _) in sorted(current.items()):
+        scope, tag = key.rsplit(".", 1)
+        if reserved and key not in baseline and baseline.is_reserved(scope, tag):
+            problems.append(f"{scope} tag {tag} was reserved and is used again by {now_name}.")
+    for scope, ranges in sorted(reserved.items()):
+        for low, high in ranges:
+            ends = [low] if high == float("inf") else [low, high]
+            if not all(getattr(current, "is_reserved", lambda *_: False)(scope, t) for t in ends):
+                which = f"tag {low} is" if low == high else f"tags {low} to {'max' if high == float('inf') else high} are"
+                problems.append(f"{scope} {which} no longer reserved, so the number could be reused.")
     return problems
 
 
@@ -600,6 +642,24 @@ def self_test():
             f"proto/farcooler.proto declares {declared} numbered fields and enum values "
             f"but the parser found {parsed}; some shape is invisible to it"
         )
+
+    # Reserving a removed field's number is compatible, as in protobuf; any
+    # other removal is not, nor is reusing or un-reserving a reserved number.
+    beta = "message B {\n  string alpha = 2;\n  string beta = 1;\n}\nenum E { E_ZERO = 0; E_ONE = 1; }\n"
+    reserved_cases = [
+        ("removed, number reserved", beta, beta.replace("string beta = 1;", 'reserved 1;\n  reserved "beta";'), None),
+        ("removed, in a reserved range", beta, beta.replace("string beta = 1;", "reserved 1, 5 to 9;"), None),
+        ("removed, another number reserved", beta, beta.replace("string beta = 1;", "reserved 3;"), "was removed"),
+        ("an enum value removed, reserved", beta, beta.replace(" E_ONE = 1;", " reserved 1;"), None),
+        ("a reserved number used again", beta.replace("string beta = 1;", "reserved 1;"), beta.replace("string beta = 1;", "string gamma = 1;"), "used again"),
+        ("a reservation dropped", beta.replace("string beta = 1;", "reserved 1;"), beta.replace("string beta = 1;", ""), "no longer reserved"),
+        ("a reservation kept", beta.replace("string beta = 1;", "reserved 1 to max;"), beta.replace("string beta = 1;", "reserved 1 to max;"), None),
+    ]
+    for what, old_text, new_text, want in reserved_cases:
+        count += 1
+        got = compare(parse(old_text), parse(new_text))
+        if (want is None and got) or (want is not None and not any(want in p for p in got)):
+            failures.append(f"reserved case {what!r}: expected {want or 'no problem'}, got {got}")
 
     # The capability check. Fixtures in the shape of the real tables: a method
     # whose capability is undeclared, one whose capability is never advertised,
