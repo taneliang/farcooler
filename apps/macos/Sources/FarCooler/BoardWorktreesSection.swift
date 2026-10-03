@@ -23,6 +23,9 @@ struct BoardWorktrees {
     /// what choosing an item does.
     var menu: (Worktree) -> [WorktreeMenu.Item] = { _ in [] }
     var perform: (WorktreeMenu.Item, Worktree) -> Void = { _, _ in }
+    /// The repository's own terminals, in their main checkout: the
+    /// Terminals section beside the tasks (ov-178).
+    var terminals: ProjectTerminals = .none
 
     static var none: BoardWorktrees { BoardWorktrees() }
 

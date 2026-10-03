@@ -208,6 +208,7 @@ struct GridGeometryTests {
         ("SidebarViews.swift", nil), ("SidebarLayout.swift", nil),
         ("BoardHeader.swift", nil), ("BoardSummaryStrip.swift", nil),
         ("TaskBoard.swift", "struct TaskCard: View"), ("TaskListSection.swift", nil), ("Navigator.swift", nil), ("BoardWorktreesSection.swift", nil),
+        ("ProjectTerminalsSection.swift", nil),
     ]
 
     /// Every numeric horizontal padding or x offset in `source`, with its

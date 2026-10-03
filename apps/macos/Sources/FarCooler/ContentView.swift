@@ -1530,16 +1530,62 @@ struct ContentView: View {
         let loose = WorkspaceWorktrees.loose(in: workspace, host: host, board: board, fleet: store.fleet)
         let usable = store.refusal(for: host) == nil
         let repository = client.repositories.first { $0.id == (workspace.repository ?? workspace.id) }
+        let terminals = projectTerminals(host: host, workspace: workspace, usable: usable)
         return BoardWorktrees(
             byTask: WorkspaceWorktrees.taskWorktrees(on: board, host: host, in: store.fleet),
             shown: loose.shown, hidden: loose.hidden,
+            // A project terminal open lights its own row, not the checkout's.
             selected: Self.openedWhole(selection).map(\.worktree)
-                ?? WorkspaceScreen.namedTerminal(selection).map(\.worktree),
+                ?? (terminals.selected == nil ? WorkspaceScreen.namedTerminal(selection).map(\.worktree) : nil),
             onOpen: { worktree in glance(at: worktree) },
             onNew: usable ? repository.map { repo in { newWorktree(host: host, project: repo.displayName) } } : nil,
             onUnhide: usable ? { ws in Task { await act(on: ws) { c in await c.unhideWorktree(ws.short) } } } : nil,
             menu: { worktreeMenu(for: $0) },
-            perform: { item, ws in perform(item, on: ws) })
+            perform: { item, ws in perform(item, on: ws) },
+            terminals: terminals)
+    }
+
+    /// The navigator's Terminals section for `workspace` (ov-178): its
+    /// repository's own terminals, in the main checkout every one of its
+    /// workspaces shares, each opened in this workspace, with the keyboard.
+    private func projectTerminals(host: String, workspace: WorkspaceSummary, usable: Bool) -> ProjectTerminals {
+        guard let checkout = ProjectTerminals.checkout(for: workspace, host: host, in: store.fleet) else { return .none }
+        let terminals = ProjectTerminals.terminals(in: checkout, fleet: store.fleet)
+        let named = WorkspaceScreen.namedTerminal(selection)
+        return ProjectTerminals(
+            checkout: checkout, terminals: terminals,
+            selected: named.flatMap { open in
+                open.host == host && open.worktree == checkout.id && terminals.contains { $0.id == open.terminal }
+                    ? open.terminal : nil
+            },
+            onOpen: { terminal in
+                trail = nil
+                focusColumn = false
+                keyboardOnBoard = false
+                navigate(
+                    to: .workspace(host: host, workspace: workspace.id, focus: .worktree(checkout.id, terminal: terminal.id)),
+                    key: PaneRef(host: host, worktree: checkout.id, terminal: terminal.id))
+            },
+            onNew: usable ? { Task { await newProjectTerminal(in: checkout, workspace: workspace.id) } } : nil)
+    }
+
+    /// New Terminal in the Terminals section: a shell in the main checkout,
+    /// in a window of its own, opened in the workspace it was asked from,
+    /// with the keyboard. Nothing else starts one (ov-190: no auto-start).
+    private func newProjectTerminal(in checkout: Worktree, workspace: String) async {
+        let host = checkout.host ?? ""
+        guard
+            let created = await act(
+                on: checkout, default: nil as Terminal?,
+                { c in
+                    await c.createTerminal(
+                        in: checkout, preset: "shell", title: "Terminal \(checkout.terminals.count + 1)")
+                })
+        else { return }
+        trail = nil
+        keyboardOnBoard = false
+        selection = .workspace(host: host, workspace: workspace, focus: .worktree(checkout.id, terminal: created.id))
+        keyPane = PaneRef(host: host, worktree: checkout.id, terminal: created.id)
     }
 
     /// ↑ or ↓ in the navigator onto `item`: it's selected, and the

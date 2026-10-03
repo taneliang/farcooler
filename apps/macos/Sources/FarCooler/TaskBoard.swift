@@ -975,12 +975,15 @@ struct TaskBoardView: View {
         let shown = BoardFilter.narrowed(store.board, filter)
         let plan = self.plan(worktrees: worktreesOf(store.board), shown: shown)
         let worktrees = plan.worktrees
+        // The repository's own terminals, between Tasks and Worktrees
+        // (ov-178): the filter narrows them as it does the rest.
+        let terminals = worktrees.terminals.narrowed(by: filter)
         let inProgress = store.board.columns.first { $0.status == .inProgress }?.rows.count ?? 0
         let unreadable = !shown.unreadable.isEmpty
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
-                    if plan.isEmpty(unreadable: unreadable) {
+                    if plan.isEmpty(unreadable: unreadable) && !terminals.isShown {
                         NavigatorNoResults(filter: filter)
                     }
                     if let orchestrator, plan.showsOrchestrator {
@@ -989,15 +992,23 @@ struct TaskBoardView: View {
                             keyed: hasKeyboard)
                         .id(NavigatorItem.orchestrator)
                         .padding(.horizontal, NavigatorGrid.edge)
-                        if plan.showsTasks(unreadable: unreadable) || plan.showsWorktrees { Divider() }
+                        if plan.showsTasks(unreadable: unreadable) || terminals.isShown || plan.showsWorktrees {
+                            Divider()
+                        }
                     }
                     if plan.showsTasks(unreadable: unreadable) {
                         section("Tasks", id: "tasks") {
                             tasks(plan, shown: shown, worktrees: worktrees)
                         }
                     }
-                    if plan.showsWorktrees {
+                    if terminals.isShown {
                         if plan.showsTasks(unreadable: unreadable) { Divider() }
+                        section("Terminals", id: "terminals", count: terminals.terminals.count) {
+                            ProjectTerminalsSection(terminals: terminals, keyed: hasKeyboard)
+                        }
+                    }
+                    if plan.showsWorktrees {
+                        if plan.showsTasks(unreadable: unreadable) || terminals.isShown { Divider() }
                         section("Worktrees", id: "worktrees", count: worktrees.shown.count) {
                             BoardWorktreesSection(worktrees: worktrees, keyed: hasKeyboard)
                         }
@@ -1158,7 +1169,7 @@ struct TaskBoardView: View {
 
     /// The navigator's collapsible sections. Not the orchestrator's row
     /// (ov-177), whose closed state, kept from before, is no longer read.
-    static let navigatorSections = ["tasks", "worktrees"]
+    static let navigatorSections = ["tasks", "terminals", "worktrees"]
 
     /// A navigator section (ov-92): the one collapsible section, in the
     /// navigator's style, its open state kept per board on this Mac.
