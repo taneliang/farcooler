@@ -15,3 +15,4 @@ crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 alacritty_terminal = "0.26"
+farcooler-ffi-guard = { workspace = true }

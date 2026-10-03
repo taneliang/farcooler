@@ -30,7 +30,10 @@ final class VTCore {
 
     func feed(_ bytes: [UInt8]) {
         guard let handle, !bytes.isEmpty else { return }
-        bytes.withUnsafeBufferPointer { farcooler_vt_feed(handle, $0.baseAddress, $0.count) }
+        // False means the core failed on these bytes and reset the terminal to
+        // a blank screen. Its revision has moved, so the next frame shows that
+        // with nothing to do here, and the program repaints on its next output.
+        _ = bytes.withUnsafeBufferPointer { farcooler_vt_feed(handle, $0.baseAddress, $0.count) }
     }
 
     /// Recolor every cell the next snapshot produces.

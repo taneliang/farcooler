@@ -1,0 +1,17 @@
+[package]
+name = "farcooler-ffi-guard"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# What every function the apps call into goes through, so that a panic under
+# the boundary comes back as a value rather than closing the app.
+#
+# Its own crate because the boundaries it guards do not otherwise share one:
+# `farcooler-vt` depends on nothing of ours, `farcooler-review` on core, the
+# client on half the workspace, and the JNI shim on the first and last of those.
+# Putting this in any of them would hang the terminal emulator's static archive
+# off a crate it has no other use for.
+[dependencies]
+tracing.workspace = true

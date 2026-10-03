@@ -99,8 +99,18 @@ void farcooler_vt_free(void *handle);
  * Chunk boundaries do not matter: a sequence split across calls parses exactly
  * as one call would, which is what makes this safe to drive straight from a
  * socket read.
+ *
+ * Returns false when the bytes did not reach the screen: a NULL handle or
+ * buffer, or the emulator failed on them. After a failure the terminal has
+ * been reset to a blank screen of the same size, keeping its palette; the
+ * revision has moved, so the next frame draws that; and later calls work as
+ * usual. Empty input returns true.
+ *
+ * No function here ever unwinds or aborts on a failure inside the emulator. A
+ * failure returns that function's ordinary "nothing happened" value — false,
+ * 0 or NULL — and resets the terminal the same way.
  */
-void farcooler_vt_feed(void *handle, const uint8_t *bytes, size_t len);
+bool farcooler_vt_feed(void *handle, const uint8_t *bytes, size_t len);
 
 /* Resize the grid. The core reflows; the renderer does not. */
 void farcooler_vt_resize(void *handle, uint16_t columns, uint16_t rows);

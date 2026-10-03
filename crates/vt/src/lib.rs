@@ -53,7 +53,11 @@ struct Collector {
 
 impl EventListener for Collector {
     fn send_event(&self, event: Event) {
-        let mut s = self.inner.lock().expect("signal lock");
+        let mut s = farcooler_ffi_guard::locked(&self.inner);
+        #[cfg(test)]
+        if test_hook::fire() {
+            panic!("forced by the test hook, holding the signal lock");
+        }
         match event {
             Event::Bell => s.bell = true,
             Event::Title(t) => s.title = Some(t),
@@ -69,6 +73,31 @@ impl EventListener for Collector {
             Event::ClipboardStore(ClipboardType::Clipboard, text) => s.clipboard = Some(text),
             _ => {}
         }
+    }
+}
+
+/// A way for a test to make the emulator panic mid-parse, as a real bug in it
+/// would: inside the parser's callback, with the signal lock held, so both the
+/// unwinding and the poisoned lock it leaves behind are exercised.
+///
+/// Thread-local, so arming it in one test cannot fire it in another running
+/// beside it. Compiled into tests only.
+#[cfg(test)]
+pub(crate) mod test_hook {
+    use std::cell::Cell;
+
+    thread_local! {
+        static ARMED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// Panic at the next event the emulator raises on this thread.
+    pub(crate) fn arm() {
+        ARMED.with(|armed| armed.set(true));
+    }
+
+    /// Whether to panic now. Fires once.
+    pub(crate) fn fire() -> bool {
+        ARMED.with(|armed| armed.replace(false))
     }
 }
 
@@ -117,6 +146,29 @@ impl Terminal {
             accept_stream_sizes: false,
             stream_resizes: 0,
         }
+    }
+
+    /// Start over: a blank screen and no scrollback, at the same size and
+    /// with the same settings.
+    ///
+    /// What the C ABI does after the emulator panics. A panic can stop the
+    /// parser halfway through a sequence and the grid halfway through an
+    /// update, and nothing says the next call would not trip over what it left.
+    /// A blank screen the program repaints is recoverable; a terminal that
+    /// panics on every frame is not.
+    ///
+    /// The palette and the stream-size settings survive, because they are the
+    /// client's, not the program's: a reset that dropped the theme or started
+    /// believing size markers again would be a second fault on top of the
+    /// first. `stream_resizes` keeps counting, so a client comparing it against
+    /// an earlier reading still sees a counter that only goes up.
+    pub fn reset(&mut self) {
+        let mut fresh = Terminal::new(self.columns(), self.rows());
+        fresh.palette = self.palette;
+        fresh.accept_stream_sizes = self.accept_stream_sizes;
+        fresh.sized_by_stream = self.sized_by_stream;
+        fresh.stream_resizes = self.stream_resizes;
+        *self = fresh;
     }
 
     pub fn palette(&self) -> &grid::Palette {
@@ -277,7 +329,7 @@ impl Terminal {
 
     /// Take whatever the program signalled since the last call.
     pub fn take_signals(&mut self) -> Signals {
-        let mut guard = self.collector.inner.lock().expect("signal lock");
+        let mut guard = farcooler_ffi_guard::locked(&self.collector.inner);
         std::mem::take(&mut *guard)
     }
 
@@ -1122,5 +1174,40 @@ mod tests {
         let mut t = Terminal::new(10, 4);
         t.feed(b"0123456789\r\nsecond");
         assert_eq!(snapshot(&t).cursor_row, 1);
+    }
+
+    /// A panic inside the parser leaves the signal lock poisoned, and the next
+    /// drain must still work rather than panic on the poison.
+    ///
+    /// This is the cascade behind "one bad byte and every later call aborts":
+    /// the drain used to `.expect` the lock, so the first panic made every
+    /// later feed fatal too.
+    #[test]
+    fn a_panic_mid_parse_does_not_make_the_next_drain_fatal() {
+        let mut t = Terminal::new(20, 4);
+        test_hook::arm();
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| t.feed(b"\x07")));
+        assert!(unwound.is_err(), "the hook really panicked");
+        assert!(t.collector.inner.lock().is_err(), "and really poisoned the lock");
+
+        let _ = t.take_signals();
+        t.feed(b"\x07");
+        assert!(t.take_signals().bell, "signals flow again after the poison");
+    }
+
+    /// A reset keeps what the client chose and drops what the program drew.
+    #[test]
+    fn a_reset_blanks_the_screen_and_keeps_the_client_settings() {
+        let mut t = Terminal::new(30, 5);
+        t.set_palette(grid::Palette { foreground: 0x123456, ..grid::Palette::default() });
+        t.set_accept_stream_sizes(true);
+        t.feed(b"drawn by the program");
+
+        t.reset();
+        let snap = snapshot(&t);
+        assert_eq!((snap.columns, snap.rows.len()), (30, 5));
+        assert!(snap.rows[0].cells.iter().all(|c| c.ch == ' '), "the screen is blank");
+        assert_eq!(t.palette().foreground, 0x123456);
+        assert!(t.accept_stream_sizes);
     }
 }

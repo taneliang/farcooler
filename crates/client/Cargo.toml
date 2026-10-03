@@ -29,6 +29,7 @@ tailcat = ["farcooler-tailcat/linked"]
 farcooler-core.workspace = true
 farcooler-protocol.workspace = true
 farcooler-transport.workspace = true
+farcooler-ffi-guard.workspace = true
 farcooler-tailcat.workspace = true
 tokio.workspace = true
 bytes.workspace = true

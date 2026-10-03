@@ -28,9 +28,22 @@
 //! handle is used concurrently from two threads without the caller's own
 //! synchronization. Null is checked everywhere and is never a crash — a
 //! renderer bug must not take down the app.
+
+//! ## Panics
+//!
+//! The bytes `farcooler_vt_feed` parses come from a runner, and the emulator
+//! underneath is a large parser nobody here wrote. A panic in it used to unwind
+//! through `extern "C"` and abort the app. Now every function's whole body runs
+//! under `guarded` or `guarded_handle`, a panic comes back as that function's
+//! ordinary "nothing happened" value, and a terminal that panicked is reset to
+//! a blank screen rather than left half-updated for the next call to trip on.
+//! `crates/ffi-guard/tests/every_export_is_guarded.rs` fails on an export that
+//! is not.
 #![allow(clippy::missing_safety_doc)]
 
 use std::ffi::{c_char, c_void};
+
+use farcooler_ffi_guard::{caught, guarded};
 
 use crate::grid::{snapshot, Cell};
 use crate::Terminal;
@@ -107,58 +120,68 @@ pub struct VtHandle {
 /// Create a terminal. Free with `farcooler_vt_free`.
 #[unsafe(no_mangle)]
 pub extern "C" fn farcooler_vt_new(columns: u16, rows: u16) -> *mut c_void {
-    let handle = Box::new(VtHandle {
-        terminal: Terminal::new(columns, rows),
-        cells: Vec::new(),
-        pending_writes: Vec::new(),
-        pending_clipboard: None,
-        title: None,
-        revision: 0,
-        bell: false,
-    });
-    Box::into_raw(handle) as *mut c_void
+    guarded(std::ptr::null_mut(), || {
+        let handle = Box::new(VtHandle {
+            terminal: Terminal::new(columns, rows),
+            cells: Vec::new(),
+            pending_writes: Vec::new(),
+            pending_clipboard: None,
+            title: None,
+            revision: 0,
+            bell: false,
+        });
+        Box::into_raw(handle) as *mut c_void
+    })
 }
 
 /// Destroy a terminal. Safe to call with null; never call twice.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_vt_free(handle: *mut c_void) {
-    if handle.is_null() {
-        return;
-    }
-    drop(unsafe { Box::from_raw(handle as *mut VtHandle) });
+    guarded((), || {
+        if handle.is_null() {
+            return;
+        }
+        drop(unsafe { Box::from_raw(handle as *mut VtHandle) });
+    })
 }
 
 /// Feed program output.
 ///
 /// Chunk boundaries are irrelevant: a sequence split across calls parses the
 /// same as one call, which is what makes this safe to drive from a socket.
+///
+/// False when the bytes did not reach the screen: a null handle or buffer, or
+/// the emulator failed on them. After a failure the terminal has been reset to
+/// a blank screen at the same size, its revision has moved so the next frame
+/// draws that, and the next feed works as usual. Empty input is true.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn farcooler_vt_feed(handle: *mut c_void, bytes: *const u8, len: usize) {
-    let Some(h) = (unsafe { as_handle(handle) }) else { return };
-    if bytes.is_null() || len == 0 {
-        return;
-    }
-    let slice = unsafe { std::slice::from_raw_parts(bytes, len) };
-    h.terminal.feed(slice);
-    h.revision = h.revision.wrapping_add(1);
-
-    let signals = h.terminal.take_signals();
-    h.bell |= signals.bell;
-    h.pending_writes.extend_from_slice(&signals.pty_writes);
-    if let Some(t) = signals.title {
-        h.title = std::ffi::CString::new(t).ok();
-    }
-    if let Some(text) = signals.clipboard {
-        h.pending_clipboard = Some(text);
-    }
+pub unsafe extern "C" fn farcooler_vt_feed(
+    handle: *mut c_void,
+    bytes: *const u8,
+    len: usize,
+) -> bool {
+    guarded_handle(handle, false, |h| {
+        if len == 0 {
+            return true;
+        }
+        if bytes.is_null() {
+            return false;
+        }
+        let slice = unsafe { std::slice::from_raw_parts(bytes, len) };
+        h.terminal.feed(slice);
+        h.revision = h.revision.wrapping_add(1);
+        h.collect_signals();
+        true
+    })
 }
 
 /// Resize the grid. Dimensions are clamped to the protocol's range.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_vt_resize(handle: *mut c_void, columns: u16, rows: u16) {
-    let Some(h) = (unsafe { as_handle(handle) }) else { return };
-    h.terminal.resize(columns, rows);
-    h.revision = h.revision.wrapping_add(1);
+    guarded_handle(handle, (), |h| {
+        h.terminal.resize(columns, rows);
+        h.revision = h.revision.wrapping_add(1);
+    })
 }
 
 /// Honor size markers in the byte stream. Off by default; turn it on only for
@@ -166,18 +189,13 @@ pub unsafe extern "C" fn farcooler_vt_resize(handle: *mut c_void, columns: u16, 
 /// every marker its programs print. See `Terminal::set_accept_stream_sizes`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_vt_accept_stream_sizes(handle: *mut c_void, accept: bool) {
-    if let Some(h) = unsafe { as_handle(handle) } {
-        h.terminal.set_accept_stream_sizes(accept);
-    }
+    guarded_handle(handle, (), |h| h.terminal.set_accept_stream_sizes(accept))
 }
 
 /// How many size markers have been applied. See `Terminal::stream_resizes`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_vt_stream_resizes(handle: *mut c_void) -> u64 {
-    match unsafe { as_handle(handle) } {
-        Some(h) => h.terminal.stream_resizes(),
-        None => 0,
-    }
+    guarded_handle(handle, 0, |h| h.terminal.stream_resizes())
 }
 
 /// Whether the byte stream has said what size its pane is.
@@ -188,10 +206,7 @@ pub unsafe extern "C" fn farcooler_vt_stream_resizes(handle: *mut c_void) -> u64
 /// program has already repainted for the new size. See `size_marker`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_vt_sized_by_stream(handle: *mut c_void) -> bool {
-    match unsafe { as_handle(handle) } {
-        Some(h) => h.terminal.sized_by_stream(),
-        None => false,
-    }
+    guarded_handle(handle, false, |h| h.terminal.sized_by_stream())
 }
 
 /// A counter that changes whenever the screen may have changed.
@@ -200,10 +215,7 @@ pub unsafe extern "C" fn farcooler_vt_sized_by_stream(handle: *mut c_void) -> bo
 /// entirely.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_vt_revision(handle: *mut c_void) -> u64 {
-    match unsafe { as_handle(handle) } {
-        Some(h) => h.revision,
-        None => 0,
-    }
+    guarded_handle(handle, 0, |h| h.revision)
 }
 
 /// Read the screen into `out`.
@@ -213,34 +225,35 @@ pub unsafe extern "C" fn farcooler_vt_revision(handle: *mut c_void) -> u64 {
 /// a steady redraw allocates nothing.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_vt_snapshot(handle: *mut c_void, out: *mut VtSnapshot) -> bool {
-    let Some(h) = (unsafe { as_handle(handle) }) else { return false };
-    if out.is_null() {
-        return false;
-    }
-
-    let snap = snapshot(&h.terminal);
-    let count = snap.rows.len() * snap.columns as usize;
-    h.cells.clear();
-    h.cells.reserve(count);
-    for row in &snap.rows {
-        for cell in &row.cells {
-            h.cells.push(pack(cell));
+    guarded_handle(handle, false, |h| {
+        if out.is_null() {
+            return false;
         }
-    }
 
-    unsafe {
-        *out = VtSnapshot {
-            cells: h.cells.as_ptr(),
-            columns: snap.columns,
-            rows: snap.rows.len() as u16,
-            cursor_row: snap.cursor_row,
-            cursor_column: snap.cursor_column,
-            cursor_visible: snap.cursor_visible,
-            display_offset: snap.display_offset,
-            history_size: snap.history_size,
-        };
-    }
-    true
+        let snap = snapshot(&h.terminal);
+        let count = snap.rows.len() * snap.columns as usize;
+        h.cells.clear();
+        h.cells.reserve(count);
+        for row in &snap.rows {
+            for cell in &row.cells {
+                h.cells.push(pack(cell));
+            }
+        }
+
+        unsafe {
+            *out = VtSnapshot {
+                cells: h.cells.as_ptr(),
+                columns: snap.columns,
+                rows: snap.rows.len() as u16,
+                cursor_row: snap.cursor_row,
+                cursor_column: snap.cursor_column,
+                cursor_visible: snap.cursor_visible,
+                display_offset: snap.display_offset,
+                history_size: snap.history_size,
+            };
+        }
+        true
+    })
 }
 
 /// Scroll the view. Positive goes back into history, negative returns toward
@@ -250,9 +263,10 @@ pub unsafe extern "C" fn farcooler_vt_snapshot(handle: *mut c_void, out: *mut Vt
 /// this produces no bytes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_vt_scroll(handle: *mut c_void, lines: i32) {
-    let Some(h) = (unsafe { as_handle(handle) }) else { return };
-    h.terminal.scroll(lines);
-    h.revision = h.revision.wrapping_add(1);
+    guarded_handle(handle, (), |h| {
+        h.terminal.scroll(lines);
+        h.revision = h.revision.wrapping_add(1);
+    })
 }
 
 /// Jump back to the live screen.
@@ -261,9 +275,10 @@ pub unsafe extern "C" fn farcooler_vt_scroll(handle: *mut c_void, lines: i32) {
 /// nothing of what they typed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_vt_scroll_to_bottom(handle: *mut c_void) {
-    let Some(h) = (unsafe { as_handle(handle) }) else { return };
-    h.terminal.scroll_to_bottom();
-    h.revision = h.revision.wrapping_add(1);
+    guarded_handle(handle, (), |h| {
+        h.terminal.scroll_to_bottom();
+        h.revision = h.revision.wrapping_add(1);
+    })
 }
 
 /// Recolor the terminal.
@@ -288,17 +303,18 @@ pub unsafe extern "C" fn farcooler_vt_set_palette(
     colors: *const u32,
     len: usize,
 ) -> bool {
-    let Some(h) = (unsafe { as_handle(handle) }) else { return false };
-    if colors.is_null() {
-        return false;
-    }
-    let values = unsafe { std::slice::from_raw_parts(colors, len) };
-    let Some(palette) = crate::grid::Palette::from_packed(values) else {
-        return false;
-    };
-    h.terminal.set_palette(palette);
-    h.revision = h.revision.wrapping_add(1);
-    true
+    guarded_handle(handle, false, |h| {
+        if colors.is_null() {
+            return false;
+        }
+        let values = unsafe { std::slice::from_raw_parts(colors, len) };
+        let Some(palette) = crate::grid::Palette::from_packed(values) else {
+            return false;
+        };
+        h.terminal.set_palette(palette);
+        h.revision = h.revision.wrapping_add(1);
+        true
+    })
 }
 
 /// Take bytes the program wants written back to the pty.
@@ -312,23 +328,21 @@ pub unsafe extern "C" fn farcooler_vt_take_writes(
     out: *mut u8,
     capacity: usize,
 ) -> usize {
-    let Some(h) = (unsafe { as_handle(handle) }) else { return 0 };
-    if out.is_null() || capacity == 0 || h.pending_writes.is_empty() {
-        return 0;
-    }
-    let n = capacity.min(h.pending_writes.len());
-    unsafe { std::ptr::copy_nonoverlapping(h.pending_writes.as_ptr(), out, n) };
-    h.pending_writes.drain(..n);
-    n
+    guarded_handle(handle, 0, |h| {
+        if out.is_null() || capacity == 0 || h.pending_writes.is_empty() {
+            return 0;
+        }
+        let n = capacity.min(h.pending_writes.len());
+        unsafe { std::ptr::copy_nonoverlapping(h.pending_writes.as_ptr(), out, n) };
+        h.pending_writes.drain(..n);
+        n
+    })
 }
 
 /// Take the bell flag, clearing it.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_vt_take_bell(handle: *mut c_void) -> bool {
-    match unsafe { as_handle(handle) } {
-        Some(h) => std::mem::take(&mut h.bell),
-        None => false,
-    }
+    guarded_handle(handle, false, |h| std::mem::take(&mut h.bell))
 }
 
 /// Take text the program asked to put on the clipboard (OSC 52).
@@ -348,16 +362,17 @@ pub unsafe extern "C" fn farcooler_vt_take_clipboard(
     out: *mut u8,
     capacity: usize,
 ) -> usize {
-    let Some(h) = (unsafe { as_handle(handle) }) else { return 0 };
-    let Some(text) = h.pending_clipboard.as_ref() else { return 0 };
-    let bytes = text.as_bytes();
-    if bytes.len() > capacity || out.is_null() {
-        return bytes.len();
-    }
-    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
-    let n = bytes.len();
-    h.pending_clipboard = None;
-    n
+    guarded_handle(handle, 0, |h| {
+        let Some(text) = h.pending_clipboard.as_ref() else { return 0 };
+        let bytes = text.as_bytes();
+        if bytes.len() > capacity || out.is_null() {
+            return bytes.len();
+        }
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
+        let n = bytes.len();
+        h.pending_clipboard = None;
+        n
+    })
 }
 
 /// The current window title, or null if the program never set one.
@@ -365,10 +380,7 @@ pub unsafe extern "C" fn farcooler_vt_take_clipboard(
 /// Borrowed; valid until the next `feed`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_vt_title(handle: *mut c_void) -> *const c_char {
-    match unsafe { as_handle(handle) } {
-        Some(h) => h.title.as_ref().map_or(std::ptr::null(), |t| t.as_ptr()),
-        None => std::ptr::null(),
-    }
+    guarded_handle(handle, std::ptr::null(), |h| h.title.as_ref().map_or(std::ptr::null(), |t| t.as_ptr()))
 }
 
 // MARK: - Input
@@ -422,10 +434,11 @@ pub unsafe extern "C" fn farcooler_vt_encode_key(
     out: *mut u8,
     capacity: usize,
 ) -> usize {
-    let Some(h) = (unsafe { as_handle(handle) }) else { return 0 };
-    let Some(key) = decode_key(key) else { return 0 };
-    let bytes = h.terminal.encode_key(key, decode_mods(modifiers));
-    unsafe { write_out(&bytes, out, capacity) }
+    guarded_handle(handle, 0, |h| {
+        let Some(key) = decode_key(key) else { return 0 };
+        let bytes = h.terminal.encode_key(key, decode_mods(modifiers));
+        unsafe { write_out(&bytes, out, capacity) }
+    })
 }
 
 /// Encode a mouse event. Returns 0 when the program does not want the event,
@@ -441,27 +454,28 @@ pub unsafe extern "C" fn farcooler_vt_encode_mouse(
     out: *mut u8,
     capacity: usize,
 ) -> usize {
-    use crate::input::{MouseAction, MouseButton};
+    guarded_handle(handle, 0, |h| {
+        use crate::input::{MouseAction, MouseButton};
 
-    let Some(h) = (unsafe { as_handle(handle) }) else { return 0 };
-    let button = match button {
-        MOUSE_LEFT => MouseButton::Left,
-        MOUSE_MIDDLE => MouseButton::Middle,
-        MOUSE_RIGHT => MouseButton::Right,
-        MOUSE_WHEEL_UP => MouseButton::WheelUp,
-        MOUSE_WHEEL_DOWN => MouseButton::WheelDown,
-        _ => return 0,
-    };
-    let action = match action {
-        MOUSE_PRESS => MouseAction::Press,
-        MOUSE_RELEASE => MouseAction::Release,
-        MOUSE_MOVE => MouseAction::Move,
-        _ => return 0,
-    };
-    match h.terminal.encode_mouse(button, action, column, row, decode_mods(modifiers)) {
-        Some(bytes) => unsafe { write_out(&bytes, out, capacity) },
-        None => 0,
-    }
+        let button = match button {
+            MOUSE_LEFT => MouseButton::Left,
+            MOUSE_MIDDLE => MouseButton::Middle,
+            MOUSE_RIGHT => MouseButton::Right,
+            MOUSE_WHEEL_UP => MouseButton::WheelUp,
+            MOUSE_WHEEL_DOWN => MouseButton::WheelDown,
+            _ => return 0,
+        };
+        let action = match action {
+            MOUSE_PRESS => MouseAction::Press,
+            MOUSE_RELEASE => MouseAction::Release,
+            MOUSE_MOVE => MouseAction::Move,
+            _ => return 0,
+        };
+        match h.terminal.encode_mouse(button, action, column, row, decode_mods(modifiers)) {
+            Some(bytes) => unsafe { write_out(&bytes, out, capacity) },
+            None => 0,
+        }
+    })
 }
 
 /// Encode pasted text, bracketing it if the program asked for that.
@@ -477,18 +491,19 @@ pub unsafe extern "C" fn farcooler_vt_encode_paste(
     out: *mut u8,
     capacity: usize,
 ) -> usize {
-    let Some(h) = (unsafe { as_handle(handle) }) else { return 0 };
-    if text.is_null() {
-        return 0;
-    }
-    let slice = unsafe { std::slice::from_raw_parts(text, len) };
-    let Ok(s) = std::str::from_utf8(slice) else { return 0 };
-    let bytes = h.terminal.encode_paste(s);
-    if bytes.len() > capacity || out.is_null() {
-        return bytes.len();
-    }
-    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
-    bytes.len()
+    guarded_handle(handle, 0, |h| {
+        if text.is_null() {
+            return 0;
+        }
+        let slice = unsafe { std::slice::from_raw_parts(text, len) };
+        let Ok(s) = std::str::from_utf8(slice) else { return 0 };
+        let bytes = h.terminal.encode_paste(s);
+        if bytes.len() > capacity || out.is_null() {
+            return bytes.len();
+        }
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
+        bytes.len()
+    })
 }
 
 /// True when the program has taken over the whole screen.
@@ -497,10 +512,7 @@ pub unsafe extern "C" fn farcooler_vt_encode_paste(
 /// or belongs to the program.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_vt_alt_screen(handle: *mut c_void) -> bool {
-    match unsafe { as_handle(handle) } {
-        Some(h) => h.terminal.mode().contains(alacritty_terminal::term::TermMode::ALT_SCREEN),
-        None => false,
-    }
+    guarded_handle(handle, false, |h| h.terminal.mode().contains(alacritty_terminal::term::TermMode::ALT_SCREEN))
 }
 
 /// True while a synchronized update (DECSET 2026) is being held back.
@@ -511,10 +523,7 @@ pub unsafe extern "C" fn farcooler_vt_alt_screen(handle: *mut c_void) -> bool {
 /// revision does not move and the frame is skipped for free.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_vt_sync_pending(handle: *mut c_void) -> bool {
-    match unsafe { as_handle(handle) } {
-        Some(h) => h.terminal.sync_pending(),
-        None => false,
-    }
+    guarded_handle(handle, false, |h| h.terminal.sync_pending())
 }
 
 /// Release a synchronized update whose deadline has passed. True if it did.
@@ -526,24 +535,18 @@ pub unsafe extern "C" fn farcooler_vt_sync_pending(handle: *mut c_void) -> bool 
 /// `Terminal::flush_expired_sync` for why the parser cannot do this by itself.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_vt_flush_sync(handle: *mut c_void) -> bool {
-    let Some(h) = (unsafe { as_handle(handle) }) else { return false };
-    if !h.terminal.flush_expired_sync() {
-        return false;
-    }
-    // The same bookkeeping a feed does, because this IS the deferred half of
-    // one: the bytes have only now reached the grid, so the screen has changed
-    // and whatever they signalled on the way past is only now ours to collect.
-    h.revision = h.revision.wrapping_add(1);
-    let signals = h.terminal.take_signals();
-    h.bell |= signals.bell;
-    h.pending_writes.extend_from_slice(&signals.pty_writes);
-    if let Some(t) = signals.title {
-        h.title = std::ffi::CString::new(t).ok();
-    }
-    if let Some(text) = signals.clipboard {
-        h.pending_clipboard = Some(text);
-    }
-    true
+    guarded_handle(handle, false, |h| {
+        if !h.terminal.flush_expired_sync() {
+            return false;
+        }
+        // The same bookkeeping a feed does, because this IS the deferred half
+        // of one: the bytes have only now reached the grid, so the screen has
+        // changed and whatever they signalled on the way past is only now ours
+        // to collect.
+        h.revision = h.revision.wrapping_add(1);
+        h.collect_signals();
+        true
+    })
 }
 
 /// The URL under a cell, or 0 if there is none.
@@ -568,26 +571,27 @@ pub unsafe extern "C" fn farcooler_vt_url_at(
     out: *mut u8,
     capacity: usize,
 ) -> usize {
-    let Some(h) = (unsafe { as_handle(handle) }) else { return 0 };
-    let Some(found) = crate::url::url_at(&h.terminal, row, column) else { return 0 };
+    guarded_handle(handle, 0, |h| {
+        let Some(found) = crate::url::url_at(&h.terminal, row, column) else { return 0 };
 
-    if !span.is_null() {
-        unsafe {
-            *span = VtUrlSpan {
-                start_row: found.start_row,
-                start_column: found.start_column,
-                end_row: found.end_row,
-                end_column: found.end_column,
-            };
+        if !span.is_null() {
+            unsafe {
+                *span = VtUrlSpan {
+                    start_row: found.start_row,
+                    start_column: found.start_column,
+                    end_row: found.end_row,
+                    end_column: found.end_column,
+                };
+            }
         }
-    }
 
-    let bytes = found.url.as_bytes();
-    if bytes.len() > capacity || out.is_null() {
-        return bytes.len();
-    }
-    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
-    bytes.len()
+        let bytes = found.url.as_bytes();
+        if bytes.len() > capacity || out.is_null() {
+            return bytes.len();
+        }
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
+        bytes.len()
+    })
 }
 
 fn decode_key(key: u32) -> Option<crate::input::Key> {
@@ -653,6 +657,78 @@ unsafe fn as_handle<'a>(handle: *mut c_void) -> Option<&'a mut VtHandle> {
         return None;
     }
     Some(unsafe { &mut *(handle as *mut VtHandle) })
+}
+
+/// Run an entry point's body against its handle, so that a panic can neither
+/// leave this module nor leave the terminal broken.
+///
+/// A null handle is `fallback` without running anything, as it always was. A
+/// panic is `fallback` too, logged, and the terminal is reset first (see
+/// `VtHandle::recover`): the emulator stopped wherever it was, possibly halfway
+/// through a sequence and halfway through updating the grid, and a snapshot or
+/// a feed on that state could panic again on every frame from then on.
+///
+/// Not `unsafe` itself, so an entry point's body can be this call and nothing
+/// else — which is what `every_export_is_guarded` checks. The handle is still
+/// only as good as the module's safety contract says, and it is private so
+/// that nothing but the entry points, which carry that contract, can reach it.
+fn guarded_handle<T>(
+    handle: *mut c_void,
+    fallback: T,
+    body: impl FnOnce(&mut VtHandle) -> T,
+) -> T {
+    // Twice over: the inner catch is the one that knows to reset the
+    // terminal, and the outer one covers the reset itself.
+    caught(|| {
+        let h = unsafe { as_handle(handle) }?;
+        let answer = caught(|| body(&mut *h));
+        if answer.is_none() {
+            h.recover();
+        }
+        answer
+    })
+    .flatten()
+    .unwrap_or(fallback)
+}
+
+impl VtHandle {
+    /// Move what the emulator signalled during a feed onto the handle, for the
+    /// caller to take.
+    fn collect_signals(&mut self) {
+        let signals = self.terminal.take_signals();
+        self.bell |= signals.bell;
+        self.pending_writes.extend_from_slice(&signals.pty_writes);
+        if let Some(t) = signals.title {
+            self.title = std::ffi::CString::new(t).ok();
+        }
+        if let Some(text) = signals.clipboard {
+            self.pending_clipboard = Some(text);
+        }
+    }
+
+    /// Put the terminal back in a state every call can trust, after a panic.
+    ///
+    /// A blank screen at the same size, with the client's theme and settings
+    /// kept (see `Terminal::reset`). Pending replies are dropped, because a
+    /// reply the emulator was halfway through writing is bytes the program
+    /// would read as typing; the title and the bell stay, because they were
+    /// complete before the failure and say nothing wrong.
+    ///
+    /// The revision moves, so a renderer that skips unchanged frames draws the
+    /// blank one rather than holding the last frame from before the failure.
+    /// The program repaints on its next output; a full-screen one repaints at
+    /// the next resize too.
+    fn recover(&mut self) {
+        if caught(|| self.terminal.reset()).is_none() {
+            // Not even the size could be read back. A terminal of the default
+            // size is still a terminal; the next resize corrects it.
+            self.terminal = Terminal::new(80, 24);
+        }
+        self.cells.clear();
+        self.pending_writes.clear();
+        self.pending_clipboard = None;
+        self.revision = self.revision.wrapping_add(1);
+    }
 }
 
 #[cfg(test)]
@@ -1062,6 +1138,56 @@ mod tests {
         // Renderers read these fields by raw offset, same as VtCell.
         assert_eq!(std::mem::size_of::<VtUrlSpan>(), 8);
         assert_eq!(std::mem::align_of::<VtUrlSpan>(), 2);
+    }
+
+    /// A panic in the emulator, on bytes from the runner, is a false return
+    /// and a blank terminal — not an abort — and every later call still works.
+    ///
+    /// The hook panics inside the parser's callback while holding the signal
+    /// lock, so this covers the unwinding through `extern "C"` and the poisoned
+    /// lock that used to make every later call abort too. Without the guard
+    /// this test does not fail, it kills the test binary — which is what it did
+    /// to the app.
+    #[test]
+    fn a_panic_inside_feed_is_an_error_and_the_terminal_keeps_working() {
+        let h = farcooler_vt_new(20, 4);
+        feed(h, b"before");
+        let revision = unsafe { farcooler_vt_revision(h) };
+
+        crate::test_hook::arm();
+        let bytes = b"lost\x07";
+        assert!(
+            !unsafe { farcooler_vt_feed(h, bytes.as_ptr(), bytes.len()) },
+            "a feed the emulator failed on reports it"
+        );
+        assert_ne!(unsafe { farcooler_vt_revision(h) }, revision, "the reset must be redrawn");
+
+        // Reset, not half-updated: neither the old screen nor the failed bytes.
+        let (snap, cells) = read(h);
+        assert_eq!((snap.columns, snap.rows), (20, 4), "same size");
+        assert!(cells.iter().all(|c| c.ch == ' ' as u32), "a blank screen");
+
+        // And everything after it works, the signal lock included.
+        let ok = b"after\x1b[6n\x07";
+        assert!(unsafe { farcooler_vt_feed(h, ok.as_ptr(), ok.len()) });
+        let (_, cells) = read(h);
+        let first: String = cells[..5].iter().map(|c| char::from_u32(c.ch).unwrap()).collect();
+        assert_eq!(first, "after");
+        assert!(unsafe { farcooler_vt_take_bell(h) });
+        let mut buf = [0u8; 32];
+        assert!(unsafe { farcooler_vt_take_writes(h, buf.as_mut_ptr(), buf.len()) } > 0);
+
+        unsafe { farcooler_vt_free(h) };
+    }
+
+    #[test]
+    fn feed_reports_success_and_the_null_cases() {
+        let h = farcooler_vt_new(20, 4);
+        assert!(unsafe { farcooler_vt_feed(h, b"x".as_ptr(), 1) });
+        assert!(unsafe { farcooler_vt_feed(h, std::ptr::null(), 0) }, "nothing to feed is not a failure");
+        assert!(!unsafe { farcooler_vt_feed(h, std::ptr::null(), 4) });
+        assert!(!unsafe { farcooler_vt_feed(std::ptr::null_mut(), b"x".as_ptr(), 1) });
+        unsafe { farcooler_vt_free(h) };
     }
 
     #[test]

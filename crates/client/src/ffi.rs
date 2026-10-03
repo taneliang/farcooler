@@ -38,57 +38,13 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 
+// Every entry point's body is one `guarded` call, and no lock here is taken any
+// other way than `locked`. Both are shared with the terminal, review and JNI
+// boundaries, and their reasoning is written once, in `farcooler-ffi-guard`.
+use farcooler_ffi_guard::{guarded, locked};
+
 use crate::session::{Session, SessionError, uuid_of};
 use crate::ssh::{Destination, HostKeyPolicy, Reach};
-
-/// Run an entry point's body so that a panic cannot leave this crate.
-///
-/// A panic unwinding out of an `extern "C"` function aborts the process — that
-/// is the defined behaviour, not an accident — so without this, any panic
-/// anywhere under the boundary is `SIGABRT` in the host app with nothing in the
-/// report but the signal. The app is a phone in someone's hand; a recoverable
-/// fault must not be able to close it.
-///
-/// The fallback is each function's own "this did not happen" value: 0 for a
-/// ticket, false for a predicate, null for a pointer. Every one of those is a
-/// value the callers already handle, because they are the same values these
-/// functions return when they are simply asked for something impossible.
-///
-/// `AssertUnwindSafe` because the arguments are raw pointers and handles from
-/// C, which carry no `UnwindSafe` claim and could not: their safety contract is
-/// the module's, stated once at the top, and it is the caller's to keep.
-fn guarded<T>(fallback: T, body: impl FnOnce() -> T) -> T {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)) {
-        Ok(value) => value,
-        Err(payload) => {
-            let what = payload
-                .downcast_ref::<&str>()
-                .map(|s| s.to_string())
-                .or_else(|| payload.downcast_ref::<String>().cloned())
-                .unwrap_or_else(|| "a panic with no message".to_string());
-            tracing::error!(panic = %what, "the client core panicked at the C boundary");
-            fallback
-        }
-    }
-}
-
-/// Take a lock without caring whether a previous holder panicked.
-///
-/// `Mutex::lock` returns `Err` once any thread has panicked while holding it,
-/// and the `.expect(…)` this replaces turned that into a panic of its own — one
-/// that then unwound through `extern "C"` and aborted the app. So a single
-/// recoverable fault in a spawned task, which tokio would otherwise absorb,
-/// permanently poisoned the queue and made every subsequent `poll` from Swift
-/// fatal.
-///
-/// Ignoring the poison is right here rather than merely convenient. What these
-/// locks hold is a queue of finished results, a ticket counter, and a map of
-/// running streams. None of them has an invariant that a panic elsewhere could
-/// have broken mid-update, and refusing to read them ever again is strictly
-/// worse than reading them.
-fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-}
 
 /// A client handle: a runtime, a session, and a queue of finished work.
 pub struct ClientHandle {
@@ -2955,46 +2911,6 @@ mod tests {
             serde_json::from_str(&minted(Err(farcooler_tailcat::TunnelError::NoTailcatLinked)))
                 .unwrap();
         assert_eq!(json["error"], "no_tailcat");
-    }
-
-    /// A panic under the boundary must come back as a value, not a signal.
-    ///
-    /// Worth an actual panic rather than a reading of the code: `catch_unwind`
-    /// is a no-op under `panic = "abort"`, so a profile change could remove
-    /// this protection silently and nothing else would notice. This test would.
-    #[test]
-    fn a_panic_inside_an_entry_point_becomes_its_fallback() {
-        assert_eq!(guarded(0u64, || panic!("the core fell over")), 0);
-        assert!(!guarded(false, || -> bool { panic!("still no") }));
-        assert!(guarded(std::ptr::null::<c_char>(), || panic!("nor here")).is_null());
-    }
-
-    /// And it only does that when something actually panicked.
-    #[test]
-    fn an_entry_point_that_returns_normally_is_untouched() {
-        assert_eq!(guarded(0u64, || 42), 42);
-    }
-
-    /// One panic must not make every later call fatal.
-    ///
-    /// This is the cascade the guard alone does not fix: a thread that panics
-    /// while holding a `std::sync::Mutex` poisons it, and the `.expect(…)` this
-    /// replaced then panicked on every subsequent take — including inside
-    /// `farcooler_client_poll`, which Swift calls on a timer forever.
-    #[test]
-    fn a_poisoned_lock_is_still_readable() {
-        let queue: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
-        locked(&queue).push_back("survived".into());
-
-        let poisoner = Arc::clone(&queue);
-        let _ = std::thread::spawn(move || {
-            let _held = poisoner.lock().unwrap();
-            panic!("poison it");
-        })
-        .join();
-        assert!(queue.lock().is_err(), "the lock really is poisoned");
-
-        assert_eq!(locked(&queue).pop_front().as_deref(), Some("survived"));
     }
 
     #[test]
