@@ -88,9 +88,11 @@ class AppModel(
      * Held here rather than inside [FleetRepository] because it needs a
      * `Context`, and the repository deliberately has none — it is given the
      * stores it talks to, not the framework. Declared before `init`, because
-     * that is where it is started and Kotlin initialises in source order.
+     * that is where it is started and Kotlin initializes in source order.
+     * Given [viewModelScope] because the network calls back on a thread of its
+     * own, and the retry has to happen on the main one that owns the fleet.
      */
-    private val reachability = Reachability(application) { fleet.reconnectAll() }
+    private val reachability = Reachability(application, viewModelScope) { fleet.reconnectAll() }
 
     private val _stack = MutableStateFlow(listOf(Backstack.ROOT))
 
