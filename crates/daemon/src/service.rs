@@ -12555,3 +12555,7 @@ mod launch_prompt_tests {
         assert!(validate_launch_prompt(&"x".repeat(MAX_LAUNCH_PROMPT_BYTES + 1)).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "service_lost_tests.rs"]
+mod lost_terminal_tests;
