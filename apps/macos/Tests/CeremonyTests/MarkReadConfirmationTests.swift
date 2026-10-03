@@ -269,7 +269,10 @@ struct MarkReadConfirmationTests {
         let observer = NotificationCenter.default.addObserver(
             forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil
         ) { note in
-            guard let menu = note.object as? NSMenu else { return }
+            guard let tracked = note.object as? NSMenu else { return }
+            // Posted on the main thread, as the menu opens; NSMenu isn't
+            // Sendable, so the closures below can't take it as it is.
+            nonisolated(unsafe) let menu = tracked
             MainActor.assumeIsolated {
                 let index = menu.indexOfItem(withTitle: title)
                 RunLoop.main.perform(inModes: [.common, .eventTracking]) {
