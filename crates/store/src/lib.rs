@@ -10,6 +10,9 @@
 //! Schema changes are forward-only migrations within a major version, tracked
 //! by `schema_version` in the `meta` table. A pre-existing database gets a
 //! checksummed backup written next to it before a migration touches it.
+//! A database at a NEWER schema than this build knows is refused
+//! (`DomainError::NewerData`) unless the build that wrote it stamped a
+//! `compatible_down_to` at or below this build's schema. See `migrate::Older`.
 
 mod backup;
 mod error;
