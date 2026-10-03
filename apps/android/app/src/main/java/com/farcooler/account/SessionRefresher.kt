@@ -96,17 +96,23 @@ class SessionRefresher(
         }
         if (!mine) return flight.await()
 
-        val outcome = try {
-            refreshing()
+        // Landed in `finally`, whatever is thrown. A flight that never lands
+        // leaves every later caller awaiting it, and refresh hung until the
+        // app restarted: an `Error` from the Keystore did that when only
+        // `Exception` was caught.
+        var outcome: Refresh = Refresh.Failed("interrupted")
+        try {
+            outcome = refreshing()
         } catch (cancelled: CancellationException) {
             // The caller that owned the flight went away. The ones waiting on
-            // it have not, and must not wait forever.
-            land(flight, Refresh.Failed("cancelled"))
+            // it have not; they get a failure, and the next call starts afresh.
+            outcome = Refresh.Failed("cancelled")
             throw cancelled
         } catch (e: Exception) {
-            Refresh.Failed(e.javaClass.simpleName)
+            outcome = Refresh.Failed(e.javaClass.simpleName)
+        } finally {
+            land(flight, outcome)
         }
-        land(flight, outcome)
         return outcome
     }
 

@@ -11,7 +11,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -21,8 +20,6 @@ import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import java.net.HttpURLConnection
-import java.net.URL
 import java.security.MessageDigest
 import java.security.SecureRandom
 
@@ -87,8 +84,6 @@ class Account(context: Context) {
     val clientId: String
         get() = preferences.getString(KEY_CLIENT_ID, null)
             ?: BuildConfig.WORKOS_CLIENT_ID
-
-    private val json = Json { ignoreUnknownKeys = true }
 
     /**
      * The verifier for the sign-in currently in flight, and the state bound to
@@ -225,33 +220,13 @@ class Account(context: Context) {
      * WorkOS wants the API key on that call, and an app that could refresh
      * alone would be an app carrying the key.
      */
-    suspend fun accessToken(): String? {
-        if (tokens.read(KEY_REFRESH) == null) return null
-        freshAccessToken()?.let { return it }
-        // Null for this call when the refresh failed, and the session kept: an
-        // unreachable relay is not a signed-out person. Only a refresh token
-        // the relay definitively refused ends it; see [SessionRefresher].
-        return (refresher.refresh() as? Refresh.Refreshed)?.accessToken
-    }
+    suspend fun accessToken(): String? = session.accessToken()
 
-    /** The stored access token, if it has more than a minute left. */
-    private fun freshAccessToken(): String? {
-        val access = tokens.read(KEY_ACCESS) ?: return null
-        val expiry = jwtExpiry(access) ?: return null
-        return access.takeIf { expiry - System.currentTimeMillis() > 60_000 }
-    }
-
-    private val refresher = SessionRefresher(
-        storedRefreshToken = { tokens.read(KEY_REFRESH) },
-        freshAccessToken = ::freshAccessToken,
-        request = { refresh ->
-            post("/v1/auth/refresh", buildJsonObject { put("refreshToken", JsonPrimitive(refresh)) })
-        },
+    private val session = AccountSession(
+        readToken = tokens::read,
+        post = { path, body -> post(path, body) },
         store = ::store,
-        // A refresh token the relay refused means the session is over, and
-        // leaving a dead one in place makes every later call fail silently
-        // instead of showing a sign-in button.
-        endSession = ::forgetLocally,
+        forget = ::forgetLocally,
     )
 
     /**
@@ -394,59 +369,7 @@ class Account(context: Context) {
         path: String,
         body: JsonObject,
         bearer: String? = null,
-    ): RelayAnswer = withContext(Dispatchers.IO) {
-        val connection = try {
-            // `relay` is a setting anyone can type into, so a stray space in it
-            // must surface as a relay that would not answer rather than a
-            // crash.
-            (URL(relay + path).openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                setRequestProperty("Content-Type", "application/json")
-                bearer?.let { setRequestProperty("Authorization", "Bearer $it") }
-                connectTimeout = 15_000
-                readTimeout = 15_000
-                doOutput = true
-            }
-        } catch (e: Exception) {
-            return@withContext RelayAnswer.Unreachable("relay address invalid")
-        }
-        val status = try {
-            connection.outputStream.use { it.write(body.toString().toByteArray()) }
-            connection.responseCode
-        } catch (e: Exception) {
-            // The request never completed. Named by its class, never its
-            // message, which can carry the URL.
-            return@withContext RelayAnswer.Unreachable(e.javaClass.simpleName)
-        }
-        val text = runCatching {
-            (if (status == 200) connection.inputStream else connection.errorStream)
-                ?.bufferedReader()?.readText()
-        }.getOrNull()
-        val parsed = text?.let { runCatching { json.parseToJsonElement(it).jsonObject }.getOrNull() }
-        when {
-            status != 200 -> RelayAnswer.Refused(status, parsed)
-            // A 200 that isn't JSON is the relay's failure, not this session's.
-            parsed == null -> RelayAnswer.Refused(status, null)
-            else -> RelayAnswer.Answered(parsed)
-        }
-    }
-
-    /**
-     * Read a JWT's `exp` without verifying it.
-     *
-     * Verification is the relay's job — it has the JWKS. This only decides
-     * whether to bother sending a token that is already stale, and a forged
-     * expiry buys nothing but an extra refresh.
-     */
-    private fun jwtExpiry(token: String): Long? {
-        val parts = token.split(".")
-        if (parts.size != 3) return null
-        return runCatching {
-            val payload = Base64.decode(parts[1], Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
-            val claims = json.parseToJsonElement(String(payload)).jsonObject
-            (claims["exp"]?.jsonPrimitive?.doubleOrNull ?: return null).toLong() * 1000
-        }.getOrNull()
-    }
+    ): RelayAnswer = withContext(Dispatchers.IO) { relayPost(relay + path, body, bearer) }
 
     /**
      * Null rather than zeros if the system has no randomness for us.

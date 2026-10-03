@@ -4,6 +4,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -190,5 +191,48 @@ class SessionRefresherTest {
             )
         )
         assertFalse(SessionRefresher.rejectsRefreshToken(RelayAnswer.Unreachable("offline")))
+    }
+
+    /**
+     * An Error, not an Exception, from the request: the flight still lands,
+     * so the next caller is not left waiting on it forever.
+     *
+     * Mutation: `land` outside a `finally`, after `catch (e: Exception)`.
+     * Red: the second call never returns, and the test times out.
+     */
+    @Test
+    fun anErrorStillLandsTheFlight() = runTest {
+        var first = true
+        val fixture = Fixture {
+            if (first) { first = false; throw AssertionError("keystore") }
+            minted("at-2", "rt-2")
+        }
+        val thrown = runCatching { fixture.refresher.refresh() }.exceptionOrNull()
+        assertTrue("$thrown", thrown is AssertionError)
+        assertEquals(Refresh.Refreshed("at-2"), withTimeout(1_000) { fixture.refresher.refresh() })
+    }
+
+    /**
+     * The owner of a flight is cancelled: whoever was waiting on it gets a
+     * failure rather than waiting forever, and the next call refreshes afresh.
+     */
+    @Test
+    fun aCancelledOwnerReleasesItsWaiters() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        var calls = 0
+        val fixture = Fixture {
+            calls++
+            if (calls == 1) gate.await()
+            minted("at-2", "rt-2")
+        }
+        val owner = async { fixture.refresher.refresh() }
+        yield()
+        val waiter = async { fixture.refresher.refresh() }
+        yield()
+        owner.cancel()
+        assertEquals(Refresh.Failed("cancelled"), waiter.await())
+        assertEquals(Refresh.Refreshed("at-2"), fixture.refresher.refresh())
+        assertEquals(2, calls)
+        assertEquals(0, fixture.ended)
     }
 }
