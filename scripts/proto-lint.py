@@ -290,6 +290,21 @@ def canary_gate_problems(text):
     return problems
 
 
+def timeout_problems(text):
+    """The jobs in a workflow that could hang until GitHub's six-hour cap.
+
+    A job with no `timeout-minutes` runs for six hours before GitHub kills it,
+    holding a runner (a macOS one bills at ten times Linux) and, in Canary and
+    CI, the concurrency group behind it. A job that calls a reusable workflow
+    through `uses:` cannot take one; the called workflow's jobs carry it.
+    """
+    return [
+        f"`{job}` has no timeout-minutes, so a hang runs for six hours"
+        for job, keys in workflow_jobs(text).items()
+        if "uses" not in keys and not re.fullmatch(r"[1-9]\d*", keys.get("timeout-minutes", ""))
+    ]
+
+
 def lint(channel, baseline_dir):
     """The problems, and the line to print if there are none."""
     problems = capability_problems()
@@ -552,6 +567,33 @@ def self_test():
         got = canary_gate_problems(canary.replace(old, new, 1))
         if bool(got) != bool(want):
             failures.append(f"gate case {what!r}: expected {'a problem' if want else 'none'}, got {got}")
+
+    # Every job in every workflow has a timeout. Without one, a hang holds a
+    # runner until GitHub kills it at six hours.
+    workflows = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+    count += 1
+    if not workflows:
+        failures.append("no workflows found under .github/workflows")
+    for path in workflows:
+        for problem in timeout_problems(path.read_text()):
+            failures.append(f"{path.name}: {problem}")
+
+    # And the timeout check itself: a planted job with none, one with an empty
+    # value, and a reusable-workflow call, which cannot take one.
+    planted = canary.replace("\njobs:\n", "\njobs:\n  planted:\n    runs-on: ubuntu-latest\n    steps:\n      - run: sleep 99999\n", 1)
+    timeout_cases = [
+        ("a job without timeout-minutes", planted, 1),
+        ("an empty timeout-minutes", canary.replace("    timeout-minutes: 5\n", "    timeout-minutes:\n", 1), 1),
+        ("the real canary.yml", canary, 0),
+    ]
+    for what, text, want in timeout_cases:
+        count += 1
+        if text == canary and want:
+            failures.append(f"timeout case {what!r}: the mutation no longer applies to canary.yml")
+            continue
+        got = timeout_problems(text)
+        if len(got) != want:
+            failures.append(f"timeout case {what!r}: expected {want} problem(s), got {got}")
 
     for f in failures:
         print(f"FAIL: {f}", file=sys.stderr)
