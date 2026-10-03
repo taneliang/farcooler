@@ -68,6 +68,7 @@ pub fn host(
     runtime: &farcooler_core::inventory::RuntimeSnapshot,
     replay_bytes: u64,
     stand_in: Option<&str>,
+    push_paired: bool,
 ) -> wire::Host {
     let healthy = runtime.inventory_healthy;
     wire::Host {
@@ -105,6 +106,9 @@ pub fn host(
         // What every agent launch runs instead of the agent, when somebody
         // set `FARCOOLER_STAND_IN_AGENT`. See `service::stand_in_agent`.
         stand_in_agent: stand_in.unwrap_or_default().to_string(),
+        // Whether the relay delivers this runner's task notices (ov-94), so a
+        // Mac leaves them to the push rather than posting them too.
+        push_paired,
     }
 }
 
@@ -835,10 +839,19 @@ mod tests {
     #[test]
     fn a_stand_in_agent_reaches_the_host() {
         let runtime = farcooler_core::inventory::RuntimeSnapshot::healthy(Vec::new());
-        let with = host("v", Uuid::nil(), &runtime, 0, Some("/bin/sleep"));
+        let with = host("v", Uuid::nil(), &runtime, 0, Some("/bin/sleep"), false);
         assert_eq!(with.stand_in_agent, "/bin/sleep");
-        let without = host("v", Uuid::nil(), &runtime, 0, None);
+        let without = host("v", Uuid::nil(), &runtime, 0, None, false);
         assert_eq!(without.stand_in_agent, "");
+    }
+
+    /// **A paired runner says so** (ov-94): a Mac leaves its task notices to
+    /// the relay's push rather than posting them too, which would alert twice.
+    #[test]
+    fn a_paired_runner_says_so_on_the_host() {
+        let runtime = farcooler_core::inventory::RuntimeSnapshot::healthy(Vec::new());
+        assert!(host("v", Uuid::nil(), &runtime, 0, None, true).push_paired);
+        assert!(!host("v", Uuid::nil(), &runtime, 0, None, false).push_paired);
     }
 
     #[test]

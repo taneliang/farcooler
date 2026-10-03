@@ -347,6 +347,31 @@ struct Notification<'a> {
     /// Skipped exactly when `trace` is: an anchor for no bytes anchors nothing.
     #[serde(rename = "traceAnchor", skip_serializing_if = "Option::is_none")]
     trace_anchor: Option<i64>,
+    /// A task notice's id (ov-94): `t:<runner id>:<task key>`, which every
+    /// platform replaces by, so a newer notice about a task replaces the
+    /// older. At most 64 bytes, APNs's limit on a collapse id; see
+    /// `watch::task_notice::notice_id`.
+    #[serde(rename = "noticeId", skip_serializing_if = "Option::is_none")]
+    notice_id: Option<&'a str>,
+    /// A task notice's class: `decision`, `review`, `blocked`, `done` or
+    /// `new`. Each device hears only the classes it kept on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    event: Option<&'a str>,
+    /// A task notice's interruption level: `time-sensitive`, `active` or
+    /// `passive`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    level: Option<&'a str>,
+    /// A task DECISION's answer options, for the notification's buttons: the
+    /// QUESTION note's own, which a person or the manager wrote. Never an
+    /// agent's permission ask, whose option names can be a command line (see
+    /// `ask`).
+    #[serde(skip_serializing_if = "<[String]>::is_empty")]
+    options: &'a [String],
+    /// `false` on an agent notice whose task notice carries the alert: the
+    /// relay moves the card and buzzes nobody (ov-94). Absent otherwise, so a
+    /// relay too old to know it alerts as it always did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    alert: Option<bool>,
 }
 
 /// What `hook-ask-` is followed by: a UUID, hyphenated, or anything the
@@ -408,7 +433,6 @@ impl WireAsk {
 /// Borrowed throughout. Every field is already owned by the caller's stack for
 /// the length of the await, and a payload that allocated five strings per
 /// notification would be paying for a copy nothing keeps.
-#[derive(Default)]
 pub struct Outgoing<'a> {
     /// `None` for an agent notice, else `"decision"`, `"count"` or `"ask"`.
     /// See `Notification::kind` for what each carries; `wire_body` is what
@@ -446,6 +470,46 @@ pub struct Outgoing<'a> {
     /// `trace`'s newest bucket on the absolute grid, sampled at the same
     /// moment. See `Notification::trace_anchor`.
     pub trace_anchor: Option<i64>,
+    /// A task notice's id, class, level and a decision's options. See
+    /// `Notification::notice_id` and the three after it.
+    pub notice_id: Option<&'a str>,
+    pub event: Option<&'a str>,
+    pub level: Option<&'a str>,
+    pub options: &'a [String],
+    /// `false` for an agent notice whose task notice carries the alert. See
+    /// `Notification::alert`.
+    pub alert: bool,
+}
+
+impl Default for Outgoing<'_> {
+    fn default() -> Self {
+        Outgoing {
+            kind: None,
+            title: "",
+            subtitle: "",
+            status: "",
+            failed: false,
+            label: "",
+            terminal: None,
+            task: None,
+            workspace: None,
+            needs_you: None,
+            install: None,
+            ask: None,
+            started_at: None,
+            insertions: None,
+            deletions: None,
+            commits: None,
+            trace: &[],
+            trace_anchor: None,
+            notice_id: None,
+            event: None,
+            level: None,
+            options: &[],
+            // Every notice alerts as it always did unless it says otherwise.
+            alert: true,
+        }
+    }
 }
 
 /// The trace's bytes as the body spells them: base64, or no key for none.
@@ -474,6 +538,10 @@ fn wire_anchor(trace: &[u8], anchor: Option<i64>) -> Option<i64> {
 /// - An ask carries its kind, terminal, count and the ask, or no `ask` key when
 ///   none is open. `None` if it names no terminal.
 /// - The ask rides on a `blocked` agent notice, and on nothing else.
+/// - A task notice (ov-94) carries its kind, task, workspace, title,
+///   subtitle, count, runner, id, class and level, a decision's options, and
+///   no terminal, status, label or ask.
+/// - An agent notice carries `alert: false` when its task's notice alerts.
 ///
 /// Every kind carries the runner's install id when the caller has one.
 fn wire_body<'a>(o: &Outgoing<'a>) -> Option<Notification<'a>> {
@@ -500,6 +568,7 @@ fn wire_body<'a>(o: &Outgoing<'a>) -> Option<Notification<'a>> {
             trace: wire_trace(o.trace),
             trace_anchor: wire_anchor(o.trace, o.trace_anchor),
             ask: o.ask.filter(|_| o.status == "blocked"),
+            alert: (!o.alert).then_some(false),
             ..shared
         },
         Some("ask") => Notification { terminal: Some(o.terminal?), ask: o.ask, ..shared },
@@ -509,6 +578,20 @@ fn wire_body<'a>(o: &Outgoing<'a>) -> Option<Notification<'a>> {
             task: o.task,
             workspace: o.workspace,
             runner: o.install.map(|id| crate::service::stable_host_id(id).to_string()),
+            ..shared
+        },
+        // A task notice (ov-94): about a task, so like a decision it names
+        // no terminal and writes no roster row. Options only on a decision.
+        Some("task") => Notification {
+            title: Some(o.title),
+            subtitle: Some(o.subtitle),
+            task: o.task,
+            workspace: o.workspace,
+            runner: o.install.map(|id| crate::service::stable_host_id(id).to_string()),
+            notice_id: o.notice_id,
+            event: o.event,
+            level: o.level,
+            options: if o.event == Some("decision") { o.options } else { &[] },
             ..shared
         },
         Some(_) => shared,
@@ -1099,6 +1182,62 @@ mod tests {
         assert_eq!(decision["task"], "bil-7");
         assert_eq!(decision["kind"], "decision");
         assert_eq!(decision["title"], "Billing · bil-7 needs a decision");
+    }
+
+    /// A task notice (ov-94) is about a task: no terminal, none of an agent
+    /// notice's fields, its id, class and level, and a decision's options,
+    /// which no other class carries, ever.
+    #[test]
+    fn a_task_notice_names_its_task_its_id_and_never_a_terminal() {
+        let options = vec!["pdfkit".to_string(), "pdf.js".to_string()];
+        let notice = |event: &'static str| {
+            serde_json::to_value(
+                wire_body(&Outgoing {
+                    kind: Some("task"),
+                    title: "ov-90 Wake the agent",
+                    subtitle: "Needs your decision · Which?",
+                    terminal: Some("term-1"),
+                    status: "blocked",
+                    task: Some("ov-90"),
+                    install: Some("install-1"),
+                    notice_id: Some("t:r-1:ov-90"),
+                    event: Some(event),
+                    level: Some("time-sensitive"),
+                    options: &options,
+                    ..Outgoing::default()
+                })
+                .unwrap(),
+            )
+            .unwrap()
+        };
+        let decision = notice("decision");
+        for key in ["terminal", "status", "label", "failed", "ask", "alert"] {
+            assert!(decision.get(key).is_none(), "a task notice carries no `{key}`: {decision}");
+        }
+        assert_eq!(decision["kind"], "task");
+        assert_eq!(decision["task"], "ov-90");
+        assert_eq!(decision["noticeId"], "t:r-1:ov-90");
+        assert_eq!(decision["event"], "decision");
+        assert_eq!(decision["level"], "time-sensitive");
+        assert_eq!(decision["options"], serde_json::json!(["pdfkit", "pdf.js"]));
+        assert_eq!(decision["runner"], crate::service::stable_host_id("install-1").to_string());
+        let review = notice("review");
+        assert!(review.get("options").is_none(), "only a decision has buttons: {review}");
+    }
+
+    /// An agent working on a task sends its notice for the card alone:
+    /// `alert: false`, and every other agent notice says nothing about it.
+    #[test]
+    fn an_agent_notice_says_alert_false_only_when_its_task_alerts() {
+        let agent = |alert| {
+            serde_json::to_value(
+                wire_body(&Outgoing { terminal: Some("term-1"), status: "blocked", alert, ..Outgoing::default() })
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        assert_eq!(agent(false)["alert"], false);
+        assert!(agent(true).get("alert").is_none());
     }
 
     /// A decision names the runner it is on as a phone knows it

@@ -30,6 +30,7 @@ use uuid::Uuid;
 
 use crate::service::Service;
 use crate::watch::Watcher;
+use crate::watch::task_notice::TaskEvent;
 use crate::wire::id_bytes;
 
 // ---------------------------------------------------------------------------
@@ -440,6 +441,8 @@ pub fn create(svc: &Service, watcher: &Watcher, req: &pb::TaskCreate) -> Result<
     if let Some(lane) = task.worktree_id {
         watcher.announce_worktree_changed(lane);
     }
+    // New Task, for the devices that want it (ov-94).
+    watcher.task_event(&task, TaskEvent::Created, actor);
     Ok(pb_task(&task))
 }
 
@@ -526,9 +529,10 @@ pub fn set_status(svc: &Service, watcher: &Watcher, req: &pb::TaskSetStatus) -> 
     if before != task.status && (is_an_item(before) || is_an_item(task.status)) {
         watcher.announce_needs_you();
     }
-    // Ruling 3: a decision pushes.
-    if before != TaskStatus::NeedsDecision && task.status == TaskStatus::NeedsDecision {
-        watcher.announce_decision(&task);
+    // Ruling 3: a decision pushes, now as its task's notice, beside a review
+    // and a finish (ov-94). The composer decides which moves are news.
+    if before != task.status {
+        watcher.task_event(&task, TaskEvent::Moved { to: task.status }, actor);
     }
     Ok(pb_task(&task))
 }
@@ -571,6 +575,10 @@ pub fn note(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend) -> Resul
     // Every client's answer arrives here, so this is where the agent waiting
     // on it is woken (`watch::answer_wake`).
     watcher.answered(&task, &written, queued);
+    // A new question on a task waiting for a decision is its notice's news.
+    if kind == NoteKind::Question {
+        watcher.task_event(&task, TaskEvent::Asked, actor);
+    }
     Ok(pb_note(&written))
 }
 
@@ -610,6 +618,10 @@ pub fn block(
     // `NotFound` a caller should see rather than a silent success.
     let task = svc.store.get_task(id)?;
     announce(watcher, &task, actor);
+    // A new edge is news; clearing one isn't.
+    if !req.clear {
+        watcher.task_event(&task, TaskEvent::Blocked { by: blocked_by }, actor);
+    }
     Ok(pb::TaskBlockList { items: blocks.iter().map(pb_block).collect() })
 }
 

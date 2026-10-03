@@ -283,6 +283,9 @@ impl FleetEvent {
                 Some(FleetEvent::Stack { repository: uuid_of(&s.repository_id) })
             }
             Payload::TerminalFrame(_) | Payload::AgentEvents(_) => None,
+            // A task notice (ov-94): the phones hear it as a push from the
+            // relay, which their notification code draws; nothing to re-read.
+            Payload::Notice(_) => None,
             // Reserved arms no daemon emits yet. Named one by one rather than
             // swept up by `_` so that the day a NEW variant is added to this
             // oneof, this match stops compiling (E0004) and somebody decides

@@ -510,7 +510,36 @@ message Event {
     // is ranked as a whole and a delta would have to re-rank anyway.
     // Debounced on the runner: at most one per 250 ms, on the trailing edge.
     Empty needs_you_changed = 24;
+    // A task notice this runner composed (ov-94): what a client that posts
+    // its own notifications posts, under `notice_id`, so it and the relay's
+    // push about the same task replace each other.
+    Notice notice = 25;
   }
+}
+
+// One task notice, as the runner decided, worded and named it (ov-94). The
+// same notice the relay is sent as `kind: "task"`.
+message Notice {
+  // `t:<runner id>:<task key>`: the notification's identifier and thread on
+  // every platform, so a newer notice about the task replaces the older.
+  string notice_id = 1;
+  // `decision`, `review`, `blocked`, `done` or `new`: which of a device's
+  // switches it answers to.
+  string event = 2;
+  // `time-sensitive`, `active` or `passive`.
+  string level = 3;
+  // `<key> <title>`.
+  string title = 4;
+  // The status update: `Moved to In Review · 3 files changed`.
+  string body = 5;
+  string task_key = 6;
+  bytes task_id = 7;
+  // `Host.runner_id`.
+  string runner_id = 8;
+  // A task decision's answer options, for its buttons. Never an agent's ask.
+  repeated string options = 9;
+  // The task's workspace, by name.
+  string workspace = 10;
 }
 
 message SnapshotChunk {
@@ -657,6 +686,10 @@ message Host {
   // invisible: every agent silently runs `sleep` or `false`, and the only
   // sign was one line in the daemon's own log. A client shows it.
   string stand_in_agent = 12;
+  // Whether this runner is paired with a relay, so its task notices reach the
+  // owner's devices as pushes (ov-94). A Mac reads it to leave a notice to the
+  // push rather than post it locally too: both would alert.
+  bool push_paired = 13;
 }
 
 enum SelfHealth {

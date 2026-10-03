@@ -35,6 +35,7 @@ use crate::service::Service;
 use crate::wire;
 
 mod answer_wake;
+pub(crate) mod task_notice;
 
 /// How often to look.
 ///
@@ -466,14 +467,6 @@ fn agent_notice(
     notification(activity, &name, quoted, failed, started_at)
 }
 
-/// A decision notice's title: "Billing · bil-7 needs a decision".
-fn decision_title(workspace: Option<&str>, key: &str) -> String {
-    match workspace {
-        Some(workspace) => format!("{workspace} · {key} needs a decision"),
-        None => format!("{key} needs a decision"),
-    }
-}
-
 /// The count notice's window: the first change opens it, and the count is
 /// read and sent when it closes. A window rather than a debounce: it does
 /// not restart on later changes, so a steady stream of them still sends one
@@ -487,7 +480,7 @@ const COUNT_NOTICE_EVERY: std::time::Duration = std::time::Duration::from_secs(5
 
 /// What the watcher sent, or would have sent to a paired relay, for a test to
 /// read. See `Watcher::tap_notices`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct Tapped {
     pub kind: Option<&'static str>,
     pub title: String,
@@ -497,6 +490,15 @@ pub(crate) struct Tapped {
     pub needs_you: Option<u32>,
     /// The id of the ask the notice carried, if any.
     pub ask: Option<String>,
+    /// An agent notice sent `alert: false`: its task's notice alerts instead
+    /// (ov-94).
+    pub quiet: bool,
+    /// A task notice's class, level, id, body and a decision's options.
+    pub event: Option<&'static str>,
+    pub level: Option<&'static str>,
+    pub notice_id: Option<String>,
+    pub subtitle: String,
+    pub options: Vec<String>,
 }
 
 /// How often a live card may be refreshed while an agent stays in one tier.
@@ -803,6 +805,11 @@ pub struct Watcher {
     clears_pending: std::sync::Mutex<HashSet<Uuid>>,
     /// Where a test reads the notices this watcher sends. `None` in a daemon.
     taps: std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<Tapped>>>,
+    /// Each task's open notice window (ov-94). See `task_notice`.
+    task_notices: std::sync::Mutex<task_notice::Windows>,
+    /// What each task was last told, by class and the `status_since` it was
+    /// told at, so a status is told once. See `task_notice`.
+    task_told: std::sync::Mutex<task_notice::Told>,
     /// How many times a count was gathered, so a test can see an unpaired
     /// runner gather none.
     #[cfg(test)]
@@ -2707,6 +2714,8 @@ impl Watcher {
             fail_sends: std::sync::atomic::AtomicBool::new(false),
             clears_pending: std::sync::Mutex::new(HashSet::new()),
             taps: std::sync::Mutex::new(None),
+            task_notices: std::sync::Mutex::new(HashMap::new()),
+            task_told: std::sync::Mutex::new(HashMap::new()),
             #[cfg(test)]
             counts_gathered: std::sync::atomic::AtomicUsize::new(0),
             service,
@@ -2766,6 +2775,55 @@ impl Watcher {
             return;
         };
         self.push_notice(terminal, who, notice);
+    }
+
+    /// An agent's blocked or done transition, worth telling the owner about.
+    ///
+    /// An agent working on a task (`task_link::task_of`) is told about through
+    /// its task (ov-94): its own notice still goes, for the live card, but with
+    /// `alert: false`, and its news joins the task's notice window, worded by
+    /// task. An agent with no task, and an orchestrator, notify as they
+    /// always have.
+    fn announce_transition(
+        &self,
+        terminal: Uuid,
+        activity: AgentActivity,
+        label: &str,
+        quoted: Quoted<'_>,
+        turn_failed: bool,
+        started_at: Option<i64>,
+    ) {
+        let task = self
+            .service
+            .store
+            .get_terminal(terminal)
+            .ok()
+            .and_then(|row| crate::task_link::task_of(&self.service.store, &row));
+        let Some(task) = task else {
+            return self.push_if_paired(terminal, activity, label, quoted, turn_failed, started_at);
+        };
+        let who = self.who(terminal, label);
+        let news = match activity {
+            AgentActivity::Blocked => Some(task_notice::AgentNews::Blocked {
+                terminal,
+                label: label.to_string(),
+                question: quoted.question.map(str::to_string),
+            }),
+            AgentActivity::Done if turn_failed => {
+                Some(task_notice::AgentNews::Failed { label: label.to_string() })
+            }
+            AgentActivity::Done => Some(task_notice::AgentNews::Finished {
+                label: label.to_string(),
+                said: quoted.said.map(str::to_string),
+            }),
+            _ => None,
+        };
+        if let Some(notice) = agent_notice(activity, &who, quoted, turn_failed, started_at) {
+            self.push_notice_alerting(terminal, who, notice, false);
+        }
+        if let Some(news) = news {
+            self.agent_event(&task, news);
+        }
     }
 
     /// Refresh the live card of an agent that is still working, at most once
@@ -2849,6 +2907,13 @@ impl Watcher {
     /// Reading the pairing file happens in the spawned task for the same
     /// reason. It is blocking I/O, and it does not belong under a lock either.
     fn push_notice(&self, terminal: Uuid, who: Who, notice: Notice) {
+        self.push_notice_alerting(terminal, who, notice, true);
+    }
+
+    /// `push_notice`, saying whether it alerts: `false` for an agent on a
+    /// task, whose task's notice alerts instead (ov-94). The card moves
+    /// either way.
+    fn push_notice_alerting(&self, terminal: Uuid, who: Who, notice: Notice, alert: bool) {
         // Owned, because the spawned task outlives this call by design. The
         // label is the one the phone needs on its own, for the half of the
         // live card that is not a sentence; the workspace names its row.
@@ -2880,10 +2945,11 @@ impl Watcher {
                 kind: None,
                 title: notice.title.clone(),
                 terminal: Some(terminal),
-                task: None,
                 workspace: workspace.clone(),
                 needs_you,
                 ask: ask.as_ref().map(|a| a.id().to_string()),
+                quiet: !alert,
+                ..Tapped::default()
             });
             let landed = watcher
                 .deliver(
@@ -2908,6 +2974,8 @@ impl Watcher {
                         trace: &stats.trace,
                         trace_anchor: stats.trace_anchor,
                         ask: ask.as_ref(),
+                        alert,
+                        ..Default::default()
                     },
                 )
                 .await;
@@ -2982,6 +3050,7 @@ impl Watcher {
                 workspace: None,
                 needs_you,
                 ask: ask.as_ref().map(|a| a.id().to_string()),
+                ..Tapped::default()
             });
             let id = terminal.to_string();
             let outgoing = crate::push::Outgoing {
@@ -3686,56 +3755,10 @@ impl Watcher {
                 workspace: None,
                 needs_you: Some(count),
                 ask: None,
+                ..Tapped::default()
             });
             let outgoing = crate::push::Outgoing { kind: Some("count"), needs_you: Some(count), ..Default::default() };
             if watcher.deliver(pairing, outgoing).await {
-                watcher.told(count);
-            }
-        });
-    }
-
-    /// Push a decision: `task` has just entered Needs Decision (ruling 3).
-    ///
-    /// "Billing · bil-7 needs a decision", with the question as the subtitle.
-    /// It is about a task, so it names no terminal and the relay writes no
-    /// roster row for it. Detached, like every push.
-    pub fn announce_decision(&self, task: &farcooler_store::models::Task) {
-        let Ok(runtime) = tokio::runtime::Handle::try_current() else { return };
-        let me = self.me.clone();
-        let (id, key, workspace) = (task.id, task.key.clone(), task.workspace_id);
-        runtime.spawn(async move {
-            let Some(watcher) = me.upgrade() else { return };
-            let Some(pairing) = watcher.audience() else { return };
-            let store = &watcher.service.store;
-            let workspace = store.get_workspace(workspace).ok().map(|w| w.name);
-            let question = store
-                .notes_for(id, Some(farcooler_store::models::NoteKind::Question))
-                .ok()
-                .and_then(|notes| notes.last().map(|n| n.body.clone()))
-                .unwrap_or_default();
-            let title = decision_title(workspace.as_deref(), &key);
-            let count = watcher.needs_you_count().await;
-            watcher.tap(Tapped {
-                kind: Some("decision"),
-                title: title.clone(),
-                terminal: None,
-                task: Some(key.clone()),
-                workspace: workspace.clone(),
-                needs_you: count,
-                ask: None,
-            });
-            let outgoing = crate::push::Outgoing {
-                kind: Some("decision"),
-                title: &title,
-                subtitle: &question,
-                task: Some(&key),
-                workspace: workspace.as_deref(),
-                needs_you: count,
-                ..Default::default()
-            };
-            if watcher.deliver(pairing, outgoing).await
-                && let Some(count) = count
-            {
                 watcher.told(count);
             }
         });
@@ -5000,7 +5023,7 @@ impl Watcher {
                     // A watched agent asking a question. See `attention` for
                     // why this leaves the card alone rather than retiring it.
                     Attention::Hold => {}
-                    Attention::Announce => self.push_if_paired(
+                    Attention::Announce => self.announce_transition(
                         id,
                         next,
                         &command,
@@ -8403,11 +8426,13 @@ mod needs_you_push_tests {
             },
         )
         .unwrap();
+        // Now as its task's notice (ov-94): `kind: "task"`, class decision.
         let sent = next(&mut taps).await.expect("a decision pushes");
-        assert_eq!(sent.kind, Some("decision"));
+        assert_eq!((sent.kind, sent.event), (Some("task"), Some("decision")));
         assert_eq!(sent.terminal, None, "a decision is about a task, not a pane");
         assert_eq!(sent.task.as_deref(), Some(task.key.as_str()));
-        assert_eq!(sent.title, format!("Main · {} needs a decision", task.key));
+        assert_eq!(sent.title, format!("{} Pick a PDF library", task.key));
+        assert_eq!(sent.subtitle, "Needs your decision · Which?");
         assert_eq!(sent.needs_you, Some(1), "the decision itself is counted");
     }
 

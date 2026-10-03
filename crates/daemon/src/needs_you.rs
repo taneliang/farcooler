@@ -24,7 +24,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use farcooler_agent::event::PermissionOption;
 use farcooler_protocol::v1::{self as pb, AgentActivity, NeedsYouKind};
-use farcooler_store::models::{self, NoteKind, TaskStatus, TerminalRole};
+use farcooler_store::models::{self, NoteKind, TaskStatus};
 use farcooler_store::TaskScope;
 use uuid::Uuid;
 
@@ -259,23 +259,33 @@ fn terminal_signal(t: &models::Terminal, inputs: &Inputs, subject: Subject) -> O
     })
 }
 
+/// Whether `task`, in Needs Decision, is still waiting on its decision, and
+/// on which question: `Some(Some(q))` for its latest QUESTION, `Some(None)`
+/// for none asked, `None` once answered. `notes` are its QUESTION and ANSWER
+/// notes, oldest first.
+///
+/// Answered: an ANSWER after the latest QUESTION, or, with no question, one
+/// since the task last moved. An answer only appends a note; the task stays
+/// where the orchestrator left it. The task notice composer asks the same
+/// question, so a notice and the Needs You row can't disagree (ov-94).
+pub(crate) fn waiting_question<'a>(
+    task: &models::Task,
+    notes: &'a [models::TaskNote],
+) -> Option<Option<&'a models::TaskNote>> {
+    let asked = notes.iter().rposition(|n| n.kind == NoteKind::Question);
+    let answered = match asked {
+        Some(q) => notes[q + 1..].iter().any(|n| n.kind == NoteKind::Answer),
+        None => notes.iter().any(|n| n.kind == NoteKind::Answer && n.at >= task.status_since),
+    };
+    (!answered).then(|| asked.map(|q| &notes[q]))
+}
+
 /// A task's signal from the board, if it has one.
 fn task_signal(task: &models::Task, inputs: &Inputs) -> Option<Signal> {
     match task.status {
         TaskStatus::NeedsDecision => {
             let notes = inputs.notes.get(&task.id).map(Vec::as_slice).unwrap_or_default();
-            let asked = notes.iter().rposition(|n| n.kind == NoteKind::Question);
-            // Answered: an ANSWER after the latest QUESTION, or, with no
-            // question, one since the task last moved. An answer only appends
-            // a note; the task stays where the orchestrator left it.
-            let answered = match asked {
-                Some(q) => notes[q + 1..].iter().any(|n| n.kind == NoteKind::Answer),
-                None => notes.iter().any(|n| n.kind == NoteKind::Answer && n.at >= task.status_since),
-            };
-            if answered {
-                return None;
-            }
-            let question = asked.map(|q| &notes[q]);
+            let question = waiting_question(task, notes)?;
             Some(Signal {
                 kind: NeedsYouKind::Decision,
                 id: format!("decision:{}", task.id),
@@ -325,9 +335,9 @@ pub fn assemble(inputs: &Inputs, now: SystemTime) -> Vec<pb::NeedsYouItem> {
     for t in inputs.terminals.iter().filter(|t| !crate::wire::has_ended(t)) {
         // An orchestrator is never a task's agent, so its signals are about
         // its own terminal whatever its row says.
-        let subject = match t.task_id.filter(|id| tasks.contains_key(id)) {
-            Some(task) if t.role != TerminalRole::Orchestrator => Subject::Task(task),
-            _ => Subject::Terminal(t.id),
+        let subject = match crate::task_link::bound_task(t).filter(|id| tasks.contains_key(id)) {
+            Some(task) => Subject::Task(task),
+            None => Subject::Terminal(t.id),
         };
         signals.extend(terminal_signal(t, inputs, subject));
     }
@@ -460,7 +470,7 @@ pub fn redact_below_control(item: pb::NeedsYouItem) -> pb::NeedsYouItem {
 mod tests {
     use super::*;
     use farcooler_protocol::v1::TerminalIntent;
-    use farcooler_store::models::{Actor, PaneMode};
+    use farcooler_store::models::{Actor, PaneMode, TerminalRole};
     use std::time::Duration;
 
     const MINUTE: i64 = 60_000;

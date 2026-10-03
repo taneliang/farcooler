@@ -414,6 +414,13 @@ pub mod capability {
     /// printed. A client that reads it absent opens streams without the flag
     /// and sizes its emulator from layout replies, as it always did.
     pub const STREAM_SIZE_MARKERS: &str = "stream_size_markers";
+    /// Task notices (ov-94): the `notice` event, `Host.push_paired`, and an
+    /// agent working on a task notifying through its task's notice.
+    ///
+    /// Its own capability because a client that posts its own banners (the
+    /// Mac) leaves a task-bound agent's banner to the task's notice only when
+    /// the runner sends one; on an older runner it posts as it always has.
+    pub const TASK_NOTICES: &str = "task_notices";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -424,7 +431,7 @@ pub mod capability {
             WORKTREES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES,
             ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL, WORKTREE_ORDER, TASKS,
             LAUNCH_PROMPT, TERMINAL_TASK, WORKTREE_FORK_ONLY, WORKSTREAMS, ORCHESTRATOR_HANDOFF,
-            NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS,
+            NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such

@@ -1406,6 +1406,9 @@ fn status_json(
         // or null when agents launch as themselves. The same key, and the
         // same null from an older runner, as the phones' `host.health`.
         "standInAgent": stand_in_agent(host),
+        // Whether this runner's task notices reach the owner's devices as
+        // pushes (ov-94): the Mac then leaves them to the push.
+        "pushPaired": host.push_paired,
         "roots": counts.roots,
         "repositories": counts.repositories,
         "worktrees": counts.worktrees,
@@ -3765,12 +3768,31 @@ fn event_json(payload: farcooler_protocol::v1::event::Payload) -> Option<serde_j
         farcooler_protocol::v1::event::Payload::NeedsYouChanged(_) => serde_json::json!({
             "kind": "needs_you",
         }),
+        // A task notice the runner composed (ov-94): what the Mac posts when
+        // the relay won't, under `notice_id`. See `notice_json`.
+        farcooler_protocol::v1::event::Payload::Notice(n) => notice_json(&n),
         // Other resources have no events yet. `None` is right: a client that
         // reacted to a line it cannot read would be worse. What is NOT right
         // is a resource that HAS a reader landing here by omission, which is
         // the bug the board arm above was, and which is what this function
         // exists to make testable.
         _ => return None,
+    })
+}
+
+/// A task notice, as the Mac's `NoticeEvent` reads it (ov-94).
+fn notice_json(n: &farcooler_protocol::v1::Notice) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "notice",
+        "notice_id": n.notice_id,
+        "event": n.event,
+        "level": n.level,
+        "title": n.title,
+        "body": n.body,
+        "task": n.task_key,
+        "runner": n.runner_id,
+        "workspace": n.workspace,
+        "options": n.options,
     })
 }
 
@@ -4773,12 +4795,44 @@ mod tests {
             // board arm once did, so a Mac that fell behind never re-read.
             (Payload::EventsMissed(farcooler_protocol::v1::Empty {}), "events_missed"),
             (Payload::NeedsYouChanged(farcooler_protocol::v1::Empty {}), "needs_you"),
+            (Payload::Notice(Default::default()), "notice"),
         ];
         for (payload, kind) in kinds {
             let line = event_json(payload)
                 .unwrap_or_else(|| panic!("a {kind} change reached a client as nothing at all"));
             assert_eq!(line["kind"], kind, "the wrong resource was named on the line");
         }
+    }
+
+    /// **A task notice's line carries what the Mac posts it from** (ov-94):
+    /// `NoticeEvent` in apps/macos/Sources/FarCooler/EventStream.swift reads
+    /// these keys, and a key renamed here is a notice the Mac never posts.
+    #[test]
+    fn a_notice_line_carries_what_the_mac_posts() {
+        let line = notice_json(&farcooler_protocol::v1::Notice {
+            notice_id: "t:r-1:ov-90".into(),
+            event: "decision".into(),
+            level: "time-sensitive".into(),
+            title: "ov-90 Wake the agent".into(),
+            body: "Needs your decision · Which?".into(),
+            task_key: "ov-90".into(),
+            runner_id: "r-1".into(),
+            options: vec!["pdfkit".into()],
+            ..Default::default()
+        });
+        assert_eq!(line["kind"], "notice");
+        assert_eq!(line["notice_id"], "t:r-1:ov-90");
+        assert_eq!(line["event"], "decision");
+        assert_eq!(line["level"], "time-sensitive");
+        assert_eq!(line["title"], "ov-90 Wake the agent");
+        assert_eq!(line["body"], "Needs your decision · Which?");
+        assert_eq!(line["task"], "ov-90");
+        assert_eq!(line["runner"], "r-1");
+        assert_eq!(line["options"], serde_json::json!(["pdfkit"]));
+        // And `status --json` says whether the relay will push it instead.
+        let counts = StatusCounts { roots: 0, repositories: 0, worktrees: 0, terminals: 0 };
+        let host = farcooler_protocol::v1::Host { push_paired: true, ..Default::default() };
+        assert_eq!(status_json(&host, &[], counts)["pushPaired"], true);
     }
 
     /// **A runner whose agents run a stand-in says so, in `status`** (ov-49).
