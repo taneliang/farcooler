@@ -276,14 +276,12 @@ struct ContentView: View {
                 // them. This is the one place that decides which worktree the
                 // window is showing, which is exactly what the control acts on.
                 .openInEditorToolbar(worktree: detailWorktree) { editorError = $0 }
-                // The sidebar button joins the switcher's group instead
-                // (ov-105). The title would repeat the switcher or the
-                // breadcrumb (`TitleBar`); the window keeps it for the
-                // Window menu.
-                .toolbar(removing: .sidebarToggle)
+                // The title would repeat the switcher or the breadcrumb
+                // (`TitleBar`); the window keeps it for the Window menu. The
+                // system's sidebar button stays, the only one (ov-177).
                 .toolbar(removing: TitleBar.showsTitle(for: selection) ? nil : .title)
                 .toolbar {
-                    LeadingToolbar(sidebarHidden: sidebarVisibility == .detailOnly, switcher: workspaceSwitcher)
+                    LeadingToolbar(switcher: workspaceSwitcher)
                 }
                 .overlay(alignment: .top) {
                     ErrorBanner(message: errorBanner) { errorBanner = nil }

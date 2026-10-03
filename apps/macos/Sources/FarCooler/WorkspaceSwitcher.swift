@@ -46,6 +46,10 @@ struct WorkspaceSwitcherButton: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
+            // Its whole width, always (ov-177): the toolbar squeezes an item
+            // that will shrink before it moves one to its overflow menu, and
+            // "Main · ov…" was the switcher squeezed.
+            .fixedSize()
             .background(MenuAnchor(coordinator: coordinator))
         }
         .help("Switch Workspace (⌘0)")
@@ -284,25 +288,18 @@ enum TitleBar {
     }
 }
 
-/// The toolbar's leading group (ov-105): the sidebar button and the
-/// workspace switcher, after the traffic lights, in one glass group, as
-/// Mail and Notes keep the sidebar button with what's beside it. The
-/// window removes the system's own sidebar button for this one. Then the
-/// flexible space, so this goes outermost of the window's toolbars.
+/// The toolbar's leading group (ov-105): the workspace switcher, after the
+/// traffic lights and the system's own sidebar button, as Mail and Notes
+/// keep theirs. One sidebar button, the system's (ov-177): ov-105 drew a
+/// second inside this group and asked the window to remove the system's,
+/// but the removal sat on the detail column, where it doesn't reach, so
+/// the title bar showed two. Then the flexible space, so this goes
+/// outermost of the window's toolbars.
 struct LeadingToolbar: ToolbarContent {
-    let sidebarHidden: Bool
     let switcher: WorkspaceSwitcherButton
 
     var body: some ToolbarContent {
-        ToolbarItemGroup(placement: .navigation) {
-            Button {
-                Sidebar.toggle()
-            } label: {
-                Label(sidebarHidden ? "Show Sidebar" : "Hide Sidebar", systemImage: "sidebar.left")
-            }
-            .help(sidebarHidden ? "Show Sidebar (⌘B)" : "Hide Sidebar (⌘B)")
-            switcher
-        }
+        ToolbarItem(placement: .navigation) { switcher }
         // The room the title held, which pushes what follows to the
         // trailing end. `.primaryAction` items stay before it whatever
         // their order, so the window's other items are `.automatic`, and
