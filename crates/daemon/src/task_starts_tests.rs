@@ -62,7 +62,7 @@ async fn a_blocker_finishing_announces_what_it_blocked() {
     let (phase_b, follower) = (&t[0], &t[1]);
     svc.store.set_block(follower.id, phase_b.id, Some("follows Phase B landing")).unwrap();
     let read = |svc: &Service| pb_one(svc, &svc.store.get_task(follower.id).unwrap()).unwrap().waiting_on;
-    assert_eq!(read(&svc), [phase_b.key.clone()]);
+    assert_eq!(read(&svc), std::slice::from_ref(&phase_b.key));
 
     let done = pb::TaskSetStatus {
         task_id: id_bytes(phase_b.id),
@@ -92,7 +92,7 @@ async fn a_line_reaches_the_wire_with_its_positions() {
 
     let wait = line[1].wait.clone().unwrap();
     assert_eq!((wait.kind, wait.line, wait.position), (pb::TaskWaitKind::InLine as i32, pb::TaskLine::Agent as i32, 2));
-    assert_eq!(wait.ahead, [t[2].key.clone()]);
+    assert_eq!(wait.ahead, std::slice::from_ref(&t[2].key));
     let heard = changed(&mut events);
     assert!(heard.contains(&t[1].id), "the one that left the line is announced too: {heard:?}");
     let left = pb_one(&svc, &svc.store.get_task(t[1].id).unwrap()).unwrap();

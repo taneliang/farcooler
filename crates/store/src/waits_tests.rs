@@ -77,7 +77,7 @@ fn a_line_is_replaced_whole() {
     assert_eq!(facts(&store, b).position, 0);
     assert_eq!(wait_of(&store, b), None, "b is out of the line, not ranked behind it");
     assert_eq!(wait_notes(&store, b), ["In line to start.", "Out of the line to start."]);
-    assert_eq!(facts(&store, a).ahead, [c.key.clone()]);
+    assert_eq!(facts(&store, a).ahead, std::slice::from_ref(&c.key));
 }
 
 /// Who is ahead: the front of the line, at most three, in line order.
@@ -311,7 +311,8 @@ fn a_copy_of_a_real_board_keeps_every_card_key_and_note() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("store.db");
     std::fs::copy(&source, &path).unwrap();
-    let census = |conn: &Connection| -> (Vec<(Vec<u8>, String, String)>, Vec<(Vec<u8>, String, String)>) {
+    type Rows = Vec<(Vec<u8>, String, String)>;
+    let census = |conn: &Connection| -> (Rows, Rows) {
         let rows = |sql: &str| {
             let mut stmt = conn.prepare(sql).unwrap();
             stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().map(|r| r.unwrap()).collect()

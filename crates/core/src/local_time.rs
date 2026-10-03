@@ -8,6 +8,10 @@
 const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /// `Oct 5, 9:00 AM`: Unix milliseconds in local time, on a 12-hour clock.
+// The libc crate marks `time_t` deprecated on musl only, warning that it will
+// follow musl 1.2's move to 64 bits. On the 64-bit targets we ship it is
+// `c_long`, already 64 bits, so there is nothing to act on.
+#[cfg_attr(target_env = "musl", allow(deprecated))]
 pub fn moment(millis: i64) -> String {
     let seconds: libc::time_t = millis.div_euclid(1000) as libc::time_t;
     // SAFETY: `localtime_r` writes only the `tm` it is given and reads only
