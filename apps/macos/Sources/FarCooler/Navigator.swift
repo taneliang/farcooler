@@ -265,22 +265,33 @@ struct OrchestratorRowView: View {
             return nil
         }
         if !starts.isEmpty {
-            HStack(spacing: SidebarGrid.gap) {
-                Menu("Start Orchestrator") {
-                    ForEach(starts) { harness in Button(harness.title) { model.onStart(harness) } }
-                }
-                .fixedSize()
-                if !model.candidates.isEmpty {
-                    Menu("Use as Orchestrator…") {
-                        ForEach(model.candidates, id: \.terminal.id) { pane in
-                            Button(pane.terminal.label) { model.onUse(pane) }
-                        }
-                    }
-                    .fixedSize()
-                }
+            // Side by side where they fit, else one under the other: the
+            // navigator can be as narrow as 240 pt.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: SidebarGrid.gap) { startMenu(starts); useMenu }
+                VStack(alignment: .leading, spacing: ColumnGrid.rhythm / 2) { startMenu(starts); useMenu }
             }
             .controlSize(.small)
             .padding(.top, 2)
+        }
+    }
+
+    private func startMenu(_ starts: [OrchestratorHarness]) -> some View {
+        Menu("Start Orchestrator") {
+            ForEach(starts) { harness in Button(harness.title) { model.onStart(harness) } }
+        }
+        .fixedSize()
+    }
+
+    @ViewBuilder
+    private var useMenu: some View {
+        if !model.candidates.isEmpty {
+            Menu("Use as Orchestrator…") {
+                ForEach(model.candidates, id: \.terminal.id) { pane in
+                    Button(pane.terminal.label) { model.onUse(pane) }
+                }
+            }
+            .fixedSize()
         }
     }
 }

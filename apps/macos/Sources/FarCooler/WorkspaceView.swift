@@ -430,7 +430,9 @@ struct DrillBreadcrumb: View {
 
     var body: some View {
         let pieces = Self.pieces(crumbs, worktrees: worktrees)
-        HStack(alignment: .firstTextBaseline, spacing: JumpBar.spacing) {
+        HStack(spacing: JumpBar.spacing) {
+            // The segments on one baseline; the bar centered in the header.
+            HStack(alignment: .firstTextBaseline, spacing: JumpBar.spacing) {
             ForEach(Array(pieces.enumerated()), id: \.offset) { _, piece in
                 switch piece.kind {
                 case .separator:
@@ -447,6 +449,7 @@ struct DrillBreadcrumb: View {
                     EmptyView()
                 }
             }
+            }
             Spacer(minLength: 0)
             if let onClose {
                 Button(action: onClose) {
@@ -459,7 +462,6 @@ struct DrillBreadcrumb: View {
                 .help("Close (Esc)")
                 .accessibilityLabel("Close")
                 .accessibilityIdentifier("workspace-close")
-                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] }
             }
         }
         .padding(.leading, 12)
