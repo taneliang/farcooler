@@ -487,6 +487,13 @@ final class FleetStore: ObservableObject {
         return client.state.refusal
     }
 
+    /// The same check, as the sentence a banner shows: `ActionCopy.refused`.
+    /// `refusal(for:)` is the runner's own words, for a sheet's `DetailBox`.
+    func refusalSentence(for host: String) -> String? {
+        guard refusal(for: host) != nil else { return nil }
+        return ActionCopy.refused(clients[host]?.state)
+    }
+
     // MARK: - Retrying
 
     /// Cancel any bring-up still in flight for `host` before reconnecting.

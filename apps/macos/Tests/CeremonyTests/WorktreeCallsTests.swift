@@ -120,7 +120,7 @@ struct WorktreeCallsTests {
         await record("branches", ["worktree", "branches", "repo", "--json"]) {
             _ = await $0.branches(project: "repo")
         }
-        await record("adoptBranch", ["worktree", "adopt", "repo", "feat/limits"]) {
+        await record("adoptBranch", ["worktree", "adopt", "repo", "feat/limits", "--json"]) {
             _ = await $0.adoptBranch(project: "repo", branch: "feat/limits", agent: "claude")
         }
         await record(
@@ -132,8 +132,8 @@ struct WorktreeCallsTests {
         ) {
             _ = await $0.createWorktree(repo: "repo", task: "fix-it", branch: "fix-it", base: "HEAD")
         }
-        await record("hide", ["worktree", "hide", "w1"]) { await $0.hideWorktree("w1") }
-        await record("unhide", ["worktree", "unhide", "w1"]) { await $0.unhideWorktree("w1") }
+        await record("hide", ["worktree", "hide", "w1", "--json"]) { await $0.hideWorktree("w1") }
+        await record("unhide", ["worktree", "unhide", "w1", "--json"]) { await $0.unhideWorktree("w1") }
         await record("remove", ["worktree", "remove", "w1"]) {
             _ = await $0.removeWorktree("w1", confirm: "")
         }

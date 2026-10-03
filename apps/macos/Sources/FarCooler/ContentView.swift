@@ -111,17 +111,21 @@ struct ContentView: View {
     /// banner below — the opposite of when this control exists. See
     /// `ErrorBanner`, which shows it.
     @State private var editorError: String?
-    /// What a refused or failed action said, shown by the banner over the
-    /// detail pane.
+    /// Each action's result, shown by the banners over the detail pane.
     ///
-    /// Its own state now rather than one client's `lastError`: there is no
-    /// longer one client whose `lastError` could stand for "the last thing
-    /// that went wrong" — an action against one runner must not be reported
-    /// through, or cleared by, a banner bound to a different one. Set by
-    /// `act(on:default:_:)`, which is also the one place that clears it: on
-    /// refusal, and by copying back whatever the client itself set on
-    /// failure.
-    @State private var errorBanner: String?
+    /// Filed by `act(_:on:target:subject:default:_:)` under the action and
+    /// its target, so a result stays until it is dismissed or that action
+    /// is done to that target again. It used to be one client's `lastError`
+    /// copied out after every action, which every command wrote and every
+    /// good refresh cleared: a refused Stop vanished when the refresh after
+    /// it worked, and a focus that worked showed a minute-old failure.
+    @StateObject private var outcomes = ActionOutcomes()
+    /// A sentence the app wrote that isn't one action's result: the one
+    /// notice slot, cleared on navigation. See `ActionOutcomes.notice`.
+    private var errorBanner: String? {
+        get { outcomes.notice }
+        nonmutating set { outcomes.notice = newValue }
+    }
     /// Workspaces whose orchestrator this app has asked to start and the
     /// runner hasn't answered, by `orchestratorKey`.
     @State private var startingOrchestrators = OrchestratorStarts()
@@ -269,11 +273,15 @@ struct ContentView: View {
                     toggle: { toggleNavigator() }))
         }
         .overlay(alignment: .top) {
-            ErrorBanner(message: errorBanner) { errorBanner = nil }
+            VStack(spacing: 0) {
+                ForEach(outcomes.shown) { failure in
+                    ErrorBanner(message: failure.sentence) { outcomes.dismiss(failure.key) }
+                }
+            }
         }
         // A message arriving on a keystroke, so the same snappy preset
         // `PrefixHintOverlay` uses for its chip.
-        .animation(.snappy(duration: 0.22), value: errorBanner)
+        .animation(.snappy(duration: 0.22), value: outcomes.shown)
         .task {
             Notifier.shared.requestAuthorization()
             PushRegistration.shared.label = { Host.current().localizedName ?? "Mac" }
@@ -292,7 +300,7 @@ struct ContentView: View {
             // anyway so a daemon that failed to start is never silent even if
             // that race is ever changed.
             if let problem = await LocalDaemon.shared.ensure().problem {
-                store.clients[""]?.lastError = problem
+                store.clients[""]?.fleetError = problem
             }
             // Every runner's own fleet, repositories, roots, and layouts are
             // already being brought up by `FleetStore` — see `rebuild()`.
@@ -415,13 +423,15 @@ struct ContentView: View {
             markVisibleSeen()
         }
         .onChange(of: selection) { old, new in
-            // Cleared on every navigation, so a refusal or failure left behind
-            // on one pane does not go on describing a pane the user is no
-            // longer looking at. Selection is the one thing every navigation
-            // path — a navigator click, ⌘P, ⌘], ⌃B o, closing a terminal — funnels
-            // through, which makes it the narrowest point that sees every one
-            // of them.
-            errorBanner = nil
+            // The notice is cleared on every navigation, so a sentence left
+            // behind on one pane does not go on describing a pane the user is
+            // no longer looking at. Selection is the one thing every
+            // navigation path — sidebar click, ⌘P, ⌘], ⌃B o, closing a
+            // terminal — funnels through, which makes it the narrowest point
+            // that sees every one of them. An action's own result stays: it
+            // names what it was about, and a refused Stop that went away on
+            // the next click would be the bug it exists to fix.
+            outcomes.clearNotice()
             // Focus and a navigator holding the keyboard are about the view
             // that was on screen, not the next one. Focus stays while the
             // same thing is open, whichever of its panes is selected.
@@ -456,7 +466,7 @@ struct ContentView: View {
                 !holder.isActive || !pane.focused
             {
                 Task {
-                    await act(on: worktree) { client in
+                    await act(.arrange, on: worktree) { client in
                         await client.focusPane(pane.short, in: worktree)
                     }
                 }
@@ -482,7 +492,7 @@ struct ContentView: View {
                 shown.id != active.id
             {
                 Task {
-                    await act(on: worktree) { client in
+                    await act(.arrange, on: worktree) { client in
                         await client.selectLayout(shown.id, in: worktree)
                     }
                 }
@@ -659,8 +669,8 @@ struct ContentView: View {
                 // the stderr of whatever last failed to reach the runner — so
                 // the prefix was this app's words joined to a runner's with a
                 // colon, the join `e0f72df` took out of the phone. The banner
-                // path in `act(on:default:)` keeps its own prefix: nothing
-                // there draws a sentence above it.
+                // path in `act` says its own sentence instead
+                // (`ActionCopy.refused`).
                 if let why = store.refusal(for: host) { return why }
                 guard let client = store.clients[host] else {
                     return "that runner is not connected"
@@ -699,8 +709,10 @@ struct ContentView: View {
                     return kind == .running || kind == .starting
                 }.count
             ) { typed in
+                // The sheet shows this one's failures itself; `removeWorktree`
+                // runs through `runRaw`, so only a refusal reaches a banner.
                 let result = await act(
-                    on: ws, default: .failed("This runner can’t be reached right now.")
+                    .removeWorktree, on: ws, default: .failed("This runner can’t be reached right now.")
                 ) { c in
                     await c.removeWorktree(ws.short, confirm: typed)
                 }
@@ -790,7 +802,9 @@ struct ContentView: View {
             Button("Stop Turn and Switch", role: .destructive) {
                 Task {
                     await act(
-                        on: pending.worktree,
+                        .switchMode, on: pending.worktree, target: pending.terminal,
+                        subject: pending.worktree.terminals.first(where: { $0.short == pending.terminal }).map { Self.quoted($0) }
+                            ?? "this pane",
                         default: .failed("This runner can’t be reached right now.")
                     ) { c in
                         await c.setPaneMode(pending.terminal, mode: pending.mode, force: true)
@@ -898,7 +912,7 @@ struct ContentView: View {
             let worktree = Self.mainCheckout(
                 host: host, repositoryID: repositoryID, project: project, in: store.fleet.worktrees)
         else { return }
-        await act(on: worktree) { client in
+        await act(.newTerminal, on: worktree) { client in
             await client.createTerminal(worktree: worktree.short, preset: "shell", title: "")
             await client.refresh()
         }
@@ -928,9 +942,9 @@ struct ContentView: View {
     /// Move to Workspace ▸.
     private func move(_ worktree: Worktree, to workspace: WorkspaceSummary) {
         Task {
-            // Refused first, as every write here is; see `act(on:_:)`.
-            if let why = store.refusal(for: worktree) {
-                errorBanner = "Cannot do that: \(why)"
+            // Refused first, as every write here is; see `act`.
+            if let why = store.refusalSentence(for: worktree.host ?? "") {
+                errorBanner = why
                 return
             }
             guard let client = store.client(for: worktree) else { return }
@@ -946,8 +960,8 @@ struct ContentView: View {
     private func startOrchestrator(
         _ workspace: WorkspaceSummary, host: String, harness: OrchestratorHarness, replace: Bool
     ) {
-        if let why = store.refusal(for: host) {
-            errorBanner = "Cannot do that: \(why)"
+        if let why = store.refusalSentence(for: host) {
+            errorBanner = why
             return
         }
         guard let client = store.clients[host] else { return }
@@ -1031,7 +1045,11 @@ struct ContentView: View {
             // the daemon does that — closing a diff from tmux's own `⌃B x` has
             // to leave as little behind as closing it from here, so the reaping
             // lives on the host where both can reach it, not in this button.
-            Task { await act(on: ws) { c in await c.stop(terminal: open.short) } }
+            Task {
+                await act(.close, on: ws, target: open.id, subject: Self.quoted(open)) { c in
+                    await c.stop(terminal: open.short)
+                }
+            }
             return
         }
         showChanges(in: ws)
@@ -1055,7 +1073,7 @@ struct ContentView: View {
         }
         if let layout = worktreeColumn(of: ws) {
             Task {
-                let groups = await act(on: ws, default: []) { c in
+                let groups = await act(.openChanges, on: ws, default: []) { c in
                     // `beside: nil` means the focused pane of the layout
                     // named, which is the daemon's own default and the same
                     // anchor `⌃B %` uses.
@@ -1081,7 +1099,7 @@ struct ContentView: View {
             var pane = existing
             if pane == nil {
                 pane = await act(
-                    on: listed, default: nil as Terminal?,
+                    .openChanges, on: listed, default: nil as Terminal?,
                     { c in await c.createTerminal(in: listed, preset: "changes", title: "Changes") })
             }
             guard let pane else { return }
@@ -1473,8 +1491,8 @@ struct ContentView: View {
             if let term = listed.terminals.first(where: { $0.id == terminal }) {
                 Task { await run(.useAsOrchestrator, on: term, in: listed) }
             }
-        case .hide: Task { await act(on: listed) { c in await c.hideWorktree(listed.short) } }
-        case .unhide: Task { await act(on: listed) { c in await c.unhideWorktree(listed.short) } }
+        case .hide: Task { await act(.hide, on: listed) { c in await c.hideWorktree(listed.short) } }
+        case .unhide: Task { await act(.unhide, on: listed) { c in await c.unhideWorktree(listed.short) } }
         case .remove, .dismiss: removeWorktree = listed
         }
     }
@@ -1539,7 +1557,7 @@ struct ContentView: View {
                 ?? (terminals.selected == nil ? WorkspaceScreen.namedTerminal(selection).map(\.worktree) : nil),
             onOpen: { worktree in glance(at: worktree) },
             onNew: usable ? repository.map { repo in { newWorktree(host: host, project: repo.displayName) } } : nil,
-            onUnhide: usable ? { ws in Task { await act(on: ws) { c in await c.unhideWorktree(ws.short) } } } : nil,
+            onUnhide: usable ? { ws in Task { await act(.unhide, on: ws) { c in await c.unhideWorktree(ws.short) } } } : nil,
             menu: { worktreeMenu(for: $0) },
             perform: { item, ws in perform(item, on: ws) },
             terminals: terminals,
@@ -2211,8 +2229,8 @@ struct ContentView: View {
                 }
             },
             onNewTerminal: { newTerminal(in: ws) },
-            onHide: { Task { await act(on: ws) { c in await c.hideWorktree(ws.short) } } },
-            onUnhide: { Task { await act(on: ws) { c in await c.unhideWorktree(ws.short) } } },
+            onHide: { Task { await act(.hide, on: ws) { c in await c.hideWorktree(ws.short) } } },
+            onUnhide: { Task { await act(.unhide, on: ws) { c in await c.unhideWorktree(ws.short) } } },
             onRemove: { removeWorktree = ws },
             onOpenTerminal: { t in open(ws, terminal: t.id) },
             onTerminalAction: { action, t in Task { await run(action, on: t, in: ws) } },
@@ -2271,7 +2289,7 @@ struct ContentView: View {
             linkGeneration: client?.linkGeneration ?? 0,
             refusal: { store.refusal(for: ws) },
             onGeometry: { cols, rows in
-                // Not through `act(on:_:)`: this is geometry, not a click.
+                // Not through `act`: this is geometry, not a click.
                 await store.client(for: ws)?.resize(terminal: term.short, columns: cols, rows: rows)
             },
             onSearchFiles: { query in
@@ -2367,13 +2385,13 @@ struct ContentView: View {
                 focus(PaneRef(host: ws.host ?? "", worktree: ws.id, terminal: id))
                 guard let pane = store.client(for: ws)?.group(holding: id, in: ws.id)?.pane(id)
                 else { return }
-                Task { await act(on: ws) { c in await c.focusPane(pane.short, in: ws) } }
+                Task { await act(.arrange, on: ws) { c in await c.focusPane(pane.short, in: ws) } }
             },
             onSelectGroup: { chosen in
                 Task {
                     // Land in the layout you just chose, not on whatever pane the
                     // previous one had focused.
-                    let groups = await act(on: ws, default: []) { c in
+                    let groups = await act(.arrange, on: ws, default: []) { c in
                         await c.selectLayout(chosen.id, in: ws)
                     }
                     reveal(groups, in: ws)
@@ -2383,7 +2401,7 @@ struct ContentView: View {
                 placePane(dragged, onto: target, side: side, in: ws)
             },
             onViewport: { layout, columns, rows in
-                // Not routed through `act(on:_:)` — see `onGeometry`'s
+                // Not routed through `act` — see `onGeometry`'s
                 // comment above: this fires from pane geometry, not a click.
                 //
                 // The layout drawn, by name: tmux's active window can be an
@@ -2435,30 +2453,44 @@ struct ContentView: View {
             ?? store.repositories.first?.repository.id
     }
 
-    /// Route a mutation to the runner a worktree is on, refusing it first.
+    /// Route a click to the runner a worktree is on, refusing it first, and
+    /// file its result under `verb` and `target` (`ActionOutcomes`).
     ///
     /// Checked here rather than at each call site — see `FleetStore.refusal(for:)`
-    /// for why. On refusal, `fallback` is handed back and nothing is called; on
-    /// success, whatever the client itself left in `lastError` is surfaced too,
-    /// which is how a command that reached its runner and failed there still
-    /// reaches the banner.
+    /// for why. On refusal, `fallback` is handed back, nothing is called, and
+    /// the refusal is the result. Otherwise the result is what the commands
+    /// `body` ran said (`ActionReport`): the first failure in the app's
+    /// words, or nothing, which also takes down this action's earlier
+    /// failure on the same target. `target` defaults to the worktree's id,
+    /// `subject` (how the sentence names it) to its name.
     @discardableResult
     private func act<T>(
-        on ws: Worktree, default fallback: T, _ body: (DaemonClient) async -> T
+        _ verb: ActionVerb, on ws: Worktree, target: String? = nil, subject: String? = nil,
+        default fallback: T, _ body: (DaemonClient) async -> T
     ) async -> T {
-        if let why = store.refusal(for: ws) {
-            errorBanner = "Cannot do that: \(why)"
+        let host = ws.host ?? ""
+        let key = ActionKey(verb: verb, host: host, target: target ?? ws.id)
+        let named = subject ?? Self.quoted(ws)
+        if let why = store.refusalSentence(for: host) {
+            outcomes.settle(key, failure: "\(verb.lead(named)) \(why)")
             return fallback
         }
         guard let client = store.client(for: ws) else { return fallback }
-        let result = await body(client)
-        if let failure = client.lastError { errorBanner = failure }
-        return result
+        return await outcomes.perform(key, subject: named, on: client, body)
     }
 
-    private func act(on ws: Worktree, _ body: (DaemonClient) async -> Void) async {
-        await act(on: ws, default: ()) { client in await body(client) }
+    private func act(
+        _ verb: ActionVerb, on ws: Worktree, target: String? = nil, subject: String? = nil,
+        _ body: (DaemonClient) async -> Void
+    ) async {
+        await act(verb, on: ws, target: target, subject: subject, default: ()) { client in await body(client) }
     }
+
+    /// A worktree as a sentence names it: its task, in quotes.
+    static func quoted(_ ws: Worktree) -> String { "“\(WorktreeName.display(ws.task))”" }
+
+    /// A terminal as a sentence names it: its label, in quotes.
+    static func quoted(_ terminal: Terminal) -> String { "“\(terminal.label)”" }
 
     /// A terminal's rendered screen, for the palette's preview tiles.
     ///
@@ -2485,9 +2517,18 @@ struct ContentView: View {
 
     private func run(_ action: TerminalAction, on term: Terminal, in worktree: Worktree) async {
         switch action {
-        case .restart: await act(on: worktree) { c in await c.restart(terminal: term.short) }
-        case .dismissLost: await act(on: worktree) { c in await c.dismissLost(term) }
-        case .stop: await act(on: worktree) { c in await c.stop(terminal: term.short) }
+        case .restart:
+            await act(.restart, on: worktree, target: term.id, subject: Self.quoted(term)) { c in
+                await c.restart(terminal: term.short)
+            }
+        case .dismissLost:
+            await act(.dismissLost, on: worktree, target: term.id, subject: Self.quoted(term)) { c in
+                await c.dismissLost(term)
+            }
+        case .stop:
+            await act(.stop, on: worktree, target: term.id, subject: Self.quoted(term)) { c in
+                await c.stop(terminal: term.short)
+            }
         case .useAsOrchestrator: useAsOrchestrator(BoardPane(terminal: term, worktree: worktree))
         case .stopBeingOrchestrator: await stepDown(BoardPane(terminal: term, worktree: worktree))
         }
@@ -2497,8 +2538,8 @@ struct ContentView: View {
     /// orchestrator. Asks first when that would replace one, naming it.
     private func useAsOrchestrator(_ pane: BoardPane) {
         let host = pane.worktree.host ?? ""
-        if let why = store.refusal(for: host) {
-            errorBanner = "Cannot do that: \(why)"
+        if let why = store.refusalSentence(for: host) {
+            errorBanner = why
             return
         }
         guard let id = pane.terminal.workspace,
@@ -2670,10 +2711,10 @@ struct ContentView: View {
     /// a question does not answer it — the daemon agrees, so sending anything
     /// else would only be a subprocess spent to be told no.
     ///
-    /// Not routed through `act(on:_:)`: this is a best-effort background
+    /// Not routed through `act`: this is a best-effort background
     /// bookkeeping call, not a user-initiated action, and a runner gone quiet
-    /// for a moment must not put "Cannot do that" on screen just because an
-    /// agent on it happened to finish.
+    /// for a moment must not put a banner on screen just because an agent on
+    /// it happened to finish.
     ///
     /// It also tells each runner what this window is SHOWING, which is the same
     /// judgement one beat earlier — see `DaemonClient.reportWatching`. Marking
@@ -2817,14 +2858,14 @@ struct ContentView: View {
 
         switch command {
         case .zoom:
-            await act(on: worktree) { c in await c.zoomPane(nil, in: worktree, layout: shown) }
+            await act(.arrange, on: worktree) { c in await c.zoomPane(nil, in: worktree, layout: shown) }
 
         case .focusNext:
-            await act(on: worktree) { c in
+            await act(.arrange, on: worktree) { c in
                 await c.focusPane(step: "--next", in: worktree, layout: shown)
             }
         case .focusPrevious:
-            await act(on: worktree) { c in
+            await act(.arrange, on: worktree) { c in
                 await c.focusPane(step: "--prev", in: worktree, layout: shown)
             }
 
@@ -2832,18 +2873,18 @@ struct ContentView: View {
             guard let group, let from = here,
                 let next = group.neighbour(of: from.id, direction)
             else { return }
-            await act(on: worktree) { c in await c.focusPane(next.short, in: worktree) }
+            await act(.arrange, on: worktree) { c in await c.focusPane(next.short, in: worktree) }
 
         case .focusIndex(let n):
             // Counted in the layout on screen. See `pane(numbered:in:)`.
             guard let pane = Self.pane(numbered: n, in: group) else { return }
-            await act(on: worktree) { c in await c.focusPane(pane.short, in: worktree) }
+            await act(.arrange, on: worktree) { c in await c.focusPane(pane.short, in: worktree) }
 
         case .cycle:
-            await act(on: worktree) { c in await c.cycleLayout(worktree, layout: shown) }
+            await act(.arrange, on: worktree) { c in await c.cycleLayout(worktree, layout: shown) }
 
         case .preset(let preset):
-            await act(on: worktree) { c in await c.applyPreset(preset, in: worktree, layout: shown) }
+            await act(.arrange, on: worktree) { c in await c.applyPreset(preset, in: worktree, layout: shown) }
 
         case .evenPanes:
             // Which even arrangement, read off the panes rather than asked for.
@@ -2856,7 +2897,7 @@ struct ContentView: View {
             let columns = Set(group?.panes.map(\.left) ?? []).count
             let rows = Set(group?.panes.map(\.top) ?? []).count
             let preset: TilePreset = columns >= rows ? .evenHorizontal : .evenVertical
-            await act(on: worktree) { c in await c.applyPreset(preset, in: worktree, layout: shown) }
+            await act(.arrange, on: worktree) { c in await c.applyPreset(preset, in: worktree, layout: shown) }
 
         case .splitRight, .splitDown:
             // One call. It used to be create-then-join-then-apply-a-preset, three
@@ -2865,7 +2906,7 @@ struct ContentView: View {
             // four rebuilt the other three as well. `layout split` splits the pane
             // you name, on the side you name, and leaves the rest alone.
             let side: TileDirection = command == .splitRight ? .right : .bottom
-            let groups = await act(on: worktree, default: []) { c in
+            let groups = await act(.arrange, on: worktree, default: []) { c in
                 await c.split(worktree, beside: here?.short, side: side, layout: shown)
             }
             // Land in the pane that was just made, which is the one tmux focuses.
@@ -2883,7 +2924,7 @@ struct ContentView: View {
                 for sharer in sharers { await moveOutOfOrchestratorWindow(sharer, in: worktree) }
                 return
             }
-            let groups = await act(on: worktree, default: []) { c in
+            let groups = await act(.arrange, on: worktree, default: []) { c in
                 await c.breakPane(here.short, in: worktree)
             }
             reveal(groups, in: worktree, preferring: here.id)
@@ -2906,14 +2947,14 @@ struct ContentView: View {
             // Through the layouts the bar offers. See `layout(stepping:from:in:)`.
             guard let next = Self.layout(stepping: 1, from: group?.id, in: screen?.groups ?? [])
             else { return }
-            let groups = await act(on: worktree, default: []) { c in
+            let groups = await act(.arrange, on: worktree, default: []) { c in
                 await c.selectLayout(next.id, in: worktree)
             }
             reveal(groups, in: worktree)
         case .previousGroup:
             guard let previous = Self.layout(stepping: -1, from: group?.id, in: screen?.groups ?? [])
             else { return }
-            let groups = await act(on: worktree, default: []) { c in
+            let groups = await act(.arrange, on: worktree, default: []) { c in
                 await c.selectLayout(previous.id, in: worktree)
             }
             reveal(groups, in: worktree)
@@ -2975,12 +3016,15 @@ struct ContentView: View {
     /// exactly the kind of state the design says clients never derive.
     private func togglePaneMode(_ terminal: Terminal, in worktree: Worktree) async {
         let target = terminal.isAgentPane ? "terminal" : "agent"
-        let result = await act(on: worktree, default: DaemonClient.PaneModeResult.ok) { c in
+        let result = await act(
+            .switchMode, on: worktree, target: terminal.short, subject: Self.quoted(terminal),
+            default: DaemonClient.PaneModeResult.ok
+        ) { c in
             await c.setPaneMode(terminal.short, mode: target)
         }
         switch result {
         case .ok, .failed:
-            // A failure already reached `errorBanner` via `act`, so there is
+            // A failure is already this action's result via `act`, so there is
             // nothing further to do from here.
             break
         case let .confirmationRequired(message):
@@ -3000,11 +3044,11 @@ struct ContentView: View {
         Task {
             let groups: [PaneGroup]
             if let group, let onto = group.panes.first(where: \.focused) ?? group.panes.first {
-                groups = await act(on: worktree, default: []) { c in
+                groups = await act(.arrange, on: worktree, default: []) { c in
                     await c.movePane(terminal.short, onto: onto.short, side: .right, in: worktree)
                 }
             } else {
-                groups = await act(on: worktree, default: []) { c in
+                groups = await act(.arrange, on: worktree, default: []) { c in
                     await c.breakPane(terminal.short, in: worktree)
                 }
             }
@@ -3046,7 +3090,7 @@ struct ContentView: View {
         }
         resizingDivider = true
         Task {
-            await act(on: worktree) { c in
+            await act(.arrange, on: worktree) { c in
                 await c.resizePane(pane.short, side: side, cells: cells, in: worktree)
             }
             resizingDivider = false
@@ -3070,7 +3114,7 @@ struct ContentView: View {
             return
         }
         Task {
-            let groups = await act(on: worktree, default: []) { c in
+            let groups = await act(.arrange, on: worktree, default: []) { c in
                 await c.movePane(shorts[0], onto: shorts[1], side: side, in: worktree)
             }
             reveal(groups, in: worktree, preferring: dragged)
@@ -3318,8 +3362,12 @@ struct ContentView: View {
             Task {
                 // Stop, then remove the record. Closing a terminal should leave
                 // nothing behind — that is what closing means everywhere else.
-                await act(on: worktree) { c in await c.stop(terminal: terminal.short) }
-                await act(on: worktree) { c in await c.removeTerminal(terminal.short) }
+                // One action: a Close whose stop was refused fails its remove
+                // too, and that is one thing that didn't happen, not two.
+                await act(.close, on: worktree, target: terminal.id, subject: Self.quoted(terminal)) { c in
+                    await c.stop(terminal: terminal.short)
+                    await c.removeTerminal(terminal.short)
+                }
                 // The runner publishes no layout when a pane closes, so the
                 // pane left behind kept the closed one's half of the grid
                 // until something else read the layout: a click (checklist
@@ -3622,13 +3670,16 @@ struct ContentView: View {
     /// belongs where the selection was made, not downstream of it.
     private func resume(branch: String, host: String, project: String, agent: String) {
         Task {
-            if let why = store.refusal(for: host) {
-                errorBanner = "Can’t do that because \(why)."
+            let key = ActionKey(verb: .resumeBranch, host: host, target: "\(project) \(branch)")
+            let subject = "“\(branch)”"
+            if let why = store.refusalSentence(for: host) {
+                outcomes.settle(key, failure: "\(ActionVerb.resumeBranch.lead(subject)) \(why)")
                 return
             }
             guard let client = store.clients[host] else { return }
-            let created = await client.adoptBranch(
-                project: project, branch: branch, agent: agent)
+            let created = await outcomes.perform(key, subject: subject, on: client) { c in
+                await c.adoptBranch(project: project, branch: branch, agent: agent)
+            }
             reveal(created)
         }
     }
@@ -3678,7 +3729,7 @@ struct ContentView: View {
     private func openTerminalInNewLayout(_ worktree: Worktree) async -> Terminal? {
         guard
             let created = await act(
-                on: worktree, default: nil as Terminal?,
+                .newTerminal, on: worktree, default: nil as Terminal?,
                 { c in
                     await c.createTerminal(
                         in: worktree,
@@ -3708,7 +3759,7 @@ struct ContentView: View {
         }
         guard
             let created = await act(
-                on: checkout, default: nil as Terminal?,
+                .newTerminal, on: checkout, default: nil as Terminal?,
                 { c in
                     await c.createTerminal(
                         in: checkout, preset: "shell", title: "Terminal \(checkout.terminals.count + 1)")
@@ -3882,7 +3933,7 @@ struct ContentView: View {
         guard let worktree = worktree(host: pane.host, id: pane.worktree),
             let rect = store.client(for: worktree)?.group(holding: pane.terminal, in: pane.worktree)?.pane(pane.terminal)
         else { return }
-        Task { await act(on: worktree) { c in await c.focusPane(rect.short, in: worktree) } }
+        Task { await act(.arrange, on: worktree) { c in await c.focusPane(rect.short, in: worktree) } }
     }
 
 }
@@ -3898,12 +3949,11 @@ enum SearchEscape {
 
 enum TerminalAction { case restart, dismissLost, stop, useAsOrchestrator, stopBeingOrchestrator }
 
-/// Errors the app writes but nothing else shows.
+/// One result the app wrote: an action's failure, or the notice.
 ///
-/// Backed by `ContentView`'s own `errorBanner` now rather than one client's
-/// `lastError` — see that property's doc comment for why a single client's
-/// field stopped being able to answer "what should this banner say" once
-/// there was more than one client to have said it.
+/// One per entry in `ActionOutcomes.shown`, stacked, each with its own close
+/// button: two actions that failed are two things to read, and closing one
+/// must not take the other with it.
 struct ErrorBanner: View {
     let message: String?
     let onDismiss: () -> Void

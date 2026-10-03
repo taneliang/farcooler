@@ -68,7 +68,14 @@ final class DaemonClient: ObservableObject {
     @Published var changesError: String?
 
     @Published var fleet: Fleet = .empty
-    @Published var lastError: String?
+    /// Why this runner's fleet couldn't be read, verbatim; nil once a read
+    /// works. Connection state only: `refresh()` writes it, and so does
+    /// launch when this Mac's own daemon won't start. No action writes it or
+    /// reads it — each action has its own result (`ActionOutcomes`), because
+    /// one field every command wrote and every good read cleared lost a
+    /// refused Stop to the refresh after it and showed a focus that worked an
+    /// error from a minute before.
+    @Published var fleetError: String?
     @Published var busy = false
 
     /// The runner this client drives. Empty means the Mac it runs on.
@@ -744,8 +751,10 @@ final class DaemonClient: ObservableObject {
         guard !reaped.contains(terminal.id) else { return }
         reaped.insert(terminal.id)
 
+        // `runRaw`: this task inherits the action whose refresh found the
+        // exited terminal, and reaping it is not that action's business.
         Task {
-            _ = await run(["terminal", "remove", terminal.short], background: true)
+            _ = await runRaw(["terminal", "remove", terminal.short], background: true)
             Notifier.shared.forget(terminal.id)
             VisitLog.shared.forget(terminal.id)
             await refresh()
@@ -765,14 +774,14 @@ final class DaemonClient: ObservableObject {
 
     func refresh() async {
         // `runRaw`, not `run`: the failure message comes back from THIS
-        // call directly rather than being read out of `lastError` after the
-        // fact, where a concurrent command's own failure could have
-        // overwritten it between that call resuming and this line running.
+        // call directly, and a refresh inside an action is not that action's
+        // failure — a Stop the runner refused is not undone by the fleet
+        // reading fine afterwards.
         let (maybeData, failureMessage) = await runRaw(
             ["worktree", "list", "--json"], background: true)
         guard let data = maybeData else {
             let reason = failureMessage ?? "Couldn’t reach this runner."
-            lastError = reason
+            fleetError = reason
             if looksNotInstalled(reason) {
                 state = .notInstalled
             } else {
@@ -797,7 +806,7 @@ final class DaemonClient: ObservableObject {
             // plus a two-syscall gate per worktree, so a fleet where nothing is
             // happening costs nothing to keep on screen.
             Task { await self.refreshChangesInbox() }
-            lastError = nil
+            fleetError = nil
             // Read before overwriting: `onReconnect` fires for a genuine
             // transition into `.connected`, not for a read that merely
             // confirms a connection that was already up — the common case,
@@ -869,8 +878,9 @@ final class DaemonClient: ObservableObject {
             // `e0f72df` took out of the phone.
             let sample = String(data: data.prefix(200), encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            lastError = sample.isEmpty ? error.localizedDescription : sample
-            state = .unreachable(reason: lastError ?? "Could not read the fleet.")
+            let reason = sample.isEmpty ? error.localizedDescription : sample
+            fleetError = reason
+            state = .unreachable(reason: reason)
             scheduleRetry()
         }
     }
@@ -899,11 +909,11 @@ final class DaemonClient: ObservableObject {
     ///   quietly fixed what it found would make this whole file pointless.
     private func readDaemonBuild() async {
         // `runRaw`, and its message dropped on the floor: a status read that
-        // failed is news for this one dot and nothing else, and `run()` would
-        // put it in `lastError` — the window's error banner — where a
-        // background poll's failure has no business being. `background: true`
-        // for the same reason it is set on `refresh()`: nothing here should
-        // toggle `busy` and re-evaluate every terminal surface in the app.
+        // failed is news for this one dot and nothing else, and inside an
+        // action `run()` would make it that action's failure. `background:
+        // true` for the same reason it is set on `refresh()`: nothing here
+        // should toggle `busy` and re-evaluate every terminal surface in the
+        // app.
         let (data, _) = await runRaw(["--json", "status"], background: true)
         guard let data,
             let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -1065,7 +1075,10 @@ final class DaemonClient: ObservableObject {
     /// be forgotten in the other.
     private func rereadMissedNews() {
         missedNewsGeneration += 1
-        onReconnect?()
+        // Outside any action: a reconnection found by a click's refresh
+        // re-reads every layout, and those reads failing are not that
+        // click's failure. Tasks started here inherit no report.
+        ActionReporting.$current.withValue(nil) { onReconnect?() }
     }
 
     /// The runner dropped events it owed this stream (`events_missed`): the
@@ -1442,7 +1455,7 @@ final class DaemonClient: ObservableObject {
     @Published private(set) var repositoriesListed = false
 
     func refreshRepositories() async {
-        guard let data = await run(["repo", "list", "--json"], background: true) else { return }
+        guard let data = await runRaw(["repo", "list", "--json"], background: true).data else { return }
         let decoded = try? JSONDecoder().decode(RepositoryList.self, from: data)
         repositories = decoded?.repositories ?? []
         repositoriesListed = decoded != nil
@@ -1453,7 +1466,7 @@ final class DaemonClient: ObservableObject {
     @Published var roots: [RepositoryRoot] = []
 
     func refreshRoots() async {
-        guard let data = await run(["root", "list", "--json"], background: true) else { return }
+        guard let data = await runRaw(["root", "list", "--json"], background: true).data else { return }
         roots = (try? JSONDecoder().decode(RootList.self, from: data))?.roots ?? []
     }
 
@@ -1490,11 +1503,10 @@ final class DaemonClient: ObservableObject {
     /// Touches nothing on disk, same as the CLI's own `root remove` promises.
     @discardableResult
     func removeRoot(_ id: String, confirm: String) async -> RemoveRootResult {
-        let before = lastError
-        guard await run(["root", "remove", id, "--confirm", confirm]) != nil else {
-            let message = lastError ?? "command failed"
+        let (data, failure) = await runRaw(["root", "remove", id, "--confirm", confirm])
+        guard data != nil else {
+            let message = failure ?? "command failed"
             if message.localizedCaseInsensitiveContains("confirmation") {
-                lastError = before
                 return .confirmationRequired
             }
             return .failed(message)
@@ -1836,13 +1848,13 @@ final class DaemonClient: ObservableObject {
     @discardableResult
     func adoptBranch(project: String, branch: String, agent: String) async -> String? {
         let before = Set(fleet.worktrees.map(\.id))
-        _ = await run(["worktree", "adopt", project, branch])
+        _ = await run(["worktree", "adopt", project, branch, "--json"])
         await refresh()
 
         guard let worktree = fleet.worktrees.first(where: { !before.contains($0.id) })
         else { return nil }
         _ = await run([
-            "terminal", "create", worktree.short, "--preset", agent, "--title", "Agent",
+            "terminal", "create", worktree.short, "--preset", agent, "--title", "Agent", "--json",
         ])
         await refresh()
         return worktree.id
@@ -2136,8 +2148,8 @@ final class DaemonClient: ObservableObject {
     var typingPasses = 120
 
     /// `send`, saying whether the runner took both the text and the Return.
-    /// Through `runRaw`, so a refusal is this path's to report rather than a
-    /// `lastError` left for the next unrelated action's banner.
+    /// Through `runRaw`, so a refusal is this path's to report rather than
+    /// the failure of whichever action it runs inside.
     private func type(_ text: String, into terminal: String) async -> Bool {
         let (typed, _) = await runRaw(["terminal", "send", terminal, text], background: true)
         guard typed != nil else { return false }
@@ -2218,12 +2230,12 @@ final class DaemonClient: ObservableObject {
     }
 
     func hideWorktree(_ worktree: String) async {
-        _ = await run(["worktree", "hide", worktree])
+        _ = await run(["worktree", "hide", worktree, "--json"])
         await refresh()
     }
 
     func unhideWorktree(_ worktree: String) async {
-        _ = await run(["worktree", "unhide", worktree])
+        _ = await run(["worktree", "unhide", worktree, "--json"])
         await refresh()
     }
 
@@ -2393,13 +2405,12 @@ final class DaemonClient: ObservableObject {
         var args = ["worktree", "remove", worktree]
         if !confirm.isEmpty { args += ["--confirm", confirm] }
 
-        let before = lastError
-        guard await run(args) != nil else {
-            let message = lastError ?? "command failed"
+        // `runRaw`: both refusals are the sheet's to show, beside the field,
+        // not a banner's behind it.
+        let (data, failure) = await runRaw(args)
+        guard data != nil else {
+            let message = failure ?? "command failed"
             if message.localizedCaseInsensitiveContains("confirmation") {
-                // Leave the banner clean: this refusal becomes the sheet's
-                // own field and callout, not a banner behind it.
-                lastError = before
                 return .confirmationRequired
             }
             return .failed(message)
@@ -2438,16 +2449,16 @@ final class DaemonClient: ObservableObject {
     /// `worktree file-search`. This once asked for `workspace file-search`, a
     /// command the CLI never had, so every search exited 2 and came back
     /// empty; `WorktreeCallsTests` now hands every line these calls send to
-    /// the CLI to parse. Empty on any failure rather than surfacing
-    /// `lastError`: a mention picker that cannot search is a picker with
-    /// nothing to show, not a reason to put a banner over someone's
-    /// half-typed message.
+    /// the CLI to parse. Empty on any failure, and `runRaw` so it is never a
+    /// banner: a mention picker that cannot search is a picker with nothing
+    /// to show, not a reason to put a banner over someone's half-typed
+    /// message.
     func searchFiles(in worktree: Worktree, query: String) async -> [String] {
         guard !query.isEmpty else { return [] }
         guard
-            let data = await run([
+            let data = await runRaw([
                 "worktree", "file-search", worktree.short, query, "--json",
-            ])
+            ]).data
         else { return [] }
         struct Result: Decodable { var paths: [String] }
         return (try? JSONDecoder().decode(Result.self, from: data))?.paths ?? []
@@ -2486,15 +2497,16 @@ final class DaemonClient: ObservableObject {
         var args = ["terminal", "set-pane-mode", terminal, mode]
         if force { args.append("--force") }
 
-        let before = lastError
-        guard await run(args) != nil else {
-            let message = lastError ?? "command failed"
+        let (data, failure) = await runRaw(args)
+        guard data != nil else {
+            let message = failure ?? "command failed"
             if message.localizedCaseInsensitiveContains("confirmation") {
-                // Leave the banner clean: this refusal becomes a sheet, not a
-                // banner, in `ContentView`.
-                lastError = before
+                // This refusal becomes a sheet, not a banner, in
+                // `ContentView`.
                 return .confirmationRequired(message)
             }
+            // Any other refusal is the switch's failure, for its banner.
+            ActionReport.note(message)
             return .failed(message)
         }
         await refresh()
@@ -2540,12 +2552,12 @@ final class DaemonClient: ObservableObject {
     /// also hid the tab strip — with one layout there are no tabs to show —
     /// so the pane appeared to arrive nowhere at all.
     func createTerminal(worktree: String, preset: String, title: String) async {
-        _ = await run(["terminal", "create", worktree, "--preset", preset, "--title", title])
+        _ = await run(["terminal", "create", worktree, "--preset", preset, "--title", title, "--json"])
         await refresh()
     }
 
     func restart(terminal: String) async {
-        _ = await run(["terminal", "restart", terminal])
+        _ = await run(["terminal", "restart", terminal, "--json"])
         await refresh()
     }
 
@@ -2556,7 +2568,7 @@ final class DaemonClient: ObservableObject {
     /// for the row to say. Its notification and its place in the switcher go
     /// with it: both point at something that no longer exists.
     func dismissLost(_ terminal: Terminal) async {
-        _ = await run(["terminal", "dismiss-lost", terminal.short])
+        _ = await run(["terminal", "dismiss-lost", terminal.short, "--json"])
         Notifier.shared.forget(terminal.id)
         VisitLog.shared.forget(terminal.id)
         await refresh()
@@ -2569,7 +2581,8 @@ final class DaemonClient: ObservableObject {
     /// being read, and clearing a notification nobody read is worse than not
     /// sending one.
     func markSeen(_ terminal: String) async {
-        _ = await run(["terminal", "seen", terminal], background: true)
+        // `runRaw`: bookkeeping, never the failure of the click it follows.
+        _ = await runRaw(["terminal", "seen", terminal], background: true)
     }
 
     /// End `done` for the terminals on screen that have it — if somebody is
@@ -2745,8 +2758,8 @@ final class DaemonClient: ObservableObject {
             watching = claim
             watchingSentAt = Date()
             // `runRaw`, and its message dropped: a heartbeat that failed is
-            // nobody's news, and `run` would leave it in `lastError` for the
-            // next unrelated action's banner to show.
+            // nobody's news, least of all the news of the action it happened
+            // to start inside.
             Task { [weak self] in
                 _ = await self?.runRaw(["terminal", "watching"] + claim, background: true)
             }
@@ -2782,13 +2795,20 @@ final class DaemonClient: ObservableObject {
     }
 
     /// Delete a terminal's record. Refused by the daemon while it is running.
+    ///
+    /// A record already gone is what was asked for, not a failure: the stop
+    /// before it in a Close refreshes, and the refresh reaps an exited
+    /// terminal (`reapIfExited`), so the remove can find nothing to remove.
     func removeTerminal(_ terminal: String) async {
-        _ = await run(["terminal", "remove", terminal])
+        let (data, message) = await runRaw(["terminal", "remove", terminal, "--json"])
+        if data == nil, let message, TaskFailure.code(in: message) != "not-found" {
+            ActionReport.note(message)
+        }
         await refresh()
     }
 
     func stop(terminal: String) async {
-        _ = await run(["terminal", "stop", terminal])
+        _ = await run(["terminal", "stop", terminal, "--json"])
         await refresh()
     }
 
@@ -3002,7 +3022,7 @@ final class DaemonClient: ObservableObject {
         if let commit, scope == .commit { args += ["--commit", commit] }
         if context > 0 { args += ["--context", "\(context)"] }
         args.append("--json")
-        guard let data = await run(args, background: true) else { return FileDiff() }
+        guard let data = await runRaw(args, background: true).data else { return FileDiff() }
         if let diff = try? JSONDecoder().decode(FileDiff.self, from: data) { return diff }
         guard let text = String(data: data, encoding: .utf8) else { return FileDiff() }
         return FileDiff(lines: Self.parseUnified(text))
@@ -3074,10 +3094,10 @@ final class DaemonClient: ObservableObject {
     /// keep in step.
     ///
     /// `runRaw` rather than `run`, for both of its differences. The failure
-    /// comes BACK instead of going into `lastError`, because `lastError` draws
-    /// the orange banner across the top of this pane and the outbox is already
-    /// showing this failure beside the notes it kept — the same reason
-    /// `runReportingError` exists for sheets. And `background: true`, because
+    /// comes BACK instead of becoming the failure of an action, which draws
+    /// the orange banner across the top of the window, and the outbox is
+    /// already showing this failure beside the notes it kept — the same
+    /// reason `runReportingError` exists for sheets. And `background: true`, because
     /// `busy` is `@Published` and toggling it re-evaluates every terminal
     /// surface in the window; the outbox has a spinner of its own that costs
     /// one popover.
@@ -3090,33 +3110,28 @@ final class DaemonClient: ObservableObject {
 
     // MARK: - Subprocess
 
-    /// Run a command; on failure, set `lastError` and hand back `nil`.
+    /// Run a command; on failure, hand back `nil` and make the failure the
+    /// running action's (`ActionReport`), if this is running inside one.
     ///
-    /// A thin wrapper over `runRaw`, kept for the roughly thirty call sites
-    /// in this file that only ever wanted the data-or-banner behavior. The
-    /// one caller that needs its OWN failure's exact words — `refresh()`,
-    /// which decides `.unreachable`'s reason and whether this is a runner
-    /// that needs installing — calls `runRaw` directly instead. See there.
+    /// A thin wrapper over `runRaw` for the call sites that only want the
+    /// data, and the banner when a click's command fails. The report is the
+    /// action's own, set by `ActionOutcomes.perform` for that action's task
+    /// alone, so a failure here can't outlive the action or reach a
+    /// different one, and a poll, which runs inside no action, reports to
+    /// nobody. `background` is only whether `busy` is toggled: a focus is
+    /// a click that doesn't show a spinner.
     @discardableResult
     private func run(_ args: [String], background: Bool = false) async -> Data? {
         let (data, message) = await runRaw(args, background: background)
-        if let message { lastError = message }
+        if let message { ActionReport.note(message) }
         return data
     }
 
-    /// Run a command and hand back its data or its failure message directly,
-    /// rather than through `lastError`.
+    /// Run a command and hand back its data or its failure message directly.
     ///
-    /// `refresh()` used to read `lastError` back out after `run()` returned,
-    /// to build `.unreachable(reason:)`. That is a race: `run()`'s failure
-    /// used to write `lastError` and resume its continuation from the same
-    /// hop, which closed the ordering between those two — but a SECOND,
-    /// concurrent command's own `run()` call can still land its own write in
-    /// between that resume and `refresh()`'s subsequent read, handing
-    /// `.unreachable` a message about an unrelated command instead of its
-    /// own. Returning the message removes the shared state from the middle
-    /// of that read entirely: whatever this call's own result says is what
-    /// `refresh()` acts on, unconditionally.
+    /// For a caller that says its own failure — a sheet, `refresh()`'s
+    /// `.unreachable(reason:)` — rather than leaving it to the action it
+    /// runs inside.
     private func runRaw(
         _ args: [String], background: Bool = false
     ) async -> (data: Data?, message: String?) {
@@ -3173,20 +3188,13 @@ final class DaemonClient: ObservableObject {
         }
     }
 
-    /// Run a command and hand back its failure instead of only banner-ing it.
+    /// Run a command and hand back its failure instead of banner-ing it.
     ///
     /// A sheet needs to show the reason next to the field that caused it and
-    /// stay open so the user can fix it. `lastError` alone would put the
-    /// message in the window behind the sheet, where nobody is looking.
+    /// stay open so the user can fix it. A banner would put the message in
+    /// the window behind the sheet, where nobody is looking.
     private func runReportingError(_ args: [String]) async -> String? {
-        let before = lastError
-        let output = await run(args)
-        if output == nil {
-            let message = lastError ?? "command failed"
-            // Leave the banner clean: the sheet is showing this one.
-            lastError = before
-            return message
-        }
-        return nil
+        let (data, message) = await runRaw(args)
+        return data == nil ? (message ?? "command failed") : nil
     }
 }
