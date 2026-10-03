@@ -181,7 +181,7 @@ class Account(context: Context) {
         val body = post("/v1/auth/token", buildJsonObject {
             put("code", JsonPrimitive(code))
             put("verifier", JsonPrimitive(verifier))
-        })
+        }).body
         if (body == null) {
             _lastError.value = "The relay would not complete the sign-in."
             return true
@@ -226,25 +226,33 @@ class Account(context: Context) {
      * alone would be an app carrying the key.
      */
     suspend fun accessToken(): String? {
-        val refresh = tokens.read(KEY_REFRESH) ?: return null
-        val access = tokens.read(KEY_ACCESS)
-        if (access != null) {
-            val expiry = jwtExpiry(access)
-            if (expiry != null && expiry - System.currentTimeMillis() > 60_000) return access
-        }
-        val body = post("/v1/auth/refresh", buildJsonObject {
-            put("refreshToken", JsonPrimitive(refresh))
-        })
-        if (body == null) {
-            // A refresh token that no longer works means the session is over,
-            // and leaving a dead one in place makes every later call fail
-            // silently instead of showing a sign-in button.
-            forgetLocally()
-            return null
-        }
-        store(body)
-        return body["accessToken"]?.jsonPrimitive?.contentOrNull
+        if (tokens.read(KEY_REFRESH) == null) return null
+        freshAccessToken()?.let { return it }
+        // Null for this call when the refresh failed, and the session kept: an
+        // unreachable relay is not a signed-out person. Only a refresh token
+        // the relay definitively refused ends it; see [SessionRefresher].
+        return (refresher.refresh() as? Refresh.Refreshed)?.accessToken
     }
+
+    /** The stored access token, if it has more than a minute left. */
+    private fun freshAccessToken(): String? {
+        val access = tokens.read(KEY_ACCESS) ?: return null
+        val expiry = jwtExpiry(access) ?: return null
+        return access.takeIf { expiry - System.currentTimeMillis() > 60_000 }
+    }
+
+    private val refresher = SessionRefresher(
+        storedRefreshToken = { tokens.read(KEY_REFRESH) },
+        freshAccessToken = ::freshAccessToken,
+        request = { refresh ->
+            post("/v1/auth/refresh", buildJsonObject { put("refreshToken", JsonPrimitive(refresh)) })
+        },
+        store = ::store,
+        // A refresh token the relay refused means the session is over, and
+        // leaving a dead one in place makes every later call fail silently
+        // instead of showing a sign-in button.
+        endSession = ::forgetLocally,
+    )
 
     /**
      * Tell the relay where to reach this device, and what version is asking.
@@ -292,7 +300,7 @@ class Account(context: Context) {
             },
             bearer = token,
         )
-        return body != null
+        return body is RelayAnswer.Answered
     }
 
     /**
@@ -307,14 +315,14 @@ class Account(context: Context) {
             "/v1/daemons",
             buildJsonObject { put("label", JsonPrimitive(label)) },
             bearer = token,
-        )
+        ).body
         return body?.get("token")?.jsonPrimitive?.contentOrNull
     }
 
     /** Everything this account has registered, for the management screen. */
     suspend fun fetchRegistrations(): Registrations? {
         val token = accessToken() ?: return null
-        val body = post("/v1/account", JsonObject(emptyMap()), bearer = token) ?: return null
+        val body = post("/v1/account", JsonObject(emptyMap()), bearer = token).body ?: return null
 
         val devices = body["devices"]?.jsonArray?.map { element ->
             val item = element.jsonObject
@@ -358,7 +366,7 @@ class Account(context: Context) {
             path,
             buildJsonObject { put("id", JsonPrimitive(registration.id)) },
             bearer = token,
-        ) != null
+        ) is RelayAnswer.Answered
     }
 
     // MARK: - Plumbing
@@ -376,16 +384,22 @@ class Account(context: Context) {
         }
     }
 
+    /**
+     * One POST to the relay, and which of three things happened.
+     *
+     * It used to answer null for a refusal, a 5xx and no network alike, and
+     * the refresh path read that one null as "the session is over".
+     */
     private suspend fun post(
         path: String,
         body: JsonObject,
         bearer: String? = null,
-    ): JsonObject? = withContext(Dispatchers.IO) {
-        runCatching {
+    ): RelayAnswer = withContext(Dispatchers.IO) {
+        val connection = try {
             // `relay` is a setting anyone can type into, so a stray space in it
             // must surface as a relay that would not answer rather than a
             // crash.
-            val connection = (URL(relay + path).openConnection() as HttpURLConnection).apply {
+            (URL(relay + path).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 setRequestProperty("Content-Type", "application/json")
                 bearer?.let { setRequestProperty("Authorization", "Bearer $it") }
@@ -393,11 +407,28 @@ class Account(context: Context) {
                 readTimeout = 15_000
                 doOutput = true
             }
+        } catch (e: Exception) {
+            return@withContext RelayAnswer.Unreachable("relay address invalid")
+        }
+        val status = try {
             connection.outputStream.use { it.write(body.toString().toByteArray()) }
-            if (connection.responseCode != 200) return@runCatching null
-            val text = connection.inputStream.bufferedReader().readText()
-            json.parseToJsonElement(text).jsonObject
+            connection.responseCode
+        } catch (e: Exception) {
+            // The request never completed. Named by its class, never its
+            // message, which can carry the URL.
+            return@withContext RelayAnswer.Unreachable(e.javaClass.simpleName)
+        }
+        val text = runCatching {
+            (if (status == 200) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()?.readText()
         }.getOrNull()
+        val parsed = text?.let { runCatching { json.parseToJsonElement(it).jsonObject }.getOrNull() }
+        when {
+            status != 200 -> RelayAnswer.Refused(status, parsed)
+            // A 200 that isn't JSON is the relay's failure, not this session's.
+            parsed == null -> RelayAnswer.Refused(status, null)
+            else -> RelayAnswer.Answered(parsed)
+        }
     }
 
     /**
