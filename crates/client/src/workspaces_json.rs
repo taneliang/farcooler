@@ -43,6 +43,8 @@ pub fn workspace_json(w: &pb::Workspace) -> serde_json::Value {
         "orchestrator": some_uuid(w.orchestrator_terminal_id.as_deref()).map(|u| u.to_string()),
         "home": w.home.as_deref().filter(|p| !p.is_empty()),
         "charter": w.charter_path.as_deref().filter(|p| !p.is_empty()),
+        // Null from a runner without `wake_on_answer`, which tells nobody.
+        "wake_on_answer": w.wake_on_answer,
     })
 }
 
@@ -123,9 +125,12 @@ mod tests {
         // Paths withheld from this client are null, not "".
         assert!(json["home"].is_null(), "{json}");
         assert!(json["charter"].is_null(), "{json}");
+        // An older runner's says nothing, which is null rather than off.
+        assert!(json["wake_on_answer"].is_null(), "{json}");
 
-        let none = workspace_json(&pb::Workspace { is_main: true, ..w });
+        let none = workspace_json(&pb::Workspace { is_main: true, wake_on_answer: Some(false), ..w });
         assert_eq!(none["is_main"], true);
+        assert_eq!(none["wake_on_answer"], false);
     }
 
     #[test]

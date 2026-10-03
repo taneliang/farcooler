@@ -179,6 +179,7 @@ pub fn workspace(
         home: admin(scope).then(|| home.to_string_lossy().into_owned()),
         charter_path: admin(scope)
             .then(|| home.join(crate::workspace_home::CHARTER_FILE).to_string_lossy().into_owned()),
+        wake_on_answer: Some(model.wake_on_answer),
     }
 }
 

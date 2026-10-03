@@ -451,6 +451,7 @@ fn required_scope(method: &str) -> Option<Scope> {
         "workspace.create"
         | "workspace.rename"
         | "workspace.set_prefix"
+        | "workspace.set_settings"
         | "workspace.delete"
         | "workspace.start_orchestrator"
         | "task.move"
@@ -2068,6 +2069,20 @@ impl Rpc {
                 )?))
             }
 
+            "workspace.set_settings" => {
+                let id = Self::target(&req)?;
+                let Some(request::Payload::WorkspaceSetSettings(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::Workspace(crate::workspace_ops::set_settings(
+                    svc,
+                    &self.watcher,
+                    id,
+                    &p,
+                    scope,
+                )?))
+            }
+
             "workspace.delete" => {
                 let id = Self::target(&req)?;
                 Ok(result::Value::Empty(crate::workspace_ops::delete(svc, &self.watcher, id)?))
@@ -2540,6 +2555,7 @@ mod tests {
             "workspace.create",
             "workspace.rename",
             "workspace.set_prefix",
+            "workspace.set_settings",
             "workspace.delete",
             "task.move",
             "worktree.assign",
@@ -2707,6 +2723,7 @@ mod tests {
             "workspace.create",
             "workspace.rename",
             "workspace.set_prefix",
+            "workspace.set_settings",
             "workspace.delete",
             "task.move",
             "worktree.assign",

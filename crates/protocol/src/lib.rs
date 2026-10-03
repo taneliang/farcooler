@@ -395,6 +395,13 @@ pub mod capability {
     /// `Terminal.activity` and says the runner needs an update to show asks
     /// and decisions.
     pub const NEEDS_YOU: &str = "needs_you";
+    /// Answering a decision tells the agent waiting on it:
+    /// `workspace.set_settings` and `Workspace.wake_on_answer`.
+    ///
+    /// Its own capability because an older daemon has neither the switch nor
+    /// the behavior: a client that reads it absent draws no switch rather
+    /// than one that changes nothing.
+    pub const WAKE_ON_ANSWER: &str = "wake_on_answer";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -405,7 +412,7 @@ pub mod capability {
             WORKTREES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES,
             ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL, WORKTREE_ORDER, TASKS,
             LAUNCH_PROMPT, TERMINAL_TASK, WORKTREE_FORK_ONLY, WORKSTREAMS, ORCHESTRATOR_HANDOFF,
-            NEEDS_YOU,
+            NEEDS_YOU, WAKE_ON_ANSWER,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -487,6 +494,7 @@ pub mod capability {
             "terminal.watching" => WATCHING,
             "terminal.attach" => TERMINAL_STREAM,
             "needs_you.list" => NEEDS_YOU,
+            "workspace.set_settings" => WAKE_ON_ANSWER,
             _ => return None,
         })
     }

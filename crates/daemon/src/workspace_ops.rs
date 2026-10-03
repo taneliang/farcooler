@@ -105,6 +105,25 @@ pub fn set_prefix(
     pb_workspace(svc, &workspace, scope)
 }
 
+/// `workspace.set_settings`: each switch present is set, each absent is left
+/// alone. One that names no switch is refused (`settings`) rather than read
+/// as a no-op, so a client that meant to change something hears it didn't.
+pub fn set_settings(
+    svc: &Service,
+    watcher: &Watcher,
+    id: Uuid,
+    req: &pb::WorkspaceSetSettings,
+    scope: Scope,
+) -> Result<pb::Workspace> {
+    let Some(on) = req.wake_on_answer else {
+        return Err(DomainError::InvalidArgument { what: "settings" });
+    };
+    let expected = version(svc, id, req.expected_version)?;
+    let workspace = svc.store.set_workspace_wake_on_answer(id, expected, on)?;
+    watcher.announce_fleet_changed();
+    pb_workspace(svc, &workspace, scope)
+}
+
 /// `workspace.delete`: refused for Main and for a workspace anything still
 /// belongs to. Its home is left on disk: the charter in it is the user's
 /// own words, and deleting a workspace shouldn't delete those. Its
@@ -229,6 +248,28 @@ mod tests {
         let listed = list(&svc, Some(repo), Scope::HostAdmin).unwrap();
         let main = &listed.items[0];
         assert!(main.home.is_some() && main.charter_path.is_some(), "{main:?}");
+    }
+
+    /// The wake switch reads on for every workspace until it's set, is set by
+    /// `workspace.set_settings`, and a call naming no switch is refused.
+    #[tokio::test]
+    async fn a_workspace_wakes_on_answer_until_its_switch_is_turned_off() {
+        let (_dir, svc, repo) = fixture().await;
+        let watcher = crate::watch::Watcher::new(svc.clone());
+        let main = list(&svc, Some(repo), Scope::Control).unwrap().items.remove(0);
+        assert_eq!(main.wake_on_answer, Some(true), "on by default");
+        let id = Uuid::from_slice(&main.id).unwrap();
+        let off = pb::WorkspaceSetSettings { wake_on_answer: Some(false), expected_version: None };
+        let set = set_settings(&svc, &watcher, id, &off, Scope::Control).unwrap();
+        assert_eq!(set.wake_on_answer, Some(false));
+        assert_eq!(list(&svc, Some(repo), Scope::Read).unwrap().items[0].wake_on_answer, Some(false));
+        let nothing = pb::WorkspaceSetSettings { wake_on_answer: None, expected_version: None };
+        assert!(matches!(
+            set_settings(&svc, &watcher, id, &nothing, Scope::Control),
+            Err(DomainError::InvalidArgument { what: "settings" })
+        ));
+        let stale = pb::WorkspaceSetSettings { wake_on_answer: Some(true), expected_version: Some(main.resource_version) };
+        assert!(matches!(set_settings(&svc, &watcher, id, &stale, Scope::Control), Err(DomainError::ResourceConflict)));
     }
 
     /// Deleting a workspace removes its orchestrator's settings file, and
