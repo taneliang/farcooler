@@ -91,21 +91,41 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// A notification's button, or a click on it.
     ///
-    /// A task decision's answer buttons write the answer as an ANSWER note
-    /// through the runner that posted it, the same note the Needs You rows
-    /// write; the runner then tells the agent waiting on it (ov-90). Any
-    /// other click just brings the app forward, as it always has.
+    /// Read here, off the main actor, into what `respond` acts on: the
+    /// notification's `userInfo` can't cross to it.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
     ) async {
         let info = response.notification.request.content.userInfo
-        let action = response.actionIdentifier
         let typed = (response as? UNTextInputNotificationResponse)?.userText
-        let target = info["target"] as? String
-        guard let notice = TaskNotice(userInfo: info),
-            let answer = TaskDecisionActions.answer(action: action, options: notice.options, typed: typed)
-        else { return }
-        await send(answer, to: notice, target: target)
+        guard let notice = TaskNotice(userInfo: info) else { return }
+        await respond(
+            to: notice, target: info["target"] as? String, action: response.actionIdentifier, typed: typed)
+    }
+
+    /// What a task notice's button or click does.
+    ///
+    /// A task decision's answer buttons write the answer as an ANSWER note
+    /// through the runner that posted it, the same note the Needs You rows
+    /// write; the runner then tells the agent waiting on it (ov-90). A click
+    /// opens the task, as choosing it in its workspace's navigator does
+    /// (`TaskNoticeOpener`, ov-106), once its runner is connected. Any other
+    /// notification's click just brings the app forward, as it always has.
+    func respond(to notice: TaskNotice, target: String?, action: String, typed: String?, now: Date = Date()) async {
+        if let answer = TaskDecisionActions.answer(action: action, options: notice.options, typed: typed) {
+            await send(answer, to: notice, target: target)
+            return
+        }
+        guard let open = TaskNoticeOpen(notice: notice, target: target, action: action, now: now) else { return }
+        TaskNoticeOpener.shared.request(open)
+    }
+
+    /// Be the notification center's delegate, before the app finishes
+    /// launching: a click that launched the app is handed to the delegate
+    /// set by then, and the window's `requestAuthorization` comes later.
+    func becomeDelegate() {
+        guard Self.canNotify else { return }
+        UNUserNotificationCenter.current().delegate = self
     }
 
     /// Send `answer` to `notice`'s task, or say it wasn't sent.
@@ -123,7 +143,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let content = UNMutableNotificationContent()
         content.title = "Couldn’t Send Your Answer"
         content.body = "Open Far Cooler to answer \(notice.key) again."
-        content.userInfo = notice.userInfo
+        var info = notice.userInfo
+        // So a click on it opens the task on the runner it came from.
+        if let target { info["target"] = target }
+        content.userInfo = info
         // Under the task's own id, so it replaces the decision whose buttons
         // didn't work rather than sitting beside it.
         if let id = notice.noticeId { content.threadIdentifier = id }
@@ -255,7 +278,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             TaskNotifications.events(master: Preferences.shared.notifyOnAttention)
         }
         guard Self.canNotify else { return }
-        UNUserNotificationCenter.current().delegate = self
+        becomeDelegate()
         UNUserNotificationCenter.current()
             .requestAuthorization(options: [.alert, .sound]) { [weak self] granted, _ in
                 Task { @MainActor in
@@ -394,8 +417,16 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 }
 
 
-/// The only reason this app has a delegate: the APNs token arrives nowhere else.
+/// The app's delegate: the APNs token arrives nowhere else, and a click on a
+/// notification that launched the app is only handed to a notification center
+/// delegate set before launching finishes.
 final class PushDelegate: NSObject, NSApplicationDelegate {
+    /// The notifier takes clicks from here on, so one that launched the app
+    /// reaches it (ov-106).
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated { Notifier.shared.becomeDelegate() }
+    }
+
     func application(
         _ application: NSApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data

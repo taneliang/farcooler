@@ -9,6 +9,8 @@ struct ContentView: View {
     @State private var windowID = UUID()
     @ObservedObject private var preferences = Preferences.shared
     @ObservedObject private var themes = Themes.shared
+    /// A click on a task notice, waiting to be opened (ov-106).
+    @ObservedObject private var noticeOpener = TaskNoticeOpener.shared
     @Environment(\.openSettings) private var openSettings
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -401,6 +403,9 @@ struct ContentView: View {
             settleLaunch()
         }
         .onChange(of: store.needsYou) { _, _ in settleLaunch() }
+        // A click on a task notice: its task, opened as the navigator opens
+        // one, once its runner is connected (ov-106).
+        .task(id: noticeOpener.pending?.id) { await openNoticedTask() }
         // ⌃HJKL traverse the layout the keyboard is in, and pass through to
         // a lone pane's program. See `WorkspaceScreen.tiledPanes`.
         .onChange(of: WorkspaceScreen.tiledPanes(selectedPane, in: shown), initial: true) { _, count in
@@ -3895,6 +3900,19 @@ struct ContentView: View {
     private func openTask(_ id: String, host: String, workspace: String) {
         trail = nil
         selection = .workspace(host: host, workspace: workspace, focus: .task(id))
+    }
+
+    /// Open the task a notice was clicked for, in this window if it's the
+    /// one to (`TaskNoticeOpener.claim`), through `openTask`, the palette's
+    /// way and the navigator's selection.
+    private func openNoticedTask() async {
+        guard let open = noticeOpener.pending else { return }
+        await noticeOpener.drive(
+            open, window: windowID, isKey: { windowBox.window?.isKeyWindow == true }, clients: { store.clients },
+            land: { host, place in
+                openTask(place.task, host: host, workspace: place.workspace)
+                windowBox.window?.makeKeyAndOrderFront(nil)
+            })
     }
 
     /// A finished status's History page, in the main area (ov-103). The

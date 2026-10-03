@@ -925,7 +925,10 @@ final class DaemonClient: ObservableObject {
             // `can(_:)` saw an empty set and answered as for a daemon older
             // than capabilities: worktrees and terminals, nothing else.
             // `reportWatching`'s gate was therefore closed on every Mac.
-            capabilities: Set(body["capabilities"] as? [String] ?? []))
+            capabilities: Set(body["capabilities"] as? [String] ?? []),
+            // Which runner this is, by the id a task notice names it by, so a
+            // click on a pushed notice finds it (`TaskNoticeOpen`, ov-106).
+            runnerId: (body["runnerId"] as? String).flatMap { $0.isEmpty ? nil : $0 })
         servedNeedsYou = daemonBuild?.can("needs_you") == true
         pushPaired = body["pushPaired"] as? Bool ?? false
     }
@@ -1152,6 +1155,12 @@ final class DaemonClient: ObservableObject {
             ["task", "list", "--repo", repository] + (workspace.map { ["--workspace", $0] } ?? [])
                 + ["--json"],
             background: true)
+    }
+
+    /// The task under `key`, on whichever of this runner's boards has it: a
+    /// task notice names its task by key and runner only (ov-106).
+    func taskByKey(_ key: String) async -> (data: Data?, message: String?) {
+        await runRaw(["task", "show", key, "--json"], background: true)
     }
 
     /// One task's card with its record and what it waits on, in one call.

@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct FarCoolerApp: App {
-    /// Present only to catch the APNs device token, which arrives nowhere else.
+    /// Present to catch the APNs device token, which arrives nowhere else, and
+    /// to take notification clicks before launching finishes (`PushDelegate`).
     @NSApplicationDelegateAdaptor(PushDelegate.self) private var pushDelegate
     @State private var showsCLIToolsPrompt = false
 
