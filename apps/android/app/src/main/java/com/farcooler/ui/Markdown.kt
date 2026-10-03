@@ -24,13 +24,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.farcooler.model.Markdown
@@ -251,19 +246,9 @@ private fun MarkdownTable(table: Markdown.Block.Table) {
 fun inline(text: String): AnnotatedString {
     val codeBackground = MaterialTheme.colorScheme.surfaceContainerHighest
     val linkColor = MaterialTheme.colorScheme.primary
-    return remember(text, codeBackground, linkColor) {
-        buildAnnotatedString {
-            for (span in Markdown.inline(text)) {
-                val style = SpanStyle(
-                    fontWeight = if (span.bold) FontWeight.Bold else null,
-                    fontStyle = if (span.italic) FontStyle.Italic else null,
-                    fontFamily = if (span.code) FontFamily.Monospace else null,
-                    background = if (span.code) codeBackground else Color.Unspecified,
-                    color = if (span.link != null) linkColor else Color.Unspecified,
-                    textDecoration = if (span.link != null) TextDecoration.Underline else null,
-                )
-                withStyle(style) { append(span.text) }
-            }
-        }
+    // Task keys the screen's runner has link to their tasks (ov-196).
+    val linker = LocalTaskKeyLinker.current
+    return remember(text, codeBackground, linkColor, linker) {
+        inlineAnnotated(Markdown.inline(text), linker, codeBackground, linkColor)
     }
 }

@@ -314,6 +314,7 @@ private fun OverlayScreen(model: AppModel, route: Route, connections: List<Conne
                         model.openWorktreeFromTask(route.hostId, worktree, changes)
                     },
                     onBack = { model.back() },
+                    onOpenTask = { model.navigate(it.route()) },
                 )
             }
         }

@@ -42,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -75,6 +76,7 @@ import com.farcooler.model.TaskUsageState
 import com.farcooler.model.TaskAgentLink
 import com.farcooler.model.TaskAgentPresence
 import com.farcooler.model.TaskBoard
+import com.farcooler.model.TaskKeyTarget
 import com.farcooler.model.TaskRow
 import com.farcooler.model.Terminal
 import com.farcooler.model.Worktree
@@ -545,6 +547,8 @@ fun TaskDetailScreen(
     /** Its worktree, pushed over this task: on its Changes tab when [changes]. */
     onOpenWorktree: (worktreeId: String, changes: Boolean) -> Unit,
     onBack: () -> Unit,
+    /** Another task, from a key in this one's text (ov-196). */
+    onOpenTask: (TaskKeyTarget) -> Unit = {},
 ) {
     val boards by connection.boards.collectAsStateWithLifecycle()
     val unread by connection.unreadBoards.collectAsStateWithLifecycle()
@@ -609,124 +613,128 @@ fun TaskDetailScreen(
         }
         val agents = if (speaks) boardAgents(row, fleet.worktrees) else emptyList()
         val presence = row.agentPresence(agents.size, speaks)
-        LazyColumn(Modifier.fillMaxSize().padding(padding).testTag("board-detail")) {
-            item(key = "heading") {
-                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(row.title, style = MaterialTheme.typography.titleLarge)
-                    Text(
-                        row.status.title,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    CardDetails(row.copy(acceptance = emptyList()), rememberMinuteClock())
+        // "ov-190" in its text opens that task (ov-196).
+        val taskKeys = rememberTaskKeyLinker(connection, onOpenTask)
+        CompositionLocalProvider(LocalTaskKeyLinker provides taskKeys) {
+            LazyColumn(Modifier.fillMaxSize().padding(padding).testTag("board-detail")) {
+                item(key = "heading") {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(row.title, style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            row.status.title,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        CardDetails(row.copy(acceptance = emptyList()), rememberMinuteClock())
+                    }
                 }
-            }
-            if (asking != null) {
-                item(key = "asking") {
-                    NeedsYouItemRow(
-                        row = NeedsYouRow(RunnerNeedsYouItem(connection.host.id, asking), place = "", runner = null),
-                        connection = connection,
-                        showPlace = false,
-                        // Open from here is the agent it's about, if any: the
-                        // task is already on screen.
-                        onOpen = {
-                            asking.terminal?.id?.let { id ->
-                                fleet.worktrees.firstOrNull { w -> w.terminals.any { it.id == id } }
-                                    ?.terminals?.firstOrNull { it.id == id }?.let(jump)
-                            }
-                        },
-                    )
-                }
-            } else if (row.status == TaskStatus.NEEDS_DECISION && mayAnswer) {
-                // A runner too old to list its decisions: the answer is still
-                // a note, and still written here.
-                item(key = "answer") {
-                    AnswerDecision(connection, row)
-                }
-            }
-            if (presence != TaskAgentPresence.Unsaid) {
-                item(key = "agent") {
-                    ListItem(
-                        headlineContent = { Text("Agent") },
-                        trailingContent = { AgentControl(row.key, agents, presence, jump) },
-                    )
-                }
-            }
-            // Its worktree and changes, through the task's own worktree_id:
-            // reachable whether or not an agent is still on it (spec §3.2).
-            items(TaskLinks.rows(row, fleet.worktrees), key = { "link/${it::class.simpleName}" }) { link ->
-                when (link) {
-                    is TaskLinkRow.Changes -> {
-                        val counts = inbox[link.worktreeId]
-                        ListItem(
-                            headlineContent = { Text("Changes") },
-                            leadingContent = { Icon(Icons.Outlined.Difference, contentDescription = null) },
-                            trailingContent = { if (counts != null && counts.hasDiff) DiffCounts(counts) },
-                            modifier = Modifier
-                                .clickable { onOpenWorktree(link.worktreeId, true) }
-                                .testTag("task-changes"),
+                if (asking != null) {
+                    item(key = "asking") {
+                        NeedsYouItemRow(
+                            row = NeedsYouRow(RunnerNeedsYouItem(connection.host.id, asking), place = "", runner = null),
+                            connection = connection,
+                            showPlace = false,
+                            // Open from here is the agent it's about, if any: the
+                            // task is already on screen.
+                            onOpen = {
+                                asking.terminal?.id?.let { id ->
+                                    fleet.worktrees.firstOrNull { w -> w.terminals.any { it.id == id } }
+                                        ?.terminals?.firstOrNull { it.id == id }?.let(jump)
+                                }
+                            },
                         )
                     }
-                    is TaskLinkRow.Worktree -> ListItem(
-                        headlineContent = { Text("Worktree") },
-                        supportingContent = { Text(link.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        leadingContent = { Icon(Icons.Outlined.Folder, contentDescription = null) },
-                        modifier = Modifier
-                            .clickable { onOpenWorktree(link.worktreeId, false) }
-                            .testTag("task-worktree"),
-                    )
+                } else if (row.status == TaskStatus.NEEDS_DECISION && mayAnswer) {
+                    // A runner too old to list its decisions: the answer is still
+                    // a note, and still written here.
+                    item(key = "answer") {
+                        AnswerDecision(connection, row)
+                    }
                 }
-            }
-            if (row.intent.isNotEmpty()) {
-                item(key = "intent") {
-                    Section("Intent")
-                    // Markdown, as the Mac and iOS draw it (ov-98).
-                    MarkdownText(
-                        row.intent,
-                        blockSpacing = 8.dp,
-                        modifier = Modifier.padding(horizontal = 16.dp).testTag("board-detail-intent"),
-                    )
+                if (presence != TaskAgentPresence.Unsaid) {
+                    item(key = "agent") {
+                        ListItem(
+                            headlineContent = { Text("Agent") },
+                            trailingContent = { AgentControl(row.key, agents, presence, jump) },
+                        )
+                    }
                 }
-            }
-            row.acceptanceProgress?.let { progress ->
-                item(key = "acceptance-header") { Section("Acceptance · ${progress.sentence}") }
-                items(row.acceptance, key = { "line/${it.id}" }) { line ->
-                    ListItem(
-                        leadingContent = {
-                            Icon(
-                                if (line.met) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                // Its worktree and changes, through the task's own worktree_id:
+                // reachable whether or not an agent is still on it (spec §3.2).
+                items(TaskLinks.rows(row, fleet.worktrees), key = { "link/${it::class.simpleName}" }) { link ->
+                    when (link) {
+                        is TaskLinkRow.Changes -> {
+                            val counts = inbox[link.worktreeId]
+                            ListItem(
+                                headlineContent = { Text("Changes") },
+                                leadingContent = { Icon(Icons.Outlined.Difference, contentDescription = null) },
+                                trailingContent = { if (counts != null && counts.hasDiff) DiffCounts(counts) },
+                                modifier = Modifier
+                                    .clickable { onOpenWorktree(link.worktreeId, true) }
+                                    .testTag("task-changes"),
                             )
-                        },
-                        // Its inline Markdown; met, struck through and quiet,
-                        // as on the Mac (ov-98).
-                        headlineContent = {
-                            Text(
-                                inline(line.text),
-                                color = if (line.met) MaterialTheme.colorScheme.onSurfaceVariant
-                                else MaterialTheme.colorScheme.onSurface,
-                                textDecoration = if (line.met) TextDecoration.LineThrough else null,
-                            )
-                        },
-                        modifier = Modifier
-                            .testTag("board-acceptance-${line.id}")
-                            .semantics {
-                                // What it says, not its markup.
-                                contentDescription = "${Markdown.plain(line.text)}. ${if (line.met) "Met" else "Not met"}"
+                        }
+                        is TaskLinkRow.Worktree -> ListItem(
+                            headlineContent = { Text("Worktree") },
+                            supportingContent = { Text(link.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            leadingContent = { Icon(Icons.Outlined.Folder, contentDescription = null) },
+                            modifier = Modifier
+                                .clickable { onOpenWorktree(link.worktreeId, false) }
+                                .testTag("task-worktree"),
+                        )
+                    }
+                }
+                if (row.intent.isNotEmpty()) {
+                    item(key = "intent") {
+                        Section("Intent")
+                        // Markdown, as the Mac and iOS draw it (ov-98).
+                        MarkdownText(
+                            row.intent,
+                            blockSpacing = 8.dp,
+                            modifier = Modifier.padding(horizontal = 16.dp).testTag("board-detail-intent"),
+                        )
+                    }
+                }
+                row.acceptanceProgress?.let { progress ->
+                    item(key = "acceptance-header") { Section("Acceptance · ${progress.sentence}") }
+                    items(row.acceptance, key = { "line/${it.id}" }) { line ->
+                        ListItem(
+                            leadingContent = {
+                                Icon(
+                                    if (line.met) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             },
-                    )
+                            // Its inline Markdown; met, struck through and quiet,
+                            // as on the Mac (ov-98).
+                            headlineContent = {
+                                Text(
+                                    inline(line.text),
+                                    color = if (line.met) MaterialTheme.colorScheme.onSurfaceVariant
+                                    else MaterialTheme.colorScheme.onSurface,
+                                    textDecoration = if (line.met) TextDecoration.LineThrough else null,
+                                )
+                            },
+                            modifier = Modifier
+                                .testTag("board-acceptance-${line.id}")
+                                .semantics {
+                                    // What it says, not its markup.
+                                    contentDescription = "${Markdown.plain(line.text)}. ${if (line.met) "Met" else "Not met"}"
+                                },
+                        )
+                    }
                 }
-            }
-            taskUsageItems(usage, onRetry = { usageReads++ }) { Section("Usage") }
-            if (row.labels.isNotEmpty()) {
-                item(key = "labels") {
-                    Section("Labels")
-                    Text(
-                        row.labels.joinToString(", "),
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                    )
+                taskUsageItems(usage, onRetry = { usageReads++ }) { Section("Usage") }
+                if (row.labels.isNotEmpty()) {
+                    item(key = "labels") {
+                        Section("Labels")
+                        Text(
+                            row.labels.joinToString(", "),
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                        )
+                    }
                 }
             }
         }
