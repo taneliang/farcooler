@@ -667,7 +667,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
 
-        let err = ensure_in(&socket, &database).await.err().expect("refused");
+        let err = ensure_in(&socket, &database).await.expect_err("refused");
         assert_eq!(
             err.to_string(),
             "This runner's data was written by a newer Far Cooler. Update Far Cooler to use it."
