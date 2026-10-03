@@ -117,6 +117,12 @@ void farcooler_vt_resize(void *handle, uint16_t columns, uint16_t rows);
 void farcooler_vt_accept_stream_sizes(void *handle, bool accept);
 
 /*
+ * How many size markers have been applied, a repeat of the current size
+ * included. Compare two readings to learn whether the stream has spoken since.
+ */
+uint64_t farcooler_vt_stream_resizes(void *handle);
+
+/*
  * True once the byte stream has said what size its pane is.
  *
  * A runner puts the pane's size in the stream, in front of the first bytes

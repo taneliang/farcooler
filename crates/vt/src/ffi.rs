@@ -171,6 +171,15 @@ pub unsafe extern "C" fn farcooler_vt_accept_stream_sizes(handle: *mut c_void, a
     }
 }
 
+/// How many size markers have been applied. See `Terminal::stream_resizes`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_vt_stream_resizes(handle: *mut c_void) -> u64 {
+    match unsafe { as_handle(handle) } {
+        Some(h) => h.terminal.stream_resizes(),
+        None => 0,
+    }
+}
+
 /// Whether the byte stream has said what size its pane is.
 ///
 /// Once true, the stream resizes the grid itself, at the exact point in the
@@ -736,6 +745,7 @@ mod tests {
         let (snap, _) = read(h);
         assert_eq!((snap.columns, snap.rows), (90, 30));
         assert!(unsafe { farcooler_vt_sized_by_stream(h) });
+        assert_eq!(unsafe { farcooler_vt_stream_resizes(h) }, 1);
         unsafe { farcooler_vt_free(h) };
     }
 
@@ -802,6 +812,7 @@ mod tests {
             farcooler_vt_resize(null, 10, 10);
             assert!(!farcooler_vt_sized_by_stream(null));
             farcooler_vt_accept_stream_sizes(null, true);
+            assert_eq!(farcooler_vt_stream_resizes(null), 0);
             assert_eq!(farcooler_vt_revision(null), 0);
             assert!(!farcooler_vt_snapshot(null, std::ptr::null_mut()));
             assert_eq!(farcooler_vt_take_writes(null, std::ptr::null_mut(), 0), 0);

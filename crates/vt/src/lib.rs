@@ -87,6 +87,8 @@ pub struct Terminal {
     sized_by_stream: bool,
     /// Whether markers are honored at all. See `set_accept_stream_sizes`.
     accept_stream_sizes: bool,
+    /// How many markers have been applied. See `stream_resizes`.
+    stream_resizes: u64,
 }
 
 impl Terminal {
@@ -113,6 +115,7 @@ impl Terminal {
             marker: MarkerScan::default(),
             sized_by_stream: false,
             accept_stream_sizes: false,
+            stream_resizes: 0,
         }
     }
 
@@ -169,6 +172,16 @@ impl Terminal {
         }
         self.resize(columns, rows);
         self.sized_by_stream = true;
+        self.stream_resizes = self.stream_resizes.wrapping_add(1);
+    }
+
+    /// How many size markers this terminal has applied.
+    ///
+    /// A counter rather than a flag, so a client can tell whether the stream
+    /// has spoken SINCE something — a layout reply it is deciding whether to
+    /// apply — including when it repeated the size the grid already had.
+    pub fn stream_resizes(&self) -> u64 {
+        self.stream_resizes
     }
 
     /// Honor size markers in the stream, or (the default) ignore them.
@@ -1012,6 +1025,20 @@ mod tests {
         t.set_accept_stream_sizes(true);
         t.feed(&size_marker(40, 6));
         assert_eq!((t.columns(), t.rows()), (40, 6));
+    }
+
+    /// Every applied marker counts, a repeat of the current size included:
+    /// that a stream has spoken is news even when what it said is not.
+    #[test]
+    fn every_applied_marker_is_counted() {
+        let mut t = trusting(20, 4);
+        assert_eq!(t.stream_resizes(), 0);
+        t.feed(&size_marker(40, 6));
+        t.feed(&size_marker(40, 6));
+        assert_eq!(t.stream_resizes(), 2);
+        t.set_accept_stream_sizes(false);
+        t.feed(&size_marker(50, 6));
+        assert_eq!(t.stream_resizes(), 2, "an ignored marker is not applied");
     }
 
     /// The bug a resize made visible, and the reason the stream carries sizes.
