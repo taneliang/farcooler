@@ -1608,7 +1608,9 @@ struct TaskCard: View {
                 let feed = TaskNoteStyle.feed(detail.notes)
                 let paired = feed.paired
                 ForEach(feed.notes) { note in
-                    TaskNoteView(note: note, pairedWithQuestion: paired.contains(note.id))
+                    TaskNoteView(
+                        note: note, pairedWithQuestion: paired.contains(note.id),
+                        tint: TaskNoteStyle.tint(of: note, in: feed.notes, status: row.status))
                 }
                 // Never silently: an entry this build cannot name is still an
                 // entry, and the record's claim is that nothing in it is lost.
@@ -1754,13 +1756,17 @@ private struct QuestionAnswers: View {
 }
 
 /// One note in the record, a block (ov-98): a quiet "<Kind> · byline ·
-/// time" line, the kind in its tint (`TaskNoteStyle`), then the body as
+/// time" line, monochrome but for a question still waiting on the person,
+/// then the body as
 /// Markdown. A decision is a card with its rejected options beneath; an
 /// answer that follows a question sits under it on a rule; the store's own
 /// entries are the quiet line alone.
 private struct TaskNoteView: View {
     let note: TaskNoteRow
     let pairedWithQuestion: Bool
+    /// The label's color: secondary, or the accent for a question still
+    /// waiting on the person (`TaskNoteStyle.tint(of:in:status:)`).
+    var tint: TaskNoteStyle.Tint = .secondary
 
     private var style: TaskNoteStyle { .of(note.kind) }
 
@@ -1778,7 +1784,7 @@ private struct TaskNoteView: View {
         BoardTick { now in
             let ago = TaskRow.ago(now.timeIntervalSince(note.at))
             let rest = TaskProse.noteLine(kind: "", byline: note.byline, ago: ago)
-            let kind = Text(style.label).foregroundStyle(style.tint.color).fontWeight(.medium)
+            let kind = Text(style.label).foregroundStyle(tint.color).fontWeight(.medium)
             let replaces = note.supersedes != nil ? " · Replaces an earlier entry" : ""
             Text("\(kind)\(Text(" · \(rest)\(replaces)").foregroundStyle(.secondary))")
                 .font(TaskTypography.meta)
@@ -1795,7 +1801,7 @@ private struct TaskNoteView: View {
         .padding(.leading, pairedWithQuestion ? 2 * ColumnGrid.rhythm : 0)
         .overlay(alignment: .leading) {
             if pairedWithQuestion {
-                Capsule().fill(style.tint.color.opacity(0.5)).frame(width: 2)
+                Capsule().fill(Color.secondary.opacity(0.5)).frame(width: 2)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1819,7 +1825,7 @@ private struct TaskNoteView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(style.tint.color.opacity(0.08)))
+                .fill(Color.primary.opacity(0.05)))
     }
 
     /// "Status Change: Backlog → In Progress · 4m ago", or the bare

@@ -9,11 +9,11 @@ struct TaskNoteStyleTests {
     @Test("Every kind has a label, one icon family and a style")
     func everyKindHasALabelAnIconAndAStyle() {
         let expected: [TaskNoteKind: (String, String, TaskNoteStyle.Tint, TaskNoteStyle.Weight)] = [
-            .decision: ("Decision", "checkmark.seal", .accent, .prominent),
-            .finding: ("Finding", "lightbulb", .primary, .standard),
+            .decision: ("Decision", "checkmark.seal", .secondary, .prominent),
+            .finding: ("Finding", "lightbulb", .secondary, .standard),
             .progress: ("Progress", "chart.bar", .secondary, .standard),
-            .question: ("Question", "questionmark.bubble", .orange, .standard),
-            .answer: ("Answer", "text.bubble", .green, .standard),
+            .question: ("Question", "questionmark.bubble", .secondary, .standard),
+            .answer: ("Answer", "text.bubble", .secondary, .standard),
             .comment: ("Comment", "bubble.left", .secondary, .standard),
             .statusChange: ("Status Change", "arrow.right.circle", .secondary, .quiet),
             .created: ("Created", "plus.circle", .secondary, .quiet),
@@ -25,6 +25,28 @@ struct TaskNoteStyleTests {
             #expect(style == TaskNoteStyle(label: want.0, symbol: want.1, tint: want.2, weight: want.3))
         }
         #expect(Set(TaskNoteKind.allCases.map { TaskNoteStyle.of($0).symbol }).count == TaskNoteKind.allCases.count)
+    }
+
+    /// Color only for what needs the person (ov-98, owner): every kind's
+    /// label is secondary, and the one accent in the record is a question
+    /// still waiting on its answer, in a task waiting on a decision. One
+    /// answered, or in a task that has moved on, is history.
+    @Test("Only an unanswered question that waits on you is in the accent")
+    func onlyAnUnansweredQuestionIsAccented() {
+        func note(_ id: String, _ kind: TaskNoteKind) -> TaskNoteRow {
+            TaskNoteRow(id: id, kind: kind, actor: "manager", at: .now, body: "")
+        }
+        // Display order, newest first: the open question on top, an
+        // answered one under it.
+        let notes = [note("q2", .question), note("q1", .question), note("a1", .answer), note("d", .decision)]
+        func tint(_ id: String, _ status: TaskStatus) -> TaskNoteStyle.Tint {
+            TaskNoteStyle.tint(of: notes.first { $0.id == id }!, in: notes, status: status)
+        }
+        #expect(tint("q2", .needsDecision) == .accent)
+        #expect(tint("q1", .needsDecision) == .secondary, "answered, and still lit")
+        #expect(tint("q2", .inProgress) == .secondary, "the task moved on, and it's still lit")
+        #expect(tint("a1", .needsDecision) == .secondary)
+        #expect(tint("d", .needsDecision) == .secondary)
     }
 
     @Test("Machine-written kinds are quiet, and only the decision is prominent")

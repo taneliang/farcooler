@@ -5,21 +5,17 @@ import SwiftUI
 /// how loud it is. Values, so `TaskNoteStyleTests` pins them.
 ///
 /// One SF Symbols family (outlined, bubble and mark shapes), and system
-/// semantic colors only, so each reads in light and dark mode without a
-/// palette of its own. Color is spent where it means something: a decision is
-/// the accent, a question that waits is orange, and an answer, which closes
-/// one, is green. Everything else is quiet.
+/// semantic colors only. Color is only for what needs the person (ov-98,
+/// owner): every kind's label is secondary, and the one accent in the record
+/// is a question still waiting on its answer (`tint(of:in:status:)`).
 struct TaskNoteStyle: Equatable {
     /// The semantic color a kind is tinted with.
     enum Tint: Equatable {
-        case accent, orange, green, primary, secondary
+        case accent, secondary
 
         var color: Color {
             switch self {
             case .accent: return .accentColor
-            case .orange: return .orange
-            case .green: return .green
-            case .primary: return .primary
             case .secondary: return .secondary
             }
         }
@@ -43,15 +39,15 @@ struct TaskNoteStyle: Equatable {
     static func of(_ kind: TaskNoteKind) -> TaskNoteStyle {
         switch kind {
         case .decision:
-            return TaskNoteStyle(label: "Decision", symbol: "checkmark.seal", tint: .accent, weight: .prominent)
+            return TaskNoteStyle(label: "Decision", symbol: "checkmark.seal", tint: .secondary, weight: .prominent)
         case .finding:
-            return TaskNoteStyle(label: "Finding", symbol: "lightbulb", tint: .primary, weight: .standard)
+            return TaskNoteStyle(label: "Finding", symbol: "lightbulb", tint: .secondary, weight: .standard)
         case .progress:
             return TaskNoteStyle(label: "Progress", symbol: "chart.bar", tint: .secondary, weight: .standard)
         case .question:
-            return TaskNoteStyle(label: "Question", symbol: "questionmark.bubble", tint: .orange, weight: .standard)
+            return TaskNoteStyle(label: "Question", symbol: "questionmark.bubble", tint: .secondary, weight: .standard)
         case .answer:
-            return TaskNoteStyle(label: "Answer", symbol: "text.bubble", tint: .green, weight: .standard)
+            return TaskNoteStyle(label: "Answer", symbol: "text.bubble", tint: .secondary, weight: .standard)
         case .comment:
             return TaskNoteStyle(label: "Comment", symbol: "bubble.left", tint: .secondary, weight: .standard)
         case .statusChange:
@@ -87,6 +83,18 @@ struct TaskNoteStyle: Equatable {
         let rejected = body[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
         guard !chosen.isEmpty, !rejected.isEmpty else { return Decision(chosen: body, rejected: nil) }
         return Decision(chosen: chosen, rejected: rejected)
+    }
+
+    /// The color `note`'s label is drawn in, among `notes` (display order,
+    /// `feed`): the accent for a question with no answer under it, in a task
+    /// waiting on a decision, which is the one thing in the record that
+    /// needs the person; its kind's own tint (secondary) for every other.
+    static func tint(of note: TaskNoteRow, in notes: [TaskNoteRow], status: TaskStatus) -> Tint {
+        guard note.kind == .question, status == .needsDecision,
+            let at = notes.firstIndex(where: { $0.id == note.id })
+        else { return of(note.kind).tint }
+        let answered = notes.index(after: at) < notes.endIndex && notes[notes.index(after: at)].kind == .answer
+        return answered ? of(note.kind).tint : .accent
     }
 
     /// The record as the task view draws it: newest first (`TaskNoteFeed`),
