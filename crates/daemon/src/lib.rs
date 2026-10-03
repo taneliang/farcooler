@@ -30,6 +30,7 @@ pub mod paths;
 pub mod proc_cwd;
 pub mod push;
 pub mod reconcile;
+pub mod refusal;
 pub mod resync;
 pub mod rendezvous;
 pub mod report;

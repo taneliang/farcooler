@@ -1025,6 +1025,7 @@ dependencies = [
  "notify",
  "prost-types",
  "reqwest",
+ "rusqlite",
  "rustix",
  "serde",
  "serde_json",

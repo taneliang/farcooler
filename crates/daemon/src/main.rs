@@ -191,10 +191,24 @@ async fn run() -> Result<(), i32> {
     // never sets: if it is set, the log says so from the first line.
     let _ = farcooler_daemon::service::test_stub_agents();
 
-    let service = Arc::new(Service::open().await.map_err(|e| {
-        eprintln!("cannot open the service: {e}");
-        1
-    })?);
+    let service = match Service::open().await {
+        Ok(service) => Arc::new(service),
+        // Up, but refusing: see `refusal` for why this doesn't exit. The lock
+        // is still held, so a second start finds the socket and goes quietly.
+        Err(e) if farcooler_daemon::refusal::stays_up_for(&e) => {
+            eprintln!("{e}");
+            return farcooler_daemon::refusal::hold(&socket, e, farcooler_daemon::refusal::signaled())
+                .await
+                .map_err(|e| {
+                    eprintln!("cannot bind {}: {e}", socket.display());
+                    1
+                });
+        }
+        Err(e) => {
+            eprintln!("cannot open the service: {e}");
+            return Err(1);
+        }
+    };
 
     // Repair identity on any pane still carrying it at window level. See
     // `backfill_pane_tags`: those panes read correctly until something moves
@@ -539,10 +553,23 @@ async fn serve_stdio_session() -> Result<(), i32> {
     }
 
     // Nothing may be printed to stdout: it is the wire.
-    let service = Arc::new(Service::open().await.map_err(|e| {
-        eprintln!("cannot open the service: {e}");
-        1
-    })?);
+    let service = match Service::open().await {
+        Ok(service) => Arc::new(service),
+        // Said to the device on the other end, which is the one place it can
+        // be read. On stderr alone, ssh would carry it to nobody and the
+        // phone would ask whether Far Cooler is installed. See `refusal`.
+        Err(e) if farcooler_daemon::refusal::stays_up_for(&e) => {
+            eprintln!("{e}");
+            if let Err(sent) = farcooler_transport::refuse_stdio(e).await {
+                tracing::debug!(error = %sent, "the session closed before it could be refused");
+            }
+            return Err(1);
+        }
+        Err(e) => {
+            eprintln!("cannot open the service: {e}");
+            return Err(1);
+        }
+    };
 
     let watcher = Watcher::new(service.clone());
     tokio::spawn(watcher.clone().run());
