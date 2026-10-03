@@ -30,8 +30,12 @@ struct CompactTaskRow<Second: View>: View {
     @ViewBuilder private var titleText: some View {
         let text = Text(title)
             .font(.system(size: WorkspaceStyle.PaneText.body, weight: emphasized ? .semibold : .regular))
-            .lineLimit(1)
+            // Two lines before the ellipsis (ov-177, the owner: "task names
+            // can probably be truncated only after 2 lines"), its height its
+            // own, so a row moving in a list keeps the height it lands with.
+            .lineLimit(2)
             .truncationMode(.tail)
+            .fixedSize(horizontal: false, vertical: true)
         if let titleMark { text.gridMark(titleMark, .text) } else { text }
     }
 

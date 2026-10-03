@@ -33,8 +33,13 @@ enum WorkspaceColumns {
     /// The navigator's narrowest: room for a task's key, a short title and
     /// its agent pill, and the orchestrator's state (ov-92).
     static let navigatorMinimum: CGFloat = 240
-    /// The navigator's width until its trailing edge is dragged.
-    static let navigatorDefault: CGFloat = 280
+    /// The navigator's width until its trailing edge is dragged: 320, from
+    /// 280, so a task's title has room before it wraps (ov-177, the owner:
+    /// "the sidebar is a little too narrow"). A width dragged is kept.
+    static let navigatorDefault: CGFloat = 320
+    /// The navigator's widest, however far it's dragged: past this, it's a
+    /// main area of its own and not a list.
+    static let navigatorMaximum: CGFloat = 480
     /// The navigator's divider.
     static let divider: CGFloat = 1
 
@@ -55,7 +60,7 @@ enum WorkspaceColumns {
     /// in the main area.
     static func navigatorWidth(_ remembered: CGFloat, width: CGFloat, cell: CGFloat = defaultCell) -> CGFloat {
         let most = width - divider - openedMinimum(cell: cell)
-        return max(navigatorMinimum, min(remembered, most))
+        return max(navigatorMinimum, min(remembered, most, navigatorMaximum))
     }
 
     /// What's drawn (spec §4.3, ov-92).

@@ -708,7 +708,8 @@ struct AgentComposer: View {
             .help(failure.advice ?? "Switch this pane back to the terminal to see what it printed")
         } else if stream.transcript.configOptions.isEmpty && stream.transcript.rows.isEmpty {
             HStack(spacing: 5) {
-                ProgressView().controlSize(.mini)
+                // An agent starting: the app's status mark (ov-177).
+                StatusGlyph(status: .starting)
                 Text("Starting the agent…")
             }
             .font(.caption)

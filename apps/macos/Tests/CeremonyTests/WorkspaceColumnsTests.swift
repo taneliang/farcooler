@@ -51,7 +51,10 @@ struct WorkspaceColumnsTests {
     func theNavigatorIsHeld() {
         #expect(Columns.navigatorWidth(100, width: 1222) == Columns.navigatorMinimum)
         #expect(Columns.navigatorWidth(320, width: 1222) == 320)
-        #expect(Columns.navigatorWidth(2000, width: 1222) == 1222 - 1 - Columns.openedMinimum())
+        // Dragged far, held at the navigator's widest (ov-177), or at what
+        // leaves the main area its own, whichever is narrower.
+        #expect(Columns.navigatorWidth(2000, width: 1222) == min(Columns.navigatorMaximum, 1222 - 1 - Columns.openedMinimum()))
+        #expect(Columns.navigatorWidth(2000, width: 3000) == Columns.navigatorMaximum)
         #expect(Columns.navigatorWidth(320, width: 500) == Columns.navigatorMinimum)
     }
 

@@ -2695,6 +2695,7 @@ struct ContentView: View {
         return NavigatorOrchestrator(
             state: state,
             agent: ConversationHeader.agentName(seat),
+            status: seat?.terminal.status,
             nowDoing: OrchestratorRow.nowDoing(seat?.terminal, state: state),
             offers: ConversationColumn.offers(column, canAct: canAct),
             candidates: OrchestratorAdoption.candidates(for: workspace, host: host, in: store.fleet),

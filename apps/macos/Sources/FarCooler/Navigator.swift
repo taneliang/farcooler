@@ -204,6 +204,9 @@ struct NavigatorOrchestrator {
     var state: OrchestratorRow.State
     /// Its harness: claude, codex.
     var agent: String?
+    /// Its pane's status, for the agent status mark the rest of the app
+    /// draws (`StatusGlyph`); nil with no pane.
+    var status: Status?
     var nowDoing: String?
     var offers: [ConversationColumn.Offer] = []
     var candidates: [BoardPane] = []
@@ -274,14 +277,15 @@ struct OrchestratorRowView: View {
         .accessibilityIdentifier("navigator-orchestrator")
     }
 
-    /// Its state as an icon: a spinner while it works or starts, the accent
-    /// dot when it needs you or has news, else its glyph, dimmed when
+    /// Its state as an icon: the app's own agent status mark while it
+    /// works or starts (ov-177: never the system's spinner), the
+    /// accent dot when it needs you or has news, else its glyph, dimmed when
     /// there's nothing running.
     @ViewBuilder
     private var icon: some View {
         switch model.state {
         case .working, .starting:
-            ProgressView().controlSize(.mini).frame(width: 10, height: 10)
+            StatusGlyph(status: model.status ?? (model.state == .starting ? .starting : .working))
         case .needsYou, .unread:
             Circle()
                 .fill(model.state == .needsYou ? Color.accentColor : GlancePalette.amber(scheme))

@@ -200,7 +200,9 @@ struct ConversationPlaceholder: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 320)
             case .starting(let slow):
-                ProgressView().controlSize(.small)
+                // An agent starting: the app's status mark, not a spinner
+                // (ov-177).
+                StatusGlyph(status: .starting, size: .lone)
                 Text("Starting Orchestrator…").font(.headline)
                 if slow {
                     Text("This is taking longer than usual.")

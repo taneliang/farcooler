@@ -250,8 +250,10 @@ struct TaskViewHeader: View {
             Spacer(minLength: ColumnGrid.rhythm)
             if let line = TaskColumnModel.agentLine(agent) {
                 HStack(spacing: ColumnGrid.rhythm / 2) {
-                    if line.working {
-                        ProgressView().controlSize(.mini).frame(width: 10, height: 10)
+                    if line.working, let agent {
+                        // The app's agent status mark, never the system's
+                        // spinner (ov-177).
+                        StatusGlyph(status: agent.terminal.status)
                     } else if line.needsYou {
                         Circle().fill(Color.accentColor).frame(width: 6, height: 6)
                     }
