@@ -437,85 +437,164 @@ pub mod capability {
     /// The capability a method belongs to, or `None` if there is no such
     /// method.
     ///
-    /// Exhaustive by construction, exactly as the daemon's `required_scope` is:
-    /// a method with no row here is unreachable rather than silently ungated,
-    /// so adding a handler without adding a row fails loudly in tests instead
-    /// of shipping an unnamed feature.
+    /// Read off `method::Method`, the one table of methods, so a method and its
+    /// capability are declared on one line and cannot be added apart.
     pub fn for_method(method: &str) -> Option<&'static str> {
-        Some(match method {
-            "host.get" | "host.health" | "daemon.version" | "daemon.shutdown" => WORKTREES,
-            "repository.list"
-            | "repository.register"
-            | "repository_root.list"
-            | "repository_root.add"
-            | "repository_root.remove"
-            | "worktree.list"
-            | "worktree.create"
-            | "worktree.hide"
-            | "worktree.unhide"
-            | "worktree.remove"
-            | "branch.list"
-            | "worktree.discover"
-            | "worktree.file_search" => WORKTREES,
-            "terminal.list"
-            | "terminal.create"
-            | "terminal.screen"
-            | "terminal.write"
-            | "terminal.resize"
-            | "terminal.stop"
-            | "terminal.seen"
-            | "terminal.remove"
-            | "terminal.dismiss_lost"
-            | "terminal.restart" => TERMINALS,
-            "terminal.paste_file" => PASTE,
-            "terminal.set_pane_mode"
-            | "terminal.agent_subscribe"
-            | "terminal.agent_prompt"
-            | "terminal.agent_answer"
-            | "terminal.agent_set_mode"
-            | "terminal.agent_set_model"
-            | "terminal.agent_set_config"
-            | "terminal.agent_edit_queued"
-            | "terminal.agent_cancel_queued"
-            | "terminal.agent_steer_queued"
-            | "terminal.agent_cancel" => AGENT,
-            "changes.change_set"
-            | "changes.commit_files"
-            | "changes.file_diff"
-            | "changes.set_base"
-            | "changes.mark_read"
-            | "changes.inbox" => CHANGES,
-            "stack.get" | "stack.set_parent" | "pr.refresh" => STACK,
-            m if m.starts_with("layout.") => LAYOUT,
-            "adapter.list" | "adapter.upsert" | "adapter.delete" | "adapter.test" => ADAPTERS,
-            "theme.list" | "theme.upsert" | "theme.delete" | "settings.set_branch_prefix" => THEMES,
-            "client.list" | "client.enroll" | "client.revoke" => ENROLLMENT,
-            "client.set_node_key" => TUNNEL,
-            "worktree.reorder" => WORKTREE_ORDER,
-            "task.list"
-            | "task.get"
-            | "task.get_by_key"
-            | "task.create"
-            | "task.update"
-            | "task.set_status"
-            | "task.note"
-            | "task.block"
-            | "task.search" => TASKS,
-            "workspace.list"
-            | "workspace.create"
-            | "workspace.rename"
-            | "workspace.set_prefix"
-            | "workspace.delete"
-            | "task.move"
-            | "worktree.assign"
-            | "terminal.set_role"
-            | "workspace.start_orchestrator" => WORKSTREAMS,
-            "terminal.watching" => WATCHING,
-            "terminal.attach" => TERMINAL_STREAM,
-            "needs_you.list" => NEEDS_YOU,
-            "workspace.set_settings" => WAKE_ON_ANSWER,
-            _ => return None,
-        })
+        super::method::Method::parse(method).map(super::method::Method::capability)
+    }
+}
+
+/// Every method the wire carries, in one table.
+///
+/// The one list every other list is derived from. It used to be four: this
+/// crate's capability match, the daemon's scope match, the daemon's dispatch
+/// and the FFI's dispatch, each typed by hand. They drifted. The daemon
+/// refused Edit, Cancel and Send Now on a queued agent message as a method it
+/// had never heard of, because its scope match stopped one row short of this
+/// crate's, and the FFI never routed the model and config pickers at all.
+///
+/// So the other tables are matches on `Method` with no wildcard: the daemon's
+/// scope (`rpc::scope_of`) and the FFI's route (`ffi::route`). A row added
+/// here is a compile error in each until it has been given a scope and a route,
+/// and the tests that enumerate `Method::ALL` cover what the compiler cannot,
+/// that the daemon dispatches it and the FFI's arm exists.
+pub mod method {
+    /// Declares `Method` and everything read straight off its row.
+    macro_rules! methods {
+        ($($variant:ident = $name:literal => $capability:ident,)*) => {
+            /// A method by its wire name. See the module.
+            #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+            pub enum Method {
+                $($variant,)*
+            }
+
+            impl Method {
+                /// Every method, in the table's order.
+                pub const ALL: &'static [Method] = &[$(Method::$variant,)*];
+
+                /// The name on the wire, `Request.method`.
+                pub fn name(self) -> &'static str {
+                    match self {
+                        $(Method::$variant => $name,)*
+                    }
+                }
+
+                /// The capability a client asks for before calling it.
+                pub fn capability(self) -> &'static str {
+                    match self {
+                        $(Method::$variant => super::capability::$capability,)*
+                    }
+                }
+
+                /// The method a wire name names, or `None` for one this build
+                /// has never heard of. Exact: no prefix and no fuzzy match.
+                pub fn parse(name: &str) -> Option<Method> {
+                    match name {
+                        $($name => Some(Method::$variant),)*
+                        _ => None,
+                    }
+                }
+            }
+        };
+    }
+
+    methods! {
+        HostGet = "host.get" => WORKTREES,
+        HostHealth = "host.health" => WORKTREES,
+        DaemonVersion = "daemon.version" => WORKTREES,
+        DaemonShutdown = "daemon.shutdown" => WORKTREES,
+        RepositoryList = "repository.list" => WORKTREES,
+        RepositoryRegister = "repository.register" => WORKTREES,
+        RepositoryRootList = "repository_root.list" => WORKTREES,
+        RepositoryRootAdd = "repository_root.add" => WORKTREES,
+        RepositoryRootRemove = "repository_root.remove" => WORKTREES,
+        WorktreeList = "worktree.list" => WORKTREES,
+        WorktreeCreate = "worktree.create" => WORKTREES,
+        WorktreeHide = "worktree.hide" => WORKTREES,
+        WorktreeUnhide = "worktree.unhide" => WORKTREES,
+        WorktreeRemove = "worktree.remove" => WORKTREES,
+        BranchList = "branch.list" => WORKTREES,
+        WorktreeDiscover = "worktree.discover" => WORKTREES,
+        WorktreeFileSearch = "worktree.file_search" => WORKTREES,
+        TerminalList = "terminal.list" => TERMINALS,
+        TerminalCreate = "terminal.create" => TERMINALS,
+        TerminalScreen = "terminal.screen" => TERMINALS,
+        TerminalWrite = "terminal.write" => TERMINALS,
+        TerminalResize = "terminal.resize" => TERMINALS,
+        TerminalStop = "terminal.stop" => TERMINALS,
+        TerminalSeen = "terminal.seen" => TERMINALS,
+        TerminalRemove = "terminal.remove" => TERMINALS,
+        TerminalDismissLost = "terminal.dismiss_lost" => TERMINALS,
+        TerminalRestart = "terminal.restart" => TERMINALS,
+        TerminalPasteFile = "terminal.paste_file" => PASTE,
+        TerminalSetPaneMode = "terminal.set_pane_mode" => AGENT,
+        TerminalAgentSubscribe = "terminal.agent_subscribe" => AGENT,
+        TerminalAgentPrompt = "terminal.agent_prompt" => AGENT,
+        TerminalAgentAnswer = "terminal.agent_answer" => AGENT,
+        TerminalAgentSetMode = "terminal.agent_set_mode" => AGENT,
+        TerminalAgentSetModel = "terminal.agent_set_model" => AGENT,
+        TerminalAgentSetConfig = "terminal.agent_set_config" => AGENT,
+        TerminalAgentEditQueued = "terminal.agent_edit_queued" => AGENT,
+        TerminalAgentCancelQueued = "terminal.agent_cancel_queued" => AGENT,
+        TerminalAgentSteerQueued = "terminal.agent_steer_queued" => AGENT,
+        TerminalAgentCancel = "terminal.agent_cancel" => AGENT,
+        ChangesChangeSet = "changes.change_set" => CHANGES,
+        ChangesCommitFiles = "changes.commit_files" => CHANGES,
+        ChangesFileDiff = "changes.file_diff" => CHANGES,
+        ChangesSetBase = "changes.set_base" => CHANGES,
+        ChangesMarkRead = "changes.mark_read" => CHANGES,
+        ChangesInbox = "changes.inbox" => CHANGES,
+        StackGet = "stack.get" => STACK,
+        StackSetParent = "stack.set_parent" => STACK,
+        PrRefresh = "pr.refresh" => STACK,
+        LayoutList = "layout.list" => LAYOUT,
+        LayoutSplit = "layout.split" => LAYOUT,
+        LayoutMove = "layout.move" => LAYOUT,
+        LayoutResize = "layout.resize" => LAYOUT,
+        LayoutBreak = "layout.break" => LAYOUT,
+        LayoutRename = "layout.rename" => LAYOUT,
+        LayoutViewport = "layout.viewport" => LAYOUT,
+        LayoutPreset = "layout.preset" => LAYOUT,
+        LayoutCycle = "layout.cycle" => LAYOUT,
+        LayoutFocus = "layout.focus" => LAYOUT,
+        LayoutZoom = "layout.zoom" => LAYOUT,
+        LayoutSwap = "layout.swap" => LAYOUT,
+        LayoutGroupSelect = "layout.group.select" => LAYOUT,
+        AdapterList = "adapter.list" => ADAPTERS,
+        AdapterUpsert = "adapter.upsert" => ADAPTERS,
+        AdapterDelete = "adapter.delete" => ADAPTERS,
+        AdapterTest = "adapter.test" => ADAPTERS,
+        ThemeList = "theme.list" => THEMES,
+        ThemeUpsert = "theme.upsert" => THEMES,
+        ThemeDelete = "theme.delete" => THEMES,
+        SettingsSetBranchPrefix = "settings.set_branch_prefix" => THEMES,
+        ClientList = "client.list" => ENROLLMENT,
+        ClientEnroll = "client.enroll" => ENROLLMENT,
+        ClientRevoke = "client.revoke" => ENROLLMENT,
+        ClientSetNodeKey = "client.set_node_key" => TUNNEL,
+        WorktreeReorder = "worktree.reorder" => WORKTREE_ORDER,
+        TaskList = "task.list" => TASKS,
+        TaskGet = "task.get" => TASKS,
+        TaskGetByKey = "task.get_by_key" => TASKS,
+        TaskCreate = "task.create" => TASKS,
+        TaskUpdate = "task.update" => TASKS,
+        TaskSetStatus = "task.set_status" => TASKS,
+        TaskNote = "task.note" => TASKS,
+        TaskBlock = "task.block" => TASKS,
+        TaskSearch = "task.search" => TASKS,
+        WorkspaceList = "workspace.list" => WORKSTREAMS,
+        WorkspaceCreate = "workspace.create" => WORKSTREAMS,
+        WorkspaceRename = "workspace.rename" => WORKSTREAMS,
+        WorkspaceSetPrefix = "workspace.set_prefix" => WORKSTREAMS,
+        WorkspaceDelete = "workspace.delete" => WORKSTREAMS,
+        TaskMove = "task.move" => WORKSTREAMS,
+        WorktreeAssign = "worktree.assign" => WORKSTREAMS,
+        TerminalSetRole = "terminal.set_role" => WORKSTREAMS,
+        WorkspaceStartOrchestrator = "workspace.start_orchestrator" => WORKSTREAMS,
+        TerminalWatching = "terminal.watching" => WATCHING,
+        TerminalAttach = "terminal.attach" => TERMINAL_STREAM,
+        NeedsYouList = "needs_you.list" => NEEDS_YOU,
+        WorkspaceSetSettings = "workspace.set_settings" => WAKE_ON_ANSWER,
     }
 }
 
@@ -941,37 +1020,30 @@ mod tests {
         // A method mapped to a capability absent from `ALL` would be
         // permanently unreachable: the daemon refuses anything whose capability
         // it does not advertise, so the typo would present as a feature that
-        // silently does not exist.
-        for method in [
-            "worktree.create",
-            "worktree.discover",
-            "terminal.create",
-            "terminal.paste_file",
-            "terminal.agent_prompt",
-            "changes.file_diff",
-            "stack.get",
-            "layout.split",
-            "adapter.list",
-            "theme.list",
-            "client.enroll",
-            "client.set_node_key",
-            "terminal.attach",
-            "worktree.reorder",
-            "task.create",
-            "task.note",
-            "workspace.list",
-            "workspace.create",
-            "workspace.rename",
-            "workspace.set_prefix",
-            "workspace.delete",
-            "task.move",
-            "worktree.assign",
-            "terminal.set_role",
-            "workspace.start_orchestrator",
-            "needs_you.list",
-        ] {
-            let cap = capability::for_method(method).expect("a known method");
-            assert!(capability::ALL.contains(&cap), "{method} names {cap}, which is not advertised");
+        // silently does not exist. Every method, not a sample of them.
+        for method in method::Method::ALL {
+            let cap = method.capability();
+            assert!(capability::ALL.contains(&cap), "{method:?} names {cap}, which is not advertised");
+        }
+    }
+
+    /// Each method is one wire name and back again, and no two share a name.
+    ///
+    /// The macro writes the name into `name` and `parse` from one row, so the
+    /// round trip can only fail on a duplicate: `parse` would answer the first
+    /// row for both, and the second would be unreachable on the wire.
+    #[test]
+    fn every_method_round_trips_through_its_wire_name() {
+        let names: std::collections::BTreeSet<_> = method::Method::ALL.iter().map(|m| m.name()).collect();
+        assert_eq!(names.len(), method::Method::ALL.len(), "two methods share a wire name");
+        for &m in method::Method::ALL {
+            assert_eq!(method::Method::parse(m.name()), Some(m), "{m:?}");
+            assert_eq!(capability::for_method(m.name()), Some(m.capability()), "{m:?}");
+        }
+        // The agent queue's three, which the daemon's own scope table was
+        // missing while this table had them.
+        for name in ["terminal.agent_edit_queued", "terminal.agent_cancel_queued", "terminal.agent_steer_queued"] {
+            assert_eq!(capability::for_method(name), Some(capability::AGENT), "{name}");
         }
     }
 
@@ -982,6 +1054,10 @@ mod tests {
         // turns that into CAPABILITY_UNSUPPORTED rather than NOT_FOUND.
         assert_eq!(capability::for_method("something.invented"), None);
         assert_eq!(capability::for_method(""), None);
+        // Exact, as the daemon's scope table always was. This used to answer
+        // `layout` for any name under `layout.`, so a layout verb this build
+        // lacks read as a capability it has.
+        assert_eq!(capability::for_method("layout.nonsense"), None);
     }
 
     #[test]

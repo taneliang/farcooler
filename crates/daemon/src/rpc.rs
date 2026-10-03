@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use farcooler_agent::link::DaemonMessage;
 use farcooler_core::{DomainError, Result};
+use farcooler_protocol::method::Method;
 use farcooler_protocol::v1::{
     Empty, Error as WireError, Request, Response, Result as WireResult, Scope, request, response,
     result,
@@ -315,62 +316,69 @@ fn local_name(macos: bool) -> &'static str {
     if macos { "Mac" } else { "this computer" }
 }
 
+/// The scope a method requires, by its wire name, or `None` for a name this
+/// build does not know, which `handle` refuses as a capability it lacks.
+fn required_scope(method: &str) -> Option<Scope> {
+    Method::parse(method).map(scope_of)
+}
+
 /// The scope each method requires.
 ///
-/// Exhaustive by construction: an unknown method is rejected rather than
-/// defaulted, so adding a handler arm without adding a row here makes the
-/// method unreachable instead of silently unguarded.
-fn required_scope(method: &str) -> Option<Scope> {
-    Some(match method {
+/// Exhaustive by construction: a match on `Method` with no wildcard, so a
+/// method added to the protocol's table does not compile here until it has a
+/// scope. An unknown name never reaches this; `required_scope` refuses it
+/// rather than defaulting it.
+fn scope_of(method: Method) -> Scope {
+    match method {
         // Themes are what a client paints with. Read, not Control: naming a
         // color changes nothing on the runner, and a phone connected in a
         // read-only capacity should still be able to render itself properly.
-        "host.get" | "host.health" | "daemon.version" | "theme.list" => Scope::Read,
+        Method::HostGet | Method::HostHealth | Method::DaemonVersion | Method::ThemeList => Scope::Read,
         // Stopping the daemon stops nothing a user is watching — terminals are
         // tmux's — but it is the one method that ends the process, so it sits
         // at the highest scope. A local caller already holds it; a remote one
         // gets it only where ssh has proved who they are.
-        "daemon.shutdown" => Scope::HostAdmin,
-        "repository.list" | "worktree.list" | "terminal.list" | "branch.list" => Scope::Read,
-        "layout.list" => Scope::Read,
+        Method::DaemonShutdown => Scope::HostAdmin,
+        Method::RepositoryList | Method::WorktreeList | Method::TerminalList | Method::BranchList => Scope::Read,
+        Method::LayoutList => Scope::Read,
         // Discovery reveals paths, which live behind the same gate as every
         // other path in this protocol.
-        "worktree.discover" => Scope::HostAdmin,
-        "repository.register"
-        | "worktree.create"
-        | "worktree.hide"
-        | "worktree.unhide"
+        Method::WorktreeDiscover => Scope::HostAdmin,
+        Method::RepositoryRegister
+        | Method::WorktreeCreate
+        | Method::WorktreeHide
+        | Method::WorktreeUnhide
         // Dragging a card is a preference about a list, the same weight as
         // hiding one. It writes no git data and reveals no path, so it sits
         // where hide and unhide sit rather than behind `host_admin`.
-        | "worktree.reorder"
-        | "terminal.create"
-        | "terminal.resize"
-        | "terminal.stop"
-        | "terminal.dismiss_lost"
-        | "terminal.restart"
-        | "terminal.seen"
+        | Method::WorktreeReorder
+        | Method::TerminalCreate
+        | Method::TerminalResize
+        | Method::TerminalStop
+        | Method::TerminalDismissLost
+        | Method::TerminalRestart
+        | Method::TerminalSeen
         // Saying what is on your screen sits at the same scope as saying you
         // have read it, and for the same reason: both change what this runner
         // tells the owner. `read` is the scope handed to something that should
         // only see the SHAPE of the fleet, and a read-scoped client that could
         // assert attention could hold a terminal silent — which is a way of
         // withholding a notification, not a way of looking at one.
-        | "terminal.watching"
-        | "terminal.remove"
+        | Method::TerminalWatching
+        | Method::TerminalRemove
         // Reading a screen is `control`, not `read`.
         //
         // A screen is the most sensitive thing this protocol carries — it is
         // whatever the agent has on it, which routinely includes source, paths
         // and tokens — and `read` is the scope handed to something that should
         // only see the shape of the fleet.
-        | "terminal.screen"
+        | Method::TerminalScreen
         // And a stream is that same screen, continuously, plus every byte
         // between one screen and the next. Anything looser than `terminal.screen`
         // would hand a read-scoped client strictly more than one call of it
         // already gives — so this sits here rather than reasoning from "watching
         // is not writing", which is not the axis this table splits on.
-        | "terminal.attach"
+        | Method::TerminalAttach
         // Pasting a file writes bytes to a pane and a file to the runner.
         //
         // The bytes are the same privilege as `terminal.write`, and so is the
@@ -378,20 +386,29 @@ fn required_scope(method: &str) -> Option<Scope> {
         // of its choosing. That is why this accepts any type rather than only
         // images — the restriction protected nothing and cost the case people
         // actually want, which is dropping a PDF or a log on a pane.
-        | "terminal.paste_file"
-        | "terminal.write" => Scope::Control,
+        | Method::TerminalPasteFile
+        | Method::TerminalWrite => Scope::Control,
         // A pane's agent channel is exactly as sensitive as its screen — it is
         // the same conversation, just structured — so it sits at the same
         // scope rather than behind `host_admin`. Search returns
         // worktree-relative paths only, never a runner path, so it belongs here
         // too rather than beside `worktree.discover`.
-        "terminal.set_pane_mode"
-        | "terminal.agent_subscribe"
-        | "terminal.agent_prompt"
-        | "terminal.agent_answer"
-        | "terminal.agent_set_mode" | "terminal.agent_set_model" | "terminal.agent_set_config"
-        | "terminal.agent_cancel"
-        | "worktree.file_search" => Scope::Control,
+        Method::TerminalSetPaneMode
+        | Method::TerminalAgentSubscribe
+        | Method::TerminalAgentPrompt
+        | Method::TerminalAgentAnswer
+        | Method::TerminalAgentSetMode | Method::TerminalAgentSetModel | Method::TerminalAgentSetConfig
+        | Method::TerminalAgentCancel
+        // The queue is `control` for `terminal.agent_prompt`'s reason, because
+        // each of these is a prompt. Steering sends a queued message into the
+        // running turn; editing rewrites words the agent will read; cancelling
+        // withdraws them. A read-scoped client cannot send a prompt, so it
+        // cannot rewrite or launch one either. Not `host_admin`: they touch
+        // nothing outside the conversation the pane's own chat already shows.
+        | Method::TerminalAgentEditQueued
+        | Method::TerminalAgentCancelQueued
+        | Method::TerminalAgentSteerQueued
+        | Method::WorktreeFileSearch => Scope::Control,
         // Review is `control`, and for exactly the reason the screen above is.
         //
         // A diff IS source. `read` is the scope handed to something that should
@@ -401,27 +418,27 @@ fn required_scope(method: &str) -> Option<Scope> {
         // adding a feature. `Scope` is runner-wide (there is no per-repository
         // authorization to reach for), so the honest answer is the scope that
         // can already read a terminal screen, which already shows source.
-        "changes.change_set"
-        | "changes.commit_files"
-        | "changes.file_diff"
-        | "changes.set_base"
-        | "changes.mark_read"
-        | "stack.set_parent"
-        | "pr.refresh" => Scope::Control,
+        Method::ChangesChangeSet
+        | Method::ChangesCommitFiles
+        | Method::ChangesFileDiff
+        | Method::ChangesSetBase
+        | Method::ChangesMarkRead
+        | Method::StackSetParent
+        | Method::PrRefresh => Scope::Control,
         // Metadata about work, not the work. Counts, +/-, PR state and the
         // needs-you badge let a read-scoped phone triage the fleet without being
         // able to read a line of the code.
-        "changes.inbox" | "stack.get" => Scope::Read,
+        Method::ChangesInbox | Method::StackGet => Scope::Read,
         // The shape of the work, like `changes.inbox`: what is waiting on a
         // person and where. Below `control` the converter drops what an ask's
         // option names carry, which is the raw command or path
         // (`needs_you::redact_below_control`).
-        "needs_you.list" => Scope::Read,
+        Method::NeedsYouList => Scope::Read,
         // The board reads. A task's title, intent and record are metadata about
         // work, not the work: no path, no diff, no terminal byte — the same
         // ground `changes.inbox` stands on, and a read-scoped phone has to be
         // able to see what the fleet is doing to be worth carrying.
-        "task.list" | "task.get" | "task.get_by_key" | "task.search" => Scope::Read,
+        Method::TaskList | Method::TaskGet | Method::TaskGetByKey | Method::TaskSearch => Scope::Read,
         // The board writes, at the scope `worktree.create` and
         // `terminal.create` already sit at: a write that touches no git data
         // and reveals no path.
@@ -432,15 +449,15 @@ fn required_scope(method: &str) -> Option<Scope> {
         // `read`, because `read` is what a client gets when it should only see
         // the SHAPE of the fleet, and a client that could append notes could
         // write a decision the record then claims a person made.
-        "task.create"
-        | "task.update"
-        | "task.set_status"
-        | "task.note"
-        | "task.block" => Scope::Control,
+        Method::TaskCreate
+        | Method::TaskUpdate
+        | Method::TaskSetStatus
+        | Method::TaskNote
+        | Method::TaskBlock => Scope::Control,
         // Workspaces: the list is the shape of the fleet, like
         // `worktree.list`; paths in it are redacted below `host_admin` by the
         // converter, as everywhere.
-        "workspace.list" => Scope::Read,
+        Method::WorkspaceList => Scope::Read,
         // The writes sit with the board writes and `worktree.create`: they
         // touch no git data and reveal no path, and an orchestrator has to
         // be able to split its own workstream for any of this to be
@@ -448,35 +465,35 @@ fn required_scope(method: &str) -> Option<Scope> {
         // reaches, the same weight as saying you have read one. Starting an
         // orchestrator opens an agent pane, which is `terminal.create`'s
         // weight.
-        "workspace.create"
-        | "workspace.rename"
-        | "workspace.set_prefix"
-        | "workspace.set_settings"
-        | "workspace.delete"
-        | "workspace.start_orchestrator"
-        | "task.move"
-        | "worktree.assign"
-        | "terminal.set_role" => Scope::Control,
+        Method::WorkspaceCreate
+        | Method::WorkspaceRename
+        | Method::WorkspaceSetPrefix
+        | Method::WorkspaceSetSettings
+        | Method::WorkspaceDelete
+        | Method::WorkspaceStartOrchestrator
+        | Method::TaskMove
+        | Method::WorktreeAssign
+        | Method::TerminalSetRole => Scope::Control,
         // Tiling is `control`, not `host_admin`. It touches no files and stops
         // no process — the worst a wrong one does is show you the wrong pane —
         // and it has to be reachable by an agent for any of this to be
         // automatable.
-        "layout.split"
-        | "layout.move"
-        | "layout.resize"
-        | "layout.break"
-        | "layout.rename"
-        | "layout.viewport"
-        | "layout.preset"
-        | "layout.cycle"
-        | "layout.focus"
-        | "layout.zoom"
-        | "layout.swap"
-        | "layout.group.select" => Scope::Control,
-        "repository_root.list"
-        | "repository_root.add"
-        | "repository_root.remove"
-        | "worktree.remove" => Scope::HostAdmin,
+        Method::LayoutSplit
+        | Method::LayoutMove
+        | Method::LayoutResize
+        | Method::LayoutBreak
+        | Method::LayoutRename
+        | Method::LayoutViewport
+        | Method::LayoutPreset
+        | Method::LayoutCycle
+        | Method::LayoutFocus
+        | Method::LayoutZoom
+        | Method::LayoutSwap
+        | Method::LayoutGroupSelect => Scope::Control,
+        Method::RepositoryRootList
+        | Method::RepositoryRootAdd
+        | Method::RepositoryRootRemove
+        | Method::WorktreeRemove => Scope::HostAdmin,
         // Runner settings, reads included.
         //
         // These write a file in the user's home directory on a runner that may
@@ -497,8 +514,8 @@ fn required_scope(method: &str) -> Option<Scope> {
         // user's home directory; they decide who may log in to this runner at
         // all. A client that could enroll could widen its own access, which
         // would make every scope beneath this one advisory.
-        "client.list" => Scope::Read,
-        "client.enroll" | "client.revoke" => Scope::HostAdmin,
+        Method::ClientList => Scope::Read,
+        Method::ClientEnroll | Method::ClientRevoke => Scope::HostAdmin,
         // Registering a node key is `read`, and that is not an oversight.
         //
         // It writes into `authorized_keys`, which everything else in this
@@ -510,16 +527,15 @@ fn required_scope(method: &str) -> Option<Scope> {
         // that can gains nothing it did not have. Requiring `host_admin` here
         // would mean a read-scoped phone could never migrate onto the tunnel,
         // which is the entire purpose of the method.
-        "client.set_node_key" => Scope::Read,
-        "settings.set_branch_prefix"
-        | "theme.upsert"
-        | "theme.delete"
-        | "adapter.list"
-        | "adapter.upsert"
-        | "adapter.delete"
-        | "adapter.test" => Scope::HostAdmin,
-        _ => return None,
-    })
+        Method::ClientSetNodeKey => Scope::Read,
+        Method::SettingsSetBranchPrefix
+        | Method::ThemeUpsert
+        | Method::ThemeDelete
+        | Method::AdapterList
+        | Method::AdapterUpsert
+        | Method::AdapterDelete
+        | Method::AdapterTest => Scope::HostAdmin,
+    }
 }
 
 /// Where an adapter in force came from.
@@ -2499,73 +2515,19 @@ mod tests {
         assert!(!satisfies(Scope::Unspecified, Scope::Read));
     }
 
+    /// Every method on the wire has a scope, so none of them is refused as a
+    /// method this runner does not know.
+    ///
+    /// Enumerates `Method::ALL` rather than a list of names typed here, which
+    /// is what let the agent queue's three slip: they were in the protocol's
+    /// table and the hand-typed list below, which checked it, never named them.
     #[test]
-    fn every_method_the_design_lists_for_mvp_declares_a_scope() {
-        // The table is the guard, so an unlisted method must be unreachable
-        // rather than reachable-and-unguarded.
-        for method in [
-            "host.get",
-            "daemon.version",
-            "repository_root.list",
-            "repository.list",
-            "worktree.list",
-            "terminal.list",
-            "branch.list",
-            "worktree.discover",
-            "repository_root.add",
-            "repository.register",
-            "worktree.create",
-            "worktree.hide",
-            "worktree.unhide",
-            "worktree.reorder",
-            "terminal.seen",
-            "terminal.watching",
-            "terminal.remove",
-            "repository_root.remove",
-            "worktree.remove",
-            "terminal.create",
-            "terminal.resize",
-            "terminal.stop",
-            "terminal.dismiss_lost",
-            "terminal.restart",
-            "terminal.screen",
-            "terminal.write",
-            "terminal.paste_file",
-            "layout.list",
-            "layout.split",
-            "layout.move",
-            "layout.resize",
-            "layout.break",
-            "layout.rename",
-            "layout.viewport",
-            "layout.preset",
-            "layout.cycle",
-            "layout.focus",
-            "layout.zoom",
-            "layout.swap",
-            "layout.group.select",
-            "changes.change_set",
-            "changes.commit_files",
-            "changes.file_diff",
-            "changes.set_base",
-            "changes.mark_read",
-            "changes.inbox",
-            "stack.get",
-            "stack.set_parent",
-            "pr.refresh",
-            "workspace.list",
-            "workspace.create",
-            "workspace.rename",
-            "workspace.set_prefix",
-            "workspace.set_settings",
-            "workspace.delete",
-            "task.move",
-            "worktree.assign",
-            "terminal.set_role",
-            "workspace.start_orchestrator",
-        ] {
-            assert!(required_scope(method).is_some(), "{method} has no declared scope");
-        }
+    fn every_method_has_a_scope() {
+        let unscoped: Vec<_> = farcooler_protocol::method::Method::ALL
+            .iter()
+            .filter(|m| required_scope(m.name()).is_none())
+            .collect();
+        assert!(unscoped.is_empty(), "refused as unknown by every runner: {unscoped:?}");
     }
 
     #[test]
@@ -2662,40 +2624,48 @@ mod tests {
         assert_eq!(required_scope("layout.list"), Some(Scope::Read));
     }
 
-    /// Every `task.` route this file dispatches is in the scope table, and
-    /// every one the table names is dispatched.
+    /// Every method on the wire is dispatched here, and every route this file
+    /// dispatches is a method on the wire.
     ///
     /// A SET DIFFERENCE, both ways, because the two sides fail differently and
     /// a check in one direction misses the one that matters. A route in
-    /// `dispatch` and not in `required_scope` is unreachable — the table
-    /// refuses it as an unknown method — which reads to a client as "this
-    /// runner is too old" for a feature this runner has. A route in the table
-    /// and not in `dispatch` is worse: the scope check passes, the method
-    /// falls through to the `other =>` arm, and the caller is told `NotFound`
-    /// as though the task it named did not exist.
+    /// `dispatch` that is not a `Method` is unreachable: `required_scope`
+    /// refuses it as an unknown method, which reads to a client as "this
+    /// runner is too old" for a feature this runner has. That is how the agent
+    /// queue's three shipped. A `Method` not in `dispatch` is worse: the scope
+    /// check passes, the method falls through to the `other =>` arm, and the
+    /// caller is told `NotFound` as though the thing it named did not exist.
     ///
-    /// Read out of this file's own source, so it pins the two lists rather
-    /// than a third list somebody has to remember to update. That is the
-    /// entire point: a hand-written roll-call of method names would pass for a
-    /// route added to `dispatch` and forgotten everywhere else, which is
-    /// exactly the mistake being guarded.
+    /// Scopes need no such check: `scope_of` is a match on `Method` with no
+    /// wildcard, so the compiler holds that side. Dispatch matches wire names
+    /// and the compiler cannot, so it is read out of this file's own source and
+    /// compared with `Method::ALL`, never with a list typed here.
     #[test]
-    fn every_board_route_is_in_the_scope_table_and_every_table_entry_is_dispatched() {
+    fn every_method_is_dispatched_and_every_dispatched_route_is_a_method() {
         let source = include_str!("rpc.rs");
-        let table = methods_in(source, "fn required_scope", "\n}\n", &["task.", "workspace."]);
-        let dispatched = methods_in(source, "async fn dispatch", "\n    }\n", &["task.", "workspace."]);
+        let methods: std::collections::BTreeSet<String> =
+            Method::ALL.iter().map(|m| m.name().to_string()).collect();
+        let prefixes: std::collections::BTreeSet<String> =
+            methods.iter().map(|m| format!("{}.", m.split('.').next().expect("a dotted name"))).collect();
+        let prefixes: Vec<&str> = prefixes.iter().map(String::as_str).collect();
+        // `"layout."` alone is the prefix arm's own pattern, not a route.
+        let dispatched: std::collections::BTreeSet<String> =
+            methods_in(source, "async fn dispatch", "\n    }\n", &prefixes)
+                .into_iter()
+                .filter(|m| !m.ends_with('.'))
+                .collect();
 
-        assert!(!table.is_empty(), "the slicing found nothing, so this test proves nothing");
-        let ungated: Vec<_> = dispatched.difference(&table).collect();
-        assert!(ungated.is_empty(), "dispatched but absent from the scope table: {ungated:?}");
-        let unreachable: Vec<_> = table.difference(&dispatched).collect();
-        assert!(
-            unreachable.is_empty(),
-            "in the scope table but never dispatched: {unreachable:?}"
-        );
+        assert!(dispatched.len() > 50, "the slicing found {}, so this test proves nothing", dispatched.len());
+        let unknown: Vec<_> = dispatched.difference(&methods).collect();
+        assert!(unknown.is_empty(), "dispatched but refused as unknown on every runner: {unknown:?}");
+        let unhandled: Vec<_> = methods.difference(&dispatched).collect();
+        assert!(unhandled.is_empty(), "a method with a scope and no handler: {unhandled:?}");
+    }
 
-        // And the routes themselves are split the way the table's comment says
-        // they are, which the set comparison above cannot see.
+    /// The board and workspace routes are split the way the scope table's
+    /// comments say they are, which no set comparison can see.
+    #[test]
+    fn the_board_reads_are_read_and_its_writes_are_control() {
         for method in ["task.list", "task.get", "task.get_by_key", "task.search"] {
             assert_eq!(required_scope(method), Some(Scope::Read), "{method}");
         }
@@ -2703,22 +2673,6 @@ mod tests {
             ["task.create", "task.update", "task.set_status", "task.note", "task.block"]
         {
             assert_eq!(required_scope(method), Some(Scope::Control), "{method}");
-        }
-        // The workspace routes, the same way. `workspace.` is scanned whole
-        // above; the two that live under other prefixes are named here, in
-        // both lists, so neither can be dropped from one of them alone.
-        assert!(table.contains("workspace.list") && table.contains("workspace.delete"), "{table:?}");
-        for method in ["worktree.assign", "terminal.set_role"] {
-            let prefix = format!("{}.", method.split('.').next().expect("a dotted name"));
-            let prefix = [prefix.as_str()];
-            assert!(
-                methods_in(source, "fn required_scope", "\n}\n", &prefix).contains(method),
-                "{method} is missing from the scope table"
-            );
-            assert!(
-                methods_in(source, "async fn dispatch", "\n    }\n", &prefix).contains(method),
-                "{method} is never dispatched"
-            );
         }
         assert_eq!(required_scope("workspace.list"), Some(Scope::Read));
         for method in [
