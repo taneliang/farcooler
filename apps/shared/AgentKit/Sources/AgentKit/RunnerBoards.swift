@@ -3,8 +3,8 @@ import Foundation
 // The phone's Board rows: one per workspace that has a board, in its runner's
 // section of the shell overview.
 //
-// The Mac's sidebar has had this row since card -19 (`BoardRow` in
-// `apps/macos/Sources/FarCooler/SidebarViews.swift`), and it draws the same two
+// The Mac's old Fleet sidebar had this row from card -19 until ov-178 retired
+// the sidebar, and it drew the same two
 // numbers: the tasks waiting on a decision, amber, and a quiet count of the
 // tasks an agent is on. The rules for both are AgentKit's already —
 // `TaskBoardModel.waitingOnYou`, `tasksWithLiveAgents`, `TaskAgentLink` — and

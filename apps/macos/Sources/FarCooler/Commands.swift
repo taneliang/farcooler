@@ -112,11 +112,9 @@ struct FarCoolerCommands: Commands {
                 .disabled(!(MainWindowFocus.isKey(mainWindow) && mainWindow?.hasWorktree == true))
             // ⌘N, the plainest shortcut in the app, for the thing it is for.
             //
-            // "New Worktree…" and not "New Task…", which it was until the
-            // board moved into the sidebar: this makes a worktree and starts an
-            // agent in it, and puts nothing on the board. With a Board row
-            // above every repository's worktrees, "task" on this item would
-            // name the other thing.
+            // "New Worktree…" and not "New Task…": this makes a worktree and
+            // starts an agent in it, and puts nothing on the board, so "task"
+            // on this item would name the other thing.
             Button("New Worktree…") { AppCommand.newWorktree.post() }
                 .keyboardShortcut("n", modifiers: .command)
                 .disabled(!MainWindowFocus.isKey(mainWindow))
@@ -130,10 +128,10 @@ struct FarCoolerCommands: Commands {
 
         // The board, beside the things it is about.
         //
-        // ⇧⌘B rather than a bare ⌘B, which is the sidebar's on every Mac and
-        // is not up for grabs. Repository-scoped, like the board itself: it
-        // selects the Board row of whatever the sidebar is showing, and of the
-        // only repository there is when nothing is selected.
+        // ⇧⌘B rather than a bare ⌘B, which is the sidebar's on every Mac (here,
+        // the navigator's) and is not up for grabs. It opens the board of the
+        // workspace the window is in, and of the only repository there is
+        // when nothing is selected.
         CommandGroup(after: .toolbar) {
             Button("Show Board") { AppCommand.showBoard.post() }
                 .keyboardShortcut("b", modifiers: [.command, .shift])
@@ -172,8 +170,8 @@ struct FarCoolerCommands: Commands {
         // taken: ⌘[ is Previous Terminal and ⇧⌘↩ is Zoom Pane (spec §4.9).
         //
         // ⌘1 through ⌘9 are the workspaces themselves (ov-86), in the title
-        // bar switcher's order, as a browser's are its tabs: with no sidebar,
-        // they're the fastest way between them. They were the terminals on
+        // bar switcher's order, as a browser's are its tabs: they're the
+        // fastest way between them. They were the terminals on
         // screen, which moved to ⌃⌘1 through ⌃⌘9.
         CommandMenu("Workspace") {
             Button("Back") { AppCommand.back.post() }
@@ -469,7 +467,7 @@ struct FarCoolerCommands: Commands {
             // and typing is the fastest way to any of them, on any runner.
             CommandGroup(after: .textEditing) {
                 // In a workspace, ⌘F filters its navigator's tasks (ov-103),
-                // and says so; elsewhere it's the sidebar's find.
+                // and says so; elsewhere it opens Go to Anything (ov-178).
                 Button(MainWindowFocus.findTitle(mainWindow)) { AppCommand.search.post() }
                     .keyboardShortcut("f", modifiers: .command)
                     .disabled(!MainWindowFocus.isKey(mainWindow))

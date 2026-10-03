@@ -130,8 +130,8 @@ terminal, or a chat view when it's in chat mode. The `⋯` menu in the
 conversation's header switches with **Show as Chat** or **Show as Terminal**,
 and also has **Replace Orchestrator**, **Show Charter**, **Wake the Agent When
 You Answer**, **Restart** and **Stop Being Orchestrator**. With no orchestrator
-running, it still has **Show Charter** and **Wake the Agent When You Answer**. Tell it what you want done in plain words. It puts the work
-on the board, dispatches agents, and reports back from the board, not from
+running, it still has **Show Charter** and **Wake the Agent When You Answer**.
+Tell it what you want done in plain words. It puts the work on the board, dispatches agents, and reports back from the board, not from
 memory. It writes down what it decides, so its work survives a restart. The
 first time you talk to a new orchestrator, it interviews you for the charter:
 how work gets from idea to landed, what done means, who reviews, what it may

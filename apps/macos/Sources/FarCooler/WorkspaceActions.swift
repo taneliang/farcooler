@@ -1,10 +1,11 @@
 import AgentKit
 import Foundation
 
-// What a workspace offers: its sidebar row's menu, starting its
-// orchestrator from the conversation column, and opening its charter.
+// What a workspace offers: its orchestrator header's menu (the old Fleet
+// sidebar's workspace row's, until ov-178), starting its orchestrator from
+// the conversation column, and opening its charter.
 //
-// Worked out here as values, and drawn by `WorkspaceRow` and the
+// Worked out here as values, and drawn by `ConversationHeader` and the
 // conversation column, so the rules are the ones `WorkspaceActionsTests`
 // pins.
 
@@ -24,8 +25,7 @@ enum WorkspaceMenu {
         }
     }
 
-    /// Show Board only where the sidebar draws a Board row (a runner with
-    /// `tasks`). Start or Replace, never both: a workspace has at most one
+    /// Show Board only where there's a board (a runner with `tasks`). Start or Replace, never both: a workspace has at most one
     /// orchestrator, and the runner refuses a second start without
     /// `--replace`. Show Charter always, disabled when this Mac can't open it
     /// (`CharterAccess`), so the item says why rather than vanishing.

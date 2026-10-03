@@ -1,16 +1,15 @@
 import AgentKit
 import Foundation
 
-// Everything the sidebar does, and where else it's done (ov-86 review M1).
-//
-// A new window opens without the sidebar, so nothing may be reachable only
-// from it. The title bar's switcher, the toolbar's runner item, the
+// Everything the old Fleet sidebar did, and where it's done now (ov-86 review
+// M1; the sidebar itself went in ov-178, so nothing may have been reachable
+// only from it). The title bar's switcher, the toolbar's runner item, the
 // workspace navigator (ov-92: what the orchestrator's rail did is its first
 // row) and the worktree menus are drawn from the values here, and
 // `SidebarParityTests` checks that between them they offer every
 // `SidebarAction`.
 
-/// One thing the sidebar lets you do.
+/// One thing the old Fleet sidebar let you do.
 enum SidebarAction: String, CaseIterable {
     // The window's places.
     case needsYou, switchWorkspace, newWorkspace, newWorktree, addRepository, addRunner, find

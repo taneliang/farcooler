@@ -34,14 +34,14 @@ struct ContentView: View {
     /// `sheet(item:)` presents a new value as a new presentation, so each `+`
     /// gets a view that has never chosen anything.
     private struct NewWorktreeIntent: Identifiable {
-        /// The project whose header was clicked, by display name — which is
-        /// what the sidebar groups by and what the sheet matches on. Empty
+        /// The project the control named, by display name, which is what the
+        /// sheet matches on. Empty
         /// when the control named no project at all.
         var project: String = ""
         /// The runner that project is on. Only meaningful beside `project`:
         /// two runners can share a display name, and only one of them is the
         /// project the header actually named. Empty means "none was named",
-        /// which is the sidebar's own `+` and the empty-state buttons — the
+        /// which is ⌘N's own and the empty-state buttons — the
         /// one case where letting the sheet choose a default is legitimate
         /// rather than the picker again in disguise.
         var host: String = ""
@@ -418,7 +418,7 @@ struct ContentView: View {
             // Cleared on every navigation, so a refusal or failure left behind
             // on one pane does not go on describing a pane the user is no
             // longer looking at. Selection is the one thing every navigation
-            // path — sidebar click, ⌘P, ⌘], ⌃B o, closing a terminal — funnels
+            // path — a navigator click, ⌘P, ⌘], ⌃B o, closing a terminal — funnels
             // through, which makes it the narrowest point that sees every one
             // of them.
             errorBanner = nil
@@ -490,7 +490,7 @@ struct ContentView: View {
 
             if let arrived {
                 // Stamped here rather than in the palette, so every way of
-                // arriving counts: a sidebar click, ⌘], ⌃B o, a jump from the
+                // arriving counts: a navigator click, ⌘], ⌃B o, a jump from the
                 // palette itself. A switcher that only learned from its own
                 // choices would order by where you had used IT, not by where you
                 // have been.
@@ -498,7 +498,7 @@ struct ContentView: View {
             }
 
             // Opening a terminal is what ends `done`. Being LISTED is still not
-            // being read — the sidebar shows every terminal on the runner and
+            // being read — the palette lists every terminal on the runner and
             // clearing a notification nobody read is worse than not sending one
             // — but being on screen is, which is more than the pane you clicked.
             markVisibleSeen()
@@ -635,7 +635,7 @@ struct ContentView: View {
                         // nothing left to offer to import. Refreshed on the
                         // runner it was registered on — there is no event
                         // push for a repository or root change, so any other
-                        // host would leave that host's sidebar rows stale.
+                        // host would leave that host's switcher and navigator stale.
                         await store.clients[host]?.refreshRepositories()
                         await store.clients[host]?.refresh()
                     }
@@ -647,8 +647,8 @@ struct ContentView: View {
                 repositories: store.repositories,
                 preselected: intent.project,
                 // Both halves off the one intent, so they cannot disagree
-                // about which project this is. An empty host is the sidebar's
-                // own `+` and the empty-state buttons, none of which named a
+                // about which project this is. An empty host is ⌘N's and the
+                // empty-state buttons, none of which named a
                 // runner, so the sheet's own picker is left to choose one.
                 preselectedHost: intent.host,
                 branchPrefix: { host in store.clients[host]?.fleet.branchPrefix ?? "" }
@@ -680,8 +680,8 @@ struct ContentView: View {
                 // Land in the terminal it came up with, exactly as starting a
                 // task does. Creating a worktree is not a filing act — you make
                 // one because you are about to work in it — and `reveal` is the
-                // one place that says what "go to it" means: expand the
-                // worktree in the sidebar, then select its terminal.
+                // one place that says what "go to it" means: select its
+                // terminal.
                 reveal(created.worktree)
                 return nil
             }
@@ -1169,8 +1169,8 @@ struct ContentView: View {
 
     /// Whose board ⇧⌘B selects.
     ///
-    /// The workspace of whatever the sidebar is showing — Main's for a
-    /// worktree in Unclaimed — and the only repository's Main when nothing is
+    /// The workspace of whatever the window is showing — Main's for an
+    /// unclaimed worktree — and the only repository's Main when nothing is
     /// selected. Never a guess between several: opening the wrong board looks
     /// exactly like a workspace with somebody else's work on it. See
     /// `ContentView.boardWorkspace(for:in:)`.
@@ -1394,7 +1394,7 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Getting around without the sidebar (ov-86)
+    // MARK: - The title bar, the toolbar and the worktree menus (ov-86)
 
     /// Whether this is the window menu commands are for: the key one, or
     /// the only one before its window is known.
@@ -1422,8 +1422,7 @@ struct ContentView: View {
             openRequest: switcherRequest, perform: { perform($0) })
     }
 
-    /// What a switcher item does: the sidebar's own actions, by the same
-    /// routes.
+    /// What a switcher item does, by the routes the rest of the window uses.
     private func perform(_ command: SwitcherCommand) {
         switch command {
         case .go(let target): selection = target
@@ -1445,8 +1444,8 @@ struct ContentView: View {
         }
     }
 
-    /// A worktree's menu away from the sidebar (`WorktreeMenu.items`): the
-    /// sidebar row's, by the same rules.
+    /// A worktree's menu (`WorktreeMenu.items`), on navigator rows, task rows
+    /// and the breadcrumb.
     private func worktreeMenu(for ws: Worktree) -> [WorktreeMenu.Item] {
         let host = ws.host ?? ""
         let listed = worktree(host: host, id: ws.id) ?? ws
@@ -2221,13 +2220,13 @@ struct ContentView: View {
         )
     }
 
-    /// Open `worktree`, or `terminal` in it, as its sidebar row and its card
+    /// Open `worktree`, or `terminal` in it, as its navigator row and its card
     /// do. See `navigate(to:key:)`.
     private func open(_ worktree: Worktree, terminal: String?) {
         navigate(to: Self.opening(worktree, terminal: terminal, in: store.fleet))
     }
 
-    /// Go to `next`, an explicit open: a sidebar row, a card, Needs You, the
+    /// Go to `next`, an explicit open: a navigator row, a card, Needs You, the
     /// palette, or a pane gone to from the keyboard. A terminal it names that
     /// shares a seated orchestrator's window is moved to a window of its own
     /// first (`moveOutOfOrchestratorWindow`: the sharer, never the
@@ -2336,7 +2335,7 @@ struct ContentView: View {
     /// worktree it is in put the same view on screen with the same six
     /// callbacks, and while they were written out twice they drifted: the drag
     /// handler was fixed in one copy and not the other, so dropping a pane
-    /// behaved differently depending on which sidebar row you had clicked last.
+    /// behaved differently depending on which row you had clicked last.
     @ViewBuilder
     private func tiled(_ shown: ShownLayout, titled: Bool = true, keyboard: Bool = true) -> some View {
         let ws = shown.worktree
@@ -2423,8 +2422,8 @@ struct ContentView: View {
     // MARK: - Routing
 
     /// A repository to default the project picker to, when nothing was
-    /// chosen yet — the empty state's "New Worktree…" button, the sidebar's
-    /// own `+`, and the palette's "New Worktree…" all reach this with no project
+    /// chosen yet — the empty state's "New Worktree…" button, ⌘N, and the
+    /// palette's "New Worktree…" all reach this with no project
     /// and therefore no host in hand at all, which is the one case where a
     /// default runner is legitimate rather than the picker again in
     /// disguise. This Mac's own repositories come first: it is the runner
@@ -2468,7 +2467,7 @@ struct ContentView: View {
     /// This is the one place left that has to work backwards from a bare short
     /// id with no host of its own to check against, because that is the whole
     /// interface `ScreenPreviews` and `CommandPalette` were built around. Local
-    /// runner first, then the rest in the same order the sidebar lists them:
+    /// runner first, then the rest in the fleet's order:
     /// with one runner, or with short ids that do not collide, this finds the
     /// right terminal every time; a genuine collision costs a preview tile
     /// showing the wrong screen, never an action landing on the wrong runner.
@@ -2592,9 +2591,9 @@ struct ContentView: View {
     // MARK: - Commands
 
     /// The terminals of the view on screen, in the order they're drawn:
-    /// what ⌘] and ⌘[, ⌥⌘↓ and ⌥⌘↑ and ⌃⌘1… step through (spec §4.9). The
-    /// sidebar no longer lists terminals, so stepping through all of them
-    /// would walk a list nobody can see.
+    /// what ⌘] and ⌘[, ⌥⌘↓ and ⌥⌘↑ and ⌃⌘1… step through (spec §4.9).
+    /// Nothing lists every terminal, so stepping through all of them would
+    /// walk a list nobody can see.
     private var allTerminals: [PaneRef] { Self.stepOrder(shown) }
 
     /// `allTerminals` for what's shown: column by column, each layout's
@@ -3015,8 +3014,8 @@ struct ContentView: View {
 
     /// Drop a terminal on an edge of a pane: it splits that pane on that edge.
     ///
-    /// One write for every drag in the app — a pane onto a pane, a sidebar row
-    /// onto a pane, a sidebar row onto another row — because they all say the same
+    /// One write for every drag in the app — a pane onto a pane, from a tile
+    /// or a layout's bar — because they all say the same
     /// thing: this terminal, against that one, on this side. It was three
     /// operations while a layout was an ordered list, and the list could only
     /// express "before" and "after", which is why dropping on the left half of a
@@ -3113,7 +3112,7 @@ struct ContentView: View {
     /// Put the keyboard in `pane`, which is on screen or about to be.
     ///
     /// Within the view on screen: a worktree opened whole selects the pane
-    /// in it, so its sidebar row lights and it's what the window reopens on;
+    /// in it, so its navigator row lights and it's what the window reopens on;
     /// in the conversation or a task's column, the selection stays and only
     /// the key pane moves. A pane on no column of this view goes to where it
     /// lives, as `land(on:)` does.
@@ -3385,8 +3384,8 @@ struct ContentView: View {
             } else if let target = boardTarget {
                 selection = .workspace(host: target.host, workspace: target.workspace.id, focus: nil)
             } else {
-                // Never a guess between several. The rows are in the sidebar
-                // for exactly this case.
+                // Never a guess between several. The switcher lists them for
+                // exactly this case.
                 errorBanner = "Select a workspace first."
             }
         case .back: goBack()
@@ -3464,7 +3463,7 @@ struct ContentView: View {
     /// Every case here routes into a method that already existed, and that is
     /// the whole design of `PaletteAction`: the palette knows what you picked
     /// and nothing about what picking it means, so opening a terminal from the
-    /// panel and clicking it in the sidebar cannot drift apart.
+    /// panel and clicking it in the window cannot drift apart.
     private func perform(_ action: PaletteAction) {
         showPalette = false
         switch action {
@@ -3666,8 +3665,8 @@ struct ContentView: View {
 
     /// A new terminal, in a layout of its own.
     ///
-    /// Every way of making a terminal goes through this — the sidebar button, ⌘T,
-    /// the palette's action, ⌃B c.
+    /// Every way of making a terminal in a worktree goes through this — the
+    /// worktree menu's New Terminal, ⌘T, the palette's action, ⌃B c.
     ///
     /// One call now, where it used to be two. A terminal IS a tmux window and a
     /// window IS a layout, so creating one already produces the layout; the
@@ -3848,7 +3847,7 @@ struct ContentView: View {
 
     /// The worktree to land on when `worktreeID` is gone: one on the same
     /// runner, in the same repository if `previous` still says which that was,
-    /// and one the sidebar actually draws before a hidden one. Nil when the
+    /// and one that isn't hidden before a hidden one. Nil when the
     /// runner has none left, because landing on another runner is the app
     /// moving you somewhere you never asked to go.
     nonisolated static func sibling(
@@ -3888,7 +3887,8 @@ struct ContentView: View {
 
 }
 
-/// What Esc does in the sidebar's search field.
+/// What Esc does in a search or filter field: the navigator's filter, and
+/// History's search.
 enum SearchEscape {
     /// With text, clears it and keeps the field; empty, leaves the field.
     static func after(query: String) -> (query: String, keepsFocus: Bool) {

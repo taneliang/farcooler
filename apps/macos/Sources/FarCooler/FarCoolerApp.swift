@@ -13,19 +13,12 @@ struct FarCoolerApp: App {
                     Appearance.apply(Preferences.shared.appearance)
                     promptForCLIToolsIfNeeded()
                 }
-                // Small enough that revealing the sidebar never has to grow the
-                // window.
-                //
-                // This was 900×560, and that one number caused every sidebar
-                // complaint at once. A 900 minimum meant a 900-wide window was
-                // sitting exactly AT its minimum, so ⌘B could not give the
-                // sidebar's width back out of the detail — it had to widen the
-                // window instead. Hence the window creeping left and growing on
-                // every reveal, and hence the jerk: an AppKit window resize
-                // running against the sidebar's own slide animation.
-                //
-                // 640×420 is a real minimum — enough for a usable terminal beside
-                // the sidebar — rather than a preferred size expressed as a floor.
+                // A real minimum, enough for a usable terminal beside the
+                // navigator, rather than a preferred size expressed as a floor.
+                // It was 900×560 while the window had a split-view sidebar, and
+                // a window sitting at its minimum had to grow to reveal one;
+                // the navigator gives its width out of the detail instead
+                // (`WorkspaceColumns`), and the old sidebar is gone (ov-178).
                 .frame(minWidth: 600, minHeight: 400)
                 .alert("Install command-line tools?", isPresented: $showsCLIToolsPrompt) {
                     Button("Install") { CommandLineTools().install() }
