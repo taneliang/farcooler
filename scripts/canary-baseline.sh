@@ -21,6 +21,12 @@
 #     ships an old commit after newer ones already shipped. The newer proto is
 #     still in the field, so it stays the baseline: a commit that does not
 #     descend from the recorded one records nothing.
+#   - NEVER OVER A BREAK. The proto that shipped is checked against the one
+#     recorded, by proto-lint's own rules, before it replaces it. Copied
+#     unchecked, a break that shipped became the baseline, and every later lint
+#     passed against it. canary.yml's `wire` job should stop a break before it
+#     ships; this is the lock that holds if that gate is ever lost, and it fails
+#     the job rather than warning, because a break in the field needs a person.
 #   - COMPARED WITHOUT IT. Only the proto below that line decides whether there
 #     is anything to commit, so a push that leaves the wire alone commits
 #     nothing — the header keeps naming the first commit to ship this wire.
@@ -28,6 +34,8 @@ set -euo pipefail
 
 shipped="${1:?usage: canary-baseline.sh <shipped commit>}"
 baseline=proto/baseline/canary.proto
+# Resolved now: the checkout below moves the tree, and this path with it.
+lint="$(cd "$(dirname "$0")" && pwd)/proto-lint.py"
 
 # The shipped commit, by object, not by whatever main is now. Fetched if the
 # checkout lacks it, and loudly absent otherwise.
@@ -74,6 +82,13 @@ for attempt in 1 2 3; do
     if cmp -s <(tail -n +2 "$baseline") <(tail -n +2 "$new"); then
       echo "canary baseline unchanged"
       exit 0
+    fi
+    # The same rules CI's and Canary's `wire` jobs apply, so what is refused
+    # here is exactly what the lint would have refused before the ship.
+    if ! problems="$("$lint" --compare "$baseline" "$new" 2>&1)"; then
+      echo "::error::$shipped breaks the wire Canary already shipped, so the baseline was not advanced. Ship a fix that restores compatibility." >&2
+      echo "$problems" >&2
+      exit 1
     fi
   fi
 
