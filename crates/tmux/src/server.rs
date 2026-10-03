@@ -103,6 +103,9 @@ const LIFECYCLE_COMMANDS: &[&str] = &[
     "respawn-pane",
     "break-pane",
     "join-pane",
+    // Forks a `sh -c` inside the server, as `new-window` does, and runs on
+    // attach, just after the open.
+    "pipe-pane",
     // The tags. A pane whose tags never landed is a process the inventory
     // cannot name.
     "set-option",
@@ -482,9 +485,10 @@ mod tests {
     }
 
     /// A private server whose every command goes through a wrapper that
-    /// sleeps 1.5 s before `new-session` and `send-keys` and then runs the real
-    /// tmux: a machine too loaded to start a server in a second, made to order.
-    /// Its server, its wrapper and its config go with it.
+    /// sleeps 1.5 s before the verbs in `slow` (a `case` pattern such as
+    /// `new-session|send-keys`) and then runs the real tmux: a machine too
+    /// loaded to answer in a second, made to order. Its server, its wrapper
+    /// and its config go with it.
     struct SlowTmux {
         server: TmuxServer,
         real: PathBuf,
@@ -494,7 +498,7 @@ mod tests {
     impl SlowTmux {
         /// `None` off CI when there is no tmux to wrap; on CI, which installs
         /// tmux for this job, a missing one is a failure, never a skip.
-        fn start(test: &str) -> Option<SlowTmux> {
+        fn start(test: &str, slow: &str) -> Option<SlowTmux> {
             use std::os::unix::fs::PermissionsExt;
             let Some(real) = farcooler_core::programs::find("tmux") else {
                 assert!(std::env::var_os("CI").is_none(), "tmux is not installed, and CI must run {test}");
@@ -505,7 +509,7 @@ mod tests {
             let wrapper = std::env::temp_dir().join(format!("farcooler-{install}-tmux"));
             // `-L <socket> -f <config> <verb> …`, so the verb is the fifth.
             let script = format!(
-                "#!/bin/sh\ncase \"$5\" in new-session|send-keys) sleep 1.5 ;; esac\nexec '{}' \"$@\"\n",
+                "#!/bin/sh\ncase \"$5\" in {slow}) sleep 1.5 ;; esac\nexec '{}' \"$@\"\n",
                 real.display()
             );
             std::fs::write(&wrapper, script).unwrap();
@@ -532,7 +536,7 @@ mod tests {
         // ov-176: the first pane starts the server, and a loaded machine takes
         // more than a second over that. This open used to be cut off at one
         // second and reported as "tmux is unavailable".
-        let Some(slow) = SlowTmux::start("a_server_slow_to_start_still_opens_the_first_pane") else { return };
+        let Some(slow) = SlowTmux::start("a_server_slow_to_start_still_opens_the_first_pane", "new-session") else { return };
         let terminal = Uuid::now_v7();
         let dir = std::env::temp_dir();
         let opened = slow
@@ -551,7 +555,7 @@ mod tests {
         // The second the opening commands no longer get is still the bound on
         // everything else: a `send-keys` into a pane that never reads must not
         // hold the connection any longer than it did.
-        let Some(slow) = SlowTmux::start("a_keystroke_tmux_will_not_take_still_gives_up_in_a_second") else {
+        let Some(slow) = SlowTmux::start("a_keystroke_tmux_will_not_take_still_gives_up_in_a_second", "send-keys") else {
             return;
         };
         let dir = std::env::temp_dir();
@@ -566,6 +570,23 @@ mod tests {
         let took = started.elapsed();
         assert!(matches!(sent, Err(DomainError::TmuxUnavailable)), "{sent:?}");
         assert!(took < std::time::Duration::from_millis(1400), "send-keys waited {took:?}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn attaching_to_a_pane_outlasts_a_slow_fork() {
+        // `pipe-pane` forks a shell inside the server, the way opening a pane
+        // does, and it is what attaching runs straight after the open.
+        let Some(slow) = SlowTmux::start("attaching_to_a_pane_outlasts_a_slow_fork", "pipe-pane") else {
+            return;
+        };
+        let dir = std::env::temp_dir();
+        let window = slow
+            .server
+            .create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "slow", &dir.to_string_lossy(), "sleep 30")
+            .await
+            .expect("open a pane");
+        let piped = slow.server.pipe_pane_start(&window.pane_id, "cat > /dev/null").await;
+        assert!(piped.is_ok(), "a pipe-pane that takes 1.5 s is slow, not unavailable: {piped:?}");
     }
 
     #[tokio::test(flavor = "current_thread")]
