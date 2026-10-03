@@ -355,17 +355,31 @@ final class TaskBoardStore: ObservableObject {
         await readUsage(row)
     }
 
-    /// Read what agents spent on `row`. A read that fails keeps what was
-    /// shown before, and with nothing shown, the section goes.
+    /// Read what agents spent on `row`. A runner too old to record it says
+    /// it needs an update; a read that fails keeps what was shown before,
+    /// and with nothing shown, offers Try Again.
     func readUsage(_ row: TaskRow) async {
-        let (data, _) = await client.taskUsage(key: row.key, repository: repositoryID)
-        if let data, let read = try? TaskUsage.decode(data) {
-            usage[row.id] = .loaded(read)
-        } else if case .loaded? = usage[row.id] {
+        let can = client.daemonBuild?.can("agent_usage")
+        if can == false {
+            usage[row.id] = .needsUpdate
             return
-        } else {
-            usage[row.id] = .unavailable
         }
+        let (data, message) = await client.taskUsage(key: row.key, repository: repositoryID)
+        // The CLI's own refusal for a runner without `agent_usage`
+        // (`task_usage.rs`, NO_USAGE), for a build not yet read.
+        if data == nil, message?.contains("older than usage reports") == true {
+            usage[row.id] = .needsUpdate
+            return
+        }
+        let read = data.flatMap { try? TaskUsage.decode($0) }
+        if read == nil, case .loaded? = usage[row.id] { return }
+        usage[row.id] = TaskUsageState.after(read: read, runnerCan: can)
+    }
+
+    /// Try Again on a Usage section whose read failed.
+    func retryUsage(_ row: TaskRow) {
+        usage[row.id] = .loading
+        Task { await readUsage(row) }
     }
 
     /// Read the open card again, keeping what it shows until the new read
@@ -1485,6 +1499,8 @@ struct TaskCard: View {
     let canAnswer: Bool
     /// What its agents spent (ov-195). Nil draws no Usage section.
     var usage: TaskUsageState? = nil
+    /// Try Again, on a Usage section whose read failed.
+    var onRetryUsage: () -> Void = {}
     /// Send an answer; true when it was written.
     let onAnswer: (String) async -> Bool
     /// Where Answer…'s unsent text is kept: the store, so it outlives this
@@ -1510,7 +1526,7 @@ struct TaskCard: View {
                     .id(offer.question.id)
             }
             if let usage {
-                TaskUsageView(state: usage)
+                TaskUsageView(state: usage, onRetry: onRetryUsage)
             }
             Divider()
             record

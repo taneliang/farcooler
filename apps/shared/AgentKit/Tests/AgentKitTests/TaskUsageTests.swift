@@ -20,7 +20,9 @@ private struct UsageFixture: Decodable {
         var time: String?
         var rows: [Row]
     }
+    struct Words: Decodable { var nothingYet, needsUpdate, couldntRead, tryAgain: String }
     var locale: String
+    var words: Words
     var tokens: [Count]
     var dollars: [Money]
     var durations: [Span]
@@ -57,7 +59,7 @@ struct TaskUsageTests {
     func cases() throws {
         let fixture = try UsageFixture.load()
         let locale = Locale(identifier: fixture.locale)
-        #expect(fixture.cases.count >= 8)
+        #expect(fixture.cases.count >= 9)
         for each in fixture.cases {
             let t = each.usage.totals
             #expect(t.isEmpty == each.empty, "\(each.case): empty")
@@ -86,6 +88,25 @@ struct TaskUsageTests {
         let usage = try TaskUsage.decode(Data(json.utf8))
         #expect(usage.totals.isEmpty)
         #expect(TaskUsageFormat.nothingYet == "No agent usage recorded yet.")
+    }
+
+    @Test("The section's sentences are the shared fixture's")
+    func sentences() throws {
+        let w = try UsageFixture.load().words
+        #expect(TaskUsageFormat.nothingYet == w.nothingYet)
+        #expect(TaskUsageFormat.needsUpdate == w.needsUpdate)
+        #expect(TaskUsageFormat.couldntRead == w.couldntRead)
+        #expect(TaskUsageFormat.tryAgain == w.tryAgain)
+    }
+
+    @Test("An older runner needs an update; a read that didn't come back failed")
+    func states() {
+        let usage = TaskUsage(task: "t", priceTable: "", totals: TaskSpend(), byHarnessModel: [])
+        #expect(TaskUsageState.after(read: nil, runnerCan: false) == .needsUpdate)
+        #expect(TaskUsageState.after(read: usage, runnerCan: false) == .needsUpdate)
+        #expect(TaskUsageState.after(read: nil, runnerCan: true) == .failed)
+        #expect(TaskUsageState.after(read: nil, runnerCan: nil) == .failed)
+        #expect(TaskUsageState.after(read: usage, runnerCan: nil) == .loaded(usage))
     }
 
     @Test("Another locale's digits and currency, not en_US's")

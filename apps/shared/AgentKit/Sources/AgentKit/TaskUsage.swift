@@ -75,7 +75,9 @@ public struct TaskSpendRow: Decodable, Equatable, Sendable, Identifiable {
     public var model: String
     public var totals: TaskSpend
 
-    public var id: String { "\(harness)/\(model)" }
+    /// The runner keys a task's rows by harness and model, and files a turn
+    /// that named no model under "", so this is unique within a task.
+    public var id: String { "\(harness)\u{1F}\(model)" }
 }
 
 /// A task's spend: its totals and the same by harness and model.
@@ -105,6 +107,11 @@ public enum TaskUsageFormat {
     /// What an empty section says.
     public static let nothingYet = "No agent usage recorded yet."
     public static let notReported = "Not reported"
+    /// What a runner too old to record spend gets.
+    public static let needsUpdate = "This runner needs an update to show spend."
+    /// What a read that didn't come back gets, beside `tryAgain`.
+    public static let couldntRead = "Far Cooler couldn’t read this task’s usage."
+    public static let tryAgain = "Try Again"
 
     /// A token count, short, in `locale`'s digits: "999", "1.2K", "12K",
     /// "1M", "2.1B". One decimal below ten of a unit, none above; a count
@@ -212,29 +219,44 @@ public enum TaskUsageFormat {
         row.model.isEmpty ? row.harness : "\(row.harness) · \(row.model)"
     }
 
-    /// "1.2M tokens · $3.20", "$0.42 estimated", "Cost not reported", or
-    /// "Not reported" when the row stated nothing.
+    /// "1.2M tokens · $3.20", with "estimated", "partly estimated" and
+    /// "partly not reported" as they apply to the row's own part; "Cost not
+    /// reported"; or "Not reported" when the row stated nothing.
     public static func detail(_ row: TaskSpendRow, locale: Locale = .current) -> String {
         let s = row.totals
         guard s.totalTokens > 0 || s.pricedMicros > 0 else { return notReported }
         let cost: String
         if s.pricedMicros <= 0 {
             cost = "Cost not reported"
-        } else if s.costReportedMicros == 0 {
-            cost = "\(dollars(s.pricedMicros, locale: locale)) estimated"
-        } else if s.costEstimatedMicros > 0 {
-            cost = "\(dollars(s.pricedMicros, locale: locale)) partly estimated"
         } else {
-            cost = dollars(s.pricedMicros, locale: locale)
+            var words: [String] = []
+            if s.costReportedMicros == 0 {
+                words.append("estimated")
+            } else if s.costEstimatedMicros > 0 {
+                words.append("partly estimated")
+            }
+            if s.partlyUnknown { words.append("partly not reported") }
+            let amount = dollars(s.pricedMicros, locale: locale)
+            cost = words.isEmpty ? amount : "\(amount) \(words.joined(separator: ", "))"
         }
         return "\(tokens(s.totalTokens, locale: locale)) tokens · \(cost)"
     }
 }
 
-/// What a Usage section shows: still reading, nothing to show (an older
-/// runner, or a read that failed), or the task's spend.
+/// What a Usage section shows.
 public enum TaskUsageState: Equatable, Sendable {
     case loading
-    case unavailable
+    /// The runner is older than spend: `TaskUsageFormat.needsUpdate`.
+    case needsUpdate
+    /// The read didn't come back: `couldntRead`, with Try Again.
+    case failed
     case loaded(TaskUsage)
+
+    /// The state a read lands in: the usage, or why there's none. A runner
+    /// that says it lacks `agent_usage` needs an update; one whose build
+    /// isn't known yet is asked, and a refusal then reads as a failure.
+    public static func after(read usage: TaskUsage?, runnerCan: Bool?) -> TaskUsageState {
+        if runnerCan == false { return .needsUpdate }
+        return usage.map(TaskUsageState.loaded) ?? .failed
+    }
 }

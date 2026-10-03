@@ -1572,11 +1572,20 @@ final class Connection: ObservableObject {
         return (detail, TaskQuestion.open(in: data))
     }
 
-    /// What agents spent on a task (`usage.task`, ov-195), or nil from a
-    /// runner too old to record it, or a read that didn't come back.
-    func taskUsage(_ task: String) async -> TaskUsage? {
-        guard let data = try? await rpc("usage.task", ["task": task]) else { return nil }
-        return try? TaskUsage.decode(data)
+    /// What agents spent on a task (`usage.task`, ov-195): the spend, or
+    /// that this runner needs an update to record it, or that the read
+    /// didn't come back (which the section offers to try again).
+    func taskUsage(_ task: String) async -> TaskUsageState {
+        let can = daemon?.can("agent_usage")
+        if can == false { return .needsUpdate }
+        do {
+            let data = try await rpc("usage.task", ["task": task])
+            return .after(read: try TaskUsage.decode(data), runnerCan: can)
+        } catch ClientCore.CoreError.rejected(_, let word, _) where word == "capability-unsupported" {
+            return .needsUpdate
+        } catch {
+            return .failed
+        }
     }
 
     /// One call on this runner, through a harness's stand-in when there is

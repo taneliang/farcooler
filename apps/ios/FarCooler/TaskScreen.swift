@@ -73,7 +73,12 @@ struct TaskScreen: View {
             // list (ov-103).
             if let row { PhoneReads.open(row, latest: read.detail.notes.map(\.at).max(), place: place) }
         }
-        usage = await connection.taskUsage(task).map(TaskUsageState.loaded) ?? .unavailable
+        await readUsage()
+    }
+
+    /// What its agents spent; Try Again reads it once more.
+    private func readUsage() async {
+        usage = await connection.taskUsage(task)
     }
 
     private func list(_ row: TaskRow) -> some View {
@@ -132,7 +137,10 @@ struct TaskScreen: View {
                 }
             }
 
-            TaskUsageSection(state: usage)
+            TaskUsageSection(state: usage) {
+                usage = .loading
+                Task { await readUsage() }
+            }
 
             if let notes = record?.notes, !notes.isEmpty {
                 Section("Record") {

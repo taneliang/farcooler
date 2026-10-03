@@ -10,13 +10,29 @@ import SwiftUI
 /// one disclosure, `CollapsibleSection`, closed until opened and remembered.
 struct TaskUsageView: View {
     let state: TaskUsageState
+    /// Try Again, after a read that didn't come back.
+    var onRetry: () -> Void = {}
 
     var body: some View {
         switch state {
-        case .unavailable:
-            // A runner older than spend, or a read that didn't come back:
-            // nothing to say, so no section.
-            EmptyView()
+        case .needsUpdate:
+            section {
+                Text(TaskUsageFormat.needsUpdate)
+                    .font(TaskTypography.body)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("task-usage-needs-update")
+            }
+        case .failed:
+            section {
+                HStack(alignment: .firstTextBaseline, spacing: ColumnGrid.rhythm) {
+                    Text(TaskUsageFormat.couldntRead)
+                        .font(TaskTypography.body)
+                        .foregroundStyle(.secondary)
+                    Button(TaskUsageFormat.tryAgain, action: onRetry)
+                        .controlSize(.small)
+                        .accessibilityIdentifier("task-usage-retry")
+                }
+            }
         case .loading:
             section {
                 ProgressView()

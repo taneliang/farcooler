@@ -7,13 +7,22 @@ import SwiftUI
 
 struct TaskUsageSection: View {
     let state: TaskUsageState
+    /// Try Again, after a read that didn't come back.
+    var onRetry: () -> Void = {}
 
     var body: some View {
         switch state {
-        case .unavailable:
-            // A runner older than spend, or a read that didn't come back:
-            // nothing to say, so no section.
-            EmptyView()
+        case .needsUpdate:
+            Section("Usage") {
+                quiet(TaskUsageFormat.needsUpdate)
+                    .accessibilityIdentifier("task-usage-needs-update")
+            }
+        case .failed:
+            Section("Usage") {
+                quiet(TaskUsageFormat.couldntRead)
+                Button(TaskUsageFormat.tryAgain, action: onRetry)
+                    .accessibilityIdentifier("task-usage-retry")
+            }
         case .loading:
             Section("Usage") {
                 ProgressView()
@@ -24,9 +33,7 @@ struct TaskUsageSection: View {
         case .loaded(let usage):
             Section("Usage") {
                 if usage.totals.isEmpty {
-                    Text(TaskUsageFormat.nothingYet)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    quiet(TaskUsageFormat.nothingYet)
                         .accessibilityIdentifier("task-usage-empty")
                 } else {
                     totals(usage.totals)
@@ -49,6 +56,12 @@ struct TaskUsageSection: View {
                 }
             }
         }
+    }
+
+    private func quiet(_ text: String) -> some View {
+        Text(text)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
     }
 
     private func totals(_ t: TaskSpend) -> some View {
