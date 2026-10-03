@@ -216,7 +216,7 @@ fun AgentScreen(
     }
 
     // "ov-190" in a reply opens that task (ov-196).
-    val taskKeys = rememberTaskKeyLinker(connection) { model.navigate(it.route()) }
+    val taskKeys = rememberTaskKeyLinker(connection, model::navigate)
     CompositionLocalProvider(LocalAnswering provides answering, LocalTaskKeyLinker provides taskKeys) {
         Column(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f)) {

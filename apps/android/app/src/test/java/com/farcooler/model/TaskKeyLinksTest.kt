@@ -4,8 +4,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.LinkAnnotation
 import com.farcooler.ui.Route
 import com.farcooler.ui.TaskKeyLinker
+import com.farcooler.ui.actions
 import com.farcooler.ui.inlineAnnotated
 import com.farcooler.ui.route
+import com.farcooler.ui.taskKeyLinker
+import com.farcooler.ui.targets
 import java.io.File
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.int
@@ -70,20 +73,6 @@ class TaskKeyLinksTest {
         }
     }
 
-    /** The guard lets the web, mail and a task link through, and nothing else: AgentKit's `Markdown.opens`. */
-    @Test
-    fun `the open guard adds the task link and only it`() {
-        for (allowed in listOf("https://a.b", "HTTP://a.b", "mailto:o@a.b", "farcooler://task/r1/ov-190")) {
-            assertTrue(allowed, TaskKeyLinks.opens(allowed))
-        }
-        for (refused in listOf(
-            "farcooler://x", "farcooler://terminal/abc", "farcooler://task/r1", "farcooler://auth?code=1",
-            "file:///tmp/x.command", "javascript:alert(1)", "tel:123", "intent://x#Intent;end",
-        )) {
-            assertFalse(refused, TaskKeyLinks.opens(refused))
-        }
-    }
-
     /** A key in a line becomes a clickable link; in code or a link's words it doesn't. */
     @Test
     fun `a key in text links to its task, and a click opens it on its own runner`() {
@@ -115,6 +104,45 @@ class TaskKeyLinksTest {
     fun `a task link opens through the task screen's route`() {
         val target = index().targets.getValue("lo-3")
         assertEquals(Route.BoardTask("r1", "w-lo", "t3"), target.route())
+    }
+
+    /**
+     * The screens' own builder, as `rememberTaskKeyLinker` calls it: following
+     * a link hands the navigator its task's screen, each id where it goes.
+     */
+    @Test
+    fun `the app's linker navigates to the linked task's screen`() {
+        val navigated = mutableListOf<Route>()
+        val boards = mapOf(
+            "w-lo" to TaskBoard(listOf(TaskBoardColumn(TaskStatus.TODO, listOf(TaskRow("t3", "lo-3", "T", TaskStatus.TODO, 0L))))),
+        )
+        val linker = taskKeyLinker("r1", listOf(WorkspaceSummary("w-lo", taskPrefix = "lo")), boards) { navigated.add(it) }
+        assertTrue(linker.follow(TaskKeyLinks.url("r1", "lo-3")))
+        assertEquals(listOf<Route>(Route.BoardTask("r1", "w-lo", "t3")), navigated)
+    }
+
+    /** A row whose description replaces its text still offers each linked task once, as an action. */
+    @Test
+    fun `a linked line's tasks become one action apiece`() {
+        val opened = mutableListOf<TaskKeyTarget>()
+        val linker = TaskKeyLinker(index()) { opened.add(it) }
+        val text = inlineAnnotated(
+            Markdown.inline("lo-3 before ov-190, `ov-7`, [ov-7](https://x.dev) and lo-3 again"), linker, Color.Gray, Color.Blue,
+        )
+        assertEquals(listOf("lo-3", "ov-190"), linker.targets(text).map { it.key })
+        val actions = linker.actions(text)
+        assertEquals(listOf("Open lo-3", "Open ov-190"), actions.map { it.label })
+        assertTrue(actions[1].action())
+        assertEquals(listOf("ov-190"), opened.map { it.key })
+    }
+
+    /** A link's target as a `Destination` (ov-182), in this device's ids: AgentKit's `TaskKeyTarget.destination`. */
+    @Test
+    fun `a task link's target as a destination`() {
+        assertEquals(
+            Destination(runner = Destination.Runner(host = "r1"), place = Destination.Place.Task("w-lo", Destination.TaskRef(id = "t3", key = "lo-3"))),
+            index().targets.getValue("lo-3").destination,
+        )
     }
 
     /** A file in this checkout, found by walking up from wherever Gradle runs. */

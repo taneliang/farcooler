@@ -7,6 +7,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -20,7 +21,9 @@ import androidx.compose.ui.text.withStyle
 import com.farcooler.model.Markdown
 import com.farcooler.model.TaskKeyIndex
 import com.farcooler.model.TaskKeyLinks
+import com.farcooler.model.TaskBoard
 import com.farcooler.model.TaskKeyTarget
+import com.farcooler.model.WorkspaceSummary
 import com.farcooler.net.Connection
 
 /**
@@ -54,20 +57,45 @@ class TaskKeyLinker(val index: TaskKeyIndex, val open: (TaskKeyTarget) -> Unit) 
 
 val LocalTaskKeyLinker = compositionLocalOf { TaskKeyLinker.NONE }
 
-/** [connection]'s linker: its workspaces' prefixes and the boards it has read, opening through [open]. */
+/** [connection]'s linker: its workspaces' prefixes and the boards it has read, each link navigating to its task. */
 @Composable
-fun rememberTaskKeyLinker(connection: Connection, open: (TaskKeyTarget) -> Unit): TaskKeyLinker {
+fun rememberTaskKeyLinker(connection: Connection, navigate: (Route) -> Unit): TaskKeyLinker {
     val boards by connection.boards.collectAsStateWithLifecycle()
     val fleet by connection.fleet.collectAsStateWithLifecycle()
-    val opener by rememberUpdatedState(open)
+    val navigator by rememberUpdatedState(navigate)
     val runner = connection.host.id
     return remember(runner, fleet.workspaces, boards) {
-        TaskKeyLinker(TaskKeyIndex.of(runner, fleet.workspaces.orEmpty(), boards)) { opener(it) }
+        taskKeyLinker(runner, fleet.workspaces.orEmpty(), boards) { navigator(it) }
     }
 }
 
+/**
+ * [runner]'s linker, each link handing [navigate] its task's own screen. Out of
+ * [rememberTaskKeyLinker] so a unit test holds the wiring: which id goes where.
+ */
+fun taskKeyLinker(
+    runner: String,
+    workspaces: List<WorkspaceSummary>,
+    boards: Map<String, TaskBoard>,
+    navigate: (Route) -> Unit,
+): TaskKeyLinker = TaskKeyLinker(TaskKeyIndex.of(runner, workspaces, boards)) { navigate(it.route()) }
+
 /** Where a key's task opens: its own task screen, as a board row or History opens one. */
 fun TaskKeyTarget.route(): Route = Route.BoardTask(runner, workspace, task)
+
+/**
+ * The tasks [text] links to, once each, in order: one accessibility action
+ * apiece, "Open ov-190", for a row whose description replaces its text's own
+ * links (ov-196).
+ */
+fun TaskKeyLinker.targets(text: AnnotatedString): List<TaskKeyTarget> =
+    text.getLinkAnnotations(0, text.length)
+        .mapNotNull { (it.item as? LinkAnnotation.Clickable)?.tag?.let { url -> TaskKeyLinks.target(url, index) } }
+        .distinctBy { it.key }
+
+/** [targets] as accessibility actions, each opening its task as a tap on the link would. */
+fun TaskKeyLinker.actions(text: AnnotatedString): List<CustomAccessibilityAction> =
+    targets(text).map { target -> CustomAccessibilityAction("Open ${target.key}") { open(target); true } }
 
 /**
  * A line's inline spans as one styled string, with each task key [linker]
@@ -92,7 +120,7 @@ fun inlineAnnotated(
         )
         val start = length
         withStyle(style) { append(span.text) }
-        if (span.code || span.link != null) quoted.add(start until length)
+        if ((span.code || span.link != null) && length > start) quoted.add(start until length)
     }
     if (linker.index.isEmpty) return@buildAnnotatedString
     val linkStyle = TextLinkStyles(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline))

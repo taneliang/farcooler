@@ -57,6 +57,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -76,7 +77,6 @@ import com.farcooler.model.TaskUsageState
 import com.farcooler.model.TaskAgentLink
 import com.farcooler.model.TaskAgentPresence
 import com.farcooler.model.TaskBoard
-import com.farcooler.model.TaskKeyTarget
 import com.farcooler.model.TaskRow
 import com.farcooler.model.Terminal
 import com.farcooler.model.Worktree
@@ -547,8 +547,8 @@ fun TaskDetailScreen(
     /** Its worktree, pushed over this task: on its Changes tab when [changes]. */
     onOpenWorktree: (worktreeId: String, changes: Boolean) -> Unit,
     onBack: () -> Unit,
-    /** Another task, from a key in this one's text (ov-196). */
-    onOpenTask: (TaskKeyTarget) -> Unit = {},
+    /** Another task's screen, from a key in this one's text (ov-196). */
+    onNavigate: (Route) -> Unit,
 ) {
     val boards by connection.boards.collectAsStateWithLifecycle()
     val unread by connection.unreadBoards.collectAsStateWithLifecycle()
@@ -614,7 +614,7 @@ fun TaskDetailScreen(
         val agents = if (speaks) boardAgents(row, fleet.worktrees) else emptyList()
         val presence = row.agentPresence(agents.size, speaks)
         // "ov-190" in its text opens that task (ov-196).
-        val taskKeys = rememberTaskKeyLinker(connection, onOpenTask)
+        val taskKeys = rememberTaskKeyLinker(connection, onNavigate)
         CompositionLocalProvider(LocalTaskKeyLinker provides taskKeys) {
             LazyColumn(Modifier.fillMaxSize().padding(padding).testTag("board-detail")) {
                 item(key = "heading") {
@@ -698,6 +698,7 @@ fun TaskDetailScreen(
                 row.acceptanceProgress?.let { progress ->
                     item(key = "acceptance-header") { Section("Acceptance · ${progress.sentence}") }
                     items(row.acceptance, key = { "line/${it.id}" }) { line ->
+                        val linked = inline(line.text)
                         ListItem(
                             leadingContent = {
                                 Icon(
@@ -710,7 +711,7 @@ fun TaskDetailScreen(
                             // as on the Mac (ov-98).
                             headlineContent = {
                                 Text(
-                                    inline(line.text),
+                                    linked,
                                     color = if (line.met) MaterialTheme.colorScheme.onSurfaceVariant
                                     else MaterialTheme.colorScheme.onSurface,
                                     textDecoration = if (line.met) TextDecoration.LineThrough else null,
@@ -721,6 +722,9 @@ fun TaskDetailScreen(
                                 .semantics {
                                     // What it says, not its markup.
                                     contentDescription = "${Markdown.plain(line.text)}. ${if (line.met) "Met" else "Not met"}"
+                                    // Its task links, which the description
+                                    // replaces: "Open ov-190" (ov-196).
+                                    customActions = taskKeys.actions(linked)
                                 },
                         )
                     }
