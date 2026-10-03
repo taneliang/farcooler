@@ -1,4 +1,4 @@
-// Shipped by Canary at 73163f89ed51389390d5379157dbe47fb4703c09. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 9b050d753147b582ef6b8c0404f867572ff40efc. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -706,6 +706,15 @@ message Host {
   // owner's devices as pushes (ov-94). A Mac reads it to leave a notice to the
   // push rather than post it locally too: both would alert.
   bool push_paired = 13;
+  // This runner's database: the schema it is at, and the oldest schema whose
+  // build may still open it (ov-143). A client compares them with its own
+  // build's schema before offering to install that build here, because a
+  // database newer than the build is a downgrade, and one the build can't
+  // open leaves the runner refusing every device. Both 0 from a runner too
+  // old to say; `compatible_down_to` 0 also from a database no build has
+  // stamped, which vouches for no older build.
+  uint32 schema_version = 14;
+  uint32 compatible_down_to = 15;
 }
 
 enum SelfHealth {
@@ -3246,6 +3255,10 @@ message ReportRequest {
   // At most one of these narrows the report; neither is the whole runner.
   optional bytes repository_id = 3;
   optional bytes workspace_id = 4;
+  // The client's offset from UTC, in minutes, where the period falls: what
+  // the spend's by-day, by-week and by-month lines (ov-195) are cut by.
+  // Zero, as an older client sends, is UTC.
+  int32 utc_offset_minutes = 5;
 }
 
 message Report {
