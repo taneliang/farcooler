@@ -90,7 +90,7 @@ struct BoardSummaryStrip: View {
                             .truncationMode(.tail)
                             .frame(minHeight: Self.lineHeight)
                             .gridMark("summary.empty", .text)
-                            .padding(.leading, ColumnGrid.step)
+                            .padding(.leading, NavigatorGrid.textInset)
                             .identified("board-summary-empty")
                             .transition(.opacity)
                     } else {
@@ -291,7 +291,7 @@ struct BoardSummaryStrip: View {
             VStack(alignment: .leading, spacing: 0) {
                 GroupHeader(title: title, count: items.count, follows: follows)
                     .gridMark("summary.group", .text)
-                    .padding(.leading, ColumnGrid.step)
+                    .padding(.leading, NavigatorGrid.textInset)
                 ForEach(capped.shown) { item in
                     CompactTaskRow(
                         key: item.key, title: item.title, selected: item.id == selectedLine, keyed: keyed,
@@ -327,7 +327,7 @@ struct BoardSummaryStrip: View {
             VStack(alignment: .leading, spacing: 0) {
                 GroupHeader(title: "Activity", count: entries.count, follows: follows)
                     .gridMark("summary.group", .text)
-                    .padding(.leading, ColumnGrid.step)
+                    .padding(.leading, NavigatorGrid.textInset)
                 ForEach(capped.shown) { entry in
                     CompactTaskRow(
                         key: entry.key, title: entry.title, selected: entry.id == selectedLine, keyed: keyed,
@@ -358,7 +358,7 @@ struct BoardSummaryStrip: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .frame(minHeight: Self.lineHeight)
-                .padding(.leading, ColumnGrid.step)
+                .padding(.leading, NavigatorGrid.textInset)
         }
     }
 

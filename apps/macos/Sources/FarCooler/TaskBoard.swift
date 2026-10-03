@@ -1419,7 +1419,7 @@ private struct UnreadableColumnView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.leading, ColumnGrid.step)
+            .padding(.leading, NavigatorGrid.textInset)
             ForEach(rows) { row in
                 VStack(alignment: .leading, spacing: 3) {
                     Text(row.key)
@@ -1433,7 +1433,7 @@ private struct UnreadableColumnView: View {
                         .font(.system(size: WorkspaceStyle.PaneText.minimum, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
-                .padding(.horizontal, ColumnGrid.step)
+                .padding(.horizontal, NavigatorGrid.textInset)
                 .padding(.vertical, ColumnGrid.rhythm)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: 8).fill(WorkspaceStyle.paneChrome))

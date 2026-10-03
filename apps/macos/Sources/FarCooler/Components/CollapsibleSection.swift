@@ -84,7 +84,7 @@ struct SectionMetrics: Equatable {
     var isHeading = false
 
     /// The board's navigator: its sections, task statuses and groups.
-    static let navigator = SectionMetrics(spacing: ColumnGrid.rhythm, isHeading: true)
+    static let navigator = SectionMetrics(spacing: ColumnGrid.rhythm, chevronWidth: NavigatorGrid.mark, isHeading: true)
     /// The sidebar: a group of rows below a repository (Unclaimed, Hidden),
     /// at the sidebar's edges, its rows straight under it.
     static let sidebar = SectionMetrics(
