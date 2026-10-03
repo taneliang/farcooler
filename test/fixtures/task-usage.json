@@ -1,0 +1,284 @@
+{
+  "about": "What a task's Usage section says (ov-195), read by AgentKit's TaskUsageTests, Android's TaskUsageTest and farcooler-core's usage_words tests, so the Mac, iOS, Android and `farcooler report` word spend the same way. `usage` is the JSON `farcooler task usage --json` prints and the phones' `task.usage` route returns. Every expected string is en_US. A cost is API-equivalent always: Claude's own figure and the price table are both API list prices, which on a subscription is notional and on an API key is what was paid.",
+  "locale": "en_US",
+  "tokens": [
+    { "n": 0, "text": "0" },
+    { "n": 7, "text": "7" },
+    { "n": 999, "text": "999" },
+    { "n": 1000, "text": "1K" },
+    { "n": 1234, "text": "1.2K" },
+    { "n": 9940, "text": "9.9K" },
+    { "n": 9970, "text": "10K" },
+    { "n": 12345, "text": "12K" },
+    { "n": 830000, "text": "830K" },
+    { "n": 999400, "text": "999K" },
+    { "n": 999700, "text": "1M" },
+    { "n": 1155400, "text": "1.2M" },
+    { "n": 41000000, "text": "41M" },
+    { "n": 2140000000, "text": "2.1B" }
+  ],
+  "dollars": [
+    { "micros": 3200000, "text": "$3.20" },
+    { "micros": 420000, "text": "$0.42" },
+    { "micros": 1234560000, "text": "$1,234.56" },
+    { "micros": 10000, "text": "$0.01" },
+    { "micros": 3000, "text": "Under $0.01" }
+  ],
+  "durations": [
+    { "ms": 0, "text": "under a minute" },
+    { "ms": 59999, "text": "under a minute" },
+    { "ms": 360000, "text": "6 min" },
+    { "ms": 3600000, "text": "1 h" },
+    { "ms": 11430000, "text": "3 h 10 min" },
+    { "ms": 147600000, "text": "41 h" }
+  ],
+  "cases": [
+    {
+      "case": "nothing recorded",
+      "usage": {
+        "task": "8d3c1a52-0b8e-4c1e-9a3f-0f3b2a6c9e11",
+        "price_table": "2026-09-25",
+        "totals": {
+          "turns": 0, "turns_partial": 0, "turns_not_reported": 0, "subagent_runs": 0, "active_ms": 0,
+          "input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0,
+          "cost_reported_micros": 0, "cost_estimated_micros": 0, "unpriced_tokens": 0, "price_tables": []
+        },
+        "by_harness_model": []
+      },
+      "empty": true,
+      "tokens": null,
+      "token_detail": null,
+      "cost": null,
+      "time": null,
+      "rows": []
+    },
+    {
+      "case": "a claude chat, its cost reported",
+      "usage": {
+        "task": "8d3c1a52-0b8e-4c1e-9a3f-0f3b2a6c9e11",
+        "price_table": "2026-09-25",
+        "totals": {
+          "turns": 12, "turns_partial": 0, "turns_not_reported": 0, "subagent_runs": 0, "active_ms": 11430000,
+          "input_tokens": 12000, "output_tokens": 3400, "cache_read_tokens": 1100000, "cache_write_tokens": 40000,
+          "cost_reported_micros": 3200000, "cost_estimated_micros": 0, "unpriced_tokens": 0, "price_tables": []
+        },
+        "by_harness_model": [
+          {
+            "harness": "claude", "model": "claude-opus-5",
+            "totals": {
+              "turns": 12, "turns_partial": 0, "turns_not_reported": 0, "subagent_runs": 0, "active_ms": 11430000,
+              "input_tokens": 12000, "output_tokens": 3400, "cache_read_tokens": 1100000, "cache_write_tokens": 40000,
+              "cost_reported_micros": 3200000, "cost_estimated_micros": 0, "unpriced_tokens": 0, "price_tables": []
+            }
+          }
+        ]
+      },
+      "empty": false,
+      "tokens": "1.2M tokens",
+      "token_detail": "12K input · 3.4K output · 1.1M cache",
+      "cost": "$3.20 · API-equivalent",
+      "time": "Agent time 3 h 10 min · 12 turns",
+      "rows": [
+        { "title": "claude · claude-opus-5", "detail": "1.2M tokens · $3.20" }
+      ]
+    },
+    {
+      "case": "a claude in a terminal, its cost estimated",
+      "usage": {
+        "task": "8d3c1a52-0b8e-4c1e-9a3f-0f3b2a6c9e11",
+        "price_table": "2026-09-25",
+        "totals": {
+          "turns": 1, "turns_partial": 0, "turns_not_reported": 0, "subagent_runs": 0, "active_ms": 0,
+          "input_tokens": 900, "output_tokens": 70, "cache_read_tokens": 0, "cache_write_tokens": 0,
+          "cost_reported_micros": 0, "cost_estimated_micros": 420000, "unpriced_tokens": 0, "price_tables": ["2026-09-25"]
+        },
+        "by_harness_model": [
+          {
+            "harness": "claude", "model": "claude-sonnet-5",
+            "totals": {
+              "turns": 1, "turns_partial": 0, "turns_not_reported": 0, "subagent_runs": 0, "active_ms": 0,
+              "input_tokens": 900, "output_tokens": 70, "cache_read_tokens": 0, "cache_write_tokens": 0,
+              "cost_reported_micros": 0, "cost_estimated_micros": 420000, "unpriced_tokens": 0, "price_tables": ["2026-09-25"]
+            }
+          }
+        ]
+      },
+      "empty": false,
+      "tokens": "970 tokens",
+      "token_detail": "900 input · 70 output · 0 cache",
+      "cost": "$0.42 · API-equivalent, estimated",
+      "time": "1 turn",
+      "rows": [
+        { "title": "claude · claude-sonnet-5", "detail": "970 tokens · $0.42 estimated" }
+      ]
+    },
+    {
+      "case": "reported and estimated together, the bigger first",
+      "usage": {
+        "task": "8d3c1a52-0b8e-4c1e-9a3f-0f3b2a6c9e11",
+        "price_table": "2026-09-25",
+        "totals": {
+          "turns": 5, "turns_partial": 0, "turns_not_reported": 0, "subagent_runs": 1, "active_ms": 360000,
+          "input_tokens": 20000, "output_tokens": 5000, "cache_read_tokens": 300000, "cache_write_tokens": 0,
+          "cost_reported_micros": 1234560000, "cost_estimated_micros": 200000, "unpriced_tokens": 0, "price_tables": ["2026-09-25"]
+        },
+        "by_harness_model": [
+          {
+            "harness": "claude", "model": "claude-haiku-4-5",
+            "totals": {
+              "turns": 2, "turns_partial": 0, "turns_not_reported": 0, "subagent_runs": 1, "active_ms": 60000,
+              "input_tokens": 5000, "output_tokens": 1000, "cache_read_tokens": 0, "cache_write_tokens": 0,
+              "cost_reported_micros": 0, "cost_estimated_micros": 200000, "unpriced_tokens": 0, "price_tables": ["2026-09-25"]
+            }
+          },
+          {
+            "harness": "claude", "model": "claude-opus-5",
+            "totals": {
+              "turns": 4, "turns_partial": 0, "turns_not_reported": 0, "subagent_runs": 0, "active_ms": 300000,
+              "input_tokens": 15000, "output_tokens": 4000, "cache_read_tokens": 300000, "cache_write_tokens": 0,
+              "cost_reported_micros": 1234560000, "cost_estimated_micros": 0, "unpriced_tokens": 0, "price_tables": []
+            }
+          }
+        ]
+      },
+      "empty": false,
+      "tokens": "325K tokens",
+      "token_detail": "20K input · 5K output · 300K cache",
+      "cost": "$1,234.76 · API-equivalent, partly estimated",
+      "time": "Agent time 6 min · 5 turns",
+      "rows": [
+        { "title": "claude · claude-opus-5", "detail": "319K tokens · $1,234.56" },
+        { "title": "claude · claude-haiku-4-5", "detail": "6K tokens · $0.20 estimated" }
+      ]
+    },
+    {
+      "case": "codex, whose cost nobody knows",
+      "usage": {
+        "task": "8d3c1a52-0b8e-4c1e-9a3f-0f3b2a6c9e11",
+        "price_table": "2026-09-25",
+        "totals": {
+          "turns": 3, "turns_partial": 0, "turns_not_reported": 0, "subagent_runs": 0, "active_ms": 3600000,
+          "input_tokens": 600000, "output_tokens": 30000, "cache_read_tokens": 200000, "cache_write_tokens": 0,
+          "cost_reported_micros": 0, "cost_estimated_micros": 0, "unpriced_tokens": 830000, "price_tables": []
+        },
+        "by_harness_model": [
+          {
+            "harness": "codex", "model": "gpt-5.5",
+            "totals": {
+              "turns": 3, "turns_partial": 0, "turns_not_reported": 0, "subagent_runs": 0, "active_ms": 3600000,
+              "input_tokens": 600000, "output_tokens": 30000, "cache_read_tokens": 200000, "cache_write_tokens": 0,
+              "cost_reported_micros": 0, "cost_estimated_micros": 0, "unpriced_tokens": 830000, "price_tables": []
+            }
+          }
+        ]
+      },
+      "empty": false,
+      "tokens": "830K tokens",
+      "token_detail": "600K input · 30K output · 200K cache",
+      "cost": "Not reported",
+      "time": "Agent time 1 h · 3 turns",
+      "rows": [
+        { "title": "codex · gpt-5.5", "detail": "830K tokens · Cost not reported" }
+      ]
+    },
+    {
+      "case": "claude priced, codex not: the dollars are only part of it",
+      "usage": {
+        "task": "8d3c1a52-0b8e-4c1e-9a3f-0f3b2a6c9e11",
+        "price_table": "2026-09-25",
+        "totals": {
+          "turns": 4, "turns_partial": 0, "turns_not_reported": 0, "subagent_runs": 0, "active_ms": 147600000,
+          "input_tokens": 1000, "output_tokens": 1000, "cache_read_tokens": 0, "cache_write_tokens": 0,
+          "cost_reported_micros": 3200000, "cost_estimated_micros": 0, "unpriced_tokens": 1500, "price_tables": []
+        },
+        "by_harness_model": [
+          {
+            "harness": "claude", "model": "claude-opus-5",
+            "totals": {
+              "turns": 1, "turns_partial": 0, "turns_not_reported": 0, "subagent_runs": 0, "active_ms": 600000,
+              "input_tokens": 300, "output_tokens": 200, "cache_read_tokens": 0, "cache_write_tokens": 0,
+              "cost_reported_micros": 3200000, "cost_estimated_micros": 0, "unpriced_tokens": 0, "price_tables": []
+            }
+          },
+          {
+            "harness": "codex", "model": "gpt-5.5",
+            "totals": {
+              "turns": 3, "turns_partial": 0, "turns_not_reported": 0, "subagent_runs": 0, "active_ms": 147000000,
+              "input_tokens": 700, "output_tokens": 800, "cache_read_tokens": 0, "cache_write_tokens": 0,
+              "cost_reported_micros": 0, "cost_estimated_micros": 0, "unpriced_tokens": 1500, "price_tables": []
+            }
+          }
+        ]
+      },
+      "empty": false,
+      "tokens": "2K tokens",
+      "token_detail": "1K input · 1K output · 0 cache",
+      "cost": "$3.20 · API-equivalent, partly not reported",
+      "time": "Agent time 41 h · 4 turns",
+      "rows": [
+        { "title": "codex · gpt-5.5", "detail": "1.5K tokens · Cost not reported" },
+        { "title": "claude · claude-opus-5", "detail": "500 tokens · $3.20" }
+      ]
+    },
+    {
+      "case": "an adapter that says nothing about tokens",
+      "usage": {
+        "task": "8d3c1a52-0b8e-4c1e-9a3f-0f3b2a6c9e11",
+        "price_table": "2026-09-25",
+        "totals": {
+          "turns": 2, "turns_partial": 0, "turns_not_reported": 2, "subagent_runs": 0, "active_ms": 0,
+          "input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0,
+          "cost_reported_micros": 0, "cost_estimated_micros": 0, "unpriced_tokens": 0, "price_tables": []
+        },
+        "by_harness_model": [
+          {
+            "harness": "gemini", "model": "",
+            "totals": {
+              "turns": 2, "turns_partial": 0, "turns_not_reported": 2, "subagent_runs": 0, "active_ms": 0,
+              "input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0,
+              "cost_reported_micros": 0, "cost_estimated_micros": 0, "unpriced_tokens": 0, "price_tables": []
+            }
+          }
+        ]
+      },
+      "empty": false,
+      "tokens": "Not reported",
+      "token_detail": null,
+      "cost": "Not reported",
+      "time": "2 turns",
+      "rows": [
+        { "title": "gemini", "detail": "Not reported" }
+      ]
+    },
+    {
+      "case": "a few cents short of a cent, with a turn that stated part",
+      "usage": {
+        "task": "8d3c1a52-0b8e-4c1e-9a3f-0f3b2a6c9e11",
+        "price_table": "2026-09-25",
+        "totals": {
+          "turns": 2, "turns_partial": 1, "turns_not_reported": 0, "subagent_runs": 0, "active_ms": 59999,
+          "input_tokens": 7, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0,
+          "cost_reported_micros": 0, "cost_estimated_micros": 3000, "unpriced_tokens": 0, "price_tables": ["2026-09-25"]
+        },
+        "by_harness_model": [
+          {
+            "harness": "claude", "model": "claude-haiku-4-5",
+            "totals": {
+              "turns": 2, "turns_partial": 1, "turns_not_reported": 0, "subagent_runs": 0, "active_ms": 59999,
+              "input_tokens": 7, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0,
+              "cost_reported_micros": 0, "cost_estimated_micros": 3000, "unpriced_tokens": 0, "price_tables": ["2026-09-25"]
+            }
+          }
+        ]
+      },
+      "empty": false,
+      "tokens": "7 tokens",
+      "token_detail": "7 input · 0 output · 0 cache",
+      "cost": "Under $0.01 · API-equivalent, estimated, partly not reported",
+      "time": "Agent time under a minute · 2 turns",
+      "rows": [
+        { "title": "claude · claude-haiku-4-5", "detail": "7 tokens · Under $0.01 estimated" }
+      ]
+    }
+  ]
+}

@@ -122,6 +122,18 @@ pub enum TaskCmd {
         #[arg(long)]
         repo: Option<String>,
     },
+    /// What agents spent on one task: tokens, cost and agent time, in all
+    /// and by harness and model.
+    Usage {
+        /// A key like `fc-42`, or the last eight of a task's id. Defaults to
+        /// the pane's own task.
+        #[arg(allow_negative_numbers = true)]
+        key: Option<String>,
+        /// Which board the key is on. Only needed when two repositories are
+        /// registered here and both use it.
+        #[arg(long)]
+        repo: Option<String>,
+    },
     /// Put a new task on the board, with whatever is understood so far.
     Create {
         /// One line, for the board. At most 200 characters.
@@ -464,6 +476,11 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
             let asked = asked_fields(fields.as_deref())?;
             let borrowed: Vec<&str> = asked.iter().map(String::as_str).collect();
             print!("{}", render_show(&detail, &borrowed, kind));
+        }
+
+        TaskCmd::Usage { key, repo } => {
+            let key = wanted_key(key)?;
+            println!("{}", crate::task_usage::task_usage(&mut link, repo.as_deref(), &key, json).await?);
         }
 
         TaskCmd::Create {
@@ -1244,7 +1261,7 @@ fn resolve_key(given: Option<String>, from_env: Option<String>) -> Option<String
     given.and_then(clean).or_else(|| from_env.and_then(clean))
 }
 
-fn wanted_key(given: Option<String>) -> Result<String, Box<dyn std::error::Error>> {
+pub(crate) fn wanted_key(given: Option<String>) -> Result<String, Box<dyn std::error::Error>> {
     resolve_key(given, std::env::var(TASK_ENV).ok()).ok_or_else(|| {
         format!("name a task, or run this where {TASK_ENV} names one").into()
     })
@@ -1635,7 +1652,7 @@ async fn tasks_with_key<L: DispatchLink>(
 /// prints — there is no index for the last eight characters of a uuid, and
 /// `task block` is not worth a second table to avoid one listing on a miss.
 /// The fallback is also what answers for a runner too old to have the route.
-async fn find_task<L: DispatchLink>(
+pub(crate) async fn find_task<L: DispatchLink>(
     link: &mut L,
     repo: Option<&str>,
     needle: &str,

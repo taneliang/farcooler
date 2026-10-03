@@ -31,6 +31,7 @@ use clap::{Parser, Subcommand};
 mod changes;
 mod clients;
 mod report;
+mod task_usage;
 mod tasks;
 mod workspaces;
 pub(crate) use daemon_link::{Link, connect_to, expect_value, req, req_for, with};

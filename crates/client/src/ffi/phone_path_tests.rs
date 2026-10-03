@@ -395,7 +395,8 @@ fn route(method: Method) -> Option<&'static str> {
         | Method::TaskCreate
         | Method::TaskNote
         | Method::WorkspaceStartOrchestrator
-        | Method::TerminalWatching => Some(method.name()),
+        | Method::TerminalWatching
+        | Method::UsageTask => Some(method.name()),
         Method::AdapterList => Some("adapters"),
         Method::ThemeList => Some("themes"),
         Method::RepositoryList => Some("repositories"),
@@ -446,9 +447,10 @@ fn route(method: Method) -> Option<&'static str> {
         // The CLI reads it today; the Summary page (ov-188 phase 3) will
         // route it here.
         Method::ReportGet => None,
-        // Spend (ov-194): the CLI's `farcooler report` reads it through
-        // `Session`; a task view's route is the follow-up lane's to add.
-        Method::UsageReport | Method::UsageTask => None,
+        // Spend (ov-194): the CLI's `farcooler report` reads the whole
+        // runner's through `Session`. A task's own is the task screen's
+        // Usage section (ov-195), routed above.
+        Method::UsageReport => None,
     }
 }
 

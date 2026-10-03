@@ -16,4 +16,5 @@ pub mod needs_you_json;
 pub mod session;
 pub mod ssh;
 pub mod tasks_json;
+pub mod usage_json;
 pub mod workspaces_json;

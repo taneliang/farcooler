@@ -1991,6 +1991,13 @@ async fn dispatch(
 
         "task.get" => Ok(session.task(id("task")?).await?),
 
+        // A task's spend, for its screen's Usage section (ov-195), as
+        // `usage_json` shapes it.
+        "usage.task" => {
+            let usage = session.task_usage(id("task")?).await?;
+            Ok(crate::usage_json::task_spend_json(&usage))
+        }
+
         // The first board write a phone makes: answering a decision, as
         // `{task, kind: "answer", body}`, which takes the decision off Needs
         // You. Always as `user`; see `task_note_of`.

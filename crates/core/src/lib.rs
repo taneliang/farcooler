@@ -24,6 +24,7 @@ pub mod theme;
 pub mod title;
 pub mod trace;
 pub mod usage;
+pub mod usage_words;
 pub mod validate;
 
 pub use error::{DomainError, Result};
