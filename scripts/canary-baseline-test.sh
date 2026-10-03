@@ -195,5 +195,31 @@ check "and commits nothing" "$before" "$(commits)"
 case "$out" in *"::error::the wire lint failed to run"*) got=said ;; *) got="$out" ;; esac
 check "and says the lint failed to run" said "$got"
 
+# A commit that shipped but was recorded late, after a newer one: the newer
+# baseline stays, but it is checked against what the older one shipped. A run
+# whose recording was lost or delayed shipped `pi`; the next commit removed it,
+# which the old baseline (no `pi`) could not see. Both are in the field now.
+# alpha comes back first: the break above is still on main.
+git_q -C "$dev" pull --quiet --rebase origin main 2>/dev/null
+land alpha 12 >/dev/null
+p="$(land pi 13)"
+grep -vx "$(msg pi)" "$dev/proto/farcooler.proto" > "$scratch/removed"
+cp "$scratch/removed" "$dev/proto/farcooler.proto"
+echo 14 > "$dev/other"
+git_q -C "$dev" commit --quiet -am "pi removed"
+git_q -C "$dev" push --quiet origin HEAD:main
+q="$(git -C "$dev" rev-parse HEAD)"
+record "$q" >/dev/null
+check "the newer commit is recorded first" "$q" "$(baseline_sha)"
+before="$(commits)"
+was="$(git -C "$scratch/origin.git" show main:proto/baseline/canary.proto)"
+status=0
+out="$(record "$p" 2>&1)" || status=$?
+check "an older shipped commit the baseline breaks fails the job" 1 "$status"
+check "and leaves the newer baseline in place" "$was" "$(git -C "$scratch/origin.git" show main:proto/baseline/canary.proto)"
+check "and commits nothing" "$before" "$(commits)"
+case "$out" in *"::error::"*"pi tag 1 (pi) was removed"*) got=said ;; *) got="$out" ;; esac
+check "and says what broke" said "$got"
+
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

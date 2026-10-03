@@ -20,7 +20,11 @@
 #   - NEVER BACKWARDS. A re-run of an old Canary run (after an upload limit, say)
 #     ships an old commit after newer ones already shipped. The newer proto is
 #     still in the field, so it stays the baseline: a commit that does not
-#     descend from the recorded one records nothing.
+#     descend from the recorded one records nothing. But it is still CHECKED:
+#     both are in the field now, so the recorded proto must read what the older
+#     one shipped. Recordings arrive out of order whenever two Canary runs end
+#     close together, and skipping the older one unchecked let a field it
+#     shipped be renumbered by the newer one with nothing going red.
 #   - NEVER OVER A BREAK. The proto that shipped is checked against the one
 #     recorded, by proto-lint's own rules, before it replaces it. Copied
 #     unchecked, a break that shipped became the baseline, and every later lint
@@ -47,6 +51,19 @@ fi
 git cat-file -e "$shipped^{commit}" 2>/dev/null \
   || git fetch --quiet --no-tags origin "$shipped"
 shipped="$(git rev-parse "$shipped^{commit}")"
+
+# A failed --compare: a break, or a lint that could not run (a crash prints no
+# verdict). Either way nothing is recorded, and each says which it was.
+refuse() {
+  case "$1" in
+    *"wire compatibility problem"*)
+      echo "::error::$2" >&2 ;;
+    *)
+      echo "::error::the wire lint failed to run, so the shipped proto cannot be checked and the canary baseline was not advanced" >&2 ;;
+  esac
+  echo "$1" >&2
+  exit 1
+}
 
 new="$(mktemp)"
 trap 'rm -f "$new"' EXIT
@@ -78,6 +95,10 @@ for attempt in 1 2 3; do
     # compared, so it does not block; one it can find must be an ancestor.
     if [ -n "$recorded" ] && git cat-file -e "$recorded^{commit}" 2>/dev/null \
       && ! git merge-base --is-ancestor "$recorded" "$shipped"; then
+      # Older than the baseline, so the baseline must still read it.
+      if ! problems="$("$lint" --compare "$new" "$baseline" 2>&1)"; then
+        refuse "$problems" "$recorded, the canary wire baseline, breaks the wire $shipped shipped, so both are in the field and disagree. Ship a fix that restores compatibility with $shipped."
+      fi
       echo "::warning::the canary wire baseline records $recorded, which $shipped does not descend from, so it was not advanced"
       exit 0
     fi
@@ -90,17 +111,8 @@ for attempt in 1 2 3; do
     fi
     # The same rules CI's and Canary's `wire` jobs apply, so what is refused
     # here is exactly what the lint would have refused before the ship.
-    # A break, or a lint that could not run (a crash prints no verdict), and
-    # either way nothing is recorded. Each says which it was.
     if ! problems="$("$lint" --compare "$baseline" "$new" 2>&1)"; then
-      case "$problems" in
-        *"wire compatibility problem"*)
-          echo "::error::$shipped breaks the wire Canary already shipped, so the baseline was not advanced. Ship a fix that restores compatibility." >&2 ;;
-        *)
-          echo "::error::the wire lint failed to run, so the shipped proto cannot be checked and the canary baseline was not advanced" >&2 ;;
-      esac
-      echo "$problems" >&2
-      exit 1
+      refuse "$problems" "$shipped breaks the wire Canary already shipped, so the baseline was not advanced. Ship a fix that restores compatibility."
     fi
   fi
 
