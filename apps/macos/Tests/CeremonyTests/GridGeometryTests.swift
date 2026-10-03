@@ -269,6 +269,28 @@ struct GridGeometryTests {
         }
     }
 
+    /// Open, the strip has as much room under its last line as over its
+    /// first, so it doesn't read as a scroll area cut off at the divider
+    /// (owner, 2 Oct); closed, its one row is centered. Measured too: the
+    /// open strip is its header row, its lines, and both insets.
+    @Test("The strip's room above its text equals the room below")
+    func theStripIsAFinishedBlock() async {
+        for collapsed in [false, true] {
+            let room = BoardSummaryStrip.visibleInsets(collapsed: collapsed)
+            #expect(room.top == room.bottom, "collapsed \(collapsed): \(room)")
+        }
+        let store = await Self.store()
+        let defaults = UserDefaults(suiteName: "strip-open-\(UUID().uuidString)")!
+        let host = NSHostingController(rootView: BoardSummaryStrip(store: store, defaults: defaults))
+        let height = host.sizeThatFits(in: CGSize(width: WorkspaceColumns.navigatorDefault, height: 800)).height
+        // Everything else in it is on the 8 pt rhythm, so what's over is
+        // the bottom inset's: drawn, not just declared.
+        let bottom = BoardSummaryStrip.insets(collapsed: false).bottom
+        #expect(
+            height.truncatingRemainder(dividingBy: ColumnGrid.rhythm)
+                == bottom.truncatingRemainder(dividingBy: ColumnGrid.rhythm), "\(height) tall")
+    }
+
     // MARK: - No stray offsets
 
     /// The row files, and how much of each holds rows: TaskBoard.swift's

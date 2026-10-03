@@ -66,7 +66,8 @@ struct BoardSummaryStrip: View {
             // Measured from the board column's edge, as the list below is:
             // the disclosure at column A, everything else at B.
             .padding(.horizontal, ColumnGrid.a)
-            .padding(.vertical, ColumnGrid.rhythm)
+            .padding(.top, Self.insets(collapsed: collapsed).top)
+            .padding(.bottom, Self.insets(collapsed: collapsed).bottom)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(WorkspaceStyle.document)
             .task(id: Self.notesKey(since: since, generation: store.generation, count: store.board.rows.count, collapsed: collapsed)) {
@@ -80,6 +81,25 @@ struct BoardSummaryStrip: View {
 
     /// A line of the strip: a group's label, one item, "and 2 more".
     static let lineHeight: CGFloat = 2 * ColumnGrid.rhythm
+
+    /// Its padding above and below. Open, the last line gets the air the
+    /// header's own 24 pt row gives its title above, so the text has as much
+    /// room under it as over it and the strip reads as a finished block, not
+    /// a list cut off at the divider (owner, 2 Oct). Closed, the one row is
+    /// centered already.
+    static func insets(collapsed: Bool) -> (top: CGFloat, bottom: CGFloat) {
+        let top = ColumnGrid.rhythm
+        return (top, collapsed ? top : top + headerAir)
+    }
+
+    /// The air over the header's title inside its row.
+    static let headerAir = (ColumnGrid.rowHeight - lineHeight) / 2
+
+    /// The room over its first line of text and under its last, as drawn.
+    static func visibleInsets(collapsed: Bool) -> (top: CGFloat, bottom: CGFloat) {
+        let insets = insets(collapsed: collapsed)
+        return (insets.top + headerAir, insets.bottom + (collapsed ? headerAir : 0))
+    }
 
     /// The font an item's key is set in, which `keyColumn` measures.
     private static let keyFont = NSFont.monospacedSystemFont(
