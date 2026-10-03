@@ -234,9 +234,40 @@ public enum Markdown {
     @MainActor
     public static let runCache = RenderMemo<String, [Run]>(limit: 60)
 
+    /// `runCache`'s twin for a task's own text (ov-98): a record draws every
+    /// note at once, in no lazy stack, so a cache smaller than the record
+    /// evicts each entry before it's drawn again and every redraw re-parses
+    /// them all. Sized past the longest record, and still bounded, and apart
+    /// from the chat's, so a long record doesn't flush a transcript's.
     @MainActor
-    public static func cachedRuns(_ text: String) -> [Run] {
-        runCache.value(for: text) { runs(blocks($0)) }
+    public static let documentRunCache = RenderMemo<String, [Run]>(limit: 1_000)
+
+    /// `inline`, computed once per distinct line: acceptance lines,
+    /// constraints and questions, drawn on every redraw of a task.
+    @MainActor
+    public static let inlineCache = RenderMemo<String, AttributedString>(limit: 1_000)
+
+    /// Whether a link may be opened: the web and mail, nothing else.
+    ///
+    /// Task text and replies are written by agents. A `file:` link to a
+    /// `.command` runs it in Terminal on one click on a Mac, an app's own
+    /// scheme hands off to that app, and none of it asks first (ov-98 review
+    /// B1). So any other scheme isn't a link at all (`inline`), and the views
+    /// refuse to open one besides (`openGuard`).
+    public static func opens(_ url: URL) -> Bool {
+        ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "")
+    }
+
+    /// The open-URL handler every Markdown view draws under: `opens`'s
+    /// links go to the system, everything else is dropped.
+    public static var openGuard: OpenURLAction {
+        OpenURLAction { url in opens(url) ? .systemAction : .discarded }
+    }
+
+    @MainActor
+    public static func cachedRuns(_ text: String, spacing: MarkdownSpacing = .reply) -> [Run] {
+        let cache = spacing == .document ? documentRunCache : runCache
+        return cache.value(for: text) { runs(blocks($0)) }
     }
 
     /// Inline syntax only — bold, italic, code spans, links.
@@ -249,7 +280,13 @@ public enum Markdown {
             interpretedSyntax: .inlineOnlyPreservingWhitespace,
             failurePolicy: .returnPartiallyParsedIfPossible
         )
-        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+        var parsed = (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+        // A link to anywhere but the web or mail keeps its words and loses
+        // its link (`opens`).
+        for run in parsed.runs {
+            if let url = run.link, !opens(url) { parsed[run.range].link = nil }
+        }
+        return parsed
     }
 }
 
@@ -277,7 +314,7 @@ public struct MarkdownText: View {
     }
 
     public var body: some View {
-        let runs = Markdown.cachedRuns(text)
+        let runs = Markdown.cachedRuns(text, spacing: spacing)
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(runs.enumerated()), id: \.offset) { index, run in
                 view(for: run)
@@ -293,6 +330,8 @@ public struct MarkdownText: View {
         .font(secondary ? .caption : .body)
         .foregroundStyle(secondary ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
         .textSelection(.enabled)
+        // A second line of defense behind `Markdown.inline`'s filter.
+        .environment(\.openURL, Markdown.openGuard)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -777,11 +816,15 @@ public enum TaskProse {
 
     /// One line's inline Markdown: bold, italic, `code` and links. HTML is
     /// left as the characters it was typed as; nothing here renders it.
-    public static func inline(_ text: String) -> AttributedString { Markdown.inline(text) }
+    @MainActor
+    public static func inline(_ text: String) -> AttributedString {
+        Markdown.inlineCache.value(for: text) { Markdown.inline($0) }
+    }
 
     /// An acceptance line as its checklist row draws it: its inline
     /// Markdown, and struck through, all of it, once it's met. The color is
     /// the row's to choose (secondary when met), so it stays monochrome.
+    @MainActor
     public static func acceptance(_ text: String, met: Bool) -> AttributedString {
         var line = inline(text)
         if met {
@@ -789,6 +832,11 @@ public enum TaskProse {
         }
         return line
     }
+
+    /// What a line of task text says, without its markup: what VoiceOver
+    /// reads for a row drawn from it, never "star star".
+    @MainActor
+    public static func plain(_ text: String) -> String { String(inline(text).characters) }
 
     /// The quiet line over a note in the record: "Finding · manager · 4m
     /// ago". No byline, no middle part.

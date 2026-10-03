@@ -71,6 +71,7 @@ struct TaskProseTests {
         #expect(open.runs.allSatisfy { $0[Strike.self] == nil })
         #expect(met.runs.contains { $0.inlinePresentationIntent == .stronglyEmphasized })
         #expect(open.runs.contains { $0.inlinePresentationIntent == .code })
+        #expect(TaskProse.plain("Renders **bold**, `code` and [a link](https://x.y)") == "Renders bold, code and a link")
     }
 
     /// The quiet line over a note: its kind, who wrote it, and when.
@@ -97,5 +98,56 @@ struct TaskProseTests {
                         == MarkdownBlockSpacing.gap(after: before, before: after))
             }
         }
+    }
+
+    /// Task text is written by agents, so a link opens only on the web or in
+    /// mail (ov-98 review B1). A `file:` link to a script, an app's own
+    /// scheme or `javascript:` reads as its words and isn't a link at all;
+    /// http, https and mailto stay links.
+    @Test("Only http, https and mailto links are links")
+    func onlyWebAndMailLinksAreLinks() {
+        func link(_ text: String) -> URL? {
+            TaskProse.inline(text).runs.compactMap(\.link).first
+        }
+        #expect(link("[run](file:///Users/me/run.command)") == nil, "file: is still a link")
+        #expect(link("[open](farcooler://open?x=1)") == nil, "a custom scheme is still a link")
+        #expect(link("[go](x-apple.systempreferences:com.apple.preference)") == nil)
+        #expect(link("[x](javascript:alert(1))") == nil, "javascript: is still a link")
+        #expect(link("<file:///etc/passwd>") == nil, "an autolink to a file is still a link")
+        #expect(String(TaskProse.inline("[run](file:///tmp/run.command) now").characters) == "run now")
+        #expect(link("[spec](https://example.com/spec)") == URL(string: "https://example.com/spec"))
+        #expect(link("[old](http://example.com)") == URL(string: "http://example.com"))
+        #expect(link("[me](mailto:o@example.com)") == URL(string: "mailto:o@example.com"))
+        #expect(Markdown.inline("[run](file:///tmp/a.command)").runs.compactMap(\.link).isEmpty, "the chat's too")
+    }
+
+    /// The second line of defense, on the views: what the open-URL handler
+    /// lets through.
+    @Test("The open-URL guard lets only http, https and mailto through")
+    func theOpenGuard() {
+        for allowed in ["https://a.b", "HTTP://a.b", "mailto:o@a.b"] {
+            #expect(Markdown.opens(URL(string: allowed)!), "\(allowed) refused")
+        }
+        for refused in ["file:///tmp/x.command", "farcooler://x", "javascript:alert(1)", "tel:123", "shortcuts://run"] {
+            #expect(!Markdown.opens(URL(string: refused)!), "\(refused) let through")
+        }
+    }
+
+    /// A long record parses each note once: drawn twice, the second pass
+    /// parses nothing, however many notes there are (review M2). The chat's
+    /// 60-entry cache thrashed past 60.
+    @Test("A record of 100 notes drawn twice is parsed once")
+    func aLongRecordIsParsedOnce() {
+        let notes = (0..<100).map { "Note \($0): **bold** and `code`.\n\n- one\n- two" }
+        let record = VStack { ForEach(notes, id: \.self) { MarkdownText(text: $0, spacing: .document) } }
+        _ = renderedHeight(record, width: 400)
+        let first = Markdown.documentRunCache.misses
+        _ = renderedHeight(record, width: 400)
+        #expect(Markdown.documentRunCache.misses == first, "the second pass re-parsed \(Markdown.documentRunCache.misses - first)")
+        let inlineMisses = Markdown.inlineCache.misses
+        _ = TaskProse.acceptance("a **met** line", met: true)
+        _ = TaskProse.acceptance("a **met** line", met: true)
+        _ = TaskProse.inline("a **met** line")
+        #expect(Markdown.inlineCache.misses == inlineMisses + 1, "inline Markdown isn't memoized")
     }
 }
