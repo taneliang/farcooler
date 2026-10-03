@@ -257,6 +257,10 @@ fn to_millis(year: i32, month: i32, day: i32, hour: i32, minute: i32) -> Option<
     (seconds >= 0).then_some(seconds as i64 * 1000)
 }
 
+// The libc crate marks `time_t` deprecated on musl only, warning that it will
+// follow musl 1.2's move to 64 bits. On the 64-bit targets we ship it is
+// `c_long`, already 64 bits, so there is nothing to act on.
+#[cfg_attr(target_env = "musl", allow(deprecated))]
 fn broken_down(millis: i64) -> libc::tm {
     let seconds: libc::time_t = (millis / 1000) as libc::time_t;
     // SAFETY: `localtime_r` writes only the `tm` it is given and reads only
