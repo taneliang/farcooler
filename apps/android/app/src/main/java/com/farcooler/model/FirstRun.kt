@@ -66,38 +66,42 @@ enum class OrchestratorExit {
 
 /** The phone's first-run words, sentence case throughout. The iPhone's are `FirstRunCopy.Phone`. */
 object FirstRunCopy {
-    const val ONBOARDING_TITLE = "Connect a runner"
+    const val ONBOARDING_TITLE = "Connect to your agents"
     const val ONBOARDING_BODY =
-        "A runner is where your agents run: Far Cooler on a Mac or a Linux computer. " +
-            "Connect this phone to one to see what they’re doing and answer them."
+        "Your agents work on a Mac or Linux computer that runs Far Cooler, called a runner. " +
+            "Connect this phone to one to answer your agents while you’re away from it."
     const val ONBOARDING_PRIMARY = "Connect this device"
     const val ONBOARDING_SECONDARY = "Add a runner"
     const val NO_REPOSITORIES_BODY =
-        "Add one here, or in the Mac app with File > Add Repository. Each one starts with a workspace called Main."
+        "Add the Git repository you want agents to work on, here or on your Mac with File > Add Repository."
     const val ADD_REPOSITORY = "Add repository"
     const val NOTHING_NEEDS_YOU = "Nothing needs you"
-    const val NO_ORCHESTRATOR_RUNNING = "No orchestrator is running yet. Open a workspace below to start one."
+    const val NO_ORCHESTRATOR_RUNNING =
+        "No agents are working yet. To give them work, open a workspace below and start its orchestrator."
     const val ORCHESTRATOR_TITLE = "No orchestrator yet"
     const val ORCHESTRATOR_BODY =
-        "Tell the orchestrator what you want done, and it plans the tasks and starts agents on them. " +
-            "The first time, it asks a few questions about how you work."
+        "Instead of running each agent yourself, tell the orchestrator what you want done. " +
+            "It splits the work into tasks and starts an agent on each. The first time, it asks how you like to work."
     const val START = "Start orchestrator"
 
     /** Under a harness the runner doesn't have, which is disabled. */
     const val NOT_INSTALLED = "Not installed"
     const val TRY_AGAIN = "Try again"
     const val BOARD_TITLE = "No tasks"
-    const val BOARD_NO_ORCHESTRATOR = "Start the orchestrator and tell it what you want done. Its tasks appear here."
-    const val BOARD_WITH_ORCHESTRATOR = "Ask your orchestrator to plan the work. Its tasks appear here, grouped by status."
+    const val BOARD_NO_ORCHESTRATOR =
+        "Start the orchestrator and tell it what you want done. Each piece of work it hands out appears here as a task."
+    const val BOARD_WITH_ORCHESTRATOR =
+        "Tell the orchestrator what you want done. Each piece of work it hands out appears here as a task."
     const val SHOW_ORCHESTRATOR = "Show orchestrator"
     const val PUSH_BODY =
-        "Notifications arrive only while Far Cooler is open. To get them when it’s closed, sign in, " +
-            "then turn on notifications for your runner in Far Cooler on your Mac."
+        "To hear from your agents while Far Cooler is closed, sign in. Until then, notifications arrive only while it’s open."
     const val SIGN_IN = "Sign in"
 
     /** The explainer before the permission request, after the first runner (iOS: `NotificationAsk`). */
     const val NOTIFY_TITLE = "Get notified when an agent needs you"
-    const val NOTIFY_BODY = "Far Cooler can tell you when an agent asks a question or finishes."
+    const val NOTIFY_BODY =
+        "Your agents keep working without you. Far Cooler can tell you when one has a question or finishes, " +
+            "so you don’t have to keep checking."
     const val NOTIFY_ALLOW = "Allow notifications"
     const val NOTIFY_DECLINE = "Not now"
 
