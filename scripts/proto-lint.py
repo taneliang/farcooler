@@ -202,6 +202,78 @@ def capability_problems(scope_table=None, cap_table=None):
     ]
 
 
+def workflow_jobs(text):
+    """The `jobs:` of a workflow: each job's top-level keys, raw, by name.
+
+    Not a YAML parser, because a lint that needs PyYAML stops running wherever
+    it is missing (it is, on this repository's Macs). It reads the shape
+    workflows here are written in: two-space indentation, jobs at indent 2,
+    their keys at indent 4. A value is everything to the next key at indent 4,
+    so a block list or a multi-line `if` is kept whole. Comments are dropped.
+    """
+    jobs, job, key, in_jobs = {}, None, None, False
+    for line in text.splitlines():
+        bare = line.split(" #", 1)[0].rstrip() if not line.lstrip().startswith("#") else ""
+        if not bare:
+            continue
+        indent = len(bare) - len(bare.lstrip())
+        if indent == 0:
+            in_jobs = bare == "jobs:"
+            continue
+        if not in_jobs:
+            continue
+        if indent == 2 and bare.endswith(":"):
+            job, key = bare.strip()[:-1], None
+            jobs[job] = {}
+        elif indent == 4 and job and ":" in bare:
+            key, value = bare.strip().split(":", 1)
+            jobs[job][key] = value.strip()
+        elif job and key:
+            jobs[job][key] += "\n" + bare.strip()
+    return jobs
+
+
+def needs_of(value):
+    """`needs: a`, `needs: [a, b]` or a block list, as a set of job names."""
+    return set(re.findall(r"[\w-]+", value or ""))
+
+
+def canary_gate_problems(text):
+    """How a wire break could still ship in canary.yml, as sentences.
+
+    Every job but the lint must reach it through `needs`, and nothing may
+    undo that: a status function in an `if` (always(), cancelled(),
+    failure()) runs a job after its need failed, and continue-on-error or
+    `|| true` in the lint job lets it fail and still count as passed.
+    """
+    jobs = workflow_jobs(text)
+    gates = [j for j, keys in jobs.items() if "proto-lint.py --channel canary" in keys.get("steps", "")]
+    if len(gates) != 1:
+        return [f"expected one job running `proto-lint.py --channel canary`, found {gates}"]
+    gate = gates[0]
+    problems = []
+    body = jobs[gate]
+    if "continue-on-error" in body or "continue-on-error" in body.get("steps", ""):
+        problems.append(f"`{gate}` has continue-on-error, so a failed lint still passes")
+    if re.search(r"\|\|\s*(true|:|exit 0)", body.get("steps", "")):
+        problems.append(f"`{gate}` swallows a lint failure with `|| true`")
+    if "if" in body or re.search(r"^\s*(-\s*)?if:", body.get("steps", ""), re.M):
+        problems.append(f"`{gate}` has an `if`, so the lint can be skipped")
+    for job, keys in jobs.items():
+        if job == gate:
+            continue
+        if re.search(r"\b(always|cancelled|failure)\(\)", keys.get("if", "")):
+            problems.append(f"`{job}`'s `if` uses a status function, so it can run after the lint failed")
+        seen, todo = set(), [job]
+        while todo:
+            for need in needs_of(jobs.get(todo.pop(), {}).get("needs")) - seen:
+                seen.add(need)
+                todo.append(need)
+        if gate not in seen:
+            problems.append(f"`{job}` does not need `{gate}`, directly or through another job, so a wire break can ship")
+    return problems
+
+
 def lint(channel, baseline_dir):
     """The problems, and the line to print if there are none."""
     problems = capability_problems()
@@ -420,19 +492,33 @@ def self_test():
 
     # Canary ships every push to main, so its ship jobs must wait for this lint
     # in their own workflow. CI's `wire` job is no gate: canary.yml never waits
-    # for it, and CI cancels a run when the next push lands. The Mac job needs
-    # `linux`, so gating `linux` and `ios` gates every ship.
+    # for it, and CI cancels a run when the next push lands.
     count += 1
     canary = (ROOT / CHANNELS["canary"]).read_text()
-    gate = re.search(r"\n  (\w[\w-]*):\n(?:(?!\n  \w).)*?proto-lint\.py --channel canary", canary, re.S)
-    if not gate:
-        failures.append("canary.yml runs no `proto-lint.py --channel canary` job")
-    else:
-        for job in ["linux", "ios"]:
-            body = re.search(rf"\n  {job}:\n((?:(?!\n  \w).)*)", canary, re.S)
-            needs = re.search(r"\n    needs:\s*(\[[^\]]*\]|\S+)", "\n" + body.group(1)) if body else None
-            if not needs or not re.search(rf"\b{re.escape(gate.group(1))}\b", needs.group(1)):
-                failures.append(f"canary.yml's `{job}` job does not need `{gate.group(1)}`, so a wire break can ship")
+    for problem in canary_gate_problems(canary):
+        failures.append(f"canary.yml: {problem}")
+
+    # And the gate check itself, against the ways a gate is lost while every
+    # `needs` line still reads correctly, plus a valid spelling it must accept.
+    gate_cases = [
+        ("ios's needs removed", "    runs-on: xcode-27\n    needs: wire\n", "    runs-on: xcode-27\n", 1),
+        ("macos's needs removed", "    needs: linux\n", "", 1),
+        ("always() on ios", "    if: vars.CANARY_TESTFLIGHT == 'true'\n", "    if: always() && vars.CANARY_TESTFLIGHT == 'true'\n", 1),
+        ("!cancelled() on linux", "  linux:\n    needs: wire\n", "  linux:\n    needs: wire\n    if: ${{ !cancelled() }}\n", 1),
+        ("|| true on the lint", "--channel canary\n", "--channel canary || true\n", 1),
+        ("continue-on-error on the lint job", "  wire:\n    name: Wire compatibility\n", "  wire:\n    name: Wire compatibility\n    continue-on-error: true\n", 1),
+        ("continue-on-error on a lint step", "      - run: ./scripts/proto-lint.py --channel canary\n", "      - run: ./scripts/proto-lint.py --channel canary\n        continue-on-error: true\n", 1),
+        ("needs as a block list", "  linux:\n    needs: wire\n", "  linux:\n    needs:\n      - wire\n", 0),
+        ("needs as a flow list", "    needs: linux\n", "    needs: [wire, linux]\n", 0),
+    ]
+    for what, old, new, want in gate_cases:
+        count += 1
+        if old not in canary:
+            failures.append(f"gate case {what!r}: canary.yml no longer contains {old!r}")
+            continue
+        got = canary_gate_problems(canary.replace(old, new, 1))
+        if bool(got) != bool(want):
+            failures.append(f"gate case {what!r}: expected {'a problem' if want else 'none'}, got {got}")
 
     for f in failures:
         print(f"FAIL: {f}", file=sys.stderr)
