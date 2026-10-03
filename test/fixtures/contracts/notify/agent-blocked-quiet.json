@@ -1,0 +1,13 @@
+{
+  "alert": false,
+  "failed": false,
+  "install": "0199a8f2-4c1e-7b3a-9d0e-5f6a7b8c9d0e",
+  "label": "codex",
+  "needsYou": 2,
+  "startedAt": 1791019500000,
+  "status": "blocked",
+  "subtitle": "ov-90 — Waiting for your answer",
+  "terminal": "term-01999a90aa10",
+  "title": "codex needs you",
+  "version": "2026.10.3-canary.412+d35970c9"
+}

@@ -1,0 +1,23 @@
+{
+  "ask": {
+    "id": "hook-ask-0199a8f3-1b2c-7d4e-8f50-6a7b8c9d0e1f",
+    "tool": "Bash",
+    "until": 1791020340000
+  },
+  "commits": 1,
+  "deletions": 37,
+  "failed": false,
+  "insertions": 142,
+  "install": "0199a8f2-4c1e-7b3a-9d0e-5f6a7b8c9d0e",
+  "label": "claude",
+  "needsYou": 2,
+  "startedAt": 1791018420000,
+  "status": "blocked",
+  "subtitle": "auth-refactor — Do you want to run git push --force-with-lease?",
+  "terminal": "term-01999a8f2c4e",
+  "title": "claude needs you",
+  "trace": "EAAAAAAAAAAAAAAAAAAAHgAbAC0AIQAMAAkAAAAAAAAAAAAAAAAAAAB0AEABQAFAAUABKAAAAAAAAAAAAAAAAAEA",
+  "traceAnchor": 5970066,
+  "version": "2026.10.3-canary.412+d35970c9",
+  "workspace": "Billing"
+}

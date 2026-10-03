@@ -1,0 +1,18 @@
+{
+  "commits": 1,
+  "deletions": 37,
+  "failed": false,
+  "insertions": 142,
+  "install": "0199a8f2-4c1e-7b3a-9d0e-5f6a7b8c9d0e",
+  "label": "claude",
+  "needsYou": 1,
+  "startedAt": 1791018420000,
+  "status": "working",
+  "subtitle": "3/7 · Designing test matrix",
+  "terminal": "term-01999a8f2c4e",
+  "title": "claude",
+  "trace": "EAAAAAAAAAAAAAAAAAAAHgAbAC0AIQAMAAkAAAAAAAAAAAAAAAAAAAB0AEABQAFAAUABKAAAAAAAAAAAAAAAAAEA",
+  "traceAnchor": 5970066,
+  "version": "2026.10.3-canary.412+d35970c9",
+  "workspace": "Billing"
+}
