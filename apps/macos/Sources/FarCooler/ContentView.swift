@@ -14,6 +14,7 @@ struct ContentView: View {
     @Environment(\.openSettings) private var openSettings
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.markReadConfirmation) private var markReadConfirmation
     @State private var selection: Selection?
     @State private var expanded: Set<String> = []
     /// Which projects have their hidden worktrees showing. Collapsed is the
@@ -4158,7 +4159,7 @@ struct ContentView: View {
 
         case .markAllRead:
             if let scene = selection.flatMap(workspaceScene), let board = scene.board {
-                boardStores["\(scene.host)/\(board)"]?.markAllRead()
+                boardStores["\(scene.host)/\(board)"]?.askToMarkAllRead(markReadConfirmation)
             }
 
         // Toggles rather than opens. ⌘P on an open palette is what a hand

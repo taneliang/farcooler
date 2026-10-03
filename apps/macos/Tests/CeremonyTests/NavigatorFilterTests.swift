@@ -70,6 +70,8 @@ struct NavigatorFilterTests {
         let defaults: UserDefaults
         let seen: Seen
         let slowdown: Double
+        /// Where Mark as Read asks: the harness's `marks`.
+        let confirmation: MarkReadConfirmation
         let onStep: (NavigatorItem) -> Void
 
         var body: some View {
@@ -77,6 +79,7 @@ struct NavigatorFilterTests {
                 store: store, client: store.client, agents: .none, onGoTo: { _ in }, defaults: defaults,
                 selected: level.selected, hasKeyboard: true, current: level.current, onStep: onStep)
             .environment(\.boardMotionSlowdown, slowdown)
+            .environment(\.markReadConfirmation, confirmation)
             .frame(width: Harness.width, height: Harness.height, alignment: .topLeading)
             .background(WorkspaceStyle.canvas)
             .environment(\.gridProbing, true)
@@ -103,6 +106,8 @@ struct NavigatorFilterTests {
         static let height: CGFloat = 900
         let level = Level()
         let seen = Seen()
+        /// Mark as Read's questions, answered yes unless a test says not.
+        let marks = AskedToMarkRead()
         let store: TaskBoardStore
         let defaults: UserDefaults
         let host: NSHostingView<Hosted>
@@ -117,7 +122,7 @@ struct NavigatorFilterTests {
             host = NSHostingView(
                 rootView: Hosted(
                     level: level, store: store, defaults: defaults, seen: seen, slowdown: slowdown,
-                    onStep: { onStep($0) }))
+                    confirmation: marks.confirmation, onStep: { onStep($0) }))
             window = KeyWindow(
                 contentRect: NSRect(x: -4000, y: -4000, width: Self.width, height: Self.height),
                 styleMask: [.borderless], backing: .buffered, defer: false)
@@ -299,7 +304,7 @@ struct NavigatorFilterTests {
         defer { harness.close() }
         await harness.settle()
         #expect(harness.seen.sections.contains("status.backlog"), "unfiltered, every status is drawn")
-        harness.store.markAllRead()
+        harness.store.askToMarkAllRead(.granting)
         harness.type("tax")
         await harness.settle()
         let sections = harness.seen.sections

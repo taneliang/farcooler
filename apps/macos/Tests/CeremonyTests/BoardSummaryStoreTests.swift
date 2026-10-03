@@ -64,7 +64,7 @@ struct BoardSummaryStoreTests {
         await store.reload()
         await store.readSummaryNotes(reads: store.reads)
         #expect(!BoardSummary.make(rows: store.board.rows, notes: store.summaryNotes, reads: store.reads).isEmpty)
-        store.markAllRead()
+        store.askToMarkAllRead(.granting)
         #expect(BoardSummary.make(rows: store.board.rows, notes: store.summaryNotes, reads: store.reads).isEmpty)
         #expect(BoardSummary.make(rows: store.board.rows, notes: store.summaryNotes, reads: self.store(defaults: defaults).reads).isEmpty)
     }

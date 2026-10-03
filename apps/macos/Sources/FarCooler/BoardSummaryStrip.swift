@@ -6,7 +6,7 @@ import SwiftUI
 /// stays until its ticket is opened, and opening it clears that ticket's
 /// items (`BoardReads`). Mark All as Read is its header's button on hover
 /// (`MarkAllReadButton`), its header's VoiceOver action, in its context menu
-/// and in the Board menu (⇧⌘K).
+/// and in the Board menu (⇧⌘K), and each asks first (`MarkReadConfirmation`).
 ///
 /// The board's header hosts it. What goes in the strip is `BoardSummary`'s;
 /// this view only draws the lines and reads the records of the tasks that
@@ -37,6 +37,7 @@ struct BoardSummaryStrip: View {
     @State private var arrived: Set<String> = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.boardMotionSlowdown) private var slowdown
+    @Environment(\.markReadConfirmation) private var confirmation
 
     init(
         store: TaskBoardStore, defaults: UserDefaults = .standard, filter: String = "", selectedLine: String? = nil,
@@ -234,12 +235,16 @@ struct BoardSummaryStrip: View {
     /// to read.
     private func offersMarkRead(_ summary: BoardSummary) -> Bool { !collapsed && !summary.isEmpty }
 
-    /// Mark All as Read from the strip: unfiltered, everything on the board;
-    /// filtered, only the tasks it lists, the ones its count counts (ov-177
-    /// review: one click beside "3" cleared all 15).
+    /// Mark All as Read from the strip, once asked (ov-210): unfiltered,
+    /// everything on the board; filtered, only the tasks it lists, the ones
+    /// its count counts (ov-177 review: one click beside "3" cleared all 15).
     private func markRead(_ summary: BoardSummary) {
-        guard filtering else { return store.markAllRead() }
-        Self.markRead(summary, in: store)
+        let animation = BoardMotion.list(reduceMotion: reduceMotion, slowedBy: slowdown)
+        guard filtering else { return store.askToMarkAllRead(confirmation, animation: animation) }
+        let request = MarkReadRequest(filtering: true, tasks: MarkReadRequest.tasks(in: summary))
+        confirmation.confirm(request) { [store] _ in
+            withAnimation(animation) { Self.markRead(summary, in: store) }
+        }
     }
 
     /// Every task `summary` lists, read up to its newest line.

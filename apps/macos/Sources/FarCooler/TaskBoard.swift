@@ -115,8 +115,9 @@ final class TaskBoardStore: ObservableObject {
         held = taskID.map { HeldRead(taskID: $0, reads: reads) }
     }
 
-    /// Mark All as Read: everything on the board so far.
-    func markAllRead(now: Date = Date()) {
+    /// Mark All as Read: everything on the board so far, once the person
+    /// said yes (`MarkReadConfirmation`, ov-210).
+    func markAllRead(_ granted: MarkReadGrant, now: Date = Date()) {
         reads.markAllRead(rows: board.rows, now: now)
         readStore.save(reads, host: hostKey, workspace: workspace.id)
     }

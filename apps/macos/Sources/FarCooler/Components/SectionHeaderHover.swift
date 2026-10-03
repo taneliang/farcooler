@@ -47,7 +47,8 @@ extension CollapsibleSection {
 /// navigator's filter narrows the strip, when it reads only what's listed.
 ///
 /// Without the pointer it's the header's VoiceOver action (`headerAction`),
-/// the header's context menu, and Board ▸ Mark All as Read (⇧⌘K). The task
+/// the header's context menu, and Board ▸ Mark All as Read (⇧⌘K). Each asks
+/// first (`MarkReadConfirmation`, ov-210). The task
 /// selected keeps its lines until the selection moves on (`HeldRead`); the
 /// rest leave on the shared spring.
 struct MarkAllReadButton: View {
@@ -56,8 +57,6 @@ struct MarkAllReadButton: View {
     let action: () -> Void
 
     @Environment(\.sectionHeaderHovered) private var headerHovered
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.boardMotionSlowdown) private var slowdown
     /// The pointer is on the words themselves: they read in primary.
     @State private var hovered = false
 
@@ -69,9 +68,9 @@ struct MarkAllReadButton: View {
 
     var body: some View {
         if Self.isShown(headerHovered: headerHovered) {
-            Button {
-                withAnimation(BoardMotion.list(reduceMotion: reduceMotion, slowedBy: slowdown), action)
-            } label: {
+            // The action asks first, and animates what it reads once the
+            // person says yes (`MarkReadConfirmation`).
+            Button(action: action) {
                 Text(Self.title(filtering: filtering))
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
                     .foregroundStyle(hovered ? .primary : .secondary)
