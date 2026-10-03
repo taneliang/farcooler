@@ -215,8 +215,7 @@ enum WorkspaceScreen {
     /// in its repository's main checkout, so that's where these are.
     ///
     /// Seated, not every orchestrator-role terminal: a stopped one nobody
-    /// seats is drawn among the checkout's own terminals, as the sidebar
-    /// draws it (`sidebarRows`).
+    /// seats is drawn among the checkout's own terminals (`ownTerminals`).
     static func seated(in worktree: Worktree, fleet: Fleet) -> [(workspace: WorkspaceSummary, pane: BoardPane)] {
         let host = worktree.host ?? ""
         return (fleet.runnerWorkspaces[host] ?? []).compactMap { workspace in
