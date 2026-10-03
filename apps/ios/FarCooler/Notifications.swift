@@ -86,11 +86,18 @@ final class Notifier {
     }
 
     /// Announce a change, if it is worth announcing.
-    func report(terminal: Terminal, worktree: String) {
+    ///
+    /// `leftToTask` is `TaskLink.leavesBannerToTask`'s answer for this pane:
+    /// an agent working on a task is told about through the task's push,
+    /// worded by task and filed under the task's own thread, so posting its
+    /// own banner too would say the same thing twice (ov-107). Still
+    /// recorded as announced, so a fold that ends doesn't replay old news.
+    func report(terminal: Terminal, worktree: String, leftToTask: Bool = false) {
         let activity = terminal.agent
         defer { announced[terminal.id] = activity }
 
         guard NotificationSettings.onAttention else { return }
+        guard !leftToTask else { return }
         guard activity.wantsAttention else { return }
         guard activity != announced[terminal.id] else { return }
         if activity == .done && !NotificationSettings.onDone { return }

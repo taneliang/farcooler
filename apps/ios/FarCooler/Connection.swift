@@ -898,7 +898,10 @@ final class Connection: ObservableObject {
             grantedScope: body["grantedScope"] as? String ?? "unspecified",
             // Which runner this is, by its own id (ov-71). See
             // `FleetSnapshot.Agent.hostRunner`.
-            runnerId: body["runnerId"] as? String)
+            runnerId: body["runnerId"] as? String,
+            // Whether its task notices reach this phone as pushes (ov-107).
+            // See `TaskLink.taskNoticeReachesPhone`.
+            pushPaired: body["pushPaired"] as? Bool ?? false)
         daemon = build
         lastDaemon = build
         // Boards this link never read — `loadBoards` refused them while the
@@ -1000,9 +1003,17 @@ final class Connection: ObservableObject {
             // Here rather than in a view: a notification about an agent must
             // not depend on which screen happens to be open, and this is the
             // one place that learns what every agent is doing.
+            //
+            // An agent on a task is left to its task's push (ov-107), the
+            // same rule as the Mac's: `TaskLink.leavesBannerToTask`.
+            let noticeReaches = TaskLink.taskNoticeReachesPhone(
+                daemon, registered: PushRegistration.shared.registered)
             for worktree in fleet.worktrees {
                 for terminal in worktree.terminals {
-                    Notifier.shared.report(terminal: terminal, worktree: worktree.task)
+                    Notifier.shared.report(
+                        terminal: terminal, worktree: worktree.task,
+                        leftToTask: TaskLink.leavesBannerToTask(
+                            terminal, in: worktree, noticeReachesHere: noticeReaches))
                 }
             }
 

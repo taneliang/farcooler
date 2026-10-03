@@ -1676,6 +1676,11 @@ async fn dispatch(
                 // another runner's when one goes quiet (ov-71). Null from a
                 // runner too old to say.
                 "runnerId": runner_id(&facts),
+                // Whether this runner is paired with the relay
+                // (`Host.push_paired`), so its task notices reach the phone
+                // as pushes. A phone leaves a task-bound agent's own banner
+                // to that push only then (ov-107); false from an older runner.
+                "pushPaired": facts.push_paired,
                 "daemonVersion": facts.daemon_version,
                 "clientVersion": farcooler_protocol::BUILD,
                 "buildsMatch": facts.daemon_version == farcooler_protocol::BUILD,
