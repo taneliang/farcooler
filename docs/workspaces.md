@@ -344,11 +344,11 @@ workspaces, grouped by runner and repository. A workspace has three views:
 - **Orchestrator**: its conversation, as a terminal or as chat. A workspace
   without one offers **Start Orchestrator**.
 - **Board**: the board as a sectioned list, with "N tasks are waiting on you"
-  above it when any are. **New Task…** files a task by hand, with a title and
-  optional details; it's offered when the runner lets the phone write to the
-  board. Select a task to see its card and answer its decision, then go on to
-  its **Agent**, its **Changes** or its **Worktree**. Back always returns to the
-  task, and then to the board.
+  above it when any are. The phone reads the board and answers its
+  questions; the orchestrator files and moves the tasks. Select a task to
+  see its card and answer its decision, then go on to its **Agent**, its
+  **Changes** or its **Worktree**. Back always returns to the task, and then
+  to the board.
 - **Worktrees**: the worktrees it owns, with their task keys. **New Worktree…**
   here makes one that belongs to this workspace. On the iPhone, swipe a
   worktree to **Hide** it; hidden ones are kept under **Hidden**, where the

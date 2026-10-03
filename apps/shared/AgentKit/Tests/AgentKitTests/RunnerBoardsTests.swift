@@ -299,8 +299,8 @@ func everyStatusIsASectionEmptyOnesIncluded() throws {
 /// **An empty implicit board still has a row** (spec §5, §8). An implicit
 /// board is a repository's on a runner without `workstreams`, and the
 /// workspace view treats it as a workspace, so an empty one has to be
-/// reachable: the row is the way onto the board, and New Task… is on the
-/// board. Read or not, like a workspace's (ov-56).
+/// reachable: the row is the way onto the board and its Worktrees view,
+/// where New Worktree… is. Read or not, like a workspace's (ov-56).
 @Test("An empty implicit board still has a row")
 func anEmptyImplicitBoardStillHasARow() {
     let rows = RunnerBoards.rows(

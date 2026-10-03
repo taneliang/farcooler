@@ -136,7 +136,8 @@ public enum RunnerBoards {
     ///   gets a row the same way, empty or unread (ov-55, spec §5 and §8).
     ///   It used to need something on it, since nobody made a workspace
     ///   there; but the workspace view treats it as a workspace, and an
-    ///   empty board with no row was a board New Task… could never reach.
+    ///   empty board with no row hid its Worktrees view too, where New
+    ///   Worktree… is.
     /// - `agents` is counted only where `TaskAgentLink.speaksOfAgents` says
     ///   the runner can be believed about its panes. Anywhere else it is 0,
     ///   which draws nothing: "can't say", not "none".
