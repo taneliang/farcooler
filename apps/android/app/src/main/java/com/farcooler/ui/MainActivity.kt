@@ -11,7 +11,7 @@ import androidx.activity.viewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import com.farcooler.notify.Notifier
+import com.farcooler.notify.PushTap
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -73,22 +73,12 @@ class MainActivity : ComponentActivity() {
         intent.data?.let { uri ->
             lifecycleScope.launch { model.account.handleCallback(uri) }
         }
-        // Two spellings for one id, because two different things draw the
-        // notification. This app's own banner puts it under its own key; a push
-        // the app never saw is drawn by Firebase, which copies the message's
-        // `data` keys into the launch intent verbatim — so a tapped push
-        // arrives under the relay's spelling. Reading only the first is why
-        // tapping a notification about an agent on a sleeping phone opened the
-        // app on whatever it was showing last. See [Notifier.PUSH_EXTRA_TERMINAL].
-        val terminal = intent.getStringExtra(Notifier.EXTRA_TERMINAL)
-            ?: intent.getStringExtra(Notifier.PUSH_EXTRA_TERMINAL)
-        terminal?.let { model.openByTerminalId(it) }
-        // A decision push names its task by key, and no terminal: the same
-        // key on both paths (see [Notifier.PUSH_EXTRA_TASK]).
-        if (terminal == null && intent.getStringExtra(Notifier.PUSH_EXTRA_KIND) == Notifier.KIND_DECISION) {
-            intent.getStringExtra(Notifier.PUSH_EXTRA_TASK)?.let {
-                model.openByTaskKey(it, intent.getStringExtra(Notifier.PUSH_EXTRA_RUNNER))
-            }
+        // Which extras a tap carries, and why an empty terminal is absent, is
+        // [PushTap]'s to say.
+        when (val tap = PushTap.from { intent.getStringExtra(it) }) {
+            is PushTap.Terminal -> model.openByTerminalId(tap.id)
+            is PushTap.Task -> model.openByTaskKey(tap.key, tap.runner)
+            null -> Unit
         }
     }
 }
