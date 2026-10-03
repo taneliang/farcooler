@@ -737,6 +737,10 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         agents.sorted { ($0.rank, $0.id) < ($1.rank, $1.id) }
     }
 
+    /// How many agents' last turn failed. Latched like `blocked`: the turn is
+    /// over and stays failed until the agent works again.
+    public var failing: Int { failedTurns.count }
+
     /// The terminals whose last turn this phone knows ended badly.
     ///
     /// For the Live Activity, whose push carries a status per row and no
@@ -788,6 +792,9 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     /// stopped and waiting on a person. A diff waiting to be reviewed is not
     /// that — a blocked agent cannot continue, an unreviewed diff is merely
     /// waiting — so it gets a mark and a tint of its own and never amber.
+    /// **Red means "failed"**: a turn that ended badly (ov-125). It wants a
+    /// person too, so it is an attention color like amber, but it is not
+    /// amber — amber is still only "stopped and asking".
     ///
     /// The symbol and the words live on the case rather than in each view, and
     /// that is a deliberate departure from how `agentTitle` is handled. Three
@@ -807,6 +814,8 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     public enum Glance: Sendable, Equatable {
         /// Agents stopped, waiting on a person. Amber, and nothing else is.
         case blocked(Int)
+        /// Agents whose last turn failed. Red: the system's own error color.
+        case failed(Int)
         /// Worktrees whose diff moved since anyone last looked. Never amber.
         case review(Int)
         /// Agents getting on with it, with nothing waiting on you.
@@ -814,7 +823,7 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
 
         public var count: Int {
             switch self {
-            case let .blocked(n), let .review(n), let .working(n): n
+            case let .blocked(n), let .failed(n), let .review(n), let .working(n): n
             }
         }
 
@@ -829,6 +838,8 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         public var symbol: String {
             switch self {
             case .blocked: "exclamationmark.triangle.fill"
+            // The app's own glyph for a failed turn, `Terminal.activitySymbol`.
+            case .failed: "xmark.circle.fill"
             case .review: "plus.forwardslash.minus"
             case .working: "checkmark"
             }
@@ -843,6 +854,8 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         public var phrase: String {
             switch self {
             case let .blocked(n): "\(n) \(n == 1 ? "needs" : "need") you"
+            // The app's word, "Failed", as the Live Activity's header says it.
+            case let .failed(n): "\(n) failed"
             case let .review(n): "\(n) to review"
             case let .working(n): "\(n) working"
             }
@@ -863,6 +876,7 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         public var caption: String {
             switch self {
             case let .blocked(n): n == 1 ? "needs you" : "need you"
+            case .failed: "failed"
             case let .review(n): n == 1 ? "worktree to review" : "worktrees to review"
             case let .working(n): n == 1 ? "agent working" : "agents working"
             }
@@ -897,6 +911,10 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     public func glance(at now: Date) -> Glance? {
         let blocked = needingYou
         if blocked > 0 { return .blocked(blocked) }
+        // After needs-you and before review: a failed turn wants a person, and
+        // a surface showing one number must not show "3 to review" over it
+        // while the top agent's own mark is red (ov-125).
+        if failing > 0 { return .failed(failing) }
         if let reviews = needsReview, reviews > 0 { return .review(reviews) }
         let working = agents.filter {
             $0.status == "working" && confidence(in: $0, at: now) == .known

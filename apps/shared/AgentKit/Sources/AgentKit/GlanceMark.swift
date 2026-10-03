@@ -76,17 +76,21 @@ public struct GlanceMark: Hashable, Sendable {
         /// `FleetSnapshot.Agent` below, which produces this tier for `done`
         /// and for nothing else.
         case toReview
-        /// A turn that ended badly. Drawn exactly as `needsYou` — the heavy
-        /// amber ring — and SAID as "Failed".
+        /// A turn that ended badly. Drawn at `needsYou`'s weight in the system
+        /// RED, and SAID as "Failed".
         ///
-        /// **Amber, because it needs you.** The owner's rule for the glance
-        /// surfaces is that color is for the states that want a person, and a
-        /// build that died overnight wants one at least as much as an agent
-        /// that stopped to ask. It arrives as `done`, and drawing it with the
-        /// review ring told the lock screen, the widget and the watch that it
-        /// was a calm "have a look" (ov-125). The Mac and Android draw it red
-        /// in the app; the glance palette has no red and §01 allows it none,
-        /// so the glance surfaces give it the one hue they reserve for "you".
+        /// **Red, as the Mac draws a failed turn** (`StatusGlyph.swift`). The
+        /// owner's rule is that color is for the states that want a person, and
+        /// a build that died overnight wants one; amber stays the one meaning
+        /// "needs you", stopped and asking. Both are attention colors, so the
+        /// rule holds. It arrives as `done`, and drawing it with the review ring
+        /// told the lock screen, the widget and the watch that it was a calm
+        /// "have a look" (ov-125). Red is the system's, not a §01 figure: it is
+        /// the platform's own word for "went wrong", and §01 has none.
+        ///
+        /// Same weight as needs-you because it wants a person as much. In a
+        /// tinted or monochrome widget, where hue goes, the two marks are the
+        /// same ring and the words (where a family has them) tell them apart.
         ///
         /// Its own case rather than `needsYou` with a footnote, so that the
         /// words — VoiceOver's `phrase`, the Live Activity's badge — can say
@@ -166,7 +170,7 @@ public struct GlanceMark: Hashable, Sendable {
     /// **`status` is a String on the wire and stays one** — see
     /// `FleetSnapshot.Agent.status`, which explains that the daemon and the
     /// relay are not Swift and that a word none of them knew about must not
-    /// take the whole snapshot down. So an unrecognised status lands on the
+    /// take the whole snapshot down. So an unrecognized status lands on the
     /// quiet hairline, which is the tier that claims the least.
     ///
     /// **`turnFailed` is read here, and it was not.** A turn that died arrives
@@ -207,6 +211,7 @@ public struct GlanceMark: Hashable, Sendable {
     public init(glance: FleetSnapshot.Glance) {
         switch glance {
         case .blocked: self.init(attention: .needsYou, core: .atAPrompt)
+        case .failed: self.init(attention: .failed, core: .atAPrompt)
         case .review: self.init(attention: .toReview, core: .atAPrompt)
         case .working: self.init(attention: .quiet, core: .producing)
         }
@@ -341,24 +346,27 @@ public enum GlanceState: String, CaseIterable, Sendable {
     /// The word beside the mark, where a surface has room for one, or nil
     /// where there is nothing true to say.
     ///
-    /// "Failed" and "Finished" are the app's own words for a `done` turn —
-    /// the notification it posts says "claude failed" or "claude finished"
-    /// (`Notifications.swift`), and `Terminal.activityLabel` says "Failed".
-    /// "Needs You" in title case, as the Live Activity badge always wrote it.
+    /// **The app's own words, exactly** — `AgentActivity.label` and
+    /// `Terminal.activityLabel` in `CoreModel.swift`, which the Mac's rows say
+    /// too: "Needs you", "Failed", "Done", "Working". Sentence case, because a
+    /// status is a label and not a button. The Live Activity wrote "Needs You"
+    /// and "Finished" until ov-125, the one surface disagreeing with the app.
     public var title: String? {
         switch self {
-        case .needsYou: "Needs You"
+        case .needsYou: "Needs you"
         case .failed: "Failed"
-        case .finished: "Finished"
+        case .finished: "Done"
         case .working: "Working"
         case .unstated: nil
         }
     }
 
-    /// Which ink the WORDS take. The mark colors itself.
+    /// Which ink the WORDS take. The mark colors itself, from the same tier.
     public enum Tone: Sendable, Equatable {
-        /// Amber: a person is wanted.
-        case attention
+        /// Amber: stopped, and a person is wanted.
+        case needsYou
+        /// The system red: the turn went wrong.
+        case failed
         /// Everything else: the secondary neutral.
         case quiet
     }
@@ -367,8 +375,41 @@ public enum GlanceState: String, CaseIterable, Sendable {
     /// finished turn's word stays neutral; its ring already says "review".
     public var tone: Tone {
         switch self {
-        case .needsYou, .failed: .attention
+        case .needsYou: .needsYou
+        case .failed: .failed
         case .finished, .working, .unstated: .quiet
+        }
+    }
+
+    /// The leader of a lock screen card: its status, and how its turn ended —
+    /// the relay's word when it gave one (`AgentCardState.failed`), and the App
+    /// Group snapshot's (`known`, `FleetSnapshot.failedTurns`) when it did not.
+    public init(card: AgentCardState, known: Set<String>) {
+        self.init(
+            status: card.status, failed: card.failed ?? known.contains(card.terminal))
+    }
+
+    /// This state's mark on a card or runner nobody is vouching for now.
+    ///
+    /// Working is the claim about now, so it becomes "can't say"; needs-you,
+    /// failed and done hold, as `said(answering:)` holds them.
+    public func mark(stale: Bool) -> GlanceMark { mark.said(answering: !stale) }
+
+    /// The word beside the mark, or nil where the mark is "can't say".
+    public func title(stale: Bool) -> String? { mark(stale: stale) == .unsaid ? nil : title }
+}
+
+extension GlanceState.Tone {
+    /// The ink for the words, on a surface that is dark whatever the phone
+    /// is set to — a Live Activity on a wallpaper, the Dynamic Island.
+    ///
+    /// The same three inks `GlanceMarkView` strokes the ring in, so a word
+    /// and the mark beside it cannot come out two colors.
+    public var darkInk: Color {
+        switch self {
+        case .needsYou: GlancePalette.amber.darkColor
+        case .failed: GlancePalette.failed
+        case .quiet: GlancePalette.text2.darkColor
         }
     }
 }
@@ -623,7 +664,8 @@ public struct GlanceMarkView: View {
 
     private var ringColor: Color {
         switch mark.attention {
-        case .needsYou, .failed: GlancePalette.amber(scheme)
+        case .needsYou: GlancePalette.amber(scheme)
+        case .failed: GlancePalette.failed
         case .toReview: GlancePalette.review(scheme)
         case .quiet: GlancePalette.ink2(scheme)
         }

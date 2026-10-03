@@ -107,6 +107,11 @@ public struct AgentCardRow: Codable, Hashable, Sendable, Identifiable {
     /// trace. The row is then packed from its newest end, which is the drawing
     /// every card had before this existed.
     public var traceAnchor: Int?
+    /// How this agent's turn ended, on a `done` row whose runner said: the
+    /// relay's `failed`, migration 0018 (ov-125). Nil when the relay did not
+    /// say, and the card then asks the App Group snapshot — see
+    /// `AgentCardLayout.init(state:now:stale:failed:)`.
+    public var failed: Bool?
 
     public var id: String { terminal }
 
@@ -123,7 +128,8 @@ public struct AgentCardRow: Codable, Hashable, Sendable, Identifiable {
         startedAt: Date? = nil,
         updatedAt: Date? = nil,
         trace: Data? = nil,
-        traceAnchor: Int? = nil
+        traceAnchor: Int? = nil,
+        failed: Bool? = nil
     ) {
         self.terminal = terminal
         self.label = label
@@ -138,11 +144,12 @@ public struct AgentCardRow: Codable, Hashable, Sendable, Identifiable {
         self.updatedAt = updatedAt
         self.trace = trace
         self.traceAnchor = traceAnchor
+        self.failed = failed
     }
 
     private enum CodingKeys: String, CodingKey {
         case terminal, label, machine, workspace, status, detail
-        case insertions, deletions, commits, startedAt, updatedAt, trace, traceAnchor
+        case insertions, deletions, commits, startedAt, updatedAt, trace, traceAnchor, failed
     }
 
     public init(from decoder: Decoder) throws {
@@ -180,6 +187,7 @@ public struct AgentCardRow: Codable, Hashable, Sendable, Identifiable {
         traceAnchor = number(.traceAnchor).flatMap {
             (0...ActivityTrace.anchorLimit).contains($0) ? $0 : nil
         }
+        failed = (try? container.decodeIfPresent(Bool.self, forKey: .failed)) ?? nil
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -197,6 +205,15 @@ public struct AgentCardRow: Codable, Hashable, Sendable, Identifiable {
         try container.encodeIfPresent(AgentCardClock.number(updatedAt), forKey: .updatedAt)
         try container.encodeIfPresent(trace?.base64EncodedString(), forKey: .trace)
         try container.encodeIfPresent(traceAnchor, forKey: .traceAnchor)
+        try container.encodeIfPresent(failed, forKey: .failed)
+    }
+
+    /// Whether this row's turn failed: the relay's word when it gave one, and
+    /// the App Group snapshot's otherwise (`known`, `FleetSnapshot.failedTurns`).
+    /// Only ever true for a `done` row.
+    public func turnFailed(known: Set<String>) -> Bool {
+        guard status == "done" else { return false }
+        return failed ?? known.contains(terminal)
     }
 
     /// How long ago this row last said anything.
@@ -348,10 +365,11 @@ public struct AgentCardLayout: Sendable, Equatable {
     /// relay's own rule is that a stale date is not a dismissal date, because
     /// a card that vanished on a timer could take a blocked agent with it.
     ///
-    /// **`failed` is the terminals this phone knows ended their turn badly**
-    /// — `FleetSnapshot.failedTurns`. The push carries a status per row and no
-    /// outcome, so without it a dead agent's row is the review ring, a calm
-    /// "have a look" (ov-125). Read only for a row the push calls `done`.
+    /// **`failed` is the terminals this phone's snapshot says ended their turn
+    /// badly** — `FleetSnapshot.failedTurns` — and it is only the FALLBACK. A
+    /// relay with migration 0018 says on each `done` row how it ended, and a
+    /// row that says is believed over the file, which a push the notification
+    /// extension never saw leaves stale (ov-125). See `AgentCardRow.turnFailed`.
     public init?(
         state: AgentCardState, now: Date = Date(), stale: Bool, failed: Set<String> = []
     ) {
@@ -390,7 +408,7 @@ public struct AgentCardLayout: Sendable, Equatable {
             return Row(
                 row: row,
                 mark: GlanceMark(
-                    status: row.status, failed: failed.contains(row.terminal),
+                    status: row.status, failed: row.turnFailed(known: failed),
                     confidence: row.confidence(at: now, answering: !stale)),
                 name: Self.name(of: row),
                 // Never a blocked row's question: it can carry the command,
@@ -422,15 +440,22 @@ public struct AgentCardLayout: Sendable, Equatable {
         if needing > 0 {
             clauses.append("\(needing) need\(needing == 1 ? "s" : "") you")
         }
-        if state.review > 0 { clauses.append("\(state.review) to review") }
+        // A turn that died is not a calm "to review" (ov-125). Its own clause,
+        // after what needs you, and out of the review count it is part of on
+        // the wire. The relay's count when it sent one; the drawn rows known to
+        // have failed otherwise, which is what an older relay leaves us.
+        let failing = Self.failing(state, known: failed)
+        if failing > 0 { clauses.append("\(failing) failed") }
+        let reviews = max(0, state.review - failing)
+        if reviews > 0 { clauses.append("\(reviews) to review") }
         if state.working > 0 && !stale { clauses.append("\(state.working) in flight") }
         // A fleet with nothing in any tier still needs a title — the card is on
         // screen either way, and a blank header reads as a card that failed to
         // load. The relay's `fleetHeader` falls back to the same two words.
         title = clauses.first ?? "Your agents"
         counts = clauses.count > 1 ? clauses.dropFirst().joined(separator: " · ") : nil
-        mark = GlanceMark(status: Self.tier(state)).said(answering: !stale)
-        rings = Self.rings(state).map { $0.said(answering: !stale) }
+        mark = Self.tier(state, failing: failing).mark.said(answering: !stale)
+        rings = Self.rings(state, failing: failing).map { $0.said(answering: !stale) }
 
         var tail: [String] = []
         if hidden > 0 { tail.append("+\(hidden) more") }
@@ -605,10 +630,19 @@ public struct AgentCardLayout: Sendable, Equatable {
     ///
     /// Blocked is the header's count, `headerCount`: a decision waiting with no
     /// agent blocked is still amber, because the header says it needs you.
-    static func tier(_ state: AgentCardState) -> String {
-        if state.headerCount > 0 { return "blocked" }
-        if state.review > 0 { return "done" }
-        return "working"
+    static func tier(_ state: AgentCardState, failing: Int = 0) -> GlanceState {
+        if state.headerCount > 0 { return .needsYou }
+        if failing > 0 { return .failed }
+        if state.review > 0 { return .finished }
+        return .working
+    }
+
+    /// How many of the card's agents failed their turn: the relay's
+    /// `failedTurns`, or the drawn rows known to have failed when that is the
+    /// larger — an older relay sends no count at all.
+    static func failing(_ state: AgentCardState, known: Set<String>) -> Int {
+        let drawn = state.rows.prefix(rowsDrawn).filter { $0.turnFailed(known: known) }.count
+        return min(max(0, state.review), max(state.failedTurns, drawn))
     }
 
     /// One ring per agent, blocked first, capped at `ringsDrawn`.
@@ -622,13 +656,16 @@ public struct AgentCardLayout: Sendable, Equatable {
     /// rather than a shortcut: the core is the agent's side of the mark, the
     /// counts say nothing about any single agent, and nil is a surface DECLINING
     /// to state an axis rather than stating that the agent is at a prompt.
-    static func rings(_ state: AgentCardState) -> [GlanceMark] {
-        let tiers = [(state.blocked, "blocked"), (state.review, "done"), (state.working, "working")]
+    static func rings(_ state: AgentCardState, failing: Int = 0) -> [GlanceMark] {
+        let tiers: [(Int, GlanceState)] = [
+            (state.blocked, .needsYou), (failing, .failed),
+            (state.review - failing, .finished), (state.working, .working),
+        ]
         var marks: [GlanceMark] = []
-        for (count, status) in tiers where count > 0 {
+        for (count, tier) in tiers where count > 0 {
             for _ in 0..<count {
                 guard marks.count < Self.ringsDrawn else { return marks }
-                marks.append(GlanceMark(status: status).withoutCore)
+                marks.append(tier.mark.withoutCore)
             }
         }
         return marks

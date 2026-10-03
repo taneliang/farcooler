@@ -179,8 +179,24 @@ public struct AgentCardState: Codable, Hashable, Sendable {
     /// with no reader is still the mistake this type has been burned by once
     /// already, see the note on `detail` — it has been satisfied.
     public var blocked: Int
+    /// Every agent whose turn is over, FAILED OR NOT: the relay keeps it
+    /// inclusive so an app too old to know `failedTurns` still counts a failed
+    /// one somewhere. The card subtracts.
     public var review: Int
     public var working: Int
+
+    /// The agents among `review` whose turn failed (ov-125). Drawn as its own
+    /// clause, "1 failed", and out of "to review".
+    ///
+    /// Zero when absent, which the relay sends for none and an older relay
+    /// sends always. `AgentCardLayout` takes the larger of this and the drawn
+    /// rows it knows failed, so an older relay still gets the rows it can see.
+    public var failedTurns: Int
+
+    /// How the HEADLINE's turn ended, on a `done` headline whose runner said;
+    /// nil when the relay did not say, which the card answers from the App
+    /// Group snapshot. See `GlanceState(card:failedTurns:)`.
+    public var failed: Bool?
 
     /// Agents the card has no line for, as the RELAY counts them: the fleet
     /// minus the rows it sent.
@@ -304,7 +320,9 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         needsYou: Int = -1,
         rows: [AgentCardRow] = [],
         ask: CardAsk? = nil,
-        quiet: [String] = []
+        quiet: [String] = [],
+        failedTurns: Int = 0,
+        failed: Bool? = nil
     ) {
         self.terminal = terminal
         self.label = label
@@ -324,12 +342,14 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         self.rows = rows
         self.ask = ask
         self.quiet = quiet
+        self.failedTurns = failedTurns
+        self.failed = failed
     }
 
     private enum CodingKeys: String, CodingKey {
         case terminal, label, machine, workspace, status, detail, startedAt
         case blocked, review, working, insertions, deletions, commits
-        case more, needsYou, rows, ask, quiet
+        case more, needsYou, rows, ask, quiet, failedTurns, failed
     }
 
     /// Hand-written for two reasons, and neither is the timestamp alone.
@@ -404,6 +424,9 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         ask = (try? container.decodeIfPresent(CardAsk.self, forKey: .ask)) ?? nil
         // Names of the wrong shape cost the names, never the card.
         quiet = ((try? container.decodeIfPresent([String].self, forKey: .quiet)) ?? nil) ?? []
+        // A count of the wrong shape is no count, never a card that throws.
+        failedTurns = max(0, ((try? container.decodeIfPresent(Int.self, forKey: .failedTurns)) ?? nil) ?? 0)
+        failed = (try? container.decodeIfPresent(Bool.self, forKey: .failed)) ?? nil
     }
 
     /// The other half of the same decision, and it is not decorative
@@ -447,6 +470,9 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         try container.encodeIfPresent(ask, forKey: .ask)
         // Only when there are any, like `rows`: none reads back as none.
         if !quiet.isEmpty { try container.encode(quiet, forKey: .quiet) }
+        // On the relay's terms: absent for none, and absent for "not told".
+        if failedTurns > 0 { try container.encode(failedTurns, forKey: .failedTurns) }
+        try container.encodeIfPresent(failed, forKey: .failed)
     }
 }
 

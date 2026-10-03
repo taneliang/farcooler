@@ -177,6 +177,16 @@ public enum GlancePalette {
     public static let review = GlanceInk(
         dark: OKLCH(0.76, 0.055, 235), light: OKLCH(0.5, 0.06, 235))
 
+    /// A turn that failed: the SYSTEM red, as the Mac draws one
+    /// (`StatusGlyph.swift`), and not a §01 figure (ov-125).
+    ///
+    /// §01 has no red because it was written for one question, "does this need
+    /// me", and amber answers it. A failed turn needs you too, but for a
+    /// different reason, and the platform already has a color that means "went
+    /// wrong" and adapts itself to light, dark and increased contrast. Amber
+    /// stays the only thing meaning "stopped and asking".
+    public static let failed = Color.red
+
     // MARK: - The activity trace's four tones
     //
     // Kept here in full although nothing draws a trace yet — the data for it
@@ -424,6 +434,7 @@ public enum GlancePalette {
     {
         switch glance {
         case .blocked: AnyShapeStyle(amber(scheme))
+        case .failed: AnyShapeStyle(failed)
         case .review: AnyShapeStyle(review(scheme))
         case .working: AnyShapeStyle(HierarchicalShapeStyle.tertiary)
         }

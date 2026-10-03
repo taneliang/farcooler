@@ -487,9 +487,11 @@ struct FleetWidgetView: View {
                     .opacity(confidence == .lastSeen ? 0.6 : 1)
                 if layout.statesBothCounts {
                     if blocked > 0 { GlanceLabel(glance: .blocked(blocked)) }
+                    // A failed turn is its own count, never folded into review (ov-125).
+                    if entry.snapshot.failing > 0 { GlanceLabel(glance: .failed(entry.snapshot.failing)) }
                     if reviews > 0 { GlanceLabel(glance: .review(reviews)) }
                 }
-                if blocked == 0, reviews == 0, let top, !top.line.isEmpty,
+                if blocked == 0, entry.snapshot.failing == 0, reviews == 0, let top, !top.line.isEmpty,
                     top.line != agentTitle(top)
                 {
                     // What the agent is actually doing, which is worth the line
@@ -536,6 +538,10 @@ struct FleetWidgetView: View {
         var parts: [String] = []
         if entry.snapshot.needingYou > 0 {
             parts.append(FleetSnapshot.Glance.blocked(entry.snapshot.needingYou).phrase)
+        }
+        // A failed turn is its own count, after what needs you (ov-125).
+        if entry.snapshot.failing > 0 {
+            parts.append(FleetSnapshot.Glance.failed(entry.snapshot.failing).phrase)
         }
         // `?? 0` here and not in the snapshot: nil means this build was never
         // told about reviews, and saying nothing is what "not told" should
@@ -651,9 +657,11 @@ private struct RowsFleet: View {
             // narrow accessory keeps — show BOTH, never collapse them into one
             // number — is the same one, since "2 need you" and "3 to review"
             // are different work in different places.
-            if statesBothCounts, blocked > 0 || reviews > 0 {
+            if statesBothCounts, blocked > 0 || entry.snapshot.failing > 0 || reviews > 0 {
                 HStack(spacing: 10) {
                     if blocked > 0 { GlanceLabel(glance: .blocked(blocked)) }
+                    // A failed turn is its own count, never folded into review (ov-125).
+                    if entry.snapshot.failing > 0 { GlanceLabel(glance: .failed(entry.snapshot.failing)) }
                     if reviews > 0 { GlanceLabel(glance: .review(reviews)) }
                     Spacer(minLength: 0)
                 }

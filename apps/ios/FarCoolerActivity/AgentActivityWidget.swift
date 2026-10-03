@@ -65,14 +65,14 @@ struct AgentActivityWidget: Widget {
             // to a runner that stopped beating (ov-71): either way nothing on
             // it vouches for "Working" now. See `AgentCardState.unvouched`.
             let stale = context.state.unvouched(stale: context.isStale)
-            // Which of the card's agents ended their last turn badly. The push
-            // says `done` for a turn that died exactly as for one that worked,
-            // and carries no outcome; the notification that came with it did,
-            // and the notification service wrote it to the App Group snapshot.
-            // So this card reads that file on every render now — one small
-            // JSON, as `FleetWidget` reads on every timeline — because a dead
-            // build drawn as a calm review ring is worse than a file read
-            // (ov-125). See `FleetSnapshot.failedTurns`.
+            // Which of the card's agents ended their last turn badly, for a
+            // card whose relay did not say. A relay with migration 0018 puts
+            // `failed` on every `done` row and headline, and those are
+            // believed; an older one sends `done` for a turn that died exactly
+            // as for one that worked, and then the App Group snapshot — which
+            // the app's poll and the notification service write — is the only
+            // word there is (ov-125). One small JSON, as `FleetWidget` reads on
+            // every timeline. See `AgentCardRow.turnFailed`.
             let snapshot = SnapshotStore.read()
             let failed = snapshot?.failedTurns ?? []
             // Which of the two cards this is. See `LockScreenCard`, which is
@@ -105,9 +105,7 @@ struct AgentActivityWidget: Widget {
                         for: context.state, snapshot: snapshot, stale: stale),
                 ask: ask,
                 layout: layout,
-                leader: GlanceState(
-                    status: context.state.status,
-                    failed: failed.contains(context.state.terminal)),
+                leader: GlanceState(card: context.state, known: failed),
                 stale: stale)
                 // The card's own background. Left to the system's material
                 // rather than a color of ours: the lock screen wallpaper is
@@ -141,9 +139,7 @@ struct AgentActivityWidget: Widget {
             // See the lock screen's `stale` and `failed` above.
             let stale = context.state.unvouched(stale: context.isStale)
             let snapshot = SnapshotStore.read()
-            let leader = GlanceState(
-                status: context.state.status,
-                failed: snapshot?.failedTurns.contains(context.state.terminal) ?? false)
+            let leader = GlanceState(card: context.state, known: snapshot?.failedTurns ?? [])
             let tail =
                 ask.isPresent
                 ? FleetTail.unknown
@@ -273,7 +269,7 @@ struct AgentActivityWidget: Widget {
                             ? "\(context.state.label) +\(tail.others)" : context.state.label
                     )
                     .font(.caption2)
-                    .foregroundStyle(leader.tint)
+                    .foregroundStyle(leader.tone.darkInk)
                     // On a stale card with a count beside the name, the count
                     // is who the relay last knew about. See
                     // `FleetTail.dimsCompactCount`.
@@ -764,37 +760,6 @@ private struct StatusBadge: View {
                 Text(title)
                     .glanceType(.monoFigures)
             }
-        }
-    }
-}
-
-extension GlanceState {
-    /// This state's mark on a card the relay has stopped vouching for.
-    ///
-    /// ActivityKit's `isStale`: an hour since the last push, which is what a
-    /// runner that stays down looks like from here. Working is the claim about
-    /// now, so it becomes "can't say", the dashed ring with no core that
-    /// `AgentCardLayout` draws for the same card; needs-you, failed and
-    /// finished hold, as `said(answering:)` holds them.
-    ///
-    /// The mark itself is `GlanceState.mark`, the table the card's rows, the
-    /// widgets and the watch read. This file drew its own until ov-125, and
-    /// drew `done` as the quiet hairline beside rows drawing the review ring.
-    func mark(stale: Bool) -> GlanceMark { mark.said(answering: !stale) }
-
-    /// The word beside the mark, or nil where the mark is "can't say".
-    func title(stale: Bool) -> String? { mark(stale: stale) == .unsaid ? nil : title }
-
-    /// The color for the WORDS beside the mark. The mark colors itself.
-    ///
-    /// `darkColor` and not the scheme-resolved value: the Dynamic Island is a
-    /// black pill whatever the phone's appearance is set to, and the lock
-    /// screen card sits over a wallpaper on the same dark ground. §01's light
-    /// values are for a pale backdrop, which is not what either of these is.
-    var tint: Color {
-        switch tone {
-        case .attention: GlancePalette.amber.darkColor
-        case .quiet: GlancePalette.text2.darkColor
         }
     }
 }

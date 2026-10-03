@@ -411,6 +411,10 @@ struct WatchFleetView: View {
         if entry.snapshot.needingYou > 0 {
             parts.append(FleetSnapshot.Glance.blocked(entry.snapshot.needingYou).phrase)
         }
+        // A failed turn is its own count, after what needs you (ov-125).
+        if entry.snapshot.failing > 0 {
+            parts.append(FleetSnapshot.Glance.failed(entry.snapshot.failing).phrase)
+        }
         // `?? 0` deliberately absent: nil is "this build was never told about
         // reviews", and saying nothing is what that should draw. "0 to review"
         // would assert something no host said.
@@ -529,8 +533,10 @@ private struct Rectangular: View {
             // work in different places, and one number standing for both would
             // send somebody to the wrong screen.
             if blocked > 0 { GlanceLabel(glance: .blocked(blocked)) }
+            // A failed turn is its own count, never folded into review (ov-125).
+            if entry.snapshot.failing > 0 { GlanceLabel(glance: .failed(entry.snapshot.failing)) }
             if reviews > 0 { GlanceLabel(glance: .review(reviews)) }
-            if blocked == 0, reviews == 0, !entry.quiet.isEmpty,
+            if blocked == 0, entry.snapshot.failing == 0, reviews == 0, !entry.quiet.isEmpty,
                 let hedge = entry.snapshot.hedge(quiet: entry.quiet)
             {
                 // A runner the relay says stopped beating (ov-71), in ov-50's
@@ -541,7 +547,7 @@ private struct Rectangular: View {
                 Text(hedge.standalone)
                     .font(.caption)
                     .lineLimit(1)
-            } else if blocked == 0, reviews == 0, let top, !top.line.isEmpty,
+            } else if blocked == 0, entry.snapshot.failing == 0, reviews == 0, let top, !top.line.isEmpty,
                 top.line != agentTitle(top)
             {
                 // The host's signal line — "3/7 · Designing test matrix · 2
