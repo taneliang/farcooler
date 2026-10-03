@@ -230,9 +230,14 @@ struct GhCheck {
 ///
 /// gh finds the repository by running git there (`remote -v`, `config`,
 /// `rev-parse`), so a planted config would reach those gits the same way.
+///
+/// By absolute path, for the reason `git` is (`crate::git::absolute_git`): a
+/// bare name is looked up after the child has moved into the worktree. No gh
+/// is the same as a gh that failed.
 async fn gh(worktree: &Path) -> Result<tokio::process::Command> {
     let pins = crate::git::guard_pins(worktree).await?;
-    let mut gh = tokio::process::Command::new("gh");
+    let path = farcooler_core::programs::find("gh").ok_or(farcooler_core::DomainError::OperationFailed)?;
+    let mut gh = tokio::process::Command::new(path);
     crate::git_guard::apply(gh.as_std_mut(), &pins);
     Ok(gh)
 }

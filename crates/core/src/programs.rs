@@ -450,8 +450,15 @@ fn kill_group(child: &std::process::Child) {
 /// Split out from `resolve` so it can be tested against a temp directory: the
 /// real search reads process-global environment and the real prefixes are not
 /// something a test can create.
+///
+/// Absolute directories only. A relative one (`.`, or the empty entry a
+/// stray `:` leaves in `PATH`) names a different place for every working
+/// directory, and the daemon starts programs in worktrees an agent writes:
+/// with `PATH=.:/usr/bin`, a `git` planted in the worktree ran in place of
+/// `/usr/bin/git`.
 fn find_in(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
     dirs.iter()
+        .filter(|dir| dir.is_absolute())
         .map(|dir| dir.join(name))
         .find(|candidate| is_executable(candidate))
 }
@@ -530,6 +537,22 @@ mod tests {
         let dir = scratch("not-executable");
         std::fs::write(dir.join("tmux"), "not a program").unwrap();
         assert_eq!(find_in("tmux", &[dir]), None);
+    }
+
+    #[test]
+    fn a_relative_directory_is_never_searched() {
+        // The same directory spelled relative to the working directory, which
+        // is what `.` in `PATH` is: it finds the planted program only by
+        // depending on where the search ran.
+        let dir = scratch("relative");
+        executable(&dir, "thing");
+        let here = std::env::current_dir().unwrap();
+        let up: PathBuf = here.components().skip(1).map(|_| "..").collect();
+        let relative = up.join(dir.strip_prefix("/").unwrap());
+        assert!(relative.is_relative() && relative.join("thing").exists(), "{relative:?} names the program");
+
+        assert_eq!(find_in("thing", &[relative]), None);
+        assert_eq!(find_in("thing", &[PathBuf::new()]), None, "the empty entry is the working directory too");
     }
 
     #[test]

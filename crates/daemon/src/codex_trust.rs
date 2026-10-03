@@ -265,7 +265,7 @@ pub async fn trust_for_worktree(root: &Path, worktree: &Path) {
 /// so no hook or filter is ever looked up, and a second git to list them
 /// would cost this blocking step a process for nothing.
 pub fn main_checkout(worktree: &Path) -> Option<PathBuf> {
-    let mut git = std::process::Command::new("git");
+    let mut git = std::process::Command::new(crate::git::absolute_git().ok()?);
     crate::git_guard::apply(&mut git, &crate::git_guard::fixed());
     let mut child = git
         .arg("-C")
