@@ -663,7 +663,7 @@ pub(crate) fn resolve_workspace<'a>(
     if let Some(w) = workspaces.iter().find(|w| w.task_prefix.to_lowercase() == needle) {
         return Ok(w);
     }
-    resolve(workspaces, given, |w| &w.id, "workspace")
+    resolve(workspaces, given, |w| &w.id, "workspace").map_err(String::from)
 }
 
 fn repository_name(repositories: &[pb::Repository], id: &[u8]) -> String {

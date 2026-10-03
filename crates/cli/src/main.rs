@@ -942,6 +942,8 @@ fn error_code_lines(error: &(dyn std::error::Error + 'static), json: bool) -> Ve
         error.downcast_ref::<farcooler_transport::ClientError>()
     {
         (Some(farcooler_core::error::word_for(*code)), Some(what.clone()).filter(|w| !w.is_empty()))
+    } else if let Some(Unresolved::Missing(_)) = error.downcast_ref::<Unresolved>() {
+        (Some(farcooler_core::error::word(farcooler_protocol::v1::ErrorCode::NotFound)), None)
     } else {
         return Vec::new();
     };
@@ -2523,7 +2525,7 @@ async fn layout(runner: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
 
     let terminals = list_terminals(&mut link, Some(worktree_id)).await?;
     let pick = |given: &str| -> Result<bytes::Bytes, String> {
-        resolve(&terminals, given, |t| &t.id, "terminal").map(|t| t.id.clone())
+        resolve(&terminals, given, |t| &t.id, "terminal").map(|t| t.id.clone()).map_err(String::from)
     };
 
     let method = match &cmd {
@@ -4039,7 +4041,7 @@ pub(crate) fn resolve_repository<'a>(
         }
         _ => {}
     }
-    resolve(repositories, given, |r| &r.id, "repository")
+    resolve(repositories, given, |r| &r.id, "repository").map_err(String::from)
 }
 
 /// A worktree by id prefix or by task name.
@@ -4061,7 +4063,38 @@ pub(crate) fn find_worktree<'a>(worktrees: &'a [Worktree], needle: &str) -> Resu
     if let [one] = by_name.as_slice() {
         return Ok(one);
     }
-    resolve(worktrees, needle, |w| &w.id, "worktree")
+    resolve(worktrees, needle, |w| &w.id, "worktree").map_err(String::from)
+}
+
+/// Why `resolve` found no one item.
+///
+/// Typed rather than a `String` so a miss carries `code: not-found` under
+/// `--json` (`error_code_lines`), as the daemon's own not-found does. A
+/// miss here is the same fact found one step earlier: the Mac's Close
+/// removes a terminal a reap may already have removed, and only the word
+/// tells it the record is gone rather than the runner unreachable.
+#[derive(Debug)]
+pub(crate) enum Unresolved {
+    /// Nothing matched.
+    Missing(String),
+    /// More than one did.
+    Ambiguous(String),
+}
+
+impl std::fmt::Display for Unresolved {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Unresolved::Missing(said) | Unresolved::Ambiguous(said) => f.write_str(said),
+        }
+    }
+}
+
+impl std::error::Error for Unresolved {}
+
+impl From<Unresolved> for String {
+    fn from(e: Unresolved) -> String {
+        e.to_string()
+    }
 }
 
 /// Resolve a short id suffix, refusing an ambiguous match rather than guessing.
@@ -4070,7 +4103,7 @@ pub(crate) fn resolve<'a, T>(
     prefix: &str,
     id_of: impl Fn(&T) -> &[u8],
     kind: &str,
-) -> Result<&'a T, String> {
+) -> Result<&'a T, Unresolved> {
     let needle = normalize_id(prefix);
     let matches: Vec<&T> = items
         .iter()
@@ -4079,8 +4112,8 @@ pub(crate) fn resolve<'a, T>(
 
     match matches.len() {
         1 => Ok(matches[0]),
-        0 => Err(format!("no {kind} matching {prefix:?}")),
-        n => Err(format!("{prefix:?} matches {n} {kind}s, be more specific")),
+        0 => Err(Unresolved::Missing(format!("no {kind} matching {prefix:?}"))),
+        n => Err(Unresolved::Ambiguous(format!("{prefix:?} matches {n} {kind}s, be more specific"))),
     }
 }
 
@@ -4146,6 +4179,28 @@ mod tests {
         assert!(error_code_lines(refused.as_ref(), false).is_empty(), "a person has the sentence");
         let other: Box<dyn std::error::Error> = "no such worktree".into();
         assert!(error_code_lines(other.as_ref(), true).is_empty());
+    }
+
+    /// A terminal the CLI can't find among the records is not found, said
+    /// as the daemon says it: the Mac's Close tells a record already reaped
+    /// from a runner it couldn't reach by this word alone. An ambiguous
+    /// prefix is the caller's to fix and carries no word.
+    #[test]
+    fn a_resolve_miss_carries_not_found_under_json() {
+        let terminals = vec![farcooler_protocol::v1::Terminal {
+            id: bytes::Bytes::copy_from_slice(Uuid::from_u128(0xabc).as_bytes()),
+            ..Default::default()
+        }];
+        let missing = resolve(&terminals, "def", |t| &t.id, "terminal").map(|_| ()).unwrap_err();
+        assert_eq!(missing.to_string(), "no terminal matching \"def\"", "the sentence is unchanged");
+        let boxed: Box<dyn std::error::Error> = Box::new(missing);
+        assert_eq!(error_code_lines(boxed.as_ref(), true), ["code: not-found"]);
+        assert!(error_code_lines(boxed.as_ref(), false).is_empty());
+
+        let twice = vec![terminals[0].clone(), terminals[0].clone()];
+        let ambiguous: Box<dyn std::error::Error> =
+            Box::new(resolve(&twice, "abc", |t| &t.id, "terminal").map(|_| ()).unwrap_err());
+        assert!(error_code_lines(ambiguous.as_ref(), true).is_empty());
     }
 
     /// A runner that answers every call with `answer`, and records them.
