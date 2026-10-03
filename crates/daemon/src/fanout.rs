@@ -167,14 +167,17 @@ pub async fn serve(install: &str, pane_id: &str, tty: Option<&str>) -> std::io::
 ///
 /// But which tty is the pane's can change under a running fanout, and that is
 /// asked of tmux. `respawn-pane -k` — a pane switching between its terminal
-/// and its chat — gives the pane a new pty and keeps the pipe, so the path
-/// tmux expanded when the pipe started goes stale: closed, or reused by the
-/// next terminal anyone opens, whose size would then be announced as this
-/// pane's. So a size is trusted without asking only when it is the size
-/// already announced. A different size, or a tty that cannot be read, is
-/// checked against tmux's `#{pane_tty}` for this pane first, and the fanout
-/// follows the pane to its new tty; if tmux cannot say, nothing is announced,
-/// and a client falls back to its layout replies.
+/// and its chat — gives the pane a new pty and keeps the pipe. The new pty may
+/// have a new path or, as often, the same one, so a path says nothing about
+/// whether the pane was respawned. And a path left behind may already be the
+/// next terminal anyone opened: a different size there would be announced as
+/// this pane's, and the same size would hide every resize after it. What a
+/// respawn always changes is the pane's process. So a size is
+/// trusted without asking only when it is the size already announced and the
+/// process tmux last named for the pane is still alive, which is one syscall.
+/// Otherwise tmux is asked for the pane's `#{pane_tty}` and `#{pane_pid}`
+/// first, and the fanout follows the pane; if tmux cannot say, nothing is
+/// announced, and a client falls back to its layout replies.
 pub struct PaneSize {
     source: SizeSource,
 }
@@ -182,8 +185,9 @@ pub struct PaneSize {
 enum SizeSource {
     /// A test's.
     Probe(Box<dyn Fn() -> Option<(u16, u16)> + Send + Sync>),
-    /// A real pane: its tty as last confirmed, and how to ask tmux for it.
-    Pane { tty: PathBuf, socket: String, pane: String },
+    /// A real pane: its tty as last confirmed, the process tmux named with it
+    /// (not yet asked: `None`), and how to ask tmux for both.
+    Pane { tty: PathBuf, pid: Option<rustix::process::Pid>, socket: String, pane: String },
 }
 
 impl PaneSize {
@@ -195,25 +199,30 @@ impl PaneSize {
     /// `socket`, whose tty was `tty` when the pipe started.
     pub fn of_pane(tty: PathBuf, socket: &str, pane_id: &str) -> Self {
         let pane = format!("%{}", pane_id.trim_start_matches('%'));
-        Self { source: SizeSource::Pane { tty, socket: socket.to_string(), pane } }
+        Self { source: SizeSource::Pane { tty, pid: None, socket: socket.to_string(), pane } }
     }
 
     /// The pane's size if it can be trusted, given the size last announced.
     async fn read(&mut self, last: Option<(u16, u16)>) -> Option<(u16, u16)> {
-        let (tty, socket, pane) = match &mut self.source {
+        let (tty, pid, socket, pane) = match &mut self.source {
             SizeSource::Probe(probe) => return probe(),
-            SizeSource::Pane { tty, socket, pane } => (tty, socket, pane),
+            SizeSource::Pane { tty, pid, socket, pane } => (tty, pid, socket, pane),
         };
         let seen = tty_size(tty);
-        if seen.is_some() && seen == last {
+        if seen.is_some() && seen == last && pid.is_some_and(alive) {
             return seen;
         }
-        // Changed, or unreadable: is this still the pane's tty?
-        let owner = pane_tty(socket, pane).await?;
-        if owner != *tty {
+        // Changed, unreadable, or respawned: which tty is the pane's now?
+        let Some((owner, now)) = pane_tty(socket, pane).await else {
+            // Asked again next time, rather than trusting a pane that may be gone.
+            *pid = None;
+            return None;
+        };
+        if *pid != Some(now) || owner != *tty {
             let (from, to) = (tty.display(), owner.display());
-            tracing::debug!(pane = %pane, %from, %to, "the pane has a new tty");
+            tracing::debug!(pane = %pane, %from, %to, pid = now.as_raw_nonzero(), "the pane has a new program");
             *tty = owner;
+            *pid = Some(now);
         }
         tty_size(tty)
     }
@@ -235,20 +244,29 @@ fn tty_size(path: &std::path::Path) -> Option<(u16, u16)> {
     (size.ws_col > 0 && size.ws_row > 0).then_some((size.ws_col, size.ws_row))
 }
 
-/// Which tty tmux says `pane` has now. One tmux process, so only asked when a
-/// size changes or cannot be read — a resize, not a read.
-async fn pane_tty(socket: &str, pane: &str) -> Option<PathBuf> {
+/// Whether process `pid` is still ours to signal. A respawned pane's old
+/// program is gone, whatever tty its replacement was given; a pid that is
+/// someone else's now means the same.
+fn alive(pid: rustix::process::Pid) -> bool {
+    rustix::process::test_kill_process(pid).is_ok()
+}
+
+/// Which tty and process tmux says `pane` has now. One tmux process, so only
+/// asked when a size changes or cannot be read, or the pane's program has
+/// gone — a resize or a respawn, not a read.
+async fn pane_tty(socket: &str, pane: &str) -> Option<(PathBuf, rustix::process::Pid)> {
     let tmux = farcooler_tmux::server::find_tmux().await?;
     let output = tokio::process::Command::new(tmux)
-        .args(["-L", socket, "display-message", "-p", "-t", pane, "#{pane_tty}"])
+        .args(["-L", socket, "display-message", "-p", "-t", pane, "#{pane_tty} #{pane_pid}"])
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
         .output();
     let output = tokio::time::timeout(std::time::Duration::from_secs(1), output).await.ok()?.ok()?;
-    let tty = String::from_utf8(output.stdout).ok()?;
-    let tty = tty.trim();
-    (output.status.success() && !tty.is_empty()).then(|| PathBuf::from(tty))
+    let text = String::from_utf8(output.stdout).ok()?;
+    let (tty, pid) = text.trim().rsplit_once(' ')?;
+    let pid = rustix::process::Pid::from_raw(pid.parse().ok()?)?;
+    (output.status.success() && !tty.is_empty()).then(|| (PathBuf::from(tty), pid))
 }
 
 /// `farcooler_vt::size_marker`, written out rather than called.
