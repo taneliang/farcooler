@@ -83,7 +83,12 @@ class FirstRunTest {
     /** Sentence case: after a sentence's first word, a capital only in a proper name. */
     @Test
     fun `every string is in sentence case`() {
-        val proper = setOf("Far", "Cooler", "Claude", "Code", "Codex", "Cursor", "CLI", "Mac", "Linux", "Main")
+        // Product and proper names, including ones no string uses yet, so a
+        // sentence that adds one later doesn't trip the check.
+        val proper = setOf(
+            "Far", "Cooler", "Claude", "Code", "Codex", "Cursor", "CLI", "Mac", "Linux", "Main", "Git", "GitHub",
+            "Homebrew", "SSH", "iPhone", "Android", "Terminal",
+        )
         for (string in FirstRunCopy.all) {
             // A Mac menu path is quoted in the Mac's own casing.
             val ours = string.replace("File > Add Repository", "")
