@@ -107,7 +107,7 @@ final class FleetStore: ObservableObject {
                 Task { @MainActor in await self?.seed(target) }
             }
             clientObservers[target] = client.objectWillChange.sink { [weak self] _ in
-                Task { @MainActor in self?.remerge() }
+                Task { @MainActor in self?.scheduleRemerge() }
             }
             bringUpTasks[target] = Task { @MainActor [weak self] in
                 // A daemon going away is also the moment another build could
@@ -252,6 +252,29 @@ final class FleetStore: ObservableObject {
     /// See `Reading`.
     @Published private(set) var reading: Reading = .connecting
 
+    /// One re-merge for however many client changes arrive together.
+    ///
+    /// A client fires `objectWillChange` once per `@Published` write, and one
+    /// daemon event used to be thirteen of them, each re-merging every runner
+    /// and republishing the whole window (ov-229). The writes of one turn now
+    /// share one pass, which runs after they have all landed.
+    ///
+    /// The pass still says the store changed even when the merged fleet did
+    /// not, because views read client state through this store — a layout, a
+    /// changes row, a needs-you count — and this forwarding is how they hear
+    /// about it. What no longer happens is saying it thirteen times.
+    private func scheduleRemerge() {
+        guard !remergeScheduled else { return }
+        remergeScheduled = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.remergeScheduled = false
+            self.remerge(forwarding: true)
+        }
+    }
+
+    private var remergeScheduled = false
+
     /// One list from N.
     ///
     /// An unreachable runner still contributes its last good rows — that is
@@ -266,10 +289,16 @@ final class FleetStore: ObservableObject {
     /// that, a single lost runner with a stale `runtimeHealthy == true` could
     /// keep the whole bar reading well while the only runner actually
     /// answering has no tmux at all.
-    private func remerge() {
+    private func remerge(forwarding: Bool = false) {
         let merged = Self.merge(
             hosts.compactMap { host in clients[host].map { (host, $0.state, $0.fleet) } })
-        fleet = merged.fleet
+        // Assigned only when it changed: `@Published` fires on every
+        // assignment, and this property is what the root view observes.
+        if fleet != merged.fleet {
+            fleet = merged.fleet
+        } else if forwarding {
+            objectWillChange.send()
+        }
         if reading != merged.reading { reading = merged.reading }
         let items = NeedsYou.merge(
             Dictionary(clients.map { ($0.key, $0.value.needsYouItems) }, uniquingKeysWith: { a, _ in a }))

@@ -484,7 +484,7 @@ final class DaemonClient: ObservableObject {
             onLayout: { [weak self] event in
                 Task { @MainActor in
                     guard let self, self.streamGeneration == generation else { return }
-                    self.layouts[event.worktree] = event.groups
+                    if self.layouts[event.worktree] != event.groups { self.layouts[event.worktree] = event.groups }
                 }
             },
             onFleet: { [weak self] in
@@ -641,8 +641,16 @@ final class DaemonClient: ObservableObject {
                 let t = fleet.worktrees[w].terminals.firstIndex(where: { $0.id == event.id })
             else { continue }
 
-            fleet.worktrees[w].terminals[t].state = event.state
-            fleet.worktrees[w].terminals[t].activity = event.activity
+            // Built on a copy and written back once, and only when it differs.
+            //
+            // `fleet` is `@Published`, which fires on every assignment whatever
+            // the value, and `FleetStore` re-merges and republishes the whole
+            // window on each one. Thirteen field writes in place were thirteen
+            // whole-window updates per event, and an event that changed nothing
+            // still cost all of them (ov-229).
+            var updated = fleet.worktrees[w].terminals[t]
+            updated.state = event.state
+            updated.activity = event.activity
             // What is RUNNING, which is also what the terminal is CALLED.
             //
             // This was missed, and the omission was invisible until the name
@@ -651,7 +659,7 @@ final class DaemonClient: ObservableObject {
             // out of that event and dropped the command — so a shell you had just
             // run `node` in stayed labeled `shell` until something forced a full
             // re-read. The whole point of pushing events is not needing one.
-            fleet.worktrees[w].terminals[t].preset = event.preset
+            updated.preset = event.preset
             // What can be switched to a chat, which is also what `⌃B a`
             // checks before it will even try.
             //
@@ -663,25 +671,25 @@ final class DaemonClient: ObservableObject {
             // dropped this field — so `canSwitchPaneMode` stayed false
             // forever, since this app is push-only and never re-fetches a
             // terminal it already knows.
-            fleet.worktrees[w].terminals[t].chatCapable = event.chatCapable
+            updated.chatCapable = event.chatCapable
             // Same reason as `chatCapable` above, one field later: without
             // this, a terminal pushed into `exited` here reads as a clean
             // exit — `Status` sees a `nil` exit code, which is deliberately
             // never a failure — until some later full refresh happens to
             // backfill it. A failed build must not wait on that to be seen.
-            fleet.worktrees[w].terminals[t].exitCode = event.exitCode
-            fleet.worktrees[w].terminals[t].exitSignal = event.exitSignal
+            updated.exitCode = event.exitCode
+            updated.exitSignal = event.exitSignal
             // The daemon has always sent this; it was never applied here,
             // which is the same omission a third time — a live-pushed
             // Working or Blocked row kept showing whatever `statusDuration`
             // last got from a full refresh instead of what just changed.
-            fleet.worktrees[w].terminals[t].activitySince = event.activitySince
+            updated.activitySince = event.activitySince
             // Same reason as `exitCode` above, one tick later: the moment a
             // row goes Blocked over this event is exactly the moment it
             // needs the turn clock and the question to be current, not
             // whatever a later refresh happens to backfill.
-            fleet.worktrees[w].terminals[t].turnStartedAt = event.turnStartedAt
-            fleet.worktrees[w].terminals[t].blockedQuestion = event.blockedQuestion
+            updated.turnStartedAt = event.turnStartedAt
+            updated.blockedQuestion = event.blockedQuestion
             // The fields whose whole job is "what is it doing RIGHT NOW".
             // Applied from the push rather than waited on, because a row that
             // only arrived with a full refresh would always be describing the
@@ -689,14 +697,16 @@ final class DaemonClient: ObservableObject {
             // sending them. `line` is the one that moves most often of all: a
             // task completing takes `3/7` to `4/7` while nothing else about
             // the pane changes.
-            fleet.worktrees[w].terminals[t].feed = event.feed
-            fleet.worktrees[w].terminals[t].line = event.line
-            fleet.worktrees[w].terminals[t].subagents = event.subagents
+            updated.feed = event.feed
+            updated.line = event.line
+            updated.subagents = event.subagents
             // And the field with the most expensive omission: without this a
             // row whose agent just died kept a clean `Done` tick until
             // something else happened in that pane, which for a dead agent is
             // never.
-            fleet.worktrees[w].terminals[t].turnFailed = event.turnFailed
+            updated.turnFailed = event.turnFailed
+
+            if updated != fleet.worktrees[w].terminals[t] { fleet.worktrees[w].terminals[t] = updated }
 
             let terminal = fleet.worktrees[w].terminals[t]
             Notifier.shared.report(
@@ -803,21 +813,25 @@ final class DaemonClient: ObservableObject {
             // Filed under this runner, because the list doesn't say whose it
             // is — see `Fleet.runnerWorkspaces`.
             if let workspaces = read.workspaces { read.runnerWorkspaces[target] = workspaces }
-            fleet = read
-            hasLoaded = true
+            // Each of these only when it changed: `@Published` fires on every
+            // assignment, and a full read lands after every fleet event, so an
+            // unchanged read used to republish the whole window four times
+            // (ov-229).
+            if read != fleet { fleet = read }
+            if !hasLoaded { hasLoaded = true }
             // Diff status for the whole sidebar, in one more call. Cheap by
             // construction: the daemon answers it from counts it already holds
             // plus a two-syscall gate per worktree, so a fleet where nothing is
             // happening costs nothing to keep on screen.
             Task { await self.refreshChangesInbox() }
-            fleetError = nil
+            if fleetError != nil { fleetError = nil }
             // Read before overwriting: `onReconnect` fires for a genuine
             // transition into `.connected`, not for a read that merely
             // confirms a connection that was already up — the common case,
             // since `refresh()` has some thirty call sites and most of them
             // run while everything is fine.
             let justReconnected = state != .connected
-            state = .connected
+            if justReconnected { state = .connected }
             if justReconnected {
                 // Every stream this runner was carrying died with the link.
                 //
@@ -2852,13 +2866,14 @@ final class DaemonClient: ObservableObject {
             // it is back, and remembering "unsupported" for it would be a lie
             // that outlives the network.
             if state == .connected {
-                changesSupported = false
-                changesError = message
+                if changesSupported != false { changesSupported = false }
+                if changesError != message { changesError = message }
             }
             return
         }
-        changesSupported = true
-        changesError = nil
+        // Guarded for the reason `refresh()` gives: this runs every few seconds.
+        if changesSupported != true { changesSupported = true }
+        if changesError != nil { changesError = nil }
         guard let rows = InboxReply.rows(from: data) else { return }
         var byWorktree: [String: InboxRow] = [:]
         // Keyed by the SHORT id, which is what `ChangesStore` and the sidebar
