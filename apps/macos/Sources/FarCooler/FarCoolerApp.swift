@@ -34,6 +34,10 @@ struct FarCoolerApp: App {
                 }
         }
         .windowStyle(.titleBar)
+        // The system's compact toolbar (ov-214): a 40 pt bar with 24 pt
+        // controls, where the unified one is 52 with 36. The window's root
+        // sets it on its window too (`MainWindowChrome`).
+        .windowToolbarStyle(.unifiedCompact(showsTitle: false))
         .commands { FarCoolerCommands() }
 
         // A real Settings scene, so ⌘, works the way it does in every other Mac

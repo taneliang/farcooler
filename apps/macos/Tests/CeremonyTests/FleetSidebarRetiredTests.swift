@@ -38,15 +38,15 @@ struct FleetSidebarRetiredTests {
     func theHeaderOffersTheWorkspacesItemsWithoutASeat() {
         let charter = CharterAccess.unavailable("No charter yet.")
         #expect(
-            ConversationHeader.menu(hasSeat: false, charter: charter, wakeOnAnswer: false)
+            OrchestratorMenu.menu(hasSeat: false, charter: charter, wakeOnAnswer: false)
                 == [.showCharter, .wakeOnAnswer])
         #expect(
-            ConversationHeader.menu(hasSeat: true, charter: charter, wakeOnAnswer: true)
+            OrchestratorMenu.menu(hasSeat: true, charter: charter, wakeOnAnswer: true)
                 == [.replaceOrchestrator, .showCharter, .wakeOnAnswer])
         // A runner that can't wake anyone gets no switch, and starting one
         // is the column's placeholder's, never the header's.
-        #expect(ConversationHeader.menu(hasSeat: false, charter: charter, wakeOnAnswer: nil) == [.showCharter])
-        #expect(ConversationHeader.menu(hasSeat: false, charter: nil, wakeOnAnswer: nil).isEmpty)
+        #expect(OrchestratorMenu.menu(hasSeat: false, charter: charter, wakeOnAnswer: nil) == [.showCharter])
+        #expect(OrchestratorMenu.menu(hasSeat: false, charter: nil, wakeOnAnswer: nil).isEmpty)
     }
 
     // MARK: - One sidebar, the navigator

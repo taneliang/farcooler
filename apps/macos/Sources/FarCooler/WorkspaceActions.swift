@@ -1,11 +1,12 @@
 import AgentKit
 import Foundation
 
-// What a workspace offers: its orchestrator header's menu (the old Fleet
-// sidebar's workspace row's, until ov-178), starting its orchestrator from
-// the conversation column, and opening its charter.
+// What a workspace offers: its orchestrator's menu (the old Fleet sidebar's
+// workspace row's until ov-178, its column header's until ov-214, now the
+// title bar's status area's), starting its orchestrator from the
+// conversation column, and opening its charter.
 //
-// Worked out here as values, and drawn by `ConversationHeader` and the
+// Worked out here as values, and drawn by `OrchestratorMenu` and the
 // conversation column, so the rules are the ones `WorkspaceActionsTests`
 // pins.
 

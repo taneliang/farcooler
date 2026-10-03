@@ -46,19 +46,24 @@ enum TileGeometry {
     /// against the 88×54 tmux had actually split — five rows of terminal that
     /// nothing would ever paint again.
     ///
+    /// `header` is the header each pane pays for: the style's, or none for a
+    /// pane drawn without one (`showsHeader`, ov-214). A lone pane charged for
+    /// a header it doesn't draw was given about two rows fewer than it had.
+    ///
     /// Main-actor only for one reason: it reads the pane header's height, which
     /// is part of the style and so lives where the views do. The rest of this
     /// type is arithmetic and stays free of that.
     @MainActor
     static func viewport(
-        fitting size: CGSize, across: Int, down: Int, cell: CGSize
+        fitting size: CGSize, across: Int, down: Int, cell: CGSize,
+        header: CGFloat = WorkspaceStyle.paneHeaderHeight
     ) -> PaneGrid? {
         guard cell.width > 0, cell.height > 0 else { return nil }
 
         let chromeWidth = TerminalMetrics.padding.left + TerminalMetrics.padding.right
         let chromeHeight =
             TerminalMetrics.padding.top + TerminalMetrics.padding.bottom
-            + WorkspaceStyle.paneHeaderHeight
+            + header
 
         let usableWidth = size.width - CGFloat(across) * chromeWidth
         let usableHeight = size.height - CGFloat(down) * chromeHeight
@@ -67,6 +72,17 @@ enum TileGeometry {
         return PaneGrid(
             columns: max(20, Int(usableWidth / cell.width)),
             rows: max(5, Int(usableHeight / cell.height)))
+    }
+
+    /// Whether a pane draws its header (ov-214): only beside other panes,
+    /// where it's the one thing saying which is which, carrying the number
+    /// prefix-N selects and the handle that drags it. A lone pane is named
+    /// by the window's title and, for the orchestrator, the title bar's
+    /// status, so its header was a third copy of the same words. A Changes
+    /// pane keeps its header alone too, since its comparison controls live
+    /// there. A zoomed pane is still one of several, and keeps its own.
+    static func showsHeader(panes: Int, isChanges: Bool) -> Bool {
+        panes > 1 || isChanges
     }
 
     /// How many cells fit in a terminal view of this size.

@@ -225,46 +225,13 @@ struct ContentView: View {
                 needsYouSelected: selection == .needsYou, onNeedsYou: { selection = .needsYou },
                 perform: { perform($0) })
         }
+        // Open in Editor and Changes, one capsule (ov-214).
         .toolbar {
-            // Not offered on a runner that has already said it cannot
-            // read changes at all. Its daemon predates the whole
-            // feature, so the split would open a pane running a
-            // subcommand that runner has never heard of — a dead pane
-            // where a diff was asked for, with nothing saying why.
-            // For a worktree opened whole, with a terminal or not,
-            // or the main checkout beside the Orchestrator column
-            // (ov-78); not for a task, whose column shows its
-            // changes already, without a pane (spec R3).
-            if let ws = WorkspaceScreen.changesTarget(
-                selection, in: store.fleet, repositories: repositoryIDs(selection?.host ?? "")),
-                store.client(for: ws)?.changesSupported != false
-            {
-                ToolbarItem(placement: .automatic) {
-                    Button {
-                        toggleChangesPane(in: ws)
-                    } label: {
-                        Label("Changes", systemImage: "plusminus")
-                    }
-                    // Lit while one is open, the way a toggle in a
-                    // toolbar says which state you are in. This is a
-                    // `Button` rather than a `Toggle` because the two
-                    // directions are not symmetrical: opening splits a
-                    // pane, closing kills one, and a `Toggle`'s binding
-                    // would have to pretend they were one value.
-                    .symbolVariant(changesPane(in: ws) == nil ? .none : .fill)
-                    .help(
-                        changesPane(in: ws) == nil
-                            ? "Show what this worktree changed, in a pane"
-                            : "Close the changes pane")
-                }
-            }
+            WorktreeToolbar(
+                editor: detailWorktree, onEditorError: { editorError = $0 },
+                changes: changesToolbarState, onChanges: { ws in toggleChangesPane(in: ws) })
         }
-        // Attached here rather than beside each of the four
-        // `navigationTitle` calls, which sit in three different views
-        // that would each need the failure channel threaded down to
-        // them. This is the one place that decides which worktree the
-        // window is showing, which is exactly what the control acts on.
-        .openInEditorToolbar(worktree: detailWorktree) { editorError = $0 }
+        .titleBarStatus(titleStatusSource, room: titleStatusRoom, actions: titleStatusActions)
         // The title would repeat the switcher or the breadcrumb
         // (`TitleBar`); the window keeps it for the Window menu.
         .toolbar(removing: TitleBar.showsTitle(for: selection) ? nil : .title)
@@ -275,6 +242,8 @@ struct ContentView: View {
                     hidden: navigatorHidden, available: selection.flatMap(workspaceScene)?.board != nil,
                     toggle: { toggleNavigator() }))
         }
+        // The compact toolbar (ov-214), on whatever made the window.
+        .mainWindowChrome()
         .overlay(alignment: .top) {
             ActionBanners(outcomes: outcomes)
         }
@@ -1449,6 +1418,108 @@ struct ContentView: View {
             openRequest: switcherRequest, perform: { perform($0) })
     }
 
+    /// Show Changes in the toolbar, where offered (`WorktreeToolbar`). Not
+    /// on a runner that has already said it can't read changes at all: its
+    /// daemon predates the feature, and the split would open a dead pane
+    /// where a diff was asked for. For a worktree opened whole, or the main
+    /// checkout beside the orchestrator (ov-78); not for a task, whose
+    /// column shows its changes already (spec R3).
+    private var changesToolbarState: WorktreeToolbar.Changes? {
+        guard
+            let ws = WorkspaceScreen.changesTarget(
+                selection, in: store.fleet, repositories: repositoryIDs(selection?.host ?? "")),
+            store.client(for: ws)?.changesSupported != false
+        else { return nil }
+        return WorktreeToolbar.Changes(worktree: ws, open: changesPane(in: ws) != nil)
+    }
+
+    /// The title bar's status area for the workspace on screen (ov-214):
+    /// its orchestrator as the navigator's row says it, and its board. Nil
+    /// with no workspace on screen.
+    private var titleStatusSource: TitleStatusSource? {
+        guard let scene = selection.flatMap(workspaceScene), let summary = scene.summary,
+            let client = store.clients[scene.host]
+        else { return nil }
+        let host = scene.host
+        let orchestrator = scene.hasConversation ? navigatorOrchestrator(host: host, workspace: summary) : nil
+        let decisions = WorkspaceCounts.decisions(for: summary, host: host, in: store.needsYou)
+        return TitleStatusSource(
+            orchestrator: orchestrator?.state, status: orchestrator?.status, nowDoing: orchestrator?.nowDoing,
+            board: scene.board == nil ? nil : boardStore(for: summary, client: client, host: host),
+            waiting: { column in client.boardWaiting(columnCount: column, decisions: decisions) })
+    }
+
+    /// What the status area sizes itself around (`TitleStatusRoom`).
+    private var titleStatusRoom: TitleStatusRoom {
+        let switcher = workspaceSwitcher
+        return TitleStatusRoom(
+            switcherTitle: switcher.title, switcherRepository: switcher.repository,
+            editor: detailWorktree != nil, changes: changesToolbarState != nil,
+            trouble: RunnerStatusItem.label(troubles: runnerTroubles, stale: store.staleHosts),
+            needsYou: store.needsYou.count)
+    }
+
+    /// What the status area's parts do, by the routes the window already
+    /// has: the orchestrator's row, ⌃⌘N within this workspace, a task's row.
+    private var titleStatusActions: TitleStatusActions {
+        guard let scene = selection.flatMap(workspaceScene), let summary = scene.summary, let board = scene.board
+        else { return TitleStatusActions() }
+        let host = scene.host
+        return TitleStatusActions(
+            goToOrchestrator: { selectOrchestrator(keyboard: .conversation) },
+            orchestratorMenu: scene.hasConversation ? orchestratorMenu(host: host, workspace: summary) : nil,
+            nextNeedingYou: {
+                let here = store.needsYou.filter { WorkspaceCounts.count(for: summary, host: host, in: [$0]) > 0 }
+                if let next = NeedsYouNavigation.step(
+                    lastOpened: lastAttention, items: here, fleet: store.fleet, showing: selection)
+                {
+                    open(next.item)
+                }
+            },
+            openTask: { row in chooseTask(row.id, host: host, workspace: board, glance: false) })
+    }
+
+    /// The orchestrator's menu, for the status area: what its column's
+    /// header offered before the header went (ov-214).
+    private func orchestratorMenu(host: String, workspace: WorkspaceSummary) -> OrchestratorMenu {
+        let seat = WorkspaceScreen.orchestrator(of: workspace, host: host, in: store.fleet)
+        let canAct = store.refusal(for: host) == nil
+        let column = ConversationColumn.state(
+            seat: seat, isStarting: startingOrchestrators.isStarting(workspace, host: host),
+            startedAt: orchestratorStartedAt["\(host)|\(workspace.id)"], now: Date())
+        return OrchestratorMenu(
+            seat: seat, charter: CharterAccess.of(workspace, host: host), canAct: canAct,
+            onReplace: { harness in
+                orchestratorReplacement = OrchestratorReplacement(host: host, workspace: workspace, harness: harness)
+            },
+            onShowCharter: { url in
+                if !NSWorkspace.shared.open(url) {
+                    errorBanner = "Couldn’t open \(workspace.name)’s charter. It may have been moved or deleted."
+                }
+            },
+            onTogglePaneMode: {
+                if let seat { Task { await togglePaneMode(seat.terminal, in: seat.worktree) } }
+            },
+            onRestart: {
+                if let seat { Task { await run(.restart, on: seat.terminal, in: seat.worktree) } }
+            },
+            onStepDown: {
+                if let seat { Task { await stepDown(seat) } }
+            },
+            wakeOnAnswer: workspace.wakeOnAnswer,
+            onSetWakeOnAnswer: { on in
+                guard let client = store.clients[host] else { return }
+                Task {
+                    if let refused = await client.setWakeOnAnswer(workspace, on: on) { errorBanner = refused }
+                }
+            },
+            starts: ConversationColumn.offers(column, canAct: canAct).compactMap { offer in
+                if case .start(let harness) = offer { return harness }
+                return nil
+            },
+            onStart: { harness in startOrchestrator(workspace, host: host, harness: harness, replace: false) })
+    }
+
     /// What a switcher item does, by the routes the rest of the window uses.
     private func perform(_ command: SwitcherCommand) {
         switch command {
@@ -1795,33 +1866,9 @@ struct ContentView: View {
             let seat = WorkspaceScreen.orchestrator(of: workspace, host: host, in: store.fleet)
             let key = "\(host)|\(workspace.id)"
             let canAct = store.refusal(for: host) == nil
+            // No header row (ov-214): the orchestrator's state, its harness
+            // and its menu are the title bar's status area's.
             VStack(spacing: 0) {
-                ConversationHeader(
-                    seat: seat, charter: CharterAccess.of(workspace, host: host), canAct: canAct,
-                    onReplace: { harness in
-                        orchestratorReplacement = OrchestratorReplacement(host: host, workspace: workspace, harness: harness)
-                    },
-                    onShowCharter: { url in
-                        if !NSWorkspace.shared.open(url) {
-                            errorBanner = "Couldn’t open \(workspace.name)’s charter. It may have been moved or deleted."
-                        }
-                    },
-                    onTogglePaneMode: {
-                        if let seat { Task { await togglePaneMode(seat.terminal, in: seat.worktree) } }
-                    },
-                    onRestart: {
-                        if let seat { Task { await run(.restart, on: seat.terminal, in: seat.worktree) } }
-                    },
-                    onStepDown: {
-                        if let seat { Task { await stepDown(seat) } }
-                    },
-                    wakeOnAnswer: workspace.wakeOnAnswer,
-                    onSetWakeOnAnswer: { on in
-                        guard let client = store.clients[host] else { return }
-                        Task {
-                            if let refused = await client.setWakeOnAnswer(workspace, on: on) { errorBanner = refused }
-                        }
-                    })
                 if let seat {
                     let sharers = WorkspaceScreen.sharers(
                         of: seat, layouts: store.client(for: seat.worktree)?.layouts[seat.worktree.id])
@@ -1907,7 +1954,7 @@ struct ContentView: View {
         if case .starting = column { state = .starting }
         return NavigatorOrchestrator(
             state: state,
-            agent: ConversationHeader.agentName(seat),
+            agent: OrchestratorMenu.agentName(seat),
             status: seat?.terminal.status,
             nowDoing: OrchestratorRow.nowDoing(seat?.terminal, state: state),
             offers: ConversationColumn.offers(column, canAct: canAct),
@@ -2329,9 +2376,6 @@ struct ContentView: View {
                 store: boardStore(for: workspace, client: client, host: host),
                 client: client,
                 agents: boardAgents(host: host, client: client),
-                waiting: client.boardWaiting(
-                    columnCount: boardStore(for: workspace, client: client, host: host).board.waitingOnYou,
-                    decisions: WorkspaceCounts.decisions(for: workspace, host: host, in: store.needsYou)),
                 onGoTo: { pane in go(to: pane) },
                 selected: WorkspaceNavigation.selectedTask(selection, trail: trail, board: id),
                 focusRequest: boardFocusRequest,

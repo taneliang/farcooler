@@ -1,0 +1,487 @@
+import AgentKit
+import AppKit
+import SwiftUI
+
+// The title bar's status area (ov-214): the toolbar's empty middle, put to
+// work the way Xcode's activity view is. One standard toolbar item in the
+// principal (center) place, with no glass of its own, holding the
+// orchestrator's state and what it's doing, then how many of this
+// workspace's tasks need you, are running and are in review.
+//
+// Native by construction: the window, its traffic lights, the toolbar, its
+// overflow menu and every button and menu here are the system's. What's
+// custom is only text and a status mark inside one item.
+//
+// The toolbar measures an item once, when the window's content is
+// installed, and doesn't flex a principal item between a minimum and a
+// maximum (ov-177; the design's probe). So the area never asks it to: it has
+// four forms, each a fixed width, chosen from the window's width, and its
+// identity is the form and nothing else. Text that grows truncates inside
+// the form's width, and a new form is a new view, which the toolbar measures
+// again (`TitleStatusWidthTests`).
+
+/// The status area's values and rules.
+enum TitleStatus {
+    /// What the area says, built from what the navigator and the board
+    /// already work out.
+    struct Model: Equatable {
+        /// The orchestrator's state, or nil where the workspace has no
+        /// conversation column to have one in.
+        var orchestrator: OrchestratorRow.State?
+        /// Its pane's status, for the status mark.
+        var status: Status?
+        /// What it's doing now (`OrchestratorRow.nowDoing`).
+        var nowDoing: String?
+        /// This workspace's count of what's waiting on you: the board's
+        /// waiting count (`DaemonClient.boardWaiting`).
+        var needYou: Int
+        /// Its tasks in progress and in review, in board order.
+        var running: [TaskRow]
+        var inReview: [TaskRow]
+    }
+
+    /// How much the area can afford to say, narrowest first.
+    enum Form: Int, CaseIterable, Comparable, CustomStringConvertible {
+        /// The status mark, and the need-you count.
+        case ring
+        /// Then the state's word.
+        case short
+        /// Then what it's doing, and every count as a glyph and a number.
+        case medium
+        /// Then the counts in words.
+        case wide
+
+        /// Its width, fixed: see the file's comment.
+        var width: CGFloat {
+            switch self {
+            case .ring: 64
+            case .short: 184
+            case .medium: 380
+            case .wide: 600
+            }
+        }
+
+        static func < (a: Form, b: Form) -> Bool { a.rawValue < b.rawValue }
+
+        var description: String {
+            switch self {
+            case .ring: "ring"
+            case .short: "short"
+            case .medium: "medium"
+            case .wide: "wide"
+            }
+        }
+    }
+
+    /// The widest form that fits in `available` points; the ring when none
+    /// does, so the orchestrator's mark and the count are always offered.
+    static func form(available: CGFloat) -> Form {
+        Form.allCases.reversed().first { $0.width <= available } ?? .ring
+    }
+
+    /// The room between the toolbar's leading and trailing items in a
+    /// window `window` wide, less `gap` each side of the area.
+    ///
+    /// Strict, because a center item too wide doesn't shrink: the toolbar
+    /// keeps it whole and moves the trailing items, the tray among them,
+    /// into the overflow menu (the lane's probe, at 600 pt).
+    static func available(window: CGFloat, leading: CGFloat, trailing: CGFloat, gap: CGFloat = 8) -> CGFloat {
+        window - leading - trailing - 2 * gap
+    }
+
+    /// What the leading items take: the traffic lights, then one capsule
+    /// holding the navigator's button and the switcher, whose label is
+    /// `title · repository ⌄` at the toolbar's font.
+    ///
+    /// Measured in a compact toolbar on macOS 27 (the lane's probe): the
+    /// traffic lights end at 92 pt, the navigator's button is 31 with 10 to
+    /// the switcher, and the switcher is its label and 35 more. Slightly
+    /// over, never under: the room left over is what the area may take.
+    static func leading(switcher title: String, repository: String) -> CGFloat {
+        let label = repository.isEmpty ? title : "\(title) · \(repository)"
+        return 92 + 31 + 10 + textWidth(label) + 35 + 8
+    }
+
+    /// What the trailing items take: the window's edge, the tray and its
+    /// count, the space before them, then Open in Editor and Changes, and
+    /// the runner trouble's words while there's any. Measured as `leading`
+    /// is: the tray 32 pt and its count, the editor 69, Changes 32.
+    static func trailing(editor: Bool, changes: Bool, trouble: String?, needsYou: Int = 0) -> CGFloat {
+        var width: CGFloat = 10 + 32 + 12
+        if let count = NeedsYouToolbar.countText(count: needsYou) { width += 4 + textWidth(count) }
+        if editor { width += 69 + 5 }
+        if changes { width += 32 + 5 }
+        if let trouble { width += 30 + textWidth(trouble) + 5 }
+        return width
+    }
+
+    /// `text`'s width at the toolbar's font, rounded up.
+    private static func textWidth(_ text: String) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        return (text as NSString).size(withAttributes: [.font: font]).width.rounded(.up)
+    }
+
+    /// The board's tasks in progress and in review, as the board's own
+    /// columns hold them: the status area counts what the navigator lists.
+    static func counts(_ board: TaskBoardModel) -> (running: [TaskRow], inReview: [TaskRow]) {
+        let column = { (status: TaskStatus) in board.columns.first { $0.status == status }?.rows ?? [] }
+        return (column(.inProgress), column(.inReview))
+    }
+
+    /// The area's model: `source`'s orchestrator, and `board` as read now.
+    @MainActor
+    static func model(_ source: TitleStatusSource, board: TaskBoardModel) -> Model {
+        let counts = counts(board)
+        return Model(
+            orchestrator: source.orchestrator, status: source.status, nowDoing: source.nowDoing,
+            needYou: source.waiting(board.waitingOnYou), running: counts.running, inReview: counts.inReview)
+    }
+
+    /// A count as the area draws it: "99+" past 99.
+    static func number(_ count: Int) -> String { count > 99 ? "99+" : "\(count)" }
+
+    /// The counts in words, for the wide form: nil at zero, since a count of
+    /// nothing teaches people to stop reading it.
+    static func needYouWords(_ count: Int) -> String? { count > 0 ? "\(number(count)) need you" : nil }
+    static func runningWords(_ count: Int) -> String? { count > 0 ? "\(number(count)) running" : nil }
+    static func inReviewWords(_ count: Int) -> String? { count > 0 ? "\(number(count)) in review" : nil }
+
+    /// Whether the need-you count wears the attention color: only above
+    /// zero (and it's not drawn at zero at all).
+    static func needYouIsTinted(_ count: Int) -> Bool { count > 0 }
+
+    /// The orchestrator's part in words: "Working — Reading the diff", or
+    /// the word alone with nothing more to say.
+    static func orchestratorLine(_ model: Model) -> String? {
+        guard let state = model.orchestrator else { return nil }
+        let word = OrchestratorRow.word(state)
+        guard let doing = model.nowDoing else { return word }
+        return "\(word) — \(doing)"
+    }
+
+    /// What VoiceOver reads for the orchestrator's part, whatever the form:
+    /// "Orchestrator, Working, Reading the diff".
+    static func orchestratorLabel(_ model: Model) -> String? {
+        guard let state = model.orchestrator else { return nil }
+        guard state != .none else { return "No Orchestrator" }
+        return ["Orchestrator", OrchestratorRow.word(state), model.nowDoing].compactMap { $0 }.joined(separator: ", ")
+    }
+
+    /// The counts as VoiceOver and the tooltips say them: "3 need you".
+    static func needYouLabel(_ count: Int) -> String { count == 0 ? "Nothing needs you" : "\(count) need you" }
+    static func runningLabel(_ count: Int) -> String { count == 1 ? "1 task running" : "\(count) tasks running" }
+    static func inReviewLabel(_ count: Int) -> String { count == 1 ? "1 task in review" : "\(count) tasks in review" }
+}
+
+/// Where the status area's model comes from: the orchestrator as the
+/// navigator's row works it out, and the workspace's board, observed by the
+/// area itself so its counts move when the board does, not only when the
+/// window happens to redraw.
+struct TitleStatusSource {
+    /// The orchestrator's state, or nil where the workspace has no
+    /// conversation column (`TitleStatus.Model.orchestrator`).
+    var orchestrator: OrchestratorRow.State?
+    var status: Status?
+    var nowDoing: String?
+    /// The workspace's board; nil before there is one to read.
+    var board: TaskBoardStore?
+    /// The waiting count shown, from the board's Needs Decision count
+    /// (`DaemonClient.boardWaiting`, which prefers the runner's list).
+    var waiting: (Int) -> Int = { $0 }
+}
+
+/// What the status area's parts do. `ContentView` routes each to what the
+/// window already does for it.
+struct TitleStatusActions {
+    /// Show the orchestrator, closing whatever is open.
+    var goToOrchestrator: () -> Void = {}
+    /// The orchestrator's menu: what the conversation column's header held.
+    var orchestratorMenu: OrchestratorMenu?
+    /// Open the next thing in this workspace that needs you.
+    var nextNeedingYou: () -> Void = {}
+    /// Open a task from the running or in-review menu.
+    var openTask: (TaskRow) -> Void = { _ in }
+}
+
+/// The status area drawn: `form` decides what's said, `model` what it says.
+struct TitleStatusView: View {
+    let model: TitleStatus.Model
+    let form: TitleStatus.Form
+    let actions: TitleStatusActions
+
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        HStack(spacing: form >= .medium ? 14 : 8) {
+            if model.orchestrator != nil { orchestrator }
+            Spacer(minLength: 0)
+            needYou
+            if form >= .medium {
+                taskMenu(
+                    model.running, symbol: "circle.dotted", words: TitleStatus.runningWords(model.running.count),
+                    label: TitleStatus.runningLabel(model.running.count), id: "title-status-running")
+                taskMenu(
+                    model.inReview, symbol: "eye", words: TitleStatus.inReviewWords(model.inReview.count),
+                    label: TitleStatus.inReviewLabel(model.inReview.count), id: "title-status-in-review")
+            }
+        }
+        .font(.system(size: NSFont.systemFontSize))
+        // At least the compact bar's 24 pt control height, to hit.
+        .frame(width: form.width, height: 24)
+        .background(TitleStatusAnchor.Mark())
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Status")
+    }
+
+    /// The orchestrator: a click shows it, its ⌄ holds its menu.
+    @ViewBuilder
+    private var orchestrator: some View {
+        let label = HStack(spacing: 6) {
+            OrchestratorMark(state: model.orchestrator ?? .none, status: model.status)
+            if form >= .short, let state = model.orchestrator {
+                Text(OrchestratorRow.word(state))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .fixedSize()
+                if form >= .medium, let doing = model.nowDoing {
+                    Text("— \(doing)")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+        }
+        Group {
+            if let menu = actions.orchestratorMenu {
+                Menu {
+                    menu
+                } label: {
+                    label
+                } primaryAction: {
+                    actions.goToOrchestrator()
+                }
+                .menuStyle(.borderlessButton)
+            } else {
+                Button(action: actions.goToOrchestrator) { label }
+                    .buttonStyle(.borderless)
+            }
+        }
+        .help(TitleStatus.orchestratorLine(model) ?? "Orchestrator")
+        .accessibilityLabel(TitleStatus.orchestratorLabel(model) ?? "Orchestrator")
+        .accessibilityIdentifier("title-status-orchestrator")
+        .layoutPriority(1)
+    }
+
+    /// This workspace's need-you count, in the attention color, with words
+    /// at the wide form and a glyph below it. Nothing at zero.
+    @ViewBuilder
+    private var needYou: some View {
+        let count = model.needYou
+        if count > 0 {
+            Button(action: actions.nextNeedingYou) {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.bubble")
+                    if form == .wide, let words = TitleStatus.needYouWords(count) {
+                        Text(words)
+                    } else {
+                        Text(TitleStatus.number(count)).monospacedDigit()
+                    }
+                }
+                .foregroundStyle(TitleStatus.needYouIsTinted(count) ? Tint.attention(scheme) : Color.secondary)
+                .fixedSize()
+            }
+            .buttonStyle(.borderless)
+            .help("Open the next thing in this workspace that needs you")
+            .accessibilityLabel(TitleStatus.needYouLabel(count))
+            .accessibilityIdentifier("title-status-need-you")
+        }
+    }
+
+    /// Running or in review: a count, and a menu of those tasks; a pick
+    /// opens it. Nothing at zero.
+    @ViewBuilder
+    private func taskMenu(_ rows: [TaskRow], symbol: String, words: String?, label: String, id: String) -> some View {
+        if !rows.isEmpty {
+            Menu {
+                ForEach(rows) { row in
+                    Button("\(row.key) \(row.title)") { actions.openTask(row) }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: symbol)
+                    if form == .wide, let words {
+                        Text(words)
+                    } else {
+                        Text(TitleStatus.number(rows.count)).monospacedDigit()
+                    }
+                }
+                .foregroundStyle(.secondary)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(label)
+            .accessibilityLabel(label)
+            .accessibilityIdentifier(id)
+        }
+    }
+}
+
+/// The orchestrator's state as a mark, the one the navigator's row and the
+/// status area both draw: the app's own agent status mark while it works or
+/// starts (ov-177: never the system's spinner), a dot when it needs you or
+/// has news, else its glyph, dimmed when nothing runs.
+struct OrchestratorMark: View {
+    let state: OrchestratorRow.State
+    let status: Status?
+
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        switch state {
+        case .working, .starting:
+            StatusGlyph(status: status ?? (state == .starting ? .starting : .working))
+        case .needsYou, .unread:
+            Circle()
+                .fill(state == .needsYou ? Color.accentColor : GlancePalette.amber(scheme))
+                .frame(width: 7, height: 7)
+        case .idle:
+            Image(systemName: "person.wave.2").font(.system(size: 10)).foregroundStyle(.secondary)
+        case .none, .stopped:
+            Image(systemName: "person.wave.2").font(.system(size: 10)).foregroundStyle(.tertiary)
+        }
+    }
+}
+
+/// The view behind the status area, so a test can find the toolbar item
+/// holding it and compare the two widths (`TitleStatusWidthTests`), as the
+/// switcher's menu anchor lets `SwitcherWidthTests` do.
+enum TitleStatusAnchor {
+    final class View: NSView {}
+
+    struct Mark: NSViewRepresentable {
+        func makeNSView(context: Context) -> NSView { View() }
+        func updateNSView(_ view: NSView, context: Context) {}
+    }
+}
+
+/// The status area in the toolbar: in the center, with no glass, and
+/// measured again whenever its form changes (and only then).
+struct TitleStatusItem: ToolbarContent {
+    let source: TitleStatusSource
+    let form: TitleStatus.Form
+    let actions: TitleStatusActions
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            // The form, not the text: a "now doing" line changes many times
+            // a minute, and rebuilding the item for each would close its
+            // menu and move VoiceOver's focus. The text truncates inside the
+            // form's fixed width instead.
+            TitleStatusBoard(source: source, form: form, actions: actions).id(form)
+        }
+        // Plain text on the bar, as Xcode's activity view is: the HIG's
+        // "reduce the use of toolbar backgrounds", and ov-216's rule that
+        // glass is for controls that float, not for a status.
+        .sharedBackgroundVisibility(.hidden)
+    }
+}
+
+/// The status area over its board: observed here, so the counts follow it.
+private struct TitleStatusBoard: View {
+    let source: TitleStatusSource
+    let form: TitleStatus.Form
+    let actions: TitleStatusActions
+
+    var body: some View {
+        if let store = source.board {
+            Observed(store: store, source: source, form: form, actions: actions)
+        } else {
+            TitleStatusView(model: TitleStatus.model(source, board: .empty), form: form, actions: actions)
+        }
+    }
+
+    private struct Observed: View {
+        @ObservedObject var store: TaskBoardStore
+        let source: TitleStatusSource
+        let form: TitleStatus.Form
+        let actions: TitleStatusActions
+
+        var body: some View {
+            TitleStatusView(model: TitleStatus.model(source, board: store.board), form: form, actions: actions)
+        }
+    }
+}
+
+/// What the window's leading and trailing items take, for the status area
+/// to size itself around.
+struct TitleStatusRoom: Equatable {
+    var switcherTitle: String
+    var switcherRepository: String
+    var editor: Bool
+    var changes: Bool
+    var trouble: String?
+    /// The tray's count, every workspace's.
+    var needsYou: Int = 0
+
+    func form(window: CGFloat) -> TitleStatus.Form {
+        TitleStatus.form(
+            available: TitleStatus.available(
+                window: window,
+                leading: TitleStatus.leading(switcher: switcherTitle, repository: switcherRepository),
+                trailing: TitleStatus.trailing(editor: editor, changes: changes, trouble: trouble, needsYou: needsYou)))
+    }
+}
+
+private struct TitleStatusModifier: ViewModifier {
+    let source: TitleStatusSource?
+    let room: TitleStatusRoom
+    let actions: TitleStatusActions
+
+    /// The window's width: this is applied to the window's root view.
+    @State private var width: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+            .toolbar {
+                if let source {
+                    TitleStatusItem(source: source, form: room.form(window: width), actions: actions)
+                }
+            }
+    }
+}
+
+extension View {
+    /// The title bar's status area, for the window this is the root of.
+    /// Nothing with no workspace on screen (`source` nil).
+    func titleBarStatus(_ source: TitleStatusSource?, room: TitleStatusRoom, actions: TitleStatusActions) -> some View {
+        modifier(TitleStatusModifier(source: source, room: room, actions: actions))
+    }
+}
+
+/// The main window's chrome (ov-214): the system's compact toolbar, 40 pt
+/// with 24 pt controls where the unified one is 52 with 36. The scene asks
+/// for it (`FarCoolerApp`), and the window's root sets it on its window as
+/// well, so a window made any other way, a test's included, is the same.
+enum MainWindowChrome {
+    static let toolbarStyle: NSWindow.ToolbarStyle = .unifiedCompact
+
+    struct Setter: NSViewRepresentable {
+        final class Probe: NSView {
+            override func viewDidMoveToWindow() {
+                super.viewDidMoveToWindow()
+                if let window, window.toolbarStyle != MainWindowChrome.toolbarStyle {
+                    window.toolbarStyle = MainWindowChrome.toolbarStyle
+                }
+            }
+        }
+        func makeNSView(context: Context) -> NSView { Probe() }
+        func updateNSView(_ view: NSView, context: Context) {}
+    }
+}
+
+extension View {
+    /// This view's window in the main window's chrome (`MainWindowChrome`).
+    func mainWindowChrome() -> some View { background(MainWindowChrome.Setter()) }
+}

@@ -696,11 +696,6 @@ struct TaskBoardView: View {
     @ObservedObject var store: TaskBoardStore
     @ObservedObject var client: DaemonClient
     let agents: BoardAgents
-    /// How many decisions are waiting on the person, from the needs-you
-    /// store (`WorkspaceCounts.decisions`), not from the Needs Decision
-    /// column: answering a decision leaves its task in that column (spec
-    /// §2.2), so the column outlives the question.
-    let waiting: Int
     /// Go to a pane working a task. The window's, because only the window can
     /// change what is selected.
     let onGoTo: (BoardPane) -> Void
@@ -811,7 +806,7 @@ struct TaskBoardView: View {
     }
 
     init(
-        store: TaskBoardStore, client: DaemonClient, agents: BoardAgents, waiting: Int = 0,
+        store: TaskBoardStore, client: DaemonClient, agents: BoardAgents,
         onGoTo: @escaping (BoardPane) -> Void, defaults: UserDefaults = .standard,
         selected: String? = nil, focusRequest: Int = 0, onKeyboard: @escaping () -> Void = {},
         onEnter: @escaping () -> Void = {}, hasKeyboard: Bool = false,
@@ -823,7 +818,6 @@ struct TaskBoardView: View {
         self.store = store
         self.client = client
         self.agents = agents
-        self.waiting = waiting
         self.onGoTo = onGoTo
         self.defaults = defaults
         self.selected = selected
@@ -846,8 +840,7 @@ struct TaskBoardView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            filterField
+            topBand
             list
         }
         // One key column for the whole board, so every title starts at one x.
@@ -889,20 +882,55 @@ struct TaskBoardView: View {
         VStack { content() }.frame(maxWidth: .infinity, minHeight: 6 * ColumnGrid.rhythm)
     }
 
-    // MARK: - Header
+    // MARK: - The top band
 
-    private var header: some View {
-        BoardHeader(
-            title: store.title, waiting: waiting, reading: store.reading,
-            trouble: store.hasRead ? store.trouble : nil, offersWrites: store.offersWrites,
-            newTaskOpen: $newTaskOpen,
-            onCreate: { title in await store.createTask(title: title) },
-            onRefresh: { Task { await store.reload() } })
+    /// The navigator's top band (ov-214): the filter, then the board's own
+    /// state and its one write at the trailing edge. It took the place of a
+    /// header row that named the board ("Main", which the title bar's
+    /// switcher names) and counted what's waiting (which the title bar's
+    /// status area counts); Refresh is ⌘R, as it was.
+    private var topBand: some View {
+        HStack(spacing: SidebarGrid.gap / 2) {
+            filterField
+            if store.reading {
+                ProgressView().controlSize(.small)
+                    .help("Reading the board")
+            }
+            // Beside the board rather than over it: a failed re-read
+            // leaves the last good board on screen.
+            if store.hasRead, let trouble = store.trouble {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(.secondary)
+                    .frame(width: SidebarGrid.control, height: SidebarGrid.control)
+                    .help(trouble)
+                    .accessibilityLabel(trouble)
+            }
+            if store.offersWrites {
+                Button { newTaskOpen = true } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .medium))
+                        .frame(width: SidebarGrid.control, height: SidebarGrid.control)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .help("New Task…")
+                .accessibilityLabel("New Task…")
+                .accessibilityIdentifier("board-new-task")
+                .popover(isPresented: $newTaskOpen, arrowEdge: .bottom) {
+                    NewTaskForm(
+                        onCreate: { title in await store.createTask(title: title) },
+                        onClose: { newTaskOpen = false })
+                }
+            }
+        }
+        // On the list's grid (ov-177): the filter's box from the grid's
+        // edge, where a row's selection runs, to as far in from the
+        // trailing edge, and a rhythm over it; the list's own top inset is
+        // the rhythm under it.
+        .padding(.horizontal, NavigatorGrid.edge)
+        .padding(.top, ColumnGrid.rhythm)
+        .onChange(of: filterRequest) { _, _ in filterFocused = true }
     }
-
-    /// The waiting pill's short form, for a board too narrow for the
-    /// sentence: "2 waiting".
-    static func waitingShort(_ count: Int) -> String { BoardHeader.waitingShort(count) }
 
     // MARK: - The list
 
@@ -913,12 +941,6 @@ struct TaskBoardView: View {
             filterFocused = false
             listFocused = true
         }
-        // On the list's grid (ov-177): its box from the grid's edge, where
-        // a row's selection runs, to as far in from the trailing edge, and
-        // a rhythm over it; the list's own top inset is the rhythm under it.
-        .padding(.horizontal, NavigatorGrid.edge)
-        .padding(.top, ColumnGrid.rhythm)
-        .onChange(of: filterRequest) { _, _ in filterFocused = true }
     }
 
     private var filtering: Bool { !BoardFilter.isEmpty(filter) }

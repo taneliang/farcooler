@@ -8,7 +8,9 @@ import Testing
 /// their bottom edges are one line across the window (ov-92: the board's
 /// "Main" header stood taller than the orchestrator's), and the jump bar's
 /// segments are one size (owner, 2 Oct: "Main" small, the task large and
-/// bold, "Worktrees" a third size).
+/// bold, "Worktrees" a third size). The board's and the orchestrator's
+/// headers went in ov-214; the jump bar's, over a task or a worktree, are
+/// the ones left.
 @MainActor
 struct ColumnHeaderTests {
     private func height<V: View>(_ view: V, width: CGFloat = 640) -> CGFloat {
@@ -24,16 +26,6 @@ struct ColumnHeaderTests {
     @Test("Every column header is the shared height over the one divider", arguments: [280, 640, 1200] as [CGFloat])
     func everyHeaderIsOneHeight(width: CGFloat) {
         let headers: [(String, CGFloat)] = [
-            ("navigator", height(
-                BoardHeader(
-                    title: "Main", waiting: 2, reading: true, trouble: "Couldn’t refresh", offersWrites: true,
-                    newTaskOpen: .constant(false), onCreate: { _ in true }, onRefresh: {}),
-                width: width)),
-            ("orchestrator", height(
-                ConversationHeader(
-                    seat: nil, charter: nil, canAct: true, onReplace: { _ in }, onShowCharter: { _ in },
-                    onTogglePaneMode: {}, onRestart: {}),
-                width: width)),
             ("jump bar", height(
                 DrillBreadcrumb(crumbs: [Self.main, Self.longTask], worktrees: Self.menu, onGo: { _ in }, onClose: {}),
                 width: width)),

@@ -189,7 +189,6 @@ struct GridGeometryTests {
             orchestrator: Self.orchestrator(running: orchestratorRunning))
         let found = await marks(board, width: WorkspaceColumns.navigatorDefault)
         var expect: [String: CGFloat] = [
-            "header.text": NavigatorGrid.text,
             // ov-177 round 2: the words of the filter and the orchestrator
             // on the text column every row's words start on. ov-230: their
             // boxes reach half a margin past the grid's edge, and their
@@ -259,7 +258,7 @@ struct GridGeometryTests {
     /// task detail, from `struct TaskCard` on, is another lane's.
     private static let rowFiles: [(name: String, until: String?)] = [
         ("SidebarViews.swift", nil), ("SidebarLayout.swift", nil),
-        ("BoardHeader.swift", nil), ("BoardSummaryStrip.swift", nil),
+        ("BoardSummaryStrip.swift", nil),
         ("TaskBoard.swift", "struct TaskCard: View"), ("TaskListSection.swift", nil), ("Navigator.swift", nil), ("BoardWorktreesSection.swift", nil),
         ("ProjectTerminalsSection.swift", nil),
     ]

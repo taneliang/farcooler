@@ -137,31 +137,3 @@ struct OpenInEditorButton: View {
         return "Open in \(editor.name)"
     }
 }
-
-extension View {
-    /// Put the editor control in the window's title bar.
-    ///
-    /// Applied once, where `ContentView` places the detail column, rather than
-    /// in each of the four views that set the window's title. Those views would
-    /// each need the failure channel threaded down to them, and a control that
-    /// belongs to "whatever worktree you are looking at" should be attached
-    /// where that is decided, not in three places that each know one case of it.
-    ///
-    /// The right side of the title bar is otherwise empty, and the title already
-    /// names the worktree — so the action about that worktree belongs beside it.
-    func openInEditorToolbar(
-        worktree: Worktree?, onError: @escaping (String) -> Void
-    ) -> some View {
-        toolbar {
-            if let worktree {
-                // Automatic, not primary: with the title gone from the
-                // toolbar, only the flexible space `LeadingToolbar` leaves
-                // pushes items to the trailing end, and it moves automatic
-                // ones only (ov-105).
-                ToolbarItem(placement: .automatic) {
-                    OpenInEditorButton(worktree: worktree, onError: onError)
-                }
-            }
-        }
-    }
-}

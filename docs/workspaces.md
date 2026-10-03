@@ -85,7 +85,18 @@ as in any menu. Below the workspaces:
   **Add Repository…**, **Add Device or Runner…**, and **Runners and
   Devices…**, which opens Settings.
 
-The tray beside the switcher is Needs You. When a runner can't be reached, has
+**The status area** is in the middle of the title bar, while a workspace is
+open. It says what the orchestrator is doing ("Working — Running the Mac tests
+for ov-91"), then how many of this workspace's tasks need you, are running and
+are in review. Click the orchestrator to go to it from anywhere in the
+workspace; its ⌄ is the orchestrator's menu, below. Click the need-you count to
+open the next thing in this workspace waiting on you, and running or in review
+for a menu of those tasks. A narrower window says less: the counts become a
+glyph and a number, then only the state's word, then only the orchestrator's
+mark and the need-you count.
+
+The tray at the right of the title bar is Needs You, counting every workspace.
+When a runner can't be reached, has
 lost tmux, or runs an older Far Cooler, a banner across the top of the window
 says so, with **Reconnect** or the update.
 
@@ -126,11 +137,13 @@ you left it. Drag the navigator's right edge to make it wider or narrower; it
 remembers the width.
 
 **Talking to the orchestrator.** The conversation is the orchestrator's own
-terminal, or a chat view when it's in chat mode. The `⋯` menu in the
-conversation's header switches with **Show as Chat** or **Show as Terminal**,
+terminal, or a chat view when it's in chat mode. The orchestrator's menu, the
+⌄ beside it in the title bar's status area, switches with **Show as Chat** or
+**Show as Terminal**,
 and also has **Replace Orchestrator**, **Show Charter**, **Wake the Agent When
 You Answer**, **Restart** and **Stop Being Orchestrator**. With no orchestrator
-running, it still has **Show Charter** and **Wake the Agent When You Answer**.
+running, it has **Start Orchestrator**, **Show Charter** and **Wake the Agent
+When You Answer**.
 Tell it what you want done in plain words. It puts the work on the board, dispatches agents, and reports back from the board, not from
 memory. It writes down what it decides, so its work survives a restart. The
 first time you talk to a new orchestrator, it interviews you for the charter:
@@ -138,10 +151,9 @@ how work gets from idea to landed, what done means, who reviews, what it may
 decide alone. You can edit the charter any time with **Show Charter**; the
 orchestrator rereads it whenever it picks the work back up.
 
-**The board** is a list sectioned by status, with Needs Decision first. When a
-workspace has tasks waiting on a decision, the header says "3 tasks are waiting
-on you" ("1 task is waiting on you" for one), and "3 waiting" where the room is
-short. It says nothing at zero. Every status is always shown, even an empty one:
+**The board** is a list sectioned by status, with Needs Decision first. How
+many tasks wait on you is the title bar's need-you count. Every status is
+always shown, even an empty one:
 an empty status is a header with a 0. Each task is one compact row: its key
 and title, and under them what it's waiting on, who's working it and how much
 of it holds. Done and Canceled start collapsed. They show what finished since
@@ -149,9 +161,8 @@ you last opened it and what finished today, and at least the latest three.
 When some are left out, **All Done** opens the History page, which you can
 search and filter by area.
 A long section shows ten tasks, then **Show N More**. The
-**+** button in the board's header (**New Task…**) files a task by hand. It's
-there when the runner lets this Mac write to the board. Beside it, the arrow
-re-reads the board.
+**+** button beside the filter (**New Task…**) files a task by hand. It's
+there when the runner lets this Mac write to the board. ⌘R re-reads it.
 
 ## Following a task to its changes
 

@@ -223,8 +223,6 @@ struct OrchestratorRowView: View {
     /// The navigator has the keyboard: selected reads in the accent.
     let keyed: Bool
 
-    @Environment(\.colorScheme) private var scheme
-
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
             // In the glyph column, centered under the carets, so its title is
@@ -281,25 +279,8 @@ struct OrchestratorRowView: View {
         .accessibilityIdentifier("navigator-orchestrator")
     }
 
-    /// Its state as an icon: the app's own agent status mark while it
-    /// works or starts (ov-177: never the system's spinner), the
-    /// accent dot when it needs you or has news, else its glyph, dimmed when
-    /// there's nothing running.
-    @ViewBuilder
-    private var icon: some View {
-        switch model.state {
-        case .working, .starting:
-            StatusGlyph(status: model.status ?? (model.state == .starting ? .starting : .working))
-        case .needsYou, .unread:
-            Circle()
-                .fill(model.state == .needsYou ? Color.accentColor : GlancePalette.amber(scheme))
-                .frame(width: 7, height: 7)
-        case .idle:
-            Image(systemName: "person.wave.2").font(.system(size: 10)).foregroundStyle(.secondary)
-        case .none, .stopped:
-            Image(systemName: "person.wave.2").font(.system(size: 10)).foregroundStyle(.tertiary)
-        }
-    }
+    /// Its state as an icon, the title bar's mark too (`OrchestratorMark`).
+    private var icon: some View { OrchestratorMark(state: model.state, status: model.status) }
 
     /// No orchestrator: start one, or take up a running terminal.
     @ViewBuilder

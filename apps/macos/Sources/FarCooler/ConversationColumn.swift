@@ -58,7 +58,7 @@ enum ConversationColumn {
     }
 
     /// Whether the orchestrator finished a turn nobody has seen: an unread
-    /// dot on its workspace's row and in this column's header, never an
+    /// dot on its workspace’s row and on the title bar’s mark, never an
     /// inbox item (ruling 10). `done` is finished-and-unseen, and seeing the
     /// pane turns it idle, which clears the dot.
     static func unread(_ seat: BoardPane?) -> Bool {
@@ -70,9 +70,15 @@ enum ConversationColumn {
         "An orchestrator runs this workspace’s board. It reads the charter, dispatches agents, and asks you when it needs a decision."
 }
 
-/// The conversation column's header: `Orchestrator`, its harness and status,
-/// the unread dot, and its menu.
-struct ConversationHeader: View {
+/// The orchestrator's menu: what the conversation column's header held
+/// until the header went (ov-214), and now the title bar's status area's
+/// orchestrator ⌄ (`TitleStatusView`). Replace Orchestrator, Show Charter
+/// and Wake the Agent When You Answer, the chat switch, Restart and Stop
+/// Being Orchestrator; with none running and a runner that can act, Start
+/// Orchestrator.
+///
+/// The menu's items, not a menu: whoever draws the menu draws its label.
+struct OrchestratorMenu: View {
     let seat: BoardPane?
     let charter: CharterAccess?
     let canAct: Bool
@@ -88,56 +94,37 @@ struct ConversationHeader: View {
     /// row, its only home before, went (ov-178).
     var wakeOnAnswer: Bool? = nil
     var onSetWakeOnAnswer: (Bool) -> Void = { _ in }
-
-    @Environment(\.colorScheme) private var scheme
+    /// With no orchestrator: the harnesses Start Orchestrator offers
+    /// (`ConversationColumn.offers`), and what starting one does.
+    var starts: [OrchestratorHarness] = []
+    var onStart: (OrchestratorHarness) -> Void = { _ in }
 
     var body: some View {
-        HStack(spacing: 8) {
-            if let seat { StatusGlyph(status: seat.terminal.status) }
-            Text("Orchestrator").font(ColumnHeader.font(.semibold))
-            if let name = Self.agentName(seat) {
-                Text(name)
-                    .font(ColumnHeader.font())
-                    .foregroundStyle(.secondary)
+        if canAct {
+            if seat == nil, !starts.isEmpty {
+                Menu("Start Orchestrator") {
+                    ForEach(starts) { harness in Button(harness.title) { onStart(harness) } }
+                }
             }
-            if ConversationColumn.unread(seat) {
-                Circle()
-                    .fill(GlancePalette.amber(scheme))
-                    .frame(width: 6, height: 6)
-                    .help("The orchestrator finished a turn you haven’t seen")
-                    .accessibilityLabel("Unread")
-            }
-            Spacer(minLength: 0)
             // Drawn with no orchestrator too (ov-178): Show Charter and Wake
             // the Agent When You Answer are the workspace's, not the seat's.
-            let items = Self.menu(hasSeat: seat != nil, charter: charter, wakeOnAnswer: wakeOnAnswer)
-            if canAct, seat != nil || !items.isEmpty {
-                Menu {
-                    ForEach(items, id: \.self) { item in menuItem(item) }
-                    if seat?.terminal.canSwitchPaneMode == true || seat?.terminal.isAgentPane == true {
-                        Button(seat?.terminal.isAgentPane == true ? "Show as Terminal" : "Show as Chat", action: onTogglePaneMode)
-                    }
-                    if seat != nil {
-                        Divider()
-                        Button("Restart", action: onRestart)
-                        Button("Stop Being Orchestrator", action: onStepDown)
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Orchestrator actions")
+            ForEach(Self.menu(hasSeat: seat != nil, charter: charter, wakeOnAnswer: wakeOnAnswer), id: \.self) { item in
+                menuItem(item)
+            }
+            if seat?.terminal.canSwitchPaneMode == true || seat?.terminal.isAgentPane == true {
+                Button(seat?.terminal.isAgentPane == true ? "Show as Terminal" : "Show as Chat", action: onTogglePaneMode)
+            }
+            if seat != nil {
+                Divider()  // style-exempt: menu
+                Button("Restart", action: onRestart)
+                Button("Stop Being Orchestrator", action: onStepDown)
             }
         }
-        .padding(.horizontal, 12)
-        .columnHeader()
     }
 }
 
-extension ConversationHeader {
-    /// The workspace's items in the header's menu, in `WorkspaceMenu`'s
+extension OrchestratorMenu {
+    /// The workspace's items in the menu, in `WorkspaceMenu`'s
     /// order: Replace Orchestrator with one seated (starting one is the
     /// column's own placeholder's), Show Charter where this runner says
     /// where it is, and Wake the Agent When You Answer from a runner that
@@ -181,7 +168,7 @@ extension ConversationHeader {
         }
     }
 
-    /// The agent the header names beside "Orchestrator": its harness while
+    /// The agent the navigator's orchestrator row names: its harness while
     /// one runs, and nothing otherwise. A lost pane reports no process, which
     /// `Terminal.name(of:)` calls "shell", and "Orchestrator · shell" named
     /// the one thing it wasn't (checklist O7).

@@ -234,7 +234,7 @@ struct TileView: View {
                 // replaced: every pane scaled from the wrong `group.columns`,
                 // then snapping once tmux was finally told. That is the
                 // wrong-size flash on every switch.
-                .task(id: Viewport(size: size, group: group, font: preferences.revision)) {
+                .task(id: Viewport(size: size, group: group, font: preferences.revision, header: headerHeight(group))) {
                     if size != lastViewportSize {
                         try? await Task.sleep(for: .milliseconds(250))
                         guard !Task.isCancelled else { return }
@@ -267,6 +267,7 @@ struct TileView: View {
             refusal: refusal,
             isFocused: isFocused,
             isZoomed: rect.zoomed,
+            showsHeader: TileGeometry.showsHeader(panes: group.panes.count, isChanges: terminal.isChangesPane),
             index: (group.panes.firstIndex(of: rect) ?? 0) + 1,
             size: size,
             // The pane's grid as tmux reports it, which is the only correct
@@ -282,6 +283,20 @@ struct TileView: View {
     }
 
     // MARK: - Viewport
+
+    /// The header height each pane in `group` draws: `TileGeometry.showsHeader`
+    /// for its panes, so the viewport subtracts exactly what's drawn.
+    private func headerHeight(_ group: PaneGroup) -> CGFloat {
+        Self.headerHeight(group, terminals: worktree.terminals)
+    }
+
+    /// `headerHeight(_:)`, for `group` among `terminals`.
+    static func headerHeight(_ group: PaneGroup, terminals: [Terminal]) -> CGFloat {
+        let changes = group.panes.count == 1
+            && terminals.first { $0.id == group.panes[0].id }?.isChangesPane == true
+        return TileGeometry.showsHeader(panes: group.panes.count, isChanges: changes)
+            ? WorkspaceStyle.paneHeaderHeight : 0
+    }
 
     /// Everything that changes what this view's size is worth in cells.
     ///
@@ -301,10 +316,14 @@ struct TileView: View {
         /// How many panes: a pane closing changes the arrangement even where
         /// the depth doesn't say so (checklist O1).
         var panes: Int
+        /// The header each pane down a column pays for: none for a lone pane
+        /// (ov-214), so tmux is given the rows the header no longer takes.
+        var header: CGFloat
 
-        init(size: CGSize, group: PaneGroup, font: Int) {
+        init(size: CGSize, group: PaneGroup, font: Int, header: CGFloat) {
             self.size = size
             self.panes = group.panes.count
+            self.header = header
             let depth = TileGeometry.depth(of: group.panes)
             self.across = depth.across
             self.down = depth.down
@@ -320,11 +339,11 @@ struct TileView: View {
     /// columns any one pane has — is tmux's answer, read back off the layout and
     /// handed to that pane's renderer. See `TilePane`'s `grid`.
     private func send(viewport size: CGSize, for group: PaneGroup) async {
-        let viewport = Viewport(size: size, group: group, font: preferences.revision)
+        let viewport = Viewport(size: size, group: group, font: preferences.revision, header: headerHeight(group))
         guard
             let window = TileGeometry.viewport(
                 fitting: size, across: viewport.across, down: viewport.down,
-                cell: TerminalMetrics.cell(preferences.terminalFont()))
+                cell: TerminalMetrics.cell(preferences.terminalFont()), header: viewport.header)
         else { return }
 
         // Compared against what tmux HAS rather than against what we last asked
@@ -372,6 +391,10 @@ private struct TilePane: View {
     let refusal: () -> String?
     let isFocused: Bool
     let isZoomed: Bool
+    /// Whether the pane names itself in a header: not alone, where the
+    /// window's title and the title bar's status already do
+    /// (`TileGeometry.showsHeader`, ov-214).
+    let showsHeader: Bool
     let index: Int
     /// The pane's own size, so a drop can be placed against its edges.
     let size: CGSize
@@ -424,89 +447,8 @@ private struct TilePane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            if terminal.isChangesPane {
-                // Not gated on `isLive`, unlike the two surfaces below it. The
-                // process behind a changes pane exists to hold the rectangle
-                // and nothing else, so its liveness says nothing about whether
-                // the diff can be read — that comes from the daemon over the
-                // same channel the sidebar's counts do. A pane whose host was
-                // killed still shows the branch; it just cannot be split.
-                ChangesPane(changes: changes, isFocused: isFocused, agents: reviewTargets)
-                    .id("\(terminal.id)#changes")
-            } else if isLive, terminal.isAgentPane {
-                // Same empty `onResize` as the terminal case just below, and
-                // for the identical reason: `TileView.send(viewport:for:)`
-                // already tells tmux the WHOLE window's grid once, from the
-                // view's own pixel size and the same font metrics this pane
-                // would use — it does not consult what any one pane draws.
-                // An agent pane reporting its own geometry here would be
-                // exactly the bug the terminal case's comment describes,
-                // just for a chat instead of a VT grid.
-                AgentSurface(
-                    terminal: terminal,
-                    binary: binary,
-                    environment: environment,
-                    hostArguments: hostArguments,
-                    linkGeneration: linkGeneration,
-                    refusal: refusal,
-                    isFocused: isFocused,
-                    searchFiles: onSearchFiles,
-                    onResize: { _, _ in },
-                    onBackend: { paneBackend = $0 }
-                )
-                // Identity includes the PANE MODE, not just the terminal.
-                //
-                // A mode switch respawns the pane: new process, new epoch, new
-                // stream and input channel. With an id that ignores mode,
-                // SwiftUI reuses the existing view, which stays bound to the
-                // process that is gone — so the terminal comes back black and
-                // swallows every keystroke, and only switching layouts (which
-                // rebuilds everything) appears to fix it.
-                .id("\(terminal.id)#\(terminal.paneMode ?? "terminal")")
-            } else if isLive {
-                TerminalSurface(
-                    terminal: terminal.short,
-                    binary: binary,
-                    environment: environment,
-                    hostArguments: hostArguments,
-                    linkGeneration: linkGeneration,
-                    // Deliberately empty. A pane's size is a property of the layout
-                    // it is in, so a pane reporting its own grid would resize the
-                    // whole tmux window to fit itself and squash its neighbours —
-                    // which is exactly what happened while each pane was its own
-                    // window and the call survived the change. The view tells tmux
-                    // its total size once, in `TileView.send(viewport:for:)`, and
-                    // every pane's size falls out of that.
-                    onResize: { _, _ in },
-                    fontRevision: preferences.revision,
-                    isFocused: isFocused,
-                    // And falls back IN here, which is the other half of that
-                    // deal. Without it the pane's emulator sized itself from its
-                    // own pixels and held a grid tmux does not have.
-                    grid: grid
-                )
-                // Identity includes the PANE MODE, not just the terminal.
-                //
-                // A mode switch respawns the pane: new process, new epoch, new
-                // stream and input channel. With an id that ignores mode,
-                // SwiftUI reuses the existing view, which stays bound to the
-                // process that is gone — so the terminal comes back black and
-                // swallows every keystroke, and only switching layouts (which
-                // rebuilds everything) appears to fix it.
-                .id("\(terminal.id)#\(terminal.paneMode ?? "terminal")")
-            } else if LostPane.Kind(state: terminal.state) != nil {
-                // A lost pane still in a layout the app last read: the
-                // window it was in is gone, and this is the only place it's
-                // drawn. Its page, not a lone glyph nothing happens on
-                // (ov-191).
-                LostTerminalPage(terminal: terminal, hasKeyboard: isFocused, onAction: onAction)
-            } else {
-                ZStack {
-                    Color(nsColor: Palette.background)
-                    StatusGlyph(status: terminal.status, size: .lone)
-                }
-            }
+            if showsHeader { header.probed("pane-header") }
+            paneBody.probed("pane-body")
         }
         .paneCard(focused: isFocused || landing != nil)
         // Not animated at all.
@@ -523,6 +465,94 @@ private struct TilePane: View {
         .onDrop(
             of: [.text],
             delegate: PaneDropTarget(pane: terminal.id, size: size, onDrop: onDrop))
+    }
+
+    /// The pane's content under its header: its diff, its chat, its
+    /// terminal, or what's left of one.
+    @ViewBuilder
+    private var paneBody: some View {
+        if terminal.isChangesPane {
+            // Not gated on `isLive`, unlike the two surfaces below it. The
+            // process behind a changes pane exists to hold the rectangle
+            // and nothing else, so its liveness says nothing about whether
+            // the diff can be read — that comes from the daemon over the
+            // same channel the sidebar's counts do. A pane whose host was
+            // killed still shows the branch; it just cannot be split.
+            ChangesPane(changes: changes, isFocused: isFocused, agents: reviewTargets)
+                .id("\(terminal.id)#changes")
+        } else if isLive, terminal.isAgentPane {
+            // Same empty `onResize` as the terminal case just below, and
+            // for the identical reason: `TileView.send(viewport:for:)`
+            // already tells tmux the WHOLE window's grid once, from the
+            // view's own pixel size and the same font metrics this pane
+            // would use — it does not consult what any one pane draws.
+            // An agent pane reporting its own geometry here would be
+            // exactly the bug the terminal case's comment describes,
+            // just for a chat instead of a VT grid.
+            AgentSurface(
+                terminal: terminal,
+                binary: binary,
+                environment: environment,
+                hostArguments: hostArguments,
+                linkGeneration: linkGeneration,
+                refusal: refusal,
+                isFocused: isFocused,
+                searchFiles: onSearchFiles,
+                onResize: { _, _ in },
+                onBackend: { paneBackend = $0 }
+            )
+            // Identity includes the PANE MODE, not just the terminal.
+            //
+            // A mode switch respawns the pane: new process, new epoch, new
+            // stream and input channel. With an id that ignores mode,
+            // SwiftUI reuses the existing view, which stays bound to the
+            // process that is gone — so the terminal comes back black and
+            // swallows every keystroke, and only switching layouts (which
+            // rebuilds everything) appears to fix it.
+            .id("\(terminal.id)#\(terminal.paneMode ?? "terminal")")
+        } else if isLive {
+            TerminalSurface(
+                terminal: terminal.short,
+                binary: binary,
+                environment: environment,
+                hostArguments: hostArguments,
+                linkGeneration: linkGeneration,
+                // Deliberately empty. A pane's size is a property of the layout
+                // it is in, so a pane reporting its own grid would resize the
+                // whole tmux window to fit itself and squash its neighbours —
+                // which is exactly what happened while each pane was its own
+                // window and the call survived the change. The view tells tmux
+                // its total size once, in `TileView.send(viewport:for:)`, and
+                // every pane's size falls out of that.
+                onResize: { _, _ in },
+                fontRevision: preferences.revision,
+                isFocused: isFocused,
+                // And falls back IN here, which is the other half of that
+                // deal. Without it the pane's emulator sized itself from its
+                // own pixels and held a grid tmux does not have.
+                grid: grid
+            )
+            // Identity includes the PANE MODE, not just the terminal.
+            //
+            // A mode switch respawns the pane: new process, new epoch, new
+            // stream and input channel. With an id that ignores mode,
+            // SwiftUI reuses the existing view, which stays bound to the
+            // process that is gone — so the terminal comes back black and
+            // swallows every keystroke, and only switching layouts (which
+            // rebuilds everything) appears to fix it.
+            .id("\(terminal.id)#\(terminal.paneMode ?? "terminal")")
+        } else if LostPane.Kind(state: terminal.state) != nil {
+            // A lost pane still in a layout the app last read: the
+            // window it was in is gone, and this is the only place it's
+            // drawn. Its page, not a lone glyph nothing happens on
+            // (ov-191).
+            LostTerminalPage(terminal: terminal, hasKeyboard: isFocused, onAction: onAction)
+        } else {
+            ZStack {
+                Color(nsColor: Palette.background)
+                StatusGlyph(status: terminal.status, size: .lone)
+            }
+        }
     }
 
     /// Where the dragged pane would land, drawn over the half it would take.

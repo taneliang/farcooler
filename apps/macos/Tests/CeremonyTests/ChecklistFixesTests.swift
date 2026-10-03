@@ -13,18 +13,7 @@ struct ChecklistFixesTests {
         #expect(SearchEscape.after(query: "") == ("", false))
     }
 
-    /// F2: a narrow board says it short, on one line: a form that is
-    /// shorter than the sentence and still carries the count.
-    @Test func theWaitingPillHasAShortForm() {
-        for count in [1, 2, 12] {
-            let sentence = try! #require(TaskBoardModel.waitingSentence(count))
-            let short = TaskBoardView.waitingShort(count)
-            #expect(short.count < sentence.count, "the short form is no shorter: \(short)")
-            #expect(short.hasPrefix("\(count) "))
-        }
-    }
-
-    /// O7: a lost orchestrator's header names no "shell".
+    /// O7: a lost orchestrator is named no "shell".
     @Test func aLostOrchestratorsHeaderNamesNoShell() {
         let worktree = Worktree(
             id: "co", short: "co", task: "main", branch: "main", repository: "r", host: "",
@@ -32,9 +21,9 @@ struct ChecklistFixesTests {
         func seat(_ preset: String, state: String) -> BoardPane {
             BoardPane(terminal: Terminal(id: "t", short: "t", title: "t", preset: preset, state: state, epoch: 0), worktree: worktree)
         }
-        #expect(ConversationHeader.agentName(seat("claude", state: "running")) == "claude")
-        #expect(ConversationHeader.agentName(seat("", state: "lost")) == nil)
-        #expect(ConversationHeader.agentName(seat("zsh", state: "lost")) == nil)
-        #expect(ConversationHeader.agentName(nil) == nil)
+        #expect(OrchestratorMenu.agentName(seat("claude", state: "running")) == "claude")
+        #expect(OrchestratorMenu.agentName(seat("", state: "lost")) == nil)
+        #expect(OrchestratorMenu.agentName(seat("zsh", state: "lost")) == nil)
+        #expect(OrchestratorMenu.agentName(nil) == nil)
     }
 }
