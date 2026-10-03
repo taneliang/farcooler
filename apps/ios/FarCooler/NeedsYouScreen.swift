@@ -310,7 +310,8 @@ struct NeedsYouScreen: View {
                 $0.id == id
             })
         {
-            ShellMarkView(mark: ShellFleetMap.mark(of: terminal, now: Date()), size: 8)
+            ShellMarkView(
+                mark: ShellFleetMap.mark(of: terminal).said(answering: connection.isAnswering), size: 8)
                 .frame(width: markWidth)
         } else {
             Image(systemName: "circle.dashed")

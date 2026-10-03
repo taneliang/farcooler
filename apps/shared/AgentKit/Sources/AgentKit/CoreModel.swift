@@ -761,6 +761,31 @@ enum AgentActivity: String {
     }
 }
 
+extension GlanceMark {
+    /// One terminal's in-app mark, before the runner's link is applied.
+    ///
+    /// The daemon's activity word through `GlanceMark(status:)`, the table the
+    /// widgets and the watch read, so a tab, a row and a complication can't map
+    /// one agent two ways. Callers apply `said(answering:)` for the link.
+    ///
+    /// **Never dashed here, at any age.** `activityChangedAt` is when the state
+    /// began, not when the runner was last heard from, and an agent working for
+    /// three hours on a runner polled seconds ago is being vouched for right
+    /// now. The phone used to dash a quiet ring once that date was an hour old,
+    /// which drew every long turn as "Can't say" on a live link while the
+    /// widget, measuring from `observedAt`, drew it solid; see
+    /// `FleetSnapshot.lastHeard(of:)`, which names the same mistake. In-app,
+    /// "heard from" is the runner answering on this link, so the link is the
+    /// whole rule. `test/fixtures/glance-in-app.json` holds the cases, and
+    /// Android's `GlanceMark.of` reads the same file.
+    ///
+    /// Here rather than in `GlanceMark.swift` because that file is compiled
+    /// without this one by the watch complication, which has no `Terminal`.
+    init(terminal: Terminal) {
+        self.init(status: terminal.agent.rawValue)
+    }
+}
+
 // `Fleet.landingTerminal` was here: an agent waiting on you, else the first
 // terminal already running, else anything — the pane `FleetView` opened onto at
 // connect. It is gone because the phone no longer lands on a terminal at all;

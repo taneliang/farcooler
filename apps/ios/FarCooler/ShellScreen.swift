@@ -10,34 +10,6 @@ import SwiftUI
 // pieces of state a mounted pane cannot own for itself — `isVisible` and
 // `Notifier.shared.visibleTerminal`.
 
-/// How long the daemon's answer about a terminal stays fresh.
-///
-/// **This is not a fifth state competing with the daemon's four.** The rule
-/// `FleetView.swift:168-171` states — *"every state shown here is DERIVED by
-/// the daemon at the moment of asking; the phone never computes a terminal's
-/// state, because a client that re-derives can disagree with the daemon and
-/// with the Mac about the same terminal"* — is about what a terminal is DOING.
-/// A threshold on `activityChangedAt` (`CoreModel.swift:379`, a
-/// daemon-supplied timestamp) says how long ago the runner last told us
-/// anything, which is a fact about OUR knowledge. It cannot disagree with the
-/// daemon, because it is not an opinion about the same question.
-///
-/// So the dashed ring is drawn UNDER whatever the daemon's state already says
-/// and never instead of it: an agent that is blocked is `needsYou` however old
-/// the news is, because a blocked agent is waiting on you either way. Stale
-/// only ever displaces `working`, which is the state that means "nothing to
-/// report" and is exactly the one that stops being true when nobody has
-/// reported for an hour.
-///
-/// One named constant, in one place. If it ever has to agree with the Mac,
-/// that is the moment to push it into `farcooler_core::feed` — not the moment
-/// to copy it.
-///
-/// An hour, because the thing it has to separate is an agent that is thinking
-/// from an agent whose session has quietly died. Turns run for many minutes;
-/// a threshold in minutes would draw half a healthy fleet as unknown.
-private let staleAfter: TimeInterval = 60 * 60
-
 /// One worktree, as the phone's stack pushes it (ov-55, spec §6.1): the
 /// shell over that worktree's panes and nothing else. `WorktreeScreen` and
 /// the agent layout harness mount it.
@@ -154,10 +126,9 @@ struct ShellFleetMap {
     /// Read the fleet the shell draws — the entries the store holds — as the
     /// shell's.
     ///
-    /// Order is the store's. `now` is an argument rather than `Date()` so
-    /// staleness is a pure function of its inputs.
-    static func of(_ store: FleetStore, now: Date = Date()) -> ShellFleetMap {
-        of(store.entries, now: now)
+    /// Order is the store's.
+    static func of(_ store: FleetStore) -> ShellFleetMap {
+        of(store.entries)
     }
 
     /// The map itself, over the entries rather than the store that published
@@ -167,7 +138,7 @@ struct ShellFleetMap {
     /// that worktree's entry and nothing else. What a runner's workspaces
     /// contribute is the title of each orchestrator's tab (`Fleet.orchestratorTitles`): in Main's checkout, Billing's manager is not one
     /// more terminal of Main's.
-    static func of(_ entries: [FleetEntry], now: Date = Date()) -> ShellFleetMap {
+    static func of(_ entries: [FleetEntry]) -> ShellFleetMap {
         var map = ShellFleetMap(fleet: ShellFleet(worktrees: []), refs: [:])
         var worktrees: [ShellWorktree] = []
         // More than one runner in the map is what would make a worktree name
@@ -177,7 +148,7 @@ struct ShellFleetMap {
             let connection = run[0].connection
             let orchestrators = connection.fleet.orchestratorTitles() ?? [:]
             for entry in run {
-                let built = one(entry, naming: servers > 1, orchestrators: orchestrators, now: now)
+                let built = one(entry, naming: servers > 1, orchestrators: orchestrators)
                 worktrees.append(built.worktree)
                 for (id, ref) in built.refs { map.refs[id] = ref }
                 map.entries[built.worktree.id] = entry
@@ -206,7 +177,7 @@ struct ShellFleetMap {
     /// the title their tab takes (`orchestratorTitles`). They are tabs here —
     /// this worktree is where their panes are — marked as orchestrators.
     private static func one(
-        _ entry: FleetEntry, naming server: Bool, orchestrators: [String: String] = [:], now: Date
+        _ entry: FleetEntry, naming server: Bool, orchestrators: [String: String] = [:]
     ) -> (worktree: ShellWorktree, refs: [String: ShellPaneRef]) {
         var refs: [String: ShellPaneRef] = [:]
         let connection = entry.connection
@@ -245,7 +216,7 @@ struct ShellFleetMap {
                     // whose it is: in Main's checkout, Billing's manager is
                     // not one more terminal of Main's.
                     title: orchestrators[terminal.id] ?? HarnessName.display(terminal.label),
-                    mark: mark(of: terminal, now: now),
+                    mark: mark(of: terminal),
                     // The rank's own question, kept separate from the
                     // drawing's. See `ShellTab.wantsAttention`.
                     wantsAttention: terminal.agent.wantsAttention,
@@ -328,53 +299,17 @@ struct ShellFleetMap {
         return GlanceMark(attention: .toReview, core: nil)
     }
 
-    /// One agent's mark.
+    /// One agent's mark: `GlanceMark(terminal:)`, the rule AgentKit and
+    /// Android share through `test/fixtures/glance-in-app.json`.
     ///
-    /// In order, and the order is the whole rule. `wantsAttention` — blocked
-    /// or done, the app's single definition of "interrupt someone", shared
-    /// with the Mac — comes first and is never displaced by age. Staleness
-    /// comes next and displaces only `working`; see `staleAfter`.
-    ///
-    /// A terminal the host has said nothing about at all — no `activitySince`
-    /// — is NOT stale. Nil means "not told", which is a different thing from
-    /// "told a long time ago" and must never be rendered as it: an older
-    /// daemon sends no timestamp for anything, and reading that as silence
-    /// would draw a whole healthy fleet as unknown.
-    ///
-    /// **This is the same table `GlanceMark.init(agent:)` reads**, and it is
-    /// here rather than beside that one because it takes an `AgentActivity`:
-    /// `GlanceMark.swift` is compiled a file at a time by the watch's
-    /// complication and `CoreModel.swift` is not in that list, so a mapping
-    /// living there would break a build this app does not run.
-    ///
-    /// **`working` is no longer the catch-all it was.** The old `ShellMark`
-    /// had one case for a producing agent, an idle one, an agent the daemon
-    /// had said nothing about, and a Diff tab — and drawing them alike is the
-    /// defect this replaced: the bar could not say an agent was running even
-    /// in principle. The core axis carries that distinction now, and `idle`,
-    /// `none` and `unknown` land at a prompt rather than borrowing a claim
-    /// that some agent somewhere is producing.
-    static func mark(of terminal: Terminal, now: Date) -> GlanceMark {
-        // Latched, both of them, and never dashed. `GlanceMark.Link` states
-        // the rule — "blocked and to-review hold at any age; working and idle
-        // go dashed" — and `FleetSnapshot.Confidence.isLatched` is the same
-        // sentence about the same two statuses. An agent that stopped for you
-        // an hour ago is still stopped for you.
-        switch terminal.agent {
-        case .blocked: return GlanceMark(attention: .needsYou, core: .atAPrompt)
-        case .done: return GlanceMark(attention: .toReview, core: .atAPrompt)
-        default: break
-        }
-        let stale =
-            if let changed = terminal.activityChangedAt {
-                now.timeIntervalSince(changed) > staleAfter
-            } else {
-                false
-            }
-        return GlanceMark(
-            attention: .quiet,
-            core: terminal.agent == .working ? .producing : .atAPrompt,
-            link: stale ? .broken : .live)
+    /// Never dashed for age. This used to dash a quiet ring once
+    /// `activityChangedAt` was an hour old, but that is when the state began,
+    /// not when the runner was last heard from, so every agent working or idle
+    /// for over an hour read "Can't say" on a live link. Whether the runner is
+    /// answering is the whole of it, and the caller applies that with
+    /// `said(answering:)`.
+    static func mark(of terminal: Terminal) -> GlanceMark {
+        GlanceMark(terminal: terminal)
     }
 
     /// Which tab this worktree should be REOPENED on.
@@ -1302,7 +1237,6 @@ extension Connection {
     /// The panes working `row` on this runner, in fleet order, each named
     /// the way a menu item needs: the pane, then the worktree it is in.
     func boardAgents(for row: TaskRow) -> [BoardAgent] {
-        let now = Date()
         let found = fleet.worktrees.flatMap { worktree in
             let ordinals = worktree.ordinals()
             return row.livePanes(in: worktree.terminals).map { terminal in
@@ -1316,7 +1250,7 @@ extension Connection {
         return zip(found, titles).map { pane, title in
             BoardAgent(
                 id: pane.terminal.id, title: title,
-                mark: ShellFleetMap.mark(of: pane.terminal, now: now))
+                mark: ShellFleetMap.mark(of: pane.terminal).said(answering: isAnswering))
         }
     }
 }
