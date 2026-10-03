@@ -839,6 +839,55 @@ mod alone {
         f.refused_by_the_sandbox_alone().await;
     }
 
+    /// The per-call cost, printed: medians of 60 `git rev-parse HEAD` runs,
+    /// one process each, then the daemon's whole guarded call (the listing
+    /// and the call). Ignored: it measures, it doesn't check.
+    /// `cargo test -p farcooler-daemon --lib measure_the_overhead -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "a measurement, not a check"]
+    async fn measure_the_overhead() {
+        use std::time::{Duration, Instant};
+        let cwd = std::env::current_dir().unwrap();
+        let median = |mut runs: Vec<Duration>| {
+            runs.sort();
+            runs[runs.len() / 2]
+        };
+        let once = |cmd: &mut std::process::Command| {
+            let started = Instant::now();
+            assert!(cmd.current_dir(&cwd).args(["rev-parse", "HEAD"]).output().unwrap().status.success());
+            started.elapsed()
+        };
+        let launch = git_launch().unwrap();
+        let found = crate::git::absolute_git().unwrap();
+        type Make<'a> = Box<dyn Fn() -> std::process::Command + 'a>;
+        let rows: [(&str, Make); 3] = [
+            ("found git, unconfined", Box::new(|| std::process::Command::new(&found))),
+            ("real git, unconfined", Box::new(|| std::process::Command::new(&launch.program))),
+            ("real git, confined", Box::new(|| launch.command().unwrap())),
+        ];
+        for (name, make) in &rows {
+            let runs: Vec<Duration> = (0..60).map(|_| once(&mut make())).collect();
+            println!("{name:32} {:?}", median(runs));
+        }
+        // As before this change: the git found (on a Mac, the shim),
+        // unconfined; then the real git, unconfined and confined.
+        for (name, before, sandboxed) in
+            [("found git, unconfined", true, false), ("real git, unconfined", false, false), ("real git, confined", false, true)]
+        {
+            let mut runs = Vec::new();
+            for _ in 0..60 {
+                crate::git::PROGRAM.with(|p| *p.borrow_mut() = before.then(|| found.clone()));
+                UNSANDBOXED.with(|u| u.set(!sandboxed));
+                let started = Instant::now();
+                crate::git::git(&cwd, &["rev-parse", "HEAD"]).await.unwrap();
+                runs.push(started.elapsed());
+            }
+            crate::git::PROGRAM.with(|p| *p.borrow_mut() = None);
+            UNSANDBOXED.with(|u| u.set(false));
+            println!("guarded call, {name:22} {:?}", median(runs));
+        }
+    }
+
     /// What's on the list: git and its own, never a shell or interpreter,
     /// and never a directory.
     #[test]
