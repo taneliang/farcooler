@@ -1105,6 +1105,7 @@ dependencies = [
  "bytes",
  "farcooler-core",
  "farcooler-protocol",
+ "prost",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",

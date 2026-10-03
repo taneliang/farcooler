@@ -11,6 +11,8 @@ license.workspace = true
 tokio = { workspace = true, features = ["io-std"] }
 farcooler-protocol.workspace = true
 farcooler-core.workspace = true
+# `encoded_len`, so the push queue counts the bytes it holds rather than events.
+prost.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

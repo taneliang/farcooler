@@ -7,6 +7,7 @@
 //!   `MAX_QUEUED_CONTROL_BYTES`; staying above that for `TOO_SLOW_DISCONNECT`
 //!   disconnects the client with `ERROR_CODE_CLIENT_TOO_SLOW`.
 
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -14,16 +15,17 @@ use std::time::Duration;
 use bytes::Bytes;
 use farcooler_core::DomainError;
 use farcooler_protocol::v1::{
-    ClientHello, Error as WireErrorMsg, ErrorCode, Event, Response, Scope, ServerHello, WireEnvelope,
+    ClientHello, Error as WireErrorMsg, ErrorCode, Event, Request, Response, Scope, ServerHello, WireEnvelope,
     response, wire_envelope,
 };
 use farcooler_protocol::{MAX_QUEUED_CONTROL_BYTES, PROTOCOL_VERSION, ids};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{Notify, mpsc, watch};
 use tokio::time::Instant as TokioInstant;
 
 use crate::Handler;
 use crate::codec::{CodecError, FrameReader, FrameWriter, encode_frame};
+use crate::push::PushReceiver;
 
 /// Rule 4: the grace period before a client stuck above the control-channel
 /// ceiling gets disconnected.
@@ -85,6 +87,10 @@ pub struct Connection<R> {
     writer_task: tokio::task::JoinHandle<()>,
     watchdog_task: tokio::task::JoinHandle<()>,
     queued_bytes: Arc<AtomicU64>,
+    /// Fired by the writer each time it puts a frame on the wire, so a loop
+    /// that stopped taking pushes at `PUSH_HIGH_WATER` learns when to start
+    /// again without polling.
+    written: Arc<Notify>,
     too_slow: watch::Receiver<bool>,
     too_slow_after: Duration,
 }
@@ -149,7 +155,9 @@ impl<R: AsyncRead + Unpin> Connection<R> {
         let queued_bytes = Arc::new(AtomicU64::new(0));
         let (too_slow_tx, too_slow_rx) = watch::channel(false);
 
-        let writer_task = tokio::spawn(run_writer(writer, writer_rx, queued_bytes.clone()));
+        let written = Arc::new(Notify::new());
+        let writer_task =
+            tokio::spawn(run_writer(writer, writer_rx, queued_bytes.clone(), written.clone()));
         let watchdog_task =
             tokio::spawn(run_watchdog(queued_bytes.clone(), ceiling_bytes, too_slow_after, too_slow_tx));
 
@@ -159,6 +167,7 @@ impl<R: AsyncRead + Unpin> Connection<R> {
             writer_task,
             watchdog_task,
             queued_bytes,
+            written,
             too_slow: too_slow_rx,
             too_slow_after,
         }
@@ -304,10 +313,55 @@ fn reject_envelope(client_message_id: Bytes, err: DomainError) -> WireEnvelope {
     }
 }
 
+/// How far ahead of the wire this connection's writer may get on pushed
+/// output before `serve_connection` stops taking more from `Handler::pushes`.
+///
+/// The second half of what bounds a stalled client. A loop that drains the push
+/// queue into the writer as fast as it can just moves the backlog somewhere the
+/// sender cannot see it — which is what this used to do, into a channel only
+/// rule 4 was watching, and only after 30 seconds over 4 MiB. Stopping here
+/// leaves it in the push queue, whose sender can drop it and resync.
+///
+/// A quarter of `MAX_UNACKED_TERMINAL_BYTES`: enough to keep a link that is
+/// keeping up full, and well under the rule-4 ceiling, so terminal output alone
+/// never disconnects a slow client — it gets a fresh picture instead.
+pub const PUSH_HIGH_WATER: u64 = farcooler_protocol::MAX_UNACKED_TERMINAL_BYTES / 4;
+
+/// How many requests one connection may have in flight at once.
+///
+/// Requests no longer wait for the one before them (see `serve_connection`),
+/// so something has to stop a client from opening a thousand. At the limit the
+/// loop stops reading new requests, which leaves the rest in the socket: the
+/// client is slowed, not refused.
+pub const MAX_REQUESTS_IN_FLIGHT: usize = 32;
+
+/// Which requests on one connection must run in the order they arrived: those
+/// naming the same target. See `serve_connection`.
+type Lane = Option<Bytes>;
+
 /// Rules 2 + 3 end to end: handshake first, then dispatch only `Request`
 /// frames to `handler`, echoing `request_id` on the way out. Any codec or
 /// protocol error returned by `recv`/`send` closes the connection before
 /// `handler` ever sees it.
+///
+/// **Requests run concurrently, in lanes.** This used to await each request
+/// inside the loop, so one slow call — a diff, a git query, a tmux timeout —
+/// froze everything else on the connection: other requests, pushed terminal
+/// output and fleet news, and even the close arm, so a revoked device stayed
+/// connected until its call finished. Now a request is started and the loop
+/// goes on serving.
+///
+/// What still needs order is order WITHIN one object. Keystrokes to a pane are
+/// the case that cannot be got wrong — `terminal.write` "l" then "s" must not
+/// type "sl" — and so are a paste's chunks, a resize between writes, and an
+/// agent's prompt, queue edits and cancel. Every one of those names the
+/// terminal as `target_resource_id`, so requests are queued by target: one at a
+/// time per target, in arrival order, and targets run alongside each other.
+/// Requests that name no target share one lane of their own, which keeps them
+/// in the order they always ran in.
+///
+/// Responses go out as requests finish, so they may arrive in a different order
+/// from the requests; `request_id` is what pairs them, as it always was.
 pub async fn serve_connection<R, H>(
     conn: &mut Connection<R>,
     cfg: &HandshakeConfig,
@@ -341,8 +395,18 @@ where
     // sequence cut in half rather than a screen one refresh out of date. See
     // `Handler::pushes`.
     let mut pushes = handler.pushes();
+    let written = conn.written.clone();
+
+    // The requests running now, at most one per lane.
+    let mut running = Vec::new();
+    // Every lane with a request running, and what is waiting behind it.
+    let mut lanes: HashMap<Lane, VecDeque<Request>> = HashMap::new();
+    let mut in_flight = 0usize;
 
     loop {
+        // Read before the `select!`, because `conn.recv()` below holds `conn`.
+        let push_room = conn.queued_bytes() < PUSH_HIGH_WATER;
+
         tokio::select! {
             // Biased so a pending request is always answered before events are
             // drained. Without it a busy fleet could starve request handling,
@@ -352,6 +416,7 @@ where
             // that must win a tie: a revoked device whose request is already
             // sitting in the socket buffer would otherwise be served it, and
             // the whole point of closing the connection is that it is not.
+            // Requests still running are dropped with the loop, unanswered.
             biased;
 
             _ = &mut closed => {
@@ -359,22 +424,41 @@ where
                 return Ok(());
             }
 
-            incoming = conn.recv() => {
-                let envelope = incoming?;
-                let request = match envelope.body {
-                    Some(wire_envelope::Body::Request(req)) => req,
-                    _ => return Err(ConnectionError::UnexpectedFrame),
-                };
-
-                let request_id = request.request_id.clone();
-                let mut response = handler.handle(request).await;
+            (lane, request_id, mut response) = next_finished(&mut running) => {
                 response.request_id = request_id;
-
                 conn.send(&WireEnvelope {
                     protocol_version: PROTOCOL_VERSION,
                     message_id: ids::new_id(),
                     body: Some(wire_envelope::Body::Response(response)),
                 }).await?;
+                in_flight -= 1;
+
+                // The next request in this lane, now that the one ahead of it
+                // has finished.
+                let next = lanes.get_mut(&lane).and_then(VecDeque::pop_front);
+                match next {
+                    Some(request) => running.push(Box::pin(dispatch(handler, lane, request))),
+                    None => {
+                        lanes.remove(&lane);
+                    }
+                }
+            }
+
+            incoming = conn.recv(), if in_flight < MAX_REQUESTS_IN_FLIGHT => {
+                let envelope = incoming?;
+                let request = match envelope.body {
+                    Some(wire_envelope::Body::Request(req)) => req,
+                    _ => return Err(ConnectionError::UnexpectedFrame),
+                };
+                in_flight += 1;
+                let lane: Lane = request.target_resource_id.clone();
+                match lanes.get_mut(&lane) {
+                    Some(waiting) => waiting.push_back(request),
+                    None => {
+                        lanes.insert(lane.clone(), VecDeque::new());
+                        running.push(Box::pin(dispatch(handler, lane, request)));
+                    }
+                }
             }
 
             event = next_event(&mut events) => {
@@ -398,11 +482,13 @@ where
             // broadcast events are rare, so putting them first costs a busy
             // stream nothing measurable, while a `yes` in a pane would otherwise
             // keep a workspace change waiting indefinitely.
-            pushed = next_push(&mut pushes) => {
+            //
+            // And only while the writer has room. See `PUSH_HIGH_WATER`.
+            pushed = next_push(&mut pushes), if push_room => {
                 let Some(event) = pushed else {
-                    // Whatever was pushing has stopped — an attachment ended, or
-                    // this handler never had one. Not a reason to drop a working
-                    // connection: the client can attach again on it.
+                    // Whatever was pushing has stopped — this handler never had
+                    // anything to push. Not a reason to drop a working
+                    // connection.
                     pushes = None;
                     continue;
                 };
@@ -412,23 +498,59 @@ where
                     body: Some(wire_envelope::Body::Event(event)),
                 }).await?;
             }
+
+            // The writer put something on the wire, so there may be room for
+            // pushes again. Only listened for while there is not, and it does
+            // nothing itself: going round the loop re-reads `push_room`.
+            _ = written.notified(), if !push_room && pushes.is_some() => {}
         }
     }
+}
+
+/// One request, answered, and labeled with what the loop needs to file the
+/// answer: the lane to release, and the id to echo.
+async fn dispatch<H: Handler>(handler: &H, lane: Lane, request: Request) -> (Lane, Bytes, Response) {
+    let request_id = request.request_id.clone();
+    let response = handler.handle(request).await;
+    (lane, request_id, response)
+}
+
+/// Whichever running request finishes first, or never, when none is running.
+///
+/// A hand-rolled `FuturesUnordered`: at most `MAX_REQUESTS_IN_FLIGHT` of them,
+/// so polling each in turn costs nothing worth a dependency. A finished one is
+/// removed before it is returned, so nothing polls it again.
+fn next_finished<F>(
+    running: &mut Vec<std::pin::Pin<Box<F>>>,
+) -> impl std::future::Future<Output = (Lane, Bytes, Response)> + '_
+where
+    F: std::future::Future<Output = (Lane, Bytes, Response)>,
+{
+    std::future::poll_fn(move |cx| {
+        for index in 0..running.len() {
+            if let std::task::Poll::Ready(out) = running[index].as_mut().poll(cx) {
+                // `swap_remove` reorders the rest, which is harmless: a lane has
+                // at most one request in here, so order between them means
+                // nothing.
+                drop(running.swap_remove(index));
+                return std::task::Poll::Ready(out);
+            }
+        }
+        std::task::Poll::Pending
+    })
 }
 
 /// Await the next event addressed to this connection, or never, when there is
 /// nothing pushing to it. The `pending` arm is there for the reason
 /// `next_event` gives above: `select!` needs every branch to be a future.
-async fn next_push(
-    pushes: &mut Option<mpsc::UnboundedReceiver<Event>>,
-) -> Option<Event> {
+async fn next_push(pushes: &mut Option<PushReceiver>) -> Option<Event> {
     let Some(receiver) = pushes else {
         std::future::pending::<()>().await;
         unreachable!("pending never resolves");
     };
-    // No lag arm to handle, which is the whole reason this is an mpsc: a sender
-    // that outruns this connection queues, and the rule-4 watchdog decides when
-    // that has gone on too long. `None` means every sender is gone.
+    // No lag arm to handle: the queue never drops on its own. A sender that
+    // outruns this connection is refused at the queue's limit, and decides what
+    // to do about it. `None` means every sender is gone.
     receiver.recv().await
 }
 
@@ -468,8 +590,12 @@ async fn next_event(
 
 /// Drains queued frames onto the wire until the sender half closes (the
 /// `Connection` was dropped) or a write fails.
-async fn run_writer<W>(writer: W, mut rx: mpsc::UnboundedReceiver<Vec<u8>>, queued_bytes: Arc<AtomicU64>)
-where
+async fn run_writer<W>(
+    writer: W,
+    mut rx: mpsc::UnboundedReceiver<Vec<u8>>,
+    queued_bytes: Arc<AtomicU64>,
+    written: Arc<Notify>,
+) where
     W: AsyncWrite + Unpin,
 {
     let mut writer = FrameWriter::new(writer);
@@ -479,6 +605,7 @@ where
             break;
         }
         queued_bytes.fetch_sub(len, Ordering::SeqCst);
+        written.notify_one();
     }
 }
 
@@ -609,6 +736,91 @@ mod tests {
         .expect("watchdog must fire within the timeout");
 
         assert!(matches!(err, ConnectionError::TooSlow(_)));
+    }
+
+    /// **A client that stops reading costs a bounded number of bytes, however
+    /// fast its pushes come** (ov-118). A pane printing as fast as it can into a
+    /// connection whose peer never reads: the loop used to move every push
+    /// straight into the writer's channel, where it sat uncounted by anything
+    /// but rule 4 — and rule 4 waits 30 seconds over 4 MiB before acting. Now
+    /// the loop stops taking pushes at `PUSH_HIGH_WATER`, the backlog stays in
+    /// the push queue, and the push queue refuses past its own limit.
+    ///
+    /// The producer here clears the queue on a refusal, the policy
+    /// `terminal.attach` follows, so what is measured is the most this
+    /// connection ever holds: the queue plus the writer.
+    #[tokio::test]
+    async fn a_stalled_reader_holds_a_bounded_backlog_of_pushes() {
+        use crate::push::{Pushed, push_queue};
+        use farcooler_protocol::v1::{TerminalFrame, TerminalOutput, event::Payload, terminal_frame};
+
+        struct Pushing(std::sync::Mutex<Option<PushReceiver>>);
+        impl crate::Handler for Pushing {
+            fn peer(&self) -> crate::Peer {
+                crate::Peer { client_id: None, scope: Scope::Control }
+            }
+            fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
+                async move { Response { request_id: req.request_id, outcome: None } }
+            }
+            fn pushes(&self) -> Option<PushReceiver> {
+                self.0.lock().unwrap().take()
+            }
+        }
+
+        const QUEUE_LIMIT: usize = 64 * 1024;
+        const CHUNK: usize = 16 * 1024;
+        let (push, pushes) = push_queue(QUEUE_LIMIT);
+
+        // A tiny pipe whose far end is never read past the handshake.
+        let (server_io, client_io) = tokio::io::duplex(1024);
+        let (sr, sw) = tokio::io::split(server_io);
+        let mut server = Connection::new(sr, sw);
+        let backlog = server.queued_bytes.clone();
+        let handler = Pushing(std::sync::Mutex::new(Some(pushes)));
+        let serving = tokio::spawn(async move {
+            let cfg = HandshakeConfig { daemon_version: "t".into() };
+            let _ = serve_connection(&mut server, &cfg, &handler).await;
+        });
+
+        let (cr, cw) = tokio::io::split(client_io);
+        let mut client = Connection::new(cr, cw);
+        client.client_handshake("stalled", "0").await.unwrap();
+
+        // 32 MiB of output: eight times rule 4's ceiling.
+        let mut most = 0u64;
+        let mut refused = 0;
+        for i in 0..(32 * 1024 * 1024 / CHUNK) {
+            let frame = Event {
+                event_id: ids::new_id(),
+                sequence: 0,
+                payload: Some(Payload::TerminalFrame(TerminalFrame {
+                    terminal_id: Bytes::from_static(b"pane"),
+                    epoch: 0,
+                    kind: Some(terminal_frame::Kind::Output(TerminalOutput {
+                        start_sequence: (i * CHUNK) as u64,
+                        payload: Bytes::from(vec![b'y'; CHUNK]),
+                    })),
+                })),
+            };
+            if push.push(frame) == Pushed::Full {
+                refused += 1;
+                push.clear();
+            }
+            // The loop gets a turn after every push, as it would against a
+            // pane on another thread: the most favorable case for draining.
+            tokio::task::yield_now().await;
+            most = most.max(backlog.load(Ordering::SeqCst) + push.queued_bytes() as u64);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        most = most.max(backlog.load(Ordering::SeqCst) + push.queued_bytes() as u64);
+
+        let frame_overhead = 1024;
+        let bound = PUSH_HIGH_WATER + (CHUNK + frame_overhead) as u64 + QUEUE_LIMIT as u64;
+        assert!(refused > 0, "the scenario should actually fill the queue");
+        assert!(most <= bound, "a client that never reads held {most} bytes, more than {bound}");
+
+        serving.abort();
+        drop(client);
     }
 
     /// Below the ceiling, nothing trips: proves the watchdog isn't just a

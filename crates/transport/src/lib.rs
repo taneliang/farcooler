@@ -18,12 +18,14 @@ pub mod client;
 pub mod codec;
 pub mod connection;
 pub mod listener;
+pub mod push;
 pub mod stdio;
 
 pub use client::{Client, ClientError, request};
 pub use codec::{CodecError, FrameReader, FrameWriter};
 pub use connection::{Connection, ConnectionError, HandshakeConfig, TOO_SLOW_DISCONNECT, serve_connection};
 pub use listener::{SessionPreamble, UnixListenerServer};
+pub use push::{PushReceiver, PushSender, Pushed, push_queue};
 pub use stdio::serve_stdio;
 
 use farcooler_protocol::v1::{Request, Response, Scope};
@@ -100,11 +102,13 @@ pub trait Handler: Send + Sync + 'static {
     /// some is not a stale screen but an escape sequence cut in half, which a
     /// client cannot detect or recover from.
     ///
-    /// So this is an mpsc, and it is unbounded on purpose: the ceiling that
-    /// matters is already downstream, in rule 4's `queued_bytes` watchdog, which
-    /// disconnects a client that cannot keep up rather than letting the daemon
-    /// grow without limit. A second ceiling here would be a second, quieter
-    /// answer to the same question.
+    /// So this is a queue that never drops on its own, and bounded in bytes: see
+    /// `push`. It used to be an unbounded mpsc, on the theory that rule 4's
+    /// watchdog was the ceiling — but the watchdog only counts what has already
+    /// been handed to `Connection::send`, so a backlog waiting here was counted
+    /// nowhere. `serve_connection` now takes from this queue only while its own
+    /// writer is below `PUSH_HIGH_WATER`, which keeps a stalled client's backlog
+    /// HERE, where the sender can see it and decide what to drop.
     ///
     /// Taken once, before the first request, so a handler hands out its receiver
     /// exactly once and a second `serve_connection` on the same handler gets
@@ -112,7 +116,7 @@ pub trait Handler: Send + Sync + 'static {
     ///
     /// Defaulted to none, so a handler with nothing to push — a test, a one-shot
     /// session — needs no change.
-    fn pushes(&self) -> Option<tokio::sync::mpsc::UnboundedReceiver<farcooler_protocol::v1::Event>> {
+    fn pushes(&self) -> Option<push::PushReceiver> {
         None
     }
 
