@@ -198,3 +198,28 @@ extension TaskKeyLinksTests {
                     runner: .init(host: "R1"), place: .task(workspace: "w-main", task: .init(id: "t190", key: "ov-190"))))
     }
 }
+
+extension TaskKeyLinksTests {
+    /// **The Mac's own runner links too** (integ-3): its host target is
+    /// `""`, and a link to it once came out nil, so no key on this Mac's
+    /// boards became a link.
+    @Test("The Mac's own runner, host \"\", links its keys and opens them")
+    func theLocalRunner() throws {
+        let url = try #require(TaskKeyLinks.url(runner: "", key: "ov-190"))
+        let parsed = try #require(TaskKeyLinks.parse(url))
+        #expect(parsed.runner == "" && parsed.key == "ov-190")
+
+        var index = Self.index()
+        index.runner = ""
+        index.targets = index.targets.mapValues {
+            TaskKeyTarget(runner: "", workspace: $0.workspace, task: $0.task, key: $0.key)
+        }
+        final class Box: @unchecked Sendable { var targets: [TaskKeyTarget] = [] }
+        let box = Box()
+        let linker = TaskKeyLinker(index: index) { box.targets.append($0) }
+        let linked = linker.linked(AttributedString("see ov-190"))
+        let link = try #require(linked.runs.compactMap(\.link).first, "no link on the local runner")
+        #expect(linker.follow(link))
+        #expect(box.targets.map(\.task) == ["t190"])
+    }
+}

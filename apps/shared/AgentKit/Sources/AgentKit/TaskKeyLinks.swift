@@ -152,11 +152,16 @@ public enum TaskKeyLinks {
     public static func url(runner: String, key: String) -> URL? {
         var allowed = CharacterSet.urlPathAllowed
         allowed.remove("/")
-        guard let runner = runner.addingPercentEncoding(withAllowedCharacters: allowed),
-            let key = key.addingPercentEncoding(withAllowedCharacters: allowed), !runner.isEmpty, !key.isEmpty
+        guard let runner = runner.isEmpty ? thisMac : runner.addingPercentEncoding(withAllowedCharacters: allowed),
+            let key = key.addingPercentEncoding(withAllowedCharacters: allowed), !key.isEmpty
         else { return nil }
         return URL(string: "\(scheme)://\(host)/\(runner)/\(key)")
     }
+
+    /// The link's runner for the Mac's own, whose host target is `""`: an
+    /// empty path part would vanish from the URL. No runner is called "-",
+    /// which ssh would read as an option.
+    static let thisMac = "-"
 
     /// The runner and key a task link names, or nil for any other URL:
     /// another host under the scheme, a missing part, or one too many.
@@ -164,7 +169,7 @@ public enum TaskKeyLinks {
         guard url.scheme?.lowercased() == scheme, url.host()?.lowercased() == host else { return nil }
         let parts = url.pathComponents.filter { $0 != "/" }
         guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
-        return (parts[0], parts[1])
+        return (parts[0] == thisMac ? "" : parts[0], parts[1])
     }
 
     /// `text` with each key in `index` made a link to its task. A run that

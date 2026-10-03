@@ -53,4 +53,20 @@ struct TaskKeyLinkingTests {
             call[0], host: call[1], workspace: call[2], from: WorkspaceNavigation.BoardState(opened: false))
         #expect(landed.selection == ContentView.Selection.workspace(host: "studio", workspace: "ws-1", focus: .task("t190")))
     }
+
+    /// **This Mac's own runner, host `""`** (integ-3): its keys once made
+    /// no link at all, as `TaskKeyLinks.url` refused an empty runner.
+    @Test("This Mac's own runner links its keys, and a link opens its task")
+    func theLocalRunner() async throws {
+        let local = await store(host: "", workspace: "ws-1", prefix: "ov", tasks: [("t190", "ov-190")])
+        final class Opened: @unchecked Sendable { var calls: [[String]] = [] }
+        let opened = Opened()
+        let linker = TaskKeyLinker.mac(host: "", workspaces: [local.workspace], stores: [local]) {
+            opened.calls.append([$0, $1, $2])
+        }
+        let linked = linker.linked(AttributedString("see ov-190"))
+        let link = try #require(linked.runs.compactMap(\.link).first, "no link on this Mac's runner")
+        Markdown.openGuard(linker)(link)
+        #expect(opened.calls == [["t190", "", "ws-1"]])
+    }
 }

@@ -145,6 +145,20 @@ class TaskKeyLinksTest {
         )
     }
 
+    /** An empty runner id (the Mac's own, in AgentKit's twin) still makes a link that opens. */
+    @Test
+    fun `an empty runner's keys link and open`() {
+        val url = TaskKeyLinks.url("", "lo-3")
+        assertEquals("" to "lo-3", TaskKeyLinks.parse(url))
+        val navigated = mutableListOf<Route>()
+        val boards = mapOf(
+            "w-lo" to TaskBoard(listOf(TaskBoardColumn(TaskStatus.TODO, listOf(TaskRow("t3", "lo-3", "T", TaskStatus.TODO, 0L))))),
+        )
+        val linker = taskKeyLinker("", listOf(WorkspaceSummary("w-lo", taskPrefix = "lo")), boards) { navigated.add(it) }
+        assertTrue(linker.follow(url))
+        assertEquals(listOf<Route>(Route.BoardTask("", "w-lo", "t3")), navigated)
+    }
+
     /** A file in this checkout, found by walking up from wherever Gradle runs. */
     private fun repositoryFile(relative: String): String {
         var directory: File? = File(System.getProperty("user.dir") ?: ".").absoluteFile

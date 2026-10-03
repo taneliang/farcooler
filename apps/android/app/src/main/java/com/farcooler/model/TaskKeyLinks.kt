@@ -116,7 +116,15 @@ object TaskKeyLinks {
     const val HOST = "task"
 
     /** `farcooler://task/<runner>/<key>`, each part escaped. */
-    fun url(runner: String, key: String): String = "$SCHEME://$HOST/${escape(runner)}/${escape(key)}"
+    fun url(runner: String, key: String): String =
+        "$SCHEME://$HOST/${if (runner.isEmpty()) THIS_MAC else escape(runner)}/${escape(key)}"
+
+    /**
+     * The link's runner for an empty runner id (the Mac's own, in AgentKit's
+     * twin): an empty path part would drop out. No runner is called "-",
+     * which ssh would read as an option.
+     */
+    const val THIS_MAC = "-"
 
     /** The runner and key a task link names, or null for any other URL. */
     fun parse(url: String): Pair<String, String>? {
@@ -124,7 +132,8 @@ object TaskKeyLinks {
         if (!url.startsWith(prefix, ignoreCase = true)) return null
         val parts = url.substring(prefix.length).split('/')
         if (parts.size != 2 || parts.any { it.isEmpty() }) return null
-        return runCatching { unescape(parts[0]) to unescape(parts[1]) }.getOrNull()
+        val runner = if (parts[0] == THIS_MAC) "" else parts[0]
+        return runCatching { unescape(runner) to unescape(parts[1]) }.getOrNull()
     }
 
     /** The task [url] names on [index]'s runner, or null: another runner's, a key it hasn't read, or no task link. */
