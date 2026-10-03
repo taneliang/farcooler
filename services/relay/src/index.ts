@@ -1198,8 +1198,17 @@ async function notify(request: Request, env: Env): Promise<Response> {
   if (alerts && !body.title) return json({ error: 'title' }, 400)
   // A task notice's class, id, level and options (ov-94). Each is checked
   // here and dropped when it fails, never refused: the daemon ships apart.
-  const event = kind === 'task' ? eventOf(body.event) : undefined
-  const noticeId = kind === 'task' && typeof body.noticeId === 'string' && NOTICE_ID.test(body.noticeId)
+  // A status decision from a runner of this lane's era arrives as
+  // `kind: "decision"` carrying the task notice's fields, so an older relay
+  // still alerts on it and an older app's tap still opens its task. Read here
+  // exactly as a task notice: one alert, its classes, its id. An old runner's
+  // decision, with no `event`, alerts as it always has.
+  // TODO(ov-94): drop this once the runner stops sending legacy decisions,
+  // after one stable release (see `watch::task_notice::LEGACY_DECISION`).
+  const legacyDecision = kind === 'decision' && body.event === 'decision'
+  const taskLike = kind === 'task' || legacyDecision
+  const event = taskLike ? eventOf(body.event) : undefined
+  const noticeId = taskLike && typeof body.noticeId === 'string' && NOTICE_ID.test(body.noticeId)
     ? body.noticeId
     : undefined
   const options = event === 'decision' ? optionsOf(body.options) : undefined
@@ -1243,7 +1252,7 @@ async function notify(request: Request, env: Env): Promise<Response> {
   }
   // What this token last said, read before it is overwritten, so an ask
   // notice can tell a count that moved from one told again. See below.
-  const told = kind === 'ask' && needsYou !== null
+  const told = (kind === 'ask' || taskLike) && needsYou !== null
     ? (await env.DB.prepare(`SELECT needs_you FROM daemons WHERE id = ?`)
         .bind(daemon.id)
         .first<{ needs_you: number | null }>())?.needs_you ?? null
@@ -1288,7 +1297,7 @@ async function notify(request: Request, env: Env): Promise<Response> {
   // `alert: false` is an agent notice whose task notice carries the banner
   // (ov-94): the card below still moves, nothing buzzes. A task notice of a
   // class this relay doesn't know buzzes nobody either.
-  const quiet = body.alert === false || (kind === 'task' && event === undefined)
+  const quiet = body.alert === false || (taskLike && event === undefined)
   if (alerts && body.status !== 'working' && !quiet) {
     for (const device of devices.results ?? []) {
       // "When an agent finishes or fails", off. Per device inside the loop and
@@ -1299,9 +1308,9 @@ async function notify(request: Request, env: Env): Promise<Response> {
       // the other toggle's business and the reason this product exists — reading
       // this column on any other branch would take failures away from someone
       // who only silenced the endings.
-      if (kind !== 'task' && body.status === 'done' && device.notify_on_done === 0) continue
+      if (!taskLike && body.status === 'done' && device.notify_on_done === 0) continue
       // A task notice goes only where its class is on.
-      if (kind === 'task' && !wantsEvent(device, event!)) continue
+      if (taskLike && !wantsEvent(device, event!)) continue
       const ok = await sendPush(
         env,
         device.platform,
@@ -1323,7 +1332,7 @@ async function notify(request: Request, env: Env): Promise<Response> {
             : undefined,
           event,
           noticeId,
-          level: kind === 'task' ? levelOf(body.level, event) : undefined,
+          level: taskLike ? levelOf(body.level, event) : undefined,
           options,
         },
         device.environment,
@@ -1359,6 +1368,11 @@ async function notify(request: Request, env: Env): Promise<Response> {
   try {
     if (kind === undefined) {
       await pushActivity(env, daemon, body, devices.results ?? [])
+    } else if (taskLike) {
+      // A task notice moves the card only when the count it brings is news:
+      // every refresh is a priority-10 push to every device, and most task
+      // notices change nothing the card shows.
+      if (needsYou !== null && needsYou !== told) await refreshCard(env, daemon.account_id)
     } else if (kind === 'ask') {
       // The card moves only when the notice changed what it shows: the
       // header's count, or the headline's own ask. Every refresh is a

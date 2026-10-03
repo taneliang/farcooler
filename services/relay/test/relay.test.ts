@@ -7307,3 +7307,88 @@ describe('an agent notice the daemon marks alert: false', () => {
     expect(await roster('user_1')).toEqual(['term-1'])
   })
 })
+
+/// A runner sends a status decision as `kind: "decision"` with the task
+/// notice's fields (ov-94 fix round), so an old relay still alerts and an old
+/// app's tap still opens the task. This relay must read it as a task notice.
+describe('a legacy decision carrying task notice fields', () => {
+  const runner = '7537626f-0002-415e-1e11-000d48034210'
+  const noticeId = `t:${runner}:ov-90`
+  const decision = {
+    kind: 'decision',
+    title: 'ov-90 Pick a PDF library',
+    subtitle: 'Needs your decision · Which?',
+    task: 'ov-90',
+    runner,
+    noticeId,
+    event: 'decision',
+    level: 'time-sensitive',
+    options: ['pdfkit', 'pdf.js'],
+    needsYou: 1,
+  }
+
+  function alerts(calls: Call[]): Call[] {
+    return pushes(calls).filter(call => call.headers['apns-push-type'] !== 'liveactivity')
+  }
+
+  it('alerts once, under the task notice id, with its options', async () => {
+    const calls = watchFetch()
+    await register('user_1')
+    await pair('user_1', 'mine')
+
+    const response = await post('/v1/notify', decision, 'mine')
+
+    expect(await response.json()).toEqual({ delivered: 1 })
+    const sent = alerts(calls)
+    expect(sent.length).toBe(1)
+    expect(sent[0].headers['apns-collapse-id']).toBe(noticeId)
+    expect(sent[0].body.aps['thread-id']).toBe(noticeId)
+    expect(sent[0].body.kind).toBe('decision')
+    expect(sent[0].body.event).toBe('decision')
+    expect(sent[0].body.options).toEqual(['pdfkit', 'pdf.js'])
+  })
+
+  it("obeys a device's classes, as a task notice does", async () => {
+    const calls = watchFetch()
+    await register('user_1', { pushToken: 'quiet', notifyEvents: ['review'] })
+    await register('user_1', { pushToken: 'loud' })
+    await pair('user_1', 'mine')
+    await post('/v1/notify', decision, 'mine')
+    expect(alerts(calls).map(call => call.url.split('/device/')[1])).toEqual(['loud'])
+  })
+
+  it('still alerts an old decision with no event, as it always has', async () => {
+    const calls = watchFetch()
+    await register('user_1', { notifyEvents: [] })
+    await pair('user_1', 'mine')
+    await post('/v1/notify', { kind: 'decision', task: 'bil-7', title: 'bil-7 needs a decision', needsYou: 1 }, 'mine')
+    expect(alerts(calls).length).toBe(1)
+    expect(alerts(calls)[0].headers['apns-collapse-id']).toBeUndefined()
+  })
+})
+
+describe("a task notice and the lock screen's card", () => {
+  it('moves the card only when the count it carries changed', async () => {
+    const calls = watchFetch()
+    await register('user_1', { liveActivityStartToken: 'start-token' })
+    await pair('user_1', 'mine')
+    // A card that is up, so a refresh has something to push to.
+    await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working', label: 'claude', needsYou: 0 }, 'mine')
+    await env.DB.prepare(`DELETE FROM install_cards`).run()
+    await env.DB.prepare(
+      `INSERT INTO install_cards
+         (id, account_id, update_token, leader_terminal, leader_status, updated_at)
+       VALUES (?, 'user_1', 'update-token', 'term-1', 'working', ?)`,
+    )
+      .bind(crypto.randomUUID(), Date.now())
+      .run()
+    const cards = () => pushes(calls).filter(call => call.headers['apns-push-type'] === 'liveactivity').length
+    const before = cards()
+
+    const notice = { kind: 'task', title: 'ov-1 A', subtitle: 'Done', task: 'ov-1', event: 'done', noticeId: 't:r:ov-1' }
+    await post('/v1/notify', { ...notice, needsYou: 0 }, 'mine')
+    expect(cards()).toBe(before)
+    await post('/v1/notify', { ...notice, needsYou: 1 }, 'mine')
+    expect(cards()).toBe(before + 1)
+  })
+})
