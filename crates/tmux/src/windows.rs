@@ -288,7 +288,9 @@ impl TmuxServer {
     /// while it stays that way.
     pub async fn list_tagged_panes(&self) -> Result<Vec<TaggedPane>> {
         let mut panes = self.list_tagged_panes_once().await?;
-        let deadline = std::time::Instant::now() + EXIT_SETTLE;
+        let started = std::time::Instant::now();
+        let deadline = started + EXIT_SETTLE;
+        let mut nudged = started;
         loop {
             let unsettled: std::collections::HashSet<String> =
                 panes.iter().filter(|p| p.exit_unsettled()).map(|p| p.pane_id.clone()).collect();
@@ -306,6 +308,22 @@ impl TmuxServer {
             };
             if !waiting {
                 return Ok(panes);
+            }
+            // Waiting alone is not always enough: tmux can lose the wakeup for
+            // SIGCHLD and leave the pane's process an unreaped zombie, with no
+            // status, for as long as nothing else it started exits. Seen on
+            // CI's tmux 3.4 in about one run of the live suite in ten: the
+            // pane `Zs` under the server, nothing pending or blocked, and the
+            // code still missing a second after a 3 s wait. Any child of the
+            // server exiting makes it reap every zombie it has
+            // (`waitpid(WAIT_ANY)` in `server_child_signal`), so a `run-shell`
+            // of `true` is the nudge. That one recovered the code each time.
+            //
+            // `-b`, because without it the command waits on the very
+            // reaping it is meant to cause.
+            if nudged.elapsed() >= EXIT_NUDGE_EVERY {
+                nudged = std::time::Instant::now();
+                let _ = self.run(&["run-shell", "-b", "true"]).await;
             }
             tokio::time::sleep(EXIT_SETTLE_POLL).await;
             // A failed re-read is asked again rather than taken as the answer.
@@ -683,6 +701,12 @@ impl TmuxServer {
 /// its tty and ignored the hangup, pays it once.
 const EXIT_SETTLE: std::time::Duration = std::time::Duration::from_secs(3);
 const EXIT_SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(10);
+/// How long a dead pane goes without its status before tmux is made to reap.
+///
+/// Long enough that an exit which is merely slow settles on its own, so the
+/// common case runs nothing; short enough that a lost wakeup costs a tenth
+/// of a second rather than the whole `EXIT_SETTLE`.
+const EXIT_NUDGE_EVERY: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Parse one `list-panes -F` line. A line missing our tags is not ours.
 pub(crate) fn parse_pane_line(line: &str) -> Option<TaggedPane> {
