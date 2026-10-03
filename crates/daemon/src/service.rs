@@ -4303,7 +4303,10 @@ impl Service {
             return Err(DomainError::InvalidArgument { what: "this runner cannot be read yet" });
         }
         if derived.state != TerminalState::Lost {
-            return Err(DomainError::InvalidArgument { what: "terminal is not lost" });
+            // A conflict, not a bad argument: the request was fine and the world
+            // moved (restarted, or dismissed from another window), so a client can
+            // say that rather than blame itself.
+            return Err(DomainError::Conflict { what: "not_lost" });
         }
 
         self.delete_terminal_record(id, term.resource_version)
@@ -9009,6 +9012,22 @@ mod remove_root_tests {
 
         assert!(!service.hooks.is_tracking(term.id), "dismissal deletes the record; the \
                 assembler must go with it");
+    }
+
+    /// A Dismiss that arrives after the terminal came back is a conflict
+    /// naming `not_lost`, which the apps word as "already restarted or
+    /// dismissed" -- not `invalid-argument`, which they word as a bug in the app.
+    #[tokio::test]
+    async fn dismissing_a_terminal_that_is_not_lost_is_a_named_conflict() {
+        let (service, _root, worktree) = fixture_with_worktree().await;
+        assert!(service.inventory_snapshot().inventory_healthy);
+        let term = service
+            .store
+            .create_terminal(worktree.id, "pane", "claude", TerminalIntent::Running, 80, 24)
+            .unwrap();
+        assert_ne!(service.derive_one(&term).state, TerminalState::Lost);
+        let refused = service.dismiss_lost(term.id).await.expect_err("a live terminal is not dismissable");
+        assert!(matches!(refused, DomainError::Conflict { what: "not_lost" }), "{refused:?}");
     }
 
     /// A removal the daemon REFUSES must leave the conversation alone.

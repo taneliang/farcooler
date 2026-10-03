@@ -335,6 +335,9 @@ const SENTENCES: &[(&str, &str)] = &[
     // `terminal.agent_answer`'s two conflicts (`DomainError::Conflict`).
     ("not_held", "Someone already answered this."),
     ("not_delivered", "The answer didn't reach the agent. Try again."),
+    // `terminal.dismiss_lost` on a terminal that is not lost (any more): it was
+    // restarted or dismissed since the app drew it.
+    ("not_lost", "That terminal isn't lost anymore."),
 ];
 
 /// The word a client switches on, for a code that came off the wire.

@@ -187,7 +187,8 @@ struct WorkspaceActionsTests {
         let home = "error: \(Self.cliSaid("orchestrator_home"))\ncode: invalid-argument"
         #expect(said(home) == "The runner couldn’t make Billing’s folder, so no orchestrator started.")
         // A workspace deleted since the sidebar drew it: the CLI can't
-        // resolve its id, so no daemon answers and there's no code line.
+        // resolve its id, so no daemon answers; the miss carries its own
+        // `code: not-found` (ov-135).
         #expect(said("error: \(Self.cliNoMatch("workspace", Self.billing.id))") == "Billing isn’t on this runner anymore.")
         #expect(said("error: \(Self.cliNoMatch("workspace", Self.billing.id))", replace: true) == "Billing isn’t on this runner anymore.")
         #expect(said("error: gone\ncode: not-found") == "Billing isn’t on this runner anymore.")

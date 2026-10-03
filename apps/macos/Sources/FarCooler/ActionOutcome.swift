@@ -283,7 +283,11 @@ enum ActionCopy {
         case "auth-required":
             "This runner didn’t accept Far Cooler’s sign-in."
         case "resource-conflict":
-            "It changed while you were doing that. Try again."
+            // `not_lost` is a Dismiss that came after the terminal stopped
+            // being lost: the runner named it, so retrying is no help.
+            TaskFailure.what(in: message) == "not_lost"
+                ? "It was already restarted or dismissed."
+                : "It changed while you were doing that. Try again."
         case "host-offline":
             "The runner is offline."
         case "agent-not-connected":

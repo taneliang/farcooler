@@ -198,6 +198,21 @@ struct ActionOutcomeTests {
                 == "Couldn’t close “agent”. Check that the runner is reachable, then try again.")
     }
 
+    /// A Dismiss that lost a race says so, by the runner's `what:` word on
+    /// the `resource-conflict` code, and not "a problem in the app"
+    /// (`invalid-argument`) or "try again". Fails with the `not_lost` branch
+    /// removed from `ActionCopy.reason`.
+    @Test func aDismissThatLostTheRaceSaysTheTerminalMovedOn() {
+        let raced = "error: terminal isn’t lost anymore\ncode: resource-conflict\nwhat: not_lost"
+        #expect(
+            ActionCopy.sentence(.dismissLost, subject: "“agent”", message: raced)
+                == "Couldn’t dismiss “agent”. It was already restarted or dismissed.")
+        // Any other conflict keeps its own sentence.
+        #expect(
+            ActionCopy.reason("error: stale\ncode: resource-conflict")
+                == "It changed while you were doing that. Try again.")
+    }
+
     /// A Close whose stop worked, where the refresh after the stop reaped
     /// the record first: the remove finds nothing to remove, which is what
     /// Close asked for. The CLI says so as `code: not-found` (its
