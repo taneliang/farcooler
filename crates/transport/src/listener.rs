@@ -12,7 +12,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::net::UnixListener;
 
 use crate::Handler;
-use crate::connection::{Connection, HandshakeConfig, serve_connection};
+use crate::connection::{Connection, HandshakeConfig, refuse, serve_connection};
 
 /// What a caller said about itself in one line before the first frame.
 ///
@@ -180,6 +180,39 @@ impl UnixListenerServer {
     }
 }
 
+impl UnixListenerServer {
+    /// Accept connections only to refuse each one with `err`, until the
+    /// listener itself errors.
+    ///
+    /// A daemon that cannot serve still holds the socket this way, rather than
+    /// exiting. Exiting would leave a supervisor restarting it into the same
+    /// refusal every few seconds, and every client finding no socket at all,
+    /// which says nothing. This says the reason to each of them.
+    ///
+    /// The preamble is read and ignored: who is asking changes nothing about
+    /// the answer.
+    pub async fn refuse_every(&self, err: farcooler_core::DomainError) -> std::io::Result<()> {
+        loop {
+            let (stream, _addr) = self.listener.accept().await?;
+            let err = err.clone();
+            tokio::spawn(async move {
+                let (mut read_half, write_half) = stream.into_split();
+                let buffered = match read_opening(&mut read_half).await {
+                    Ok(Opening::Preamble(_, rest) | Opening::Frames(rest)) => rest,
+                    Err(e) => {
+                        tracing::debug!(error = %e, "connection closed before the protocol began");
+                        return;
+                    }
+                };
+                let reader = std::io::Cursor::new(buffered).chain(read_half);
+                if let Err(e) = refuse(reader, write_half, err).await {
+                    tracing::debug!(error = %e, "connection closed before it could be refused");
+                }
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::tempdir;
@@ -210,5 +243,48 @@ mod tests {
 
         let second = UnixListenerServer::bind(&sock_path);
         assert!(second.is_ok(), "a stale socket file must not block a fresh bind");
+    }
+
+    /// A daemon that cannot serve says why to whoever connects, with a
+    /// preamble or without one, and the client keeps the reason. Before
+    /// `Client::over` read a refusal, this arrived as `NoHello`, which every
+    /// caller words as "nothing is installed there".
+    #[tokio::test]
+    async fn a_refusing_daemon_tells_every_client_why() {
+        use tokio::io::AsyncWriteExt;
+
+        use crate::{Client, ClientError};
+
+        let dir = tempdir().unwrap();
+        let sock_path = dir.path().join("farcooler.sock");
+        let server = UnixListenerServer::bind(&sock_path).unwrap();
+        let serving = tokio::spawn(async move {
+            server.refuse_every(farcooler_core::DomainError::NewerData).await
+        });
+
+        for preamble in [None, Some("farcooler-session read phone-7\n")] {
+            let mut stream = tokio::net::UnixStream::connect(&sock_path).await.unwrap();
+            if let Some(line) = preamble {
+                stream.write_all(line.as_bytes()).await.unwrap();
+            }
+            let (read, write) = stream.into_split();
+            let err = Client::over(read, write, "test", "0").await.err().expect("refused");
+            match err {
+                ClientError::Daemon { code, retryable, message, what } => {
+                    assert_eq!(
+                        code,
+                        farcooler_protocol::v1::ErrorCode::VersionIncompatible as i32
+                    );
+                    assert!(!retryable);
+                    assert_eq!(
+                        message,
+                        "This runner's data was written by a newer Far Cooler. Update Far Cooler to use it."
+                    );
+                    assert_eq!(what, "newer_data");
+                }
+                other => panic!("expected the refusal, got {other:?}"),
+            }
+        }
+        serving.abort();
     }
 }

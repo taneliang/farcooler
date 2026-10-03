@@ -23,10 +23,12 @@ pub mod stdio;
 
 pub use client::{Client, ClientError, request};
 pub use codec::{CodecError, FrameReader, FrameWriter};
-pub use connection::{Connection, ConnectionError, HandshakeConfig, TOO_SLOW_DISCONNECT, serve_connection};
+pub use connection::{
+    Connection, ConnectionError, HandshakeConfig, TOO_SLOW_DISCONNECT, refuse, serve_connection,
+};
 pub use listener::{SessionPreamble, UnixListenerServer};
 pub use push::{PushReceiver, PushSender, Pushed, push_queue};
-pub use stdio::serve_stdio;
+pub use stdio::{refuse_stdio, serve_stdio};
 
 use farcooler_protocol::v1::{Request, Response, Scope};
 

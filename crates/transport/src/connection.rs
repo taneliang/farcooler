@@ -287,6 +287,31 @@ impl<R: AsyncRead + Unpin> Connection<R> {
     }
 }
 
+/// Answer the opening `ClientHello` with `err` instead of a `ServerHello`,
+/// and go no further.
+///
+/// For a daemon that is up but cannot serve: the database it would serve
+/// from is one it must not open (`DomainError::NewerData`). Saying so to
+/// whoever connects is the only way the reason reaches a person. Exiting
+/// instead puts it in a log nobody reads, and a client finds no socket at
+/// all, which reads exactly like a runner with nothing installed.
+///
+/// Whatever the first frame is gets the same answer: a client that skips
+/// the hello is not owed a different one. Written and shut down before this
+/// returns, rather than queued the way `Connection::send` queues, because a
+/// `--stdio` process exits the moment this is done.
+pub async fn refuse<R, W>(reader: R, writer: W, err: DomainError) -> Result<(), ConnectionError>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let first = FrameReader::new(reader).read_frame().await?.ok_or(ConnectionError::Closed)?;
+    let mut writer = FrameWriter::new(writer);
+    writer.write_frame(&reject_envelope(first.message_id, err)).await?;
+    writer.shutdown().await?;
+    Ok(())
+}
+
 /// There is no error variant on `ClientHello`/`ServerHello` in the proto, so
 /// a handshake-time rejection is carried as a `Response`/`Error`, echoing the
 /// `ClientHello`'s message id so the client can correlate it. This is the one
@@ -305,8 +330,7 @@ fn reject_envelope(client_message_id: Bytes, err: DomainError) -> WireEnvelope {
                 message: err.redacted_message(),
                 // Filled from the same source as `rpc::error_response`, so the
                 // two places that build this frame cannot answer differently.
-                // Always `""` today: the only error that reaches here is
-                // `VersionIncompatible`, which carries no detail.
+                // `""` for `VersionIncompatible`; `NewerData` names itself.
                 what: err.what().to_string(),
             })),
         })),

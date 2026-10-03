@@ -7,7 +7,7 @@
 use tokio::io::{stdin, stdout};
 
 use crate::Handler;
-use crate::connection::{Connection, ConnectionError, HandshakeConfig, serve_connection};
+use crate::connection::{Connection, ConnectionError, HandshakeConfig, refuse, serve_connection};
 
 /// Runs one handshake-then-dispatch session over stdin/stdout until the
 /// connection closes.
@@ -17,4 +17,11 @@ where
 {
     let mut conn = Connection::new(stdin(), stdout());
     serve_connection(&mut conn, &cfg, &handler).await
+}
+
+/// Answer the session on stdin/stdout with `err` and nothing else. The stdio
+/// side of `UnixListenerServer::refuse_every`, for a `--stdio` process that
+/// found no daemon to relay to and cannot serve one itself.
+pub async fn refuse_stdio(err: farcooler_core::DomainError) -> Result<(), ConnectionError> {
+    refuse(stdin(), stdout(), err).await
 }

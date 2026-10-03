@@ -104,8 +104,25 @@ where
             .await?;
 
         let envelope = reader.read_frame().await?.ok_or(ClientError::Closed)?;
-        let Some(wire_envelope::Body::ServerHello(server)) = envelope.body else {
-            return Err(ClientError::NoHello);
+        let server = match envelope.body {
+            Some(wire_envelope::Body::ServerHello(server)) => server,
+            // Refused at the handshake, with a reason. It used to land on
+            // `NoHello` with the reason dropped, which every caller reads as
+            // "nothing answered" and words as "is Far Cooler installed there?"
+            // — to a person whose runner had answered, and said exactly what
+            // was wrong. `Connection::refuse` and the version check in
+            // `Connection::handshake` are what send this.
+            Some(wire_envelope::Body::Response(Response {
+                outcome: Some(response::Outcome::Error(e)), ..
+            })) => {
+                return Err(ClientError::Daemon {
+                    code: e.code,
+                    retryable: e.retryable,
+                    message: e.message,
+                    what: e.what,
+                });
+            }
+            _ => return Err(ClientError::NoHello),
         };
         if server.selected_protocol_version != PROTOCOL_VERSION {
             return Err(ClientError::VersionMismatch {

@@ -7,7 +7,7 @@
 
 use farcooler_protocol::v1::ErrorCode;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum DomainError {
     #[error("authentication required")]
     AuthRequired,
