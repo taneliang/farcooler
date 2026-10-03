@@ -84,7 +84,7 @@ jobs:
     # Xcode 27 is only on this label, which GitHub calls a public preview.
     # To go back, put `macos-latest` here again and drop the check step.
     runs-on: xcode-27
-    timeout-minutes: 60
+    timeout-minutes: 90
     # Serialised behind the Linux builds, which is a real cost paid for a real
     # reason: the Mac app CARRIES them. `host_install.rs` looks for
     # `Resources/dist/<arch>-linux` inside the bundle before anywhere else,
@@ -290,7 +290,8 @@ jobs:
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
-            --wait
+            --wait \
+            --timeout 30m
           # Stapled so the app opens on a machine that is offline the first time
           # it runs — otherwise Gatekeeper has to phone home and a plane is
           # exactly where someone tries a new tool.
@@ -341,7 +342,8 @@ jobs:
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
-            --wait
+            --wait \
+            --timeout 30m
           xcrun stapler staple "$dmg"
 
       # R2 write (in `publish`, below) needs CLOUDFLARE_API_TOKEN and

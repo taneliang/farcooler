@@ -502,7 +502,8 @@ jobs:
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
-            --wait
+            --wait \
+            --timeout 30m
           xcrun stapler staple "$app"
           rm 'Far Cooler.zip'
 
@@ -541,7 +542,8 @@ jobs:
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
-            --wait
+            --wait \
+            --timeout 30m
           xcrun stapler staple "$dmg"
 
       # R2 write needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID — secrets,
