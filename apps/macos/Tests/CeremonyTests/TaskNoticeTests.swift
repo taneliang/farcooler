@@ -77,9 +77,14 @@ struct TaskNoticeTests {
     }
 
     @Test("An agent on a task is told about through its task, once the runner sends task notices")
-    func anAgentOnATaskFoldsIntoIt() {
+    func anAgentOnATaskFoldsIntoIt() throws {
         func pane(_ id: String) -> Terminal {
             Terminal(id: id, short: id, title: "claude", preset: "claude", state: "running", epoch: 0)
+        }
+        func lane(openTasks: Int, checkout: Bool = false) throws -> Worktree {
+            let tasks = (0..<openTasks).map { #"{"id":"t-\#($0)","key":"ov-\#($0)","title":"T","status":"in_progress"}"# }
+            let json = #"{"id":"w-1","short":"w1","task":"lane","branch":"b","worktree":"/tmp/w","state":"active","is_main_checkout":\#(checkout),"open_tasks":[\#(tasks.joined(separator: ","))],"terminals":[]}"#
+            return try JSONDecoder().decode(Worktree.self, from: Data(json.utf8))
         }
         var agent = pane("a1")
         agent.taskId = "task-1"
@@ -87,9 +92,15 @@ struct TaskNoticeTests {
         orchestrator.taskId = "task-1"
         orchestrator.role = "orchestrator"
         let loose = pane("l1")
-        #expect(Notifier.foldsIntoTask(agent, runnerSendsNotices: true))
-        #expect(!Notifier.foldsIntoTask(agent, runnerSendsNotices: false), "an older runner sends none")
-        #expect(!Notifier.foldsIntoTask(orchestrator, runnerSendsNotices: true))
-        #expect(!Notifier.foldsIntoTask(loose, runnerSendsNotices: true))
+        let bare = try lane(openTasks: 0)
+        #expect(Notifier.foldsIntoTask(agent, in: bare, runnerSendsNotices: true))
+        #expect(!Notifier.foldsIntoTask(agent, in: bare, runnerSendsNotices: false), "an older runner sends none")
+        #expect(!Notifier.foldsIntoTask(orchestrator, in: bare, runnerSendsNotices: true))
+        #expect(!Notifier.foldsIntoTask(loose, in: bare, runnerSendsNotices: true))
+        // Opened by hand in a lane with one open task: the runner folds it,
+        // so its banner is the task's too (ov-107). Not in the main checkout.
+        #expect(Notifier.foldsIntoTask(loose, in: try lane(openTasks: 1), runnerSendsNotices: true))
+        #expect(!Notifier.foldsIntoTask(loose, in: try lane(openTasks: 2), runnerSendsNotices: true))
+        #expect(!Notifier.foldsIntoTask(loose, in: try lane(openTasks: 1, checkout: true), runnerSendsNotices: true))
     }
 }

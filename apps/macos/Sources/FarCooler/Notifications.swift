@@ -155,10 +155,13 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     ///
     /// An agent working on a task is told about through the task, worded in
     /// terms of the task, once its runner sends task notices at all
-    /// (`task_notices`). An orchestrator is never a task's agent, and an agent
-    /// with no task notifies as it always has.
-    static func foldsIntoTask(_ terminal: Terminal, runnerSendsNotices: Bool) -> Bool {
-        runnerSendsNotices && terminal.taskId != nil && !terminal.isOrchestrator
+    /// (`task_notices`): this Mac posts that notice itself. Which task an
+    /// agent works on is `TaskLink.noticeTask`, the rule the phones use too,
+    /// so an agent opened by hand in a task's lane folds as the runner folds
+    /// it (ov-107). An orchestrator is never a task's agent, and an agent with
+    /// no task notifies as it always has.
+    static func foldsIntoTask(_ terminal: Terminal, in worktree: Worktree, runnerSendsNotices: Bool) -> Bool {
+        TaskLink.leavesBannerToTask(terminal, in: worktree, noticeReachesHere: runnerSendsNotices)
     }
 
     /// The notification for `notice`, posted from the runner `target` names.

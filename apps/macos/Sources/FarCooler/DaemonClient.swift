@@ -687,7 +687,7 @@ final class DaemonClient: ObservableObject {
                 terminal: terminal,
                 place: Notifier.place(of: terminal, in: fleet.worktrees[w], workspaces: fleet.workspaces),
                 foldsIntoTask: Notifier.foldsIntoTask(
-                    terminal, runnerSendsNotices: daemonBuild?.can("task_notices") == true))
+                    terminal, in: fleet.worktrees[w], runnerSendsNotices: daemonBuild?.can("task_notices") == true))
             reapIfExited(terminal)
             return
         }
