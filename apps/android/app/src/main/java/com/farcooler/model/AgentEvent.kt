@@ -88,6 +88,13 @@ sealed interface GapReason {
 
     data object Unparsed : GapReason
 
+    /**
+     * The turn ended `Failed`. Never on the wire as a gap: [Transcript] adds it
+     * from a `TurnEnded`'s failure, so the chat says what the row's "Failed"
+     * means. [kind] is the daemon's word; [backend] names the agent.
+     */
+    data class TurnFailed(val kind: String, val backend: String) : GapReason
+
     companion object {
         fun parse(element: JsonElement?): GapReason {
             if (element == null) return Unparsed
@@ -140,7 +147,29 @@ val GapReason.sentence: String
             "This session has no recorded turns yet — there’s nothing to restore."
         is GapReason.LoadFailed -> "This session couldn’t be reopened from where it left off."
         GapReason.Unparsed -> "Something happened here that this version can’t show."
+        is GapReason.TurnFailed -> failureSentence(kind, backend)
     }
+
+/**
+ * One plain line per failure kind, naming the agent. Never the backend's own
+ * text: that is for the log. Matched word for word to AgentKit's
+ * `GapReason.failureSentence`.
+ */
+fun failureSentence(kind: String, backend: String): String {
+    val (subject, objectName) = when (backend) {
+        "claude" -> "Claude" to "Claude"
+        "codex" -> "Codex" to "Codex"
+        // ACP carries any agent, and the transcript is not told which.
+        else -> "The agent" to "the agent"
+    }
+    return when (kind) {
+        "auth" -> "$subject couldn’t sign in."
+        "quota" -> "You’re out of credits for $objectName."
+        "rate_limited", "overloaded" -> "$subject is busy. Try again in a moment."
+        "network" -> "Couldn’t reach $objectName."
+        else -> "Something went wrong with $objectName."
+    }
+}
 
 /**
  * The adapter's own words about a refusal, to be shown as output.
@@ -168,6 +197,7 @@ val GapReason.transcript: String?
         GapReason.LoadUnsupported,
         GapReason.LoadEmpty,
         GapReason.Unparsed,
+        is GapReason.TurnFailed,
         -> null
     }
 
@@ -179,6 +209,16 @@ val GapReason.transcript: String?
  * the user the opposite of the truth.
  */
 val GapReason.isInformational: Boolean get() = this == GapReason.LoadEmpty
+
+/** A failed turn rather than a cut in history, so a row draws a warning, not scissors. */
+val GapReason.isTurnFailure: Boolean get() = this is GapReason.TurnFailed
+
+/**
+ * Why a turn failed, as the daemon classified it. [kind] stays a string so a
+ * word a later daemon invents still decodes, and reads as other. [detail] is the
+ * backend's own text, kept for logs and never shown.
+ */
+data class TurnFailure(val kind: String, val detail: String?)
 
 data class Diff(val path: String, val oldText: String?, val newText: String)
 
@@ -334,7 +374,12 @@ sealed interface AgentEvent {
     /** The slash-command menu, resent once per turn. Feeds the `/` picker. */
     data class CommandsAvailable(val commands: List<AgentChoice>) : AgentEvent
 
-    data class TurnEnded(val reason: String) : AgentEvent
+    /**
+     * [failure] is present only when [reason] is `Failed`, and absent from every
+     * daemon older than ov-140 — so it is nullable, and a turn that failed
+     * against an old daemon still ends.
+     */
+    data class TurnEnded(val reason: String, val failure: TurnFailure? = null) : AgentEvent
 
     /** Everything written but not yet sent, in order. Sent whole on any change. */
     data class PromptQueue(val items: List<QueuedPrompt>) : AgentEvent
@@ -419,7 +464,12 @@ sealed interface AgentEvent {
                     "ConfigSet" -> ConfigSet(body.string("id"), body.string("value"))
                     "ModeSet" -> ModeSet(body.string("agent_mode"))
                     "PromptQueue" -> PromptQueue(body.queuedPrompts("items"))
-                    "TurnEnded" -> TurnEnded(body.string("reason"))
+                    "TurnEnded" -> TurnEnded(
+                        body.string("reason"),
+                        (body["failure"] as? JsonObject)?.let { f ->
+                            TurnFailure(f.string("kind"), f.stringOrNull("detail"))
+                        },
+                    )
                     "Gap" -> Gap(GapReason.parse(body["reason"]))
                     else -> Gap(GapReason.Unparsed)
                 }

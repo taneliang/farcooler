@@ -699,6 +699,12 @@ class Transcript {
             }
 
             is AgentEvent.TurnEnded -> {
+                // A failed turn says so, in this app's words, rather than
+                // leaving the chat silent while the row says "Failed".
+                if (event.reason == "Failed") {
+                    val kind = event.failure?.kind ?: "other"
+                    append(TranscriptRow.Kind.Gap(GapReason.TurnFailed(kind, backend ?: "acp")))
+                }
                 // Nothing to DRAW, but it is a seam: the next message begins a
                 // new turn and must not be glued onto the tail of this one.
                 breakBeforeNextMessage = true

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.outlined.ContentCut
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.PanTool
 import androidx.compose.material.icons.outlined.Circle
@@ -63,6 +64,7 @@ import com.farcooler.model.TranscriptRow
 import com.farcooler.model.active
 import com.farcooler.model.doneCount
 import com.farcooler.model.isInformational
+import com.farcooler.model.isTurnFailure
 import com.farcooler.model.sentence
 import com.farcooler.model.transcript
 
@@ -409,7 +411,11 @@ private fun GapRow(reason: GapReason) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                if (reason.isInformational) Icons.Outlined.Info else Icons.Outlined.ContentCut,
+                when {
+                    reason.isInformational -> Icons.Outlined.Info
+                    reason.isTurnFailure -> Icons.Outlined.Warning
+                    else -> Icons.Outlined.ContentCut
+                },
                 contentDescription = null,
                 tint = tint,
                 modifier = Modifier.size(16.dp),

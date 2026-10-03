@@ -669,4 +669,47 @@ class TranscriptTest {
         assertEquals(0L, t.cursor)
         assertEquals(listOf(AgentChoice("default", "Manual")), t.availableModes)
     }
+
+    @Test
+    fun aFailedTurnSaysSoInOneLineNamingTheAgent() {
+        // ov-140: a failed turn's adapter text stopped being drawn as the agent
+        // speaking, and nothing replaced it. One line now, from the kind.
+        val t = Transcript()
+        t.apply(
+            listOf(
+                seq(0, AgentEvent.decode(
+                    """{"SessionStarted":{"session_id":"s","agent_mode":null,"available_modes":[],"model":null,"available_models":[],"config_options":[],"available_commands":[],"backend":"claude"}}""",
+                )),
+                seq(1, AgentEvent.decode(
+                    """{"TurnEnded":{"reason":"Failed","failure":{"kind":"auth","detail":"API Error: 401"}}}""",
+                )),
+            ),
+        )
+        val reason = (t.rows.lastOrNull()?.kind as? TranscriptRow.Kind.Gap)?.reason
+        assertNotNull("a failed turn drew nothing: ${t.rows}", reason)
+        assertEquals("Claude couldn’t sign in.", reason!!.sentence)
+        // The backend's own words are for the log.
+        assertNull(reason.transcript)
+    }
+
+    @Test
+    fun eachFailureKindHasItsOwnLine() {
+        fun line(kind: String, backend: String) = GapReason.TurnFailed(kind, backend).sentence
+        assertEquals("You’re out of credits for Codex.", line("quota", "codex"))
+        assertEquals("Claude is busy. Try again in a moment.", line("rate_limited", "claude"))
+        assertEquals("Claude is busy. Try again in a moment.", line("overloaded", "claude"))
+        assertEquals("Couldn’t reach Codex.", line("network", "codex"))
+        assertEquals("Something went wrong with the agent.", line("other", "acp"))
+        assertEquals("Something went wrong with Claude.", line("solar_flare", "claude"))
+    }
+
+    @Test
+    fun aTurnThatEndedWellOrAgainstAnOldDaemonDrawsNoFailure() {
+        val t = Transcript()
+        t.apply(listOf(seq(0, AgentEvent.decode("""{"TurnEnded":{"reason":"EndTurn"}}"""))))
+        assertTrue(t.rows.isEmpty())
+        // A `Failed` with no failure beside it is still a failure.
+        t.apply(listOf(seq(1, AgentEvent.decode("""{"TurnEnded":{"reason":"Failed"}}"""))))
+        assertEquals(1, t.rows.size)
+    }
 }
