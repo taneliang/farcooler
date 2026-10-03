@@ -217,30 +217,15 @@ struct ContentView: View {
             // this banner only appears once something has actually been acted
             // on, so the two never draw at once.
             detail
-                // Runner trouble and out-of-date runners, which only the
-                // sidebar's status bar said before (ov-86 review M1).
-                .safeAreaInset(edge: .top, spacing: 0) { runnerBanner }
-                // Attached here rather than beside each of the four
-                // `navigationTitle` calls, which sit in three different views
-                // that would each need the failure channel threaded down to
-                // them. This is the one place that decides which worktree the
-                // window is showing, which is exactly what the control acts on.
-                .openInEditorToolbar(worktree: detailWorktree) { editorError = $0 }
+                // The window's toolbar, inner to outer, so its items are
+                // laid out from the trailing end in (ov-105): see
+                // `LeadingToolbar` and `TrailingToolbar`.
                 .toolbar {
-                    // The workspace switcher, leading, after the traffic
-                    // lights, and Needs You beside it (ov-86): what the
-                    // sidebar was for, so it can stay hidden.
-                    ToolbarItem(placement: .navigation) { workspaceSwitcher }
-                        // A title popup, not a glass button: no capsule.
-                        .sharedBackgroundVisibility(.hidden)
-                    // Two items, not one: the system would otherwise draw
-                    // them inside a single capsule (ov-91).
-                    ToolbarSpacer(.fixed, placement: .navigation)
-                    ToolbarItem(placement: .navigation) {
-                        NeedsYouToolbarButton(
-                            count: store.needsYou.count, selected: selection == .needsYou,
-                            onSelect: { selection = .needsYou })
-                    }
+                    TrailingToolbar(
+                        troubles: runnerTroubles, stale: store.staleHosts,
+                        updates: store.staleHosts.compactMap(daemonUpdate(for:)), needsYou: store.needsYou.count,
+                        needsYouSelected: selection == .needsYou, onNeedsYou: { selection = .needsYou },
+                        perform: { perform($0) })
                 }
                 .toolbar {
                     // Not offered on a runner that has already said it cannot
@@ -256,7 +241,7 @@ struct ContentView: View {
                         selection, in: store.fleet, repositories: repositoryIDs(selection?.host ?? "")),
                         store.client(for: ws)?.changesSupported != false
                     {
-                        ToolbarItem(placement: .primaryAction) {
+                        ToolbarItem(placement: .automatic) {
                             Button {
                                 toggleChangesPane(in: ws)
                             } label: {
@@ -275,6 +260,21 @@ struct ContentView: View {
                                     : "Close the changes pane")
                         }
                     }
+                }
+                // Attached here rather than beside each of the four
+                // `navigationTitle` calls, which sit in three different views
+                // that would each need the failure channel threaded down to
+                // them. This is the one place that decides which worktree the
+                // window is showing, which is exactly what the control acts on.
+                .openInEditorToolbar(worktree: detailWorktree) { editorError = $0 }
+                // The sidebar button joins the switcher's group instead
+                // (ov-105). The title would repeat the switcher or the
+                // breadcrumb (`TitleBar`); the window keeps it for the
+                // Window menu.
+                .toolbar(removing: .sidebarToggle)
+                .toolbar(removing: TitleBar.showsTitle(for: selection) ? nil : .title)
+                .toolbar {
+                    LeadingToolbar(sidebarHidden: sidebarVisibility == .detailOnly, switcher: workspaceSwitcher)
                 }
                 .overlay(alignment: .top) {
                     ErrorBanner(message: errorBanner) { errorBanner = nil }
@@ -2233,7 +2233,7 @@ struct ContentView: View {
     private var isKeyWindow: Bool { windowBox.window?.isKeyWindow ?? true }
 
     /// The title bar's workspace switcher, naming where the window is.
-    private var workspaceSwitcher: some View {
+    private var workspaceSwitcher: WorkspaceSwitcherButton {
         let scene = selection.flatMap(workspaceScene)
         let repository = scene?.summary.flatMap { w in
             store.clients[scene?.host ?? ""]?.repositories.first { $0.id == (w.repository ?? w.id) }?.displayName
@@ -2311,45 +2311,24 @@ struct ContentView: View {
         }
     }
 
-    /// The runner banner over the detail: the sidebar's status bar's
-    /// trouble, whether or not the sidebar is out (review M1).
-    @ViewBuilder
-    private var runnerBanner: some View {
-        let offers = RunnerBanner.actions(
-            trouble: store.reading.isTrouble, unhealthy: showHosts ? store.unhealthyHosts : [],
-            stale: store.staleHosts)
-        if !offers.isEmpty {
-            VStack(spacing: 0) {
-                HStack(spacing: 7) {
-                    if offers.contains(.runnerStatus) {
-                        Circle()
-                            .fill(store.reading.isTrouble ? Color.red : Color.secondary)
-                            .frame(width: 7, height: 7)
-                        Text(store.reading.sentence)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if offers.contains(.retryRunner) {
-                        ForEach(store.unhealthyHosts, id: \.self) { host in
-                            Button("Reconnect \(host.isEmpty ? "This Mac" : host)") { store.reconnect(host) }
-                                .buttonStyle(.link)
-                                .font(.caption)
-                                .foregroundStyle(troubleColor(for: host))
-                                .help("\(host.isEmpty ? "this Mac" : host): \(troubleReason(for: host))")
-                        }
-                    }
-                    if offers.contains(.updateDaemon) {
-                        DaemonUpdateBar(targets: store.staleHosts.compactMap(daemonUpdate(for:)))
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                Divider()
-            }
-            .background(WorkspaceStyle.canvas)
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("runner-banner")
+    /// The runners `FleetStore.unhealthyHosts` names, with what's wrong
+    /// with each, for the toolbar's runner item.
+    private var runnerTroubles: [RunnerStatusItem.Trouble] {
+        store.unhealthyHosts.compactMap { host in
+            RunnerStatusItem.problem(store.state(of: host)).map { RunnerStatusItem.Trouble(host: host, problem: $0) }
+        }
+    }
+
+    /// What a line of the runner item's menu does. The update opens its
+    /// card from the item itself (`RunnerStatusMenu`).
+    private func perform(_ entry: RunnerStatusItem.Entry) {
+        switch entry {
+        case .reconnect(let host): store.reconnect(host)
+        case .reconnectAll: for trouble in runnerTroubles { store.reconnect(trouble.host) }
+        case .runners:
+            preferences.settingsTab = "machines"
+            openSettings()
+        case .note, .update, .separator: break
         }
     }
 

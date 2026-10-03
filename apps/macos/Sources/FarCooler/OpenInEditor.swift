@@ -154,7 +154,11 @@ extension View {
     ) -> some View {
         toolbar {
             if let worktree {
-                ToolbarItem(placement: .primaryAction) {
+                // Automatic, not primary: with the title gone from the
+                // toolbar, only the flexible space `LeadingToolbar` leaves
+                // pushes items to the trailing end, and it moves automatic
+                // ones only (ov-105).
+                ToolbarItem(placement: .automatic) {
                     OpenInEditorButton(worktree: worktree, onError: onError)
                 }
             }
