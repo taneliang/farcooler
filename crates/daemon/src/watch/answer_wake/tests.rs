@@ -128,13 +128,22 @@ impl Board {
 
     /// What production does about a pane whose record is stale: check 5
     /// drops it (`streamed_bracketed_paste`), the next sample follows the
-    /// pane afresh. Waits for the subscription where tmux can't report.
+    /// pane afresh. Waits for the subscription where production makes one.
     async fn refollow(&self, terminal: Uuid) {
         self.svc.streamed_bracketed_paste(terminal).await;
         self.watcher.sample().await;
-        if !tmux_tells_bracketing() {
+        if self.follows(terminal) {
             assert!(self.followed(terminal).await, "the sample never followed the pane");
         }
+    }
+
+    /// Whether production follows `terminal`'s output for bracketed paste:
+    /// where tmux can't report it, for a pane that may be typed answers
+    /// (`may_be_typed_to`). Read from the record as it is now, after any
+    /// adoption.
+    fn follows(&self, terminal: Uuid) -> bool {
+        let t = self.svc.store.get_terminal(terminal).unwrap();
+        !tmux_tells_bracketing() && t.pane_mode == PaneMode::Terminal && may_be_typed_to(&t.command_preset, t.role)
     }
 
     /// Whether, within two seconds, a live record follows the program now
@@ -208,7 +217,9 @@ impl Board {
         }
         si.show("working").await;
         si.show("idle").await;
-        self.stream_says(terminal.id, Some(true)).await;
+        if self.follows(terminal.id) {
+            self.stream_says(terminal.id, Some(true)).await;
+        }
     }
 
     /// The stand-in run as Node runs an npm install: a copy of perl named
@@ -992,7 +1003,6 @@ impl Board {
 /// agent its process proves it is. Before ov-193 its launch preset kept it
 /// from counting, and the task said "Nobody to tell".
 #[tokio::test]
-#[ignore = "ov-201: fails on CI Linux, the sample never follows the shell pane"]
 async fn a_hand_started_orchestrator_is_told() {
     let b = board().await;
     let orchestrator = b.adopted_shell().await;
@@ -1008,7 +1018,6 @@ async fn a_hand_started_orchestrator_is_told() {
 /// even the only pane in the task's lane, and one whose role reads Agent.
 /// Only the orchestrator's role stands in for an agent launch.
 #[tokio::test]
-#[ignore = "ov-201: fails on CI Linux, the sample never follows the shell pane"]
 async fn a_shell_pane_running_claude_by_hand_is_never_told() {
     let b = board().await;
     let task = b.svc.store.get_task(b.task.id).unwrap();
@@ -1024,6 +1033,9 @@ async fn a_shell_pane_running_claude_by_hand_is_never_told() {
     let shell = b.shell_pane().await;
     let shell = b.svc.set_terminal_role(shell.id, TerminalRole::Agent).await.unwrap();
     let si = b.stand_in(&shell, "claude", "claude").await;
+    // Nor followed for bracketed paste where tmux can't report it: that
+    // costs a pipe and a process, kept for panes that may be typed to.
+    assert!(!b.svc.paste_mode_followed(shell.id).await);
     b.doing(shell.id, AgentActivity::Idle).await;
     b.answer("Drill in");
     b.pump().await;

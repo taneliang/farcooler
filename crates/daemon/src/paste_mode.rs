@@ -25,8 +25,9 @@
 //! `RETRY_FIRST`, doubling to `RETRY_MOST`.
 //!
 //! **What following costs**, below tmux 3.7 only, and only for a pane whose
-//! terminal runs an agent preset in its TUI (never a shell, a chat or a
-//! Changes pane): the pane's `pipe-pane` and its `farcoolerd --fanout`
+//! terminal runs an agent preset in its TUI or is an orchestrator adopted
+//! from a shell (`answer_wake::may_be_typed_to`; never another shell, a chat
+//! or a Changes pane): the pane's `pipe-pane` and its `farcoolerd --fanout`
 //! process stay up for as long as the pane lives, where before they lived
 //! only while a client watched. That is one more process per agent pane,
 //! a second copy of everything the agent writes, and `pipe-pane`, which a

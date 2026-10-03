@@ -4408,7 +4408,7 @@ impl Service {
 
         self.inventory.refresh().await;
         // Respawned as its TUI, whichever mode the record still says.
-        self.follow_tui_paste_mode(id, &term.command_preset);
+        self.follow_tui_paste_mode(id, &term.command_preset, term.role);
 
         let restarted = self.store.update_terminal(
             id,
@@ -4993,7 +4993,7 @@ impl Service {
     pub fn wants_paste_mode_followed(&self, terminal: &models::Terminal) -> bool {
         if self.paste_modes.tmux_reports()
             || terminal.pane_mode != models::PaneMode::Terminal
-            || !crate::watch::answer_wake::is_an_agent_preset(&terminal.command_preset)
+            || !crate::watch::answer_wake::may_be_typed_to(&terminal.command_preset, terminal.role)
         {
             return false;
         }
@@ -5005,8 +5005,10 @@ impl Service {
     }
 
     /// Start following `id`'s pane output for bracketed paste (`paste_mode`),
-    /// when it runs an agent in its terminal and this runner's tmux can't
-    /// report the mode. In the background: nothing waits on the subscription.
+    /// when it runs an agent in its terminal, or is an orchestrator adopted
+    /// from a shell (`answer_wake::may_be_typed_to`), and this runner's tmux
+    /// can't report the mode. In the background: nothing waits on the
+    /// subscription.
     ///
     /// Called right after the daemon starts a program in a pane, so the
     /// subscription is usually in place before the program has set the mode,
@@ -5017,15 +5019,15 @@ impl Service {
     pub fn follow_paste_mode(&self, id: Uuid) {
         let Ok(term) = self.store.get_terminal(id) else { return };
         if term.pane_mode == models::PaneMode::Terminal {
-            self.follow_tui_paste_mode(id, &term.command_preset);
+            self.follow_tui_paste_mode(id, &term.command_preset, term.role);
         }
     }
 
     /// `follow_paste_mode`, for a caller that knows the pane runs a TUI
     /// (`preset`) whatever its record says yet: a restart respawns a chat
     /// pane as its TUI before the record is corrected.
-    fn follow_tui_paste_mode(&self, id: Uuid, preset: &str) {
-        if self.paste_modes.tmux_reports() || !crate::watch::answer_wake::is_an_agent_preset(preset) {
+    fn follow_tui_paste_mode(&self, id: Uuid, preset: &str, role: models::TerminalRole) {
+        if self.paste_modes.tmux_reports() || !crate::watch::answer_wake::may_be_typed_to(preset, role) {
             return;
         }
         let Some(pane) = self.inventory_snapshot().claimants(id).into_iter().find(|p| p.proves_life()).cloned() else {
@@ -5215,7 +5217,11 @@ impl Service {
             (models::TerminalRole::Orchestrator, Some(workspace)) => self.orchestrator_seat(workspace).await?.1,
             _ => Vec::new(),
         };
-        self.store.set_terminal_role_with(terminal, role, &vacated)
+        let adopted = self.store.set_terminal_role_with(terminal, role, &vacated)?;
+        // An adopted orchestrator may now be typed answers: follow it now
+        // rather than at the next sample.
+        self.follow_paste_mode(terminal);
+        Ok(adopted)
     }
 
     /// Where claims are recorded that the store doesn't hold. See `claims`.

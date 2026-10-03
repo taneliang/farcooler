@@ -42,9 +42,12 @@
 //! 5. The agent has bracketed paste on, as tmux reports it. tmux older than
 //!    3.7 (Ubuntu 24.04 has 3.4) can't report it, so there it's read from
 //!    the pane's own output (`paste_mode`), which the daemon follows for
-//!    every agent pane from when it starts the agent. Known only if the
-//!    daemon has seen every byte since the agent last set or reset it, and
-//!    the pane still runs that agent. Otherwise the answer waits, as for
+//!    every agent pane from when it starts the agent, and for an adopted
+//!    orchestrator from when it's adopted (`may_be_typed_to`). Known only
+//!    if the daemon has seen every byte since the agent last set or reset
+//!    it, and the pane still runs that program: for an adopted shell, the
+//!    shell, so an agent started there by hand before the adoption stays
+//!    unknown until it sets the mode again. Otherwise the answer waits, as for
 //!    any other check, and is typed if the agent sets the mode again in
 //!    time; if not, its note says why: "Not delivered: Far Cooler couldn't
 //!    tell whether the agent takes a paste…".
@@ -486,9 +489,7 @@ impl Watcher {
             t.workspace_id == Some(task.workspace_id)
                 && t.role == role
                 && t.pane_mode != PaneMode::Changes
-                && (t.pane_mode == PaneMode::Agent
-                    || is_an_agent_preset(&t.command_preset)
-                    || t.role == TerminalRole::Orchestrator)
+                && (t.pane_mode == PaneMode::Agent || may_be_typed_to(&t.command_preset, t.role))
                 && self.service.is_running(t)
         };
         let mut mine = store.terminals_for_task(task.id).ok()?;
@@ -528,6 +529,15 @@ impl Watcher {
 /// Whether a preset launches an agent this module can type to.
 pub(crate) fn is_an_agent_preset(preset: &str) -> bool {
     matches!(preset.split(':').next(), Some("claude" | "codex" | "cursor"))
+}
+
+/// Whether a terminal launched as `preset` in `role` may be typed an answer
+/// in its TUI: launched as an agent, or adopted as the orchestrator
+/// whatever it was launched as (`recipient`). What the daemon follows for
+/// bracketed paste below tmux 3.7 (`Service::follow_paste_mode`): a pane
+/// left out of that is never proven safe to paste into there.
+pub(crate) fn may_be_typed_to(preset: &str, role: TerminalRole) -> bool {
+    is_an_agent_preset(preset) || role == TerminalRole::Orchestrator
 }
 
 /// Which agent a program is, by its executable, or `None`.
