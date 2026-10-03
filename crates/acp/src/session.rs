@@ -14,7 +14,7 @@ use crate::normalize::{relativize, update_to_events};
 use crate::wire::Rpc;
 use farcooler_agent_core::event::{
     AgentChoice, AgentEvent, AgentGapReason, ConfigOption, Diff, EndReason, PermissionOption,
-    PromptImage, Role, ToolStatus,
+    PromptImage, ToolStatus,
 };
 use farcooler_agent_core::backend::BackendKind;
 use farcooler_agent_core::fs_guard::{FsGuardError, OpenError, Worktree};
@@ -836,7 +836,7 @@ impl RunningSession {
                 }
                 return Ok(Vec::new());
             }
-            Incoming::Failure { id, message } => {
+            Incoming::Failure { id, code, message } => {
                 // The turn's OTHER ending, and just as final. An adapter that
                 // cannot run the turn at all — not signed in, out of quota,
                 // an expired key — answers the prompt's id with `error`
@@ -854,25 +854,20 @@ impl RunningSession {
                     return Ok(Vec::new());
                 }
                 self.pending_prompt = None;
-                // `Refusal` rather than `EndTurn`: the turn did not run. The
-                // distinction is already in the vocabulary and already means
-                // this.
+                // `Failed`, and the adapter's sentence as its detail. It used
+                // to go in the transcript as an agent `Message` under
+                // `Refusal` — the adapter's words in the agent's mouth, and a
+                // word that means the MODEL declined. The kind ("auth" for
+                // "Run `codex login`") is what a client can act on; the
+                // sentence is kept for the log.
                 //
-                // The adapter's sentence goes in the transcript because it is
-                // the only thing that can tell the user what to do about it —
-                // "Run `codex login`" is actionable, "the turn ended" is not.
-                // The same reasoning as `AgentGapReason::LoadFailed`, and the
-                // message is the ADAPTER's own words rather than a Rust error.
-                // Ordered before `TurnEnded` so folding the batch in order
-                // lands on idle rather than on working.
-                return Ok(vec![
-                    AgentEvent::Message {
-                        role: Role::Agent,
-                        text: format!("The agent couldn’t run that turn: {message}"),
-                        parent: None,
-                    },
-                    AgentEvent::TurnEnded { reason: EndReason::Refusal },
-                ]);
+                // -32000 is the one JSON-RPC code ACP defines a meaning for:
+                // `auth_required`. Every other code says nothing about why.
+                let word = (code == Some(-32000)).then_some("auth_required");
+                let kind = farcooler_agent_core::event::classify_error(word, None, &message);
+                return Ok(vec![AgentEvent::TurnEnded {
+                    reason: EndReason::Failed { kind, detail: message },
+                }]);
             }
         };
 
@@ -1149,15 +1144,15 @@ mod tests {
             "the turn has to end, or activity stays Working: {events:?}"
         );
         assert_eq!(session.pending_prompt, None, "the turn is no longer in flight");
-        // The adapter’s own sentence is the only thing that can tell a user
-        // what to do about it, so it reaches the transcript.
-        assert!(
-            events.iter().any(|e| matches!(
-                e,
-                AgentEvent::Message { text, .. } if text.contains("Not authenticated")
-            )),
-            "{events:?}"
-        );
+        // Failed, as auth, with the adapter's sentence as the detail — and NOT
+        // as an agent message, which is where it used to go.
+        let [AgentEvent::TurnEnded { reason: EndReason::Failed { kind, detail } }] =
+            events.as_slice()
+        else {
+            panic!("one failed end and no words: {events:?}");
+        };
+        assert_eq!(*kind, farcooler_agent_core::event::FailureKind::Auth);
+        assert!(detail.contains("Not authenticated"), "{detail}");
     }
 
     #[test]

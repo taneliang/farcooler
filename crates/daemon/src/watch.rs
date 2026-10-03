@@ -4776,7 +4776,12 @@ impl Watcher {
                     } else {
                         "agent".to_string()
                     },
-                    agent_observation(self.service.agents().activity(id)),
+                    {
+                        // How the last turn went, off the protocol: the
+                        // same field a terminal pane's log fills below.
+                        turn_failed = self.service.agents().turn_failed(id);
+                        agent_observation(self.service.agents().activity(id))
+                    },
                     // The SAME question the label just asked, not a hardcoded
                     // yes. `set_pane_mode` writes the mode and the harness in
                     // two statements, so a sample landing between them — or any

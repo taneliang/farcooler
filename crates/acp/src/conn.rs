@@ -77,7 +77,10 @@ pub enum Incoming {
     ///
     /// Carries the adapter's own words, already folded by `error_detail`,
     /// because nothing on this side of the wire can say why the agent refused.
-    Failure { id: serde_json::Value, message: String },
+    ///
+    /// `code` is the JSON-RPC error code, kept because ACP gives one of them
+    /// a meaning: -32000 is `auth_required`.
+    Failure { id: serde_json::Value, code: Option<i64>, message: String },
 }
 
 /// What a JSON-RPC `error` object actually says, as one sentence.
@@ -125,7 +128,11 @@ fn classify_incoming(rpc: Rpc) -> Option<Incoming> {
     // here, so the turn never ended and the pane said Working forever.
     if let Some(error) = rpc.error {
         let id = rpc.id?;
-        return Some(Incoming::Failure { id, message: error_detail(&error) });
+        return Some(Incoming::Failure {
+            id,
+            code: error["code"].as_i64(),
+            message: error_detail(&error),
+        });
     }
     match (rpc.method, rpc.id, rpc.result) {
         // A response to something we sent and did not block on — in
@@ -680,7 +687,7 @@ mod tests {
             result: None,
             error: Some(serde_json::json!({ "code": -32000, "message": "Not authenticated" })),
         });
-        let Some(Incoming::Failure { id, message }) = conn.pending_incoming.pop() else {
+        let Some(Incoming::Failure { id, message, .. }) = conn.pending_incoming.pop() else {
             panic!("an error reply must be surfaced")
         };
         assert_eq!(id, serde_json::json!(7));

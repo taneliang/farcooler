@@ -32,7 +32,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use farcooler_agent::event::{AgentEvent, AgentGapReason, PermissionOption, Seq, Sequenced};
+use farcooler_agent::event::{
+    AgentEvent, AgentGapReason, EndReason, PermissionOption, Seq, Sequenced,
+};
 use farcooler_agent::link::{AgentFailure, DaemonMessage, ShimMessage, decode_line, encode_line};
 use farcooler_agent::activity_source;
 use farcooler_core::activity;
@@ -107,6 +109,14 @@ pub const MAX_SOCKET_PATH: usize = 103;
 /// screen or from a protocol, or a Mac badge and a phone notification will
 /// disagree about the same terminal.
 pub fn fold_activity(current: AgentActivity, event: &AgentEvent) -> AgentActivity {
+    // A failed turn is news even when nothing before it said the agent was
+    // working. A key refused on the first request arrives as the end and
+    // nothing else, and `advance(Idle, Idle)` is `Idle` — a row that never
+    // turned up in front of anybody. It used to pass through `Working` only
+    // because the adapter's error was drawn as the agent speaking first.
+    if matches!(event, AgentEvent::TurnEnded { reason: EndReason::Failed { .. } }) {
+        return activity::advance(activity::advance(current, AgentActivity::Working), AgentActivity::Idle);
+    }
     match activity_source::observe(event) {
         Some(observed) => activity::advance(current, observed),
         None => current,
@@ -144,6 +154,12 @@ struct SessionState {
     /// a pane that is starting normally is also what it looks like, so a
     /// client draws the spinner until this is set or the transcript arrives.
     failure: Option<AgentFailure>,
+    /// The last turn that ended ended as `EndReason::Failed`.
+    ///
+    /// Held until the next turn ends, and read only while the row is `Done`
+    /// (`wire::failure_narrowed`), so it is the outcome of the turn the row is
+    /// announcing and nothing older.
+    turn_failed: bool,
     /// Which run of the shim this transcript belongs to.
     ///
     /// The same idea as a terminal's `epoch`, and for the same reason. A shim
@@ -283,6 +299,14 @@ impl AgentSupervisor {
 
     pub fn agent_mode(&self, terminal: Uuid) -> Option<String> {
         self.sessions.lock().ok().and_then(|s| s.get(&terminal).and_then(|st| st.agent_mode.clone()))
+    }
+
+    /// Whether this pane's last finished turn failed.
+    ///
+    /// What `watch` puts in `Terminal.turn_failed` for a chat pane, the same
+    /// field a terminal pane's session log fills.
+    pub fn turn_failed(&self, terminal: Uuid) -> bool {
+        self.sessions.lock().ok().and_then(|s| s.get(&terminal).map(|st| st.turn_failed)).unwrap_or(false)
     }
 
     /// Why this pane has no agent in it, as a stable word, when it has none.
@@ -693,6 +717,20 @@ impl AgentSupervisor {
                     AgentEvent::SessionInfo { title } if !title.is_empty() => {
                         entry.title = Some(title.clone());
                     }
+                    AgentEvent::TurnEnded { reason } => {
+                        entry.turn_failed = matches!(reason, EndReason::Failed { .. });
+                        // The backend's own words go to the log and nowhere
+                        // else: they are for whoever is debugging this, not
+                        // the agent's to have said.
+                        if let EndReason::Failed { kind, detail } = reason {
+                            tracing::warn!(
+                                terminal = %terminal,
+                                kind = ?kind,
+                                detail = %detail,
+                                "an agent turn failed"
+                            );
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -912,6 +950,37 @@ mod tests {
         });
         current = fold_activity(current, &AgentEvent::TurnEnded { reason: EndReason::Refusal });
         assert_eq!(current, AgentActivity::Done, "a stopped agent must not report itself working");
+    }
+
+    #[test]
+    fn a_failed_turn_with_nothing_before_it_still_reaches_somebody() {
+        // A refused key now ends the turn as `Failed` with no words in front
+        // of it. From Idle, an ordinary end folds to Idle: nobody is told.
+        let failed = AgentEvent::TurnEnded {
+            reason: EndReason::Failed {
+                kind: farcooler_agent::event::FailureKind::Auth,
+                detail: "401".into(),
+            },
+        };
+        assert_eq!(fold_activity(AgentActivity::Idle, &failed), AgentActivity::Done);
+        assert_eq!(fold_activity(AgentActivity::Idle, &AgentEvent::TurnEnded { reason: EndReason::EndTurn }), AgentActivity::Idle);
+    }
+
+    #[test]
+    fn the_last_turns_failure_is_held_until_the_next_turn_ends() {
+        let supervisor = AgentSupervisor::new();
+        let terminal = Uuid::now_v7();
+        let failed = AgentEvent::TurnEnded {
+            reason: EndReason::Failed {
+                kind: farcooler_agent::event::FailureKind::Quota,
+                detail: String::new(),
+            },
+        };
+        supervisor.record(terminal, vec![failed], &|_, _| {});
+        assert!(supervisor.turn_failed(terminal), "a failed turn has to reach the row");
+        assert_eq!(supervisor.activity(terminal), AgentActivity::Done);
+        supervisor.record(terminal, vec![AgentEvent::TurnEnded { reason: EndReason::EndTurn }], &|_, _| {});
+        assert!(!supervisor.turn_failed(terminal), "and stop once a turn works");
     }
 
     #[test]
