@@ -421,13 +421,12 @@ async fn a_new_worktree_runs_nothing_its_branch_includes() {
     assert_eq!(std::fs::read_to_string(dest.join("a.txt")).unwrap(), "one\n", "checked out");
 }
 
-/// OPEN, and ignored until it closes: the listing and the call it guards are
-/// two gits, and a config that changes between them gets its hook run.
-/// Measured at about one guarded status in five. Names can't close this; an
-/// exec allowlist around git would (see the ov-129 report). Run it with
-/// `--ignored` to watch it fail.
+/// The listing and the call it guards are two gits, and a config that
+/// changes between them names a hook the pins never saw: under the pins
+/// alone, about one guarded status in five ran it (ov-129). What holds here
+/// is the exec allowlist (`git_sandbox`), which reads no config: the hook
+/// is a shell command, and no shell is on the list.
 #[tokio::test]
-#[ignore = "open: the list-then-run race, ov-129"]
 async fn a_config_swapped_between_the_listing_and_the_call_runs_nothing() {
     let p = Planted::new();
     let git_dir = p.repo().join(".git");
@@ -457,4 +456,34 @@ async fn a_config_swapped_between_the_listing_and_the_call_runs_nothing() {
     swapper.join().unwrap();
 
     assert_eq!(p.ran(), Vec::<String>::new());
+}
+
+/// Not a program, a redirect: `core.worktree` in the worktree's own
+/// `config.worktree` (which leaves its `.git` file untouched) points status
+/// and diff at another directory, and review would show that directory's
+/// changes as this worktree's. The daemon tells git the work tree is the
+/// directory it asked about.
+#[tokio::test]
+async fn a_review_reads_the_worktree_it_was_asked_about_whatever_core_worktree_says() {
+    let p = Planted::new();
+    let dest = p.root().join("side");
+    run(&p.repo(), &["worktree", "add", "-q", "-b", "side", dest.to_str().unwrap()]);
+    let decoy = p.root().join("decoy");
+    std::fs::create_dir_all(&decoy).unwrap();
+    std::fs::write(decoy.join("a.txt"), "decoy\n").unwrap();
+    run(&p.repo(), &["config", "extensions.worktreeConfig", "true"]);
+    run(&dest, &["config", "--worktree", "core.worktree", decoy.to_str().unwrap()]);
+    std::fs::write(dest.join("b.txt"), "real\n").unwrap();
+    // The control: plain git reads the decoy, where a.txt changed and
+    // b.txt doesn't exist.
+    let plain = run(&dest, &["status", "--porcelain"]);
+    assert!(plain.contains("a.txt") && !plain.contains("b.txt"), "plain git isn't redirected: {plain}");
+
+    let wt = working_tree(&dest).await.expect("status runs");
+
+    let paths = |files: &[farcooler_daemon::change_set::FileChange]| {
+        files.iter().map(|f| f.path.clone()).collect::<Vec<_>>()
+    };
+    assert_eq!(paths(&wt.untracked), ["b.txt"], "{wt:?}");
+    assert!(wt.unstaged.is_empty() && wt.staged.is_empty(), "the decoy's a.txt isn't this worktree's: {wt:?}");
 }

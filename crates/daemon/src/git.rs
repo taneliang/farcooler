@@ -12,6 +12,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use farcooler_core::{DomainError, Result};
@@ -77,7 +78,7 @@ pub async fn git(cwd: &Path, args: &[&str]) -> Result<GitOutput> {
 /// mid-scroll leaves a `git diff` running on the runner for as long as it likes,
 /// once per abandoned request.
 pub async fn git_bytes(cwd: &Path, args: &[&str]) -> Result<GitBytes> {
-    run_bounded(&program()?, GIT_TIMEOUT, cwd, args).await
+    run_bounded(&*launch()?, GIT_TIMEOUT, cwd, args).await
 }
 
 /// `git_bytes`, sharing one `deadline` with every other git of the same act.
@@ -93,28 +94,108 @@ pub async fn git_bytes_by(deadline: tokio::time::Instant, cwd: &Path, args: &[&s
         tracing::warn!(?args, "no time left for git in this act's budget");
         return Err(DomainError::OperationFailed);
     }
-    run_bounded(&program()?, left, cwd, args).await
+    run_bounded(&*launch()?, left, cwd, args).await
 }
 
-/// The program `git_bytes` runs: git, by absolute path.
+/// A program the daemon starts on a repository's behalf, by absolute path,
+/// and the exec allowlist it runs inside (`crate::git_sandbox`).
 ///
-/// Never the bare name. A bare name is looked up on `PATH` at spawn, after
+/// `sandbox` is `None` where the host can't confine a process; the program
+/// then runs under `crate::git_guard`'s pins alone, which the sandbox module
+/// has already said in the log.
+#[derive(Debug)]
+pub struct Launch {
+    pub program: PathBuf,
+    pub sandbox: Option<Arc<crate::git_sandbox::Sandbox>>,
+}
+
+impl Launch {
+    /// A command for `program`, confined to its allowlist.
+    pub fn command(&self) -> Result<std::process::Command> {
+        let mut cmd = std::process::Command::new(&self.program);
+        if let Some(sandbox) = &self.sandbox {
+            sandbox.confine(&mut cmd).map_err(|e| {
+                tracing::warn!(error = %e, "could not confine git to its exec allowlist");
+                DomainError::OperationFailed
+            })?;
+        }
+        Ok(cmd)
+    }
+}
+
+/// The git `git_bytes` runs, and what it may run in turn.
+///
+/// Never by bare name. A bare name is looked up on `PATH` at spawn, after
 /// the child has moved into the worktree, so a relative `PATH` entry (`.`,
 /// or the empty one a stray `:` makes) finds a `git` the agent put there.
 /// `programs::find` answers from absolute directories only, once.
-#[cfg(not(test))]
-fn program() -> Result<std::ffi::OsString> {
-    absolute_git()
+///
+/// The program is the real git behind the one found (`git_sandbox::real_git`;
+/// on a Mac that skips the `/usr/bin/git` shim), and the allowlist is that
+/// git and the one found. Resolved once, and again only if the program is
+/// gone (an upgrade moved it).
+pub fn git_launch() -> Result<Arc<Launch>> {
+    static CACHE: Mutex<Option<Arc<Launch>>> = Mutex::new(None);
+    let mut cache = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(launch) = cache.as_ref().filter(|l| l.program.exists()) {
+        return Ok(launch.clone());
+    }
+    let found = PathBuf::from(absolute_git()?);
+    let program = crate::git_sandbox::real_git(&found);
+    let sandbox = crate::git_sandbox::Sandbox::new(&program, crate::git_sandbox::allowlist(&[&program, &found]));
+    let launch = Arc::new(Launch { program, sandbox });
+    *cache = Some(launch.clone());
+    Ok(launch)
 }
 
-/// The program `git_bytes` runs: git, unless a test on this thread put
-/// something else in its place (`PROGRAM`).
-#[cfg(test)]
-fn program() -> Result<std::ffi::OsString> {
-    match PROGRAM.with(|p| p.borrow().clone()) {
-        Some(stand_in) => Ok(stand_in),
-        None => absolute_git(),
+/// gh, and what it may run: git and ssh as gh will find them on the `PATH`
+/// it's handed (`git remote -v`, `git config`, and `ssh -G <host>` for a
+/// remote URL's host alias), and on a Mac `/usr/bin/security`, which reads
+/// gh's token from the login keychain. `None` when there's no gh, or no git.
+pub fn gh_launch() -> Option<Arc<Launch>> {
+    static CACHE: Mutex<Option<Arc<Launch>>> = Mutex::new(None);
+    let mut cache = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(launch) = cache.as_ref().filter(|l| l.program.exists()) {
+        return Some(launch.clone());
     }
+    let found = farcooler_core::programs::find("gh")?;
+    let program = found.canonicalize().unwrap_or(found);
+    let git = git_launch().ok()?;
+    let path = crate::git_guard::child_path().unwrap_or_else(|| "/usr/bin:/bin".into());
+    let mut programs: Vec<PathBuf> = vec![program.clone()];
+    programs.extend(crate::git_sandbox::on_path("git", &path));
+    programs.extend(git.sandbox.as_ref().map(|s| s.allowed().to_vec()).unwrap_or_else(|| vec![git.program.clone()]));
+    programs.extend(crate::git_sandbox::on_path("ssh", &path));
+    if cfg!(target_os = "macos") {
+        programs.push(PathBuf::from("/usr/bin/security"));
+    }
+    let sandbox = crate::git_sandbox::Sandbox::new(&program, crate::git_sandbox::allowlist(&programs));
+    let launch = Arc::new(Launch { program, sandbox });
+    *cache = Some(launch.clone());
+    Some(launch)
+}
+
+/// The git `git_bytes` runs: [`git_launch`].
+#[cfg(not(test))]
+fn launch() -> Result<Arc<Launch>> {
+    git_launch()
+}
+
+/// The git `git_bytes` runs: [`git_launch`], unless a test on this thread
+/// put something else in its place (`PROGRAM`), which runs unconfined: a
+/// stand-in is a shell script, and its whole point is to run `sleep`. Or
+/// with the sandbox off, for a test that wants to see what a planted
+/// program does without it (`UNSANDBOXED`).
+#[cfg(test)]
+fn launch() -> Result<Arc<Launch>> {
+    if let Some(stand_in) = PROGRAM.with(|p| p.borrow().clone()) {
+        return Ok(Arc::new(Launch { program: stand_in.into(), sandbox: None }));
+    }
+    let launch = git_launch()?;
+    if UNSANDBOXED.with(std::cell::Cell::get) {
+        return Ok(Arc::new(Launch { program: launch.program.clone(), sandbox: None }));
+    }
+    Ok(launch)
 }
 
 /// Where git is, or the failure a git that couldn't start gives.
@@ -136,6 +217,21 @@ thread_local! {
     /// `#[tokio::test]` runs its future on its own thread.
     pub(crate) static PROGRAM: std::cell::RefCell<Option<std::ffi::OsString>> =
         const { std::cell::RefCell::new(None) };
+    /// Run this thread's gits without the exec allowlist.
+    pub(crate) static UNSANDBOXED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Run this thread's gits without `crate::git_guard`'s pins, flags and
+    /// work tree: the mutation that shows the allowlist holds on its own.
+    pub(crate) static UNGUARDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(not(test))]
+fn unguarded() -> bool {
+    false
+}
+
+#[cfg(test)]
+fn unguarded() -> bool {
+    UNGUARDED.with(std::cell::Cell::get)
 }
 
 /// `git_bytes`, with the program and the timeout named.
@@ -144,16 +240,17 @@ thread_local! {
 /// `timeout`: `git config` first, for the hook and filter names this
 /// repository's config chose, then the call itself with those pinned too.
 /// A listing that fails fails the call: running it without the pins would be
-/// running it unguarded.
-async fn run_bounded(
-    program: &std::ffi::OsStr,
-    timeout: Duration,
-    cwd: &Path,
-    args: &[&str],
-) -> Result<GitBytes> {
+/// running it unguarded. Both run inside the exec allowlist
+/// (`crate::git_sandbox`), which doesn't depend on the listing, and so holds
+/// across the moment between the two.
+async fn run_bounded(launch: &Launch, timeout: Duration, cwd: &Path, args: &[&str]) -> Result<GitBytes> {
     let deadline = tokio::time::Instant::now() + timeout;
-    let pins = pins_by(program, deadline, cwd).await?;
-    let out = spawn_bounded(program, deadline, cwd, &crate::git_guard::args(args), &pins).await?;
+    let out = if unguarded() {
+        spawn_bounded(launch, deadline, cwd, args, None).await?
+    } else {
+        let pins = pins_by(launch, deadline, cwd).await?;
+        spawn_bounded(launch, deadline, cwd, &crate::git_guard::args(args), Some(&pins)).await?
+    };
     Ok(GitBytes { ok: out.code == Some(0), stdout: out.stdout, stderr: out.stderr })
 }
 
@@ -164,17 +261,21 @@ struct Spawned {
     stderr: String,
 }
 
-/// Start one git with `pins`, killed at `deadline`.
+/// Start one git with `pins`, killed at `deadline`. `None` only for a test
+/// that turns the guard off (`UNGUARDED`).
 async fn spawn_bounded(
-    program: &std::ffi::OsStr,
+    launch: &Launch,
     deadline: tokio::time::Instant,
     cwd: &Path,
     args: &[&str],
-    pins: &[crate::git_guard::Pin],
+    pins: Option<&[crate::git_guard::Pin]>,
 ) -> Result<Spawned> {
-    let mut cmd = Command::new(program);
-    crate::git_guard::apply(cmd.as_std_mut(), pins);
-    let child = cmd
+    let mut cmd = launch.command()?;
+    if let Some(pins) = pins {
+        crate::git_guard::apply(&mut cmd, pins);
+        crate::git_guard::pin_work_tree(&mut cmd, cwd);
+    }
+    let child = Command::from(cmd)
         .current_dir(cwd)
         .args(args)
         .stdin(Stdio::null())
@@ -208,17 +309,17 @@ async fn spawn_bounded(
 /// carry (`gh`): `crate::git_guard`'s fixed set and this repository's hook
 /// and filter names, read within [`GIT_TIMEOUT`].
 pub async fn guard_pins(cwd: &Path) -> Result<Vec<crate::git_guard::Pin>> {
-    pins_by(&program()?, tokio::time::Instant::now() + GIT_TIMEOUT, cwd).await
+    pins_by(&*launch()?, tokio::time::Instant::now() + GIT_TIMEOUT, cwd).await
 }
 
 /// `crate::git_guard`'s fixed pins, and the by-name ones for `cwd`.
 async fn pins_by(
-    program: &std::ffi::OsStr,
+    launch: &Launch,
     deadline: tokio::time::Instant,
     cwd: &Path,
 ) -> Result<Vec<crate::git_guard::Pin>> {
     let mut pins = crate::git_guard::fixed();
-    let listing = spawn_bounded(program, deadline, cwd, crate::git_guard::LISTING, &pins).await?;
+    let listing = spawn_bounded(launch, deadline, cwd, crate::git_guard::LISTING, Some(&pins)).await?;
     // 1 is "no key matched", which is the answer for most repositories.
     match listing.code {
         Some(0) => pins.extend(crate::git_guard::pins_from(&listing.stdout)),

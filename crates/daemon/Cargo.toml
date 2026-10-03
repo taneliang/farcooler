@@ -109,6 +109,13 @@ rustix = { version = "1", features = ["fs", "process", "termios"] }
 # dependency, through `farcooler-core`'s own config writer.
 toml_edit.workspace = true
 
+# The exec allowlist around every git and gh the daemon starts, on Linux
+# (`git_sandbox`): a ruleset that lets those processes execute only the
+# programs named. Linux-only; the Mac's counterpart is Seatbelt, reached
+# through libsandbox at runtime.
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"
+
 [dev-dependencies]
 tempfile = "3"
 # `test-util` for tokio's pausable clock, and only here: `IDLE` in

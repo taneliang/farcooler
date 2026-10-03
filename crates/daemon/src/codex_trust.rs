@@ -258,15 +258,17 @@ pub async fn trust_for_worktree(root: &Path, worktree: &Path) {
 ///
 /// Blocking, and bounded: `git` is killed after `GIT_DEADLINE`. Every
 /// inherited `GIT_` variable is removed (`crate::git_guard::apply`), so the
-/// daemon's own environment can't point the question at another repository.
+/// daemon's own environment can't point the question at another repository,
+/// and it runs inside the exec allowlist (`crate::git_sandbox`).
 ///
 /// Under the fixed pins only, not the by-name ones the async calls also
 /// read: `rev-parse --git-common-dir` refreshes no index and changes no ref,
 /// so no hook or filter is ever looked up, and a second git to list them
 /// would cost this blocking step a process for nothing.
 pub fn main_checkout(worktree: &Path) -> Option<PathBuf> {
-    let mut git = std::process::Command::new(crate::git::absolute_git().ok()?);
+    let mut git = crate::git::git_launch().ok()?.command().ok()?;
     crate::git_guard::apply(&mut git, &crate::git_guard::fixed());
+    crate::git_guard::pin_work_tree(&mut git, worktree);
     let mut child = git
         .arg("-C")
         .arg(worktree)

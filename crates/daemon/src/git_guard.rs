@@ -44,10 +44,17 @@
 //!
 //! - Every config hook gets `hook.<name>.enabled=false`. A hook from the
 //!   user's own config is turned off too, like the hooks directory is.
-//! - A filter the repository's config touches at all gets `clean`, `smudge`
-//!   and `process` set to what the user's global or system config says, or
-//!   to nothing. Not every filter: git-lfs keeps its filter in the global
-//!   config, and blanking it would show every LFS file as changed.
+//! - Every filter, whoever configured it, gets `clean`, `smudge` and
+//!   `process` emptied and `required=false`. That includes the user's own
+//!   git-lfs. git starts a filter with arguments (`git-lfs filter-process`)
+//!   through `sh -c`, and the exec allowlist (`crate::git_sandbox`) never
+//!   allows a shell, so not even a git-lfs at a trusted absolute path could
+//!   run; left configured, a `required` filter would fail the call instead.
+//!   Emptied, git reads the file as it is. What that changes: a worktree the
+//!   daemon creates holds LFS pointer files, not their content (the agent
+//!   runs `git lfs pull` itself), and an LFS file whose content was fetched
+//!   shows as changed once its mtime moves. It also closes git-lfs's own
+//!   reach: custom transfer agents named in the repository's config.
 //!
 //! **Passed on a diff** (`args`): `--no-ext-diff --no-textconv`. These are
 //! also what keeps the patch parseable at all; a user whose global config
@@ -73,10 +80,16 @@
 //! child git in another worktree reads that worktree's `includeIf`s. The
 //! daemon's two such calls are taken apart instead (`worktree add` checks out
 //! in a second git in the new worktree; the non-forced `worktree remove`
-//! became a guarded status and a forced remove). Closing the race needs a
-//! guard that does not depend on names: an exec allowlist around git (see
-//! the ov-129 report). And none of this guards against an agent that is not
-//! sandboxed: one that can write `~/.zshrc` doesn't need git.
+//! became a guarded status and a forced remove). Both are closed by the exec
+//! allowlist every one of these gits runs in (`crate::git_sandbox`), which
+//! doesn't read config; the pins stay so that it never has to refuse
+//! anything in an ordinary repository, and so that a host without it keeps
+//! them. And none of this guards against an agent that is not sandboxed: one
+//! that can write `~/.zshrc` doesn't need git.
+//!
+//! **Also pinned**: `PATH`, with every entry that isn't absolute dropped
+//! ([`child_path`]), and the work tree, to the directory the daemon asked
+//! about ([`pin_work_tree`]).
 //!
 //! Every inherited `GIT_` variable is removed first, so a daemon started
 //! from inside a git hook (`GIT_DIR`, `GIT_INDEX_FILE`) or by a shell with
@@ -173,24 +186,55 @@ pub fn apply(cmd: &mut std::process::Command, pins: &[Pin]) {
     }
     cmd.env("GIT_TERMINAL_PROMPT", "0");
     cmd.env("GIT_NO_LAZY_FETCH", "1");
+    if let Some(path) = child_path() {
+        cmd.env("PATH", path);
+    }
+}
+
+/// The `PATH` git and gh are handed: the daemon's, with every entry that
+/// isn't an absolute directory dropped (`crate::git_sandbox::absolute_path_entries`).
+///
+/// git is started by absolute path, but it hands its `PATH` on, and a filter
+/// or a gh looks names up on it from inside the worktree: with `.` on it, a
+/// user's own trusted `filter.lfs.process = git-lfs filter-process` ran a
+/// `git-lfs` the agent left in the worktree root (ov-129 review 2). `None`
+/// when the daemon has no `PATH` at all, which leaves the child the system's
+/// default.
+pub fn child_path() -> Option<OsString> {
+    std::env::var_os("PATH").map(|path| crate::git_sandbox::absolute_path_entries(&path))
+}
+
+/// Tell git its work tree is `cwd` whenever `cwd` holds the `.git` git would
+/// find first, which is what git concludes on its own unless a config says
+/// otherwise.
+///
+/// A config can: `core.worktree` in a repository the worktree's `.git` file
+/// points at, or in `worktrees/<id>/config.worktree`, which leaves the `.git`
+/// file untouched. Either silently points status and diff at another
+/// directory, so review shows that directory's changes as the worktree's.
+/// `GIT_WORK_TREE` outranks the config. Not set when `cwd` has no `.git`
+/// (a subdirectory, where git searches upward and the top is elsewhere).
+/// Child gits git starts in another repository (a submodule) don't inherit it;
+/// git clears it for them.
+pub fn pin_work_tree(cmd: &mut std::process::Command, cwd: &std::path::Path) {
+    if std::fs::symlink_metadata(cwd.join(".git")).is_ok() {
+        cmd.env("GIT_WORK_TREE", cwd);
+    }
 }
 
 /// The by-name pins for what `git config` printed for [`LISTING`]: every
-/// config hook off, and every filter the repository touched reset to the
-/// user's own.
+/// config hook off, and every filter, whoever configured it, emptied.
 ///
 /// The listing is `scope NUL key LF value NUL` per entry, or `scope NUL key
 /// NUL` for a key written with no value at all.
 pub fn pins_from(listing: &[u8]) -> Vec<Pin> {
     let mut fields = listing.split(|b| *b == 0);
     let mut hooks: Vec<&[u8]> = Vec::new();
-    let mut touched: Vec<&[u8]> = Vec::new();
-    // What the user's own config says, last one winning, as git reads it.
-    let mut trusted: Vec<(&[u8], &[u8], &[u8])> = Vec::new();
-    while let (Some(scope), Some(entry)) = (fields.next(), fields.next()) {
-        let (key, value) = match entry.iter().position(|b| *b == b'\n') {
-            Some(i) => (&entry[..i], &entry[i + 1..]),
-            None => (entry, &b"true"[..]),
+    let mut filters: Vec<&[u8]> = Vec::new();
+    while let (Some(_scope), Some(entry)) = (fields.next(), fields.next()) {
+        let key = match entry.iter().position(|b| *b == b'\n') {
+            Some(i) => &entry[..i],
+            None => entry,
         };
         // `section.<name>.var`: the name is everything between the first
         // dot and the last, dots and all.
@@ -199,21 +243,14 @@ pub fn pins_from(listing: &[u8]) -> Vec<Pin> {
         if last <= first {
             continue;
         }
-        let (section, name, var) = (&key[..first], &key[first + 1..last], &key[last + 1..]);
-        match section {
-            b"hook" => {
-                if !hooks.contains(&name) {
-                    hooks.push(name);
-                }
-            }
-            b"filter" => {
-                if matches!(scope, b"system" | b"global") {
-                    trusted.push((name, var, value));
-                } else if !touched.contains(&name) {
-                    touched.push(name);
-                }
-            }
-            _ => {}
+        let (section, name) = (&key[..first], &key[first + 1..last]);
+        let seen = match section {
+            b"hook" => &mut hooks,
+            b"filter" => &mut filters,
+            _ => continue,
+        };
+        if !seen.contains(&name) {
+            seen.push(name);
         }
     }
 
@@ -230,11 +267,9 @@ pub fn pins_from(listing: &[u8]) -> Vec<Pin> {
     for name in hooks {
         pins.push((key("hook", name, "enabled"), OsString::from("false")));
     }
-    for name in touched {
-        for (var, otherwise) in [("clean", ""), ("smudge", ""), ("process", ""), ("required", "false")] {
-            let users = trusted.iter().rev().find(|(n, v, _)| *n == name && v == &var.as_bytes());
-            let value = users.map_or(OsStr::new(otherwise), |(_, _, value)| OsStr::from_bytes(value));
-            pins.push((key("filter", name, var), value.to_os_string()));
+    for name in filters {
+        for (var, value) in [("clean", ""), ("smudge", ""), ("process", ""), ("required", "false")] {
+            pins.push((key("filter", name, var), OsString::from(value)));
         }
     }
     pins
@@ -271,25 +306,17 @@ mod tests {
     }
 
     #[test]
-    fn a_filter_only_the_user_configured_is_left_alone() {
+    fn every_filter_is_emptied_whoever_wrote_it_lfs_included() {
         let listing = b"global\0filter.lfs.clean\ngit-lfs clean -- %f\0\
                         global\0filter.lfs.process\ngit-lfs filter-process\0\
-                        global\0filter.lfs.required\0";
-        assert_eq!(pins_from(listing), Vec::<Pin>::new());
-    }
-
-    #[test]
-    fn a_filter_the_repository_touches_goes_back_to_the_users_or_to_nothing() {
-        let listing = b"global\0filter.lfs.clean\ngit-lfs clean -- %f\0\
-                        system\0filter.lfs.smudge\nold\0\
-                        global\0filter.lfs.smudge\ngit-lfs smudge -- %f\0\
+                        global\0filter.lfs.required\0\
                         local\0filter.lfs.process\n./evil\0\
                         worktree\0filter.x.clean\n./evil\0";
         assert_eq!(
             pins_from(listing),
             [
-                pin("filter.lfs.clean", "git-lfs clean -- %f"),
-                pin("filter.lfs.smudge", "git-lfs smudge -- %f"),
+                pin("filter.lfs.clean", ""),
+                pin("filter.lfs.smudge", ""),
                 pin("filter.lfs.process", ""),
                 pin("filter.lfs.required", "false"),
                 pin("filter.x.clean", ""),
@@ -324,11 +351,30 @@ mod tests {
         assert_eq!(get("GIT_CONFIG_KEY_1").as_deref(), Some("hook.x.enabled"));
         assert_eq!(get("GIT_CONFIG_VALUE_1").as_deref(), Some("false"));
         assert_eq!(get("GIT_NO_LAZY_FETCH").as_deref(), Some("1"));
+        // The daemon's own PATH, less what isn't absolute.
+        let expected = std::env::var_os("PATH")
+            .map(|p| crate::git_sandbox::absolute_path_entries(&p).to_string_lossy().into_owned());
+        assert_eq!(get("PATH"), expected);
         for (key, _) in std::env::vars_os() {
             let key = key.to_string_lossy().into_owned();
             if key.starts_with("GIT_") && !key.starts_with("GIT_CONFIG_") {
                 assert!(envs.iter().any(|(k, v)| *k == key && v.is_none()), "{key} is removed");
             }
         }
+    }
+
+    #[test]
+    fn the_work_tree_is_pinned_only_where_git_would_find_it_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let top = dir.path().to_path_buf();
+        std::fs::write(top.join(".git"), "gitdir: elsewhere\n").unwrap();
+        std::fs::create_dir(top.join("sub")).unwrap();
+        let work_tree = |cwd: &std::path::Path| {
+            let mut cmd = std::process::Command::new("git");
+            pin_work_tree(&mut cmd, cwd);
+            cmd.get_envs().find(|(k, _)| *k == "GIT_WORK_TREE").and_then(|(_, v)| v.map(OsStr::to_os_string))
+        };
+        assert_eq!(work_tree(&top), Some(top.clone().into_os_string()));
+        assert_eq!(work_tree(&top.join("sub")), None);
     }
 }
