@@ -32,8 +32,17 @@ struct StandIn {
 }
 
 impl StandIn {
-    fn show(&self, mode: &str) {
+    /// Show `mode`, and wait until the stand-in has taken it and drawn it.
+    async fn show(&self, mode: &str) {
+        let before = self.log().matches(&format!("MODE {mode}\n")).count();
         std::fs::write(&self.control, mode).unwrap();
+        for _ in 0..100 {
+            if self.log().matches(&format!("MODE {mode}\n")).count() > before {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("the stand-in never showed {mode}: {}", self.log());
     }
 
     fn log(&self) -> String {
@@ -84,12 +93,18 @@ impl Board {
         std::fs::copy(farcooler_core::programs::find("perl").expect("perl"), &program).unwrap();
         std::fs::write(dir.join("stand_in.pl"), STAND_IN).unwrap();
         let si = StandIn { control: dir.join("control"), log: dir.join("log") };
-        si.show("idle");
+        std::fs::write(&si.control, "idle").unwrap();
         let q = |p: &std::path::Path| format!("'{}'", p.display());
         let command =
             format!("{} {} {agent} {} {}", q(&program), q(&dir.join("stand_in.pl")), q(&si.control), q(&si.log));
         self.run_in(terminal, &command).await;
         self.screen_with(terminal.id, "stand-in").await;
+        for _ in 0..100 {
+            if si.log().contains("MODE idle") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
         si
     }
 
@@ -329,7 +344,7 @@ async fn a_permission_menu_is_never_typed_into() {
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
-    si.show("menu");
+    si.show("menu").await;
     b.screen_with(agent.id, "Tab to amend").await;
     b.doing(agent.id, AgentActivity::Idle).await;
     b.answer("Drill in");
@@ -344,7 +359,7 @@ async fn an_unrecognized_screen_is_never_typed_into() {
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
-    si.show("picker");
+    si.show("picker").await;
     b.screen_with(agent.id, "Select model").await;
     b.doing(agent.id, AgentActivity::Idle).await;
     b.answer("Drill in");
@@ -359,7 +374,7 @@ async fn a_draft_is_never_touched() {
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
-    si.show("draft:fix the flaky");
+    si.show("draft:fix the flaky").await;
     b.screen_with(agent.id, "fix the flaky").await;
     b.doing(agent.id, AgentActivity::Idle).await;
     b.answer("Drill in");
@@ -375,7 +390,7 @@ async fn a_paste_the_box_doesnt_hold_exactly_is_not_sent() {
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
-    si.show("mangle");
+    si.show("mangle").await;
     b.screen_with(agent.id, "stand-in").await;
     b.doing(agent.id, AgentActivity::Idle).await;
     b.answer("Drill in");

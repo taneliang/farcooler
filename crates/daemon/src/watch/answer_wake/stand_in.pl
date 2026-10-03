@@ -99,6 +99,7 @@ while (1) {
         $mode = $now;
         $composer = $1 if $mode =~ /^draft:(.*)$/s;
         draw();
+        logit("MODE $mode");
     }
     my $rin = "";
     vec($rin, fileno(STDIN), 1) = 1;
