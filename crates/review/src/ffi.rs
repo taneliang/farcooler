@@ -17,9 +17,16 @@
 //! heap string this module owns until `farcooler_review_string_free`. Pointers
 //! are either null or valid for the call. Null in means null or empty out, never
 //! a crash: a renderer bug must not take down the app.
+//!
+//! Nor is a panic. Every function's whole body runs under `guarded`, so a bug
+//! in the diff on some file's contents comes back as NULL or false, the same
+//! answer an invalid input gets, rather than unwinding through `extern "C"`
+//! and aborting the app.
 #![allow(clippy::missing_safety_doc)]
 
 use std::ffi::{CStr, CString, c_char};
+
+use farcooler_ffi_guard::guarded;
 
 use crate::diff::diff_texts;
 
@@ -41,30 +48,34 @@ pub unsafe extern "C" fn farcooler_review_diff_texts(
     old: *const c_char,
     new: *const c_char,
 ) -> *mut c_char {
-    let old = unsafe { cstr(old) };
-    let new = unsafe { cstr(new) };
-    let (Some(old), Some(new)) = (old, new) else {
-        return std::ptr::null_mut();
-    };
+    guarded(std::ptr::null_mut(), || {
+        let old = unsafe { cstr(old) };
+        let new = unsafe { cstr(new) };
+        let (Some(old), Some(new)) = (old, new) else {
+            return std::ptr::null_mut();
+        };
 
-    let lines = diff_texts(old, new);
-    match serde_json::to_string(&lines) {
-        Ok(s) => to_c(s),
-        Err(_) => std::ptr::null_mut(),
-    }
+        let lines = diff_texts(old, new);
+        match serde_json::to_string(&lines) {
+            Ok(s) => to_c(s),
+            Err(_) => std::ptr::null_mut(),
+        }
+    })
 }
 
 /// Free a string returned by this module.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_review_string_free(s: *mut c_char) {
-    if s.is_null() {
-        return;
-    }
-    // Reconstituting the CString drops it, which is the only correct way to
-    // free memory Rust allocated.
-    unsafe {
-        let _ = CString::from_raw(s);
-    }
+    guarded((), || {
+        if s.is_null() {
+            return;
+        }
+        // Reconstituting the CString drops it, which is the only correct way to
+        // free memory Rust allocated.
+        unsafe {
+            let _ = CString::from_raw(s);
+        }
+    })
 }
 
 /// How many lines changed between two texts, without allocating a JSON string.
@@ -79,23 +90,27 @@ pub unsafe extern "C" fn farcooler_review_count_changes(
     added_out: *mut u32,
     removed_out: *mut u32,
 ) -> bool {
-    let old = unsafe { cstr(old) };
-    let new = unsafe { cstr(new) };
-    let (Some(old), Some(new)) = (old, new) else {
-        return false;
-    };
+    guarded(false, || {
+        let old = unsafe { cstr(old) };
+        let new = unsafe { cstr(new) };
+        let (Some(old), Some(new)) = (old, new) else {
+            return false;
+        };
 
-    let lines = diff_texts(old, new);
-    let added = lines.iter().filter(|l| l.kind == crate::diff::LineKind::Added).count() as u32;
-    let removed = lines.iter().filter(|l| l.kind == crate::diff::LineKind::Removed).count() as u32;
+        let lines = diff_texts(old, new);
+        let added =
+            lines.iter().filter(|l| l.kind == crate::diff::LineKind::Added).count() as u32;
+        let removed =
+            lines.iter().filter(|l| l.kind == crate::diff::LineKind::Removed).count() as u32;
 
-    if !added_out.is_null() {
-        unsafe { *added_out = added };
-    }
-    if !removed_out.is_null() {
-        unsafe { *removed_out = removed };
-    }
-    true
+        if !added_out.is_null() {
+            unsafe { *added_out = added };
+        }
+        if !removed_out.is_null() {
+            unsafe { *removed_out = removed };
+        }
+        true
+    })
 }
 
 unsafe fn cstr<'a>(p: *const c_char) -> Option<&'a str> {

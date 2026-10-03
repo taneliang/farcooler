@@ -35,4 +35,5 @@ tailcat = ["farcooler-client/tailcat"]
 [dependencies]
 farcooler-client.workspace = true
 farcooler-vt = { path = "../vt" }
+farcooler-ffi-guard.workspace = true
 jni = "0.21"

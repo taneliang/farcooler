@@ -30,6 +30,16 @@
 //! is a no-op rather than a process death. An Android app that crashes in native
 //! code leaves no Kotlin stack trace worth reading, which makes the cheap
 //! defence worth far more here than the equivalent is on a Mac.
+//!
+//! ## Panics
+//!
+//! Every function's whole body runs under `guarded`, and the one thing this
+//! file does add — turning JVM values into C ones and back — is inside it too.
+//! A panic unwinding out of `extern "system"` aborts the process, and this
+//! shim sizes buffers from JVM array lengths and slices on the C ABI's
+//! answers, so a guard on the cores below alone would leave this layer able to
+//! do what they no longer can. A panic is logged and comes back as 0, false or
+//! null, the values Kotlin already gets for a call that did nothing.
 
 use std::ffi::{CStr, CString, c_void};
 
@@ -38,6 +48,7 @@ use jni::objects::{JByteArray, JClass, JIntArray, JString};
 use jni::sys::{jboolean, jbyteArray, jint, jintArray, jlong, jstring};
 
 use farcooler_client::ffi as client;
+use farcooler_ffi_guard::guarded;
 use farcooler_vt::ffi as vt;
 
 // MARK: - Helpers
@@ -88,7 +99,7 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeNew(
     _env: JNIEnv,
     _class: JClass,
 ) -> jlong {
-    client::farcooler_client_new() as usize as jlong
+    guarded(0, || client::farcooler_client_new() as usize as jlong)
 }
 
 #[unsafe(no_mangle)]
@@ -97,7 +108,7 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeFree(
     _class: JClass,
     handle: jlong,
 ) {
-    unsafe { client::farcooler_client_free(handle_of(handle)) }
+    guarded((), || unsafe { client::farcooler_client_free(handle_of(handle)) })
 }
 
 #[unsafe(no_mangle)]
@@ -107,8 +118,10 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeConnect(
     handle: jlong,
     config: JString,
 ) -> jlong {
-    let Some(config) = c_string(&mut env, &config) else { return 0 };
-    unsafe { client::farcooler_client_connect(handle_of(handle), config.as_ptr()) as jlong }
+    guarded(0, || {
+        let Some(config) = c_string(&mut env, &config) else { return 0 };
+        unsafe { client::farcooler_client_connect(handle_of(handle), config.as_ptr()) as jlong }
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -119,11 +132,13 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCall(
     method: JString,
     args: JString,
 ) -> jlong {
-    let Some(method) = c_string(&mut env, &method) else { return 0 };
-    let Some(args) = c_string(&mut env, &args) else { return 0 };
-    unsafe {
-        client::farcooler_client_call(handle_of(handle), method.as_ptr(), args.as_ptr()) as jlong
-    }
+    guarded(0, || {
+        let Some(method) = c_string(&mut env, &method) else { return 0 };
+        let Some(args) = c_string(&mut env, &args) else { return 0 };
+        unsafe {
+            client::farcooler_client_call(handle_of(handle), method.as_ptr(), args.as_ptr()) as jlong
+        }
+    })
 }
 
 /// Paste a file into a terminal.
@@ -145,23 +160,25 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativePasteFile(
     mime: JString,
     data: JByteArray,
 ) -> jlong {
-    let Some(terminal) = c_string(&mut env, &terminal) else { return 0 };
-    let Some(name) = c_string(&mut env, &name) else { return 0 };
-    let Some(mime) = c_string(&mut env, &mime) else { return 0 };
-    let Ok(bytes) = env.convert_byte_array(&data) else { return 0 };
-    if bytes.is_empty() {
-        return 0;
-    }
-    unsafe {
-        client::farcooler_client_paste_file(
-            handle_of(handle),
-            terminal.as_ptr(),
-            name.as_ptr(),
-            mime.as_ptr(),
-            bytes.as_ptr(),
-            bytes.len(),
-        ) as jlong
-    }
+    guarded(0, || {
+        let Some(terminal) = c_string(&mut env, &terminal) else { return 0 };
+        let Some(name) = c_string(&mut env, &name) else { return 0 };
+        let Some(mime) = c_string(&mut env, &mime) else { return 0 };
+        let Ok(bytes) = env.convert_byte_array(&data) else { return 0 };
+        if bytes.is_empty() {
+            return 0;
+        }
+        unsafe {
+            client::farcooler_client_paste_file(
+                handle_of(handle),
+                terminal.as_ptr(),
+                name.as_ptr(),
+                mime.as_ptr(),
+                bytes.as_ptr(),
+                bytes.len(),
+            ) as jlong
+        }
+    })
 }
 
 /// The oldest finished result, or null when nothing is ready.
@@ -177,14 +194,16 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativePoll(
     _class: JClass,
     handle: jlong,
 ) -> jstring {
-    let raw = unsafe { client::farcooler_client_poll(handle_of(handle)) };
-    if raw.is_null() {
-        return std::ptr::null_mut();
-    }
-    let Ok(text) = (unsafe { CStr::from_ptr(raw) }).to_str() else {
-        return std::ptr::null_mut();
-    };
-    jstring_of(&mut env, text)
+    guarded(std::ptr::null_mut(), || {
+        let raw = unsafe { client::farcooler_client_poll(handle_of(handle)) };
+        if raw.is_null() {
+            return std::ptr::null_mut();
+        }
+        let Ok(text) = (unsafe { CStr::from_ptr(raw) }).to_str() else {
+            return std::ptr::null_mut();
+        };
+        jstring_of(&mut env, text)
+    })
 }
 
 /// The oldest fleet notice, or null when none is waiting.
@@ -202,14 +221,16 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeNextEvent(
     _class: JClass,
     handle: jlong,
 ) -> jstring {
-    let raw = unsafe { client::farcooler_client_next_event(handle_of(handle)) };
-    if raw.is_null() {
-        return std::ptr::null_mut();
-    }
-    let Ok(text) = (unsafe { CStr::from_ptr(raw) }).to_str() else {
-        return std::ptr::null_mut();
-    };
-    jstring_of(&mut env, text)
+    guarded(std::ptr::null_mut(), || {
+        let raw = unsafe { client::farcooler_client_next_event(handle_of(handle)) };
+        if raw.is_null() {
+            return std::ptr::null_mut();
+        }
+        let Ok(text) = (unsafe { CStr::from_ptr(raw) }).to_str() else {
+            return std::ptr::null_mut();
+        };
+        jstring_of(&mut env, text)
+    })
 }
 
 /// Whether a dedicated event channel is up right now, so the caller can choose
@@ -220,7 +241,7 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeEventsLive(
     _class: JClass,
     handle: jlong,
 ) -> jboolean {
-    u8::from(unsafe { client::farcooler_client_events_live(handle_of(handle)) })
+    guarded(0, || u8::from(unsafe { client::farcooler_client_events_live(handle_of(handle)) }))
 }
 
 #[unsafe(no_mangle)]
@@ -229,7 +250,7 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeConnected(
     _class: JClass,
     handle: jlong,
 ) -> jboolean {
-    u8::from(unsafe { client::farcooler_client_connected(handle_of(handle)) })
+    guarded(0, || u8::from(unsafe { client::farcooler_client_connected(handle_of(handle)) }))
 }
 
 #[unsafe(no_mangle)]
@@ -239,8 +260,10 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeStreamStart(
     handle: jlong,
     terminal: JString,
 ) -> jboolean {
-    let Some(terminal) = c_string(&mut env, &terminal) else { return 0 };
-    u8::from(unsafe { client::farcooler_client_stream_start(handle_of(handle), terminal.as_ptr()) })
+    guarded(0, || {
+        let Some(terminal) = c_string(&mut env, &terminal) else { return 0 };
+        u8::from(unsafe { client::farcooler_client_stream_start(handle_of(handle), terminal.as_ptr()) })
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -250,8 +273,10 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeStreamStop(
     handle: jlong,
     terminal: JString,
 ) {
-    let Some(terminal) = c_string(&mut env, &terminal) else { return };
-    unsafe { client::farcooler_client_stream_stop(handle_of(handle), terminal.as_ptr()) }
+    guarded((), || {
+        let Some(terminal) = c_string(&mut env, &terminal) else { return };
+        unsafe { client::farcooler_client_stream_stop(handle_of(handle), terminal.as_ptr()) }
+    })
 }
 
 /// Generate this device's SSH identity, as `{"private_key":…,"public_key":…}`.
@@ -268,20 +293,22 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeGenerateKey(
     _class: JClass,
     comment: JString,
 ) -> jstring {
-    let comment = c_string(&mut env, &comment);
-    let pointer = comment.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+    guarded(std::ptr::null_mut(), || {
+        let comment = c_string(&mut env, &comment);
+        let pointer = comment.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
 
-    let mut buffer = vec![0u8; 8192];
-    let written = unsafe {
-        client::farcooler_client_generate_key(pointer, buffer.as_mut_ptr(), buffer.len())
-    };
-    if written == 0 || written > buffer.len() {
-        return std::ptr::null_mut();
-    }
-    match std::str::from_utf8(&buffer[..written]) {
-        Ok(text) => jstring_of(&mut env, text),
-        Err(_) => std::ptr::null_mut(),
-    }
+        let mut buffer = vec![0u8; 8192];
+        let written = unsafe {
+            client::farcooler_client_generate_key(pointer, buffer.as_mut_ptr(), buffer.len())
+        };
+        if written == 0 || written > buffer.len() {
+            return std::ptr::null_mut();
+        }
+        match std::str::from_utf8(&buffer[..written]) {
+            Ok(text) => jstring_of(&mut env, text),
+            Err(_) => std::ptr::null_mut(),
+        }
+    })
 }
 
 /// The public key belonging to a private key, as one OpenSSH line.
@@ -291,24 +318,26 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativePublicKey(
     _class: JClass,
     private_key: JString,
 ) -> jstring {
-    let Some(private_key) = c_string(&mut env, &private_key) else {
-        return std::ptr::null_mut();
-    };
-    let mut buffer = vec![0u8; 4096];
-    let written = unsafe {
-        client::farcooler_client_public_key(
-            private_key.as_ptr(),
-            buffer.as_mut_ptr(),
-            buffer.len(),
-        )
-    };
-    if written == 0 || written > buffer.len() {
-        return std::ptr::null_mut();
-    }
-    match std::str::from_utf8(&buffer[..written]) {
-        Ok(text) => jstring_of(&mut env, text),
-        Err(_) => std::ptr::null_mut(),
-    }
+    guarded(std::ptr::null_mut(), || {
+        let Some(private_key) = c_string(&mut env, &private_key) else {
+            return std::ptr::null_mut();
+        };
+        let mut buffer = vec![0u8; 4096];
+        let written = unsafe {
+            client::farcooler_client_public_key(
+                private_key.as_ptr(),
+                buffer.as_mut_ptr(),
+                buffer.len(),
+            )
+        };
+        if written == 0 || written > buffer.len() {
+            return std::ptr::null_mut();
+        }
+        match std::str::from_utf8(&buffer[..written]) {
+            Ok(text) => jstring_of(&mut env, text),
+            Err(_) => std::ptr::null_mut(),
+        }
+    })
 }
 
 /// The `SHA256:…` fingerprint of a public key, as the confirmation screen shows
@@ -324,27 +353,29 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeFingerprint(
     _class: JClass,
     public_key: JString,
 ) -> jstring {
-    let Some(public_key) = c_string(&mut env, &public_key) else {
-        return std::ptr::null_mut();
-    };
-    // 128 bytes for a string that is 50: a fingerprint is `SHA256:` and 43
-    // characters of base64 today, and the hash algorithm is the sort of thing
-    // that changes once a decade without anyone revisiting a constant.
-    let mut buffer = vec![0u8; 128];
-    let written = unsafe {
-        client::farcooler_client_fingerprint(
-            public_key.as_ptr(),
-            buffer.as_mut_ptr(),
-            buffer.len(),
-        )
-    };
-    if written == 0 || written > buffer.len() {
-        return std::ptr::null_mut();
-    }
-    match std::str::from_utf8(&buffer[..written]) {
-        Ok(text) => jstring_of(&mut env, text),
-        Err(_) => std::ptr::null_mut(),
-    }
+    guarded(std::ptr::null_mut(), || {
+        let Some(public_key) = c_string(&mut env, &public_key) else {
+            return std::ptr::null_mut();
+        };
+        // 128 bytes for a string that is 50: a fingerprint is `SHA256:` and 43
+        // characters of base64 today, and the hash algorithm is the sort of thing
+        // that changes once a decade without anyone revisiting a constant.
+        let mut buffer = vec![0u8; 128];
+        let written = unsafe {
+            client::farcooler_client_fingerprint(
+                public_key.as_ptr(),
+                buffer.as_mut_ptr(),
+                buffer.len(),
+            )
+        };
+        if written == 0 || written > buffer.len() {
+            return std::ptr::null_mut();
+        }
+        match std::str::from_utf8(&buffer[..written]) {
+            Ok(text) => jstring_of(&mut env, text),
+            Err(_) => std::ptr::null_mut(),
+        }
+    })
 }
 
 /// The client id a device is enrolled under, derived from its own key.
@@ -360,20 +391,22 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeClientId(
     _class: JClass,
     public_key: JString,
 ) -> jstring {
-    let Some(public_key) = c_string(&mut env, &public_key) else {
-        return std::ptr::null_mut();
-    };
-    let mut buffer = vec![0u8; 128];
-    let written = unsafe {
-        client::farcooler_client_client_id(public_key.as_ptr(), buffer.as_mut_ptr(), buffer.len())
-    };
-    if written == 0 || written > buffer.len() {
-        return std::ptr::null_mut();
-    }
-    match std::str::from_utf8(&buffer[..written]) {
-        Ok(text) => jstring_of(&mut env, text),
-        Err(_) => std::ptr::null_mut(),
-    }
+    guarded(std::ptr::null_mut(), || {
+        let Some(public_key) = c_string(&mut env, &public_key) else {
+            return std::ptr::null_mut();
+        };
+        let mut buffer = vec![0u8; 128];
+        let written = unsafe {
+            client::farcooler_client_client_id(public_key.as_ptr(), buffer.as_mut_ptr(), buffer.len())
+        };
+        if written == 0 || written > buffer.len() {
+            return std::ptr::null_mut();
+        }
+        match std::str::from_utf8(&buffer[..written]) {
+            Ok(text) => jstring_of(&mut env, text),
+            Err(_) => std::ptr::null_mut(),
+        }
+    })
 }
 
 // MARK: - The enrollment ceremony
@@ -433,23 +466,25 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyOffer(
     key_b: JString,
     node_key: JString,
 ) -> jstring {
-    let name = c_string(&mut env, &name);
-    let account = c_string(&mut env, &account);
-    let key_a = c_string(&mut env, &key_a);
-    let key_b = c_string(&mut env, &key_b);
-    let node_key = c_string(&mut env, &node_key);
-    let pointer = |value: &Option<CString>| value.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+    guarded(std::ptr::null_mut(), || {
+        let name = c_string(&mut env, &name);
+        let account = c_string(&mut env, &account);
+        let key_a = c_string(&mut env, &key_a);
+        let key_b = c_string(&mut env, &key_b);
+        let node_key = c_string(&mut env, &node_key);
+        let pointer = |value: &Option<CString>| value.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
 
-    ceremony_json(&mut env, |out, capacity| unsafe {
-        client::farcooler_client_ceremony_offer(
-            pointer(&name),
-            pointer(&account),
-            pointer(&key_a),
-            pointer(&key_b),
-            pointer(&node_key),
-            out,
-            capacity,
-        )
+        ceremony_json(&mut env, |out, capacity| unsafe {
+            client::farcooler_client_ceremony_offer(
+                pointer(&name),
+                pointer(&account),
+                pointer(&key_a),
+                pointer(&key_b),
+                pointer(&node_key),
+                out,
+                capacity,
+            )
+        })
     })
 }
 
@@ -473,8 +508,10 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeMintNodeKey(
     mut env: JNIEnv,
     _class: JClass,
 ) -> jstring {
-    ceremony_json(&mut env, |out, capacity| unsafe {
-        client::farcooler_client_mint_node_key(out, capacity)
+    guarded(std::ptr::null_mut(), || {
+        ceremony_json(&mut env, |out, capacity| unsafe {
+            client::farcooler_client_mint_node_key(out, capacity)
+        })
     })
 }
 
@@ -496,17 +533,19 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyScan(
     expecting_account: JString,
     held_ms: jlong,
 ) -> jstring {
-    let encoded = c_string(&mut env, &encoded);
-    let account = c_string(&mut env, &expecting_account);
-    let pointer = |value: &Option<CString>| value.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
-    ceremony_json(&mut env, |out, capacity| unsafe {
-        client::farcooler_client_ceremony_scan(
-            pointer(&encoded),
-            pointer(&account),
-            held_ms.max(0) as u64,
-            out,
-            capacity,
-        )
+    guarded(std::ptr::null_mut(), || {
+        let encoded = c_string(&mut env, &encoded);
+        let account = c_string(&mut env, &expecting_account);
+        let pointer = |value: &Option<CString>| value.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+        ceremony_json(&mut env, |out, capacity| unsafe {
+            client::farcooler_client_ceremony_scan(
+                pointer(&encoded),
+                pointer(&account),
+                held_ms.max(0) as u64,
+                out,
+                capacity,
+            )
+        })
     })
 }
 
@@ -519,17 +558,19 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyReply(
     runners_json: JString,
     budget_bytes: jint,
 ) -> jstring {
-    let offer = c_string(&mut env, &offer_json);
-    let runners = c_string(&mut env, &runners_json);
-    let pointer = |value: &Option<CString>| value.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
-    ceremony_json(&mut env, |out, capacity| unsafe {
-        client::farcooler_client_ceremony_reply(
-            pointer(&offer),
-            pointer(&runners),
-            budget_bytes.max(0) as usize,
-            out,
-            capacity,
-        )
+    guarded(std::ptr::null_mut(), || {
+        let offer = c_string(&mut env, &offer_json);
+        let runners = c_string(&mut env, &runners_json);
+        let pointer = |value: &Option<CString>| value.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+        ceremony_json(&mut env, |out, capacity| unsafe {
+            client::farcooler_client_ceremony_reply(
+                pointer(&offer),
+                pointer(&runners),
+                budget_bytes.max(0) as usize,
+                out,
+                capacity,
+            )
+        })
     })
 }
 
@@ -543,18 +584,20 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyAccept
     already_taken: jboolean,
     held_ms: jlong,
 ) -> jstring {
-    let encoded = c_string(&mut env, &encoded);
-    let expecting = c_string(&mut env, &expecting_json);
-    let pointer = |value: &Option<CString>| value.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
-    ceremony_json(&mut env, |out, capacity| unsafe {
-        client::farcooler_client_ceremony_accept(
-            pointer(&encoded),
-            pointer(&expecting),
-            already_taken != 0,
-            held_ms.max(0) as u64,
-            out,
-            capacity,
-        )
+    guarded(std::ptr::null_mut(), || {
+        let encoded = c_string(&mut env, &encoded);
+        let expecting = c_string(&mut env, &expecting_json);
+        let pointer = |value: &Option<CString>| value.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+        ceremony_json(&mut env, |out, capacity| unsafe {
+            client::farcooler_client_ceremony_accept(
+                pointer(&encoded),
+                pointer(&expecting),
+                already_taken != 0,
+                held_ms.max(0) as u64,
+                out,
+                capacity,
+            )
+        })
     })
 }
 
@@ -585,23 +628,25 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeBuiltinThemes(
     mut env: JNIEnv,
     _class: JClass,
 ) -> jstring {
-    // Asked for the size first rather than guessing a buffer: eleven themes of
-    // nineteen colors is a few kilobytes today and is exactly the sort of
-    // number that grows without anyone revisiting a constant.
-    let needed = unsafe { client::farcooler_client_builtin_themes(std::ptr::null_mut(), 0) };
-    if needed == 0 {
-        return std::ptr::null_mut();
-    }
-    let mut buffer = vec![0u8; needed];
-    let written =
-        unsafe { client::farcooler_client_builtin_themes(buffer.as_mut_ptr(), buffer.len()) };
-    if written == 0 || written > buffer.len() {
-        return std::ptr::null_mut();
-    }
-    match std::str::from_utf8(&buffer[..written]) {
-        Ok(text) => jstring_of(&mut env, text),
-        Err(_) => std::ptr::null_mut(),
-    }
+    guarded(std::ptr::null_mut(), || {
+        // Asked for the size first rather than guessing a buffer: eleven themes of
+        // nineteen colors is a few kilobytes today and is exactly the sort of
+        // number that grows without anyone revisiting a constant.
+        let needed = unsafe { client::farcooler_client_builtin_themes(std::ptr::null_mut(), 0) };
+        if needed == 0 {
+            return std::ptr::null_mut();
+        }
+        let mut buffer = vec![0u8; needed];
+        let written =
+            unsafe { client::farcooler_client_builtin_themes(buffer.as_mut_ptr(), buffer.len()) };
+        if written == 0 || written > buffer.len() {
+            return std::ptr::null_mut();
+        }
+        match std::str::from_utf8(&buffer[..written]) {
+            Ok(text) => jstring_of(&mut env, text),
+            Err(_) => std::ptr::null_mut(),
+        }
+    })
 }
 
 // MARK: - Terminal core
@@ -613,7 +658,7 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeNew(
     columns: jint,
     rows: jint,
 ) -> jlong {
-    vt::farcooler_vt_new(clamp_u16(columns), clamp_u16(rows)) as usize as jlong
+    guarded(0, || vt::farcooler_vt_new(clamp_u16(columns), clamp_u16(rows)) as usize as jlong)
 }
 
 #[unsafe(no_mangle)]
@@ -622,7 +667,7 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeFree(
     _class: JClass,
     handle: jlong,
 ) {
-    unsafe { vt::farcooler_vt_free(handle_of(handle)) }
+    guarded((), || unsafe { vt::farcooler_vt_free(handle_of(handle)) })
 }
 
 #[unsafe(no_mangle)]
@@ -632,11 +677,16 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeFeed(
     handle: jlong,
     bytes: JByteArray,
 ) {
-    let Ok(bytes) = env.convert_byte_array(&bytes) else { return };
-    if bytes.is_empty() {
-        return;
-    }
-    unsafe { vt::farcooler_vt_feed(handle_of(handle), bytes.as_ptr(), bytes.len()) }
+    guarded((), || {
+        let Ok(bytes) = env.convert_byte_array(&bytes) else { return };
+        if bytes.is_empty() {
+            return;
+        }
+        // False means the core failed on these bytes and reset the terminal,
+        // whose revision has moved, so the next frame shows that by itself.
+        // Kotlin's `nativeFeed` returns nothing, and does not need to.
+        let _ = unsafe { vt::farcooler_vt_feed(handle_of(handle), bytes.as_ptr(), bytes.len()) };
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -647,7 +697,9 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeResize(
     columns: jint,
     rows: jint,
 ) {
-    unsafe { vt::farcooler_vt_resize(handle_of(handle), clamp_u16(columns), clamp_u16(rows)) }
+    guarded((), || {
+        unsafe { vt::farcooler_vt_resize(handle_of(handle), clamp_u16(columns), clamp_u16(rows)) }
+    })
 }
 
 /// Recolor the terminal. Nineteen packed values: sixteen ANSI, then
@@ -659,20 +711,22 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeSetPalette(
     handle: jlong,
     colors: JIntArray,
 ) -> jboolean {
-    let Ok(len) = env.get_array_length(&colors) else {
-        return 0;
-    };
-    let mut values = vec![0i32; len as usize];
-    if env.get_int_array_region(&colors, 0, &mut values).is_err() {
-        return 0;
-    }
-    // Kotlin has no unsigned int, so the colors arrive as a signed bit
-    // pattern. The bits are the same; only the interpretation differs.
-    let packed: Vec<u32> = values.into_iter().map(|v| v as u32).collect();
-    let ok = unsafe {
-        vt::farcooler_vt_set_palette(handle_of(handle), packed.as_ptr(), packed.len())
-    };
-    u8::from(ok)
+    guarded(0, || {
+        let Ok(len) = env.get_array_length(&colors) else {
+            return 0;
+        };
+        let mut values = vec![0i32; len as usize];
+        if env.get_int_array_region(&colors, 0, &mut values).is_err() {
+            return 0;
+        }
+        // Kotlin has no unsigned int, so the colors arrive as a signed bit
+        // pattern. The bits are the same; only the interpretation differs.
+        let packed: Vec<u32> = values.into_iter().map(|v| v as u32).collect();
+        let ok = unsafe {
+            vt::farcooler_vt_set_palette(handle_of(handle), packed.as_ptr(), packed.len())
+        };
+        u8::from(ok)
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -681,7 +735,7 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeRevision(
     _class: JClass,
     handle: jlong,
 ) -> jlong {
-    unsafe { vt::farcooler_vt_revision(handle_of(handle)) as jlong }
+    guarded(0, || unsafe { vt::farcooler_vt_revision(handle_of(handle)) as jlong })
 }
 
 /// The whole screen, as one flat `int[]`.
@@ -708,47 +762,49 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeSnapshot(
     _class: JClass,
     handle: jlong,
 ) -> jintArray {
-    let mut snapshot = vt::VtSnapshot {
-        cells: std::ptr::null(),
-        columns: 0,
-        rows: 0,
-        cursor_row: 0,
-        cursor_column: 0,
-        cursor_visible: false,
-        display_offset: 0,
-        history_size: 0,
-    };
-    let ok = unsafe { vt::farcooler_vt_snapshot(handle_of(handle), &mut snapshot) };
-    if !ok || snapshot.cells.is_null() {
-        return std::ptr::null_mut();
-    }
+    guarded(std::ptr::null_mut(), || {
+        let mut snapshot = vt::VtSnapshot {
+            cells: std::ptr::null(),
+            columns: 0,
+            rows: 0,
+            cursor_row: 0,
+            cursor_column: 0,
+            cursor_visible: false,
+            display_offset: 0,
+            history_size: 0,
+        };
+        let ok = unsafe { vt::farcooler_vt_snapshot(handle_of(handle), &mut snapshot) };
+        if !ok || snapshot.cells.is_null() {
+            return std::ptr::null_mut();
+        }
 
-    let count = snapshot.rows as usize * snapshot.columns as usize;
-    let cells = unsafe { std::slice::from_raw_parts(snapshot.cells, count) };
+        let count = snapshot.rows as usize * snapshot.columns as usize;
+        let cells = unsafe { std::slice::from_raw_parts(snapshot.cells, count) };
 
-    const HEADER: usize = 7;
-    let mut out = Vec::with_capacity(HEADER + count * 4);
-    out.push(snapshot.columns as jint);
-    out.push(snapshot.rows as jint);
-    out.push(snapshot.cursor_row as jint);
-    out.push(snapshot.cursor_column as jint);
-    out.push(jint::from(snapshot.cursor_visible));
-    out.push(snapshot.display_offset as jint);
-    out.push(snapshot.history_size as jint);
-    for cell in cells {
-        out.push(cell.ch as jint);
-        out.push(cell.fg as jint);
-        out.push(cell.bg as jint);
-        out.push(cell.flags as jint);
-    }
+        const HEADER: usize = 7;
+        let mut out = Vec::with_capacity(HEADER + count * 4);
+        out.push(snapshot.columns as jint);
+        out.push(snapshot.rows as jint);
+        out.push(snapshot.cursor_row as jint);
+        out.push(snapshot.cursor_column as jint);
+        out.push(jint::from(snapshot.cursor_visible));
+        out.push(snapshot.display_offset as jint);
+        out.push(snapshot.history_size as jint);
+        for cell in cells {
+            out.push(cell.ch as jint);
+            out.push(cell.fg as jint);
+            out.push(cell.bg as jint);
+            out.push(cell.flags as jint);
+        }
 
-    let Ok(array) = env.new_int_array(out.len() as i32) else {
-        return std::ptr::null_mut();
-    };
-    if env.set_int_array_region(&array, 0, &out).is_err() {
-        return std::ptr::null_mut();
-    }
-    array.into_raw()
+        let Ok(array) = env.new_int_array(out.len() as i32) else {
+            return std::ptr::null_mut();
+        };
+        if env.set_int_array_region(&array, 0, &out).is_err() {
+            return std::ptr::null_mut();
+        }
+        array.into_raw()
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -758,7 +814,7 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeScroll(
     handle: jlong,
     lines: jint,
 ) {
-    unsafe { vt::farcooler_vt_scroll(handle_of(handle), lines) }
+    guarded((), || unsafe { vt::farcooler_vt_scroll(handle_of(handle), lines) })
 }
 
 #[unsafe(no_mangle)]
@@ -767,7 +823,7 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeScrollToBottom(
     _class: JClass,
     handle: jlong,
 ) {
-    unsafe { vt::farcooler_vt_scroll_to_bottom(handle_of(handle)) }
+    guarded((), || unsafe { vt::farcooler_vt_scroll_to_bottom(handle_of(handle)) })
 }
 
 /// Bytes the program wants written back to the pty, drained.
@@ -782,22 +838,24 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeTakeWrites(
     _class: JClass,
     handle: jlong,
 ) -> jbyteArray {
-    let mut collected: Vec<u8> = Vec::new();
-    let mut chunk = [0u8; 1024];
-    loop {
-        let n =
-            unsafe { vt::farcooler_vt_take_writes(handle_of(handle), chunk.as_mut_ptr(), chunk.len()) };
-        if n == 0 {
-            break;
+    guarded(std::ptr::null_mut(), || {
+        let mut collected: Vec<u8> = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            let n =
+                unsafe { vt::farcooler_vt_take_writes(handle_of(handle), chunk.as_mut_ptr(), chunk.len()) };
+            if n == 0 {
+                break;
+            }
+            collected.extend_from_slice(&chunk[..n]);
+            // The C ABI's contract: call again while the result equals the
+            // capacity, because a full buffer means there may be more behind it.
+            if n < chunk.len() {
+                break;
+            }
         }
-        collected.extend_from_slice(&chunk[..n]);
-        // The C ABI's contract: call again while the result equals the
-        // capacity, because a full buffer means there may be more behind it.
-        if n < chunk.len() {
-            break;
-        }
-    }
-    byte_array_of(&mut env, &collected)
+        byte_array_of(&mut env, &collected)
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -806,7 +864,7 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeTakeBell(
     _class: JClass,
     handle: jlong,
 ) -> jboolean {
-    u8::from(unsafe { vt::farcooler_vt_take_bell(handle_of(handle)) })
+    guarded(0, || u8::from(unsafe { vt::farcooler_vt_take_bell(handle_of(handle)) }))
 }
 
 #[unsafe(no_mangle)]
@@ -815,14 +873,16 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeTitle(
     _class: JClass,
     handle: jlong,
 ) -> jstring {
-    let raw = unsafe { vt::farcooler_vt_title(handle_of(handle)) };
-    if raw.is_null() {
-        return std::ptr::null_mut();
-    }
-    match (unsafe { CStr::from_ptr(raw) }).to_str() {
-        Ok(text) => jstring_of(&mut env, text),
-        Err(_) => std::ptr::null_mut(),
-    }
+    guarded(std::ptr::null_mut(), || {
+        let raw = unsafe { vt::farcooler_vt_title(handle_of(handle)) };
+        if raw.is_null() {
+            return std::ptr::null_mut();
+        }
+        match (unsafe { CStr::from_ptr(raw) }).to_str() {
+            Ok(text) => jstring_of(&mut env, text),
+            Err(_) => std::ptr::null_mut(),
+        }
+    })
 }
 
 /// Text the program asked to put on the clipboard (OSC 52), or null.
@@ -838,21 +898,23 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeTakeClipboard(
     _class: JClass,
     handle: jlong,
 ) -> jstring {
-    let h = handle_of(handle);
-    let needed = unsafe { vt::farcooler_vt_take_clipboard(h, std::ptr::null_mut(), 0) };
-    if needed == 0 {
-        return std::ptr::null_mut();
-    }
-    let mut buffer = vec![0u8; needed];
-    let written =
-        unsafe { vt::farcooler_vt_take_clipboard(h, buffer.as_mut_ptr(), buffer.len()) };
-    if written != needed {
-        return std::ptr::null_mut();
-    }
-    match std::str::from_utf8(&buffer) {
-        Ok(text) => jstring_of(&mut env, text),
-        Err(_) => std::ptr::null_mut(),
-    }
+    guarded(std::ptr::null_mut(), || {
+        let h = handle_of(handle);
+        let needed = unsafe { vt::farcooler_vt_take_clipboard(h, std::ptr::null_mut(), 0) };
+        if needed == 0 {
+            return std::ptr::null_mut();
+        }
+        let mut buffer = vec![0u8; needed];
+        let written =
+            unsafe { vt::farcooler_vt_take_clipboard(h, buffer.as_mut_ptr(), buffer.len()) };
+        if written != needed {
+            return std::ptr::null_mut();
+        }
+        match std::str::from_utf8(&buffer) {
+            Ok(text) => jstring_of(&mut env, text),
+            Err(_) => std::ptr::null_mut(),
+        }
+    })
 }
 
 /// The URL under a cell, or null.
@@ -871,28 +933,30 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeUrlAt(
     row: jint,
     column: jint,
 ) -> jstring {
-    if row < 0 || column < 0 {
-        return std::ptr::null_mut();
-    }
-    let h = handle_of(handle);
-    let (row, column) = (clamp_u16(row), clamp_u16(column));
-    let mut span = vt::VtUrlSpan { start_row: 0, start_column: 0, end_row: 0, end_column: 0 };
-    let needed =
-        unsafe { vt::farcooler_vt_url_at(h, row, column, &mut span, std::ptr::null_mut(), 0) };
-    if needed == 0 {
-        return std::ptr::null_mut();
-    }
-    let mut buffer = vec![0u8; needed];
-    let written = unsafe {
-        vt::farcooler_vt_url_at(h, row, column, &mut span, buffer.as_mut_ptr(), buffer.len())
-    };
-    if written != needed {
-        return std::ptr::null_mut();
-    }
-    match std::str::from_utf8(&buffer) {
-        Ok(text) => jstring_of(&mut env, text),
-        Err(_) => std::ptr::null_mut(),
-    }
+    guarded(std::ptr::null_mut(), || {
+        if row < 0 || column < 0 {
+            return std::ptr::null_mut();
+        }
+        let h = handle_of(handle);
+        let (row, column) = (clamp_u16(row), clamp_u16(column));
+        let mut span = vt::VtUrlSpan { start_row: 0, start_column: 0, end_row: 0, end_column: 0 };
+        let needed =
+            unsafe { vt::farcooler_vt_url_at(h, row, column, &mut span, std::ptr::null_mut(), 0) };
+        if needed == 0 {
+            return std::ptr::null_mut();
+        }
+        let mut buffer = vec![0u8; needed];
+        let written = unsafe {
+            vt::farcooler_vt_url_at(h, row, column, &mut span, buffer.as_mut_ptr(), buffer.len())
+        };
+        if written != needed {
+            return std::ptr::null_mut();
+        }
+        match std::str::from_utf8(&buffer) {
+            Ok(text) => jstring_of(&mut env, text),
+            Err(_) => std::ptr::null_mut(),
+        }
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -901,7 +965,7 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeAltScreen(
     _class: JClass,
     handle: jlong,
 ) -> jboolean {
-    u8::from(unsafe { vt::farcooler_vt_alt_screen(handle_of(handle)) })
+    guarded(0, || u8::from(unsafe { vt::farcooler_vt_alt_screen(handle_of(handle)) }))
 }
 
 /// Encode a keystroke. Empty when the emulator produces nothing for it.
@@ -917,17 +981,19 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeEncodeKey(
     key: jint,
     modifiers: jint,
 ) -> jbyteArray {
-    let mut buffer = [0u8; 16];
-    let n = unsafe {
-        vt::farcooler_vt_encode_key(
-            handle_of(handle),
-            key as u32,
-            modifiers as u32,
-            buffer.as_mut_ptr(),
-            buffer.len(),
-        )
-    };
-    byte_array_of(&mut env, &buffer[..n])
+    guarded(std::ptr::null_mut(), || {
+        let mut buffer = [0u8; 16];
+        let n = unsafe {
+            vt::farcooler_vt_encode_key(
+                handle_of(handle),
+                key as u32,
+                modifiers as u32,
+                buffer.as_mut_ptr(),
+                buffer.len(),
+            )
+        };
+        byte_array_of(&mut env, &buffer[..n])
+    })
 }
 
 /// Encode a mouse event, or null when the program does not want it.
@@ -948,23 +1014,25 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeEncodeMouse(
     row: jint,
     modifiers: jint,
 ) -> jbyteArray {
-    let mut buffer = [0u8; 32];
-    let n = unsafe {
-        vt::farcooler_vt_encode_mouse(
-            handle_of(handle),
-            button as u32,
-            action as u32,
-            clamp_u16(column),
-            clamp_u16(row),
-            modifiers as u32,
-            buffer.as_mut_ptr(),
-            buffer.len(),
-        )
-    };
-    if n == 0 {
-        return std::ptr::null_mut();
-    }
-    byte_array_of(&mut env, &buffer[..n])
+    guarded(std::ptr::null_mut(), || {
+        let mut buffer = [0u8; 32];
+        let n = unsafe {
+            vt::farcooler_vt_encode_mouse(
+                handle_of(handle),
+                button as u32,
+                action as u32,
+                clamp_u16(column),
+                clamp_u16(row),
+                modifiers as u32,
+                buffer.as_mut_ptr(),
+                buffer.len(),
+            )
+        };
+        if n == 0 {
+            return std::ptr::null_mut();
+        }
+        byte_array_of(&mut env, &buffer[..n])
+    })
 }
 
 /// Encode pasted text, bracketed if the program asked for that.
@@ -979,33 +1047,35 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeEncodePaste(
     handle: jlong,
     text: JString,
 ) -> jbyteArray {
-    let Ok(text) = env.get_string(&text) else { return std::ptr::null_mut() };
-    let text: String = text.into();
-    let bytes = text.as_bytes();
+    guarded(std::ptr::null_mut(), || {
+        let Ok(text) = env.get_string(&text) else { return std::ptr::null_mut() };
+        let text: String = text.into();
+        let bytes = text.as_bytes();
 
-    let needed = unsafe {
-        vt::farcooler_vt_encode_paste(
-            handle_of(handle),
-            bytes.as_ptr(),
-            bytes.len(),
-            std::ptr::null_mut(),
-            0,
-        )
-    };
-    if needed == 0 {
-        return byte_array_of(&mut env, &[]);
-    }
-    let mut buffer = vec![0u8; needed];
-    let written = unsafe {
-        vt::farcooler_vt_encode_paste(
-            handle_of(handle),
-            bytes.as_ptr(),
-            bytes.len(),
-            buffer.as_mut_ptr(),
-            buffer.len(),
-        )
-    };
-    byte_array_of(&mut env, &buffer[..written.min(buffer.len())])
+        let needed = unsafe {
+            vt::farcooler_vt_encode_paste(
+                handle_of(handle),
+                bytes.as_ptr(),
+                bytes.len(),
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if needed == 0 {
+            return byte_array_of(&mut env, &[]);
+        }
+        let mut buffer = vec![0u8; needed];
+        let written = unsafe {
+            vt::farcooler_vt_encode_paste(
+                handle_of(handle),
+                bytes.as_ptr(),
+                bytes.len(),
+                buffer.as_mut_ptr(),
+                buffer.len(),
+            )
+        };
+        byte_array_of(&mut env, &buffer[..written.min(buffer.len())])
+    })
 }
 
 /// A Java `int` narrowed to the `u16` the cores take.
