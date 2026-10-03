@@ -85,6 +85,13 @@ jobs:
       # must catch and cases it must pass, then the tree.
       - run: ./scripts/copy-lint.py --self-test
       - run: ./scripts/copy-lint.py
+      # No source file grows past 1,500 lines (ov-169); the ones already past
+      # it are grandfathered in scripts/file-size-budget.txt and may only
+      # shrink. The rule against its own cases first, then the tree.
+      - name: File size budget
+        run: |
+          ./scripts/file-size-budget.py --self-test
+          ./scripts/file-size-budget.py
 
   # The tunnel itself, which is Go, and which nothing in this workflow ran until
   # now.
