@@ -54,6 +54,17 @@ pub struct TaggedPane {
     pub dead: bool,
     /// Exit code reported by tmux for a dead pane, when it gave one.
     pub dead_status: Option<i32>,
+    /// The signal that killed a dead pane's command, when one did, as tmux
+    /// names it.
+    ///
+    /// A name and not a number because that is what tmux gives: `sig2name`
+    /// renders `kill` where the platform has `sys_signame` (macOS) and `9`
+    /// where it does not (Linux).
+    ///
+    /// A dead pane carries exactly one of this and `dead_status` once tmux has
+    /// reaped its process. Neither means the exit is not settled yet — see
+    /// `exit_unsettled`.
+    pub dead_signal: Option<String>,
     /// The pane's foreground process, as tmux reports it.
     ///
     /// This is how Far Cooler knows an agent is running. A terminal is created
@@ -73,6 +84,16 @@ impl TaggedPane {
     /// A dead pane proves an exit. It does not prove life.
     pub fn proves_life(&self) -> bool {
         !self.dead
+    }
+
+    /// Dead, but tmux does not yet know how it died.
+    ///
+    /// tmux marks a pane dead when its pty reports end of file, and records
+    /// the exit status when SIGCHLD is handled. Those are two separate events
+    /// in its loop, in either order, so for a moment a pane can read as dead
+    /// with neither an exit code nor a signal.
+    pub fn exit_unsettled(&self) -> bool {
+        self.dead && self.dead_status.is_none() && self.dead_signal.is_none()
     }
 }
 

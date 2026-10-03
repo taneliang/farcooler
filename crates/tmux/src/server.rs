@@ -11,8 +11,10 @@
 //! A worktree is a daemon grouping of TAGGED WINDOWS, not a tmux session. There
 //! is one runner-wide session.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 
 use farcooler_core::{DomainError, Result, SCHEMA_VERSION, tags};
 use tokio::process::Command;
@@ -27,6 +29,11 @@ pub struct TmuxServer {
     socket: String,
     daemon_id: Uuid,
     config_path: PathBuf,
+    /// Dead panes whose exit status never arrived within the settle window.
+    ///
+    /// Remembered so `list_tagged_panes` waits for each such pane once, not on
+    /// every read for as long as it stays that way. See `EXIT_SETTLE`.
+    pub(crate) unsettled_exits: Arc<Mutex<HashSet<String>>>,
 }
 
 /// Far Cooler's own minimal tmux configuration.
@@ -82,7 +89,12 @@ impl TmuxServer {
     }
 
     pub fn with_config(install_id: &str, daemon_id: Uuid, config_path: PathBuf) -> Self {
-        Self { socket: format!("farcooler-{install_id}"), daemon_id, config_path }
+        Self {
+            socket: format!("farcooler-{install_id}"),
+            daemon_id,
+            config_path,
+            unsettled_exits: Arc::default(),
+        }
     }
 
     /// Write the managed config if what is on disk is not what we want.

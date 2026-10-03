@@ -7713,6 +7713,7 @@ mod tests {
             tty: "/dev/ttys001".into(),
             dead: false,
             dead_status: None,
+            dead_signal: None,
             command: "fish".into(),
             title: String::new(),
         }

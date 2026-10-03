@@ -157,6 +157,7 @@ fn live_pane(terminal_id: Uuid) -> TaggedPane {
         tty: String::new(),
         dead: false,
         dead_status: None,
+        dead_signal: None,
         command: "codex".into(),
         title: String::new(),
     }

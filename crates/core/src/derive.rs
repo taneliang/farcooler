@@ -200,6 +200,7 @@ mod tests {
             rows: 24,
             dead: false,
             dead_status: None,
+            dead_signal: None,
             command: "zsh".into(),
             left: 0,
             top: 0,

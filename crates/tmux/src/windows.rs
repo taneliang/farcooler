@@ -142,11 +142,58 @@ impl TmuxServer {
     ///
     /// One bulk query, never one round trip per terminal, because derivation
     /// sits on the fleet-render path.
+    ///
+    /// A pane that has just died is read again until its exit settles. tmux
+    /// sets `pane_dead` when the pty reports end of file, and `pane_dead_status`
+    /// only once it has handled SIGCHLD — two separate trips round its event
+    /// loop (tmux 3.4, `window_pane_error_callback` and `server_child_exited`).
+    /// On Linux end of file can win, and a read landing between the two sees a
+    /// dead pane with no exit code: an exit observed, and the one fact about it
+    /// that matters, lost. A tight `list-panes` poll on Linux caught it on 16
+    /// of 300 `exit 42` panes. Waiting here costs nothing in the common case,
+    /// where no pane is in that state, and a few milliseconds when one is.
+    ///
+    /// Bounded by `EXIT_SETTLE`, because a command can close its tty and keep
+    /// running if it ignores the hangup that follows. Such a pane is reported
+    /// dead without a status, as tmux sees it, and is not waited for again
+    /// while it stays that way.
     pub async fn list_tagged_panes(&self) -> Result<Vec<TaggedPane>> {
+        let mut panes = self.list_tagged_panes_once().await?;
+        let deadline = std::time::Instant::now() + EXIT_SETTLE;
+        loop {
+            let unsettled: std::collections::HashSet<String> =
+                panes.iter().filter(|p| p.exit_unsettled()).map(|p| p.pane_id.clone()).collect();
+            let waiting = {
+                let mut gave_up = self.unsettled_exits.lock().expect("unsettled exits lock");
+                // Forget panes that settled, respawned or went away, so a pane
+                // that dies again later is waited for again.
+                gave_up.retain(|id| unsettled.contains(id));
+                if std::time::Instant::now() >= deadline {
+                    gave_up.extend(unsettled);
+                    false
+                } else {
+                    unsettled.iter().any(|id| !gave_up.contains(id))
+                }
+            };
+            if !waiting {
+                return Ok(panes);
+            }
+            tokio::time::sleep(EXIT_SETTLE_POLL).await;
+            // A failed re-read keeps the good read already in hand rather than
+            // turning one pane's exit into an unreadable inventory.
+            match self.list_tagged_panes_once().await {
+                Ok(again) => panes = again,
+                Err(_) => return Ok(panes),
+            }
+        }
+    }
+
+    /// One `list-panes`, as tmux answers it.
+    async fn list_tagged_panes_once(&self) -> Result<Vec<TaggedPane>> {
         // Geometry comes along for the ride: it is the same query, and asking
         // tmux where a pane is costs nothing next to computing it twice.
         let fmt = format!(
-            "#{{pane_id}}\t#{{window_id}}\t#{{pane_width}}\t#{{pane_height}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{pane_dead}}\t#{{pane_dead_status}}\t#{{pane_current_command}}\t#{{pane_left}}\t#{{pane_top}}\t#{{window_active}}\t#{{pane_active}}\t#{{window_zoomed_flag}}\t#{{pane_tty}}\t#{{pane_title}}",
+            "#{{pane_id}}\t#{{window_id}}\t#{{pane_width}}\t#{{pane_height}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{pane_dead}}\t#{{pane_dead_status}}\t#{{pane_current_command}}\t#{{pane_left}}\t#{{pane_top}}\t#{{window_active}}\t#{{pane_active}}\t#{{window_zoomed_flag}}\t#{{pane_tty}}\t#{{pane_dead_signal}}\t#{{pane_title}}",
             tags::DAEMON_ID,
             tags::WORKTREE_ID,
             tags::TERMINAL_ID,
@@ -496,6 +543,14 @@ impl TmuxServer {
     }
 }
 
+/// How long a read waits for a dead pane's exit status to arrive.
+///
+/// Far longer than the gap ever is — that is one pass of tmux's event loop —
+/// so that a loaded machine still sees the code, and short enough that a pane
+/// which never settles costs the fleet render one pause and no more.
+const EXIT_SETTLE: std::time::Duration = std::time::Duration::from_millis(500);
+const EXIT_SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(10);
+
 /// Parse one `list-panes -F` line. A line missing our tags is not ours.
 pub(crate) fn parse_pane_line(line: &str) -> Option<TaggedPane> {
     let f: Vec<&str> = line.split('\t').collect();
@@ -508,7 +563,7 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<TaggedPane> {
     let terminal_id = Uuid::parse_str(f[6].trim()).ok()?;
     let schema_version: u32 = f[7].trim().parse().ok()?;
 
-    // tmux renders `#{pane_dead}` as "1" when set and empty when not.
+    // tmux renders `#{pane_dead}` as "1" when set, "0" or empty when not.
     let dead = f.get(8).map(|v| v.trim() == "1").unwrap_or(false);
     let dead_status = f.get(9).and_then(|v| v.trim().parse::<i32>().ok());
     let command = f.get(10).map(|v| v.trim().to_string()).unwrap_or_default();
@@ -535,10 +590,11 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<TaggedPane> {
         // together with `pane_active`: the zoomed pane is the active one.
         zoomed: flag(15) && flag(14),
         tty: f.get(16).map(|v| v.trim().to_string()).unwrap_or_default(),
+        dead_signal: f.get(17).map(|v| v.trim()).filter(|v| !v.is_empty()).map(str::to_string),
         // Appended last on purpose. A title is user-controlled text and may
         // contain a tab; putting it at the end means such a title costs its own
         // value and not every field after it.
-        title: f.get(17).map(|v| v.trim().to_string()).unwrap_or_default(),
+        title: f.get(18).map(|v| v.trim().to_string()).unwrap_or_default(),
     })
 }
 
@@ -802,11 +858,34 @@ mod tests {
     fn a_pane_line_carries_the_title() {
         let d = uuid::Uuid::nil();
         let line = format!(
-            "%1\t@0\t80\t24\t{d}\t{d}\t{d}\t1\t\t\tclaude\t0\t0\t1\t1\t0\t/dev/ttys001\t◐ Write a haiku"
+            "%1\t@0\t80\t24\t{d}\t{d}\t{d}\t1\t\t\tclaude\t0\t0\t1\t1\t0\t/dev/ttys001\t\t◐ Write a haiku"
         );
         let p = parse_pane_line(&line).expect("a well-formed line parses");
         assert_eq!(p.title, "◐ Write a haiku");
         assert_eq!(p.tty, "/dev/ttys001");
+    }
+
+    #[test]
+    fn a_pane_killed_by_a_signal_carries_the_signal() {
+        let d = uuid::Uuid::nil();
+        let line = format!(
+            "%1\t@0\t80\t24\t{d}\t{d}\t{d}\t1\t1\t\tsh\t0\t0\t1\t1\t0\t/dev/ttys001\tkill\t"
+        );
+        let p = parse_pane_line(&line).expect("a well-formed line parses");
+        assert!(p.dead);
+        assert_eq!((p.dead_status, p.dead_signal.as_deref()), (None, Some("kill")));
+        assert!(!p.exit_unsettled(), "a signal settles the exit as surely as a code");
+    }
+
+    #[test]
+    fn a_dead_pane_with_neither_code_nor_signal_is_unsettled() {
+        let d = uuid::Uuid::nil();
+        let line = format!(
+            "%1\t@0\t80\t24\t{d}\t{d}\t{d}\t1\t1\t\tsh\t0\t0\t1\t1\t0\t/dev/ttys001\t\t"
+        );
+        let p = parse_pane_line(&line).expect("a well-formed line parses");
+        assert!(p.dead && p.exit_unsettled());
+        assert!(!p.proves_life(), "an unsettled exit is still no proof of life");
     }
 
     /// A build that predates the title field must still parse.

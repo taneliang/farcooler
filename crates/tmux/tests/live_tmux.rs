@@ -203,6 +203,40 @@ async fn an_exited_command_is_observed_as_dead_not_silently_gone() {
 }
 
 #[tokio::test]
+async fn a_command_killed_by_a_signal_is_observed_with_its_signal() {
+    let srv = unique_server();
+    let t = Uuid::now_v7();
+
+    // `exec`, so the signal kills the pane's own process: the command runs
+    // under `default-shell -c`, which would otherwise outlive `sh` and turn its
+    // death into exit status 137.
+    srv.create_terminal_window(Uuid::now_v7(), t, "killed", "/tmp", "exec sh -c 'kill -9 $$'")
+        .await
+        .unwrap();
+
+    until("the pane to report its death", || async {
+        srv.list_tagged_panes().await.is_ok_and(|panes| {
+            panes.iter().any(|p| p.terminal_id == t && p.dead)
+        })
+    })
+    .await;
+
+    let panes = srv.list_tagged_panes().await.unwrap();
+    let p = panes.iter().find(|p| p.terminal_id == t).expect("remain-on-exit retains the pane");
+
+    // tmux names the signal `kill` on macOS and `9` on Linux.
+    assert!(
+        matches!(p.dead_signal.as_deref(), Some("kill" | "KILL" | "9")),
+        "the signal is observable, got {:?}",
+        p.dead_signal
+    );
+    assert_eq!(p.dead_status, None, "a signal death has no exit code");
+    assert!(!p.exit_unsettled(), "a signal settles the exit");
+
+    srv.kill_server().await.unwrap();
+}
+
+#[tokio::test]
 async fn a_killed_window_stops_proving_identity_entirely() {
     let srv = unique_server();
     let ws = Uuid::now_v7();

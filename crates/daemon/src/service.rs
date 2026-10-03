@@ -7685,6 +7685,7 @@ mod orchestrator_launch_tests {
             tty: "/dev/ttys001".into(),
             dead,
             dead_status: None,
+            dead_signal: None,
             command: "claude".into(),
             title: String::new(),
         };
