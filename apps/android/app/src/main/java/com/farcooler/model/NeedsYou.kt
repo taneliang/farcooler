@@ -30,10 +30,19 @@ data class RunnerNeedsYou(val items: List<NeedsYouItem>, val derived: Boolean = 
 data class NeedsYouRunner(
     val hostId: String,
     val label: String,
-    /** Null until this connection has read anything. */
+    /**
+     * Null until a list has been read on this connection: still coming, or
+     * the read failed. Its blocked agents are shown meanwhile; see
+     * [NeedsYou.shown].
+     */
     val reading: RunnerNeedsYou?,
     val fleet: Fleet = Fleet.EMPTY,
     val repositories: List<Repository> = emptyList(),
+    /**
+     * Whether its link is up and its fleet read on it ([RunnerLink.ANSWERING]).
+     * A runner that isn't may have more waiting than its last list says.
+     */
+    val answering: Boolean = true,
 )
 
 /** One row on the front door: an item, where it is, and whose runner. */
@@ -85,13 +94,13 @@ object NeedsYou {
      * (spec §6.2: "each item is a row labeled with its workspace").
      *
      * By rank across runners, which is safe because a rank is a duration and
-     * not a clock reading; see [NeedsYouItems.merge]. A runner that hasn't
-     * answered adds nothing yet, and nothing is invented for it.
+     * not a clock reading; see [NeedsYouItems.merge]. A runner whose list
+     * hasn't been read adds its blocked agents ([shown]).
      */
     fun rows(runners: List<NeedsYouRunner>): List<NeedsYouRow> {
         val byHost = runners.associateBy { it.hostId }
         val namesRunners = runners.size > 1
-        return NeedsYouItems.merge(runners.associate { it.hostId to it.reading?.items.orEmpty() })
+        return NeedsYouItems.merge(runners.associate { it.hostId to shown(it) })
             .map { entry ->
                 val runner = byHost.getValue(entry.hostId)
                 NeedsYouRow(entry, place(entry.item, runner), if (namesRunners) runner.label else null)
@@ -116,11 +125,43 @@ object NeedsYou {
     }
 
     /**
+     * One runner's items: its own list where it has one, and for a runner
+     * whose list isn't read yet (still coming, or the read failed), the
+     * blocked agents its last fleet shows, derived as an older runner's are.
+     *
+     * iOS's rule (`PhoneInbox.shown`), so an agent blocked on a runner whose
+     * read failed is on screen instead of under "Nothing needs you". Pinned
+     * for both by `test/fixtures/needs-you-shown.json`.
+     */
+    fun shown(runner: NeedsYouRunner): List<NeedsYouItem> =
+        runner.reading?.items ?: NeedsYouItems.derived(runner.fleet.worktrees)
+
+    /**
      * Whether the front door may say "Nothing needs you". Only with no item
      * at all, so a decision is never under that sentence the way the old
-     * Board rows were (ov-56).
+     * Board rows were (ov-56), and only once some runner's list has been
+     * read: before that it's a claim nobody made, and the screen says it's
+     * checking instead. With no runners at all, there's nothing to check.
      */
-    fun nothingNeedsYou(rows: List<NeedsYouRow>): Boolean = rows.isEmpty()
+    fun nothingNeedsYou(runners: List<NeedsYouRunner>, rows: List<NeedsYouRow>): Boolean =
+        rows.isEmpty() && (runners.isEmpty() || runners.any { it.reading != null })
+
+    /**
+     * The runners whose items may not all be here, by name: no list read
+     * from them, or a link that isn't answering now.
+     */
+    fun unanswered(runners: List<NeedsYouRunner>): List<String> =
+        runners.filter { it.reading == null || !it.answering }.map { it.label }
+
+    /**
+     * The line under "Nothing needs you", or null when every runner answered.
+     * iOS's words (`PhoneInbox.caveat`).
+     */
+    fun caveat(unanswered: List<String>): String? = when (unanswered.size) {
+        0 -> null
+        1 -> "${unanswered[0]} isn’t answering, so this may not be everything."
+        else -> "${unanswered.size} runners aren’t answering, so this may not be everything."
+    }
 
     /**
      * The runners whose items were derived on this phone, by name: each gets

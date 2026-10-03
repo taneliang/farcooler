@@ -159,11 +159,14 @@ class NeedsYouTest {
     fun `nothing needs you is never shown above a decision`() {
         val deciding = runner("h", items = listOf(item("decision:t", "decision", rank = 299_000_000)))
         val reviewing = runner("h", items = listOf(item("review:t", "review", rank = 399_000_000)))
-        assertFalse(NeedsYou.nothingNeedsYou(NeedsYou.rows(listOf(deciding))))
-        assertFalse(NeedsYou.nothingNeedsYou(NeedsYou.rows(listOf(reviewing))))
-        assertTrue(NeedsYou.nothingNeedsYou(NeedsYou.rows(listOf(runner("h", items = emptyList())))))
-        // A runner that hasn't answered adds nothing, and invents nothing.
-        assertTrue(NeedsYou.nothingNeedsYou(NeedsYou.rows(listOf(NeedsYouRunner("h", "h", reading = null)))))
+        fun nothing(vararg runners: NeedsYouRunner) =
+            NeedsYou.nothingNeedsYou(runners.toList(), NeedsYou.rows(runners.toList()))
+        assertFalse(nothing(deciding))
+        assertFalse(nothing(reviewing))
+        assertTrue(nothing(runner("h", items = emptyList())))
+        // A runner whose list isn't read invents nothing, and claims nothing
+        // either: the screen says it's checking. See NeedsYouShownTest.
+        assertFalse(nothing(NeedsYouRunner("h", "h", reading = null)))
     }
 
     /**

@@ -53,12 +53,14 @@ fun rememberNeedsYouRunners(connections: List<Connection>): List<Pair<Connection
             val reading by connection.needsYou.collectAsStateWithLifecycle()
             val fleet by connection.fleet.collectAsStateWithLifecycle()
             val repositories by connection.repositories.collectAsStateWithLifecycle()
+            val link by connection.link.collectAsStateWithLifecycle()
             connection to NeedsYouRunner(
                 hostId = connection.host.id,
                 label = connection.host.displayLabel,
                 reading = reading,
                 fleet = fleet,
                 repositories = repositories,
+                answering = link == RunnerLink.ANSWERING,
             )
         }
     }

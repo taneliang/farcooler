@@ -1,0 +1,405 @@
+{
+  "_comment": [
+    "What Needs You shows across runners, and what it may claim when it shows nothing.",
+    "Read by AgentKit (PhoneInboxShownTests) and Kotlin (NeedsYouShownTest).",
+    "needs_you null: no list read from that runner (still coming, or the read failed).",
+    "fleet null: no fleet read either. answering: the link is up and read on this link.",
+    "shown: item ids in merged order. derived: the shown ids made on the phone from the fleet.",
+    "caveat: the line under Nothing needs you. empty: null when items are shown,",
+    "\"nothing\" for Nothing needs you, \"checking\" when no runner has a list yet."
+  ],
+  "cases": [
+    {
+      "name": "A runner whose read failed shows its blocked agents, and is named",
+      "runners": [
+        {
+          "runner": "studio",
+          "answering": true,
+          "needs_you": {
+            "items": [
+              {
+                "actions": [],
+                "also": [],
+                "ask_id": null,
+                "detail": null,
+                "id": "decision:01000000-0000-7000-8000-00000000000c",
+                "kind": "decision",
+                "question": "Postgres or SQLite for the queue?",
+                "rank": 299999699,
+                "repository_id": "01000000-0000-7000-8000-000000000002",
+                "since": 1789999700000,
+                "task": {
+                  "id": "01000000-0000-7000-8000-00000000000c",
+                  "key": "bil-9",
+                  "status": "needs_decision",
+                  "title": "Retry failed webhooks"
+                },
+                "terminal": null,
+                "workspace_id": "01000000-0000-7000-8000-000000000001",
+                "workspace_name": "Billing",
+                "worktree": null
+              }
+            ]
+          },
+          "fleet": {
+            "runtime_healthy": true,
+            "live_panes": 0,
+            "worktrees": [
+              {
+                "id": "01000000-0000-7000-8000-000000000025",
+                "short": "010000",
+                "repository": "01000000-0000-7000-8000-000000000015",
+                "task": "Rotate the relay keys",
+                "branch": "ops/relay-keys",
+                "worktree": "/srv/ops-relay-keys",
+                "state": "ready",
+                "terminals": []
+              }
+            ]
+          }
+        },
+        {
+          "runner": "build-box",
+          "answering": true,
+          "needs_you": null,
+          "fleet": {
+            "runtime_healthy": true,
+            "live_panes": 2,
+            "worktrees": [
+              {
+                "id": "01000000-0000-7000-8000-000000000025",
+                "short": "010000",
+                "repository": "01000000-0000-7000-8000-000000000015",
+                "task": "Rotate the relay keys",
+                "branch": "ops/relay-keys",
+                "worktree": "/srv/ops-relay-keys",
+                "state": "ready",
+                "terminals": [
+                  {
+                    "id": "box-agent",
+                    "short": "box-ag",
+                    "title": "",
+                    "preset": "claude",
+                    "state": "running",
+                    "activity": "blocked",
+                    "rank": 120,
+                    "role": "agent",
+                    "paneMode": "terminal",
+                    "chatCapable": false
+                  },
+                  {
+                    "id": "box-shell",
+                    "short": "box-sh",
+                    "title": "",
+                    "preset": "claude",
+                    "state": "running",
+                    "activity": "working",
+                    "rank": 200000300,
+                    "role": "agent",
+                    "paneMode": "terminal",
+                    "chatCapable": false
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "shown": [
+        "blocked:box-agent",
+        "decision:01000000-0000-7000-8000-00000000000c"
+      ],
+      "derived": [
+        "blocked:box-agent"
+      ],
+      "caveat": "build-box isn’t answering, so this may not be everything.",
+      "empty": null
+    },
+    {
+      "name": "A failed read with nothing blocked hedges Nothing needs you",
+      "runners": [
+        {
+          "runner": "studio",
+          "answering": true,
+          "needs_you": {
+            "items": []
+          },
+          "fleet": {
+            "runtime_healthy": true,
+            "live_panes": 0,
+            "worktrees": [
+              {
+                "id": "01000000-0000-7000-8000-000000000025",
+                "short": "010000",
+                "repository": "01000000-0000-7000-8000-000000000015",
+                "task": "Rotate the relay keys",
+                "branch": "ops/relay-keys",
+                "worktree": "/srv/ops-relay-keys",
+                "state": "ready",
+                "terminals": []
+              }
+            ]
+          }
+        },
+        {
+          "runner": "build-box",
+          "answering": true,
+          "needs_you": null,
+          "fleet": {
+            "runtime_healthy": true,
+            "live_panes": 1,
+            "worktrees": [
+              {
+                "id": "01000000-0000-7000-8000-000000000025",
+                "short": "010000",
+                "repository": "01000000-0000-7000-8000-000000000015",
+                "task": "Rotate the relay keys",
+                "branch": "ops/relay-keys",
+                "worktree": "/srv/ops-relay-keys",
+                "state": "ready",
+                "terminals": [
+                  {
+                    "id": "box-shell",
+                    "short": "box-sh",
+                    "title": "",
+                    "preset": "claude",
+                    "state": "running",
+                    "activity": "working",
+                    "rank": 200000300,
+                    "role": "agent",
+                    "paneMode": "terminal",
+                    "chatCapable": false
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "shown": [],
+      "derived": [],
+      "caveat": "build-box isn’t answering, so this may not be everything.",
+      "empty": "nothing"
+    },
+    {
+      "name": "With no runner read, nothing is claimed",
+      "runners": [
+        {
+          "runner": "build-box",
+          "answering": true,
+          "needs_you": null,
+          "fleet": {
+            "runtime_healthy": true,
+            "live_panes": 1,
+            "worktrees": [
+              {
+                "id": "01000000-0000-7000-8000-000000000025",
+                "short": "010000",
+                "repository": "01000000-0000-7000-8000-000000000015",
+                "task": "Rotate the relay keys",
+                "branch": "ops/relay-keys",
+                "worktree": "/srv/ops-relay-keys",
+                "state": "ready",
+                "terminals": [
+                  {
+                    "id": "box-shell",
+                    "short": "box-sh",
+                    "title": "",
+                    "preset": "claude",
+                    "state": "running",
+                    "activity": "working",
+                    "rank": 200000300,
+                    "role": "agent",
+                    "paneMode": "terminal",
+                    "chatCapable": false
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "shown": [],
+      "derived": [],
+      "caveat": "build-box isn’t answering, so this may not be everything.",
+      "empty": "checking"
+    },
+    {
+      "name": "A failed read before any fleet adds nothing, and is named",
+      "runners": [
+        {
+          "runner": "studio",
+          "answering": true,
+          "needs_you": {
+            "items": []
+          },
+          "fleet": {
+            "runtime_healthy": true,
+            "live_panes": 0,
+            "worktrees": [
+              {
+                "id": "01000000-0000-7000-8000-000000000025",
+                "short": "010000",
+                "repository": "01000000-0000-7000-8000-000000000015",
+                "task": "Rotate the relay keys",
+                "branch": "ops/relay-keys",
+                "worktree": "/srv/ops-relay-keys",
+                "state": "ready",
+                "terminals": []
+              }
+            ]
+          }
+        },
+        {
+          "runner": "build-box",
+          "answering": true,
+          "needs_you": null,
+          "fleet": null
+        }
+      ],
+      "shown": [],
+      "derived": [],
+      "caveat": "build-box isn’t answering, so this may not be everything.",
+      "empty": "nothing"
+    },
+    {
+      "name": "A runner's own list is never derived over",
+      "runners": [
+        {
+          "runner": "studio",
+          "answering": true,
+          "needs_you": {
+            "items": []
+          },
+          "fleet": {
+            "runtime_healthy": true,
+            "live_panes": 1,
+            "worktrees": [
+              {
+                "id": "01000000-0000-7000-8000-000000000025",
+                "short": "010000",
+                "repository": "01000000-0000-7000-8000-000000000015",
+                "task": "Rotate the relay keys",
+                "branch": "ops/relay-keys",
+                "worktree": "/srv/ops-relay-keys",
+                "state": "ready",
+                "terminals": [
+                  {
+                    "id": "studio-agent",
+                    "short": "studio",
+                    "title": "",
+                    "preset": "claude",
+                    "state": "running",
+                    "activity": "blocked",
+                    "rank": 60,
+                    "role": "agent",
+                    "paneMode": "terminal",
+                    "chatCapable": false
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "shown": [],
+      "derived": [],
+      "caveat": null,
+      "empty": "nothing"
+    },
+    {
+      "name": "A runner gone quiet keeps its last list, and two silent runners are counted",
+      "runners": [
+        {
+          "runner": "studio",
+          "answering": false,
+          "needs_you": {
+            "items": [
+              {
+                "actions": [],
+                "also": [],
+                "ask_id": null,
+                "detail": null,
+                "id": "decision:01000000-0000-7000-8000-00000000000c",
+                "kind": "decision",
+                "question": "Postgres or SQLite for the queue?",
+                "rank": 299999699,
+                "repository_id": "01000000-0000-7000-8000-000000000002",
+                "since": 1789999700000,
+                "task": {
+                  "id": "01000000-0000-7000-8000-00000000000c",
+                  "key": "bil-9",
+                  "status": "needs_decision",
+                  "title": "Retry failed webhooks"
+                },
+                "terminal": null,
+                "workspace_id": "01000000-0000-7000-8000-000000000001",
+                "workspace_name": "Billing",
+                "worktree": null
+              }
+            ]
+          },
+          "fleet": {
+            "runtime_healthy": true,
+            "live_panes": 0,
+            "worktrees": [
+              {
+                "id": "01000000-0000-7000-8000-000000000025",
+                "short": "010000",
+                "repository": "01000000-0000-7000-8000-000000000015",
+                "task": "Rotate the relay keys",
+                "branch": "ops/relay-keys",
+                "worktree": "/srv/ops-relay-keys",
+                "state": "ready",
+                "terminals": []
+              }
+            ]
+          }
+        },
+        {
+          "runner": "build-box",
+          "answering": true,
+          "needs_you": null,
+          "fleet": {
+            "runtime_healthy": true,
+            "live_panes": 1,
+            "worktrees": [
+              {
+                "id": "01000000-0000-7000-8000-000000000025",
+                "short": "010000",
+                "repository": "01000000-0000-7000-8000-000000000015",
+                "task": "Rotate the relay keys",
+                "branch": "ops/relay-keys",
+                "worktree": "/srv/ops-relay-keys",
+                "state": "ready",
+                "terminals": [
+                  {
+                    "id": "box-agent",
+                    "short": "box-ag",
+                    "title": "",
+                    "preset": "claude",
+                    "state": "running",
+                    "activity": "blocked",
+                    "rank": 120,
+                    "role": "agent",
+                    "paneMode": "terminal",
+                    "chatCapable": false
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "shown": [
+        "blocked:box-agent",
+        "decision:01000000-0000-7000-8000-00000000000c"
+      ],
+      "derived": [
+        "blocked:box-agent"
+      ],
+      "caveat": "2 runners aren’t answering, so this may not be everything.",
+      "empty": null
+    }
+  ]
+}

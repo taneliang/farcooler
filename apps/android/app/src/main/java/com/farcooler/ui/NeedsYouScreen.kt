@@ -63,7 +63,6 @@ import com.farcooler.model.NeedsYouButton
 import com.farcooler.model.NeedsYouKind
 import com.farcooler.model.NeedsYouRow
 import com.farcooler.model.RunnerCount
-import com.farcooler.model.RunnerLink
 import com.farcooler.model.reassurance
 import com.farcooler.net.Connection
 import com.farcooler.net.rethrowIfCancellation
@@ -172,8 +171,15 @@ fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
                     )
                 }
 
-                if (NeedsYou.nothingNeedsYou(rows)) {
-                    item(key = "reassurance") { Reassurance(connections, working, visible.size) }
+                val people = runners.map { it.second }
+                if (NeedsYou.nothingNeedsYou(people, rows)) {
+                    item(key = "reassurance") {
+                        Reassurance(connections, working, visible.size, NeedsYou.caveat(NeedsYou.unanswered(people)))
+                    }
+                } else if (rows.isEmpty()) {
+                    // No runner's list is read yet, so "Nothing needs you"
+                    // would be a claim nobody made.
+                    item(key = "checking") { Checking() }
                 }
 
                 items(rows, key = { "item/${it.key}" }) { row ->
@@ -460,6 +466,10 @@ private fun KindMark(kind: NeedsYouKind) {
  * says so in its own subtitle. Here the count is unqualified because it really
  * is everything; the price of that is owning up when it is not.
  *
+ * The caveat is [NeedsYou.caveat], iOS's words, naming the runners that aren't
+ * answering or whose list wasn't read: a connected runner whose read failed is
+ * as unknown as one that's down.
+ *
  * Said only in this block, and not over a list that has rows in it. When there
  * are rows, the runner rows at the top of the screen are already saying which
  * runner is quiet and offering the one useful thing to do about it; repeating
@@ -470,6 +480,7 @@ private fun Reassurance(
     connections: List<Connection>,
     working: Map<String, Int>,
     worktrees: Int,
+    caveat: String?,
 ) {
     val runners = connections.map { connection ->
         key(connection.host.id) {
@@ -480,7 +491,6 @@ private fun Reassurance(
             RunnerCount(link, working[connection.host.id] ?: 0, fleet.runtimeHealthy)
         }
     }
-    val silent = runners.count { it.link != RunnerLink.ANSWERING }
     val where = if (connections.size == 1) " on ${connections[0].host.displayLabel}" else ""
 
     EmptyState(
@@ -488,17 +498,28 @@ private fun Reassurance(
         detail = reassurance(runners, where, worktrees),
         icon = Icons.Outlined.CheckCircleOutline,
     ) {
-        // Only beside a count. With nothing answering, the line above has
-        // already said it can't say, and this would say it twice.
-        if (silent > 0 && runners.any { it.link == RunnerLink.ANSWERING }) {
+        if (caveat != null) {
             Text(
-                if (silent == 1) "One runner hasn’t answered, so this isn’t the whole fleet."
-                else "$silent runners haven’t answered, so this isn’t the whole fleet.",
+                caveat,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
+                modifier = Modifier.testTag("needs-you-caveat"),
             )
         }
+    }
+}
+
+/** Before any runner's list is read: not "Nothing needs you", which nobody said. */
+@Composable
+private fun Checking() {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 40.dp).testTag("needs-you-checking"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+        Text("Checking what needs you…", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
