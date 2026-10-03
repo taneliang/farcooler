@@ -53,13 +53,30 @@
 //! also what keeps the patch parseable at all; a user whose global config
 //! sets `diff.external` to difftastic used to get its output in the review.
 //!
+//! **Submodules are not entered.** A submodule is a repository with a config
+//! of its own that the listing never reads, and git starts a child git in it:
+//! status, to see whether its files changed (where its filters and hooks
+//! ran), and diff under `diff.submodule=diff`, a child that does not inherit
+//! `--no-ext-diff` (where its `diff.external` ran). So status and every diff
+//! get `--ignore-submodules=dirty`, every diff `--submodule=short`, and the
+//! same four as pins for the gits started by git (`submodule.recurse=false`,
+//! `diff.submodule=short`, `diff.ignoreSubmodules=dirty`,
+//! `status.submoduleSummary=false`). `dirty` rather than `all`: a submodule
+//! moved to another commit still shows, which git learns from the gitlink
+//! and the submodule's `HEAD` without starting anything. What no longer
+//! shows is uncommitted work inside a submodule.
+//!
 //! **What this leaves.** The by-name pins are read a moment before the call
 //! they protect, so an agent rewriting its config in a loop can land a new
-//! hook or filter name in that gap. A submodule's own config is not read,
-//! and status recurses into submodules. Both need a repository the agent can
-//! point git at — the reason to also refuse a worktree whose `.git` no longer
-//! points where the daemon put it. And none of this guards against an agent
-//! that is not sandboxed: one that can write `~/.zshrc` doesn't need git.
+//! hook or filter name in that gap; measured, about one guarded status in
+//! five. And the listing is the config of ITS context: a git that starts a
+//! child git in another worktree reads that worktree's `includeIf`s. The
+//! daemon's two such calls are taken apart instead (`worktree add` checks out
+//! in a second git in the new worktree; the non-forced `worktree remove`
+//! became a guarded status and a forced remove). Closing the race needs a
+//! guard that does not depend on names: an exec allowlist around git (see
+//! the ov-129 report). And none of this guards against an agent that is not
+//! sandboxed: one that can write `~/.zshrc` doesn't need git.
 //!
 //! Every inherited `GIT_` variable is removed first, so a daemon started
 //! from inside a git hook (`GIT_DIR`, `GIT_INDEX_FILE`) or by a shell with
@@ -81,6 +98,10 @@ pub const FIXED: &[(&str, &str)] = &[
     ("log.showSignature", "false"),
     ("core.pager", "cat"),
     ("protocol.allow", "never"),
+    ("submodule.recurse", "false"),
+    ("diff.submodule", "short"),
+    ("diff.ignoreSubmodules", "dirty"),
+    ("status.submoduleSummary", "false"),
 ];
 
 /// Subcommands that can print a patch, and so run a textconv or an
@@ -88,8 +109,13 @@ pub const FIXED: &[(&str, &str)] = &[
 const DIFFS: &[&str] =
     &["diff", "log", "show", "diff-tree", "diff-index", "diff-files", "whatchanged", "format-patch"];
 
-/// What `--no-ext-diff --no-textconv` look like, after a diff subcommand.
-const NO_PROGRAMS: [&str; 2] = ["--no-ext-diff", "--no-textconv"];
+/// What goes after a diff subcommand: no external diff, no textconv, and no
+/// git started inside a submodule.
+const NO_PROGRAMS: [&str; 4] =
+    ["--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty", "--submodule=short"];
+
+/// What goes after `status`: no git started inside a submodule.
+const STATUS: [&str; 1] = ["--ignore-submodules=dirty"];
 
 /// The arguments for `git config` that list what [`pins_from`] reads.
 pub const LISTING: &[&str] =
@@ -100,8 +126,8 @@ pub const LISTING: &[&str] =
 /// through would pin a different key.
 pub type Pin = (OsString, OsString);
 
-/// `args`, with `--no-ext-diff --no-textconv` after the subcommand when it
-/// is one that can print a patch.
+/// `args`, with [`NO_PROGRAMS`] after the subcommand when it is one that can
+/// print a patch, and [`STATUS`] after `status`.
 ///
 /// Right after the subcommand rather than at the end, so they land before
 /// any `--` and are read as options.
@@ -111,6 +137,11 @@ pub fn args<'a>(args: &[&'a str]) -> Vec<&'a str> {
         Some((sub, rest)) if DIFFS.contains(sub) => {
             out.push(*sub);
             out.extend(NO_PROGRAMS);
+            out.extend_from_slice(rest);
+        }
+        Some((sub, rest)) if *sub == "status" => {
+            out.push(*sub);
+            out.extend(STATUS);
             out.extend_from_slice(rest);
         }
         _ => out.extend_from_slice(args),
@@ -218,13 +249,12 @@ mod tests {
     }
 
     #[test]
-    fn a_diff_subcommand_gets_both_flags_before_anything_else() {
-        assert_eq!(
-            args(&["diff", "--numstat", "--", "a"]),
-            ["diff", "--no-ext-diff", "--no-textconv", "--numstat", "--", "a"]
-        );
-        assert_eq!(args(&["log", "-1"]), ["log", "--no-ext-diff", "--no-textconv", "-1"]);
-        assert_eq!(args(&["status", "-z"]), ["status", "-z"]);
+    fn a_diff_or_status_gets_its_flags_before_anything_else() {
+        let diff = ["--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty", "--submodule=short"];
+        assert_eq!(args(&["diff", "--numstat", "--", "a"]), [&["diff"][..], &diff, &["--numstat", "--", "a"]].concat());
+        assert_eq!(args(&["log", "-1"]), [&["log"][..], &diff, &["-1"]].concat());
+        assert_eq!(args(&["status", "-z"]), ["status", "--ignore-submodules=dirty", "-z"]);
+        assert_eq!(args(&["rev-parse", "HEAD"]), ["rev-parse", "HEAD"]);
         // A path named like a subcommand is not one.
         assert_eq!(args(&["ls-files", "--", "diff"]), ["ls-files", "--", "diff"]);
         assert_eq!(args(&[]), Vec::<&str>::new());

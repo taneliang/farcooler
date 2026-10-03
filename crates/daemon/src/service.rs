@@ -2943,11 +2943,18 @@ impl Service {
             Err(e) => {
                 // The worktree exists but nothing records it. Remove it —
                 // carefully, and never the branch, which was not ours to make.
-                let _ = git::git(
-                    &repo_path,
-                    &["worktree", "remove", &dest.to_string_lossy()],
-                )
-                .await;
+                // Carefully is a guarded status in the worktree and then a
+                // forced remove, not `worktree remove` unforced: that checks
+                // for changes with a child git that runs in the worktree and
+                // reads ITS config's includes, which the guard listed from the
+                // main checkout never saw (`crate::git_guard`).
+                if let Ok(false) = git::is_dirty(&dest).await {
+                    let _ = git::git(
+                        &repo_path,
+                        &["worktree", "remove", "--force", &dest.to_string_lossy()],
+                    )
+                    .await;
+                }
                 Err(e)
             }
         }

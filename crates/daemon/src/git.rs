@@ -77,7 +77,7 @@ pub async fn git(cwd: &Path, args: &[&str]) -> Result<GitOutput> {
 /// mid-scroll leaves a `git diff` running on the runner for as long as it likes,
 /// once per abandoned request.
 pub async fn git_bytes(cwd: &Path, args: &[&str]) -> Result<GitBytes> {
-    run_bounded(&program(), GIT_TIMEOUT, cwd, args).await
+    run_bounded(&program()?, GIT_TIMEOUT, cwd, args).await
 }
 
 /// `git_bytes`, sharing one `deadline` with every other git of the same act.
@@ -93,20 +93,39 @@ pub async fn git_bytes_by(deadline: tokio::time::Instant, cwd: &Path, args: &[&s
         tracing::warn!(?args, "no time left for git in this act's budget");
         return Err(DomainError::OperationFailed);
     }
-    run_bounded(&program(), left, cwd, args).await
+    run_bounded(&program()?, left, cwd, args).await
 }
 
-/// The program `git_bytes` runs.
+/// The program `git_bytes` runs: git, by absolute path.
+///
+/// Never the bare name. A bare name is looked up on `PATH` at spawn, after
+/// the child has moved into the worktree, so a relative `PATH` entry (`.`,
+/// or the empty one a stray `:` makes) finds a `git` the agent put there.
+/// `programs::find` answers from absolute directories only, once.
 #[cfg(not(test))]
-fn program() -> std::ffi::OsString {
-    std::ffi::OsString::from("git")
+fn program() -> Result<std::ffi::OsString> {
+    absolute_git()
 }
 
 /// The program `git_bytes` runs: git, unless a test on this thread put
 /// something else in its place (`PROGRAM`).
 #[cfg(test)]
-fn program() -> std::ffi::OsString {
-    PROGRAM.with(|p| p.borrow().clone()).unwrap_or_else(|| std::ffi::OsString::from("git"))
+fn program() -> Result<std::ffi::OsString> {
+    match PROGRAM.with(|p| p.borrow().clone()) {
+        Some(stand_in) => Ok(stand_in),
+        None => absolute_git(),
+    }
+}
+
+/// Where git is, or the failure a git that couldn't start gives.
+pub fn absolute_git() -> Result<std::ffi::OsString> {
+    match farcooler_core::programs::find("git") {
+        Some(git) => Ok(git.into_os_string()),
+        None => {
+            tracing::warn!("no git on this runner");
+            Err(DomainError::OperationFailed)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -189,7 +208,7 @@ async fn spawn_bounded(
 /// carry (`gh`): `crate::git_guard`'s fixed set and this repository's hook
 /// and filter names, read within [`GIT_TIMEOUT`].
 pub async fn guard_pins(cwd: &Path) -> Result<Vec<crate::git_guard::Pin>> {
-    pins_by(&program(), tokio::time::Instant::now() + GIT_TIMEOUT, cwd).await
+    pins_by(&program()?, tokio::time::Instant::now() + GIT_TIMEOUT, cwd).await
 }
 
 /// `crate::git_guard`'s fixed pins, and the by-name ones for `cwd`.
@@ -378,8 +397,8 @@ pub async fn create_worktree_with(
         // tracking off the START POINT, and a 40-hex SHA is not a
         // remote-tracking branch, so passing the resolved commit here would
         // create the right content with no upstream at all.
-        Some(start) => git(repo, &["worktree", "add", "--track", "-b", branch, &dest, start]).await?,
-        None => git(repo, &["worktree", "add", "-b", branch, &dest, &commit]).await?,
+        Some(start) => add_worktree(repo, &["--track", "-b", branch, &dest, start], destination, Some(branch)).await?,
+        None => add_worktree(repo, &["-b", branch, &dest, &commit], destination, Some(branch)).await?,
     };
 
     if !r.ok {
@@ -389,6 +408,48 @@ pub async fn create_worktree_with(
         return Err(DomainError::OperationFailed);
     }
     Ok(CreatedWorktree { commit, forked: tracking.is_none() })
+}
+
+/// `git worktree add <args>`, as two gits rather than one.
+///
+/// `worktree add` checks the new worktree out in a child git that runs IN the
+/// new worktree, and that child reads the config of its own context: an
+/// `includeIf "onbranch:<new branch>"` or `"gitdir:…/worktrees/…"` that was
+/// false for the git the daemon started is true there. Listing the repository's
+/// hooks and filters from the main checkout (`crate::git_guard`) cannot see
+/// what those includes bring in, and a planted one ran its hook fifteen times
+/// and its smudge filter once on a single guarded `worktree add`.
+///
+/// So the worktree is made with `--no-checkout`, which runs nothing in the
+/// new context, and then filled by `reset --hard` started IN it, whose guard
+/// lists the hooks and filters of that context. `reset --hard
+/// --no-recurse-submodules` is what `worktree add` itself runs to check out.
+///
+/// A checkout that fails is undone the way `worktree add` undoes its own: the
+/// worktree removed, and the branch with it when `made_branch` says this call
+/// made it.
+async fn add_worktree(
+    repo: &Path,
+    args: &[&str],
+    destination: &Path,
+    made_branch: Option<&str>,
+) -> Result<GitOutput> {
+    let mut add = vec!["worktree", "add", "--no-checkout"];
+    add.extend_from_slice(args);
+    let made = git(repo, &add).await?;
+    if !made.ok {
+        return Ok(made);
+    }
+    let filled = git(destination, &["reset", "-q", "--hard", "--no-recurse-submodules"]).await;
+    if matches!(&filled, Ok(f) if f.ok) {
+        return filled;
+    }
+    let dest = destination.to_string_lossy();
+    let _ = git(repo, &["worktree", "remove", "--force", &dest]).await;
+    if let Some(branch) = made_branch {
+        let _ = git(repo, &["branch", "-D", branch]).await;
+    }
+    filled
 }
 
 /// A branch you could resume work on.
@@ -505,7 +566,7 @@ pub async fn create_worktree_from_branch(
     let dest = destination.to_string_lossy().to_string();
 
     let r = if branch_exists(repo, branch).await? {
-        git(repo, &["worktree", "add", &dest, branch]).await?
+        add_worktree(repo, &[&dest, branch], destination, None).await?
     } else {
         // Find which remote has it. Guessing `origin` is wrong often enough to
         // matter for anyone with a fork plus an upstream.
@@ -517,7 +578,7 @@ pub async fn create_worktree_from_branch(
             return Err(DomainError::InvalidArgument { what: "branch has no remote" });
         };
         let start = format!("{remote}/{branch}");
-        git(repo, &["worktree", "add", "--track", "-b", branch, &dest, &start]).await?
+        add_worktree(repo, &["--track", "-b", branch, &dest, &start], destination, Some(branch)).await?
     };
 
     if !r.ok {
