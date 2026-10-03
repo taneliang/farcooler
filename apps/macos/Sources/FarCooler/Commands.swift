@@ -46,6 +46,9 @@ enum AppCommand: String {
     case previousWorktree
     /// Open the title bar's workspace switcher (⌘0).
     case switchWorkspace
+    /// A task's next or previous tab, Overview, Agent and Changes (ov-98).
+    case nextTaskTab
+    case previousTaskTab
 
     static let notification = Notification.Name("farcooler.command")
 
@@ -174,6 +177,17 @@ struct FarCoolerCommands: Commands {
                 .keyboardShortcut("2", modifiers: [.command, .option])
             Button("Main Area") { AppCommand.focusTask.post() }
                 .keyboardShortcut("3", modifiers: [.command, .option])
+            // A task's tabs (ov-98): ⌃⌘] and ⌃⌘[, the owner's keys, on the
+            // bracket family's rule that `[` and `]` walk a list. They were
+            // the diff's commits, which moved out a modifier to ⌃⌥⌘.
+            Section {
+                Button("Next Task Tab") { AppCommand.nextTaskTab.post() }
+                    .keyboardShortcut("]", modifiers: [.command, .control])
+                    .disabled(!MainWindowFocus.navigates(mainWindow))
+                Button("Previous Task Tab") { AppCommand.previousTaskTab.post() }
+                    .keyboardShortcut("[", modifiers: [.command, .control])
+                    .disabled(!MainWindowFocus.navigates(mainWindow))
+            }
             // Only while the main window is key with nothing over it: with
             // the palette open or Settings key, they moved the window behind.
             Section {
@@ -299,8 +313,9 @@ struct FarCoolerCommands: Commands {
         //
         // Three pairs on the same convention the rest of the app already
         // teaches: `[` and `]` walk a list, and the modifier says WHICH list.
-        // ⌘ is terminals, ⇧⌘ is layouts, so ⌥⌘ is the files in a diff and ⌃⌘ is
-        // the commits behind them — outermost list, outermost modifier.
+        // ⌘ is terminals, ⇧⌘ is layouts, ⌃⌘ a task's tabs, so ⌥⌘ is the files
+        // in a diff and ⌃⌥⌘ the commits behind them — outermost list, most
+        // modifiers.
         //
         // Hunks get the arrows instead, because a hunk is not a list you pick
         // from — it is the next place down the document, which is what ⌥⌘↓
@@ -325,9 +340,9 @@ struct FarCoolerCommands: Commands {
             // and picking the oldest row.
             Button("Read Commit by Commit") { AppCommand.diffFirstCommit.post() }
             Button("Next Commit") { AppCommand.diffNextCommit.post() }
-                .keyboardShortcut("]", modifiers: [.command, .control])
+                .keyboardShortcut("]", modifiers: [.command, .control, .option])
             Button("Previous Commit") { AppCommand.diffPreviousCommit.post() }
-                .keyboardShortcut("[", modifiers: [.command, .control])
+                .keyboardShortcut("[", modifiers: [.command, .control, .option])
             Divider()
             // Not a movement, which is why it is below the divider: it says
             // something about the worktree rather than about where you are in

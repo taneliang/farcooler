@@ -318,13 +318,19 @@ enum WorkspaceScreen {
     /// What "on screen" means for seen marks, the watching claim and the
     /// keyboard: an orchestrator kept hidden while a task is selected,
     /// marked seen, would lose the notification it was about to send, for a
-    /// pane nobody can see.
-    static func visible(_ shown: [ShownLayout], arrangement: WorkspaceColumns.Arrangement?) -> [ShownLayout] {
+    /// pane nobody can see. The same for a task's agent behind its Overview
+    /// or Changes tab (`taskTab`).
+    static func visible(
+        _ shown: [ShownLayout], arrangement: WorkspaceColumns.Arrangement?, taskTab: TaskTab = .agent
+    ) -> [ShownLayout] {
         guard let arrangement else { return [] }
         return shown.filter { layout in
             switch layout.column {
             case .conversation: return arrangement.conversation == .main
-            case .task, .worktree: return arrangement.opened
+            // A task's agent only while its Agent tab is in front
+            // (ov-98): behind Overview or Changes it's kept, not seen.
+            case .task: return arrangement.opened && taskTab == .agent
+            case .worktree: return arrangement.opened
             }
         }
     }

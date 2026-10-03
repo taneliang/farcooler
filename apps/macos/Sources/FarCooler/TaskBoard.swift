@@ -1493,8 +1493,10 @@ struct TaskCard: View {
         static var none: Draft { Draft(read: { _ in "" }, write: { _, _ in }) }
     }
 
+    /// Its sections, a rhythm-multiple apart, at the reading measure
+    /// (`TaskTypography`): the present, the question, then the record.
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: TaskTypography.sectionGap) {
             understanding
             if let offer = Self.offer(row: row, question: question, canAnswer: canAnswer) {
                 QuestionAnswers(offer: offer, onAnswer: onAnswer, draft: draft)
@@ -1503,6 +1505,7 @@ struct TaskCard: View {
             Divider()
             record
         }
+        .frame(maxWidth: TaskTypography.measure, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -1534,45 +1537,60 @@ struct TaskCard: View {
     }
 
     @ViewBuilder private var understanding: some View {
-        if let waiting = row.blockedSummary {
-            Text(waiting)
-                .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
-                .foregroundStyle(.orange)
-            ForEach(row.blockedBy, id: \.key) { block in
-                if !block.reason.isEmpty {
-                    Text("\(block.key) — \(block.reason)")
-                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                        .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: ColumnGrid.rhythm / 2) {
+            if let waiting = row.blockedSummary {
+                Text(waiting)
+                    .font(TaskTypography.body.weight(.medium))
+                    .foregroundStyle(.orange)
+                ForEach(row.blockedBy, id: \.key) { block in
+                    if !block.reason.isEmpty {
+                        Text("\(block.key) — \(block.reason)")
+                            .font(TaskTypography.meta)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
+            CardTimeLines(row: row, staleSize: TaskTypography.metaSize, timeSize: TaskTypography.metaSize)
         }
-        CardTimeLines(
-            row: row,
-            staleSize: WorkspaceStyle.PaneText.body,
-            timeSize: WorkspaceStyle.PaneText.secondary)
         if !row.intent.isEmpty {
             section("Intent") {
-                Text(row.intent).font(.system(size: WorkspaceStyle.PaneText.body))
+                MarkdownText(text: row.intent, spacing: .document)
+                    .accessibilityIdentifier("task-intent")
             }
         }
         if !row.acceptance.isEmpty {
-            section("Acceptance") {
-                VStack(alignment: .leading, spacing: 4) {
+            section("Acceptance", detail: row.acceptanceProgress?.sentence) {
+                VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
                     ForEach(row.acceptance) { line in
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Image(systemName: line.met ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(line.met ? Color.accentColor : .secondary)
-                            Text(line.text).font(.system(size: WorkspaceStyle.PaneText.body))
+                        // Monochrome: a met line is ticked and struck
+                        // through, quietly; one still open is plain.
+                        HStack(alignment: .firstTextBaseline, spacing: ColumnGrid.rhythm) {
+                            Image(systemName: line.met ? "checkmark.square" : "square")
+                                .foregroundStyle(.secondary)
+                                .accessibilityHidden(true)
+                            Text(TaskProse.acceptance(line.text, met: line.met))
+                                .font(TaskTypography.body)
+                                .foregroundStyle(line.met ? Color.secondary : Color.primary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
                         }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityValue(line.met ? "Met" : "Not met")
                     }
                 }
             }
         }
         if !row.constraints.isEmpty {
             section("Constraints") {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
                     ForEach(row.constraints, id: \.self) { text in
-                        Text("• \(text)").font(.system(size: WorkspaceStyle.PaneText.body))
+                        HStack(alignment: .firstTextBaseline, spacing: ColumnGrid.rhythm) {
+                            Text("•").foregroundStyle(.secondary)
+                            Text(TaskProse.inline(text))
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                        }
+                        .font(TaskTypography.body)
                     }
                 }
             }
@@ -1581,10 +1599,10 @@ struct TaskCard: View {
 
     @ViewBuilder private var record: some View {
         section("Record") {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: TaskTypography.noteGap) {
                 if detail.notes.isEmpty {
                     Text("Nothing written down yet.")
-                        .font(.system(size: WorkspaceStyle.PaneText.body))
+                        .font(TaskTypography.body)
                         .foregroundStyle(.secondary)
                 }
                 let feed = TaskNoteStyle.feed(detail.notes)
@@ -1596,7 +1614,7 @@ struct TaskCard: View {
                 // entry, and the record's claim is that nothing in it is lost.
                 if detail.unreadableNotes > 0 {
                     Text(unreadableSentence)
-                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                        .font(TaskTypography.meta)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -1610,13 +1628,23 @@ struct TaskCard: View {
             : "\(n) more entries were written in a form this version can’t show."
     }
 
+    /// A section: its label, and beside it a quiet `detail` ("2 of 3
+    /// met"), then what it heads, a rhythm below.
     @ViewBuilder private func section<Content: View>(
-        _ title: String, @ViewBuilder _ content: () -> Content
+        _ title: String, detail: String? = nil, @ViewBuilder _ content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title)
-                .font(WorkspaceStyle.sectionTitle)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: TaskTypography.labelGap) {
+            HStack(alignment: .firstTextBaseline, spacing: ColumnGrid.rhythm) {
+                Text(title)
+                    .font(TaskTypography.label)
+                    .foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.isHeader)
+                if let detail {
+                    Text(detail)
+                        .font(TaskTypography.meta)
+                        .foregroundStyle(.tertiary)
+                }
+            }
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1637,18 +1665,19 @@ private struct QuestionAnswers: View {
     @State private var typed = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
             Text("Question")
-                .font(WorkspaceStyle.sectionTitle)
+                .font(TaskTypography.label)
                 .foregroundStyle(Color.accentColor)
-            Text(offer.question.body)
-                .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
+            Text(TaskProse.inline(offer.question.body))
+                .font(TaskTypography.body.weight(.medium))
+                .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
             if sending != nil {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
                     Text("Answering…")
-                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                        .font(TaskTypography.meta)
                         .foregroundStyle(.secondary)
                 }
             } else if offer.typed {
@@ -1670,11 +1699,11 @@ private struct QuestionAnswers: View {
             }
             if failed {
                 Text("Your answer wasn’t sent. Try again.")
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                    .font(TaskTypography.meta)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(10)
+        .padding(1.5 * ColumnGrid.rhythm)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.07)))
         .accessibilityElement(children: .contain)
@@ -1724,10 +1753,11 @@ private struct QuestionAnswers: View {
     }
 }
 
-/// One note in the record, drawn by its kind (`TaskNoteStyle`): an icon and
-/// label in the kind's tint, the byline and time, then the text. A decision
-/// is a card with its rejected options beneath; an answer that follows a
-/// question sits under it on a rule; the store's own entries are one muted line.
+/// One note in the record, a block (ov-98): a quiet "<Kind> · byline ·
+/// time" line, the kind in its tint (`TaskNoteStyle`), then the body as
+/// Markdown. A decision is a card with its rejected options beneath; an
+/// answer that follows a question sits under it on a rule; the store's own
+/// entries are the quiet line alone.
 private struct TaskNoteView: View {
     let note: TaskNoteRow
     let pairedWithQuestion: Bool
@@ -1742,44 +1772,27 @@ private struct TaskNoteView: View {
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 6) {
-            Image(systemName: style.symbol)
-                .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .regular))
-                .foregroundStyle(style.tint.color)
-                .frame(width: 16)
-                .accessibilityHidden(true)
-            Text(style.label)
-                .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .semibold))
-                .foregroundStyle(style.tint.color)
-            Text(note.byline)
-                .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(.secondary)
-            // The board's own abbreviated words ("4m ago"), as the card's
-            // line says it, with the exact time on hover.
-            BoardTick { now in
-                Text(TaskRow.ago(now.timeIntervalSince(note.at)))
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(.secondary)
-                    .help(note.at.formatted(date: .abbreviated, time: .standard))
-            }
-            if note.supersedes != nil {
-                Text("Replaces an earlier entry")
-                    .font(.system(size: WorkspaceStyle.PaneText.minimum))
-                    .foregroundStyle(.secondary)
-            }
+    /// "Finding · manager · 4m ago", the kind in its tint, the rest
+    /// secondary, with the exact time on hover.
+    private var line: some View {
+        BoardTick { now in
+            let ago = TaskRow.ago(now.timeIntervalSince(note.at))
+            let rest = TaskProse.noteLine(kind: "", byline: note.byline, ago: ago)
+            let kind = Text(style.label).foregroundStyle(style.tint.color).fontWeight(.medium)
+            let replaces = note.supersedes != nil ? " · Replaces an earlier entry" : ""
+            Text("\(kind)\(Text(" · \(rest)\(replaces)").foregroundStyle(.secondary))")
+                .font(TaskTypography.meta)
+                .lineLimit(1)
+                .help(note.at.formatted(date: .abbreviated, time: .standard))
         }
     }
 
     private var standard: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            header
-            Text(note.displayBody)
-                .font(.system(size: WorkspaceStyle.PaneText.body))
-                .textSelection(.enabled)
-                .padding(.leading, 22)
+        VStack(alignment: .leading, spacing: TaskTypography.noteLineGap) {
+            line
+            MarkdownText(text: note.displayBody, spacing: .document)
         }
-        .padding(.leading, pairedWithQuestion ? 14 : 0)
+        .padding(.leading, pairedWithQuestion ? 2 * ColumnGrid.rhythm : 0)
         .overlay(alignment: .leading) {
             if pairedWithQuestion {
                 Capsule().fill(style.tint.color.opacity(0.5)).frame(width: 2)
@@ -1790,40 +1803,37 @@ private struct TaskNoteView: View {
 
     private var card: some View {
         let decision = TaskNoteStyle.decision(note)
-        return VStack(alignment: .leading, spacing: 5) {
-            header
-            Text(decision.chosen)
-                .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
-                .textSelection(.enabled)
-                .padding(.leading, 22)
+        return VStack(alignment: .leading, spacing: TaskTypography.noteLineGap) {
+            line
+            MarkdownText(text: decision.chosen, spacing: .document)
             if let rejected = decision.rejected {
-                Text("Rejected: \(rejected)")
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                Text(TaskProse.inline("Rejected: \(rejected)"))
+                    .font(TaskTypography.meta)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
-                    .padding(.leading, 22)
+                    .padding(.top, ColumnGrid.rhythm / 2)
             }
         }
-        .padding(10)
+        .padding(1.5 * ColumnGrid.rhythm)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(style.tint.color.opacity(0.08)))
     }
 
-    /// "Backlog → In Progress", or the bare "Created": history, not somebody's
-    /// word, so no paragraph of its own. A created note's body is the title
-    /// again, so it isn't repeated.
+    /// "Status Change: Backlog → In Progress · 4m ago", or the bare
+    /// "Created · 2d ago": history, not somebody's word, so no body of its
+    /// own. A created note's body is the title again, so it isn't repeated.
     private var quiet: some View {
-        HStack(spacing: 6) {
-            Image(systemName: style.symbol)
-                .frame(width: 16)
-                .accessibilityHidden(true)
-            Text(note.kind == .created ? style.label : "\(style.label): \(note.displayBody)")
-            BoardTick { now in Text(TaskRow.ago(now.timeIntervalSince(note.at))) }
+        BoardTick { now in
+            let ago = TaskRow.ago(now.timeIntervalSince(note.at))
+            let kind = note.kind == .created ? style.label : "\(style.label): \(note.displayBody)"
+            Text(TaskProse.noteLine(kind: kind, byline: "", ago: ago))
+                .help(note.at.formatted(date: .abbreviated, time: .standard))
         }
-        .font(.system(size: WorkspaceStyle.PaneText.secondary))
-        .foregroundStyle(.secondary)
+        .font(TaskTypography.meta)
+        .foregroundStyle(.tertiary)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

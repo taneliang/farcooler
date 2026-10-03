@@ -719,7 +719,7 @@ struct ChangesPane: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Read Commit by Commit")
                             .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
-                        Text("Start at the first commit; ⌃⌘] for the next")
+                        Text("Start at the first commit; ⌃⌥⌘] for the next")
                             .font(.system(size: WorkspaceStyle.PaneText.minimum))
                             .foregroundStyle(.tertiary)
                     }

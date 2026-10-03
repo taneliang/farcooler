@@ -140,6 +140,9 @@ struct ContentView: View {
     /// The agent each task's column shows, by task id, when several are on
     /// it and one was picked.
     @State private var chosenAgents: [String: String] = [:]
+    /// The tab each task shows, Overview, Agent or Changes, as last chosen
+    /// in this window (ov-98).
+    @State private var taskTabs = TaskTabMemory()
     /// The Needs You item ⌃⌘N last opened, by its key: where the next
     /// press goes on from, while the window is still showing it.
     @State private var lastAttention: String?
@@ -400,6 +403,8 @@ struct ContentView: View {
         // what's seen and watched follows it.
         .onChange(of: detailWidth) { _, _ in markVisibleSeen() }
         .onChange(of: focusColumn) { _, _ in markVisibleSeen() }
+        // A task's agent is on screen only behind its Agent tab (ov-98).
+        .onChange(of: taskTabs) { _, _ in markVisibleSeen() }
         .onChange(of: store.needsYouSettled) { _, _ in settleLaunch() }
         .onChange(of: selection) { _, now in
             if let saved = SelectionMemory.encode(now) { lastSelection = saved }
@@ -2104,7 +2109,35 @@ struct ContentView: View {
                 opened: scene.opened != nil, hasConversation: scene.hasConversation, hasBoard: scene.board != nil,
                 focused: focusColumn)
         }
-        return WorkspaceScreen.visible(all, arrangement: arrangement)
+        return WorkspaceScreen.visible(all, arrangement: arrangement, taskTab: taskTab(for: selection))
+    }
+
+    /// Whether an agent is working `task`: what opens it on its Agent tab.
+    private func agentWorking(_ task: String, host: String) -> Bool {
+        WorkspaceScreen.agent(of: task, host: host, in: store.fleet, chosen: chosenAgents[task]) != nil
+    }
+
+    /// The tab the task `selection` names shows (ov-98), or Agent for
+    /// anything else, which has no tabs.
+    private func taskTab(for selection: Selection?) -> TaskTab {
+        guard case .workspace(let host, _, .task(let id)?)? = selection else { return .agent }
+        return taskTabs.tab(for: id, agentWorking: agentWorking(id, host: host))
+    }
+
+    /// Show `tab` for `task`, chosen; to the Agent tab, the keyboard goes
+    /// with it, into the terminal.
+    private func choose(_ tab: TaskTab, for task: String) {
+        taskTabs.choose(tab, for: task)
+        if tab == .agent { DispatchQueue.main.async { keyOpened() } }
+    }
+
+    /// ⌃⌘] and ⌃⌘[: the task open steps to its next or previous tab.
+    private func stepTaskTab(by offset: Int) {
+        guard case .workspace(let host, _, .task(let id)?)? = selection else { return }
+        taskTabs.step(id, by: offset, agentWorking: agentWorking(id, host: host))
+        if taskTabs.tab(for: id, agentWorking: agentWorking(id, host: host)) == .agent {
+            DispatchQueue.main.async { keyOpened() }
+        }
     }
 
     /// What the detail draws now.
@@ -2695,7 +2728,13 @@ struct ContentView: View {
             : drawableLayouts(for: place).last { $0.column != .conversation }
         switch place {
         case .workspace(let host, _, .task(let id)?):
-            taskView(host: host, id: id, place: place, shown: shown, keyboard: current, settled: settled)
+            // Its agent's layout whichever tab is in front, so the
+            // terminal is one view across them; whether it's on screen is
+            // the tab's to say (`WorkspaceScreen.visible`).
+            taskView(
+                host: host, id: id, place: place,
+                shown: drawableLayouts(for: place).last { $0.column != .conversation }, keyboard: current,
+                settled: settled)
         case .workspace(let host, _, .worktree(let wt, _)?), .looseWorktree(let host, let wt, _):
             if !settled {
                 // Passed on the way: its terminals wait until it settles.
@@ -2799,8 +2838,8 @@ struct ContentView: View {
         }
     }
 
-    /// A task, beside the board (spec §4.4): its text first, whole, and its
-    /// agent and changes beneath.
+    /// A task, beside the navigator (spec §4.4, ov-98): its header, and
+    /// under it its three tabs, Overview, Agent and Changes.
     @ViewBuilder
     private func taskView(
         host: String, id: String, place: Selection, shown: ShownLayout?, keyboard: Bool, settled: Bool
@@ -2840,7 +2879,7 @@ struct ContentView: View {
         let lane = worktreeID.flatMap { worktree(host: host, id: $0) }
         let agent = TaskColumnModel.agent(hasAgent: chosen != nil, worktree: lane?.id)
         let showsChanges = lane != nil && client.changesSupported != false
-        let work = TaskColumnModel.work(agent, showsChanges: showsChanges)
+        let tab = taskTabs.tab(for: row.id, agentWorking: chosen != nil)
         let openWorktree = {
             guard let lane, let current = selection else { return }
             let opened = WorkspaceNavigation.openWorktree(lane.id, from: current)
@@ -2848,72 +2887,78 @@ struct ContentView: View {
             trailWorktree = lane.id
             selection = opened.next
         }
+        let start = TaskStartPanel(
+            sentence: TaskColumnModel.sentence(agent) ?? "",
+            offersStart: TaskColumnModel.offersStart(
+                status: row.status, worktree: lane != nil, agent: agent, offersWrites: board.offersWrites),
+            starting: board.starting.contains(row.id),
+            onStartAgent: { preset in
+                taskTabs.choose(.agent, for: row.id)
+                Task {
+                    if let sentence = await board.startAgent(
+                        for: row, agent: preset,
+                        undelivered: { errorBanner = $0 })
+                    {
+                        errorBanner = sentence
+                    }
+                }
+            },
+            attachable: TaskColumnModel.attachable(
+                store.fleet.worktrees, host: host, repository: board.repositoryID, taken: board.board.rows),
+            onAttach: { target in
+                Task {
+                    if let sentence = await board.attach(row, toWorktree: target.id) {
+                        errorBanner = sentence
+                    }
+                }
+            })
         return VStack(spacing: 0) {
-            TaskViewHeader(row: row, store: board)
-            Divider()
-            TaskViewSplit(work: work, focused: focusColumn) {
+            TaskViewHeader(row: row, store: board, agent: chosen)
+            TaskTabBar(
+                tab: tab, onChoose: { choose($0, for: row.id) },
+                worktree: lane.map { WorkspaceScreen.ownTerminals(of: $0, fleet: store.fleet) },
+                agents: agents, chosen: chosen,
+                onChooseAgent: { pane in chosenAgents[row.id] = pane.terminal.id },
+                onOpenWorktree: openWorktree)
+            TaskTabs(tab: tab) {
                 ScrollView {
                     TaskColumnCard(row: row, store: board)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
+                        .padding(TaskTypography.inset)
                 }
-                // The record runs past this half on a long task: bars that
+                // The record runs past the window on a long task: bars that
                 // stay, and a soft edge that says there is more below.
                 .scrollIndicators(.visible)
                 .scrollEdgeEffectStyle(.soft, for: .bottom)
                 .background(WorkspaceStyle.document)
-            } workArea: {
-                VStack(spacing: 0) {
-                    TaskWorkHeader(
-                        agent: agent, worktree: lane.map { WorkspaceScreen.ownTerminals(of: $0, fleet: store.fleet) },
-                        agents: agents, chosen: chosen,
-                        onChooseAgent: { pane in chosenAgents[row.id] = pane.terminal.id },
-                        onOpenWorktree: openWorktree,
-                        status: row.status, starting: board.starting.contains(row.id),
-                        onStartAgent: board.offersWrites
-                            ? { preset in
-                                Task {
-                                    if let sentence = await board.startAgent(
-                                        for: row, agent: preset,
-                                        undelivered: { errorBanner = $0 })
-                                    {
-                                        errorBanner = sentence
-                                    }
-                                }
-                            } : nil,
-                        attachable: TaskColumnModel.attachable(
-                            store.fleet.worktrees, host: host, repository: board.repositoryID,
-                            taken: board.board.rows),
-                        onAttach: { target in
-                            Task {
-                                if let sentence = await board.attach(row, toWorktree: target.id) {
-                                    errorBanner = sentence
-                                }
-                            }
-                        })
-                    // A task passed on the way, glancing: no terminal mounted,
-                    // no changes read, until it settles.
-                    if work == .full, settled {
-                        Divider()
-                        TaskColumnSplit(
-                            status: row.status, showsChanges: showsChanges, showsAgent: chosen != nil,
-                            agent: {
-                                if let shown {
-                                    tiled(shown, titled: false, keyboard: keyboard)
-                                } else if let chosen {
-                                    // Working the task, and in no layout read yet.
-                                    bareTerminal(chosen, keyboard: keyboard)
-                                }
-                            },
-                            changes: {
-                                if let lane {
-                                    TaskColumnChanges(
-                                        changes: changesStore(for: lane, client: client),
-                                        isFocused: changesFocus == row.id,
-                                        agents: lane.reviewAgentTargets(), onFocus: { changesFocus = row.id })
-                                }
-                            })
+            } agent: {
+                // A task passed on the way, glancing: no terminal mounted
+                // until it settles. Mounted once, then kept behind the other
+                // tabs (`TaskTabs`); on screen and given the keyboard only
+                // in front.
+                if let chosen {
+                    if !settled {
+                        Color.clear
+                    } else if let shown {
+                        tiled(shown, titled: false, keyboard: keyboard && tab == .agent)
+                    } else {
+                        // Working the task, and in no layout read yet.
+                        bareTerminal(chosen, keyboard: keyboard && tab == .agent)
                     }
+                } else {
+                    start
+                }
+            } changes: {
+                if let lane, showsChanges {
+                    if settled {
+                        TaskColumnChanges(
+                            changes: changesStore(for: lane, client: client),
+                            isFocused: changesFocus == row.id,
+                            agents: lane.reviewAgentTargets(), onFocus: { changesFocus = row.id })
+                    }
+                } else if lane != nil {
+                    TaskStartPanel(sentence: "Update Far Cooler on this runner to see changes here.")
+                } else {
+                    start
                 }
             }
         }
@@ -4044,6 +4089,8 @@ struct ContentView: View {
         case .focusConversation, .focusBoard, .focusTask:
             focusWorkspaceColumn(command)
         case .switchWorkspace: switcherRequest += 1
+        case .nextTaskTab: stepTaskTab(by: 1)
+        case .previousTaskTab: stepTaskTab(by: -1)
         case .nextWorktree: stepWorktree(by: 1)
         case .previousWorktree: stepWorktree(by: -1)
         case .openInEditor: openInPreferredEditor()

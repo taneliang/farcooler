@@ -79,12 +79,4 @@ struct TaskNoteStyleTests {
         #expect(feed.notes.map(\.id) == ["p", "q", "a", "made"])
         #expect(feed.paired == ["a"])
     }
-
-    @Test("The text above the divider keeps a minimum height")
-    func theTextKeepsAMinimumHeight() {
-        #expect(TaskColumnModel.topHeight(total: 700, share: 0.15, minimum: 260) == 260)
-        #expect(TaskColumnModel.topHeight(total: 700, share: 0.5, minimum: 260) == 350)
-        // Never into the bottom's own minimum, in a window too short for both.
-        #expect(TaskColumnModel.topHeight(total: 200, share: 0.4, minimum: 260) == 170)
-    }
 }

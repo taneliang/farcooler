@@ -15,76 +15,11 @@ struct TaskColumnTests {
         return row
     }
 
-    /// In Review, a task is its changes: they take the larger share. Any
-    /// other status leads with the agent. A divider the person dragged wins,
-    /// kept apart for the two kinds, and never past the edge.
-    @Test("A task in review leads with its changes")
-    func aTaskInReviewLeadsWithItsChanges() {
-        #expect(TaskColumnModel.agentShare(status: .inReview, stored: nil) < 0.5)
-        #expect(TaskColumnModel.agentShare(status: .inProgress, stored: nil) > 0.5)
-        #expect(TaskColumnModel.agentShare(status: .needsDecision, stored: nil) > 0.5)
-        #expect(TaskColumnModel.agentShare(status: .inReview, stored: 0.6) == 0.6)
-        #expect(TaskColumnModel.agentShare(status: .inReview, stored: 0.99) == 1 - TaskColumnModel.minimumShare)
-    }
-
-    /// The task's own text leads: it's never collapsed, and with no agent
-    /// and no changes to show, what's beneath it is one line, never a
-    /// placeholder the height of the view (ov-79). The text's share is 40%
-    /// until its divider is dragged, and never past the edge.
-    @Test("With nothing working on a task, the space beneath its text is one line")
-    func withNothingWorkingOnATaskTheSpaceBeneathItsTextIsOneLine() {
-        let nothing = TaskColumnModel.work(.none(openWorktree: false), showsChanges: false)
-        let noChanges = TaskColumnModel.work(.none(openWorktree: true), showsChanges: false)
-        let changes = TaskColumnModel.work(.none(openWorktree: true), showsChanges: true)
-        let live = TaskColumnModel.work(.live, showsChanges: false)
-        #expect(nothing == .compact)
-        #expect(noChanges == .compact)
-        #expect(changes == .full)
-        #expect(live == .full)
-        #expect(TaskColumnModel.contentShare(stored: nil) == 0.4)
-        #expect(TaskColumnModel.contentShare(stored: 0.7) == 0.7)
-        #expect(TaskColumnModel.contentShare(stored: 0.01) == TaskColumnModel.minimumShare)
+    @Test("A worktree's terminals are counted in words")
+    func terminalsAreCountedInWords() {
         #expect(TaskColumnModel.terminalCount(0) == "No terminals")
         #expect(TaskColumnModel.terminalCount(1) == "1 terminal")
         #expect(TaskColumnModel.terminalCount(2) == "2 terminals")
-    }
-
-    /// Drawn, not only decided: with no worktree and no agent, what's
-    /// beneath a task's text is its one line, and the text has the rest of
-    /// the height, Focus or not.
-    @Test("With no worktree, the task's work is drawn as one line")
-    func withNoWorktreeTheWorkIsDrawnAsOneLine() async {
-        final class Seen { var content: CGFloat = 0 }
-        struct Height: PreferenceKey {
-            static let defaultValue: CGFloat = 0
-            static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
-        }
-        for focused in [false, true] {
-            let seen = Seen()
-            let agent = TaskColumnModel.agent(hasAgent: false, worktree: nil)
-            let view = TaskViewSplit(work: TaskColumnModel.work(agent, showsChanges: false), focused: focused) {
-                GeometryReader { proxy in Color.clear.preference(key: Height.self, value: proxy.size.height) }
-            } workArea: {
-                TaskWorkHeader(
-                    agent: agent, worktree: nil, agents: [], chosen: nil, onChooseAgent: { _ in },
-                    onOpenWorktree: {})
-            }
-            .frame(width: 600, height: 500)
-            .onPreferenceChange(Height.self) { value in MainActor.assumeIsolated { seen.content = value } }
-            let host = NSHostingView(rootView: view)
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 600, height: 500), styleMask: [.borderless],
-                backing: .buffered, defer: false)
-            window.isReleasedWhenClosed = false
-            window.contentView = host
-            for _ in 0..<5 {
-                host.layoutSubtreeIfNeeded()
-                try? await Task.sleep(for: .milliseconds(20))
-            }
-            window.close()
-            // 500, less the 30 pt line and its 1 pt divider.
-            #expect(seen.content == 469, "focused \(focused): the text got \(seen.content) of 500")
-        }
     }
 
     /// Back goes up one level at a time: from a worktree opened from its

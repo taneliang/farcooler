@@ -216,6 +216,20 @@ struct ShortcutSheetTests {
         #expect(rows.first { $0.keys == "⌃⌘1 … ⌃⌘9" }?.action.contains("terminal") == true)
     }
 
+    /// A task's tabs take ⌃⌘] and ⌃⌘[ (ov-98), the owner's keys, so the
+    /// diff's commits, which held them, move out one modifier to ⌃⌥⌘] and
+    /// ⌃⌥⌘[, still the outermost list on the most modifiers.
+    @Test("⌃⌘] and ⌃⌘[ walk a task's tabs, and the commits moved to ⌃⌥⌘")
+    func taskTabsTakeControlCommandBrackets() {
+        #expect(Self.shortcut(after: "Next Task Tab") == "⌃⌘]")
+        #expect(Self.shortcut(after: "Previous Task Tab") == "⌃⌘[")
+        #expect(Self.shortcut(after: "Next Commit") == "⌃⌥⌘]")
+        #expect(Self.shortcut(after: "Previous Commit") == "⌃⌥⌘[")
+        let rows = Shortcut.groups.flatMap { $0.1 }
+        #expect(rows.first { $0.keys == "⌃⌘] ⌃⌘[" }?.action.contains("tab") == true)
+        #expect(rows.first { $0.keys == "⌃⌥⌘] ⌃⌥⌘[" }?.action.contains("commit") == true)
+    }
+
     /// "Repository" and "workspace" replaced "project" (spec §1): not in the
     /// ⌘/ sheet, and not in a menu item's title.
     @Test("No shortcut copy says project")

@@ -19,9 +19,9 @@ import SwiftUI
 ///   ⌘R        reload the fleet
 ///
 /// The brackets are the family: `[` and `]` always walk a list, and the modifier
-/// says which one. ⌘ is terminals, ⇧⌘ is layouts, ⌥⌘ is the files inside a diff
-/// and ⌃⌘ is the commits behind them — the outermost list on the outermost
-/// modifier. Hunks take ⌥⌘↓ and ⌥⌘↑ instead, because a hunk is not a list you
+/// says which one. ⌘ is terminals, ⇧⌘ is layouts, ⌃⌘ is a task's tabs, ⌥⌘ is
+/// the files inside a diff and ⌃⌥⌘ is the commits behind them — the outermost
+/// list on the most modifiers. Hunks take ⌥⌘↓ and ⌥⌘↑ instead, because a hunk is not a list you
 /// pick from; it is the next place down the document.
 ///
 /// Tiling is the exception, and deliberately so. It uses a tmux PREFIX — ⌃B, then
@@ -79,7 +79,7 @@ enum Shortcut {
             [
                 Item(keys: "⌥⌘↓ ⌥⌘↑", action: "Next / previous hunk — and on into the next file"),
                 Item(keys: "⌥⌘] ⌥⌘[", action: "Next / previous file"),
-                Item(keys: "⌃⌘] ⌃⌘[", action: "Next / previous commit, base forward"),
+                Item(keys: "⌃⌥⌘] ⌃⌥⌘[", action: "Next / previous commit, base forward"),
             ]
         ),
         (
@@ -119,6 +119,7 @@ enum Shortcut {
                 Item(keys: "⌥⌘1 ⌥⌘2 ⌥⌘3", action: "Select the orchestrator; go to the navigator; go to what’s selected"),
                 Item(keys: "↑ ↓", action: "In the navigator: the orchestrator, the tasks and the worktrees, in turn"),
                 Item(keys: "⌃⌘↓ ⌃⌘↑", action: "Next / previous worktree, in the navigator’s order"),
+                Item(keys: "⌃⌘] ⌃⌘[", action: "A task’s next / previous tab: Overview, Agent, Changes"),
                 Item(keys: "⌘1 … ⌘9", action: "Go to a workspace, in the title bar’s order"),
                 Item(keys: "⌘0", action: "Switch workspace: open the title bar’s switcher"),
             ]

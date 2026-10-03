@@ -107,18 +107,3 @@ struct TaskNoteStyle: Equatable {
         return paired
     }
 }
-
-extension TaskColumnModel {
-    /// The least height the task's text keeps above the divider, so the
-    /// record is never squeezed to a line or two.
-    static let minimumContentHeight: CGFloat = 260
-
-    /// The top's height in a split of `total`, from its `share`: never under
-    /// `minimum` (when the view has the room), never into the bottom's
-    /// `minimumShare`.
-    static func topHeight(total: CGFloat, share: Double, minimum: CGFloat) -> CGFloat {
-        let ceiling = total * (1 - minimumShare)
-        let floor = min(minimum, ceiling)
-        return min(max(total * share, floor), ceiling)
-    }
-}

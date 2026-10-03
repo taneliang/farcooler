@@ -1,16 +1,17 @@
 import AgentKit
 import SwiftUI
 
-// A task, opened beside the board (spec §4.4): the task itself first, whole (its status,
-// title, intent, acceptance and record), and its agent and changes beneath,
-// behind a divider. A task need not have a worktree or a terminal at all, so
-// with neither the space beneath is one line, never a placeholder.
+// A task, opened beside the navigator (spec §4.4, ov-98): a compact header
+// that stays put (key, title, the agent's state, the status pop-up), and
+// under it three full-height tabs, Overview (the task itself, whole), Agent
+// (its terminal) and Changes (its diff). A task need not have a worktree or
+// a terminal at all; then Agent and Changes offer to start one.
 //
-// The rules it draws by are values here, `TaskColumnModel`, so
-// `TaskColumnTests` pins them.
+// The rules it draws by are values here, `TaskColumnModel` and
+// `TaskTabMemory`, so `TaskColumnTests` and `TaskTabsTests` pin them.
 
 enum TaskColumnModel {
-    /// What the agent half shows.
+    /// What the Agent tab shows.
     enum Agent: Equatable {
         /// The layout holding the task's agent.
         case live
@@ -38,9 +39,9 @@ enum TaskColumnModel {
         row.worktreeID.flatMap { $0.isEmpty ? nil : $0 } ?? agent?.worktree.id
     }
 
-    /// Whether a task's work line offers Start Agent… and Open Worktree…:
-    /// nothing has started, there's no worktree to open instead, the task
-    /// isn't finished, and the runner takes writes.
+    /// Whether the Agent and Changes tabs offer Start Agent… and Open
+    /// Worktree…: nothing has started, there's no worktree to open instead,
+    /// the task isn't finished, and the runner takes writes.
     static func offersStart(
         status: TaskStatus, worktree: Bool, agent: Agent, offersWrites: Bool
     ) -> Bool {
@@ -61,40 +62,6 @@ enum TaskColumnModel {
         }
     }
 
-    /// Whether the changes lead: In Review, a task is its changes; otherwise
-    /// its agent is where the work is happening.
-    static func changesLead(_ status: TaskStatus) -> Bool { status == .inReview }
-
-    /// The agent's share of the height beneath the task: what the divider was last
-    /// dragged to for this kind of task, else the larger share to whichever
-    /// leads.
-    static func agentShare(status: TaskStatus, stored: Double?) -> Double {
-        if let stored, stored > 0 { return min(max(stored, minimumShare), 1 - minimumShare) }
-        return changesLead(status) ? 0.35 : 0.65
-    }
-
-    static let minimumShare = 0.15
-
-    /// How much room the agent and changes beneath the task get.
-    enum Work: Equatable {
-        /// One line: there's nothing to draw but a sentence and its
-        /// actions. No agent, and no changes to show.
-        case compact
-        /// Its share of the height, under the divider.
-        case full
-    }
-
-    static func work(_ agent: Agent, showsChanges: Bool) -> Work {
-        agent == .live || showsChanges ? .full : .compact
-    }
-
-    /// The task's text's share of the view's height, over its agent and
-    /// changes: what the divider was last dragged to, else 40%.
-    static func contentShare(stored: Double?) -> Double {
-        if let stored, stored > 0 { return min(max(stored, minimumShare), 1 - minimumShare) }
-        return 0.4
-    }
-
     /// "1 terminal", "3 terminals", "No terminals".
     static func terminalCount(_ n: Int) -> String {
         switch n {
@@ -103,6 +70,101 @@ enum TaskColumnModel {
         default: return "\(n) terminals"
         }
     }
+
+    /// The agent's state in the header, "claude working", or nil with no
+    /// agent: its name and the navigator's own state word
+    /// (`OrchestratorRow`), so the two can't come to say it differently.
+    static func agentLine(_ pane: BoardPane?) -> (text: String, needsYou: Bool, working: Bool)? {
+        guard let pane else { return nil }
+        let state = OrchestratorRow.state(seat: pane)
+        let name = Terminal.name(of: pane.terminal.preset)
+        return (
+            "\(name) \(OrchestratorRow.word(state).lowercased())", state == .needsYou,
+            state == .working || state == .starting
+        )
+    }
+}
+
+/// A task's tabs (ov-98): the task itself, its agent's terminal, its diff.
+enum TaskTab: String, CaseIterable, Identifiable {
+    case overview, agent, changes
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .overview: "Overview"
+        case .agent: "Agent"
+        case .changes: "Changes"
+        }
+    }
+}
+
+/// Which tab each task shows, per window: the one last chosen for it, else
+/// Agent while an agent is working on it and Overview otherwise.
+///
+/// Only a choice is kept, never a default, so a task opened before its agent
+/// started opens on Agent once one has.
+struct TaskTabMemory: Equatable {
+    private(set) var chosen: [String: TaskTab] = [:]
+
+    /// The tab a task opens on with nothing chosen for it.
+    static func initial(agentWorking: Bool) -> TaskTab { agentWorking ? .agent : .overview }
+
+    func tab(for task: String, agentWorking: Bool) -> TaskTab {
+        chosen[task] ?? Self.initial(agentWorking: agentWorking)
+    }
+
+    mutating func choose(_ tab: TaskTab, for task: String) { chosen[task] = tab }
+
+    /// ⌃⌘] (`offset` 1) and ⌃⌘[ (-1): the next or previous tab from the
+    /// one `task` shows, wrapping, and chosen.
+    mutating func step(_ task: String, by offset: Int, agentWorking: Bool) {
+        let all = TaskTab.allCases
+        let at = all.firstIndex(of: tab(for: task, agentWorking: agentWorking)) ?? 0
+        choose(all[((at + offset) % all.count + all.count) % all.count], for: task)
+    }
+}
+
+/// The task view's type (ov-98): one ladder, title, section label, body,
+/// metadata, and prose at a reading measure, on the 8 pt rhythm
+/// (`ColumnGrid.rhythm`).
+enum TaskTypography {
+    /// The task's title, in the header.
+    static let title = Font.title2.weight(.semibold)
+    /// A section's label: Intent, Acceptance, Record.
+    static let label = Font.subheadline.weight(.semibold)
+    /// What's written: intent, acceptance lines, notes.
+    static let body = Font.body
+    /// Who and when, counts, the quiet lines.
+    static let meta = Font.caption
+
+    /// The body's point size, for the views that take a size.
+    static var bodySize: CGFloat { NSFont.preferredFont(forTextStyle: .body).pointSize }
+    /// The metadata's point size.
+    static var metaSize: CGFloat { NSFont.preferredFont(forTextStyle: .caption1).pointSize }
+
+    /// About seventy characters of body text, the reading measure: measured
+    /// on a sentence of the body's own type, and rounded to the rhythm.
+    static let measure: CGFloat = {
+        let sample = "How vexingly quick daft zebras jump, and the five boxing wizards jump quickly."
+        let font = NSFont.preferredFont(forTextStyle: .body)
+        let perCharacter = (sample as NSString).size(withAttributes: [.font: font]).width / CGFloat(sample.count)
+        return (70 * perCharacter / ColumnGrid.rhythm).rounded() * ColumnGrid.rhythm
+    }()
+
+    /// Between two sections.
+    static let sectionGap: CGFloat = 3 * ColumnGrid.rhythm
+    /// From a section's label to what it heads.
+    static let labelGap: CGFloat = ColumnGrid.rhythm
+    /// Between two notes in the record.
+    static let noteGap: CGFloat = 2 * ColumnGrid.rhythm
+    /// From a note's quiet line to its body.
+    static let noteLineGap: CGFloat = ColumnGrid.rhythm / 2
+    /// The overview's margins.
+    static let inset = EdgeInsets(
+        top: 2 * ColumnGrid.rhythm, leading: 3 * ColumnGrid.rhythm, bottom: 3 * ColumnGrid.rhythm,
+        trailing: 3 * ColumnGrid.rhythm)
 }
 
 /// A task's card: `row`'s record and question, drawn from the
@@ -137,22 +199,42 @@ extension TaskColumnCard where Card == TaskCard {
     }
 }
 
-/// A task's header, over its text: key and title, and the status pop-up.
+/// A task's header, which never scrolls away: key and title, the agent's
+/// state, and the status pop-up.
 struct TaskViewHeader: View {
     let row: TaskRow
     @ObservedObject var store: TaskBoardStore
+    /// The agent working it, if any (`TaskColumnModel.agentLine`).
+    var agent: BoardPane?
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .firstTextBaseline, spacing: ColumnGrid.rhythm) {
             Text(row.key)
-                .font(.system(size: WorkspaceStyle.PaneText.title, design: .monospaced))
+                .font(TaskTypography.meta.monospaced())
                 .foregroundStyle(.secondary)
+                .fixedSize()
             Text(row.title)
-                .font(.system(size: 13, weight: .semibold))
-                .lineLimit(2)
+                .font(TaskTypography.title)
+                .lineLimit(1)
                 .truncationMode(.tail)
                 .textSelection(.enabled)
-            Spacer(minLength: 6)
+                .help(row.title)
+            Spacer(minLength: ColumnGrid.rhythm)
+            if let line = TaskColumnModel.agentLine(agent) {
+                HStack(spacing: ColumnGrid.rhythm / 2) {
+                    if line.working {
+                        ProgressView().controlSize(.mini).frame(width: 10, height: 10)
+                    } else if line.needsYou {
+                        Circle().fill(Color.accentColor).frame(width: 6, height: 6)
+                    }
+                    Text(line.text)
+                        .font(TaskTypography.meta)
+                        .foregroundStyle(line.needsYou ? Color.accentColor : Color.secondary)
+                }
+                .fixedSize()
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("task-agent-state")
+            }
             // The card's Move To, in the header: the status is the task's.
             Menu(row.status.title) {
                 ForEach(TaskStatus.allCases, id: \.self) { status in
@@ -160,64 +242,56 @@ struct TaskViewHeader: View {
                         .disabled(status == row.status)
                 }
             }
+            .controlSize(.small)
             .fixedSize()
             .help("Move this task")
             .disabled(!store.offersWrites)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.horizontal, ColumnGrid.a)
+        // Six rhythms: a title2 line with a rhythm and a half each side.
+        .frame(maxWidth: .infinity, minHeight: 6 * ColumnGrid.rhythm, alignment: .leading)
         .background(WorkspaceStyle.canvas)
     }
 }
 
-/// The line over a task's agent and changes: its worktree and how many
-/// terminals it has, or why there's nothing there, with the agent picker and
-/// Open Worktree. With nothing beneath it, it's the whole of that area.
-struct TaskWorkHeader: View {
-    let agent: TaskColumnModel.Agent
+/// The bar under the header: the three tabs, and the task's worktree on the
+/// right with how many terminals it has, the agent or a picker when several
+/// are on it, and Open Worktree.
+struct TaskTabBar: View {
+    let tab: TaskTab
+    var onChoose: (TaskTab) -> Void
     /// The worktree, without the orchestrators seated in it.
     let worktree: Worktree?
     let agents: [BoardPane]
     let chosen: BoardPane?
-    var onChooseAgent: (BoardPane) -> Void
-    var onOpenWorktree: () -> Void
-    var status: TaskStatus = .backlog
-    /// An agent is being started: both menus show it and do nothing.
-    var starting = false
-    /// What a task with no worktree can do (ov-81 P3): start an agent on a
-    /// worktree made for it, with the agent's id, or go onto one that
-    /// exists. Nil hides the actions, as for a runner that takes no writes.
-    var onStartAgent: ((String) -> Void)?
-    var attachable: [Worktree] = []
-    var onAttach: (Worktree) -> Void = { _ in }
-
-    /// Whether the line offers the two actions: nothing has started and
-    /// there's no worktree to open instead.
-    private var offersStart: Bool {
-        TaskColumnModel.offersStart(
-            status: status, worktree: worktree != nil, agent: agent, offersWrites: onStartAgent != nil)
-    }
+    var onChooseAgent: (BoardPane) -> Void = { _ in }
+    var onOpenWorktree: () -> Void = {}
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: ColumnGrid.rhythm) {
+            Picker("Tab", selection: Binding(get: { tab }, set: onChoose)) {
+                ForEach(TaskTab.allCases) { tab in Text(tab.title).tag(tab) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .fixedSize()
+            .help("Overview, Agent and Changes (⌃⌘[ and ⌃⌘])")
+            .accessibilityIdentifier("task-tabs")
+            Spacer(minLength: ColumnGrid.rhythm)
             if let worktree {
-                Image(systemName: "arrow.triangle.branch").foregroundStyle(.secondary)
-                Text("Worktree \(worktree.task)")
-                    .font(.system(size: 12, weight: .semibold))
+                Image(systemName: "arrow.triangle.branch")
+                    .font(TaskTypography.meta)
+                    .foregroundStyle(.secondary)
+                Text(worktree.task)
+                    .font(ColumnHeader.font(.medium))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Text(TaskColumnModel.terminalCount(worktree.terminals.count))
-                    .font(.system(size: 11))
+                    .font(TaskTypography.meta)
                     .foregroundStyle(.secondary)
                     .fixedSize()
             }
-            if let sentence = TaskColumnModel.sentence(agent) {
-                Text(sentence)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 6)
             if agents.count > 1 {
                 Menu {
                     ForEach(Array(zip(agents, BoardPane.titles(agents))), id: \.0.id) { pane, title in
@@ -226,38 +300,9 @@ struct TaskWorkHeader: View {
                 } label: {
                     Text("agent · \(chosen.map { Terminal.name(of: $0.terminal.preset) } ?? "")")
                 }
+                .controlSize(.small)
                 .fixedSize()
                 .help("Choose which agent to show")
-            } else if let chosen {
-                Text("agent · \(Terminal.name(of: chosen.terminal.preset))")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
-            }
-            if offersStart, let onStartAgent {
-                Menu(starting ? "Starting…" : "Start Agent…") {
-                    ForEach(Agents.all) { agent in
-                        Button(agent.name) { onStartAgent(agent.id) }
-                    }
-                }
-                .controlSize(.small)
-                .fixedSize()
-                .disabled(starting)
-                .help("Make a worktree for this task and start an agent in it")
-                .accessibilityIdentifier("task-start-agent")
-                Menu("Open Worktree…") {
-                    if attachable.isEmpty {
-                        Text("No Free Worktrees")
-                    }
-                    ForEach(attachable) { worktree in
-                        Button(worktree.task) { onAttach(worktree) }
-                    }
-                }
-                .controlSize(.small)
-                .fixedSize()
-                .disabled(starting)
-                .help("Put this task on a worktree that already exists")
-                .accessibilityIdentifier("task-attach-worktree")
             }
             if worktree != nil {
                 Button("Open Worktree", action: onOpenWorktree)
@@ -266,141 +311,106 @@ struct TaskWorkHeader: View {
                     .help("Show this task’s worktree full size, with all its layouts")
             }
         }
-        .padding(.horizontal, 12)
-        // Not a column header (`ColumnHeader`): a row inside the task, under
-        // the jump bar, so it keeps its own height.
-        .frame(height: 30)
-        .background(WorkspaceStyle.canvas)
+        .padding(.horizontal, ColumnGrid.a)
+        .columnHeader()
     }
 }
 
-/// A task's text over its agent and changes, with a divider between them
-/// whose place is remembered per window. With nothing beneath but a line
-/// (`.compact`), the text takes the rest, Focus or not; with Focus, the work
-/// takes all of it, in the same views, so the agent and the changes keep
-/// their place.
-struct TaskViewSplit<Content: View, WorkArea: View>: View {
-    let work: TaskColumnModel.Work
-    /// Focus (⌃⌘↩): the agent and changes at full height.
-    let focused: Bool
-    @ViewBuilder let content: () -> Content
-    @ViewBuilder let workArea: () -> WorkArea
-
-    @SceneStorage("task.split.content") private var contentShare: Double = 0
+/// What the Agent and Changes tabs show with nothing to draw: why, in a
+/// sentence, and for a task with no worktree the two ways to begin, Start
+/// Agent… on a worktree made for it, or Open Worktree… onto one that exists.
+/// Compact, near the top: never a placeholder the height of the view.
+struct TaskStartPanel: View {
+    let sentence: String
+    /// Whether to offer the two actions (`TaskColumnModel.offersStart`).
+    var offersStart = false
+    /// An agent is being started: both menus show it and do nothing.
+    var starting = false
+    var onStartAgent: (String) -> Void = { _ in }
+    var attachable: [Worktree] = []
+    var onAttach: (Worktree) -> Void = { _ in }
 
     var body: some View {
-        switch work {
-        case .compact:
-            VStack(spacing: 0) {
-                content().frame(maxHeight: .infinity)
-                Divider()
-                workArea()
-            }
-        case .full:
-            ShareSplit(
-                stored: $contentShare, fallback: TaskColumnModel.contentShare(stored: nil), collapsed: focused,
-                minimumTop: TaskColumnModel.minimumContentHeight
-            ) {
-                content()
-            } bottom: {
-                workArea()
+        VStack(spacing: 2 * ColumnGrid.rhythm) {
+            Text(sentence)
+                .font(TaskTypography.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            if offersStart {
+                HStack(spacing: ColumnGrid.rhythm) {
+                    Menu(starting ? "Starting…" : "Start Agent…") {
+                        ForEach(Agents.all) { agent in
+                            Button(agent.name) { onStartAgent(agent.id) }
+                        }
+                    }
+                    .fixedSize()
+                    .disabled(starting)
+                    .help("Make a worktree for this task and start an agent in it")
+                    .accessibilityIdentifier("task-start-agent")
+                    Menu("Open Worktree…") {
+                        if attachable.isEmpty {
+                            Text("No Free Worktrees")
+                        }
+                        ForEach(attachable) { worktree in
+                            Button(worktree.task) { onAttach(worktree) }
+                        }
+                    }
+                    .fixedSize()
+                    .disabled(starting)
+                    .help("Put this task on a worktree that already exists")
+                    .accessibilityIdentifier("task-attach-worktree")
+                }
+                .controlSize(.small)
             }
         }
+        .padding(3 * ColumnGrid.rhythm)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.top, 4 * ColumnGrid.rhythm)
     }
 }
 
-/// The agent over the changes, with a divider between them whose place is
-/// remembered per window, one for tasks in review and one for the rest.
-/// Either alone when the other isn't there.
-struct TaskColumnSplit<Agent: View, Changes: View>: View {
-    let status: TaskStatus
-    let showsChanges: Bool
-    let showsAgent: Bool
+/// The three tabs, full height, one in front.
+///
+/// Overview and Agent are made once and kept: the one not shown is faded
+/// out, takes no click, no keyboard (`outOfSight`) and nothing VoiceOver
+/// reaches, so the terminal is never rebuilt and never re-wraps as the tabs
+/// switch (`TaskTabsTests`). Changes is made the first time it's shown and
+/// kept from then on, so a task never looked at for its diff never reads one.
+struct TaskTabs<Overview: View, Agent: View, Changes: View>: View {
+    let tab: TaskTab
+    @ViewBuilder let overview: () -> Overview
     @ViewBuilder let agent: () -> Agent
     @ViewBuilder let changes: () -> Changes
 
-    @SceneStorage("task.split.review") private var reviewShare: Double = 0
-    @SceneStorage("task.split.work") private var workShare: Double = 0
+    @State private var changesShown = false
 
     var body: some View {
-        if showsChanges && showsAgent {
-            let lead = TaskColumnModel.changesLead(status)
-            ShareSplit(
-                stored: lead ? $reviewShare : $workShare,
-                fallback: TaskColumnModel.agentShare(status: status, stored: nil)
-            ) {
-                agent()
-            } bottom: {
-                changes()
+        ZStack(alignment: .topLeading) {
+            overview().modifier(TabLayer(shown: tab == .overview))
+            agent().modifier(TabLayer(shown: tab == .agent))
+            if changesShown || tab == .changes {
+                changes().modifier(TabLayer(shown: tab == .changes))
             }
-            .id(lead)
-        } else if showsChanges {
-            changes()
-        } else {
-            agent()
         }
-    }
-}
-
-/// Two views, one over the other, with a divider between them dragged to
-/// set the top's share of the height, kept in `stored` once dropped.
-struct ShareSplit<Top: View, Bottom: View>: View {
-    @Binding var stored: Double
-    /// The top's share before anything is stored.
-    let fallback: Double
-    /// The top folded away, and the divider with it: the bottom has it all.
-    var collapsed = false
-    /// The least height the top keeps, in points, whatever the share.
-    var minimumTop: CGFloat = 0
-    @ViewBuilder let top: () -> Top
-    @ViewBuilder let bottom: () -> Bottom
-
-    @State private var dragging: Double?
-    @State private var space = UUID()
-
-    var body: some View {
-        GeometryReader { proxy in
-            let share = dragging ?? (stored > 0 ? Self.clamped(stored) : fallback)
-            let height = proxy.size.height
-            VStack(spacing: 0) {
-                top()
-                    .frame(height: collapsed ? 0 : max(0, TaskColumnModel.topHeight(total: height, share: share, minimum: minimumTop) - 3))
-                    .clipped()
-                    .opacity(collapsed ? 0 : 1)
-                    .accessibilityHidden(collapsed)
-                if !collapsed { divider(height: height) }
-                bottom().frame(maxHeight: .infinity)
-            }
-            .coordinateSpace(name: space)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: tab, initial: true) { _, tab in
+            if tab == .changes { changesShown = true }
         }
     }
 
-    static func clamped(_ share: Double) -> Double {
-        min(max(share, TaskColumnModel.minimumShare), 1 - TaskColumnModel.minimumShare)
-    }
+    /// One tab in the stack: in front, or kept out of sight behind.
+    private struct TabLayer: ViewModifier {
+        let shown: Bool
 
-    private func divider(height: CGFloat) -> some View {
-        Rectangle()
-            .fill(Color.primary.opacity(0.12))
-            .frame(height: 1)
-            .padding(.vertical, 2.5)
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-            // A pointer style rather than pushing and popping `NSCursor`,
-            // which a drag ending outside the divider left stuck.
-            .pointerStyle(.rowResize)
-            .gesture(
-                DragGesture(minimumDistance: 1, coordinateSpace: .named(space))
-                    .onChanged { value in
-                        guard height > 0 else { return }
-                        let least = min(Double(minimumTop / height), 1 - TaskColumnModel.minimumShare)
-                        dragging = max(Self.clamped(Double(value.location.y / height)), least)
-                    }
-                    .onEnded { _ in
-                        if let dragging { stored = dragging }
-                        dragging = nil
-                    })
-            .accessibilityHidden(true)
+        func body(content: Content) -> some View {
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .opacity(shown ? 1 : 0)
+                .allowsHitTesting(shown)
+                .accessibilityHidden(!shown)
+                .environment(\.outOfSight, !shown)
+                .disabled(!shown)
+        }
     }
 }
 
@@ -606,3 +616,4 @@ struct TaskColumnChanges: View {
             .simultaneousGesture(TapGesture().onEnded { onFocus() })
     }
 }
+
