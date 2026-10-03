@@ -74,8 +74,8 @@ fn a_subagent_on_a_task_that_finishes_is_closed() {
 fn a_subagent_ends_once_and_a_resume_reopens_it() {
     let (store, _, t) = board(1);
     store.record_worker(t[0].id, &subagent("a1"), Actor::Manager).unwrap();
-    store.end_worker(t[0].id, "claude", "a1", EndReason::Finished, Actor::Manager).unwrap();
-    store.end_worker(t[0].id, "claude", "a1", EndReason::Stopped, Actor::Manager).unwrap();
+    store.end_worker(t[0].id, "claude", Some("a1"), EndReason::Finished, Actor::Manager).unwrap();
+    store.end_worker(t[0].id, "claude", Some("a1"), EndReason::Stopped, Actor::Manager).unwrap();
     let ended = store.workers_for(t[0].id).unwrap().remove(0);
     assert_eq!(ended.end_reason, Some(EndReason::Finished), "the first end stands");
 
@@ -86,7 +86,7 @@ fn a_subagent_ends_once_and_a_resume_reopens_it() {
         worker_notes(&store, t[0].id),
         ["Claude subagent started: ov-1 Mac polish", "Claude subagent finished.", "Claude subagent resumed: ov-1 Mac polish"]
     );
-    let missing = store.end_worker(t[0].id, "claude", "nobody", EndReason::Finished, Actor::Manager);
+    let missing = store.end_worker(t[0].id, "claude", Some("nobody"), EndReason::Finished, Actor::Manager);
     assert!(matches!(missing, Err(DomainError::NotFound)));
 }
 
@@ -97,8 +97,8 @@ fn a_board_shows_the_open_ones_and_the_last_closed() {
     for agent in ["a1", "a2", "a3"] {
         store.record_worker(t[0].id, &subagent(agent), Actor::Manager).unwrap();
     }
-    store.end_worker(t[0].id, "claude", "a1", EndReason::Finished, Actor::Manager).unwrap();
-    store.end_worker(t[0].id, "claude", "a2", EndReason::Failed, Actor::Manager).unwrap();
+    store.end_worker(t[0].id, "claude", Some("a1"), EndReason::Finished, Actor::Manager).unwrap();
+    store.end_worker(t[0].id, "claude", Some("a2"), EndReason::Failed, Actor::Manager).unwrap();
     let task = store.get_task(t[0].id).unwrap();
     let shown = store.task_facts(&[task]).unwrap().remove(0).workers;
     assert_eq!(shown.iter().map(|w| w.agent_id.as_str()).collect::<Vec<_>>(), ["a3", "a2"]);
@@ -137,4 +137,36 @@ fn a_subagent_links_from_a_leading_key_on_its_own_board() {
     assert_eq!(already, None, "recorded by the orchestrator on another task");
     let other_board = store.create_workspace(t[0].repository_id, "Billing", "bil").unwrap().id;
     assert_eq!(store.link_worker_by_description(other_board, &format!("{key}: x"), &subagent("a4")).unwrap(), None);
+}
+
+/// The orchestrator's record wins over the runner's guess: on the same task
+/// the row becomes the orchestrator's; a guess open on another task is
+/// closed there, `relinked`, and says so.
+#[test]
+fn the_orchestrator_s_record_overrides_a_description_link() {
+    let (store, main, t) = board(2);
+    let key = t[0].key.clone();
+    store.link_worker_by_description(main, &format!("{key}: a guess"), &subagent("a1")).unwrap();
+    store.record_worker(t[0].id, &subagent("a1"), Actor::Manager).unwrap();
+    assert_eq!(store.workers_for(t[0].id).unwrap()[0].linked_by, LinkedBy::Orchestrator);
+
+    store.link_worker_by_description(main, &format!("{key}: wrong"), &subagent("a2")).unwrap();
+    store.record_worker(t[1].id, &subagent("a2"), Actor::Manager).unwrap();
+    let wrong = store.workers_for(t[0].id).unwrap().into_iter().find(|w| w.agent_id == "a2").unwrap();
+    assert_eq!(wrong.end_reason, Some(EndReason::Relinked));
+    assert_eq!(worker_notes(&store, t[0].id).last().unwrap(), "Claude subagent was recorded on another task.");
+    assert!(store.workers_for(t[1].id).unwrap()[0].ended_at.is_none(), "open where the orchestrator put it");
+}
+
+/// `task worker KEY --done` with no id: every open subagent on the task
+/// ends; none open is `NotFound`.
+#[test]
+fn ending_with_no_id_ends_every_open_one() {
+    let (store, _, t) = board(1);
+    store.record_worker(t[0].id, &subagent("a1"), Actor::Manager).unwrap();
+    store.record_worker(t[0].id, &WorkerRecord { harness: "codex".into(), ..subagent("/root/b") }, Actor::Manager).unwrap();
+    store.end_worker(t[0].id, "claude", None, EndReason::Finished, Actor::Manager).unwrap();
+    assert!(store.workers_for(t[0].id).unwrap().iter().all(|w| w.end_reason == Some(EndReason::Finished)));
+    let none = store.end_worker(t[0].id, "claude", None, EndReason::Finished, Actor::Manager);
+    assert!(matches!(none, Err(DomainError::NotFound)));
 }

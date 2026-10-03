@@ -194,10 +194,10 @@ mod tests {
             .filter(|(_, (_, older))| *older == Older::Welcome)
             .map(|(i, _)| i + 1)
             .collect();
-        assert_eq!(welcome, vec![4, 11, 13, 16, 17, 18, 19, 20]);
-        // 0021 (ov-212, ov-213) is additive, but the notes and wakes this
-        // build writes into it break an older build's reads (see
-        // `waits::migration_0021_waits_and_workers`), so it is the floor.
+        assert_eq!(welcome, vec![4, 11, 13, 16, 17, 18, 20]);
+        // 0019's runner-written notes and 0021's `wait` and `worker` notes
+        // are additive, but fail an older build's note decoder (see
+        // `waits::migration_0021_waits_and_workers`), so 0021 is the floor.
         assert_eq!(COMPATIBLE_DOWN_TO, 21);
     }
 

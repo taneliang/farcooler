@@ -86,7 +86,9 @@ fn pb_worker(worker: &TaskWorker) -> pb::TaskWorker {
     let state = match worker.end_reason {
         None => pb::TaskWorkerState::Unobserved,
         Some(EndReason::Finished | EndReason::HandedBack) => pb::TaskWorkerState::Finished,
-        Some(EndReason::Failed | EndReason::Stopped | EndReason::TaskClosed) => pb::TaskWorkerState::Stopped,
+        Some(EndReason::Failed | EndReason::Stopped | EndReason::TaskClosed | EndReason::Relinked) => {
+            pb::TaskWorkerState::Stopped
+        }
     };
     pb::TaskWorker {
         id: id_bytes(worker.id),
@@ -202,7 +204,9 @@ pub fn worker(svc: &Service, watcher: &Watcher, req: &pb::TaskWorkerSet, pane: O
             "stopped" => EndReason::Stopped,
             _ => return Err(DomainError::InvalidArgument { what: "end_reason" }),
         };
-        svc.store.end_worker(id, &req.harness, &req.agent_id, reason, actor)?
+        // No id ends every subagent open on the task (`task worker KEY --done`).
+        let agent = Some(req.agent_id.trim()).filter(|a| !a.is_empty());
+        svc.store.end_worker(id, &req.harness, agent, reason, actor)?
     } else {
         let given = |s: &Option<String>| s.as_ref().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         let record = WorkerRecord {

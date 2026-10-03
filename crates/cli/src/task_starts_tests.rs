@@ -94,7 +94,7 @@ fn the_flags_that_cannot_go_together_are_refused() {
 
 fn args(done: bool) -> WorkerArgs {
     WorkerArgs {
-        subagent: "a3fd8fceef581c787".into(),
+        subagent: Some("a3fd8fceef581c787".into()),
         harness: "claude".into(),
         label: Some("ov-12 Mac polish".into()),
         model: None,
@@ -263,4 +263,28 @@ fn every_refusal_these_routes_send_has_a_sentence() {
         what: "line_status".into(),
     };
     assert_eq!(refused_here(err, "fallback").to_string(), said_here("line_status").unwrap());
+}
+
+/// `task worker KEY --done` needs no id: it ends every subagent open on the
+/// task, which is the line the skills teach.
+#[test]
+fn done_needs_no_subagent_id() {
+    let StartCmd::Worker { subagent, done, .. } = parsed(&["worker", "ov-12", "--done"]).unwrap() else {
+        panic!("a worker command");
+    };
+    assert_eq!((subagent, done), (None, true));
+    let task = pb::Task { key: "ov-12".into(), ..Default::default() };
+    let every = WorkerArgs { subagent: None, ..args(true) };
+    let (req, said) = worker_request(&task, &every, &SessionEnv::default(), "manager").unwrap();
+    assert_eq!((req.agent_id.as_str(), req.end, said), ("", true, None));
+}
+
+/// A blocker the board read didn't name (a block across repositories) is
+/// said to be not found, never "now finished": its status is unknown.
+#[test]
+fn a_blocker_not_found_is_not_called_finished() {
+    let elsewhere = Uuid::now_v7();
+    let block = pb::TaskBlock { blocked_by: id_bytes(elsewhere), ..Default::default() };
+    let said = block_line(&block, &pb::Task::default(), &HashMap::new(), true);
+    assert_eq!(said, format!("  waits on {}, a task not found on this board\n", crate::short_bytes(&id_bytes(elsewhere))));
 }

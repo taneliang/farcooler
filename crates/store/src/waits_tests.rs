@@ -209,12 +209,16 @@ fn a_hold_whose_time_came_is_let_go() {
     assert_eq!((note.kind, note.actor), (NoteKind::Wait, Actor::Runner));
     assert!(note.body.ends_with("That time has come."), "{}", note.body);
     assert_eq!(store.next_hold_due().unwrap(), Some(now + 60_000));
-    let kind: String = store
+    let queued: i64 = store
         .conn()
-        .query_row("SELECT kind FROM answer_wakes WHERE note_id = ?1", [uuid_blob(note.id)], |r| r.get(0))
+        .query_row("SELECT count(*) FROM hold_wakes WHERE note_id = ?1 AND done_at IS NULL", [uuid_blob(note.id)], |r| r.get(0))
         .unwrap();
-    assert_eq!(kind, "hold_ended");
-    assert!(store.pending_answer_wakes().unwrap().is_empty() && !store.any_pending_answer_wake().unwrap());
+    assert_eq!(queued, 1, "its orchestrator's wake is queued");
+    // What every answer pump since ov-90 reads, with no column to tell an
+    // answer from anything else: a hold there would be typed as an answer.
+    let typed: i64 =
+        store.conn().query_row("SELECT count(*) FROM answer_wakes WHERE done_at IS NULL", [], |r| r.get(0)).unwrap();
+    assert_eq!(typed, 0, "no answer pump, old or new, can type a hold");
 }
 
 /// (7) Opening the store clears a wait an older build left on a task it
@@ -293,6 +297,7 @@ fn moving_a_task_to_another_board_takes_it_out_of_line() {
     let other = store.create_workspace(repo, "Billing", "bil").unwrap().id;
     store.move_tasks(&[t[0].id, t[1].id], other, Actor::Manager).unwrap();
     assert_eq!(wait_of(&store, &t[0]), None);
+    assert_eq!(wait_notes(&store, &t[0]), ["In line to start.", "Out of the line to start."], "said, like every clear");
     assert_eq!(wait_of(&store, &t[1]), Some(Wait::Parked));
 }
 
@@ -336,4 +341,50 @@ fn a_copy_of_a_real_board_keeps_every_card_key_and_note() {
     assert_eq!(crate::compat::read_compatible_down_to(&conn).unwrap(), Some(21), "no build before 21 opens it");
     eprintln!("{} cards and {} notes kept", after.0.len(), after.1.len());
     std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Both sides of a move, not just the new one: a wait an older build left on
+/// a started task is hidden there, and moving the task back to a status the
+/// wait happens to fit must not bring it back.
+#[test]
+fn a_stale_wait_does_not_come_back_with_a_move() {
+    let (store, _, t) = board(1);
+    store.set_task_status(t[0].id, InProgress, Actor::Manager).unwrap();
+    // An older build, which knows nothing of waits, left a place in the agent
+    // line on it; no reopen, so no sweep.
+    store
+        .conn()
+        .execute(
+            "UPDATE tasks SET wait_kind = 'in_line', wait_line = 'agent', wait_rank = 1, wait_since = 1 WHERE id = ?1",
+            [uuid_blob(t[0].id)],
+        )
+        .unwrap();
+    assert_eq!(wait_of(&store, &t[0]), None, "hidden while in progress");
+
+    store.set_task_status(t[0].id, Todo, Actor::Manager).unwrap();
+    assert_eq!(wait_of(&store, &t[0]), None, "the agent line takes todo, but this place was stale");
+    assert_eq!(raw_kind(&store, &t[0]), None);
+}
+
+/// A note or actor from a newer build reads as `Unknown` instead of failing
+/// every read that meets it: the card, a search, and with them the Needs You
+/// list and the report, which read the same notes.
+#[test]
+fn a_note_from_a_newer_build_reads_as_unknown() {
+    let (store, _, t) = board(1);
+    store
+        .conn()
+        .execute(
+            "INSERT INTO task_notes (id, task_id, kind, actor, at, body, extra)
+             VALUES (?1, ?2, 'forecast', 'oracle:7', 1, 'from the future', '{}')",
+            params![uuid_blob(Uuid::now_v7()), uuid_blob(t[0].id)],
+        )
+        .unwrap();
+    let notes = store.notes_for(t[0].id, None).unwrap();
+    let future = notes.iter().find(|n| n.body == "from the future").expect("read");
+    assert_eq!((future.kind, future.actor), (NoteKind::Unknown, Actor::Unknown));
+    let hits = store.search_notes(t[0].repository_id, "future", None).unwrap();
+    assert_eq!(hits.len(), 1);
+    let forged = store.add_note(t[0].id, NoteKind::Unknown, Actor::Manager, "x", json!({}));
+    assert!(matches!(forged, Err(DomainError::InvalidArgument { what: "kind" })), "never written");
 }

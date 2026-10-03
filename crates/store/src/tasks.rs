@@ -743,7 +743,7 @@ impl Store {
         extra: serde_json::Value,
         supersedes: Option<Uuid>,
     ) -> Result<TaskNote> {
-        if matches!(kind, NoteKind::StatusChange | NoteKind::Created | NoteKind::Wait | NoteKind::Worker) {
+        if matches!(kind, NoteKind::StatusChange | NoteKind::Created | NoteKind::Wait | NoteKind::Worker | NoteKind::Unknown) {
             return Err(DomainError::InvalidArgument { what: "kind" });
         }
         let written = insert_note(&self.conn(), task, kind, actor, body, &extra, supersedes);

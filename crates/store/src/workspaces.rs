@@ -469,11 +469,9 @@ impl Store {
                 }
                 // A line is one board's (`waits`), so a task leaves its
                 // place in one when it leaves the board.
+                crate::waits::leave_line(&tx, task, actor)?;
                 tx.execute(
-                    "UPDATE tasks SET workspace_id = ?1, resource_version = resource_version + 1,
-                            wait_since = CASE WHEN wait_kind = 'in_line' THEN NULL ELSE wait_since END,
-                            wait_kind = CASE WHEN wait_kind = 'in_line' THEN NULL ELSE wait_kind END,
-                            wait_line = NULL, wait_rank = NULL
+                    "UPDATE tasks SET workspace_id = ?1, resource_version = resource_version + 1
                       WHERE id = ?2",
                     params![uuid_blob(to), uuid_blob(task)],
                 )

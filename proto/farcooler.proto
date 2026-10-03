@@ -3184,7 +3184,10 @@ message TaskSetLine {
 // behind `task_workers`.
 //
 // Recording one that is already recorded on the task is the same row: its
-// session fields are filled in, and an ended one is reopened (a resume). A
+// session fields are filled in, and an ended one is reopened (a resume).
+// The orchestrator's record wins over a link the runner made from a
+// subagent's description: that row becomes the orchestrator's, and a link
+// still open on another task is closed there. A
 // BACKLOG or TODO task moves to IN_PROGRESS in the same write, since a
 // subagent at work means it started. A task that is done or cancelled is
 // refused (`task_closed`), and so is ending one never recorded (NOT_FOUND).
@@ -3206,7 +3209,8 @@ message TaskWorkerSet {
   optional string tmux_socket = 7;
   optional string label = 8;
   optional string model = 9;
-  // Record that it ended, rather than that it started.
+  // Record that it ended, rather than that it started. With `end`, an empty
+  // `agent_id` ends every subagent open on the task (NOT_FOUND when none is).
   bool end = 10;
   // With `end`: `finished` (the default), `failed` or `stopped`.
   string end_reason = 11;

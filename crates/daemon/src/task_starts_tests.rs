@@ -147,3 +147,68 @@ async fn a_subagent_recorded_on_the_wire() {
     ask.end_reason = "vanished".into();
     assert!(matches!(worker(&svc, &watcher, &ask, None), Err(DomainError::InvalidArgument { what: "end_reason" })));
 }
+
+/// A note a newer build wrote, of a kind and by an actor this build can't
+/// name, fails none of the reads that meet it: the card, a search, the
+/// Needs You list and the report. Before, one such note failed each whole.
+#[tokio::test]
+async fn a_note_from_a_newer_build_breaks_no_read() {
+    let (_dir, svc, watcher, _events, t) = runner(1).await;
+    let ask = pb::TaskSetStatus {
+        task_id: id_bytes(t[0].id),
+        status: pb::TaskStatus::NeedsDecision as i32,
+        actor: "manager".into(),
+    };
+    crate::task_ops::set_status(&svc, &watcher, &ask).unwrap();
+    farcooler_store::testing::note_from_a_newer_build(&svc.store, t[0].id, "forecast", "oracle:7", "from the future");
+
+    let get = pb::TaskGetRequest { task_id: id_bytes(t[0].id), ..Default::default() };
+    let detail = crate::task_ops::get(&svc, &get).unwrap();
+    let future = detail.notes.iter().find(|n| n.body == "from the future").expect("on the card");
+    assert_eq!((future.kind, future.actor.as_str()), (pb::TaskNoteKind::Unspecified as i32, "unknown"));
+    let search = pb::TaskSearchRequest {
+        repository_id: id_bytes(t[0].repository_id),
+        query: "future".into(),
+        ..Default::default()
+    };
+    assert_eq!(crate::task_ops::search(&svc, &search).unwrap().items.len(), 1);
+    let inputs = crate::needs_you::gather(&svc, &watcher).await.expect("the Needs You list");
+    assert!(!crate::needs_you::assemble(&inputs, std::time::SystemTime::now()).is_empty());
+    let now = farcooler_store::testing::now_millis();
+    let report = pb::ReportRequest { since: 0, until: now + 1, ..Default::default() };
+    crate::report::serve(&svc.store, &report, now).expect("the report");
+}
+
+/// `task.move` answers with each task's derived half, as every other route
+/// does: here, what it's still blocked on.
+#[tokio::test]
+async fn a_moved_task_comes_back_whole() {
+    let (_dir, svc, watcher, _events, t) = runner(2).await;
+    svc.store.set_block(t[1].id, t[0].id, None).unwrap();
+    let billing = svc.store.create_workspace(t[0].repository_id, "Billing", "bil").unwrap();
+    let ask = pb::TaskMove {
+        task_ids: vec![id_bytes(t[1].id)],
+        workspace_id: id_bytes(billing.id),
+        actor: "manager".into(),
+    };
+    let moved = crate::workspace_ops::move_tasks(&svc, &watcher, &ask).unwrap().items;
+    assert_eq!(moved[0].waiting_on, std::slice::from_ref(&t[0].key));
+}
+
+/// `--done` with no id, on the wire: an empty `agent_id` ends every open one.
+#[tokio::test]
+async fn ending_with_no_id_on_the_wire_ends_every_open_one() {
+    let (_dir, svc, watcher, _events, t) = runner(1).await;
+    let mut ask = pb::TaskWorkerSet {
+        task_id: id_bytes(t[0].id),
+        harness: "claude".into(),
+        agent_id: "a1".into(),
+        actor: "manager".into(),
+        ..Default::default()
+    };
+    worker(&svc, &watcher, &ask, None).unwrap();
+    ask.agent_id = String::new();
+    ask.end = true;
+    let task = worker(&svc, &watcher, &ask, None).unwrap();
+    assert_eq!(task.workers[0].state, pb::TaskWorkerState::Finished as i32);
+}

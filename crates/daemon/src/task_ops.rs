@@ -80,6 +80,9 @@ fn pb_note_kind(kind: NoteKind) -> i32 {
         NoteKind::Created => pb::TaskNoteKind::Created,
         NoteKind::Wait => pb::TaskNoteKind::Wait,
         NoteKind::Worker => pb::TaskNoteKind::Worker,
+        // A kind a newer build wrote: on the wire as UNSPECIFIED, which every
+        // client shows generically.
+        NoteKind::Unknown => pb::TaskNoteKind::Unspecified,
     }) as i32
 }
 

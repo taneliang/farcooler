@@ -53,3 +53,15 @@ pub fn backdate_answer_wakes(store: &crate::Store, by_ms: i64) {
 pub fn now_millis() -> i64 {
     crate::tasks::now_millis()
 }
+
+/// A note on `task` as a newer build might write it: a kind and an actor
+/// this build has no word for.
+pub fn note_from_a_newer_build(store: &crate::Store, task: Uuid, kind: &str, actor: &str, body: &str) {
+    store
+        .conn()
+        .execute(
+            "INSERT INTO task_notes (id, task_id, kind, actor, at, body, extra) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}')",
+            params![uuid_blob(Uuid::now_v7()), uuid_blob(task), kind, actor, crate::tasks::now_millis(), body],
+        )
+        .unwrap();
+}

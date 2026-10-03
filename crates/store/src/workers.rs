@@ -33,6 +33,9 @@ pub enum EndReason {
     HandedBack,
     /// Its task was done or cancelled while it was open.
     TaskClosed,
+    /// The runner linked it from its description, and the orchestrator then
+    /// recorded it on another task.
+    Relinked,
 }
 
 impl EndReason {
@@ -43,6 +46,7 @@ impl EndReason {
             EndReason::Stopped => "stopped",
             EndReason::HandedBack => "handed_back",
             EndReason::TaskClosed => "task_closed",
+            EndReason::Relinked => "relinked",
         }
     }
 
@@ -53,6 +57,7 @@ impl EndReason {
             "stopped" => EndReason::Stopped,
             "handed_back" => EndReason::HandedBack,
             "task_closed" => EndReason::TaskClosed,
+            "relinked" => EndReason::Relinked,
             _ => return None,
         })
     }
@@ -65,6 +70,7 @@ impl EndReason {
             EndReason::Stopped => "stopped",
             EndReason::HandedBack => "handed its work back",
             EndReason::TaskClosed => "closed with its task",
+            EndReason::Relinked => "was recorded on another task",
         }
     }
 }
@@ -177,6 +183,48 @@ pub fn leading_key(description: &str) -> Option<&str> {
         && prefix.chars().all(|c| c.is_ascii_alphanumeric());
     let number_ok = !number.is_empty() && number.chars().all(|c| c.is_ascii_digit());
     (prefix_ok && number_ok).then_some(key)
+}
+
+/// End one open subagent, with its `worker` note on its own task.
+fn end_one(tx: &Connection, worker: &TaskWorker, reason: EndReason, actor: Actor) -> Result<()> {
+    tx.execute(
+        "UPDATE task_workers SET ended_at = ?2, end_reason = ?3 WHERE id = ?1",
+        params![uuid_blob(worker.id), now_millis(), reason.as_str()],
+    )
+    .map_err(map_err)?;
+    let body = format!("{} {}.", who(&worker.harness), reason.said());
+    let extra = json!({
+        "event": "ended",
+        "harness": worker.harness,
+        "agent_id": worker.agent_id,
+        "end_reason": reason.as_str(),
+    });
+    insert_note(tx, worker.task_id, NoteKind::Worker, actor, &body, &extra, None)?;
+    Ok(())
+}
+
+/// The orchestrator's record wins over the runner's guess: a subagent the
+/// runner linked from its description to another task, and still open
+/// there, is closed there (`Relinked`) when the orchestrator records it on
+/// `task`.
+fn unlink_elsewhere(tx: &Connection, task: Uuid, record: &WorkerRecord, actor: Actor) -> Result<()> {
+    let guessed: Vec<TaskWorker> = {
+        let mut stmt = tx
+            .prepare(&format!(
+                "SELECT {WORKER_COLUMNS} FROM task_workers
+                  WHERE harness = ?1 AND agent_id = ?2 AND task_id != ?3
+                    AND ended_at IS NULL AND linked_by = 'description'"
+            ))
+            .map_err(map_err)?;
+        let rows = stmt
+            .query_map(params![record.harness, record.agent_id, uuid_blob(task)], row_to_worker)
+            .map_err(map_err)?;
+        rows.collect::<rusqlite::Result<_>>().map_err(map_err)?
+    };
+    for worker in &guessed {
+        end_one(tx, worker, EndReason::Relinked, actor)?;
+    }
+    Ok(())
 }
 
 /// Close every open subagent on `task` for `reason`, inside a caller's
@@ -294,7 +342,8 @@ impl Store {
                             SET session_id = coalesce(?2, session_id), session_cwd = coalesce(?3, session_cwd),
                                 orchestrator_terminal = coalesce(?4, orchestrator_terminal),
                                 label = coalesce(?5, label), model = coalesce(?6, model),
-                                ended_at = NULL, end_reason = NULL
+                                ended_at = NULL, end_reason = NULL,
+                                linked_by = CASE WHEN ?7 = 'orchestrator' THEN ?7 ELSE linked_by END
                           WHERE id = ?1",
                         params![
                             uuid_blob(w.id),
@@ -303,6 +352,7 @@ impl Store {
                             terminal,
                             record.label,
                             record.model,
+                            record.linked_by.as_str(),
                         ],
                     )
                     .map_err(map_err)?;
@@ -323,6 +373,9 @@ impl Store {
                 });
                 insert_note(&tx, task, NoteKind::Worker, actor, &body, &extra, None)?;
             }
+            if record.linked_by == LinkedBy::Orchestrator {
+                unlink_elsewhere(&tx, task, record, actor)?;
+            }
             if matches!(status, TaskStatus::Backlog | TaskStatus::Todo) {
                 move_in(&tx, task, status, TaskStatus::InProgress, actor, now)?;
             }
@@ -332,25 +385,39 @@ impl Store {
     }
 
     /// Record that a subagent stopped working `task`, and how, with a
-    /// `worker` note. One already ended is left as it is, and writes
-    /// nothing; one never recorded on the task is `NotFound`.
-    pub fn end_worker(&self, task: Uuid, harness: &str, agent: &str, reason: EndReason, actor: Actor) -> Result<Task> {
+    /// `worker` note. `agent` names one, by harness and id: one already
+    /// ended is left as it is, and one never recorded on the task is
+    /// `NotFound`. `None` ends every subagent open on the task, whatever its
+    /// harness, and is `NotFound` when none is.
+    pub fn end_worker(
+        &self,
+        task: Uuid,
+        harness: &str,
+        agent: Option<&str>,
+        reason: EndReason,
+        actor: Actor,
+    ) -> Result<Task> {
         {
             let mut conn = self.conn();
             let tx = conn.transaction().map_err(map_err)?;
             task_status(&tx, task)?;
-            let worker = find(&tx, task, harness, agent)?.ok_or(DomainError::NotFound)?;
-            if worker.ended_at.is_none() {
-                tx.execute(
-                    "UPDATE task_workers SET ended_at = ?2, end_reason = ?3 WHERE id = ?1",
-                    params![uuid_blob(worker.id), now_millis(), reason.as_str()],
-                )
-                .map_err(map_err)?;
-                let body = format!("{} {}.", who(harness), reason.said());
-                let extra = json!({ "event": "ended", "harness": harness, "agent_id": agent, "end_reason": reason.as_str() });
-                insert_note(&tx, task, NoteKind::Worker, actor, &body, &extra, None)?;
-                tx.commit().map_err(map_err)?;
+            let ending: Vec<TaskWorker> = match agent {
+                Some(agent) => {
+                    let worker = find(&tx, task, harness, agent)?.ok_or(DomainError::NotFound)?;
+                    worker.ended_at.is_none().then_some(worker).into_iter().collect()
+                }
+                None => {
+                    let open = shown_for(&tx, task)?.into_iter().filter(|w| w.ended_at.is_none()).collect::<Vec<_>>();
+                    if open.is_empty() {
+                        return Err(DomainError::NotFound);
+                    }
+                    open
+                }
+            };
+            for worker in &ending {
+                end_one(&tx, worker, reason, actor)?;
             }
+            tx.commit().map_err(map_err)?;
         }
         self.get_task(task)
     }

@@ -22,7 +22,7 @@ use farcooler_store::models::Workspace;
 use uuid::Uuid;
 
 use crate::service::Service;
-use crate::task_ops::{actor_from_wire, pb_task, required_id};
+use crate::task_ops::{actor_from_wire, required_id};
 use crate::watch::Watcher;
 use crate::wire;
 
@@ -167,7 +167,7 @@ pub fn move_tasks(svc: &Service, watcher: &Watcher, req: &pb::TaskMove) -> Resul
     if any {
         watcher.announce_needs_you();
     }
-    Ok(pb::TaskList { items: moved.iter().map(pb_task).collect() })
+    Ok(pb::TaskList { items: crate::task_starts::pb_tasks(svc, &moved)? })
 }
 
 /// `worktree.assign`: give a worktree to a workspace, whoever owned it.

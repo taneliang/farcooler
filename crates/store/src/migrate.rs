@@ -44,13 +44,16 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     // A column with a default and a table old code never touches, whose rows
     // go with their task by cascade. An older build enqueues no wakes; an
     // answer given while it runs wakes nobody, which is what it did anyway.
-    (migration_0019_wake_on_answer, Older::Welcome),
+    // Refused after all (ov-212 review): the answers it queues are noted by
+    // the runner (`actor = 'runner'`), which a build before it can't parse,
+    // failing every read of that card's notes.
+    (migration_0019_wake_on_answer, Older::Refused),
     // Two new tables (ov-194) that only usage.rs touches, with no key into
     // any table old code writes and no trigger. An older build records no
     // turns; the ones already there wait for a newer build.
     (crate::usage::migration_0020_agent_turns, Older::Welcome),
-    // Refused: the schema is additive, but the `wait` and `worker` notes and
-    // `hold_ended` wakes written into it break an older build. See its doc.
+    // Refused: the schema is additive, but the `wait` and `worker` notes
+    // written into it fail an older build's reads. See its doc.
     (crate::waits::migration_0021_waits_and_workers, Older::Refused),
 ];
 

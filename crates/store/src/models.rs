@@ -473,6 +473,10 @@ pub enum NoteKind {
     /// A subagent started, ended or resumed on a task (ov-213). Written only
     /// by the store's own writes.
     Worker,
+    /// A kind a newer build wrote that this one doesn't know. Read, never
+    /// written: a reader shows it generically or skips it, so one note from
+    /// a newer build can't fail a whole card, search, list or report.
+    Unknown,
 }
 
 impl NoteKind {
@@ -488,6 +492,7 @@ impl NoteKind {
             NoteKind::Created => "created",
             NoteKind::Wait => "wait",
             NoteKind::Worker => "worker",
+            NoteKind::Unknown => "unknown",
         }
     }
 
@@ -527,6 +532,9 @@ pub enum Actor {
     /// about the decision". Never taken from a caller (`task_ops`
     /// refuses it on the wire): nobody but the daemon speaks as it.
     Runner,
+    /// A word a newer build wrote that this one can't read. Read, never
+    /// written: `Actor::parse` never answers it.
+    Unknown,
 }
 
 impl std::fmt::Display for Actor {
@@ -536,6 +544,7 @@ impl std::fmt::Display for Actor {
             Actor::Manager => f.write_str("manager"),
             Actor::Agent { terminal } => write!(f, "agent:{terminal}"),
             Actor::Runner => f.write_str("runner"),
+            Actor::Unknown => f.write_str("unknown"),
         }
     }
 }
@@ -710,14 +719,19 @@ fn get_status(row: &Row, idx: usize) -> rusqlite::Result<TaskStatus> {
     TaskStatus::parse(&raw).ok_or_else(|| decode_failure(idx, format!("unknown status {raw:?}")))
 }
 
+/// A note's kind, or `Unknown` for one a newer build wrote. Not a decode
+/// failure, unlike a status: a failure here failed every read that met the
+/// note, which is a whole card, a whole search, the Needs You list and the
+/// report, for one entry nobody needs to understand to read the rest.
 fn get_note_kind(row: &Row, idx: usize) -> rusqlite::Result<NoteKind> {
     let raw: String = row.get(idx)?;
-    NoteKind::parse(&raw).ok_or_else(|| decode_failure(idx, format!("unknown note kind {raw:?}")))
+    Ok(NoteKind::parse(&raw).unwrap_or(NoteKind::Unknown))
 }
 
+/// Who wrote a note, or `Unknown`, for `get_note_kind`'s reason.
 fn get_actor(row: &Row, idx: usize) -> rusqlite::Result<Actor> {
     let raw: String = row.get(idx)?;
-    Actor::parse(&raw).ok_or_else(|| decode_failure(idx, format!("unreadable actor {raw:?}")))
+    Ok(Actor::parse(&raw).unwrap_or(Actor::Unknown))
 }
 
 pub(crate) fn get_optional_uuid(row: &Row, idx: usize) -> rusqlite::Result<Option<Uuid>> {

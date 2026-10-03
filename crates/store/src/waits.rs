@@ -200,16 +200,20 @@ const CLEARED: &str =
 /// `task_workers` is history: a row per (task, harness, agent), open while
 /// `ended_at` is NULL, never deleted while its task lives. See `workers`.
 ///
-/// `answer_wakes.kind` lets the wake queue carry more than answers: a held
-/// task whose time came (`hold_ended`) queues a wake for its orchestrator in
-/// the same transaction that clears the hold. The answer pump reads only
-/// `answer` rows; telling a hold is ov-212's lane B.
+/// `hold_wakes` is the queue of held tasks whose time came, each to be told
+/// to its orchestrator (ov-212's lane B), written in the transaction that
+/// clears the hold. A table of its own, not rows in `answer_wakes`: every
+/// answer pump since ov-90 types each undone row there as an answer, and
+/// none of them reads a column saying otherwise.
 ///
 /// `Older::Refused`, though nothing here is a constraint an old write could
-/// trip: what this build WRITES isn't readable by an older one. A `wait` or
-/// `worker` note fails an older build's note decoder (`NoteKind::parse`),
-/// which fails its whole `task.get` and `task.search`; and an older answer
-/// pump would type a `hold_ended` row to an agent as if it were an answer.
+/// trip: what this build writes isn't readable by an older one. A `wait` or
+/// `worker` note is a kind an older build's decoder fails on, failing its
+/// whole `task.get`, `task.search`, Needs You list and report. The marker
+/// only stops builds that read it (ov-143 and later) at schema 20; a build
+/// from before ov-143 opens any newer file regardless. This build's own
+/// decoder reads an unknown kind as `NoteKind::Unknown`, so the next new kind
+/// can be `Welcome`.
 pub(crate) fn migration_0021_waits_and_workers(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
         r#"
@@ -241,7 +245,14 @@ pub(crate) fn migration_0021_waits_and_workers(tx: &Transaction) -> rusqlite::Re
         CREATE INDEX task_workers_open ON task_workers (task_id) WHERE ended_at IS NULL;
         CREATE INDEX task_workers_by_session ON task_workers (session_id) WHERE session_id IS NOT NULL;
 
-        ALTER TABLE answer_wakes ADD COLUMN kind TEXT NOT NULL DEFAULT 'answer';
+        CREATE TABLE hold_wakes (
+            note_id BLOB PRIMARY KEY NOT NULL,
+            task_id BLOB NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            enqueued_at INTEGER NOT NULL,
+            claimed_at INTEGER,
+            done_at INTEGER
+        );
+        CREATE INDEX hold_wakes_pending ON hold_wakes (enqueued_at) WHERE done_at IS NULL;
         "#,
     )
 }
@@ -362,6 +373,18 @@ pub(crate) fn sweep_unfitting(conn: &Connection) -> Result<()> {
         params![now_millis()],
     )
     .map_err(map_err)?;
+    Ok(())
+}
+
+/// Inside a caller's transaction: take `task` out of its line, if it's in
+/// one, with the `wait` note every other clear writes. For a task leaving
+/// its board, since a line is one board's.
+pub(crate) fn leave_line(tx: &Connection, task: Uuid, actor: Actor) -> Result<()> {
+    let (_, _, wait, _) = stored_wait(tx, task)?;
+    if let Some(line @ Wait::InLine(_)) = wait {
+        write_wait(tx, task, None, None, 0)?;
+        note_change(tx, task, Some(line), None, actor)?;
+    }
     Ok(())
 }
 
@@ -528,8 +551,8 @@ impl Store {
     }
 
     /// Let go of every task held until a time at or before `now`, each with a
-    /// `wait` note from the runner saying the time came, and a `hold_ended`
-    /// wake queued for its orchestrator on that note, in one transaction.
+    /// `wait` note from the runner saying the time came, and a wake queued
+    /// for its orchestrator on that note in `hold_wakes`, in one transaction.
     /// Answers with each task and its note.
     pub fn release_due_holds(&self, now: i64) -> Result<Vec<(Task, TaskNote)>> {
         let released = {
@@ -554,8 +577,7 @@ impl Store {
                 let extra = json!({ "wait": "none", "was": "until", "until": until });
                 let note = insert_note(&tx, id, NoteKind::Wait, Actor::Runner, &body, &extra, None)?;
                 tx.execute(
-                    "INSERT OR IGNORE INTO answer_wakes (note_id, task_id, enqueued_at, kind)
-                     VALUES (?1, ?2, ?3, 'hold_ended')",
+                    "INSERT OR IGNORE INTO hold_wakes (note_id, task_id, enqueued_at) VALUES (?1, ?2, ?3)",
                     params![uuid_blob(note.id), uuid_blob(id), now],
                 )
                 .map_err(map_err)?;

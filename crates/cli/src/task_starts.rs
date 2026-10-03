@@ -89,9 +89,10 @@ pub enum StartCmd {
         #[arg(allow_negative_numbers = true)]
         key: String,
         /// The subagent's id from its launch result (Claude's `agentId`), or
-        /// codex's agent path.
-        #[arg(long)]
-        subagent: String,
+        /// codex's agent path. With `--done` and no id, every subagent open
+        /// on the task ends.
+        #[arg(long, required_unless_present = "done")]
+        subagent: Option<String>,
         /// claude or codex.
         #[arg(long, default_value = "claude")]
         harness: String,
@@ -229,7 +230,8 @@ fn worker_request(
     if !["claude", "codex"].contains(&harness.as_str()) {
         return Err(format!("{:?} isn't a harness this records. use claude or codex", cmd.harness));
     }
-    if cmd.subagent.trim().is_empty() {
+    let agent = cmd.subagent.as_deref().map(str::trim).unwrap_or_default();
+    if agent.is_empty() && !cmd.done {
         return Err("name the subagent with --subagent, the id from its launch result".into());
     }
     let session = if harness == "claude" { env.claude_session.clone() } else { None };
@@ -243,13 +245,13 @@ fn worker_request(
             "recorded, unobserved: {reason}. when it's finished, run `farcooler task worker {} --subagent {} \
              --harness {harness} --done`",
             task.key,
-            cmd.subagent.trim()
+            agent
         )
     });
     let request = pb::TaskWorkerSet {
         task_id: task.id.clone(),
         harness,
-        agent_id: cmd.subagent.trim().to_string(),
+        agent_id: agent.to_string(),
         session_id: session,
         session_cwd: env.cwd.clone(),
         tmux_pane: env.tmux_pane.clone(),
@@ -269,7 +271,8 @@ fn worker_request(
 
 /// `task worker`'s flags, apart from the board's.
 pub(super) struct WorkerArgs {
-    pub subagent: String,
+    /// `None` with `done`: every open one.
+    pub subagent: Option<String>,
     pub harness: String,
     pub label: Option<String>,
     pub model: Option<String>,
@@ -349,7 +352,11 @@ pub(super) async fn run<L: DispatchLink>(link: &mut L, cmd: StartCmd, json: bool
                 .await
                 .map_err(|e| match e {
                     ClientError::Daemon { code, .. } if done && farcooler_core::error::word_for(code) == "not-found" => {
-                        format!("no subagent {} is recorded on {}", args.subagent.trim(), task.key).into()
+                        match args.subagent.as_deref().map(str::trim) {
+                            Some(id) => format!("no subagent {id} is recorded on {}", task.key),
+                            None => format!("no subagent is open on {}", task.key),
+                        }
+                        .into()
                     }
                     e => refused_here(e, "that subagent couldn't be recorded"),
                 })?;
@@ -503,7 +510,8 @@ pub(super) fn workers_section(task: &pb::Task, now: i64) -> String {
 }
 
 /// A blocker's key for `task show`, and whether it's finished, from the
-/// keys the board read named and the task's `waiting_on`. `waits_known` is
+/// keys the board read named and the task's `waiting_on`. A blocker the read
+/// didn't name is said to be not found, never finished. `waits_known` is
 /// whether the runner sends `waiting_on` at all; from one that doesn't,
 /// every block reads as unfinished, as it always did.
 pub(super) fn block_line(
@@ -512,9 +520,14 @@ pub(super) fn block_line(
     keys: &HashMap<Uuid, String>,
     waits_known: bool,
 ) -> String {
-    let key = keys.get(&uuid_of(&block.blocked_by)).cloned().unwrap_or_else(|| crate::short_bytes(&block.blocked_by));
-    let finished = waits_known && !task.waiting_on.contains(&key);
     let reason = super::said(&block.reason);
+    let Some(key) = keys.get(&uuid_of(&block.blocked_by)) else {
+        // Not on the board read (a block across repositories): whether it
+        // finished can't be told, so it isn't said.
+        let short = crate::short_bytes(&block.blocked_by);
+        return format!("  waits on {short}, a task not found on this board{reason}\n");
+    };
+    let finished = waits_known && !task.waiting_on.contains(key);
     if finished { format!("  waited on {key}, now finished{reason}\n") } else { format!("  waits on {key}{reason}\n") }
 }
 
