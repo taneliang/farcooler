@@ -33,7 +33,10 @@
 //!    `composer::read` positively recognizes the agent's box and finds it
 //!    empty. A menu, a picker, a prompt, an unfamiliar screen or a draft:
 //!    not typed into.
-//! 5. The agent has bracketed paste on.
+//! 5. The agent has bracketed paste on, as tmux reports it. tmux older than
+//!    3.7 (Ubuntu 24.04 has 3.4) can't report it at all, so on such a runner
+//!    nothing is typed, and the task says so at once: "Not delivered: this
+//!    runner's tmux can't tell whether the agent takes a paste…".
 //!
 //! **Typing.** The row is claimed first, in its own write. The text goes in
 //! as one bracketed paste. The box is then read back until it holds exactly
@@ -92,6 +95,8 @@ const PASTE_LEFT: &str = "Paste left in the composer; not sent";
 const LEFT_AT_A_SHELL: &str = "Answer left at a shell prompt; not run";
 const SUPERSEDED: &str = "Not delivered: a newer answer replaced it.";
 const NOBODY: &str = "Nobody to tell about the decision";
+const OLD_TMUX: &str =
+    "Not delivered: this runner's tmux can't tell whether the agent takes a paste. tmux 3.7 or later can.";
 
 /// What the agent is told.
 pub(crate) fn message(key: &str, title: &str, answer: &str) -> String {
@@ -300,8 +305,12 @@ impl Watcher {
             Ok(Composer::Unrecognized) => return Pass::Waiting(Held::Unfamiliar),
             Err(held) => return Pass::Waiting(held),
         }
-        if !self.service.pane_bracketed_paste(to.id).await.unwrap_or(false) {
-            return Pass::Waiting(Held::Unfamiliar);
+        match self.service.pane_bracketed_paste(to.id).await {
+            Ok(Some(true)) => {}
+            // tmux can't say, and never will for this pane: say so now rather
+            // than after half an hour of waiting.
+            Ok(None) => return self.settle(wake, Some(task), Some(OLD_TMUX.into())),
+            Ok(Some(false)) | Err(_) => return Pass::Waiting(Held::Unfamiliar),
         }
         match self.service.store.claim_answer_wake(wake.note) {
             Ok(true) => {}

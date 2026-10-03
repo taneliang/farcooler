@@ -17,6 +17,46 @@ use crate::test_support::ScratchDir;
 
 const STAND_IN: &str = include_str!("stand_in.pl");
 
+/// Whether this host's tmux reports bracketed paste (`bracket_paste_flag`,
+/// new in 3.7), read from `tmux -V` rather than from the flag, so a broken
+/// flag read can't switch the tests that need it off. A version it can't
+/// read counts as new enough: those tests run, and fail if it isn't.
+///
+/// Only one of each pair below can run on a given host. Ubuntu's 3.4 runs
+/// the old-tmux test and macOS's current tmux runs the rest, so CI's two
+/// legs between them drive both paths through a real tmux.
+fn tmux_tells_bracketing() -> bool {
+    static KNOWS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *KNOWS.get_or_init(|| {
+        let tmux = farcooler_core::programs::find("tmux").expect("these tests need tmux");
+        let out = std::process::Command::new(tmux).arg("-V").output().expect("tmux -V");
+        let knows = tmux_version_tells_bracketing(&String::from_utf8_lossy(&out.stdout));
+        if !knows {
+            eprintln!("tmux older than 3.7: skipping the tests that need bracket_paste_flag");
+        }
+        knows
+    })
+}
+
+/// `tmux 3.4`, `tmux 3.7c`, `tmux next-3.8`: whether that's 3.7 or later.
+fn tmux_version_tells_bracketing(v: &str) -> bool {
+    let v = v.trim().trim_start_matches("tmux").trim().trim_start_matches("next-");
+    let mut parts = v.split('.');
+    let major = parts.next().and_then(|m| m.parse::<u32>().ok());
+    let minor = parts.next().map(|m| m.trim_end_matches(|c: char| !c.is_ascii_digit())).and_then(|m| m.parse::<u32>().ok());
+    match (major, minor) {
+        (Some(major), Some(minor)) => (major, minor) >= (3, 7),
+        _ => true,
+    }
+}
+
+#[test]
+fn a_tmux_version_is_read_for_bracketing() {
+    for (v, knows) in [("tmux 3.4\n", false), ("tmux 3.3a", false), ("tmux 3.6b", false), ("tmux 3.7", true), ("tmux 3.7c\n", true), ("tmux next-3.8", true), ("tmux 4.0", true), ("tmux master", true), ("", true)] {
+        assert_eq!(tmux_version_tells_bracketing(v), knows, "{v:?}");
+    }
+}
+
 struct Board {
     dir: ScratchDir,
     svc: Arc<Service>,
@@ -266,6 +306,9 @@ fn the_process_in_front_is_the_one_under_the_shell() {
 /// submitted, once, and the task says so.
 #[tokio::test]
 async fn an_answer_is_pasted_into_an_idle_claude_and_submitted() {
+    if !tmux_tells_bracketing() {
+        return;
+    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
@@ -281,6 +324,9 @@ async fn an_answer_is_pasted_into_an_idle_claude_and_submitted() {
 /// codex too: its placeholder is dim, so its box reads empty.
 #[tokio::test]
 async fn an_answer_is_pasted_into_an_idle_codex() {
+    if !tmux_tells_bracketing() {
+        return;
+    }
     let b = board().await;
     let agent = b.agent("Agent 2", "codex").await;
     let si = b.stand_in(&agent, "codex", "codex").await;
@@ -294,6 +340,9 @@ async fn an_answer_is_pasted_into_an_idle_codex() {
 /// reads idle.
 #[tokio::test]
 async fn an_answer_waits_for_a_working_agent_to_go_idle() {
+    if !tmux_tells_bracketing() {
+        return;
+    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
@@ -310,6 +359,9 @@ async fn an_answer_waits_for_a_working_agent_to_go_idle() {
 /// last fifteen while the pane is on someone's screen.
 #[tokio::test]
 async fn nothing_is_typed_while_someone_is_typing() {
+    if !tmux_tells_bracketing() {
+        return;
+    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
@@ -417,6 +469,9 @@ async fn a_draft_is_never_touched() {
 /// left there rather than erased.
 #[tokio::test]
 async fn a_paste_the_box_doesnt_hold_exactly_is_not_sent() {
+    if !tmux_tells_bracketing() {
+        return;
+    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
@@ -457,6 +512,9 @@ async fn a_claim_left_by_a_crash_is_never_typed_again() {
 /// Queued before a restart, told once after it, and never again.
 #[tokio::test]
 async fn an_answer_is_told_exactly_once_across_a_restart() {
+    if !tmux_tells_bracketing() {
+        return;
+    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
@@ -484,6 +542,9 @@ async fn an_answer_is_told_exactly_once_across_a_restart() {
 /// told, and the older is noted as replaced.
 #[tokio::test]
 async fn a_newer_answer_replaces_one_not_yet_told() {
+    if !tmux_tells_bracketing() {
+        return;
+    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
@@ -502,6 +563,9 @@ async fn a_newer_answer_replaces_one_not_yet_told() {
 /// on catching the agent's turn.
 #[tokio::test]
 async fn two_answers_for_one_terminal_go_one_at_a_time() {
+    if !tmux_tells_bracketing() {
+        return;
+    }
     let b = board().await;
     let other = b.svc.store.create_task(b.task.workspace_id, "Tabs or spaces", Actor::Manager).unwrap();
     let orchestrator = b.orchestrator().await;
@@ -542,6 +606,9 @@ fn a_node_install_is_known_by_its_script() {
 /// claude under node, as npm installs it: told.
 #[tokio::test]
 async fn a_node_claude_is_told() {
+    if !tmux_tells_bracketing() {
+        return;
+    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.node_stand_in(&agent, "claude").await;
@@ -564,9 +631,31 @@ async fn a_node_running_something_else_is_never_typed_into() {
     assert_eq!(b.give_up().await, ["Not delivered: no agent was running in the pane."]);
 }
 
+/// A tmux too old to report bracketed paste can't prove the agent takes a
+/// paste: nothing is typed into an idle claude with an empty box, and the
+/// task says why at once rather than after half an hour.
+#[tokio::test]
+async fn a_tmux_too_old_to_tell_is_never_typed_through() {
+    if tmux_tells_bracketing() {
+        return;
+    }
+    let b = board().await;
+    let agent = b.agent("Agent 2", "claude").await;
+    let si = b.stand_in(&agent, "claude", "claude").await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    b.answer("Drill in");
+    b.pump().await;
+    assert!(!si.log().contains("PASTE") && !si.log().contains("ENTER"), "{}", si.log());
+    assert_eq!(b.progress(), [OLD_TMUX]);
+    assert!(b.pending().is_empty(), "and never tried again");
+}
+
 /// Bracketed paste off: nothing.
 #[tokio::test]
 async fn a_pane_without_bracketed_paste_is_never_typed_into() {
+    if !tmux_tells_bracketing() {
+        return;
+    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
@@ -580,6 +669,9 @@ async fn a_pane_without_bracketed_paste_is_never_typed_into() {
 /// Someone types while the paste is being read back: no Enter.
 #[tokio::test]
 async fn typing_during_the_read_back_stops_the_enter() {
+    if !tmux_tells_bracketing() {
+        return;
+    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
@@ -606,6 +698,9 @@ async fn typing_during_the_read_back_stops_the_enter() {
 /// A paste that fails to send after the claim: never retried, and noted.
 #[tokio::test]
 async fn a_send_failing_after_the_claim_is_not_retried() {
+    if !tmux_tells_bracketing() {
+        return;
+    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
@@ -626,6 +721,9 @@ async fn a_send_failing_after_the_claim_is_not_retried() {
 /// No agent on the task: the orchestrator is told.
 #[tokio::test]
 async fn with_no_agent_the_orchestrator_is_told() {
+    if !tmux_tells_bracketing() {
+        return;
+    }
     let b = board().await;
     let orchestrator = b.orchestrator().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
@@ -680,6 +778,9 @@ async fn with_the_switch_off_nobody_is_told() {
 /// An answer carrying escape sequences reaches the agent as text.
 #[tokio::test]
 async fn control_characters_in_an_answer_arrive_as_text() {
+    if !tmux_tells_bracketing() {
+        return;
+    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
@@ -695,6 +796,9 @@ async fn control_characters_in_an_answer_arrive_as_text() {
 /// own paste and Enter don't.
 #[tokio::test]
 async fn typing_marks_the_pane_and_telling_does_not() {
+    if !tmux_tells_bracketing() {
+        return;
+    }
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;

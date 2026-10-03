@@ -4983,8 +4983,9 @@ impl Service {
     }
 
 
-    /// Whether the pane's program has asked for bracketed paste.
-    pub async fn pane_bracketed_paste(&self, id: Uuid) -> Result<bool> {
+    /// Whether the pane's program has asked for bracketed paste, or `None`
+    /// when this runner's tmux can't say (older than 3.7).
+    pub async fn pane_bracketed_paste(&self, id: Uuid) -> Result<Option<bool>> {
         self.runtime().pane_bracketed_paste(id).await
     }
 
@@ -4997,8 +4998,13 @@ impl Service {
     ///
     /// A trailing space so the next word does not glue to `.png`, and never a
     /// newline: nothing is submitted on anyone's behalf.
+    ///
+    /// Unbracketed when tmux can't say. That costs nothing here: the payload
+    /// is one line with no newline, so there is nothing for a shell to run,
+    /// while bracketing a program that never asked puts a literal `ESC[200~`
+    /// into its input.
     pub async fn paste_path(&self, id: Uuid, path: &str) -> Result<()> {
-        let bracketed = self.pane_bracketed_paste(id).await?;
+        let bracketed = self.pane_bracketed_paste(id).await?.unwrap_or(false);
         let text = format!("{} ", crate::pastes::quote_for_paste(path));
         self.send_bytes(id, &crate::pastes::encode_paste(bracketed, &text)).await
     }

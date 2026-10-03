@@ -289,7 +289,11 @@ impl TmuxServer {
     /// replaying client applies the whole string; adding bracketing to it would
     /// change what they all do, to serve one caller that asks this once, at the
     /// moment it pastes.
-    pub async fn pane_bracketed_paste(&self, pane_id: &str) -> Result<bool> {
+    ///
+    /// `None` when this tmux can't say: `bracket_paste_flag` is new in tmux
+    /// 3.7, and an older tmux renders a format it doesn't know as nothing,
+    /// whether the program asked for bracketing or not (see `parse_flag`).
+    pub async fn pane_bracketed_paste(&self, pane_id: &str) -> Result<Option<bool>> {
         let out = self
             .run(&["display-message", "-p", "-t", pane_id, "#{bracket_paste_flag}"])
             .await?;
@@ -606,26 +610,25 @@ fn parse_modes(text: &str) -> Option<PaneModes> {
     })
 }
 
-/// A single tmux flag format, as a bool.
+/// A single tmux flag format: `Some(Some(on))`, or `Some(None)` when tmux
+/// doesn't know the flag.
 ///
-/// **Empty is false, and has to be.** tmux 3.4 renders an unset pane flag as
-/// an empty string rather than `0` — verified against a real 3.4 on a Linux
-/// host, where demanding `0` made every paste fail with "tmux is unavailable"
-/// on a runner whose tmux was working perfectly.
+/// **Empty is "this tmux can't say", not "off".** tmux renders every flag it
+/// knows as `0` or `1`, and a format it doesn't know as nothing.
+/// `bracket_paste_flag` arrived in tmux 3.7, so a 3.4 (Ubuntu 24.04's) renders
+/// it empty even in a pane whose program turned bracketing on, while
+/// rendering `alternate_on` and `wrap_flag` as `0` and `1`, measured on a real
+/// 3.4. Each caller decides what not knowing means: `paste_path` pastes
+/// unbracketed, and `answer_wake` doesn't type at all.
 ///
-/// Erring towards false is also the safe direction, which is why this is not
-/// merely a compatibility patch. Pasting unbracketed into a program that wanted
-/// bracketing costs nothing here: the payload is one line with no newline, so
-/// there is nothing for a shell to run. Bracketing a program that never asked
-/// puts a literal `ESC[200~` into its input, where it is visible garbage.
-///
-/// Anything that is neither a flag nor empty is still refused, so a tmux
+/// Anything that is neither a flag nor empty is refused, so a tmux
 /// sanitizing its output to underscores in the C locale — the failure
 /// `parse_modes` exists to catch — is an error rather than a guess.
-fn parse_flag(text: &str) -> Option<bool> {
+fn parse_flag(text: &str) -> Option<Option<bool>> {
     match text.lines().next().unwrap_or("").trim() {
-        "1" => Some(true),
-        "0" | "" => Some(false),
+        "1" => Some(Some(true)),
+        "0" => Some(Some(false)),
+        "" => Some(None),
         _ => None,
     }
 }
@@ -692,13 +695,14 @@ mod tests {
 
     #[test]
     fn a_bracketed_paste_flag_is_parsed_including_the_empty_form() {
-        assert_eq!(parse_flag("1\n"), Some(true));
-        assert_eq!(parse_flag("0\n"), Some(false));
-        // tmux 3.4 renders an unset pane flag as nothing at all. Refusing this
-        // made every paste on such a host fail as "tmux is unavailable", which
-        // was a true statement about nothing that was actually wrong.
-        assert_eq!(parse_flag(""), Some(false));
-        assert_eq!(parse_flag("\n"), Some(false));
+        assert_eq!(parse_flag("1\n"), Some(Some(true)));
+        assert_eq!(parse_flag("0\n"), Some(Some(false)));
+        // A tmux older than 3.7 has no `bracket_paste_flag` and renders it as
+        // nothing, even with bracketing on: unknown, not off, and not an error
+        // either, which made every paste on such a host fail as "tmux is
+        // unavailable".
+        assert_eq!(parse_flag(""), Some(None));
+        assert_eq!(parse_flag("\n"), Some(None));
         // Garbage is still refused: a C-locale tmux sanitizes its output to
         // underscores, and that is a broken reply rather than a false one.
         assert_eq!(parse_flag("_\n"), None);
