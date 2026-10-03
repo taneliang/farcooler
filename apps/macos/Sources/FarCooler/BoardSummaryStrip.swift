@@ -87,7 +87,7 @@ struct BoardSummaryStrip: View {
                             .frame(minHeight: Self.lineHeight)
                             .gridMark("summary.empty", .text)
                             .padding(.leading, ColumnGrid.step)
-                            .accessibilityIdentifier("board-summary-empty")
+                            .identified("board-summary-empty")
                             .transition(.opacity)
                     } else {
                         let first = Self.firstGroup(summary)
@@ -274,7 +274,7 @@ struct BoardSummaryStrip: View {
                     .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityAction(.default) { open(item.id, task: item.taskID) }
-                    .accessibilityIdentifier("board-summary-item-\(item.id)")
+                    .identified("board-summary-item-\(item.id)")
                 }
                 more(capped.more)
             }
@@ -308,7 +308,7 @@ struct BoardSummaryStrip: View {
                     .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityAction(.default) { open(entry.id, task: entry.taskID) }
-                    .accessibilityIdentifier("board-summary-activity-\(entry.key)")
+                    .identified("board-summary-activity-\(entry.key)")
                 }
                 more(capped.more)
             }
@@ -393,6 +393,6 @@ struct MarkAllReadButton: View {
         .buttonStyle(.plain)
         .help("Mark All as Read (⇧⌘K)")
         .accessibilityLabel("Mark All as Read")
-        .accessibilityIdentifier("board-mark-all-read")
+        .identified("board-mark-all-read")
     }
 }

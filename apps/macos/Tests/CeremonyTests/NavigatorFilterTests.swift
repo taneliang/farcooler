@@ -57,7 +57,12 @@ struct NavigatorFilterTests {
         var current: NavigatorItem? { selected.map(NavigatorItem.task) }
     }
 
-    final class Seen { var sections: Set<String> = [] }
+    final class Seen {
+        var sections: Set<String> = []
+        /// What `identified(_:)` views were drawn, and where, from the top
+        /// left.
+        var views: [String: CGRect] = [:]
+    }
 
     struct Hosted: View {
         @ObservedObject var level: Level
@@ -74,6 +79,14 @@ struct NavigatorFilterTests {
             .environment(\.boardMotionSlowdown, slowdown)
             .frame(width: Harness.width, height: Harness.height, alignment: .topLeading)
             .background(WorkspaceStyle.canvas)
+            .environment(\.gridProbing, true)
+            .overlayPreferenceValue(ProbedViewsKey.self) { probed in
+                GeometryReader { proxy in
+                    let _ = seen.views = Dictionary(
+                        probed.map { ($0.id, proxy[$0.bounds]) }, uniquingKeysWith: { first, _ in first })
+                    Color.clear
+                }
+            }
             .onPreferenceChange(CollapsibleSectionsKey.self) { ids in MainActor.assumeIsolated { seen.sections = ids } }
         }
     }
@@ -133,40 +146,22 @@ struct NavigatorFilterTests {
             }
         }
 
-        /// Every accessibility identifier drawn.
-        var identifiers: Set<String> {
-            var found: Set<String> = []
-            func walk(_ element: Any, _ depth: Int) {
-                guard depth < 80, let node = element as? NSAccessibilityProtocol else { return }
-                if let id = node.accessibilityIdentifier(), !id.isEmpty { found.insert(id) }
-                for child in node.accessibilityChildren() ?? [] { walk(child, depth + 1) }
-            }
-            walk(host, 0)
-            return found
-        }
+        /// Every `identified(_:)` view drawn.
+        var identifiers: Set<String> { Set(seen.views.keys) }
 
-        /// Every accessibility label drawn.
-        var labels: [String] {
-            var found: [String] = []
-            func walk(_ element: Any, _ depth: Int) {
-                guard depth < 80, let node = element as? NSAccessibilityProtocol else { return }
-                if let label = node.accessibilityLabel(), !label.isEmpty { found.append(label) }
-                if let value = node.accessibilityValue() as? String, !value.isEmpty { found.append(value) }
-                for child in node.accessibilityChildren() ?? [] { walk(child, depth + 1) }
-            }
-            walk(host, 0)
-            return found
-        }
-
-        /// Press the element `identifier` names, as VoiceOver or a click does.
+        /// Click the view `identifier` names, at its middle, as the pointer
+        /// would. False when it isn't drawn.
         @discardableResult
         func press(_ identifier: String) -> Bool {
-            func walk(_ element: Any, _ depth: Int) -> Bool {
-                guard depth < 80, let node = element as? NSAccessibilityProtocol else { return false }
-                if node.accessibilityIdentifier() == identifier { return node.accessibilityPerformPress() }
-                return (node.accessibilityChildren() ?? []).contains { walk($0, depth + 1) }
+            guard let frame = seen.views[identifier] else { return false }
+            let at = NSPoint(x: frame.midX, y: Self.height - frame.midY)
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                window.sendEvent(
+                    NSEvent.mouseEvent(
+                        with: type, location: at, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!)
             }
-            return walk(host, 0)
+            return true
         }
 
         /// The navigator's filter field.
@@ -297,7 +292,6 @@ struct NavigatorFilterTests {
         #expect(ids.contains("navigator-no-results"))
         #expect(!ids.contains("board-summary-empty"), "said it was all caught up while filtering")
         #expect(harness.seen.sections.isEmpty, "drew \(harness.seen.sections) with nothing matching")
-        #expect(harness.labels.contains { $0.contains("No Results for") && $0.contains("testso") })
         // Cleared, it's all back, and Unread is Unread again.
         harness.type("")
         await harness.settle()

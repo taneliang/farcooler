@@ -76,7 +76,7 @@ struct NavigatorNoResults: View {
         ContentUnavailableView.search(text: filter.trimmingCharacters(in: .whitespaces))
             .frame(maxWidth: .infinity)
             .padding(.top, 2 * ColumnGrid.rhythm)
-            .accessibilityIdentifier("navigator-no-results")
+            .identified("navigator-no-results")
     }
 }
 

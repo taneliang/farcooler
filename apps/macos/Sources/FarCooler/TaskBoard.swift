@@ -1465,7 +1465,7 @@ struct TaskListRow: View {
                 }
             }
         }
-        .accessibilityIdentifier("board-row-\(row.key)")
+        .identified("board-row-\(row.key)")
     }
 }
 
