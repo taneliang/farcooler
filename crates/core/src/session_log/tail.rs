@@ -198,6 +198,11 @@ impl Tail {
         // regardless of how large it eventually turns out to be.
         let mut current = Vec::new();
         let mut current_over_cap = false;
+        // Every byte of the line being accumulated, including the ones an
+        // over-cap line has stopped storing. `current.len()` cannot stand in
+        // for it: once the line crosses the cap, `current` is emptied and
+        // stays empty, so it says nothing about how long the line was.
+        let mut current_len: u64 = 0;
         // Bytes belonging to lines already terminated by `\n` — safe to add
         // to the stored offset. Kept separate from bytes of the in-progress
         // line, which must NOT advance the offset until its own newline
@@ -234,20 +239,24 @@ impl Tail {
                             lines.push(text.to_string());
                         }
                     }
-                    consumed += current.len() as u64 + 1;
+                    consumed += current_len + 1;
                     current.clear();
+                    current_len = 0;
                     current_over_cap = false;
-                } else if !current_over_cap {
-                    current.push(byte);
-                    if current.len() > MAX_LINE_BYTES {
-                        current_over_cap = true;
-                        current.clear();
+                } else {
+                    current_len += 1;
+                    if !current_over_cap {
+                        current.push(byte);
+                        if current.len() > MAX_LINE_BYTES {
+                            current_over_cap = true;
+                            current.clear();
+                        }
                     }
                 }
-                // While over cap, bytes are neither stored nor counted here —
-                // `consumed` only grows when the terminating `\n` is found
-                // above, which is what keeps a skipped line's byte count
-                // correct without holding the line itself.
+                // While over cap, bytes are counted in `current_len` but not
+                // stored. `consumed` only grows when the terminating `\n` is
+                // found above, by the whole line's length, so the offset
+                // lands exactly after a skipped line without holding it.
             }
         }
 
@@ -335,6 +344,102 @@ mod tests {
         // The oversized line is skipped, not held, and does not corrupt the
         // lines around it.
         assert_eq!(tail.read_new_lines(), vec!["before", "after"]);
+        // Read again: the offset must sit after "after", not short of it by
+        // the skipped line's length, or this hands back a fragment of the
+        // long line and "after" a second time.
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
+
+        append(&path, b"later\n");
+        assert_eq!(tail.read_new_lines(), vec!["later"]);
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
+    }
+
+    /// A line of exactly `MAX_LINE_BYTES` is the largest one kept, and one
+    /// byte more is the smallest one skipped. Each is followed by repeated
+    /// reads, since a wrong offset only shows on the read after.
+    #[test]
+    fn lines_either_side_of_the_cap_are_each_read_once() {
+        let path = scratch("cap-boundary");
+        std::fs::write(&path, "").unwrap();
+        let mut tail = Tail::new(path.clone());
+
+        let at_cap = "a".repeat(MAX_LINE_BYTES);
+        append(&path, format!("{at_cap}\none\n").as_bytes());
+        assert_eq!(tail.read_new_lines(), vec![at_cap.as_str(), "one"]);
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
+
+        let over_cap = "b".repeat(MAX_LINE_BYTES + 1);
+        append(&path, format!("{over_cap}\ntwo\n").as_bytes());
+        assert_eq!(tail.read_new_lines(), vec!["two"]);
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
+
+        append(&path, b"three\n");
+        assert_eq!(tail.read_new_lines(), vec!["three"]);
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
+    }
+
+    /// An oversized line still being written: it is past the cap before its
+    /// newline arrives, so the read that finds the newline has to count
+    /// bytes it never stored, some of them seen by an earlier call.
+    #[test]
+    fn an_oversized_line_written_in_pieces_is_skipped_once() {
+        let path = scratch("oversized-partial");
+        std::fs::write(&path, "").unwrap();
+        let mut tail = Tail::new(path.clone());
+
+        let first_half = "x".repeat(MAX_LINE_BYTES + 10);
+        append(&path, format!("before\n{first_half}").as_bytes());
+        assert_eq!(tail.read_new_lines(), vec!["before"]);
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
+
+        append(&path, format!("{}\nafter\n", "y".repeat(CHUNK_BYTES * 3)).as_bytes());
+        assert_eq!(tail.read_new_lines(), vec!["after"]);
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
+    }
+
+    /// Truncated after an oversized line was skipped. The reset has to start
+    /// from the replacement's beginning and then hold its place there.
+    #[test]
+    fn a_file_truncated_after_an_oversized_line_is_read_once() {
+        let path = scratch("oversized-then-truncated");
+        std::fs::write(&path, "").unwrap();
+        let mut tail = Tail::new(path.clone());
+
+        let huge = "x".repeat(MAX_LINE_BYTES * 2);
+        append(&path, format!("{huge}\nold\n").as_bytes());
+        assert_eq!(tail.read_new_lines(), vec!["old"]);
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
+
+        // Replaced by something longer than the bytes a short offset would
+        // have counted, but shorter than what was really read.
+        let replacement = format!("{}\n", "n".repeat(200));
+        std::fs::write(&path, &replacement).unwrap();
+        assert_eq!(tail.read_new_lines(), vec![&replacement[..200]]);
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
+
+        append(&path, b"next\n");
+        assert_eq!(tail.read_new_lines(), vec!["next"]);
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
+    }
+
+    /// CRLF line endings: the `\r` is part of the line's bytes, which
+    /// serde_json reads as trailing whitespace, and it is counted toward the
+    /// offset like any other byte, oversized line included.
+    #[test]
+    fn crlf_lines_are_read_once_including_around_an_oversized_one() {
+        let path = scratch("crlf");
+        std::fs::write(&path, "").unwrap();
+        let mut tail = Tail::new(path.clone());
+
+        let huge = "x".repeat(MAX_LINE_BYTES + 1);
+        append(&path, format!("{{\"a\":1}}\r\n{huge}\r\n{{\"a\":2}}\r\n").as_bytes());
+        assert_eq!(tail.read_new_lines(), vec!["{\"a\":1}\r", "{\"a\":2}\r"]);
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
+
+        append(&path, b"{\"a\":3}\r\n");
+        assert_eq!(tail.read_new_lines(), vec!["{\"a\":3}\r"]);
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
     }
 
     /// A line of `width` bytes, repeated until the file is over `bytes`.
