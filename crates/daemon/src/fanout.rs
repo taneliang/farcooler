@@ -1041,6 +1041,10 @@ mod tests {
             let fd = libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY);
             assert!(fd >= 0, "posix_openpt: {}", std::io::Error::last_os_error());
             let master = OwnedFd::from_raw_fd(fd);
+            // Close-on-exec, or every child another test thread spawns (a
+            // tmux server, a `sleep`) holds this side open for its whole
+            // life, and the tty never hangs up when the test drops it.
+            assert_eq!(libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC), 0, "FD_CLOEXEC");
             assert_eq!(libc::grantpt(fd), 0, "grantpt");
             assert_eq!(libc::unlockpt(fd), 0, "unlockpt");
             let name = libc::ptsname(fd);
@@ -1067,6 +1071,12 @@ mod tests {
         let (master, _lingering, path) = pty(80, 24);
         assert_eq!(tty_size(&path), Some((80, 24)));
         drop(master);
+        // A child forked by another test thread before its exec can still
+        // hold this side for a moment, so the hangup may land a little late.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while tty_size(&path).is_some() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         assert_eq!(tty_size(&path), None, "a hung-up tty still read as the pane's");
     }
 
