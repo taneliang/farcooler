@@ -745,7 +745,15 @@ enum TerminalCmd {
     /// Print the rendered visible screen with color escapes intact.
     Screen { terminal: String },
     /// Stream live output bytes to stdout until killed. The terminal data plane.
-    Stream { terminal: String },
+    Stream {
+        terminal: String,
+        /// Keep the runner's pane-size markers in the stream: `ESC P >
+        /// farcooler-size;<columns>;<rows> ESC \` ahead of the first bytes
+        /// written at each new size. For a client whose emulator resizes on
+        /// them; off for a person, whose terminal has no use for them.
+        #[arg(long)]
+        sizes: bool,
+    },
     /// Persistent input channel: one hex byte-run per stdin line.
     Input { terminal: String },
     /// Resize the terminal to a viewer's geometry.
@@ -3099,8 +3107,14 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
         TerminalCmd::SendHex { terminal, hex } if runner.is_some() => {
             return proxy(runner, &["terminal".into(), "send-hex".into(), terminal, hex]).await;
         }
-        TerminalCmd::Stream { terminal } if runner.is_some() => {
-            return proxy(runner, &["terminal".into(), "stream".into(), terminal]).await;
+        TerminalCmd::Stream { terminal, sizes } if runner.is_some() => {
+            // Forwarded only when asked for, so a stream without it still runs
+            // against a runner whose CLI predates the flag.
+            let mut args = vec!["terminal".into(), "stream".into(), terminal];
+            if sizes {
+                args.push("--sizes".into());
+            }
+            return proxy(runner, &args).await;
         }
         TerminalCmd::Input { terminal } if runner.is_some() => {
             return proxy(runner, &["terminal".into(), "input".into(), terminal]).await;
@@ -3140,10 +3154,10 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
             runtime.send_bytes_hex(id, &hex).await?;
         }
 
-        TerminalCmd::Stream { terminal } => {
+        TerminalCmd::Stream { terminal, sizes } => {
             let runtime = Runtime::open().await?;
             let id = runtime.resolve_terminal(&terminal)?;
-            runtime.stream(id).await?;
+            runtime.stream(id, sizes).await?;
         }
 
         TerminalCmd::Input { terminal } => {

@@ -123,6 +123,17 @@ farcooler --runner you@box terminal stream <terminal>
 farcooler --runner you@box terminal send <terminal> 'ls -la\n'
 ```
 
+`terminal stream` prints the pane's raw output. With `--sizes`, which the Mac
+app passes to a runner that advertises the `stream_size_markers` capability, it
+also carries the pane's size: `ESC P > farcooler-size;<columns>;<rows> ESC \`
+(a private DCS), written ahead of the first bytes the program writes at each
+new size and once when the stream starts. An emulator that resizes there draws
+a program's repaint after a resize at the size it was written for, rather than
+wrapping it in the old grid. The runner removes any marker a program prints, so
+every one in the stream is the runner's. Without `--sizes` there are none:
+tmux and screen take some control strings as window titles, and a terminal has
+no use for them.
+
 Connections are multiplexed (`ControlMaster`), so a burst of commands does not
 mean a burst of key exchanges. `BatchMode=yes` is always set: a host that wants
 a password, or whose key has changed, fails immediately with SSH's own message

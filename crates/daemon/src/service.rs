@@ -4947,8 +4947,9 @@ impl Service {
         self.runtime().history(id, lines).await
     }
 
-    pub async fn stream(&self, id: Uuid) -> Result<()> {
-        self.runtime().stream(id).await
+    /// See `Runtime::stream` for `sizes`.
+    pub async fn stream(&self, id: Uuid, sizes: bool) -> Result<()> {
+        self.runtime().stream(id, sizes).await
     }
 
     /// Which run of this terminal a client is looking at.

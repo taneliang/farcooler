@@ -277,7 +277,13 @@ impl Runtime {
     /// Emits the retained history first so the client opens onto the session as
     /// it already is, then hands over to a live pipe. Runs until the caller is
     /// killed or the pane goes away.
-    pub async fn stream(&self, id: Uuid) -> Result<()> {
+    ///
+    /// `sizes` keeps the pane fanout's size markers in the stream (see
+    /// `fanout::PaneSize`), for a client that asked for them because it can use
+    /// them. Without it they are removed: a person running this in their own
+    /// terminal has no use for them, and a terminal or multiplexer that does
+    /// not know the sequence is better off never being sent it.
+    pub async fn stream(&self, id: Uuid, sizes: bool) -> Result<()> {
         use tokio::io::AsyncWriteExt;
 
         let pane = self.live_pane(id)?;
@@ -326,6 +332,7 @@ impl Runtime {
         // one's pipe and silently end its stream. See `fanout`.
         let mut reader = self.attach_to_fanout(&pane.pane_id).await?;
         let mut buf = vec![0u8; 16 * 1024];
+        let mut strip = (!sizes).then(crate::fanout::MarkerStrip::default);
 
         // Stop when whoever asked for this stops listening.
         //
@@ -369,7 +376,11 @@ impl Runtime {
                 read = reader.read(&mut buf) => match read {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
-                        if stdout.write_all(&buf[..n]).await.is_err() {
+                        let bytes = match &mut strip {
+                            Some(strip) => strip.strip(&buf[..n]),
+                            None => buf[..n].to_vec(),
+                        };
+                        if stdout.write_all(&bytes).await.is_err() {
                             break;
                         }
                         let _ = stdout.flush().await;
@@ -435,11 +446,14 @@ impl Runtime {
         // is not a special case; it is two clients.
         let mut reader = self.attach_to_fanout(&pane.pane_id).await?;
         let mut buf = vec![0u8; 16 * 1024];
+        // No size markers over the wire: nothing on this path asks for them
+        // yet, and the clients on it do not honor them. See `stream`.
+        let mut strip = crate::fanout::MarkerStrip::default();
         loop {
             match reader.read(&mut buf).await {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
-                    if !sink(buf[..n].to_vec()) {
+                    if !sink(strip.strip(&buf[..n])) {
                         break;
                     }
                 }
@@ -498,30 +512,8 @@ impl Runtime {
             tracing::warn!("cannot find farcoolerd to pipe this pane into");
             DomainError::OperationFailed
         })?;
-        // The pane NUMBER, not the pane id, because tmux expands this command
-        // as a format string before running it and `%` starts an expansion
-        // there. A pane id is `%0`, so passing one whole handed tmux an escape
-        // sequence: `%15` arrived as `15` by luck, and `%0` arrived as an
-        // environment variable's contents. The fanout then listened on a socket
-        // named after nonsense, the watcher that started it could never
-        // connect, and after a second of trying the stream gave up and exited —
-        // which a client cannot tell apart from a pane that finished. The
-        // socket name strips `%` on both sides, so the number is the whole id.
-        //
-        // The install goes with it for the same reason the pane number does:
-        // the fanout has to bind the socket this daemon will look for, and only
-        // this daemon knows which install it is. An id is hex, so tmux has
-        // nothing in it to expand.
-        //
-        // `#{pane_tty}` IS meant for tmux to expand: it is the pane's terminal
-        // device, which is where the fanout reads the pane's size so the stream
-        // can say what size its bytes were written for. See `fanout::PaneSize`.
-        let command = format!(
-            "'{}' --fanout '{}' --install '{}' --tty '#{{pane_tty}}'",
-            exe.display(),
-            pane_id.trim_start_matches('%'),
-            install,
-        );
+        // See `fanout::pipe_command` for what is in it and why.
+        let command = crate::fanout::pipe_command(&exe, pane_id, &install);
         self.tmux.pipe_pane_start(pane_id, &command).await?;
 
         // Retried rather than slept through: the fanout has a process to spawn

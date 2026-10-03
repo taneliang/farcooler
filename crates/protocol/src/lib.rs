@@ -402,6 +402,18 @@ pub mod capability {
     /// the behavior: a client that reads it absent draws no switch rather
     /// than one that changes nothing.
     pub const WAKE_ON_ANSWER: &str = "wake_on_answer";
+    /// `farcooler terminal stream --sizes`: a pane's byte stream carrying
+    /// the pane's size, `ESC P > farcooler-size;<columns>;<rows> ESC \`, ahead
+    /// of the first bytes written at each new size — and the promise that
+    /// every marker shaped like that in the stream is the runner's, because
+    /// the runner removes any a program prints.
+    ///
+    /// Its own capability because a client has to know both halves before it
+    /// may act on one: a runner before this rejects the flag outright, and a
+    /// marker from a stream without the promise is just bytes somebody
+    /// printed. A client that reads it absent opens streams without the flag
+    /// and sizes its emulator from layout replies, as it always did.
+    pub const STREAM_SIZE_MARKERS: &str = "stream_size_markers";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -412,7 +424,7 @@ pub mod capability {
             WORKTREES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES,
             ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL, WORKTREE_ORDER, TASKS,
             LAUNCH_PROMPT, TERMINAL_TASK, WORKTREE_FORK_ONLY, WORKSTREAMS, ORCHESTRATOR_HANDOFF,
-            NEEDS_YOU, WAKE_ON_ANSWER,
+            NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -855,6 +867,11 @@ mod tests {
         assert_eq!(capability::NEEDS_YOU, "needs_you");
         assert_eq!(capability::for_method("needs_you.list"), Some(capability::NEEDS_YOU));
         assert!(capability::ALL.contains(&capability::NEEDS_YOU), "the daemon would not advertise it");
+        assert_eq!(capability::STREAM_SIZE_MARKERS, "stream_size_markers");
+        assert!(
+            capability::ALL.contains(&capability::STREAM_SIZE_MARKERS),
+            "the daemon would not advertise it"
+        );
     }
 
     /// `workspaces` already means worktrees and is frozen; workspaces as

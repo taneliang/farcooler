@@ -97,12 +97,47 @@ pub async fn subscribe(install: &str, pane_id: &str) -> Option<UnixStream> {
     UnixStream::connect(socket_path(install, pane_id)).await.ok()
 }
 
+/// The command tmux pipes a pane into, to start its fanout.
+///
+/// One function for the daemon and the tests, so a test of the fanout runs
+/// the same command a pane does: a quoting slip here would otherwise leave
+/// every stream without sizes and every test still green.
+///
+/// The pane NUMBER, not the pane id, because tmux expands this command as a
+/// format string before running it and `%` starts an expansion there. A pane
+/// id is `%0`, so passing one whole handed tmux an escape sequence: `%15`
+/// arrived as `15` by luck, and `%0` arrived as an environment variable's
+/// contents. The fanout then listened on a socket named after nonsense, the
+/// watcher that started it could never connect, and after a second of trying
+/// the stream gave up and exited — which a client cannot tell apart from a
+/// pane that finished. The socket name strips `%` on both sides, so the
+/// number is the whole id.
+///
+/// The install goes with it for the same reason the pane number does: the
+/// fanout has to bind the socket this daemon will look for, and only this
+/// daemon knows which install it is. An id is hex, so tmux has nothing in it
+/// to expand. It is also the tmux socket's name, which is how the fanout asks
+/// tmux which tty is its pane's (see `PaneSize`).
+///
+/// `#{pane_tty}` IS meant for tmux to expand: it is the pane's terminal device
+/// when the pipe starts, where the fanout reads the pane's size so the stream
+/// can say what size its bytes were written for.
+pub fn pipe_command(exe: &std::path::Path, pane_id: &str, install: &str) -> String {
+    format!(
+        "'{}' --fanout '{}' --install '{}' --tty '#{{pane_tty}}'",
+        exe.display(),
+        pane_id.trim_start_matches('%'),
+        install,
+    )
+}
+
 /// Read this process's stdin — which tmux has connected to a pane — and give
 /// every byte to every watcher.
 ///
-/// `tty` is the pane's terminal device, which is where its size can be read.
-/// `None` — a pipe command written by a daemon that predates size markers —
-/// serves the bytes alone, exactly as before.
+/// `tty` is the pane's terminal device when the pipe started, which is where
+/// its size can be read. `None` — a pipe command written by a daemon that
+/// predates size markers — serves the bytes alone, exactly as before, apart
+/// from removing any marker a program printed.
 pub async fn serve(install: &str, pane_id: &str, tty: Option<&str>) -> std::io::Result<()> {
     let path = socket_path(install, pane_id);
     // Last binder wins. Two watchers can race into starting a fanout each; the
@@ -111,20 +146,11 @@ pub async fn serve(install: &str, pane_id: &str, tty: Option<&str>) -> std::io::
     // survivor without a socket.
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path)?;
-    let size = tty.map(|tty| PaneSize::of_tty(tty.into(), QUIET_SIZE_CHECK));
+    let size = tty.map(|tty| PaneSize::of_pane(tty.into(), install, pane_id));
     serve_on(tokio::io::stdin(), listener, size).await
 }
 
-/// How often a fanout looks at its pane's size when the pane is quiet.
-///
-/// Only for a resize nobody writes anything after — a shell that does not
-/// repaint its prompt on SIGWINCH. Every resize that is followed by output is
-/// announced by the check after each read, which is what orders the marker
-/// ahead of the repaint; this only bounds how long a silent one goes unsaid.
-const QUIET_SIZE_CHECK: std::time::Duration = std::time::Duration::from_millis(100);
-
-/// Where a fanout reads its pane's size, and how often to look when nothing
-/// is being written.
+/// Where a fanout reads its pane's size.
 ///
 /// The pane's size, so the stream can say what size its bytes were written
 /// for. tmux's `pipe-pane` hands over raw program output and nothing else, so
@@ -138,56 +164,91 @@ const QUIET_SIZE_CHECK: std::time::Duration = std::time::Duration::from_millis(1
 /// Read from the pane's tty rather than asked of tmux: the kernel's window
 /// size IS what tmux told the program, set at the moment it sent the SIGWINCH,
 /// and reading it is one ioctl rather than a tmux process per read.
+///
+/// But which tty is the pane's can change under a running fanout, and that is
+/// asked of tmux. `respawn-pane -k` — a pane switching between its terminal
+/// and its chat — gives the pane a new pty and keeps the pipe, so the path
+/// tmux expanded when the pipe started goes stale: closed, or reused by the
+/// next terminal anyone opens, whose size would then be announced as this
+/// pane's. So a size is trusted without asking only when it is the size
+/// already announced. A different size, or a tty that cannot be read, is
+/// checked against tmux's `#{pane_tty}` for this pane first, and the fanout
+/// follows the pane to its new tty; if tmux cannot say, nothing is announced,
+/// and a client falls back to its layout replies.
 pub struct PaneSize {
-    probe: Box<dyn Fn() -> Option<(u16, u16)> + Send + Sync>,
-    every: std::time::Duration,
+    source: SizeSource,
+}
+
+enum SizeSource {
+    /// A test's.
+    Probe(Box<dyn Fn() -> Option<(u16, u16)> + Send + Sync>),
+    /// A real pane: its tty as last confirmed, and how to ask tmux for it.
+    Pane { tty: PathBuf, socket: String, pane: String },
 }
 
 impl PaneSize {
-    pub fn new(
-        probe: impl Fn() -> Option<(u16, u16)> + Send + Sync + 'static,
-        every: std::time::Duration,
-    ) -> Self {
-        Self { probe: Box::new(probe), every }
+    pub fn new(probe: impl Fn() -> Option<(u16, u16)> + Send + Sync + 'static) -> Self {
+        Self { source: SizeSource::Probe(Box::new(probe)) }
     }
 
-    /// The size of the terminal device at `path`.
-    ///
-    /// Opened for each look and closed straight after, never held. A pty
-    /// reports end-of-file to tmux only once every handle on its other side is
-    /// closed, so a fanout keeping one open could stop tmux noticing that the
-    /// pane's program had exited — and the fanout itself only exits when the
-    /// pane does. `NOCTTY`, so opening a terminal can never make it this
-    /// process's controlling one.
-    ///
-    /// `every` is how often to look while the pane is quiet; `QUIET_SIZE_CHECK`
-    /// outside tests.
-    pub fn of_tty(path: PathBuf, every: std::time::Duration) -> Self {
-        Self::new(
-            move || {
-                use rustix::fs::{Mode, OFlags};
-                let flags = OFlags::RDONLY | OFlags::NOCTTY | OFlags::NONBLOCK | OFlags::CLOEXEC;
-                let fd = rustix::fs::open(&path, flags, Mode::empty()).ok()?;
-                let size = rustix::termios::tcgetwinsize(&fd).ok()?;
-                (size.ws_col > 0 && size.ws_row > 0).then_some((size.ws_col, size.ws_row))
-            },
-            every,
-        )
+    /// Pane `pane_id` (with or without its `%`) of the tmux server on socket
+    /// `socket`, whose tty was `tty` when the pipe started.
+    pub fn of_pane(tty: PathBuf, socket: &str, pane_id: &str) -> Self {
+        let pane = format!("%{}", pane_id.trim_start_matches('%'));
+        Self { source: SizeSource::Pane { tty, socket: socket.to_string(), pane } }
     }
 
-    fn read(&self) -> Option<(u16, u16)> {
-        (self.probe)()
+    /// The pane's size if it can be trusted, given the size last announced.
+    async fn read(&mut self, last: Option<(u16, u16)>) -> Option<(u16, u16)> {
+        let (tty, socket, pane) = match &mut self.source {
+            SizeSource::Probe(probe) => return probe(),
+            SizeSource::Pane { tty, socket, pane } => (tty, socket, pane),
+        };
+        let seen = tty_size(tty);
+        if seen.is_some() && seen == last {
+            return seen;
+        }
+        // Changed, or unreadable: is this still the pane's tty?
+        let owner = pane_tty(socket, pane).await?;
+        if owner != *tty {
+            let (from, to) = (tty.display(), owner.display());
+            tracing::debug!(pane = %pane, %from, %to, "the pane has a new tty");
+            *tty = owner;
+        }
+        tty_size(tty)
     }
 }
 
-/// The marker for a size that changed since `last`, remembering it.
-fn announce(size: Option<&PaneSize>, last: &mut Option<(u16, u16)>) -> Option<bytes::Bytes> {
-    let now = size?.read()?;
-    if *last == Some(now) {
-        return None;
-    }
-    *last = Some(now);
-    Some(bytes::Bytes::from(size_marker(now.0, now.1)))
+/// The size of the terminal device at `path`.
+///
+/// Opened for each look and closed straight after, never held. A pty reports
+/// end-of-file to tmux only once every handle on its other side is closed, so
+/// a fanout keeping one open could stop tmux noticing that the pane's program
+/// had exited — and the fanout itself only exits when the pane does.
+/// `NOCTTY`, so opening a terminal can never make it this process's
+/// controlling one.
+fn tty_size(path: &std::path::Path) -> Option<(u16, u16)> {
+    use rustix::fs::{Mode, OFlags};
+    let flags = OFlags::RDONLY | OFlags::NOCTTY | OFlags::NONBLOCK | OFlags::CLOEXEC;
+    let fd = rustix::fs::open(path, flags, Mode::empty()).ok()?;
+    let size = rustix::termios::tcgetwinsize(&fd).ok()?;
+    (size.ws_col > 0 && size.ws_row > 0).then_some((size.ws_col, size.ws_row))
+}
+
+/// Which tty tmux says `pane` has now. One tmux process, so only asked when a
+/// size changes or cannot be read — a resize, not a read.
+async fn pane_tty(socket: &str, pane: &str) -> Option<PathBuf> {
+    let tmux = farcooler_core::programs::find("tmux")?;
+    let output = tokio::process::Command::new(tmux)
+        .args(["-L", socket, "display-message", "-p", "-t", pane, "#{pane_tty}"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .output();
+    let output = tokio::time::timeout(std::time::Duration::from_secs(1), output).await.ok()?.ok()?;
+    let tty = String::from_utf8(output.stdout).ok()?;
+    let tty = tty.trim();
+    (output.status.success() && !tty.is_empty()).then(|| PathBuf::from(tty))
 }
 
 /// `farcooler_vt::size_marker`, written out rather than called.
@@ -197,7 +258,96 @@ fn announce(size: Option<&PaneSize>, last: &mut Option<(u16, u16)>) -> Option<by
 /// string would make it one. The tests below compare every marker this sends
 /// against the emulator's own, so the two cannot drift apart unnoticed.
 fn size_marker(columns: u16, rows: u16) -> Vec<u8> {
-    format!("\x1bP>farcooler-size;{columns};{rows}\x1b\\").into_bytes()
+    format!("\x1bP{}{columns};{rows}\x1b\\", MARKER_TAG).into_bytes()
+}
+
+/// Everything in a marker before its numbers.
+const MARKER_TAG: &str = ">farcooler-size;";
+
+/// Removes anything shaped like a size marker from bytes a program wrote.
+///
+/// Only the runner may say what size a pane is. A program can print the
+/// marker's bytes as easily as any others — `farcooler terminal stream` run
+/// inside a pane prints a stream of them, and so does `cat` of a saved one —
+/// and a client that believed them would size itself to some other pane and
+/// stay there. So the fanout passes every program byte through this before
+/// putting its own markers in, and a stream sent to a client that did not ask
+/// for sizes passes the runner's through it too.
+///
+/// Across reads, because a pipe splits wherever it likes. A partial match at
+/// the end of a read is passed on rather than held (holding would delay a
+/// trailing escape until the next write, which may be never); if the next read
+/// completes it, a string terminator is written in place of the rest, which
+/// ends the control string the client has started without a size in it.
+#[derive(Default)]
+pub struct MarkerStrip {
+    matched: usize,
+    carried: bool,
+    dropping: Option<Dropping>,
+}
+
+#[derive(Default)]
+struct Dropping {
+    length: usize,
+    escape: bool,
+}
+
+/// The bytes that make a marker, up to its numbers.
+const FORGED_PREFIX: &[u8] = b"\x1bP>farcooler-size";
+
+/// How much of a marker-shaped string is dropped before giving up on finding
+/// its terminator. Far longer than any real marker.
+const FORGED_LIMIT: usize = 64;
+
+impl MarkerStrip {
+    pub fn strip(&mut self, input: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(input.len());
+        let mut held: Vec<u8> = Vec::new();
+        for &byte in input {
+            if let Some(dropping) = &mut self.dropping {
+                dropping.length += 1;
+                if dropping.escape && byte == b'\\' {
+                    self.dropping = None;
+                    continue;
+                }
+                dropping.escape = byte == 0x1b;
+                if dropping.length > FORGED_LIMIT {
+                    self.dropping = None;
+                }
+                continue;
+            }
+            if byte == FORGED_PREFIX[self.matched] {
+                self.matched += 1;
+                held.push(byte);
+                if self.matched == FORGED_PREFIX.len() {
+                    if self.carried {
+                        out.extend_from_slice(b"\x1b\\");
+                    }
+                    held.clear();
+                    self.matched = 0;
+                    self.carried = false;
+                    self.dropping = Some(Dropping::default());
+                }
+                continue;
+            }
+            out.append(&mut held);
+            self.matched = 0;
+            self.carried = false;
+            // The prefix has one escape, at its start, so a mismatch can only
+            // begin a new match on an escape.
+            if byte == FORGED_PREFIX[0] {
+                self.matched = 1;
+                held.push(byte);
+            } else {
+                out.push(byte);
+            }
+        }
+        if !held.is_empty() {
+            out.append(&mut held);
+            self.carried = true;
+        }
+        out
+    }
 }
 
 /// The part that has nothing to do with processes, so a test can drive it.
@@ -207,10 +357,21 @@ fn size_marker(columns: u16, rows: u16) -> Vec<u8> {
 /// after every read, BEFORE the bytes read are passed on, which is what puts
 /// the marker ahead of the program's repaint: a program cannot answer a
 /// SIGWINCH it has not been sent, and by the time its answer has been read the
-/// new size is already on the tty. Bytes the program wrote just before the
-/// resize can land behind the marker too, and then they are drawn at the new
-/// size; that is the old-bytes-in-a-new-grid case a shrink always had, and it
-/// mostly gets away with it.
+/// new size is already on the tty.
+///
+/// Only after a read: a quiet pane costs nothing. A resize that nobody writes
+/// after is not announced until somebody does, and a client covers that gap by
+/// applying its own layout reply when no marker follows it (see the Mac's
+/// `TerminalRenderView.streamSizesCore`).
+///
+/// What this cannot order is output already in flight when the pane was
+/// resized: bytes the program wrote for the old size that tmux had read but not
+/// yet passed down the pipe. They arrive in the same read as the repaint, or
+/// before it, after the size has changed, so they are drawn at the new size.
+/// On a grow that is harmless. On a shrink a full-width line among them wraps,
+/// until the program's repaint for the new size, which follows, redraws over
+/// it. No placement of the check narrows this: which bytes were written
+/// before the resize is not something a pipe records.
 pub async fn serve_on<R>(
     mut source: R,
     listener: UnixListener,
@@ -221,12 +382,11 @@ where
 {
     let (tx, _) = tokio::sync::broadcast::channel::<bytes::Bytes>(BACKLOG);
     let watchers = Arc::new(AtomicUsize::new(0));
-    let size = size.map(Arc::new);
-    let mut last_size = size.as_deref().and_then(PaneSize::read);
-    let mut quiet = tokio::time::interval(
-        size.as_deref().map_or(std::time::Duration::from_secs(3600), |s| s.every),
-    );
-    quiet.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let size = size.map(|s| Arc::new(tokio::sync::Mutex::new(s)));
+    let mut last_size = match &size {
+        Some(size) => size.lock().await.read(None).await,
+        None => None,
+    };
 
     let accepting = tokio::spawn({
         let tx = tx.clone();
@@ -238,13 +398,15 @@ where
                 // Subscribed first, then told the size, so a change between the
                 // two is announced again on the channel rather than lost.
                 //
-                // A watcher arrives after its client sized the pane and after a
-                // replay captured at that size, so this usually confirms what it
-                // knows. It is sent anyway because it is how a client learns
-                // the stream speaks sizes at all — see
-                // `farcooler_vt::Terminal::sized_by_stream`.
-                if let Some(marker) = announce(size.as_deref(), &mut None)
-                    && socket.write_all(&marker).await.is_err()
+                // Read afresh rather than taken from the last announcement: a
+                // pane resized while quiet has not announced it yet, and this
+                // watcher's client is about to trust this size over its own.
+                let now = match &size {
+                    Some(size) => size.lock().await.read(None).await,
+                    None => None,
+                };
+                if let Some((columns, rows)) = now
+                    && socket.write_all(&size_marker(columns, rows)).await.is_err()
                 {
                     continue;
                 }
@@ -279,6 +441,7 @@ where
         }
     });
 
+    let mut strip = MarkerStrip::default();
     let mut buf = vec![0u8; 16 * 1024];
     loop {
         tokio::select! {
@@ -289,15 +452,17 @@ where
                     // A send with no receivers is not a failure. It is an
                     // ordinary moment between one watcher leaving and the next
                     // arriving, and the bytes are genuinely nobody's.
-                    if let Some(marker) = announce(size.as_deref(), &mut last_size) {
-                        let _ = tx.send(marker);
+                    let output = strip.strip(&buf[..n]);
+                    if let Some(size) = &size
+                        && let Some(now) = size.lock().await.read(last_size).await
+                        && Some(now) != last_size
+                    {
+                        last_size = Some(now);
+                        let _ = tx.send(bytes::Bytes::from(size_marker(now.0, now.1)));
                     }
-                    let _ = tx.send(bytes::Bytes::copy_from_slice(&buf[..n]));
-                }
-            },
-            _ = quiet.tick() => {
-                if let Some(marker) = announce(size.as_deref(), &mut last_size) {
-                    let _ = tx.send(marker);
+                    if !output.is_empty() {
+                        let _ = tx.send(bytes::Bytes::from(output));
+                    }
                 }
             },
             _ = &mut idle => break,
@@ -439,14 +604,10 @@ mod tests {
     }
 
     /// A pane size a test can change, as the fanout reads it.
-    fn adjustable(
-        columns: u16,
-        rows: u16,
-        every: std::time::Duration,
-    ) -> (Arc<std::sync::Mutex<(u16, u16)>>, PaneSize) {
+    fn adjustable(columns: u16, rows: u16) -> (Arc<std::sync::Mutex<(u16, u16)>>, PaneSize) {
         let size = Arc::new(std::sync::Mutex::new((columns, rows)));
         let read = size.clone();
-        let probe = PaneSize::new(move || Some(*read.lock().expect("size lock")), every);
+        let probe = PaneSize::new(move || Some(*read.lock().expect("size lock")));
         (size, probe)
     }
 
@@ -464,15 +625,12 @@ mod tests {
     /// The bug the marker exists for, at the layer that can see it: the bytes a
     /// program writes after its pane is resized must arrive BEHIND the news of
     /// the resize, or the client paints them into a grid of the old size.
-    ///
-    /// The tick is an hour, so the only thing that can put the marker in front
-    /// of the repaint is the check made after each read.
     #[tokio::test]
     async fn a_resize_is_announced_ahead_of_the_bytes_written_after_it() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("fanout.sock");
         let listener = UnixListener::bind(&path).expect("bind");
-        let (size, probe) = adjustable(80, 24, std::time::Duration::from_secs(3600));
+        let (size, probe) = adjustable(80, 24);
 
         let (mut writer, reader) = tokio::io::duplex(64 * 1024);
         let served = tokio::spawn(async move { serve_on(reader, listener, Some(probe)).await });
@@ -501,112 +659,87 @@ mod tests {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(2), served).await;
     }
 
-    /// A pane resized while its program says nothing is still announced: a
-    /// client that has handed sizing to the stream would otherwise keep the old
-    /// grid until the next byte.
+    /// A quiet pane is not polled, so a resize nobody writes after is not
+    /// announced on the channel — but a watcher arriving afterwards is told
+    /// the size as it is now, not as it was last announced: its client is
+    /// about to trust that size over its own.
     #[tokio::test]
-    async fn a_resize_with_no_output_is_announced_anyway() {
+    async fn a_watcher_arriving_after_a_quiet_resize_is_told_the_size_now() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("fanout.sock");
         let listener = UnixListener::bind(&path).expect("bind");
-        let (size, probe) = adjustable(80, 24, std::time::Duration::from_millis(20));
+        let (size, probe) = adjustable(80, 24);
 
         let (writer, reader) = tokio::io::duplex(64 * 1024);
         let served = tokio::spawn(async move { serve_on(reader, listener, Some(probe)).await });
 
-        let mut watcher = UnixStream::connect(&path).await.expect("watcher");
-        expect_bytes(&mut watcher, &farcooler_vt::size_marker(80, 24)).await;
+        let mut first = UnixStream::connect(&path).await.expect("first watcher");
+        expect_bytes(&mut first, &farcooler_vt::size_marker(80, 24)).await;
         *size.lock().expect("size lock") = (100, 40);
-        expect_bytes(&mut watcher, &farcooler_vt::size_marker(100, 40)).await;
+        let mut second = UnixStream::connect(&path).await.expect("second watcher");
+        expect_bytes(&mut second, &farcooler_vt::size_marker(100, 40)).await;
 
         drop(writer);
         let _ = tokio::time::timeout(std::time::Duration::from_secs(2), served).await;
     }
 
-    /// A private tmux server, killed however the test ends.
-    struct ScratchTmux {
-        tmux: PathBuf,
-        socket: String,
-    }
-
-    impl ScratchTmux {
-        fn run(&self, args: &[&str]) -> String {
-            let out = std::process::Command::new(&self.tmux)
-                .args(["-L", &self.socket, "-f", "/dev/null"])
-                .args(args)
-                .output()
-                .expect("run tmux");
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            assert!(out.status.success(), "tmux {args:?}: {stderr}");
-            String::from_utf8_lossy(&out.stdout).trim().to_string()
-        }
-    }
-
-    impl Drop for ScratchTmux {
-        fn drop(&mut self) {
-            let _ = std::process::Command::new(&self.tmux)
-                .args(["-L", &self.socket, "kill-server"])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
-        }
-    }
-
-    /// The ordering claim, against a real tmux and a real program: the marker
-    /// for a resize reaches a watcher ahead of what the program printed in
-    /// answer to it.
-    ///
-    /// The program prints `WINCH` when it gets the signal, which stands in for
-    /// a full-screen program's repaint. The quiet check is an hour, so only the
-    /// check after each read can put the marker in front of it — which is the
-    /// one that has to, because a repaint is never quiet.
+    /// A marker a program prints never reaches a watcher: only the runner may
+    /// say what size a pane is. Here the program prints one for a size the
+    /// pane does not have, and the watcher sees the text around it and nothing
+    /// else.
     #[tokio::test]
-    async fn a_real_panes_resize_is_announced_before_its_programs_answer() {
-        let tmux = farcooler_core::programs::find("tmux").expect("these tests need tmux");
+    async fn a_marker_a_program_prints_is_removed() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let server = ScratchTmux {
-            tmux,
-            socket: format!("fc-fanout-{}", uuid::Uuid::now_v7().simple()),
-        };
-        server.run(&[
-            "new-session", "-d", "-s", "s", "-x", "80", "-y", "24",
-            "sh -c 'trap \"echo WINCH\" WINCH; while :; do sleep 0.05; done'",
-        ]);
-        let tty = server.run(&["display-message", "-p", "-t", "s", "#{pane_tty}"]);
-
-        let fifo = dir.path().join("pane.fifo");
-        let made = std::process::Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
-        assert!(made.success());
-        let source =
-            tokio::net::unix::pipe::OpenOptions::new().open_receiver(&fifo).expect("open the fifo");
-        server.run(&["pipe-pane", "-O", "-t", "s", &format!("cat > '{}'", fifo.display())]);
-
         let path = dir.path().join("fanout.sock");
         let listener = UnixListener::bind(&path).expect("bind");
-        let size = PaneSize::of_tty(tty.into(), std::time::Duration::from_secs(3600));
-        let served = tokio::spawn(async move { serve_on(source, listener, Some(size)).await });
+        let (_size, probe) = adjustable(80, 24);
+
+        let (mut writer, reader) = tokio::io::duplex(64 * 1024);
+        let served = tokio::spawn(async move { serve_on(reader, listener, Some(probe)).await });
 
         let mut watcher = UnixStream::connect(&path).await.expect("watcher");
         expect_bytes(&mut watcher, &farcooler_vt::size_marker(80, 24)).await;
 
-        server.run(&["resize-window", "-t", "s", "-x", "120", "-y", "30"]);
-        let mut seen = Vec::new();
-        let mut buf = [0u8; 1024];
-        while !String::from_utf8_lossy(&seen).contains("WINCH") {
-            let n = tokio::time::timeout(std::time::Duration::from_secs(5), watcher.read(&mut buf))
-                .await
-                .expect("the program never answered the resize")
-                .expect("read");
-            assert!(n > 0, "the fanout hung up");
-            seen.extend_from_slice(&buf[..n]);
-        }
-        let seen = String::from_utf8_lossy(&seen).into_owned();
-        let marker = String::from_utf8_lossy(&farcooler_vt::size_marker(120, 30)).into_owned();
-        let at = seen.find(&marker).unwrap_or_else(|| panic!("no marker in {seen:?}"));
-        let answer = seen.find("WINCH").expect("WINCH");
-        assert!(at < answer, "the marker came after the answer: {seen:?}");
+        let mut forged = b"before".to_vec();
+        forged.extend_from_slice(&farcooler_vt::size_marker(300, 100));
+        forged.extend_from_slice(b"after");
+        writer.write_all(&forged).await.expect("write");
+        writer.flush().await.expect("flush");
+        expect_bytes(&mut watcher, b"beforeafter").await;
 
-        served.abort();
+        drop(writer);
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), served).await;
+    }
+
+    /// However a pipe splits a printed marker, no size gets through — checked
+    /// by what an emulator that trusts sizes ends up holding, which is the
+    /// only thing that matters.
+    #[test]
+    fn a_printed_marker_split_anywhere_is_still_removed() {
+        let mut printed = b"a".to_vec();
+        printed.extend_from_slice(&farcooler_vt::size_marker(300, 100));
+        printed.extend_from_slice(b"b");
+        for split in 1..printed.len() {
+            let mut strip = MarkerStrip::default();
+            let mut out = strip.strip(&printed[..split]);
+            out.extend(strip.strip(&printed[split..]));
+            let mut t = farcooler_vt::Terminal::new(20, 4);
+            t.set_accept_stream_sizes(true);
+            t.feed(&out);
+            assert_eq!((t.columns(), t.rows()), (20, 4), "split at {split}: {out:?}");
+            let row: String =
+                farcooler_vt::grid::snapshot(&t).rows[0].cells.iter().map(|c| c.ch).collect();
+            assert_eq!(row.trim_end(), "ab", "split at {split}: {out:?}");
+        }
+    }
+
+    /// Everything that is not a marker passes untouched, including other
+    /// control strings and escapes that start the same way.
+    #[test]
+    fn other_output_passes_through_the_strip_untouched() {
+        let output: &[u8] = b"\x1b[31mred\x1b[0m \x1bP>far away\x1b\\ \x1bPq#0\x1b\\ \x1b\x1bP>f";
+        let mut strip = MarkerStrip::default();
+        assert_eq!(strip.strip(output), output);
     }
 
     /// The socket is named for the pane, so two panes cannot collide.

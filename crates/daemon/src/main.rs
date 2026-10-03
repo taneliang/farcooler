@@ -372,7 +372,9 @@ async fn stream_terminal(terminal: &str) -> Result<(), i32> {
     // The inventory has to be fresh, or the pane this id names is looked up in a
     // snapshot taken before the process started.
     service.inventory.refresh().await;
-    service.runtime().stream(id).await.map_err(|e| {
+    // No size markers: this is how a phone reaches a pane over ssh, and the
+    // phones do not honor them yet. See `Runtime::stream`.
+    service.runtime().stream(id, false).await.map_err(|e| {
         eprintln!("cannot stream that terminal: {e}");
         1
     })
