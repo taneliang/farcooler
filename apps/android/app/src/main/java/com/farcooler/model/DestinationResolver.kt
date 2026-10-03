@@ -5,15 +5,17 @@ package com.farcooler.model
  * (ov-182, ov-183). AgentKit's `DestinationResolver`, mirrored case for case,
  * and held to the same `test/fixtures/destinations.json`.
  *
- * 1. **Find the runner**: by host, then by id among ready runners, waiting
- *    while any runner hasn't said its id. One naming no runner is looked for
- *    on every ready runner, and refused when two have it.
+ * 1. **Find the runner**: by host, then by id among ready runners (two
+ *    seats with one id are one runner), waiting while any runner hasn't said
+ *    its id. A paired runner nothing is dialing is answered
+ *    [Resolution.Connect]. One naming no runner is looked for on every ready
+ *    runner, and refused when two have it.
  * 2. **Walk the place**: not known yet waits; gone falls back a level,
  *    quietly (terminal → worktree → workspace → the runner's first
  *    workspace). Finer parts are dropped one at a time when stale.
  * 3. **At the deadline**, a restore opens the deepest level that's here, then
  *    the last workspace, the first, Needs You; a notification stays, with a
- *    [Note].
+ *    [Note], and never opens past its deadline.
  * 4. **Moving first wins** over a restore.
  *
  * A notification never falls back past its workspace.
@@ -43,6 +45,8 @@ object DestinationResolver {
         data class Open(val destination: Destination, val fellBack: Boolean) : Resolution
         /** Do nothing; a notification says why. */
         data class Stay(val note: Note?) : Resolution
+        /** Its runner is paired but nothing is dialing it: dial [host], then ask again. */
+        data class Connect(val host: String) : Resolution
     }
 
     /** What this phone holds now. Null collections are not read yet. */
@@ -53,6 +57,8 @@ object DestinationResolver {
             val host: String,
             val runnerId: String? = null,
             val ready: Boolean,
+            /** Paired but not connected, and nothing is dialing it. */
+            val idle: Boolean = false,
             /** In the switcher's order. */
             val workspaces: List<Workspace>? = null,
             val worktrees: List<Worktree>? = null,
@@ -60,7 +66,10 @@ object DestinationResolver {
             val boards: Map<String, List<Task>> = emptyMap(),
             /** Task ids or keys a direct lookup said this runner doesn't have. */
             val absentTasks: List<String> = emptyList(),
-        )
+        ) {
+            /** Coming up on its own: worth waiting for. */
+            val dialing: Boolean get() = !ready && !idle
+        }
 
         data class Workspace(val id: String, val orchestrator: Boolean = true)
         data class Worktree(val id: String, val workspace: String? = null, val terminals: List<Terminal> = emptyList())
@@ -78,35 +87,49 @@ object DestinationResolver {
         deadlineMs: Long,
         interrupted: Boolean = false,
     ): Resolution {
-        val restore = arrival == Arrival.RESTORE
-        if (restore && interrupted) return Resolution.Stay(null)
+        if (arrival == Arrival.RESTORE && interrupted) return Resolution.Stay(null)
         val late = elapsedMs >= deadlineMs
+        val resolution = decide(destination, arrival, world, late)
+        // A notification past its deadline opens nothing, even when what it's
+        // about has just turned up (ov-106).
+        if (arrival == Arrival.NOTIFICATION && late && resolution is Resolution.Open) return Resolution.Stay(Note.NOT_FOUND)
+        return resolution
+    }
+
+    private fun decide(destination: Destination, arrival: Arrival, world: World, late: Boolean): Resolution {
+        val restore = arrival == Arrival.RESTORE
         if (destination.place == Destination.Place.NeedsYou) return Resolution.Open(Destination.NEEDS_YOU, false)
+        val unavailable = { if (restore) general(world) else Resolution.Stay(Note.RUNNER_UNAVAILABLE) }
 
         val runner = destination.runner
         val byHost = runner.host?.let { host -> world.seats.firstOrNull { it.host == host } }
         if (byHost != null) {
             if (byHost.ready) return walk(destination, byHost, arrival, world, late)
-            if (!late) return Resolution.Wait
-            return if (restore) general(world) else Resolution.Stay(Note.RUNNER_UNAVAILABLE)
+            if (late) return unavailable()
+            return if (byHost.idle) Resolution.Connect(byHost.host) else Resolution.Wait
         }
         val id = runner.id?.lowercase()
         if (id == null) {
-            if (runner.host != null) return if (restore) general(world) else Resolution.Stay(Note.RUNNER_UNAVAILABLE)
+            if (runner.host != null) return unavailable()
             return search(destination, arrival, world, late)
         }
+        // Two seats with one id are one runner reached two ways: the first
+        // that has the place, else the first.
         val matching = world.seats.filter { it.ready && it.runnerId?.lowercase() == id }
+        val seat = matching.firstOrNull { presence(destination.place, it) == Presence.HERE } ?: matching.firstOrNull()
+        if (seat != null) return walk(destination, seat, arrival, world, late)
+        val idle = world.seats.firstOrNull { it.idle && it.runnerId?.lowercase() == id }
         return when {
-            matching.size == 1 -> walk(destination, matching[0], arrival, world, late)
-            matching.size > 1 -> if (restore) general(world) else Resolution.Stay(Note.AMBIGUOUS)
-            world.seats.any { !it.ready } && !late -> Resolution.Wait
-            else -> if (restore) general(world) else Resolution.Stay(Note.RUNNER_UNAVAILABLE)
+            late -> unavailable()
+            idle != null -> Resolution.Connect(idle.host)
+            world.seats.any { it.dialing } -> Resolution.Wait
+            else -> unavailable()
         }
     }
 
     private fun search(destination: Destination, arrival: Arrival, world: World, late: Boolean): Resolution {
         val found = mutableListOf<Resolution>()
-        var unknown = world.seats.any { !it.ready }
+        var unknown = world.seats.any { it.dialing }
         for (seat in world.seats.filter { it.ready }) {
             when (presence(destination.place, seat)) {
                 Presence.HERE -> found += walk(destination, seat, arrival, world, late)

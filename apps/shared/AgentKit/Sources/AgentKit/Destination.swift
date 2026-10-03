@@ -216,7 +216,7 @@ extension Destination {
             segment: (object["segment"] as? String).flatMap(Segment.init(rawValue:)),
             pane: Self.nonEmpty(object["pane"]),
             agent: Self.nonEmpty(object["agent"]),
-            question: object["question"] as? Bool ?? false)
+            question: Self.bool(object["question"]) ?? false)
     }
 
     private static func place(_ object: [String: Any]) -> Place? {
@@ -250,10 +250,20 @@ extension Destination {
         (value as? String).flatMap { $0.isEmpty ? nil : $0 }
     }
 
-    /// An integer from JSON, which `JSONSerialization` hands over as a number.
+    /// An integer from JSON, which `JSONSerialization` hands over as a number:
+    /// not a boolean, and not `1.0`, which Kotlin's reader refuses too.
     private static func int(_ value: Any?) -> Int? {
-        if let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() { return number.intValue }
-        return nil
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+            !CFNumberIsFloatType(number)
+        else { return nil }
+        return number.intValue
+    }
+
+    /// A JSON boolean, and only that: `1` would bridge to `true` here and
+    /// read as false on Android.
+    private static func bool(_ value: Any?) -> Bool? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
+        return number.boolValue
     }
 }
 

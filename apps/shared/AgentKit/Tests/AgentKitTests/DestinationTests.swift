@@ -46,7 +46,9 @@ struct DestinationFixtureTests {
     }
 
     @Test func lenientEncodingsDropWhatTheyDontKnow() {
-        for each in Fixture.cases("lenient") {
+        let cases = Fixture.cases("lenient")
+        #expect(cases.count >= 8)
+        for each in cases {
             #expect(Destination(encoded: each["json"] as! String)?.encoded == each["reads"] as? String, "\(each["case"]!)")
         }
     }
@@ -62,7 +64,9 @@ struct DestinationFixtureTests {
     }
 
     @Test func everyLinkStillReads() {
-        for each in Fixture.cases("urls") {
+        let cases = Fixture.cases("urls")
+        #expect(cases.count >= 8)
+        for each in cases {
             let url = URL(string: each["url"] as! String)!
             #expect(Destination(url: url)?.encoded == each["destination"] as? String, "\(each["case"]!)")
         }
@@ -70,7 +74,7 @@ struct DestinationFixtureTests {
 
     @Test func theResolverAgreesWithEveryCase() throws {
         let cases = Fixture.cases("resolve")
-        #expect(cases.count >= 30)
+        #expect(cases.count >= 50)
         for each in cases {
             let name = each["case"] as! String
             let destination = try #require(Destination(encoded: each["destination"] as! String), "\(name)")
@@ -88,6 +92,7 @@ struct DestinationFixtureTests {
 
     private func expected(_ object: [String: Any]) -> DestinationResolver.Resolution {
         if object["wait"] as? Bool == true { return .wait }
+        if let host = object["connect"] as? String { return .connect(host: host) }
         if let open = object["open"] as? String {
             return .open(Destination(encoded: open)!, fellBack: object["fellBack"] as? Bool ?? false)
         }

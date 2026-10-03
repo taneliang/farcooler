@@ -8,9 +8,11 @@ import Foundation
 ///
 /// 1. **Find the runner.** By `host` first; by `id` among ready runners
 ///    next, waiting while any runner hasn't said its id, since that one
-///    could be it. A destination naming no runner (an old agent push, a
-///    decision from a runner too old to say) is looked for on every ready
-///    runner, and refused when two have it.
+///    could be it; two ready seats with one id are one runner, and the one
+///    with the place wins. A runner paired here that nothing is dialing is
+///    answered `connect`. A destination naming no runner (an old agent
+///    push, a decision from a runner too old to say) is looked for on every
+///    ready runner, and refused when two have it.
 /// 2. **Walk the place.** Each level is here, gone or not known yet. Not
 ///    known waits. Gone falls back to the next level up, quietly:
 ///    terminal → worktree → workspace → the runner's home (its first
@@ -19,7 +21,8 @@ import Foundation
 /// 3. **At the deadline**, what's still unknown depends on how it arrived.
 ///    A restore opens the deepest level known to be there, then the last
 ///    workspace, then the first, then Needs You. A notification stays where
-///    the click left the app, with a quiet note saying why.
+///    the click left the app, with a quiet note saying why, and never opens
+///    past its deadline, even what has just turned up.
 /// 4. **Moving first wins.** A restore that somebody moved before, or that
 ///    a link landed on, does nothing.
 ///
@@ -71,6 +74,10 @@ public enum DestinationResolver {
         /// Do nothing. A notification says why; a restore somebody moved
         /// past says nothing.
         case stay(Note?)
+        /// Its runner is paired here but not connected, and nothing is
+        /// dialing it (the phones' "Connect every runner" off): dial this
+        /// seat, then ask again. Only before the deadline.
+        case connect(host: String)
     }
 
     /// Decide.
@@ -86,16 +93,28 @@ public enum DestinationResolver {
     ) -> Resolution {
         if arrival == .restore && interrupted { return .stay(nil) }
         let late = elapsed >= deadline
+        let resolution = decide(destination, arrival: arrival, in: world, late: late)
+        // A notification past its deadline opens nothing, even when what it's
+        // about has just turned up: it would move a window somebody has gone
+        // on using (ov-106, "the 30 s bound covers the read too").
+        if arrival == .notification, late, case .open = resolution { return .stay(.notFound) }
+        return resolution
+    }
+
+    private static func decide(
+        _ destination: Destination, arrival: Arrival, in world: World, late: Bool
+    ) -> Resolution {
         if case .needsYou = destination.place { return .open(Destination.needsYou, fellBack: false) }
 
         switch findSeat(destination, in: world) {
+        case .connect(let host):
+            if !late { return .connect(host: host) }
+            return arrival == .restore ? general(world) : .stay(.runnerUnavailable)
         case .waiting:
             if !late { return .wait }
             return arrival == .restore ? general(world) : .stay(.runnerUnavailable)
         case .absent:
             return arrival == .restore ? general(world) : .stay(.runnerUnavailable)
-        case .ambiguous:
-            return arrival == .restore ? general(world) : .stay(.ambiguous)
         case .search:
             return search(destination, arrival: arrival, in: world, late: late)
         case .found(let seat):
@@ -109,7 +128,8 @@ public enum DestinationResolver {
         case found(World.Seat)
         case waiting
         case absent
-        case ambiguous
+        /// Paired, not connected, and not dialing.
+        case connect(String)
         /// The destination names no runner: look on every one.
         case search
     }
@@ -117,15 +137,23 @@ public enum DestinationResolver {
     private static func findSeat(_ destination: Destination, in world: World) -> SeatSearch {
         let runner = destination.runner
         if let host = runner.host, let seat = world.seats.first(where: { $0.host == host }) {
-            return seat.ready ? .found(seat) : .waiting
+            if seat.ready { return .found(seat) }
+            return seat.idle ? .connect(seat.host) : .waiting
         }
         guard let id = runner.id?.lowercased() else {
             return runner.host == nil ? .search : .absent
         }
+        // Two seats with one id are one runner reached two ways (a LAN
+        // address and a tailnet one): the first that has the place, else the
+        // first, as `TaskNoticeOpen.step` took the first.
         let matching = world.seats.filter { $0.ready && $0.runnerId?.lowercased() == id }
-        if matching.count == 1 { return .found(matching[0]) }
-        if matching.count > 1 { return .ambiguous }
-        return world.seats.contains(where: { !$0.ready }) ? .waiting : .absent
+        if let seat = matching.first(where: { presence(destination.place, on: $0) == .here }) ?? matching.first {
+            return .found(seat)
+        }
+        if let seat = world.seats.first(where: { $0.idle && $0.runnerId?.lowercased() == id }) {
+            return .connect(seat.host)
+        }
+        return world.seats.contains(where: { $0.dialing }) ? .waiting : .absent
     }
 
     /// A destination naming no runner: the one ready runner where its place
@@ -134,7 +162,7 @@ public enum DestinationResolver {
         _ destination: Destination, arrival: Arrival, in world: World, late: Bool
     ) -> Resolution {
         var found: [Resolution] = []
-        var unknown = world.seats.contains(where: { !$0.ready })
+        var unknown = world.seats.contains(where: { $0.dialing })
         for seat in world.seats where seat.ready {
             switch presence(destination.place, on: seat) {
             case .here: found.append(walk(destination, on: seat, arrival: arrival, in: world, late: late))
@@ -336,6 +364,11 @@ extension DestinationResolver {
             public var runnerId: String?
             /// Connected, and its status read: `runnerId` is what it says.
             public var ready: Bool
+            /// Paired but not connected, and nothing is dialing it: waiting
+            /// on it is waiting forever, so it's `connect`ed when named.
+            public var idle: Bool
+            /// Coming up on its own: worth waiting for.
+            var dialing: Bool { !ready && !idle }
             /// Its workspaces, in the switcher's order. Nil until read.
             public var workspaces: [Workspace]?
             /// Its worktrees and their panes. Nil until its fleet is read.
@@ -348,12 +381,13 @@ extension DestinationResolver {
             public var absentTasks: [String]
 
             public init(
-                host: String, runnerId: String? = nil, ready: Bool, workspaces: [Workspace]? = nil,
+                host: String, runnerId: String? = nil, ready: Bool, idle: Bool = false, workspaces: [Workspace]? = nil,
                 worktrees: [Worktree]? = nil, boards: [String: [Task]] = [:], absentTasks: [String] = []
             ) {
                 self.host = host
                 self.runnerId = runnerId
                 self.ready = ready
+                self.idle = idle && !ready
                 self.workspaces = workspaces
                 self.worktrees = worktrees
                 self.boards = boards
@@ -366,6 +400,7 @@ extension DestinationResolver {
                     host: try c.decode(String.self, forKey: .host),
                     runnerId: try c.decodeIfPresent(String.self, forKey: .runnerId),
                     ready: try c.decode(Bool.self, forKey: .ready),
+                    idle: try c.decodeIfPresent(Bool.self, forKey: .idle) ?? false,
                     workspaces: try c.decodeIfPresent([Workspace].self, forKey: .workspaces),
                     worktrees: try c.decodeIfPresent([Worktree].self, forKey: .worktrees),
                     boards: try c.decodeIfPresent([String: [Task]].self, forKey: .boards) ?? [:],

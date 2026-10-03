@@ -22,6 +22,9 @@ object DestinationPayloads {
     /** The data or extra key the encoding rides under. */
     const val PAYLOAD_KEY = "destination"
 
+    /** `Notifier.EXTRA_TERMINAL`, read as `terminal` is. */
+    const val ANDROID_TERMINAL_KEY = "com.farcooler.terminal"
+
     /**
      * What a tapped notification asks for, or null. [extra] reads one key, as
      * `Intent.getStringExtra` does; [thread] is the notification's thread or
@@ -44,7 +47,9 @@ object DestinationPayloads {
             )
         }
         val threaded = if (thread.startsWith("t:") || thread.startsWith("a:")) null else thread.ifEmpty { null }
-        val terminal = extra("terminal")?.ifEmpty { null } ?: threaded ?: return null
+        // Android's own agent banner puts its pane under EXTRA_TERMINAL, and has no thread.
+        val terminal = extra("terminal")?.ifEmpty { null } ?: extra(ANDROID_TERMINAL_KEY)?.ifEmpty { null }
+            ?: threaded ?: return null
         return Destination(
             runner = Destination.Runner(host = host, id = extra("runner")?.ifEmpty { null }?.lowercase()),
             place = Destination.Place.Terminal(terminal),
@@ -93,7 +98,8 @@ object DestinationPayloads {
         return when (uri.host) {
             "open" -> query["d"]?.let(Destination::decode)
             "terminal" -> {
-                val id = percentDecode(uri.rawPath.orEmpty().substringAfterLast("/"))
+                // A trailing slash is ignored, as `URL.lastPathComponent` ignores it.
+                val id = percentDecode(uri.rawPath.orEmpty().trimEnd('/').substringAfterLast("/"))
                 if (id.isEmpty()) null
                 else Destination(
                     runner = Destination.Runner(id = query["runner"]?.ifEmpty { null }?.lowercase()),

@@ -14,6 +14,7 @@ import Foundation
 ///   and a banner this app posted itself, filed under the terminal's id as
 ///   its thread;
 /// - a local Mac post's `target` (`DaemonClient.target`) and `repository`;
+/// - Android's own agent banner, `com.farcooler.terminal`;
 /// - the Live Activity and widget link, `<scheme>://terminal/<id>`.
 ///
 /// A task is read before a terminal, because the relay sends `terminal: ""`
@@ -22,6 +23,9 @@ extension Destination {
     /// The `userInfo` (or Firebase data, or intent extra) key the encoding
     /// rides under.
     public static let payloadKey = "destination"
+
+    /// Android's `Notifier.EXTRA_TERMINAL`, read as `terminal` is.
+    public static let androidTerminalKey = "com.farcooler.terminal"
 
     /// What a notification's tap asks for, or nil for one about nothing this
     /// build can open. `thread` is the notification's thread identifier.
@@ -44,7 +48,10 @@ extension Destination {
             return
         }
         let threaded = thread.hasPrefix("t:") || thread.hasPrefix("a:") ? nil : Self.nonEmpty(thread)
-        guard let terminal = Self.nonEmpty(userInfo["terminal"]) ?? threaded else { return nil }
+        // `com.farcooler.terminal` is the extra Android's own agent banner
+        // puts its pane under; it has no thread to fall back on.
+        let named = Self.nonEmpty(userInfo["terminal"]) ?? Self.nonEmpty(userInfo[Self.androidTerminalKey])
+        guard let terminal = named ?? threaded else { return nil }
         self.init(
             runner: Runner(host: host, id: Self.nonEmpty(userInfo["runner"])?.lowercased()),
             place: .terminal(terminal))

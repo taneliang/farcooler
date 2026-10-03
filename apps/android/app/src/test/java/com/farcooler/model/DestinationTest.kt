@@ -49,7 +49,9 @@ class DestinationTest {
 
     @Test
     fun `lenient encodings drop what they don't know`() {
-        for (case in cases("lenient")) {
+        val cases = cases("lenient")
+        assertTrue(cases.size >= 8)
+        for (case in cases) {
             assertEquals(case.name(), case.text("reads"), Destination.decode(case.text("json")!!)?.encoded())
         }
     }
@@ -75,7 +77,9 @@ class DestinationTest {
 
     @Test
     fun `every link still reads`() {
-        for (case in cases("urls")) {
+        val cases = cases("urls")
+        assertTrue(cases.size >= 8)
+        for (case in cases) {
             assertEquals(case.name(), case.text("destination"), DestinationPayloads.fromUrl(case.text("url")!!)?.encoded())
         }
     }
@@ -83,7 +87,7 @@ class DestinationTest {
     @Test
     fun `the resolver agrees with every case`() {
         val cases = cases("resolve")
-        assertTrue(cases.size >= 30)
+        assertTrue(cases.size >= 50)
         for (case in cases) {
             val destination = Destination.decode(case.text("destination")!!)
             assertNotNull(case.name(), destination)
@@ -100,6 +104,7 @@ class DestinationTest {
 
     private fun expected(json: JsonObject): DestinationResolver.Resolution {
         if (json["wait"]?.jsonPrimitive?.booleanOrNull == true) return DestinationResolver.Resolution.Wait
+        json.text("connect")?.let { return DestinationResolver.Resolution.Connect(it) }
         json.text("open")?.let {
             return DestinationResolver.Resolution.Open(Destination.decode(it)!!, json["fellBack"]?.jsonPrimitive?.boolean ?: false)
         }
@@ -115,6 +120,7 @@ class DestinationTest {
                 host = seat.text("host")!!,
                 runnerId = seat.text("runnerId"),
                 ready = seat.flag("ready", false),
+                idle = seat.flag("idle", false),
                 workspaces = seat.list("workspaces")?.map {
                     DestinationResolver.World.Workspace(it.text("id")!!, it.flag("orchestrator", true))
                 },
