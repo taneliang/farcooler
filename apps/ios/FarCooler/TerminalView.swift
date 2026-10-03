@@ -1200,10 +1200,14 @@ struct TerminalView: View {
             // the pane can come back: restarted from the Mac, or relaunched
             // into the same slot by whoever owns it. The two ways out are the
             // fleet's own word, below, and this button.
-            status(
-                symbol: "moon.zzz", mark: .secondary, title: NotLivePane.title,
-                message: NotLivePane.message(for: currentName),
-                actionTitle: NotLivePane.action, action: { session.askAgain() })
+            if let kind = LostPane.Kind(state: live.state) {
+                gone(kind)
+            } else {
+                status(
+                    symbol: "moon.zzz", mark: .secondary, title: NotLivePane.title,
+                    message: NotLivePane.message(for: currentName),
+                    actionTitle: NotLivePane.action, action: { session.askAgain() })
+            }
         case .failed(let message, _) where PaneReconnect.isReconnecting(message):
             // A dropped link that `Connection` is already re-dialing: a wait,
             // drawn as one. Red is for a failure the person has to act on.
@@ -1246,12 +1250,40 @@ struct TerminalView: View {
     private func status(
         spinner: Bool = false, symbol: String? = nil, mark: Color = .secondary, title: String,
         message: String? = nil, transcript: String? = nil,
-        actionTitle: String? = nil, action: (() -> Void)? = nil
+        actionTitle: String? = nil, action: (() -> Void)? = nil,
+        secondaryTitle: String? = nil, secondary: (() -> Void)? = nil
     ) -> some View {
         EmptyState(
             spinner: spinner, symbol: symbol, mark: mark, title: title, message: message,
-            transcript: transcript, actionTitle: actionTitle, action: action)
+            transcript: transcript, actionTitle: actionTitle, action: action,
+            secondaryTitle: secondaryTitle, secondary: secondary)
         .padding(.horizontal, 32)
+    }
+
+    /// A pane the runner says is lost, ended or failed: why, what Restart
+    /// brings back, and Restart and, for a lost one, Dismiss (ov-191). The
+    /// Mac's page says the same words (`LostPane`). Without a Control
+    /// grant there's nothing to press, so it says why and offers Try Again.
+    @ViewBuilder
+    private func gone(_ kind: LostPane.Kind) -> some View {
+        let terminal = live
+        let mayAct = connection.daemon?.mayAct ?? true
+        let offers = LostPane.actions(for: kind)
+        if mayAct {
+            status(
+                symbol: "moon.zzz", mark: .secondary, title: LostPane.title(for: kind),
+                message: LostPane.explanation(for: kind) + " " + LostPane.restartNote(preset: terminal.preset),
+                actionTitle: "Restart",
+                action: { Task { await connection.act(.restart, on: terminal) } },
+                secondaryTitle: offers.contains(.dismiss) ? "Dismiss" : nil,
+                secondary: offers.contains(.dismiss)
+                    ? { Task { await connection.act(.dismissLost, on: terminal) } } : nil)
+        } else {
+            status(
+                symbol: "moon.zzz", mark: .secondary, title: LostPane.title(for: kind),
+                message: LostPane.explanation(for: kind),
+                actionTitle: NotLivePane.action, action: { session.askAgain() })
+        }
     }
 
     private func live(grid: TerminalGrid, size: CGSize) -> some View {

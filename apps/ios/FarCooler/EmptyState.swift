@@ -22,6 +22,10 @@ struct EmptyState: View {
     var transcript: String?
     var actionTitle: String?
     var action: (() -> Void)?
+    /// A second way out, beside the first: a lost terminal's Dismiss next to
+    /// its Restart (ov-191). Nil everywhere else.
+    var secondaryTitle: String?
+    var secondary: (() -> Void)?
     /// For a UI test to read the headline and the sentence by name.
     var titleID: String?
     var messageID: String?
@@ -60,9 +64,15 @@ struct EmptyState: View {
             // an error, and an accented button would read as the app asking to
             // be tapped.
             if let actionTitle, let action {
-                Button(actionTitle, action: action)
-                    .buttonStyle(.bordered)
-                    .padding(.top, 22)
+                HStack(spacing: 12) {
+                    Button(actionTitle, action: action)
+                        .buttonStyle(.bordered)
+                    if let secondaryTitle, let secondary {
+                        Button(secondaryTitle, action: secondary)
+                            .buttonStyle(.bordered)
+                    }
+                }
+                .padding(.top, 22)
             }
         }
     }
