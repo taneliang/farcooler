@@ -25,7 +25,6 @@
 //! [`Tail::read_new_lines`].
 
 use std::fs::File;
-use std::hash::{DefaultHasher, Hasher};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
@@ -67,40 +66,71 @@ const CHUNK_BYTES: usize = 8 * 1024;
 /// boundary, not this one.
 const READ_FROM_START_BYTES: u64 = 1024 * 1024;
 
-/// How far back from the last line's start the bytes before it are checked,
-/// to tell that line rewritten from the whole file replaced.
-///
-/// Four KiB is a few records in any of the three formats, read in the same
-/// `pread` as the last line itself. A replacement that keeps the last 4 KiB
-/// before that line byte for byte, and changes something earlier, is not
-/// caught; nothing that writes these logs does that.
-const BEFORE_BYTES: u64 = 4 * 1024;
+/// How much of the file's start is kept as its signature: a cheap check, on
+/// every read that finds the length moved, that the file is still the one
+/// being read. One `pread` of 4 KiB covers the first record of any of the
+/// three formats, which carries the session's id.
+const HEAD_BYTES: u64 = 4 * 1024;
+
+/// How much of an oversized line's start is kept, to check before resuming a
+/// skip that what is at `offset` is still that line.
+const SKIP_HEAD_BYTES: usize = 64;
+
+/// FNV-1a, 64-bit. Not for anything adversarial: these hashes only notice
+/// a log that changed under the reader. It is used because a hash of a long
+/// range can be carried forward byte by byte as the range grows, which is
+/// what lets the prefix hash below cost nothing extra while scanning.
+const FNV_START: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+fn fnv(mut state: u64, bytes: &[u8]) -> u64 {
+    for &byte in bytes {
+        state = (state ^ u64::from(byte)).wrapping_mul(FNV_PRIME);
+    }
+    state
+}
 
 /// A position in one session log file, advanced only past complete lines.
 ///
-/// Holds a path, a byte offset, which file the path named when it was last
-/// read, where the last line read began, and how far into an oversized line
-/// the reader has already skipped. Every hazard in
-/// `docs/agent-session-logs.md` — the half-written tail, the oversized line,
-/// the file that shrinks, the file that is replaced — is checked against the
-/// file on each call, so what is remembered is only ever a shortcut: when the
-/// file no longer agrees with it, it is dropped and the state re-derived. A
-/// crash or restart loses nothing worse than re-scanning from the last
-/// complete line.
+/// Holds a path, a byte offset, and what is needed to tell whether the file
+/// at that path is still the one the offset is in: its identity, its first
+/// bytes, a hash of everything read so far, and the last line read. Every
+/// hazard in `docs/agent-session-logs.md` — the half-written tail, the
+/// oversized line, the file that shrinks, the file that is replaced — is
+/// checked against the file on each call that finds its length moved, so
+/// what is remembered is only ever a shortcut: when the file no longer agrees
+/// with it, it is dropped and the state re-derived. A crash or restart loses
+/// nothing worse than re-scanning from the last complete line.
 pub struct Tail {
     path: PathBuf,
     offset: u64,
+    /// Where this `Tail` began reading: 0, or the end of a large file it
+    /// attached to. `prefix` covers the bytes from here.
+    attach: u64,
+    /// The FNV-1a hash of `[attach, offset)`, carried forward as lines are
+    /// read. Checked against the file whenever the reader would otherwise go
+    /// back, or the file looks replaced.
+    prefix: u64,
     /// The device and inode `path` named on the last read. `None` before the
     /// file exists, and always on a platform without inodes.
     identity: Option<(u64, u64)>,
+    head: Option<Head>,
     last_line: Option<LastLine>,
-    /// Where scanning stopped inside an oversized line that has no newline
-    /// yet. Every byte from `offset` to here belongs to that line, so the
-    /// next call resumes here instead of scanning the whole line again.
-    skipped_to: Option<u64>,
+    skip: Option<Skip>,
     /// Bytes pulled from disk by the scanning loop, over this `Tail`'s life.
     #[cfg(test)]
     scanned: u64,
+    /// Times `settle` fell through to hashing the file again from `attach`.
+    #[cfg(test)]
+    rehashed: u64,
+}
+
+/// The file's first bytes, as last seen.
+#[derive(Clone, Copy)]
+struct Head {
+    /// How many: the file's length, up to `HEAD_BYTES`.
+    len: u64,
+    hash: u64,
 }
 
 /// The last complete line handed back, by position and content.
@@ -113,25 +143,20 @@ struct LastLine {
     start: u64,
     /// Of the line's content, without its `\n`.
     hash: u64,
-    /// Of the up to `BEFORE_BYTES` bytes that end where the line starts.
+    /// `prefix` as it was at `start`: the hash of `[attach, start)`.
     before: u64,
 }
 
-/// What a file whose length moved did to the last line read.
-enum Change {
-    /// Still there, unchanged, and everything after it is new.
-    None,
-    /// The line was rewritten, cut short, or removed; everything before it
-    /// is as it was.
-    LastLine,
-    /// The bytes before the line changed too: this is a different file.
-    Replaced,
-}
-
-fn hash_of(bytes: &[u8]) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    hasher.write(bytes);
-    hasher.finish()
+/// An oversized line, without its newline yet, that scanning stopped inside.
+/// It starts at `offset`; every byte from there to `to` belongs to it, so the
+/// next call resumes at `to` instead of scanning the whole line again.
+#[derive(Clone, Copy)]
+struct Skip {
+    to: u64,
+    /// Of the line's first `SKIP_HEAD_BYTES`.
+    head: u64,
+    /// The hash of `[attach, to)`, so the scan carries on from there.
+    state: u64,
 }
 
 #[cfg(unix)]
@@ -145,12 +170,19 @@ fn identity_of(_: &std::fs::Metadata) -> Option<(u64, u64)> {
     None
 }
 
-/// Reads `[from, to)`, or `None` if any of it cannot be read.
-fn read_range(file: &mut File, from: u64, to: u64) -> Option<Vec<u8>> {
-    let mut bytes = vec![0u8; (to - from) as usize];
+/// `state` carried forward over `[from, to)`, or `None` if any of it cannot
+/// be read.
+fn hash_range(file: &mut File, from: u64, to: u64, mut state: u64) -> Option<u64> {
     file.seek(SeekFrom::Start(from)).ok()?;
-    file.read_exact(&mut bytes).ok()?;
-    Some(bytes)
+    let mut left = to - from;
+    let mut chunk = [0u8; CHUNK_BYTES];
+    while left > 0 {
+        let take = left.min(CHUNK_BYTES as u64) as usize;
+        file.read_exact(&mut chunk[..take]).ok()?;
+        state = fnv(state, &chunk[..take]);
+        left -= take as u64;
+    }
+    Some(state)
 }
 
 impl Tail {
@@ -172,10 +204,15 @@ impl Tail {
             identity: meta.as_ref().and_then(identity_of),
             path,
             offset,
+            attach: offset,
+            prefix: FNV_START,
+            head: None,
             last_line: None,
-            skipped_to: None,
+            skip: None,
             #[cfg(test)]
             scanned: 0,
+            #[cfg(test)]
+            rehashed: 0,
         }
     }
 
@@ -206,22 +243,22 @@ impl Tail {
     /// prompt where it was, so the file grows -- 3,619 bytes to 3,911 -- and
     /// the old offset lands 41 bytes into the new record. Read from there,
     /// the prompt is a fragment that is not JSON, the turn start is never
-    /// seen, and every turn after the first read Idle. Only the last line is
-    /// compared whole: that is the one cursor rewrites, and a change further
-    /// back is history the parsers have already folded.
+    /// seen, and every turn after the first read Idle. The same holds when
+    /// the file now ends inside that line: removed and not yet rewritten, or
+    /// rewritten shorter.
     ///
-    /// The same holds when the file now ends INSIDE that line, shorter than
-    /// it was: removed and not yet rewritten, or rewritten shorter. Reading
-    /// resumes at the line's start, so a removed line yields nothing and the
-    /// line written in its place is read once. That is right only if the
-    /// line is all that changed, so the `BEFORE_BYTES` before it are checked
-    /// too; if they differ, the file was truncated and refilled with
-    /// something else, and is read from its start.
+    /// Going back to the line's start is right only if the line is all that
+    /// changed, so every byte before it is hashed again and compared. That
+    /// costs a read of everything this `Tail` has read, but only when the
+    /// file shrank, the last line changed, or the file looks replaced; on an
+    /// ordinary append it costs nothing. If the bytes differ, the file was
+    /// replaced, and it is read from its start, whatever its size.
     ///
-    /// A different file at the same path (a new inode, as a rename over it
-    /// leaves) is read from its start, whatever its length. Callers fold
-    /// lines into last-boundary-wins state, so a replacement that repeats
-    /// lines already read leaves them where they would have been.
+    /// "Looks replaced" is a new inode at the path (a rename over it), or
+    /// first bytes that differ (which also catches a delete and re-create
+    /// that reuses the inode, as ext4 often does). Even then, a file whose
+    /// bytes still match what was read is followed from where it was, not
+    /// replayed: a rename of a copy that only appended is just an append.
     ///
     /// Checked only when the length has moved past what was scanned. A
     /// rewrite to exactly the same length is missed until the file next
@@ -239,52 +276,21 @@ impl Tail {
             Ok(m) => (m.len(), identity_of(&m)),
             Err(_) => return Vec::new(),
         };
-
-        // A different file now has this name. Nothing remembered about the
-        // old one says anything about it, however their lengths compare.
-        if self.identity.is_some() && identity != self.identity {
-            self.offset = 0;
-            self.last_line = None;
-            self.skipped_to = None;
-        }
+        let renamed = self.identity.is_some() && identity != self.identity;
         self.identity = identity;
 
-        // Before the shrink rule, so a rewrite that leaves the file shorter
-        // than it was re-reads one line rather than the whole file.
-        if len != self.skipped_to.unwrap_or(self.offset) {
-            if let Some(last) = self.last_line {
-                match self.change(&mut file, last, len) {
-                    Change::None => {}
-                    Change::LastLine => {
-                        self.offset = last.start;
-                        self.last_line = None;
-                        self.skipped_to = None;
-                    }
-                    Change::Replaced => {
-                        self.offset = 0;
-                        self.last_line = None;
-                        self.skipped_to = None;
-                    }
-                }
-            }
+        let end = self.skip.map_or(self.offset, |skip| skip.to);
+        if !renamed && len == end {
+            return Vec::new();
         }
+        // A read that fails says nothing either way: leave everything as it
+        // is, as every other failure here does, and look again next call.
+        if self.settle(&mut file, len, renamed).is_none() {
+            return Vec::new();
+        }
+        self.note_head(&mut file, len);
 
-        // Smaller than what was already read means the file was truncated or
-        // replaced underneath us — the old offset now points into the middle
-        // of a record that no longer exists. Reset rather than seek there.
-        if len < self.offset {
-            self.offset = 0;
-            self.last_line = None;
-            self.skipped_to = None;
-        }
-        // Every rule above that moves the offset drops the skip with it. One
-        // left standing still starts at `offset`; if the file no longer
-        // reaches where it stopped, the line was cut short or rewritten, and
-        // is scanned again from its start.
-        if self.skipped_to.is_some_and(|to| len < to) {
-            self.skipped_to = None;
-        }
-        let resume = self.skipped_to.unwrap_or(self.offset);
+        let resume = self.skip.map_or(self.offset, |skip| skip.to);
         if len == resume {
             return Vec::new();
         }
@@ -298,7 +304,7 @@ impl Tail {
         // still-growing line never holds more than MAX_LINE_BYTES in memory
         // regardless of how large it eventually turns out to be.
         let mut current = Vec::new();
-        let mut current_over_cap = self.skipped_to.is_some();
+        let mut current_over_cap = self.skip.is_some();
         // Every byte of the line being accumulated, including the ones an
         // over-cap line has stopped storing. `current.len()` cannot stand in
         // for it: once the line crosses the cap, `current` is emptied and
@@ -311,9 +317,12 @@ impl Tail {
         // arrives, or a half-written record would be skipped over rather
         // than re-read whole on the next call.
         let mut consumed: u64 = 0;
+        // The prefix hash through `consumed`, and through every byte scanned.
+        let mut committed = self.prefix;
+        let mut running = self.skip.map_or(self.prefix, |skip| skip.state);
+        let mut skip_head = self.skip.map(|skip| skip.head);
 
         let mut last = self.last_line;
-        let mut last_is_new = false;
 
         let mut chunk = [0u8; CHUNK_BYTES];
         loop {
@@ -330,17 +339,16 @@ impl Tail {
                 self.scanned += n as u64;
             }
             for &byte in &chunk[..n] {
+                running = fnv(running, &[byte]);
                 if byte == b'\n' {
                     // Where this line started, before `consumed` moves past
                     // it. An oversized line cannot be checked later, since
                     // none of it was kept, so it leaves nothing to check.
-                    // `before` is filled in once the scan is done.
                     last = (!current_over_cap).then(|| LastLine {
                         start: self.offset + consumed,
-                        hash: hash_of(&current),
-                        before: 0,
+                        hash: fnv(FNV_START, &current),
+                        before: committed,
                     });
-                    last_is_new = true;
                     if !current_over_cap {
                         // Session logs are UTF-8 JSONL; a line that is not
                         // valid UTF-8 cannot become a `String` and is dropped
@@ -352,15 +360,18 @@ impl Tail {
                         }
                     }
                     consumed += current_len + 1;
+                    committed = running;
                     current.clear();
                     current_len = 0;
                     current_over_cap = false;
+                    skip_head = None;
                 } else {
                     current_len += 1;
                     if !current_over_cap {
                         current.push(byte);
                         if current.len() > MAX_LINE_BYTES {
                             current_over_cap = true;
+                            skip_head = Some(fnv(FNV_START, &current[..SKIP_HEAD_BYTES]));
                             current.clear();
                         }
                     }
@@ -373,42 +384,121 @@ impl Tail {
         }
 
         self.offset += consumed;
-        self.skipped_to = current_over_cap.then_some(self.offset + current_len);
-        if last_is_new {
-            if let Some(line) = last.as_mut() {
-                let from = line.start.saturating_sub(BEFORE_BYTES);
-                // A line whose surroundings cannot be read cannot be checked
-                // later, the same as an oversized one.
-                match read_range(&mut file, from, line.start) {
-                    Some(bytes) => line.before = hash_of(&bytes),
-                    None => last = None,
-                }
-            }
-        }
+        self.prefix = committed;
         self.last_line = last;
+        self.skip = match (current_over_cap, skip_head) {
+            (true, Some(head)) => Some(Skip { to: self.offset + current_len, head, state: running }),
+            _ => None,
+        };
         lines
     }
 
-    /// What became of the last line read, now that the file is `len` bytes.
+    /// Decides where reading resumes, now that the file is `len` bytes and
+    /// its length has moved (or its identity has). `None` if a read failed.
     ///
-    /// A file too short to reach the line's start has plainly been replaced.
-    /// A read that fails says nothing either way and is not a change: the
-    /// offset is left alone, as every other failure here leaves it.
-    fn change(&self, file: &mut File, last: LastLine, len: u64) -> Change {
-        if len < last.start {
-            return Change::Replaced;
+    /// The cheap checks come first: on an ordinary append to the same file,
+    /// with its first bytes, its last line and any skipped line's start all
+    /// as they were, nothing more is read. Anything else hashes the file
+    /// again from `attach` and resumes at the furthest point the hash still
+    /// agrees with: the offset, else the last line's start, else 0.
+    fn settle(&mut self, file: &mut File, len: u64, renamed: bool) -> Option<()> {
+        let end = self.skip.map_or(self.offset, |skip| skip.to);
+        let head_moved = match self.head {
+            Some(head) if len >= head.len => hash_range(file, 0, head.len, FNV_START)? != head.hash,
+            _ => false,
+        };
+        // Spent either way: one that no longer matches, or no longer fits,
+        // is taken again once this settles, so it is not tripped every call.
+        if head_moved || self.head.is_some_and(|head| head.len > len) {
+            self.head = None;
         }
-        let from = last.start.saturating_sub(BEFORE_BYTES);
-        let to = if len < self.offset { last.start } else { self.offset };
-        let Some(mut bytes) = read_range(file, from, to) else { return Change::None };
-        let mut line = bytes.split_off((last.start - from) as usize);
-        if hash_of(&bytes) != last.before {
-            return Change::Replaced;
+        if !renamed && !head_moved && len >= end {
+            let line_same = match self.last_line {
+                Some(last) => {
+                    let mut line = vec![0u8; (self.offset - last.start) as usize];
+                    file.seek(SeekFrom::Start(last.start)).ok()?;
+                    file.read_exact(&mut line).ok()?;
+                    line.pop() == Some(b'\n') && fnv(FNV_START, &line) == last.hash
+                }
+                None => true,
+            };
+            if line_same && self.skip_same(file, len)? {
+                return Some(());
+            }
         }
-        if len < self.offset || line.pop() != Some(b'\n') || hash_of(&line) != last.hash {
-            return Change::LastLine;
+
+        #[cfg(test)]
+        {
+            self.rehashed += 1;
         }
-        Change::None
+        if len < self.attach {
+            self.replaced();
+            return Some(());
+        }
+        let mut state = FNV_START;
+        let mut at = self.attach;
+        if let Some(last) = self.last_line {
+            if len < last.start {
+                self.replaced();
+                return Some(());
+            }
+            state = hash_range(file, at, last.start, state)?;
+            at = last.start;
+            if state != last.before {
+                self.replaced();
+                return Some(());
+            }
+        }
+        if len >= self.offset && hash_range(file, at, self.offset, state)? == self.prefix {
+            if !self.skip_same(file, len)? {
+                self.skip = None;
+            }
+            return Some(());
+        }
+        match self.last_line {
+            Some(last) => {
+                self.offset = last.start;
+                self.prefix = last.before;
+                self.last_line = None;
+                self.skip = None;
+            }
+            None => self.replaced(),
+        }
+        Some(())
+    }
+
+    /// Whether a skip in progress, if any, can still be resumed: the file
+    /// still reaches where it stopped, and still starts that line with the
+    /// same bytes.
+    fn skip_same(&self, file: &mut File, len: u64) -> Option<bool> {
+        let Some(skip) = self.skip else { return Some(true) };
+        if len < skip.to {
+            return Some(false);
+        }
+        let head = hash_range(file, self.offset, self.offset + SKIP_HEAD_BYTES as u64, FNV_START)?;
+        Some(head == skip.head)
+    }
+
+    /// The file is not the one that was being read: start it from 0.
+    fn replaced(&mut self) {
+        self.offset = 0;
+        self.attach = 0;
+        self.prefix = FNV_START;
+        self.head = None;
+        self.last_line = None;
+        self.skip = None;
+    }
+
+    /// Takes the file's first bytes as its signature, until there are
+    /// `HEAD_BYTES` of them. A failed read leaves the old one, if any.
+    fn note_head(&mut self, file: &mut File, len: u64) {
+        let want = len.min(HEAD_BYTES);
+        if self.head.is_some_and(|head| head.len >= want) {
+            return;
+        }
+        if let Some(hash) = hash_range(file, 0, want, FNV_START) {
+            self.head = Some(Head { len: want, hash });
+        }
     }
 }
 
@@ -820,6 +910,141 @@ mod tests {
 
         append(&path, b"three\n");
         assert_eq!(tail.read_new_lines(), vec!["three"]);
+    }
+
+    /// A skip in progress, then the same file truncated and refilled past
+    /// where the skip stopped. What sits at the skipped line's start is not
+    /// that line any more, so the skip is dropped and the refill read from
+    /// its start, not resumed in the middle of bytes never seen.
+    #[test]
+    fn a_skip_is_not_resumed_into_a_file_refilled_in_place() {
+        let path = scratch("skip-then-refilled");
+        std::fs::write(&path, "").unwrap();
+        let mut tail = Tail::new(path.clone());
+
+        append(&path, "x".repeat(MAX_LINE_BYTES * 2).as_bytes());
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
+
+        let refill = format!("first\n{}\nkept\n", "y".repeat(MAX_LINE_BYTES * 2 + 100));
+        std::fs::write(&path, refill).unwrap();
+        assert_eq!(tail.read_new_lines(), vec!["first", "kept"]);
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
+    }
+
+    /// Cut back inside the last line, with the 4 KiB before that line as
+    /// they were but an earlier line changed. Every byte before the line is
+    /// checked, not just the nearest, so this is a different file, read
+    /// from its start.
+    #[test]
+    fn a_shrink_inside_the_last_line_checks_every_byte_before_it() {
+        let path = scratch("shrink-old-change");
+        let filler: String = (0..100).map(|i| format!("{{\"filler\":{i:040}}}\n")).collect();
+        assert!(filler.len() > 4096);
+        std::fs::write(&path, format!("early\n{filler}a-long-last-line\n")).unwrap();
+        let mut tail = Tail::new(path.clone());
+        assert_eq!(tail.read_new_lines().len(), 102);
+
+        std::fs::write(&path, format!("EARLY\n{filler}short\n")).unwrap();
+        let again = tail.read_new_lines();
+        assert_eq!(again.len(), 102);
+        assert_eq!((again[0].as_str(), again[101].as_str()), ("EARLY", "short"));
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
+    }
+
+    /// A different file at the same path, on the same inode, at least as
+    /// long, with no last line to check: what a delete and re-create looks
+    /// like when the inode is reused, as ext4 often does. Its first bytes
+    /// differ, so it is read from its start.
+    #[test]
+    fn a_log_refilled_on_the_same_inode_is_read_from_its_start() {
+        let path = scratch("refilled-same-inode");
+        let huge = "x".repeat(MAX_LINE_BYTES + 1);
+        std::fs::write(&path, format!("one\n{huge}\n")).unwrap();
+        let mut tail = Tail::new(path.clone());
+        assert_eq!(tail.read_new_lines(), vec!["one"]);
+
+        std::fs::write(&path, format!("uno\n{huge}\nthree\n")).unwrap();
+        assert_eq!(tail.read_new_lines(), vec!["uno", "three"]);
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
+    }
+
+    /// A new inode whose bytes are the ones already read, plus more: an
+    /// append delivered by a rename. Only what is new is read; nothing is
+    /// handed back a second time.
+    #[test]
+    fn a_rename_of_the_same_bytes_plus_more_is_not_replayed() {
+        let path = scratch("renamed-same-bytes");
+        std::fs::write(&path, "one\ntwo\n").unwrap();
+        let mut tail = Tail::new(path.clone());
+        assert_eq!(tail.read_new_lines(), vec!["one", "two"]);
+
+        let next = path.with_extension("next");
+        std::fs::write(&next, "one\ntwo\nthree\n").unwrap();
+        std::fs::rename(&next, &path).unwrap();
+        assert_eq!(tail.read_new_lines(), vec!["three"]);
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
+    }
+
+    /// Cursor's turn-start rewrite, if it were written to a new file and
+    /// renamed over the old: the same as the rewrite in place, one line read
+    /// again, nothing before it.
+    #[test]
+    fn a_last_line_rewritten_by_rename_is_read_again_without_the_rest() {
+        let path = scratch("rewritten-by-rename");
+        std::fs::write(&path, format!("{CURSOR_LAST_STEP}\n{CURSOR_TURN_ENDED}\n")).unwrap();
+        let mut tail = Tail::new(path.clone());
+        assert_eq!(tail.read_new_lines(), vec![CURSOR_LAST_STEP, CURSOR_TURN_ENDED]);
+
+        let next = path.with_extension("next");
+        std::fs::write(&next, format!("{CURSOR_LAST_STEP}\n{CURSOR_NEXT_PROMPT}\n")).unwrap();
+        std::fs::rename(&next, &path).unwrap();
+        assert_eq!(tail.read_new_lines(), vec![CURSOR_NEXT_PROMPT]);
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
+
+        append(&path, b"{\"more\":1}\n");
+        assert_eq!(tail.read_new_lines(), vec!["{\"more\":1}"]);
+    }
+
+    /// Hashing everything again is for a file that looks changed, once. A
+    /// rewrite that reaches into the file's first `HEAD_BYTES` leaves the
+    /// first bytes taken before it stale, so they are taken again, or every
+    /// append after a cursor turn start would re-read the whole file.
+    #[test]
+    fn a_rewrite_is_checked_in_full_once_and_appends_after_it_are_not() {
+        let path = scratch("rehash-once");
+        // The last line starts before the 4 KiB mark and ends after it.
+        let filler = format!("{}\n", "f".repeat(4070));
+        std::fs::write(&path, format!("{filler}{CURSOR_TURN_ENDED}\n")).unwrap();
+        let mut tail = Tail::new(path.clone());
+        assert_eq!(tail.read_new_lines().len(), 2);
+        assert_eq!(tail.rehashed, 0);
+
+        std::fs::write(&path, format!("{filler}{CURSOR_NEXT_PROMPT}\n")).unwrap();
+        assert_eq!(tail.read_new_lines(), vec![CURSOR_NEXT_PROMPT]);
+        assert_eq!(tail.rehashed, 1);
+
+        for i in 0..3 {
+            append(&path, format!("{{\"step\":{i}}}\n").as_bytes());
+            assert_eq!(tail.read_new_lines().len(), 1);
+        }
+        assert_eq!(tail.rehashed, 1);
+    }
+
+    /// The refill keeps the file's first bytes and its last line read, and
+    /// changes only what starts at the skipped line. The skipped line's own
+    /// first bytes are what catch it.
+    #[test]
+    fn a_skip_is_not_resumed_when_only_the_skipped_line_changed() {
+        let path = scratch("skip-line-changed");
+        let filler = format!("{}\n", "f".repeat(5000));
+        std::fs::write(&path, format!("{filler}{}", "x".repeat(MAX_LINE_BYTES * 2))).unwrap();
+        let mut tail = Tail::new(path.clone());
+        assert_eq!(tail.read_new_lines(), vec![&filler[..5000]]);
+
+        let refill = format!("{filler}first\n{}\nkept\n", "y".repeat(MAX_LINE_BYTES * 2 + 100));
+        std::fs::write(&path, refill).unwrap();
+        assert_eq!(tail.read_new_lines(), vec!["first", "kept"]);
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
     }
 
     #[test]
