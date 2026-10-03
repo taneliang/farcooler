@@ -60,4 +60,61 @@ class TaskLinkTest {
         )
         assertEquals(0, board.tasksWithLiveAgents(wt.terminals))
     }
+
+    // Which task an agent's own notifications fold into (ov-107): the same
+    // cases as AgentKit's TaskLinkTests.
+
+    @Test
+    fun `an agent's notices fold into the task it was opened for, anywhere`() {
+        val pane = Terminal(id = "p", preset = "claude", state = "running", taskId = "t-4")
+        assertEquals("t-4", TaskLink.noticeTaskId(pane, worktree(invoice)))
+        assertEquals("t-4", TaskLink.noticeTaskId(pane, worktree()))
+        assertEquals("t-4", TaskLink.noticeTaskId(pane, worktree(invoice).copy(isMainCheckout = true)))
+    }
+
+    @Test
+    fun `an agent opened by hand folds into its lane's one open task, never two`() {
+        val pane = Terminal(id = "p", preset = "claude", state = "running")
+        assertEquals("t-9", TaskLink.noticeTaskId(pane, worktree(invoice)))
+        assertEquals("t-9", TaskLink.noticeTaskId(pane.copy(taskId = ""), worktree(invoice)))
+        assertNull(TaskLink.noticeTaskId(pane, worktree(invoice, retries)))
+        assertNull(TaskLink.noticeTaskId(pane, worktree()))
+        assertNull(TaskLink.noticeTaskId(pane, null))
+    }
+
+    @Test
+    fun `the main checkout is nobody's lane for notices, though its top bar names the task`() {
+        val pane = Terminal(id = "p", preset = "claude", state = "running")
+        val checkout = worktree(invoice).copy(isMainCheckout = true)
+        assertEquals(invoice, TaskLink.task(pane, checkout))
+        assertNull(TaskLink.noticeTaskId(pane, checkout))
+    }
+
+    @Test
+    fun `an orchestrator's notices are its own`() {
+        val lead = Terminal(id = "o", preset = "claude", state = "running", role = "orchestrator")
+        assertNull(TaskLink.noticeTaskId(lead, worktree(invoice)))
+        assertNull(TaskLink.noticeTaskId(lead.copy(taskId = "t-4"), worktree()))
+    }
+
+    @Test
+    fun `a banner is left to the task only where the task's notice arrives`() {
+        val agent = Terminal(id = "p", preset = "claude", state = "running", taskId = "t-4")
+        val loose = Terminal(id = "l", preset = "claude", state = "running")
+        org.junit.Assert.assertTrue(TaskLink.leavesBannerToTask(agent, worktree(), true))
+        org.junit.Assert.assertFalse(TaskLink.leavesBannerToTask(agent, worktree(), false))
+        org.junit.Assert.assertFalse(TaskLink.leavesBannerToTask(loose, worktree(), true))
+    }
+
+    @Test
+    fun `a phone hears a task notice only from a paired runner that sends them, once registered`() {
+        fun build(capabilities: Set<String>, paired: Boolean) =
+            DaemonBuild("v", true, "linux", capabilities = capabilities, pushPaired = paired)
+        val sends = setOf("tasks", "task_notices")
+        org.junit.Assert.assertTrue(TaskLink.taskNoticeReachesPhone(build(sends, true), registered = true))
+        org.junit.Assert.assertFalse(TaskLink.taskNoticeReachesPhone(build(sends, true), registered = false))
+        org.junit.Assert.assertFalse(TaskLink.taskNoticeReachesPhone(build(sends, false), registered = true))
+        org.junit.Assert.assertFalse(TaskLink.taskNoticeReachesPhone(build(setOf("tasks"), true), registered = true))
+        org.junit.Assert.assertFalse(TaskLink.taskNoticeReachesPhone(null, registered = true))
+    }
 }

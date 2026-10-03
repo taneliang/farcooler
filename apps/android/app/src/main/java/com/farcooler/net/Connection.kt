@@ -1124,6 +1124,8 @@ class Connection(
             // build cannot silently strip controls off it.
             grantedScope = body["grantedScope"]?.jsonPrimitive?.contentOrNull ?: "unspecified",
             runnerId = body["runnerId"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotEmpty() },
+            // Whether its task notices reach this phone as pushes (ov-107).
+            pushPaired = body["pushPaired"]?.jsonPrimitive?.booleanOrNull ?: false,
         )
         // Read from the same call, which is already made once per connection.
         //

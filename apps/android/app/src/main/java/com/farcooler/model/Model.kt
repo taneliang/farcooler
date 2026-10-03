@@ -942,6 +942,12 @@ data class DaemonBuild(
      * runner by (ov-72). Null from a runner too old to say.
      */
     val runnerId: String? = null,
+    /**
+     * Whether the runner is paired with the relay (`Host.push_paired`), so its
+     * task notices reach this phone as pushes. False from a runner too old to
+     * say. See [TaskLink.taskNoticeReachesPhone].
+     */
+    val pushPaired: Boolean = false,
 ) {
     /**
      * Whether this runner can do something, by name.

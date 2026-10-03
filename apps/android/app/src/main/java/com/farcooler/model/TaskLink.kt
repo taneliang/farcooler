@@ -38,4 +38,43 @@ object TaskLink {
         val id = taskId(pane, worktree) ?: return null
         return worktree?.openTasks?.firstOrNull { it.id == id } ?: TaskRef(id = id)
     }
+
+    /**
+     * The id of the task [pane]'s own notifications fold into, or null when
+     * it notifies as itself (ov-94, ov-107). Not [taskId]: that names a top
+     * bar, and this decides whether an agent's banner is left to its task's
+     * notice, so it gives the runner's answer (`task_link::task_of`). The same
+     * cases as AgentKit's `TaskLink.noticeTask`.
+     *
+     * - Never an orchestrator's.
+     * - The task it was opened for, when it was opened for one.
+     * - Otherwise its lane's one open task; with two, none.
+     * - Never by lane in the repository's main checkout, where ad hoc agents
+     *   run and one dispatched task would take in all of them. The runner's
+     *   `task_of` still folds there (ov-107 report), so an agent there gets
+     *   both banners until it doesn't, never neither.
+     */
+    fun noticeTaskId(pane: Terminal, worktree: Worktree?): String? {
+        if (pane.isOrchestrator) return null
+        pane.taskId?.takeIf { it.isNotEmpty() }?.let { return it }
+        if (worktree == null || worktree.isMainCheckout) return null
+        return worktree.openTasks.singleOrNull()?.id
+    }
+
+    /**
+     * Whether [pane]'s own banner is left to its task's notice: it folds into
+     * a task, and that task's notice reaches this phone ([noticeReachesHere],
+     * from [taskNoticeReachesPhone]). Otherwise its own banner is all there is.
+     */
+    fun leavesBannerToTask(pane: Terminal, worktree: Worktree?, noticeReachesHere: Boolean): Boolean =
+        noticeReachesHere && noticeTaskId(pane, worktree) != null
+
+    /**
+     * Whether a task notice from the runner [daemon] describes reaches this
+     * phone, which hears one only as a push: the runner composes them
+     * (`task_notices`), is paired with the relay ([DaemonBuild.pushPaired]),
+     * and this phone is [registered] with the relay.
+     */
+    fun taskNoticeReachesPhone(daemon: DaemonBuild?, registered: Boolean): Boolean =
+        daemon != null && daemon.can("task_notices") && daemon.pushPaired && registered
 }
