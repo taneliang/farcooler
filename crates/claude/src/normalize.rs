@@ -215,7 +215,12 @@ impl Live {
                 // result, so holding these any longer only grows the set.
                 self.streaming = None;
                 self.drawn.clear();
-                frame_to_events_from(frame, Origin::Live)
+                // Live only: a restored transcript's results were recorded
+                // when they happened, and counting them again would double a
+                // report.
+                let mut events = frame_to_events_from(frame, Origin::Live);
+                events.extend(crate::usage::turn_usage(frame).map(|usage| AgentEvent::TurnUsage { usage }));
+                events
             }
             _ => frame_to_events_from(frame, Origin::Live),
         }

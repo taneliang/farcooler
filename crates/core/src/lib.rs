@@ -23,6 +23,7 @@ pub mod shell;
 pub mod theme;
 pub mod title;
 pub mod trace;
+pub mod usage;
 pub mod validate;
 
 pub use error::{DomainError, Result};

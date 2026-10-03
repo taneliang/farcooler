@@ -23,6 +23,8 @@ pub mod cursor;
 
 pub mod tail;
 
+pub mod usage;
+
 /// One thing that happened in a session.
 ///
 /// Deliberately small. Three formats with nothing in common map onto this, and

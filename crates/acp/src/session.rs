@@ -579,6 +579,7 @@ impl AgentSession {
             pending_prompt: self.pending_prompt,
             worktree,
             fs: None,
+            spend: Default::default(),
         }
     }
 }
@@ -604,6 +605,8 @@ pub struct RunningSession {
     /// The worktree held open for `fs/*` requests, from the first one on, so
     /// every later request walks from the same directory.
     fs: Option<Worktree>,
+    /// The session's running cost, for each turn's share. See `crate::usage`.
+    spend: crate::usage::Spend,
 }
 
 impl RunningSession {
@@ -824,11 +827,18 @@ impl RunningSession {
                 if id.as_u64() == self.pending_prompt {
                     self.pending_prompt = None;
                     let reason = end_reason(result["stopReason"].as_str().unwrap_or_default());
+                    // ACP names no turn, so the key is made here, once; a
+                    // replay of this event carries the same one.
+                    let at = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_nanos())
+                        .unwrap_or_default();
+                    let usage = self.spend.ended(format!("acp:{}:{at}", self.session_id), &result);
                     // Reporting the end is all this does now. Draining the
                     // queue is `ChatSession`'s job, and it triggers on exactly
                     // this event — which is what lets a backend that reports a
                     // turn's end some other way get the same behavior for free.
-                    return Ok(vec![AgentEvent::TurnEnded { reason }]);
+                    return Ok(vec![AgentEvent::TurnEnded { reason }, AgentEvent::TurnUsage { usage }]);
                 }
                 return Ok(Vec::new());
             }
@@ -926,6 +936,7 @@ impl RunningSession {
                 Ok(vec![permission_event(&request_id, &params)])
             }
             ("session/update", _) => {
+                self.spend.notice(&params);
                 let raw = params.clone();
                 let rpc = Rpc { method: Some(method), params: Some(params), id: None, result: None, error: None };
                 match rpc.session_notification() {
@@ -1014,6 +1025,7 @@ mod tests {
             pending_prompt: None,
             worktree,
             fs: None,
+            spend: Default::default(),
         };
 
         let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), session.next_events())
@@ -1127,6 +1139,7 @@ mod tests {
             pending_prompt: None,
             worktree,
             fs: None,
+            spend: Default::default(),
         };
         session.prompt("hello", &[]).await.expect("the prompt goes out");
         assert_eq!(session.pending_prompt, Some(1));
@@ -1238,6 +1251,7 @@ mod tests {
             pending_prompt: None,
             worktree,
             fs: None,
+            spend: Default::default(),
         }
     }
 

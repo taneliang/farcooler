@@ -11,4 +11,5 @@ pub mod conn;
 pub mod handshake;
 pub mod normalize;
 pub mod session;
+pub mod usage;
 pub mod wire;

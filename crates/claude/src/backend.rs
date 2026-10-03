@@ -978,7 +978,12 @@ mod tests {
             })))
             .await
             .expect("a turn has to be able to end");
-        assert!(matches!(ended.as_slice(), [AgentEvent::TurnEnded { .. }]));
+        // The turn's spend rides beside its end (`crate::usage`); this
+        // synthetic result states none, so it is "not reported".
+        assert!(matches!(
+            ended.as_slice(),
+            [AgentEvent::TurnEnded { .. }, AgentEvent::TurnUsage { usage }] if usage.models.is_none()
+        ));
 
         let Incoming::Control { request_id, request } =
             backend.recv_frame().await.expect("cat echoes what we asked")

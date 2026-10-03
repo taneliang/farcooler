@@ -17,3 +17,4 @@ pub mod backend;
 pub mod conn;
 pub mod handshake;
 pub mod normalize;
+pub mod usage;

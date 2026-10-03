@@ -472,7 +472,7 @@ fn at_ms(record: &Value) -> Option<i64> {
 /// parent for the precedent): this whole file already reads `serde_json`
 /// fields by hand instead of deriving, so one more field read by hand is not
 /// an outlier, and a crate whose only caller is one timestamp field would be.
-fn parse_iso8601_millis(s: &str) -> Option<i64> {
+pub(crate) fn parse_iso8601_millis(s: &str) -> Option<i64> {
     let bytes = s.as_bytes();
     if bytes.len() < 20 {
         return None;

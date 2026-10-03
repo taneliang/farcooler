@@ -67,6 +67,9 @@ pub struct CodexBackend {
     /// turn instead of needing a new thread.
     model: Option<String>,
     effort: Option<String>,
+    /// The thread's running token total, which each turn's spend is read
+    /// off. See `crate::usage`.
+    tokens: crate::usage::TokenLedger,
     /// The same, for `approvalPolicy`. Held rather than sent immediately for
     /// the same reason: `turn/start` is where codex accepts it.
     approval: Option<String>,
@@ -240,6 +243,7 @@ impl CodexBackend {
                 returned: Vec::new(),
                 model,
                 effort,
+                tokens: Default::default(),
                 approval,
             },
             prelude,
@@ -266,7 +270,10 @@ impl CodexBackend {
                     self.interrupt_wanted = false;
                 }
                 self.send_held().await?;
-                Ok(frame_to_events(&method, &params, Origin::Live))
+                let mut events = frame_to_events(&method, &params, Origin::Live);
+                let spent = self.tokens.observe(&method, &params, self.model.as_deref());
+                events.extend(spent.map(|usage| AgentEvent::TurnUsage { usage }));
+                Ok(events)
             }
             Incoming::Request { id, method, params } => {
                 // Every approval the server can ask becomes one event. The id
@@ -899,6 +906,7 @@ mod tests {
             returned: Vec::new(),
             model: None,
             effort: None,
+            tokens: Default::default(),
             approval: None,
         }
     }

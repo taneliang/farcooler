@@ -306,6 +306,14 @@ pub enum AgentEvent {
     TurnEnded {
         reason: EndReason,
     },
+    /// What the turn that just ended spent, for the runner's store.
+    ///
+    /// Bookkeeping that never reaches a transcript: the daemon takes it out of
+    /// the stream before numbering (`AgentSupervisor::record`), so a client
+    /// never meets a variant it has no case for. See `crate::usage`.
+    TurnUsage {
+        usage: crate::usage::TurnUsage,
+    },
     /// Everything waiting to be sent, in order, sent whole on every change.
     ///
     /// Wholesale like `Plan`, and for the same reason: the list is short, it is

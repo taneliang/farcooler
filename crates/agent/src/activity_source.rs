@@ -32,6 +32,7 @@ pub fn observe(event: &AgentEvent) -> Option<AgentActivity> {
         | AgentEvent::ModeSet { .. }
         | AgentEvent::ConfigSet { .. }
         | AgentEvent::Usage { .. }
+        | AgentEvent::TurnUsage { .. }
         | AgentEvent::SessionInfo { .. }
         | AgentEvent::CommandsAvailable { .. }
         // What is WAITING to be sent says nothing about what the agent is

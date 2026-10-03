@@ -115,6 +115,7 @@ dropped from the other fixtures.
 | `codex-unmatched-task-started.jsonl` | `task_started` with no completion anywhere in the file | 0.147.0 |
 | `codex-item-completed-turn.jsonl` | a complete turn in the shape 0.147.0 writes | 0.147.0 |
 | `codex-subagents.jsonl` | agents spawned, interacted with, and one listed as finished | 0.144.6 + 0.147.0 |
+| `codex-token-counts.jsonl` | two turns' running token totals, for spend | 0.153.4 |
 
 **`codex-complete-turn.jsonl`** (11 lines) is a real "say hi" session from
 `~/.codex/sessions/`, `session_meta.originator: "codex_exec"`,
@@ -180,6 +181,21 @@ with `/Users/example/project` everywhere it appears, including inside
 consistently, so a `turn_id` still matches the `task_started` it belongs to,
 and codex's opaque model item ids (`msg_…`, `rs_…`) are cut to a stub — no
 parser reads them and they are account-scoped.
+
+**`codex-token-counts.jsonl`** (10 lines) is two consecutive turns of a real
+0.153.4 session run by codex's own auto-reviewer (`model: codex-auto-review`),
+read for what each turn spent (`session_log::usage`). For each turn it keeps
+`event_msg`/`task_started`, `turn_context`, the newer top-level
+`token_usage_record`, `event_msg`/`token_count` (whose `total_token_usage` is
+the session's running sum, now with `cache_write_input_tokens`), and
+`event_msg`/`task_complete`. The source had 25 lines; `session_meta`,
+`response_item`, `world_state`, `user_message`, `agent_message` and
+`thread_settings_applied` were dropped as noise.
+
+Redacted: `turn_context` is cut to `turn_id`, `model` and `effort` (it held
+the sandbox policy and paths); each `task_complete`'s `last_agent_message` is
+cut to a placeholder; `token_usage_record.response_id` is replaced. Every uuid
+is replaced consistently. Token counts and timings are unaltered.
 
 **`codex-subagents.jsonl`** (8 lines) is a fleet running, and the only record
 codex ever writes that takes one off the row. Lines 1–6 and 8 are drawn from a
