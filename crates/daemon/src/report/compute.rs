@@ -72,14 +72,17 @@ impl Reading<'_> {
     }
 }
 
+/// A group's name, and the repository a workspace is in.
+type GroupKey = (String, Option<String>);
+
 /// The report for `inputs` over `period`, as of `now`.
 pub fn compute(inputs: &Inputs, period: Period, now: i64) -> Report {
     let horizon = period.until.min(now);
     let readings: Vec<Reading> = inputs.tasks.iter().map(|t| read(t, period)).collect();
     let all: Vec<&Reading> = readings.iter().collect();
 
-    let grouped = |key: &dyn Fn(&Reading) -> Vec<(String, Option<String>)>| -> Vec<Group> {
-        let mut groups: BTreeMap<(String, Option<String>), Vec<&Reading>> = BTreeMap::new();
+    let grouped = |key: &dyn Fn(&Reading) -> Vec<GroupKey>| -> Vec<Group> {
+        let mut groups: BTreeMap<GroupKey, Vec<&Reading>> = BTreeMap::new();
         for r in &readings {
             for k in key(r) {
                 groups.entry(k).or_default().push(r);
@@ -96,7 +99,7 @@ pub fn compute(inputs: &Inputs, period: Period, now: i64) -> Report {
             .collect();
         // Stable, and the map was ordered by name: most completed first, then
         // by name.
-        out.sort_by(|a, b| b.tally.completed.cmp(&a.tally.completed));
+        out.sort_by_key(|g| std::cmp::Reverse(g.tally.completed));
         out
     };
 
@@ -286,7 +289,7 @@ fn tally(readings: &[&Reading], inputs: &Inputs, period: Period, horizon: i64) -
         }
 
         if let Some(u) = inputs.usage.get(&r.facts.task.id) {
-            usage = Some(usage.unwrap_or_default().add(*u));
+            usage = Some(usage.unwrap_or_default().plus(*u));
         }
     }
 
@@ -396,7 +399,7 @@ fn notable(readings: &[&Reading], period: Period, horizon: i64) -> Notable {
             }
         }
     }
-    waits.sort_by(|a, b| b.ms.cmp(&a.ms));
+    waits.sort_by_key(|w| std::cmp::Reverse(w.ms));
     waits.truncate(NOTABLE_LIMIT);
 
     Notable {

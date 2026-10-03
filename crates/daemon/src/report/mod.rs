@@ -231,7 +231,7 @@ pub struct Usage {
 
 impl Usage {
     /// Field by field: absent plus absent stays absent.
-    pub fn add(self, other: Usage) -> Usage {
+    pub fn plus(self, other: Usage) -> Usage {
         fn sum<T: std::ops::Add<Output = T>>(a: Option<T>, b: Option<T>) -> Option<T> {
             match (a, b) {
                 (Some(a), Some(b)) => Some(a + b),
