@@ -714,6 +714,16 @@ message Host {
   // stamped, which vouches for no older build.
   uint32 schema_version = 14;
   uint32 compatible_down_to = 15;
+  // Which coding agents this runner can start, by program name: `claude`,
+  // `codex` and `cursor-agent`, in that order, each present only when the
+  // runner's user can run it. Presence only. Nothing here checks that the
+  // agent is signed in, which has no read-only answer, and its own login
+  // screen already shows in the pane.
+  //
+  // Program names rather than labels: each app owns what it calls them. Read
+  // only under the `agents_found` capability, because a runner from before it
+  // sends nothing, and an empty list from that runner is not "no agents".
+  repeated string agents_found = 16;
 }
 
 enum SelfHealth {

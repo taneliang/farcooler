@@ -62,6 +62,7 @@ fn path_token(id: Uuid) -> String {
 /// read as they do here — every one of them is the generated type or a direct
 /// projection of it, and renaming the projection alone would only hide which
 /// names are load-bearing.
+#[allow(clippy::too_many_arguments)]
 pub fn host(
     daemon_version: &str,
     host_id: Uuid,
@@ -70,6 +71,7 @@ pub fn host(
     stand_in: Option<&str>,
     push_paired: bool,
     schema: Option<farcooler_store::DatabaseSchema>,
+    agents_found: Vec<String>,
 ) -> wire::Host {
     let healthy = runtime.inventory_healthy;
     wire::Host {
@@ -114,7 +116,34 @@ pub fn host(
         // downgrade (ov-143). Zeros where the read failed: "too old to say".
         schema_version: schema.map_or(0, |s| s.version),
         compatible_down_to: schema.and_then(|s| s.compatible_down_to).unwrap_or(0),
+        // Which agents a launch here can start, so a client can say which are
+        // missing before one dies on "command not found" (ov-205).
+        agents_found,
     }
+}
+
+/// The programs the three orchestrator harnesses launch, in the order the
+/// apps list them: Claude Code, Codex, Cursor. `service::preset_command`'s
+/// arms are where each name is run.
+pub const AGENT_PROGRAMS: [&str; 3] = ["claude", "codex", "cursor-agent"];
+
+/// `Host.agents_found`: which of `AGENT_PROGRAMS` a launch on this runner can
+/// start, in that order.
+///
+/// `find` is `farcooler_core::programs::find` outside tests, the lookup every
+/// other program the daemon runs goes through: inherited `PATH`, then the login
+/// shell's, then the known prefixes. Close to what the pane's `-ilc` shell
+/// will find, and never further from it than the tmux the daemon already runs.
+///
+/// A stand-in (`FARCOOLER_STAND_IN_AGENT`, or the test stub) answers every
+/// launch, so all three are reported: an install whose agents are stand-ins
+/// can start any of them, whether or not the real one is on this runner.
+pub fn agents_found(stand_in: bool, find: impl Fn(&str) -> Option<std::path::PathBuf>) -> Vec<String> {
+    AGENT_PROGRAMS
+        .iter()
+        .filter(|program| stand_in || find(program).is_some())
+        .map(|program| program.to_string())
+        .collect()
 }
 
 /// One line of this runner's fence, as a client reads it.
@@ -844,9 +873,9 @@ mod tests {
     #[test]
     fn a_stand_in_agent_reaches_the_host() {
         let runtime = farcooler_core::inventory::RuntimeSnapshot::healthy(Vec::new());
-        let with = host("v", Uuid::nil(), &runtime, 0, Some("/bin/sleep"), false, None);
+        let with = host("v", Uuid::nil(), &runtime, 0, Some("/bin/sleep"), false, None, Vec::new());
         assert_eq!(with.stand_in_agent, "/bin/sleep");
-        let without = host("v", Uuid::nil(), &runtime, 0, None, false, None);
+        let without = host("v", Uuid::nil(), &runtime, 0, None, false, None, Vec::new());
         assert_eq!(without.stand_in_agent, "");
     }
 
@@ -855,8 +884,36 @@ mod tests {
     #[test]
     fn a_paired_runner_says_so_on_the_host() {
         let runtime = farcooler_core::inventory::RuntimeSnapshot::healthy(Vec::new());
-        assert!(host("v", Uuid::nil(), &runtime, 0, None, true, None).push_paired);
-        assert!(!host("v", Uuid::nil(), &runtime, 0, None, false, None).push_paired);
+        assert!(host("v", Uuid::nil(), &runtime, 0, None, true, None, Vec::new()).push_paired);
+        assert!(!host("v", Uuid::nil(), &runtime, 0, None, false, None, Vec::new()).push_paired);
+    }
+
+    /// **A runner names the agents it can start** (ov-205), so Start
+    /// Orchestrator can grey out the one whose pane would die on "command not
+    /// found". Each is reported by what `find` says, in the apps' order, and
+    /// the field carries the list unchanged.
+    #[test]
+    fn a_runner_names_the_agents_it_can_start() {
+        let dir = std::env::temp_dir().join(format!("fc-agents-found-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("codex"), "#!/bin/sh\n").unwrap();
+        std::fs::write(dir.join("cursor-agent"), "#!/bin/sh\n").unwrap();
+        let find = |name: &str| Some(dir.join(name)).filter(|p| p.is_file());
+        assert_eq!(agents_found(false, find), ["codex", "cursor-agent"]);
+        assert_eq!(agents_found(false, |_| None), Vec::<String>::new());
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        let runtime = farcooler_core::inventory::RuntimeSnapshot::healthy(Vec::new());
+        let found = vec!["claude".to_string()];
+        assert_eq!(host("v", Uuid::nil(), &runtime, 0, None, false, None, found).agents_found, ["claude"]);
+    }
+
+    /// A stand-in answers every launch, so a runner with one reports all three
+    /// whatever is installed: otherwise a demo or a test runner with no real
+    /// agent would grey out every harness it can in fact start.
+    #[test]
+    fn a_stand_in_can_start_every_agent() {
+        assert_eq!(agents_found(true, |_| None), ["claude", "codex", "cursor-agent"]);
     }
 
     #[test]

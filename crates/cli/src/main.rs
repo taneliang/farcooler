@@ -1425,6 +1425,12 @@ fn status_json(
         // Whether this runner's task notices reach the owner's devices as
         // pushes (ov-94): the Mac then leaves them to the push.
         "pushPaired": host.push_paired,
+        // Which agents the runner can start, by program name (ov-205). Null
+        // from a runner too old to say, whose empty list means nothing.
+        "agentsFound": capabilities
+            .iter()
+            .any(|c| c == farcooler_protocol::capability::AGENTS_FOUND)
+            .then_some(&host.agents_found),
         // The runner's own id (`Host.runner_id`), which a task notice names
         // it by (ov-106): a click on a pushed notice finds its runner here.
         // Null from a runner too old to say.
@@ -4869,6 +4875,12 @@ mod tests {
         assert_eq!(status_json(&host, &[], counts())["runnerId"], "r-1");
         let json = status_json(&farcooler_protocol::v1::Host::default(), &[], counts());
         assert!(json.get("runnerId").is_some_and(|v| v.is_null()), "{json}");
+        // And which agents it can start (ov-205), but only from a runner that
+        // says it reports them: an older one's empty list is no answer.
+        let host = farcooler_protocol::v1::Host { agents_found: vec!["codex".into()], ..Default::default() };
+        let says = ["agents_found".to_string()];
+        assert_eq!(status_json(&host, &says, counts())["agentsFound"], serde_json::json!(["codex"]));
+        assert!(status_json(&host, &[], counts())["agentsFound"].is_null());
     }
 
     /// **Which way two builds differ** (ov-143). The Mac read only

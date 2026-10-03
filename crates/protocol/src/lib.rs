@@ -432,6 +432,15 @@ pub mod capability {
     /// client that reads it absent says the runner needs an update to report
     /// spend, rather than showing zero.
     pub const AGENT_USAGE: &str = "agent_usage";
+    /// `Host.agents_found`: which of `claude`, `codex` and `cursor-agent` the
+    /// runner's user can run (ov-205).
+    ///
+    /// Its own capability because the field is a repeated one, and an older
+    /// runner's absent list decodes as an empty one. Without this a client
+    /// would read every runner from before it as having no agents and grey
+    /// out Start Orchestrator on a runner that can start one. A client that
+    /// reads it absent offers every agent, as it always did.
+    pub const AGENTS_FOUND: &str = "agents_found";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -443,6 +452,7 @@ pub mod capability {
             ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL, WORKTREE_ORDER, TASKS,
             LAUNCH_PROMPT, TERMINAL_TASK, WORKTREE_FORK_ONLY, WORKSTREAMS, ORCHESTRATOR_HANDOFF,
             NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES, REPORT, AGENT_USAGE,
+            AGENTS_FOUND,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such

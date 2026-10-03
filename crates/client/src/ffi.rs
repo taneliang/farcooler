@@ -219,6 +219,13 @@ fn runner_id(host: &farcooler_protocol::v1::Host) -> Option<&str> {
     Some(host.runner_id.as_str()).filter(|id| !id.is_empty())
 }
 
+/// `Host.agents_found`, or None from a runner that doesn't advertise
+/// `agents_found`: its list is empty because it never sent one, not because
+/// it has no agents.
+fn agents_found(host: &farcooler_protocol::v1::Host, reports: bool) -> Option<&[String]> {
+    reports.then_some(host.agents_found.as_slice())
+}
+
 /// `host.health`'s answer: the runner's own account of itself, as a phone's
 /// runner settings draw it.
 fn health_json(host: farcooler_protocol::v1::Host) -> Value {
@@ -1599,6 +1606,9 @@ async fn dispatch(
                 // as pushes. A phone leaves a task-bound agent's own banner
                 // to that push only then (ov-107); false from an older runner.
                 "pushPaired": facts.push_paired,
+                // Which agents the runner can start (ov-205): null from a
+                // runner too old to say, so a phone offers every one.
+                "agentsFound": agents_found(&facts, session.can(farcooler_protocol::capability::AGENTS_FOUND)),
                 "daemonVersion": facts.daemon_version,
                 "clientVersion": farcooler_protocol::BUILD,
                 "buildsMatch": facts.daemon_version == farcooler_protocol::BUILD,
@@ -2528,6 +2538,15 @@ mod tests {
         assert_eq!(with["standInAgent"], "/bin/sleep");
         let without = health_json(farcooler_protocol::v1::Host::default());
         assert!(without["standInAgent"].is_null());
+    }
+
+    /// `host` names the agents a runner can start (ov-205), and nothing from
+    /// one too old to say: an empty list there would grey out every harness.
+    #[test]
+    fn host_names_the_agents_found_only_when_the_runner_reports_them() {
+        let host = farcooler_protocol::v1::Host { agents_found: vec!["claude".into()], ..Default::default() };
+        assert_eq!(agents_found(&host, true), Some(&["claude".to_string()][..]));
+        assert_eq!(agents_found(&host, false), None);
     }
 
     /// `host` names the runner by its own id (`Host.runner_id`), so a phone

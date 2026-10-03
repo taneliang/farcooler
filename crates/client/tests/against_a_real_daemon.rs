@@ -320,6 +320,10 @@ async fn a_runner_says_when_its_agents_run_a_stand_in() {
     let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
     let host = session.host().await.expect("host");
     assert!(host.stand_in_agent.starts_with('/'), "no stand-in named: {:?}", host.stand_in_agent);
+    // And every agent reads as one it can start (ov-205): the stand-in answers
+    // each launch, so no harness is greyed out on a runner that runs one.
+    assert!(session.can(farcooler_protocol::capability::AGENTS_FOUND));
+    assert_eq!(host.agents_found, ["claude", "codex", "cursor-agent"]);
 
     let plain = start().await;
     let mut session = Session::connect_local(&plain.socket).await.expect("connect");

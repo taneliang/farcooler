@@ -242,6 +242,23 @@ impl Handler for RpcFactory {
     }
 }
 
+/// `Host.agents_found` for this runner, now.
+///
+/// On a blocking thread: `programs::find` asks the login shell about a program
+/// it hasn't found, which can take up to its five-second deadline, and a
+/// missing agent is asked about again once a minute. Never on a runtime worker.
+/// A lookup that panicked reports no agents rather than failing `host.get`,
+/// whose other facts a client needs more.
+async fn agents_found_now() -> Vec<String> {
+    let stand_in = crate::service::stand_in_agent().is_some() || crate::service::test_stub_agents();
+    tokio::task::spawn_blocking(move || wire::agents_found(stand_in, farcooler_core::programs::find))
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "could not look for the agents on this runner");
+            Vec::new()
+        })
+}
+
 /// A refusal in the shape every answer takes.
 ///
 /// Shared with `Rpc::handle` so a response built outside the dispatcher cannot
@@ -672,6 +689,7 @@ impl Rpc {
             crate::service::stand_in_agent(),
             crate::push::Pairing::load_in(svc.root_dir()).is_some(),
             svc.store.schema().ok(),
+            agents_found_now().await,
         ))
     }
 
@@ -804,6 +822,7 @@ impl Rpc {
                     crate::service::stand_in_agent(),
                     crate::push::Pairing::load_in(svc.root_dir()).is_some(),
                     svc.store.schema().ok(),
+                    agents_found_now().await,
                 )))
             }
 
