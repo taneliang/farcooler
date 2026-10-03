@@ -8441,15 +8441,40 @@ mod pane_actor_tests {
     /// leaves a dead pane behind (`remain-on-exit`), and every test that acts
     /// on the pane afterwards -- `set_pane_mode` wants one that
     /// `proves_life` -- then races the stub's exit. On a fast CI runner the
-    /// exit won and the test below failed with `NotFound`. Three seconds is
-    /// longer than any login shell here takes to start and fail.
+    /// exit won and the test below failed with `NotFound`.
+    ///
+    /// Waited on until the stub's own `sleep` is running on the pane's tty,
+    /// rather than for a fixed three seconds: a login shell slower than that
+    /// on a loaded box would have passed a stub that was about to fail. Once
+    /// the `sleep 600` runs, the login shell has got past everything that
+    /// could fail and only that sleep can end it. Read with `ps` rather than
+    /// tmux's `pane_current_command`, which names a non-interactive fish
+    /// (job control off, one process group) for as long as it waits.
     #[tokio::test]
     async fn a_stubbed_agents_pane_stays_alive() {
         let (_dir, svc, ws) = a_worktree().await;
         let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
         assert!(pane_start_command(&svc, term.id).await.contains(super::test_agent::MARKER), "the stub");
 
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        let on_the_tty = || async {
+            let snapshot = svc.inventory.refresh().await;
+            let Some(pane) = snapshot.claimants(term.id).into_iter().next() else { return String::new() };
+            let tty = pane.tty.trim_start_matches("/dev/").to_string();
+            let ps = std::process::Command::new("ps").args(["-o", "command=", "-t", &tty]).output();
+            ps.map(|out| String::from_utf8_lossy(&out.stdout).into_owned()).unwrap_or_default()
+        };
+        let mut running = String::new();
+        for _ in 0..400 {
+            running = on_the_tty().await;
+            if running.lines().any(|l| l.trim() == "/bin/sleep 600") {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert!(
+            running.lines().any(|l| l.trim() == "/bin/sleep 600"),
+            "the pane never got as far as the stub's sleep:\n{running}"
+        );
         let snapshot = svc.inventory.refresh().await;
         assert!(
             snapshot.claimants(term.id).into_iter().any(|p| p.proves_life()),
