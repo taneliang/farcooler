@@ -27,7 +27,10 @@ class TaskNoticesTest {
         assertEquals("decision", notice.event)
         assertEquals("t:r-1:ov-90", notice.noticeId)
         assertEquals(listOf("pdfkit", "pdf.js"), notice.options)
-        assertNull(TaskNotice.of(data + ("kind" to "decision")))
+        // A legacy decision carrying the task notice's fields is one, so it
+        // keeps its buttons; an old runner's bare decision isn't.
+        assertEquals(listOf("pdfkit", "pdf.js"), TaskNotice.of(data + ("kind" to "decision"))!!.options)
+        assertNull(TaskNotice.of(mapOf("kind" to "decision", "task" to "ov-1")))
         assertNull(TaskNotice.of(data + ("task" to "")))
         // Options that aren't a JSON list are none, not a crash.
         assertEquals(emptyList<String>(), TaskNotice.of(data + ("options" to "pdfkit"))!!.options)
@@ -89,6 +92,19 @@ class TaskNoticesTest {
         desk.deliver({ "Your phone can’t reach that runner right now." }) { _, why -> refusals += why }
         assertEquals(listOf("Your phone can’t reach that runner right now."), refusals)
         assertTrue("released, so a later tap is sent", desk.submit(answer))
+    }
+
+    /**
+     * An answer moves somebody's work, so a locked phone can't send one: every
+     * answer button asks for the device to be unlocked first, as iOS's
+     * `.authenticationRequired` does (ov-94 review).
+     */
+    @Test
+    fun everyAnswerButtonNeedsTheDeviceUnlocked() {
+        val option = TaskNotices.answerAction("pdfkit", null, null)
+        val typed = TaskNotices.answerAction("Answer…", null, null)
+        assertTrue(option.isAuthenticationRequired)
+        assertTrue(typed.isAuthenticationRequired)
     }
 
     private fun assertFalse(condition: Boolean, message: String) = org.junit.Assert.assertFalse(message, condition)

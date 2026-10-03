@@ -95,8 +95,13 @@ public struct TaskNotice: Equatable, Sendable {
     /// `nil` unless this is a task notice naming a task. `options` is a list
     /// from APNs and from a local post, and a JSON string from FCM, whose data
     /// values are strings only.
+    ///
+    /// A legacy decision (`kind: "decision"`) carrying `event` is one too: the
+    /// runner sends status decisions that way for one stable release, so
+    /// older relays and apps still read them (ov-94).
     public init?(userInfo: [AnyHashable: Any]) {
-        guard userInfo["kind"] as? String == "task",
+        let kind = userInfo["kind"] as? String
+        guard kind == "task" || (kind == "decision" && userInfo["event"] as? String == "decision"),
             let key = userInfo["task"] as? String, !key.isEmpty
         else { return nil }
         let options: [String]

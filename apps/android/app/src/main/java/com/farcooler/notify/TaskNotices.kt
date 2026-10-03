@@ -36,9 +36,15 @@ data class TaskNotice(
     val options: List<String>,
 ) {
     companion object {
-        /** `null` unless [data] is a task notice naming a task. */
+        /**
+         * `null` unless [data] is a task notice naming a task. A legacy
+         * decision carrying `event` is one too: the runner sends status
+         * decisions that way for one stable release (ov-94).
+         */
         fun of(data: Map<String, String>): TaskNotice? {
-            if (data[Notifier.PUSH_EXTRA_KIND] != TaskNotices.KIND_TASK) return null
+            val kind = data[Notifier.PUSH_EXTRA_KIND]
+            val legacy = kind == Notifier.KIND_DECISION && data[TaskNotices.EXTRA_EVENT] == "decision"
+            if (kind != TaskNotices.KIND_TASK && !legacy) return null
             val key = data[Notifier.PUSH_EXTRA_TASK]?.takeIf { it.isNotEmpty() } ?: return null
             return TaskNotice(
                 key = key,
@@ -152,16 +158,29 @@ object TaskNotices {
             )
         if (event == "decision") {
             notice.options.take(OPTION_LIMIT).forEachIndexed { index, option ->
-                builder.addAction(0, option, answerIntent(context, notice, tag, ACTION_OPTION, index, mutable = false))
+                builder.addAction(
+                    answerAction(option, answerIntent(context, notice, tag, ACTION_OPTION, index, mutable = false), null)
+                )
             }
             val input = RemoteInput.Builder(REMOTE_INPUT).setLabel("Your answer").build()
             builder.addAction(
-                NotificationCompat.Action.Builder(
-                    0, "Answer…", answerIntent(context, notice, tag, ACTION_TEXT, -1, mutable = true),
-                ).addRemoteInput(input).setAllowGeneratedReplies(false).build()
+                answerAction("Answer…", answerIntent(context, notice, tag, ACTION_TEXT, -1, mutable = true), input)
             )
         }
         runCatching { NotificationManagerCompat.from(context).notify(tag, 0, builder.build()) }
+    }
+
+    /**
+     * One answer button. Each asks for the device to be unlocked first: an
+     * answer moves somebody's work, and anyone holding a locked phone
+     * shouldn't be able to send one (as iOS's `.authenticationRequired`).
+     */
+    fun answerAction(title: String, intent: PendingIntent?, input: RemoteInput?): NotificationCompat.Action {
+        val action = NotificationCompat.Action.Builder(0, title, intent)
+            .setAuthenticationRequired(true)
+            .setAllowGeneratedReplies(false)
+        input?.let { action.addRemoteInput(it) }
+        return action.build()
     }
 
     private fun answerIntent(

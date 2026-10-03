@@ -7392,3 +7392,25 @@ describe("a task notice and the lock screen's card", () => {
     expect(cards()).toBe(before + 1)
   })
 })
+
+describe('a legacy decision to an Android phone', () => {
+  it('is drawn by the app, with its options, so it keeps its buttons', async () => {
+    const calls = watchFetch()
+    await register('user_1', { platform: 'fcm', pushToken: 'android-token' })
+    await pair('user_1', 'mine')
+    await post(
+      '/v1/notify',
+      {
+        kind: 'decision', task: 'ov-90', title: 'ov-90 Pick', subtitle: 'Needs your decision · Which?',
+        noticeId: 't:r:ov-90', event: 'decision', level: 'time-sensitive', options: ['A', 'B'], needsYou: 1,
+      },
+      'mine',
+    )
+    const message = pushes(calls).find(call => call.url.includes('fcm.googleapis.com'))?.body.message
+    expect(message.notification).toBeUndefined()
+    expect(message.data).toEqual({
+      kind: 'decision', task: 'ov-90', event: 'decision', noticeId: 't:r:ov-90',
+      title: 'ov-90 Pick', body: 'Needs your decision · Which?', options: JSON.stringify(['A', 'B']),
+    })
+  })
+})

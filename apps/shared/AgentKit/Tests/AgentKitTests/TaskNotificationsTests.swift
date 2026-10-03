@@ -48,7 +48,9 @@ struct TaskNotificationsTests {
         #expect(notice.flatMap { TaskNotice(userInfo: $0.userInfo) } == notice)
         // Android's spelling: the options as a JSON string.
         #expect(TaskNotice(userInfo: ["kind": "task", "task": "ov-1", "options": "[\"A\",\"B\"]"])?.options == ["A", "B"])
-        // Not a task notice.
+        // A legacy decision carrying the task notice's fields is one, so it
+        // keeps its buttons; an old runner's bare decision isn't.
+        #expect(TaskNotice(userInfo: ["kind": "decision", "task": "ov-1", "event": "decision", "options": ["A"]])?.options == ["A"])
         #expect(TaskNotice(userInfo: ["kind": "decision", "task": "ov-1"]) == nil)
         #expect(TaskNotice(userInfo: ["kind": "task", "task": ""]) == nil)
     }
