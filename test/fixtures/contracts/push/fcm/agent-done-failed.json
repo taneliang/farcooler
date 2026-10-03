@@ -13,7 +13,8 @@
     },
     "data": {
       "terminal": "term-01999a90aa10",
-      "status": "done"
+      "status": "done",
+      "runner": "3a342465-0508-031f-1852-5550524f0f01"
     }
   }
 }

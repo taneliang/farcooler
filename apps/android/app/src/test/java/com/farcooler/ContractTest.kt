@@ -66,6 +66,15 @@ class ContractTest {
             "ov-90 Pick a PDF library",
             "Needs your decision · Which PDF library should export use?",
         ),
+        // A runner older than ov-94 sends no event, so this is no task notice:
+        // it reads as a card that carries the task and its runner.
+        "decision-old-runner" to PushMessage.Card(
+            title = "ov-90 Pick a PDF library",
+            body = "Needs your decision · Which PDF library should export use?",
+            terminal = "",
+            channel = Notifier.CHANNEL_BLOCKED,
+            kind = "decision", task = "ov-90", runner = runner,
+        ),
         "task-decision" to PushMessage.Task(
             TaskNotice("ov-90", runner, "decision", noticeId, listOf("pdfkit", "pdf.js")),
             "ov-90 Pick a PDF library",

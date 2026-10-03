@@ -160,6 +160,9 @@ struct PushContractTests {
             .task(DecisionPush(key: "ov-90", runner: runner)),
             TaskNotice(key: "ov-90", runner: runner, event: .decision, noticeId: noticeId, options: ["pdfkit", "pdf.js"])
         ),
+        // A runner older than ov-94: no event and no notice id, so it opens
+        // the task's card and is no task notice.
+        "decision-old-runner": (.task(DecisionPush(key: "ov-90", runner: runner)), nil),
         "task-decision": (
             .task(DecisionPush(key: "ov-90", runner: runner)),
             TaskNotice(key: "ov-90", runner: runner, event: .decision, noticeId: noticeId, options: ["pdfkit", "pdf.js"])
@@ -193,6 +196,7 @@ struct PushContractTests {
         "agent-blocked": AgentPush(terminal: "term-01999a8f2c4e", status: "blocked", label: "claude", failed: false),
         "agent-done-failed": AgentPush(terminal: "term-01999a90aa10", status: "done", label: "codex", failed: true),
         "decision-legacy": nil,
+        "decision-old-runner": nil,
         "task-decision": nil,
         "task-review": nil,
     ]

@@ -143,6 +143,20 @@ fn written() -> Vec<(&'static str, serde_json::Value)> {
             options: &options,
             ..Outgoing::default()
         }),
+        // What a runner older than ov-94 sends for a status decision: the
+        // task and runner, with no `event` and no notice id. Android reads it
+        // as a card that opens the task (`PushMessage.Card.task`), not as a
+        // task notice, so this is the only fixture that reaches that branch.
+        ("decision-old-runner", Outgoing {
+            kind: Some("decision"),
+            title: "ov-90 Pick a PDF library",
+            subtitle: "Needs your decision · Which PDF library should export use?",
+            task: Some("ov-90"),
+            workspace: Some("Billing"),
+            needs_you: Some(1),
+            install: Some(INSTALL),
+            ..Outgoing::default()
+        }),
         ("task-decision", Outgoing {
             kind: Some("task"),
             title: "ov-90 Pick a PDF library",
@@ -195,6 +209,19 @@ fn rewriting() -> bool {
     asked
 }
 
+/// Which keys the fixture and the written body disagree on, so a new field
+/// is named rather than found by reading two JSON blobs.
+fn key_difference(fixture: &serde_json::Value, written: &serde_json::Value) -> String {
+    let keys = |v: &serde_json::Value| -> std::collections::BTreeSet<String> {
+        v.as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default()
+    };
+    let (have, want) = (keys(fixture), keys(written));
+    let added: Vec<_> = want.difference(&have).cloned().collect();
+    let gone: Vec<_> = have.difference(&want).cloned().collect();
+    let changed: Vec<_> = have.intersection(&want).filter(|k| fixture[k.as_str()] != written[k.as_str()]).cloned().collect();
+    format!("Written but not in the fixture: {added:?}. In the fixture but not written: {gone:?}. Values that differ: {changed:?}.")
+}
+
 /// Every fixture in `dir` is exactly what `written` holds, and no other
 /// fixture is there, which nothing would keep in step.
 fn compare(dir: &std::path::Path, written: &[(&'static str, serde_json::Value)], producer: &str) {
@@ -208,15 +235,19 @@ fn compare(dir: &std::path::Path, written: &[(&'static str, serde_json::Value)],
         let path = dir.join(format!("{name}.json"));
         let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
         let fixture: serde_json::Value = serde_json::from_str(&text).expect("the fixture is JSON");
-        assert_eq!(
-            &fixture,
-            body,
-            "{} is not what {producer} writes. If the change is deliberate, rerun with \
-             FARCOOLER_WRITE_CONTRACTS=1 and the relay's suite will say whether it still reads it. \
-             Written:\n{}",
-            path.display(),
-            serde_json::to_string_pretty(body).unwrap_or_default()
-        );
+        if &fixture != body {
+            panic!(
+                "{} is not what {producer} writes.\n{}\n\
+                 If the change is deliberate (a field added to a notice, say), regenerate the fixtures:\n    \
+                 FARCOOLER_WRITE_CONTRACTS=1 cargo test -p farcooler-daemon --lib push::contracts\n\
+                 then add the field to push/apns/ and push/fcm/ by hand where the relay forwards it, and run \
+                 the relay's suite (cd services/relay && npx vitest run) and the apps' consumers. \
+                 See test/fixtures/contracts/README.md.\nWritten:\n{}",
+                path.display(),
+                key_difference(&fixture, body),
+                serde_json::to_string_pretty(body).unwrap_or_default()
+            );
+        }
     }
     let mut on_disk: Vec<String> = std::fs::read_dir(dir)
         .expect("the fixtures")
