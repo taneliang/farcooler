@@ -1,5 +1,18 @@
 import XCTest
 
+/// A harness that did not stand up, thrown where a test used to skip.
+///
+/// The harnesses (`-shell-harness`, `-agent-layout-harness`, `-phone-harness`)
+/// are canned and in-process: nothing outside the app can make one fail to
+/// draw. So a probe that never appears is the app failing, and an `XCTSkip`
+/// there turned exactly the regression the test guards into a skipped test —
+/// which xcodebuild reports as a success (ov-127). Thrown, any error other
+/// than `XCTSkip` fails the test with this description.
+struct HarnessFailure: Error, CustomStringConvertible {
+    let description: String
+    init(_ description: String) { self.description = description }
+}
+
 extension XCUIApplication {
     /// Launch the app on `-phone-harness` with `arguments`, and wait until
     /// the canned runner is stood up: the harness publishes

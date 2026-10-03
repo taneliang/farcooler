@@ -47,7 +47,7 @@ final class ShellGestureTests: XCTestCase {
         let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
         guard probe.waitForExistence(timeout: 30) else {
             print(app.debugDescription)
-            throw XCTSkip("The shell never rendered its probe.")
+            throw HarnessFailure("The shell never rendered its probe.")
         }
         var parsed: [String: Int] = [:]
         for pair in (probe.value as? String ?? "").split(separator: " ") {
@@ -329,7 +329,7 @@ final class ShellGestureTests: XCTestCase {
             .matching(identifier: "shell-pane-\(tab)").firstMatch
         guard probe.waitForExistence(timeout: 20) else {
             print(app.debugDescription)
-            throw XCTSkip("The pane \(tab) was not in the tree at all.")
+            throw HarnessFailure("The pane \(tab) was not in the tree at all.")
         }
         var parsed: [String: String] = [:]
         for field in (probe.value as? String ?? "").split(separator: " ") {
@@ -697,7 +697,7 @@ final class ShellGestureTests: XCTestCase {
             if next == last { return next }
             last = next
         }
-        throw XCTSkip("The card never stopped changing with nothing touching it.")
+        throw HarnessFailure("The card never stopped changing with nothing touching it.")
     }
 
     /// One rectangle of a screenshot, in the app's own POINTS, as RGBA bytes.

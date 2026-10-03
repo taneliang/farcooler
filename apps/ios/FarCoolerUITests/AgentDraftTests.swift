@@ -51,8 +51,7 @@ final class AgentDraftTests: XCTestCase {
     private func composer(in app: XCUIApplication) throws -> XCUIElement {
         let composer = app.textViews.firstMatch
         guard composer.waitForExistence(timeout: 30) else {
-            XCTFail("The agent pane drew no composer")
-            throw XCTSkip("no composer")
+            throw HarnessFailure("The agent pane drew no composer")
         }
         return composer
     }

@@ -40,7 +40,7 @@ final class ShellColumnCloseTests: XCTestCase {
         let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
         guard probe.waitForExistence(timeout: 30) else {
             print(app.debugDescription)
-            throw XCTSkip("The shell never rendered its probe.")
+            throw HarnessFailure("The shell never rendered its probe.")
         }
         var parsed: [String: Int] = [:]
         for pair in (probe.value as? String ?? "").split(separator: " ") {

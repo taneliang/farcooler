@@ -1060,8 +1060,12 @@ final class TerminalScrollTests: XCTestCase {
     /// did not exist. Asserting on the PAINTER rather than on the picture is
     /// what makes that observable.
     ///
-    /// Skipped rather than failed on a runner without the capability — that is
-    /// a legitimate configuration and the fallback has its own tests above.
+    /// Failed, not skipped, when the pane is on any other painter. It used to
+    /// skip "on a runner without the capability", but the runner here is the
+    /// demo host, which runs this checkout's daemon, and every daemon this
+    /// checkout builds advertises `terminal_stream` (`capability::ALL`). So the
+    /// only way to reach the skip was the very fallback this test exists to
+    /// catch — reported as a skip, which `xcodebuild` calls a success (ov-127).
     func testAPaneOnACapableRunnerStreams() throws {
         let app = launch()
         try openATerminal(app)
@@ -1072,15 +1076,13 @@ final class TerminalScrollTests: XCTestCase {
         // into a permanent skip, quietly, with a message blaming the runner.
         let painter = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in self.source(app) == "stream" }, object: nil)
-        guard XCTWaiter.wait(for: [painter], timeout: 30) == .completed else {
-            throw XCTSkip(
-                """
-                This pane is on \(source(app) ?? "an unknown painter"), which is \
-                correct for a runner that does not advertise `terminal_stream`. \
-                Rebuild the demo host to exercise the attach path.
-                """
-            )
-        }
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [painter], timeout: 30), .completed,
+            """
+            This pane is on \(source(app) ?? "an unknown painter"), not `stream`. The \
+            demo host's daemon advertises `terminal_stream`, so the pane fell back. \
+            If the demo host predates streaming, rebuild it with ./scripts/demo-host.sh.
+            """)
         XCTAssertEqual(source(app), "stream")
     }
 
