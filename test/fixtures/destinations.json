@@ -1,0 +1,3464 @@
+{
+  "about": "Destinations (ov-182, ov-183): AgentKit's DestinationTests and Android's DestinationTest both replay every case. Encodings are exact bytes: sorted keys, compact, slashes unescaped.",
+  "encodings": [
+    {
+      "case": "needs you",
+      "json": "{\"place\":{\"kind\":\"needs-you\"},\"v\":1}"
+    },
+    {
+      "case": "a workspace on this Mac",
+      "json": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"\"},\"v\":1}"
+    },
+    {
+      "case": "a workspace with its phone segment",
+      "json": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"9F2C-host\"},\"segment\":\"board\",\"v\":1}"
+    },
+    {
+      "case": "an orchestrator",
+      "json": "{\"pane\":\"t-orch\",\"place\":{\"kind\":\"orchestrator\",\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}"
+    },
+    {
+      "case": "a History page",
+      "json": "{\"place\":{\"kind\":\"history\",\"status\":\"done\",\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\"},\"v\":1}"
+    },
+    {
+      "case": "a task, restored, with its tab, pane and agent",
+      "json": "{\"agent\":\"t-2\",\"pane\":\"t-1\",\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\"},\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\"},\"tab\":\"changes\",\"v\":1}"
+    },
+    {
+      "case": "a task from a notice, by key and repository, with its question",
+      "json": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\",\"repository\":\"repo-1\"}},\"question\":true,\"runner\":{\"id\":\"r1\"},\"v\":1}"
+    },
+    {
+      "case": "a worktree with a pane",
+      "json": "{\"pane\":\"t-1\",\"place\":{\"kind\":\"worktree\",\"workspace\":\"ws-a\",\"worktree\":\"wt-1\"},\"runner\":{\"host\":\"h1\"},\"v\":1}"
+    },
+    {
+      "case": "a loose worktree",
+      "json": "{\"place\":{\"kind\":\"worktree\",\"worktree\":\"wt-loose\"},\"runner\":{\"host\":\"h1\"},\"v\":1}"
+    },
+    {
+      "case": "a pane from a push",
+      "json": "{\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-1\"},\"runner\":{\"id\":\"r1\"},\"v\":1}"
+    },
+    {
+      "case": "a slash and an accent are written as they are",
+      "json": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"team/é\"},\"runner\":{\"host\":\"ssh://box\"},\"v\":1}"
+    }
+  ],
+  "invalid": [
+    {
+      "case": "not JSON",
+      "json": "bil-7"
+    },
+    {
+      "case": "a later version",
+      "json": "{\"place\":{\"kind\":\"needs-you\"},\"v\":2}"
+    },
+    {
+      "case": "no version",
+      "json": "{\"place\":{\"kind\":\"needs-you\"}}"
+    },
+    {
+      "case": "the version as a string",
+      "json": "{\"place\":{\"kind\":\"needs-you\"},\"v\":\"1\"}"
+    },
+    {
+      "case": "an unknown place",
+      "json": "{\"place\":{\"kind\":\"inbox\"},\"v\":1}"
+    },
+    {
+      "case": "no place",
+      "json": "{\"v\":1}"
+    },
+    {
+      "case": "a workspace with no id",
+      "json": "{\"place\":{\"kind\":\"workspace\"},\"v\":1}"
+    },
+    {
+      "case": "a workspace with an empty id",
+      "json": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"\"},\"v\":1}"
+    },
+    {
+      "case": "a task with neither id nor key",
+      "json": "{\"place\":{\"kind\":\"task\",\"task\":{\"repository\":\"r\"}},\"v\":1}"
+    },
+    {
+      "case": "a History page with no status",
+      "json": "{\"place\":{\"kind\":\"history\",\"workspace\":\"w\"},\"v\":1}"
+    },
+    {
+      "case": "a terminal with no id",
+      "json": "{\"place\":{\"kind\":\"terminal\"},\"v\":1}"
+    }
+  ],
+  "lenient": [
+    {
+      "case": "an unknown tab is dropped alone",
+      "json": "{\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T\"},\"workspace\":\"w\"},\"tab\":\"timeline\",\"v\":1}",
+      "reads": "{\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T\"},\"workspace\":\"w\"},\"v\":1}"
+    },
+    {
+      "case": "an unknown segment is dropped alone",
+      "json": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"w\"},\"segment\":\"calendar\",\"v\":1}",
+      "reads": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"w\"},\"v\":1}"
+    },
+    {
+      "case": "an unknown key is ignored",
+      "json": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"w\"},\"v\":1,\"zoom\":3}",
+      "reads": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"w\"},\"v\":1}"
+    },
+    {
+      "case": "an empty pane, agent and runner id name nothing",
+      "json": "{\"agent\":\"\",\"pane\":\"\",\"place\":{\"kind\":\"workspace\",\"workspace\":\"w\"},\"runner\":{\"id\":\"\"},\"v\":1}",
+      "reads": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"w\"},\"v\":1}"
+    },
+    {
+      "case": "question false is not written",
+      "json": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"w\"},\"question\":false,\"v\":1}",
+      "reads": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"w\"},\"v\":1}"
+    }
+  ],
+  "payloads": [
+    {
+      "case": "a task notice push",
+      "userInfo": {
+        "kind": "task",
+        "task": "bil-7",
+        "runner": "ABC1",
+        "event": "review",
+        "noticeId": "t:abc1:bil-7"
+      },
+      "thread": "t:abc1:bil-7",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"runner\":{\"id\":\"abc1\"},\"v\":1}"
+    },
+    {
+      "case": "a task notice's decision has its question",
+      "userInfo": {
+        "kind": "task",
+        "task": "bil-7",
+        "runner": "r1",
+        "event": "decision",
+        "options": [
+          "Yes",
+          "No"
+        ]
+      },
+      "thread": "",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"question\":true,\"runner\":{\"id\":\"r1\"},\"v\":1}"
+    },
+    {
+      "case": "the runner read off the notice id",
+      "userInfo": {
+        "kind": "task",
+        "task": "bil-7",
+        "noticeId": "t:r9:bil-7"
+      },
+      "thread": "",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"runner\":{\"id\":\"r9\"},\"v\":1}"
+    },
+    {
+      "case": "the runner read off the thread",
+      "userInfo": {
+        "kind": "task",
+        "task": "bil-7"
+      },
+      "thread": "t:r9:bil-7",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"runner\":{\"id\":\"r9\"},\"v\":1}"
+    },
+    {
+      "case": "a hashed notice id names no runner",
+      "userInfo": {
+        "kind": "task",
+        "task": "bil-7",
+        "noticeId": "t:0123456789abcdef"
+      },
+      "thread": "",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"v\":1}"
+    },
+    {
+      "case": "a Mac's local task post, with its target and repository",
+      "userInfo": {
+        "kind": "task",
+        "task": "bil-7",
+        "runner": "r1",
+        "target": "",
+        "repository": "repo-1",
+        "event": "blocked"
+      },
+      "thread": "t:r1:bil-7",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\",\"repository\":\"repo-1\"}},\"runner\":{\"host\":\"\",\"id\":\"r1\"},\"v\":1}"
+    },
+    {
+      "case": "Couldn't Send Your Answer, by target alone",
+      "userInfo": {
+        "kind": "task",
+        "task": "bil-7",
+        "target": "box.local",
+        "repository": "repo-1"
+      },
+      "thread": "",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\",\"repository\":\"repo-1\"}},\"runner\":{\"host\":\"box.local\"},\"v\":1}"
+    },
+    {
+      "case": "a legacy decision with no event",
+      "userInfo": {
+        "kind": "decision",
+        "task": "bil-3",
+        "runner": "r1"
+      },
+      "thread": "",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-3\"}},\"question\":true,\"runner\":{\"id\":\"r1\"},\"v\":1}"
+    },
+    {
+      "case": "a legacy decision with its event",
+      "userInfo": {
+        "kind": "decision",
+        "task": "bil-3",
+        "event": "decision"
+      },
+      "thread": "",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-3\"}},\"question\":true,\"v\":1}"
+    },
+    {
+      "case": "Firebase's task push, with terminal empty",
+      "userInfo": {
+        "terminal": "",
+        "kind": "task",
+        "task": "bil-7",
+        "runner": "r1",
+        "event": "review"
+      },
+      "thread": "",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"runner\":{\"id\":\"r1\"},\"v\":1}"
+    },
+    {
+      "case": "an agent push",
+      "userInfo": {
+        "terminal": "t-1",
+        "status": "blocked",
+        "label": "claude"
+      },
+      "thread": "t-1",
+      "destination": "{\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-1\"},\"v\":1}"
+    },
+    {
+      "case": "an agent push naming its runner",
+      "userInfo": {
+        "terminal": "t-1",
+        "status": "done",
+        "runner": "R1"
+      },
+      "thread": "t-1",
+      "destination": "{\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-1\"},\"runner\":{\"id\":\"r1\"},\"v\":1}"
+    },
+    {
+      "case": "an ask push",
+      "userInfo": {
+        "kind": "ask",
+        "terminal": "t-3"
+      },
+      "thread": "t-3",
+      "destination": "{\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-3\"},\"v\":1}"
+    },
+    {
+      "case": "a banner this app posted, by its thread",
+      "userInfo": {},
+      "thread": "t-2-uuid",
+      "destination": "{\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-2-uuid\"},\"v\":1}"
+    },
+    {
+      "case": "a task kind with no task is not a task",
+      "userInfo": {
+        "kind": "task",
+        "task": ""
+      },
+      "thread": "t:r1:bil-7",
+      "destination": null
+    },
+    {
+      "case": "an agent card's thread is not a terminal",
+      "userInfo": {},
+      "thread": "a:r1",
+      "destination": null
+    },
+    {
+      "case": "nothing at all",
+      "userInfo": {},
+      "thread": "",
+      "destination": null
+    },
+    {
+      "case": "the encoding wins over the old spelling",
+      "userInfo": {
+        "destination": "{\"pane\":\"t-1\",\"place\":{\"kind\":\"worktree\",\"workspace\":\"ws-a\",\"worktree\":\"wt-1\"},\"runner\":{\"id\":\"r1\"},\"v\":1}",
+        "kind": "task",
+        "task": "bil-7"
+      },
+      "thread": "",
+      "destination": "{\"pane\":\"t-1\",\"place\":{\"kind\":\"worktree\",\"workspace\":\"ws-a\",\"worktree\":\"wt-1\"},\"runner\":{\"id\":\"r1\"},\"v\":1}"
+    },
+    {
+      "case": "an encoding this build can't read falls to the old spelling",
+      "userInfo": {
+        "destination": "{\"place\":{\"kind\":\"needs-you\"},\"v\":9}",
+        "terminal": "t-1"
+      },
+      "thread": "",
+      "destination": "{\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-1\"},\"v\":1}"
+    }
+  ],
+  "urls": [
+    {
+      "case": "a Live Activity's pane",
+      "url": "farcooler://terminal/t-1",
+      "destination": "{\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-1\"},\"v\":1}"
+    },
+    {
+      "case": "a canary widget's pane, naming its runner",
+      "url": "farcooler-canary://terminal/t-1?runner=R1",
+      "destination": "{\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-1\"},\"runner\":{\"id\":\"r1\"},\"v\":1}"
+    },
+    {
+      "case": "a pane link with no id",
+      "url": "farcooler://terminal/",
+      "destination": null
+    },
+    {
+      "case": "an encoded destination",
+      "url": "farcooler://open?d=%7B%22place%22%3A%7B%22kind%22%3A%22task%22%2C%22task%22%3A%7B%22id%22%3A%22T1%22%7D%2C%22workspace%22%3A%22ws-a%22%7D%2C%22runner%22%3A%7B%22id%22%3A%22r1%22%7D%2C%22tab%22%3A%22agent%22%2C%22v%22%3A1%7D",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\"},\"workspace\":\"ws-a\"},\"runner\":{\"id\":\"r1\"},\"tab\":\"agent\",\"v\":1}"
+    },
+    {
+      "case": "an encoding this build can't read",
+      "url": "farcooler://open?d=%7B%22place%22%3A%7B%22kind%22%3A%22needs-you%22%7D%2C%22v%22%3A2%7D",
+      "destination": null
+    },
+    {
+      "case": "a link that's about something else",
+      "url": "farcooler://pair?code=123",
+      "destination": null
+    }
+  ],
+  "resolve": [
+    {
+      "case": "restore: a task that's here, with its tab, pane and agent",
+      "destination": "{\"agent\":\"t-2\",\"pane\":\"t-1\",\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\"},\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\"},\"tab\":\"agent\",\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"agent\":\"t-2\",\"pane\":\"t-1\",\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\",\"key\":\"bil-7\",\"repository\":\"repo-1\"},\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"tab\":\"agent\",\"v\":1}",
+        "fellBack": false
+      }
+    },
+    {
+      "case": "restore: a tab the task doesn't offer is dropped alone",
+      "destination": "{\"pane\":\"t-1\",\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\"},\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\"},\"tab\":\"changes\",\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"pane\":\"t-1\",\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\",\"key\":\"bil-7\",\"repository\":\"repo-1\"},\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": false
+      }
+    },
+    {
+      "case": "restore: a pane that's gone is dropped alone",
+      "destination": "{\"agent\":\"t-2\",\"pane\":\"t-gone\",\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\"},\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\"},\"tab\":\"agent\",\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"agent\":\"t-2\",\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\",\"key\":\"bil-7\",\"repository\":\"repo-1\"},\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"tab\":\"agent\",\"v\":1}",
+        "fellBack": false
+      }
+    },
+    {
+      "case": "restore: a pane is kept while the fleet isn't read",
+      "destination": "{\"pane\":\"t-1\",\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\"},\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\"},\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": null,
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"pane\":\"t-1\",\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\",\"key\":\"bil-7\",\"repository\":\"repo-1\"},\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": false
+      }
+    },
+    {
+      "case": "restore: a gone task falls back to its workspace",
+      "destination": "{\"pane\":\"t-1\",\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T-gone\"},\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\"},\"tab\":\"agent\",\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": true
+      }
+    },
+    {
+      "case": "restore: a task on a gone workspace falls to the runner's home",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\"},\"workspace\":\"ws-z\"},\"runner\":{\"host\":\"h1\"},\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": true
+      }
+    },
+    {
+      "case": "restore: a gone worktree falls back to its workspace",
+      "destination": "{\"pane\":\"t-1\",\"place\":{\"kind\":\"worktree\",\"workspace\":\"ws-b\",\"worktree\":\"wt-x\"},\"runner\":{\"host\":\"h1\"},\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"ws-b\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": true
+      }
+    },
+    {
+      "case": "restore: a gone loose worktree falls to the runner's home",
+      "destination": "{\"place\":{\"kind\":\"worktree\",\"worktree\":\"wt-x\"},\"runner\":{\"host\":\"h1\"},\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": true
+      }
+    },
+    {
+      "case": "restore: a worktree that's here, with its pane",
+      "destination": "{\"pane\":\"t-9\",\"place\":{\"kind\":\"worktree\",\"worktree\":\"wt-loose\"},\"runner\":{\"host\":\"h1\"},\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"pane\":\"t-9\",\"place\":{\"kind\":\"worktree\",\"worktree\":\"wt-loose\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": false
+      }
+    },
+    {
+      "case": "restore: an orchestrator on a workspace without one falls back to it",
+      "destination": "{\"place\":{\"kind\":\"orchestrator\",\"workspace\":\"repo-9\"},\"runner\":{\"host\":\"h1\"},\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"repo-9\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": true
+      }
+    },
+    {
+      "case": "restore: an orchestrator segment on a workspace without one is dropped",
+      "destination": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"repo-9\"},\"runner\":{\"host\":\"h1\"},\"segment\":\"orchestrator\",\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"repo-9\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": false
+      }
+    },
+    {
+      "case": "restore: a segment survives a fall back to its workspace",
+      "destination": "{\"place\":{\"kind\":\"worktree\",\"workspace\":\"ws-b\",\"worktree\":\"wt-x\"},\"runner\":{\"host\":\"h1\"},\"segment\":\"worktrees\",\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"ws-b\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"segment\":\"worktrees\",\"v\":1}",
+        "fellBack": true
+      }
+    },
+    {
+      "case": "restore: a History page",
+      "destination": "{\"place\":{\"kind\":\"history\",\"status\":\"done\",\"workspace\":\"ws-b\"},\"runner\":{\"host\":\"h1\"},\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"history\",\"status\":\"done\",\"workspace\":\"ws-b\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": false
+      }
+    },
+    {
+      "case": "restore: a late runner is waited for",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\"},\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\"},\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": false
+          },
+          {
+            "host": "h2",
+            "runnerId": "r2",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 2,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "wait": true
+      }
+    },
+    {
+      "case": "restore: a runner still not up at the deadline opens the last workspace",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\"},\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\"},\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": false
+          },
+          {
+            "host": "h2",
+            "runnerId": "r2",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ],
+        "lastWorkspace": {
+          "host": "h2",
+          "workspace": "ws-b"
+        }
+      },
+      "elapsed": 10,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"ws-b\"},\"runner\":{\"host\":\"h2\",\"id\":\"r2\"},\"v\":1}",
+        "fellBack": true
+      }
+    },
+    {
+      "case": "restore: with no last workspace, the first ready runner's first",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\"},\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\"},\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": false
+          },
+          {
+            "host": "h2",
+            "runnerId": "r2",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 10,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h2\",\"id\":\"r2\"},\"v\":1}",
+        "fellBack": true
+      }
+    },
+    {
+      "case": "restore: an unread board is waited for",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\"},\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\"},\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {}
+          }
+        ]
+      },
+      "elapsed": 3,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "wait": true
+      }
+    },
+    {
+      "case": "restore: at the deadline, the deepest level that's here",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\"},\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\"},\"tab\":\"agent\",\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {}
+          }
+        ]
+      },
+      "elapsed": 10,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": true
+      }
+    },
+    {
+      "case": "restore: a runner found by its id when its handle changed",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\"},\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"old-handle\",\"id\":\"R1\"},\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\",\"key\":\"bil-7\",\"repository\":\"repo-1\"},\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": false
+      }
+    },
+    {
+      "case": "restore: a runner that's no longer here opens the last workspace",
+      "destination": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h7\"},\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ],
+        "lastWorkspace": {
+          "host": "h1",
+          "workspace": "ws-b"
+        }
+      },
+      "elapsed": 1,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"ws-b\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": true
+      }
+    },
+    {
+      "case": "restore: with no runners at all, Needs You",
+      "destination": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\"},\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": []
+      },
+      "elapsed": 1,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"needs-you\"},\"v\":1}",
+        "fellBack": true
+      }
+    },
+    {
+      "case": "restore: Needs You stays Needs You",
+      "destination": "{\"place\":{\"kind\":\"needs-you\"},\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"needs-you\"},\"v\":1}",
+        "fellBack": false
+      }
+    },
+    {
+      "case": "restore: somebody moved first",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\"},\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\"},\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 10,
+      "interrupted": true,
+      "expect": {
+        "stay": null
+      }
+    },
+    {
+      "case": "restore: a question is kept on a task that's here",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\"},\"workspace\":\"ws-a\"},\"question\":true,\"runner\":{\"host\":\"h1\"},\"v\":1}",
+      "arrival": "restore",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 10,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\",\"key\":\"bil-7\",\"repository\":\"repo-1\"},\"workspace\":\"ws-a\"},\"question\":true,\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": false
+      }
+    },
+    {
+      "case": "notification: a task by key opens with its question",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"question\":true,\"runner\":{\"id\":\"r1\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\",\"key\":\"bil-7\",\"repository\":\"repo-1\"},\"workspace\":\"ws-a\"},\"question\":true,\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": false
+      }
+    },
+    {
+      "case": "notification: a key in another repository is gone",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\",\"repository\":\"repo-2\"}},\"runner\":{\"id\":\"r1\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "stay": "gone"
+      }
+    },
+    {
+      "case": "notification: a task the runner says it doesn't have is gone",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-8\"}},\"runner\":{\"id\":\"r1\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {},
+            "absentTasks": [
+              "bil-8"
+            ]
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "stay": "gone"
+      }
+    },
+    {
+      "case": "notification: a late runner is waited for",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"runner\":{\"id\":\"r1\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": null,
+            "ready": false
+          }
+        ]
+      },
+      "elapsed": 5,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "wait": true
+      }
+    },
+    {
+      "case": "notification: a runner not up at the deadline leaves the app where it is",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"runner\":{\"id\":\"r1\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": null,
+            "ready": false
+          },
+          {
+            "host": "h2",
+            "runnerId": "r2",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 30,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "stay": "runner-unavailable"
+      }
+    },
+    {
+      "case": "notification: a runner this device doesn't have",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"runner\":{\"id\":\"r5\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "stay": "runner-unavailable"
+      }
+    },
+    {
+      "case": "notification: an unread board is waited for",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"runner\":{\"id\":\"r1\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": []
+            }
+          }
+        ]
+      },
+      "elapsed": 5,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "wait": true
+      }
+    },
+    {
+      "case": "notification: a task still not found at the deadline stays",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"runner\":{\"id\":\"r1\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": []
+            }
+          }
+        ]
+      },
+      "elapsed": 30,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "stay": "not-found"
+      }
+    },
+    {
+      "case": "notification: a gone task on a named workspace falls back to it",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-99\"},\"workspace\":\"ws-b\"},\"runner\":{\"id\":\"r1\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"workspace\",\"workspace\":\"ws-b\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": true
+      }
+    },
+    {
+      "case": "notification: a pane, naming no runner, opens its worktree",
+      "destination": "{\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-1\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"pane\":\"t-1\",\"place\":{\"kind\":\"worktree\",\"workspace\":\"ws-a\",\"worktree\":\"wt-1\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": false
+      }
+    },
+    {
+      "case": "notification: an orchestrator's pane opens the orchestrator",
+      "destination": "{\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-orch\"},\"runner\":{\"id\":\"r1\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"pane\":\"t-orch\",\"place\":{\"kind\":\"orchestrator\",\"workspace\":\"ws-a\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": false
+      }
+    },
+    {
+      "case": "notification: a local post's target finds its runner first",
+      "destination": "{\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-9\"},\"runner\":{\"host\":\"h1\",\"id\":\"stale\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"pane\":\"t-9\",\"place\":{\"kind\":\"worktree\",\"worktree\":\"wt-loose\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": false
+      }
+    },
+    {
+      "case": "notification: a pane that's gone everywhere",
+      "destination": "{\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-gone\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          },
+          {
+            "host": "h2",
+            "runnerId": "r2",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "stay": "gone"
+      }
+    },
+    {
+      "case": "notification: a pane naming no runner waits for one still connecting",
+      "destination": "{\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-x\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          },
+          {
+            "host": "h2",
+            "runnerId": "r2",
+            "ready": false
+          }
+        ]
+      },
+      "elapsed": 5,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "wait": true
+      }
+    },
+    {
+      "case": "notification: ...and at the deadline stays",
+      "destination": "{\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-x\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          },
+          {
+            "host": "h2",
+            "runnerId": "r2",
+            "ready": false
+          }
+        ]
+      },
+      "elapsed": 30,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "stay": "not-found"
+      }
+    },
+    {
+      "case": "notification: a pane naming no runner on two runners is refused",
+      "destination": "{\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-1\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          },
+          {
+            "host": "h2",
+            "runnerId": "r2",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "stay": "ambiguous"
+      }
+    },
+    {
+      "case": "notification: a key naming no runner opens the one runner that has it",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"question\":true,\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          },
+          {
+            "host": "h2",
+            "runnerId": "r2",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\",\"key\":\"bil-7\",\"repository\":\"repo-1\"},\"workspace\":\"ws-a\"},\"question\":true,\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": false
+      }
+    },
+    {
+      "case": "notification: a pane on the named runner, before its fleet is read",
+      "destination": "{\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-1\"},\"runner\":{\"id\":\"r1\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": null,
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 5,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "wait": true
+      }
+    },
+    {
+      "case": "notification: somebody moving doesn't cancel a click",
+      "destination": "{\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-1\"},\"runner\":{\"id\":\"r1\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 30,
+      "interrupted": true,
+      "expect": {
+        "open": "{\"pane\":\"t-1\",\"place\":{\"kind\":\"worktree\",\"workspace\":\"ws-a\",\"worktree\":\"wt-1\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": false
+      }
+    }
+  ]
+}
