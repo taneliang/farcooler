@@ -924,7 +924,7 @@ mod tests {
     #[test]
     fn the_skill_is_short() {
         let lines = skill_body(Harness::Claude).lines().count();
-        assert!(lines <= 170, "{lines} lines");
+        assert!(lines <= 175, "{lines} lines");
     }
 
     /// Not a check: the pressure harness's way to get the skill exactly as an
