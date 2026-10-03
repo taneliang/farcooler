@@ -85,6 +85,8 @@ pub struct Terminal {
     marker: MarkerScan,
     /// Whether the stream has said what size its pane is. See `size_marker`.
     sized_by_stream: bool,
+    /// Whether markers are honored at all. See `set_accept_stream_sizes`.
+    accept_stream_sizes: bool,
 }
 
 impl Terminal {
@@ -110,6 +112,7 @@ impl Terminal {
             palette: grid::Palette::default(),
             marker: MarkerScan::default(),
             sized_by_stream: false,
+            accept_stream_sizes: false,
         }
     }
 
@@ -136,12 +139,15 @@ impl Terminal {
     /// A size marker (see `size_marker`) resizes the grid at exactly the point
     /// in the bytes where it sits: everything before it is applied at the old
     /// size, everything after at the new one. The marker itself still goes
-    /// through the parser, which ignores application strings, so it draws
+    /// through the parser, which ignores device control strings it does not
+    /// know, so it draws
     /// nothing.
     pub fn feed(&mut self, bytes: &[u8]) {
         let mut start = 0;
         for (index, &byte) in bytes.iter().enumerate() {
-            if let Some((columns, rows)) = self.marker.step(byte) {
+            if let Some((columns, rows)) = self.marker.step(byte)
+                && self.accept_stream_sizes
+            {
                 self.parser.advance(&mut self.term, &bytes[start..=index]);
                 start = index + 1;
                 self.resize_for_stream(columns, rows);
@@ -163,6 +169,20 @@ impl Terminal {
         }
         self.resize(columns, rows);
         self.sized_by_stream = true;
+    }
+
+    /// Honor size markers in the stream, or (the default) ignore them.
+    ///
+    /// Off unless the client knows the runner sends them: one that advertises
+    /// `stream_size_markers` strips every marker its programs print, so the
+    /// only ones that reach the client are the runner's own. Without that
+    /// promise a marker is just bytes somebody printed — `farcooler terminal
+    /// stream` run inside a pane prints a whole stream of them — and believing
+    /// one would size this terminal to some other pane. Ignored, a marker
+    /// still draws nothing: the parser drops device control strings it does not
+    /// know.
+    pub fn set_accept_stream_sizes(&mut self, accept: bool) {
+        self.accept_stream_sizes = accept;
     }
 
     /// Whether the stream has ever said what size its pane is.
@@ -313,25 +333,29 @@ impl Terminal {
 /// the pane's size changes, which puts it ahead of the repaint by causality:
 /// the program cannot answer a SIGWINCH it has not been sent.
 ///
-/// An application program command (APC, `ESC _ … ESC \`), because every
-/// emulator already ignores those: a client that predates markers, or a person
-/// running `farcooler terminal stream` in their own terminal, sees nothing.
+/// A private device control string, `ESC P > farcooler-size;C;R ESC \`: the
+/// `>` is a private parameter marker and `f` the final byte, so the rest is
+/// the string's data. Chosen over an application program command (`ESC _`),
+/// which tmux and GNU screen both take as a window title. This emulator (vte)
+/// and tmux ignore a DCS with a final byte they do not handle, so a client
+/// that predates markers sees nothing — though the runner only sends them to
+/// a client that asked (`terminal stream --sizes`) anyway.
 pub fn size_marker(columns: u16, rows: u16) -> Vec<u8> {
-    format!("\x1b_{MARKER_TAG}{columns};{rows}\x1b\\").into_bytes()
+    format!("\x1bP{MARKER_TAG}{columns};{rows}\x1b\\").into_bytes()
 }
 
 /// The body every size marker starts with.
-const MARKER_TAG: &str = "farcooler-size;";
+const MARKER_TAG: &str = ">farcooler-size;";
 
-/// Longer than any marker's body, so a long application string from a program
+/// Longer than any marker's body, so a long control string from a program
 /// is given up on quickly rather than buffered.
 const MARKER_BODY_LIMIT: usize = 32;
 
 /// Finds size markers in a byte stream, across however it was chunked.
 ///
 /// A scanner of its own rather than a hook in the parser, because the parser
-/// throws application strings away without telling its handler — which is the
-/// property that makes the marker invisible everywhere else.
+/// hands an unknown control string to a handler that throws it away — which is
+/// the property that makes the marker invisible everywhere else.
 #[derive(Default)]
 struct MarkerScan {
     state: ScanState,
@@ -354,7 +378,7 @@ impl MarkerScan {
         match (self.state, byte) {
             (ScanState::Ground, ESC) => self.state = ScanState::Escape,
             (ScanState::Ground, _) => {}
-            (ScanState::Escape, b'_') => {
+            (ScanState::Escape, b'P') => {
                 self.body.clear();
                 self.state = ScanState::Body;
             }
@@ -962,6 +986,34 @@ mod tests {
         assert!(!t.flush_expired_sync(), "and nothing to release a second time");
     }
 
+    /// A terminal whose client has been told the runner sends sizes.
+    fn trusting(columns: u16, rows: u16) -> Terminal {
+        let mut t = Terminal::new(columns, rows);
+        t.set_accept_stream_sizes(true);
+        t
+    }
+
+    /// Sizes are honored only when the client says the runner sends them.
+    ///
+    /// Anything can print the marker's bytes — `farcooler terminal stream`
+    /// run inside a pane does, and so does `cat` of a saved stream — and a
+    /// terminal that believed them would size itself to some other pane. A
+    /// runner that advertises `stream_size_markers` strips every one its
+    /// programs print; nothing else makes that promise.
+    #[test]
+    fn a_terminal_not_told_to_trust_sizes_ignores_them() {
+        let mut t = Terminal::new(20, 4);
+        t.feed(&size_marker(40, 6));
+        t.feed(b"x");
+        assert_eq!((t.columns(), t.rows()), (20, 4));
+        assert_eq!(render(&t)[0], "x", "and the marker still draws nothing");
+        assert!(!t.sized_by_stream());
+
+        t.set_accept_stream_sizes(true);
+        t.feed(&size_marker(40, 6));
+        assert_eq!((t.columns(), t.rows()), (40, 6));
+    }
+
     /// The bug a resize made visible, and the reason the stream carries sizes.
     ///
     /// A pane that grows is told so by tmux, and the program in it repaints for
@@ -976,7 +1028,7 @@ mod tests {
     #[test]
     fn a_repaint_for_a_grown_pane_lands_at_the_size_it_was_written_for() {
         let wide = "W".repeat(40);
-        let mut t = Terminal::new(20, 4);
+        let mut t = trusting(20, 4);
         t.feed(b"before the resize");
         t.feed(&size_marker(40, 6));
         t.feed(format!("\x1b[H\x1b[2J{wide}\x1b[6;1Hbottom").as_bytes());
@@ -994,7 +1046,7 @@ mod tests {
     fn a_size_marker_split_across_reads_still_resizes() {
         let marker = size_marker(33, 7);
         for split in 1..marker.len() {
-            let mut t = Terminal::new(20, 4);
+            let mut t = trusting(20, 4);
             assert!(!t.sized_by_stream());
             t.feed(&marker[..split]);
             t.feed(&marker[split..]);
@@ -1009,7 +1061,7 @@ mod tests {
     /// put a line aimed at the old bottom row on the new one.
     #[test]
     fn a_held_frame_is_applied_at_the_size_it_was_written_for() {
-        let mut t = Terminal::new(20, 4);
+        let mut t = trusting(20, 4);
         t.feed(b"\x1b[?2026h\x1b[99;1Hlast");
         t.feed(&size_marker(20, 8));
         t.feed(b"\x1b[?2026l");
@@ -1018,14 +1070,16 @@ mod tests {
         assert_eq!(rows[7], "");
     }
 
-    /// Somebody else's application string is not a size, and neither is a
+    /// Somebody else's control string is not a size, and neither is a
     /// marker that does not parse.
     #[test]
     fn other_application_strings_do_not_resize() {
-        let mut t = Terminal::new(20, 4);
-        t.feed(b"a\x1b_something else;40;6\x1b\\b");
-        t.feed(b"\x1b_farcooler-size;0;6\x1b\\");
-        t.feed(b"\x1b_farcooler-size;40\x1b\\c");
+        let mut t = trusting(20, 4);
+        t.feed(b"a\x1bP>something else;40;6\x1b\\b");
+        t.feed(b"\x1bP>farcooler-size;0;6\x1b\\");
+        t.feed(b"\x1bP>farcooler-size;40\x1b\\c");
+        // The old APC form is not a marker either.
+        t.feed(b"\x1b_farcooler-size;40;6\x1b\\");
         assert_eq!((t.columns(), t.rows()), (20, 4));
         assert_eq!(render(&t)[0], "abc");
         assert!(!t.sized_by_stream());

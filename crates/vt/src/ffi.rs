@@ -161,6 +161,16 @@ pub unsafe extern "C" fn farcooler_vt_resize(handle: *mut c_void, columns: u16, 
     h.revision = h.revision.wrapping_add(1);
 }
 
+/// Honor size markers in the byte stream. Off by default; turn it on only for
+/// a stream from a runner that advertises `stream_size_markers`, which strips
+/// every marker its programs print. See `Terminal::set_accept_stream_sizes`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_vt_accept_stream_sizes(handle: *mut c_void, accept: bool) {
+    if let Some(h) = unsafe { as_handle(handle) } {
+        h.terminal.set_accept_stream_sizes(accept);
+    }
+}
+
 /// Whether the byte stream has said what size its pane is.
 ///
 /// Once true, the stream resizes the grid itself, at the exact point in the
@@ -721,6 +731,7 @@ mod tests {
     fn a_size_from_the_stream_is_visible_through_the_abi() {
         let h = farcooler_vt_new(40, 6);
         assert!(!unsafe { farcooler_vt_sized_by_stream(h) });
+        unsafe { farcooler_vt_accept_stream_sizes(h, true) };
         feed(h, &crate::size_marker(90, 30));
         let (snap, _) = read(h);
         assert_eq!((snap.columns, snap.rows), (90, 30));
@@ -790,6 +801,7 @@ mod tests {
             farcooler_vt_feed(null, b"x".as_ptr(), 1);
             farcooler_vt_resize(null, 10, 10);
             assert!(!farcooler_vt_sized_by_stream(null));
+            farcooler_vt_accept_stream_sizes(null, true);
             assert_eq!(farcooler_vt_revision(null), 0);
             assert!(!farcooler_vt_snapshot(null, std::ptr::null_mut()));
             assert_eq!(farcooler_vt_take_writes(null, std::ptr::null_mut(), 0), 0);

@@ -106,6 +106,17 @@ void farcooler_vt_feed(void *handle, const uint8_t *bytes, size_t len);
 void farcooler_vt_resize(void *handle, uint16_t columns, uint16_t rows);
 
 /*
+ * Honor size markers in the byte stream. Off by default.
+ *
+ * Turn it on only for a stream from a runner that advertises
+ * "stream_size_markers": such a runner strips every marker its programs print,
+ * so the ones that arrive are its own. Without that promise a marker is just
+ * bytes a program printed, and honoring it would size this terminal to some
+ * other pane. Ignored or not, a marker draws nothing.
+ */
+void farcooler_vt_accept_stream_sizes(void *handle, bool accept);
+
+/*
  * True once the byte stream has said what size its pane is.
  *
  * A runner puts the pane's size in the stream, in front of the first bytes
@@ -113,7 +124,8 @@ void farcooler_vt_resize(void *handle, uint16_t columns, uint16_t rows);
  * on the stream is the authority: stop calling farcooler_vt_resize when a
  * layout reply arrives, because by then the program's repaint for the new size
  * has already been fed, and resizing after it wraps the repaint at the wrong
- * width. Until this is true — a runner too old to send sizes — resize as before.
+ * width. Until this is true — a runner too old to send sizes, or a client that
+ * has not called farcooler_vt_accept_stream_sizes — resize as before.
  */
 bool farcooler_vt_sized_by_stream(void *handle);
 

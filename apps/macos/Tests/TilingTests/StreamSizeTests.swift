@@ -20,7 +20,7 @@ import Testing
 struct StreamSizeTests {
     /// The bytes a runner's fanout writes when a pane becomes `columns`×`rows`.
     private func marker(_ columns: Int, _ rows: Int) -> [UInt8] {
-        Array("\u{1b}_farcooler-size;\(columns);\(rows)\u{1b}\\".utf8)
+        Array("\u{1b}P>farcooler-size;\(columns);\(rows)\u{1b}\\".utf8)
     }
 
     private func rows(of view: TerminalRenderView) -> [String] {

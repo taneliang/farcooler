@@ -197,7 +197,7 @@ fn announce(size: Option<&PaneSize>, last: &mut Option<(u16, u16)>) -> Option<by
 /// string would make it one. The tests below compare every marker this sends
 /// against the emulator's own, so the two cannot drift apart unnoticed.
 fn size_marker(columns: u16, rows: u16) -> Vec<u8> {
-    format!("\x1b_farcooler-size;{columns};{rows}\x1b\\").into_bytes()
+    format!("\x1bP>farcooler-size;{columns};{rows}\x1b\\").into_bytes()
 }
 
 /// The part that has nothing to do with processes, so a test can drive it.
