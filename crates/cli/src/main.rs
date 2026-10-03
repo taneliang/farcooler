@@ -30,6 +30,7 @@ use clap::{Parser, Subcommand};
 
 mod changes;
 mod clients;
+mod report;
 mod tasks;
 mod workspaces;
 pub(crate) use daemon_link::{Link, connect_to, expect_value, req, req_for, with};
@@ -151,6 +152,13 @@ enum Command {
     /// The runner decides what's on it, so this, the Mac's Needs You and the
     /// phones' can't disagree. `--json` prints the shape the phones read.
     NeedsYou,
+    /// Summarize what got done: tasks finished, how long they took, and how
+    /// much of a person they needed.
+    ///
+    /// Computed by the runner from its own board, for the last 7 days unless
+    /// `--since` and `--until` say otherwise. `--json` prints the shape the
+    /// apps read.
+    Report(report::ReportArgs),
     /// Show how to attach to a worktree's live tmux session.
     Attach { worktree: String },
     /// Stream changes as they happen, one JSON object per line.
@@ -1194,6 +1202,7 @@ async fn run() -> Fallible {
         Command::Worktree(c) => worktree(runner, c, cli.json).await,
         Command::Layout(c) => layout(runner, c, cli.json).await,
         Command::NeedsYou => needs_you(runner, cli.json).await,
+        Command::Report(args) => report::report(runner, args, cli.json).await,
         Command::Attach { worktree } => attach(runner, &worktree).await,
         Command::Events => events(runner).await,
         Command::Push(c) => push(runner, c).await,
