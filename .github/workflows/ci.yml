@@ -786,21 +786,12 @@ jobs:
         env:
           NSUnbufferedIO: YES
 
-      # NOT run here: FarCoolerUITests. The suite is COMPILED by the step above
-      # and executed by none, and the two halves of that are worth keeping
-      # apart: a test that does not build is a defect this job can catch for
-      # nothing, and a test that does not run is a guarantee this job cannot
-      # give at all.
-      #
-      # Most of what proves anything in that suite needs a live runner — an
-      # sshd, a daemon and a tmux fleet, which is what scripts/demo-host.sh
-      # stands up on a laptop and what this job has none of. Some of it does
-      # not: everything that stands on `-shell-harness` needs only a simulator.
-      # Running that subset here is a real option and deliberately not taken
-      # yet — it means booting a simulator in CI — so the iOS suite's coverage
-      # of the app's behavior remains a LOCAL guarantee, and CI's silence about
-      # it is absence of evidence rather than evidence of absence. Run it
-      # before landing anything that touches a pane:
+      # Run by the `ios-ui` job below: every class that stands on an in-app
+      # harness and needs no runner. The rest of FarCoolerUITests needs a
+      # live runner — an sshd, a daemon and a tmux fleet, which is what
+      # scripts/demo-host.sh stands up on a laptop and what CI has none of —
+      # so that half stays a LOCAL guarantee. Run it before landing anything
+      # that touches a pane:
       #
       #   ./scripts/demo-host.sh
       #   ./scripts/ios-ui-tests.sh
@@ -810,6 +801,106 @@ jobs:
       # which every test skipped — which xcodebuild calls a success, and which
       # is how eight green scroll tests once covered for a terminal that would
       # not scroll.
+
+  # The iOS app's own code, executed (ov-127). Until this job the app target
+  # was compiled by CI and run by nothing, so a rule that lived only there was
+  # untested on iOS even where Android tested its port.
+  #
+  # Only the runnerless classes: each launches the app on an in-app harness
+  # (`-shell-harness`, `-agent-layout-harness`, `-phone-harness`, or a fixture
+  # flag) and needs a simulator and nothing else. A live-runner test that
+  # slipped into a list would skip with "NO LIVE RUNNER:", and the script turns
+  # that red — so the lists cannot quietly grow a test that tests nothing here.
+  # `testAHorizontalSwipeOverTheLiveDiffTurnsThePage` is the one live method
+  # inside a runnerless class, and is skipped by name for that reason.
+  #
+  # Two shards, because one would be the slowest job in CI by a distance.
+  # Measured from 80 local xcresult bundles (median of passing runs per test,
+  # current tests only): the shell shard's classes sum to about 6 minutes plus
+  # KeyboardTabStripTests, which has no history (16 tests, mostly one launch
+  # each); the phone shard's to about 7. CI's Mac runners are slower than the
+  # laptop the numbers came from, and the first launch after an install can
+  # take a minute, so each shard is expected near 15 minutes with the build.
+  # The iOS job above runs in 3 to 5 (last 12 green runs); its 15-minute
+  # timeout is untouched. 40 here is that 15 times 2.5, per ov-168's rule.
+  ios-ui:
+    name: iOS UI (${{ matrix.shard }})
+    runs-on: xcode-27
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: shell
+            classes: >-
+              FarCoolerUITests/ShellGestureTests
+              FarCoolerUITests/ShellColumnCloseTests
+              FarCoolerUITests/ShellPaneScrollTests
+              FarCoolerUITests/TerminalLigatureTests
+              FarCoolerUITests/KeyboardTabStripTests
+          - shard: phone
+            classes: >-
+              FarCoolerUITests/WorkspaceScreenTests
+              FarCoolerUITests/TaskScreenTests
+              FarCoolerUITests/PhoneReopenTests
+              FarCoolerUITests/AgentDraftTests
+              FarCoolerUITests/ChangesPullRequestTests
+              FarCoolerUITests/ComposerKeyboardTests
+              FarCoolerUITests/DynamicTypeTests
+              FarCoolerUITests/RunnerReachTests
+    steps:
+      - name: Check the runner has Xcode 27
+        run: |
+          xcodebuild -version
+          xcodebuild -version | head -1 | grep -q '^Xcode 27\.'
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim, aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the Rust xcframeworks
+        run: ./scripts/build-ios-frameworks.sh
+      - name: Generate the Xcode project
+        run: apps/ios/generate-project.py
+      # The scheme embeds the watch app; see the same step in `ios`.
+      - name: Install the watchOS platform (several GB)
+        run: xcodebuild -downloadPlatform watchOS
+
+      # By UDID, not by name: the image's simulator names change without
+      # warning. The newest iOS runtime installed, and the first iPhone on it.
+      # No iPhone at all is a hard stop with the list printed, not a skip.
+      - name: Pick a simulator
+        run: |
+          udid=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          def version(runtime):
+              tail = runtime.rsplit(".", 1)[-1]
+              return [int(p) for p in tail.split("-")[1:] if p.isdigit()]
+          ios = sorted((r for r in devices if ".SimRuntime.iOS-" in r), key=version, reverse=True)
+          for runtime in ios:
+              for d in devices[runtime]:
+                  if d["name"].startswith("iPhone"):
+                      print(d["udid"])
+                      sys.exit()
+          ')
+          if [ -z "$udid" ]; then
+            xcrun simctl list devices available
+            echo "No available iPhone simulator on this runner." >&2
+            exit 1
+          fi
+          xcrun simctl list devices available | grep "$udid"
+          echo "SIMULATOR_ID=$udid" >> "$GITHUB_ENV"
+
+      # The script, never xcodebuild directly: it fails a run where every test
+      # skipped, and one where a test skipped for want of a runner.
+      - name: Run the runnerless UI tests
+        env:
+          SKIP_TESTING: >-
+            FarCoolerUITests/ShellPaneScrollTests/testAHorizontalSwipeOverTheLiveDiffTurnsThePage
+        run: ./scripts/ios-ui-tests.sh ${{ matrix.classes }}
 
   android:
     name: Android

@@ -45,12 +45,21 @@
 #   SIMULATOR_OS=26.5 ./scripts/ios-ui-tests.sh FarCoolerUITests/ShellGestureTests
 #
 # Unset, the destination is exactly what it always was.
+#
+# SIMULATOR_ID names one device by UDID instead, and wins over both. CI uses it
+# because a runner image's simulator names change without warning, so it picks
+# an iPhone that exists rather than naming one that might not.
+#
+# SKIP_TESTING is a space-separated list passed to -skip-testing, for a method
+# inside a class that is otherwise runnable — CI runs the runnerless classes
+# and has to leave out the one live test some of them carry.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 SIMULATOR="${SIMULATOR:-iPhone 17}"
 SIMULATOR_OS="${SIMULATOR_OS:-}"
+SIMULATOR_ID="${SIMULATOR_ID:-}"
 DEMO_HOST="${DEMO_HOST:-127.0.0.1:2222}"
 DEMO_USER="${DEMO_USER:-$(whoami)}"
 
@@ -62,12 +71,25 @@ ONLY=()
 for target in "$@"; do
     ONLY+=("-only-testing:$target")
 done
+for target in ${SKIP_TESTING:-}; do
+    ONLY+=("-skip-testing:$target")
+done
+
+if [ -n "$SIMULATOR_ID" ]; then
+    DESTINATION="platform=iOS Simulator,id=$SIMULATOR_ID"
+else
+    DESTINATION="platform=iOS Simulator,name=$SIMULATOR${SIMULATOR_OS:+,OS=$SIMULATOR_OS}"
+fi
 
 # Said out loud, because an empty user here is the whole first defect and it is
 # invisible in xcodebuild's output — it surfaces four screens away as an app
 # that will not connect.
 echo "runner:    $DEMO_USER@$DEMO_HOST"
-echo "simulator: $SIMULATOR (OS: ${SIMULATOR_OS:-latest installed})"
+if [ -n "$SIMULATOR_ID" ]; then
+    echo "simulator: $SIMULATOR_ID"
+else
+    echo "simulator: $SIMULATOR (OS: ${SIMULATOR_OS:-latest installed})"
+fi
 echo
 
 LOG="$(mktemp -t ios-ui-tests)"
@@ -132,7 +154,7 @@ env \
     xcodebuild test \
     -project apps/ios/FarCooler.xcodeproj \
     -scheme FarCooler \
-    -destination "platform=iOS Simulator,name=$SIMULATOR${SIMULATOR_OS:+,OS=$SIMULATOR_OS}" \
+    -destination "$DESTINATION" \
     -collect-test-diagnostics never \
     ${ONLY[@]+"${ONLY[@]}"} 2>&1 | tee "$LOG"
 STATUS=${PIPESTATUS[0]}
