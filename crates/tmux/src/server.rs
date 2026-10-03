@@ -111,6 +111,8 @@ const LIFECYCLE_COMMANDS: &[&str] = &[
     "set-option",
     "kill-window",
     "kill-pane",
+    // What a failed first open takes back. See `abandon` in windows.rs.
+    "kill-session",
 ];
 
 /// The deadline for one tmux command, by its verb.
@@ -277,7 +279,9 @@ impl TmuxServer {
             })?,
             Err(_) => {
                 tracing::warn!(command = ?args, ?deadline, "tmux did not answer in time");
-                return Err(DomainError::TmuxUnavailable);
+                // Not `TmuxUnavailable`: tmux is there, and the advice that
+                // goes with that word, install tmux, would be wrong.
+                return Err(DomainError::TmuxTimedOut);
             }
         };
 
@@ -493,12 +497,25 @@ mod tests {
         server: TmuxServer,
         real: PathBuf,
         wrapper: PathBuf,
+        /// One of these at a time. Their timings are the point, and a dozen
+        /// servers starting at once in one process made a `list-panes` with
+        /// no server behind it miss its second.
+        _turn: tokio::sync::MutexGuard<'static, ()>,
     }
+
+    static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     impl SlowTmux {
         /// `None` off CI when there is no tmux to wrap; on CI, which installs
         /// tmux for this job, a missing one is a failure, never a skip.
-        fn start(test: &str, slow: &str) -> Option<SlowTmux> {
+        async fn start(test: &str, slow: &str) -> Option<SlowTmux> {
+            SlowTmux::wrapping(test, &format!("{slow}) sleep 1.5 ;;")).await
+        }
+
+        /// A wrapper whose `case` on the verb has `arms` in it, before the real
+        /// tmux runs. `@FAIL@` in `arms` is a file `fail_from_now` creates.
+        async fn wrapping(test: &str, arms: &str) -> Option<SlowTmux> {
+            let turn = ONE_AT_A_TIME.lock().await;
             use std::os::unix::fs::PermissionsExt;
             let Some(real) = farcooler_core::programs::find("tmux") else {
                 assert!(std::env::var_os("CI").is_none(), "tmux is not installed, and CI must run {test}");
@@ -509,14 +526,185 @@ mod tests {
             let wrapper = std::env::temp_dir().join(format!("farcooler-{install}-tmux"));
             // `-L <socket> -f <config> <verb> …`, so the verb is the fifth.
             let script = format!(
-                "#!/bin/sh\ncase \"$5\" in {slow}) sleep 1.5 ;; esac\nexec '{}' \"$@\"\n",
+                "#!/bin/sh\ncase \"$5\" in {} esac\nexec '{}' \"$@\"\n",
+                arms.replace("@FAIL@", &format!("{}.fail", wrapper.display()))
+                    .replace("@REAL@", &real.display().to_string()),
                 real.display()
             );
             std::fs::write(&wrapper, script).unwrap();
             std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
             let server = TmuxServer::new(&install, Uuid::now_v7()).with_program(wrapper.clone());
-            Some(SlowTmux { server, real, wrapper })
+            Some(SlowTmux { server, real, wrapper, _turn: turn })
         }
+    }
+
+    impl SlowTmux {
+        fn fail_marker(&self) -> PathBuf {
+            PathBuf::from(format!("{}.fail", self.wrapper.display()))
+        }
+
+        /// Each pane with the command tmux started it with.
+        fn every_start(&self) -> Vec<(String, String)> {
+            let out = std::process::Command::new(&self.real)
+                .args(["-L", self.server.socket(), "list-panes", "-a", "-F", "#{pane_id}\t#{pane_start_command}"])
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .filter_map(|l| l.split_once('\t').map(|(p, c)| (p.to_string(), c.to_string())))
+                .collect()
+        }
+
+        /// A pane added the way a person or an agent adds one: `tmux` typed
+        /// in a Far Cooler terminal, which reaches our session through `TMUX`.
+        fn by_hand(&self, args: &[&str]) -> String {
+            let out = std::process::Command::new(&self.real)
+                .args(["-L", self.server.socket()])
+                .args(args)
+                .args(["-d", "-P", "-F", "#{pane_id}"])
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        }
+
+        /// Arms an `@FAIL@` test in the wrapper from here on.
+        fn fail_from_now(&self) {
+            std::fs::write(self.fail_marker(), "").unwrap();
+        }
+
+        /// Every pane on the server, read with the real tmux, so what the
+        /// wrapper does cannot hide one.
+        fn every_pane(&self) -> Vec<String> {
+            let out = std::process::Command::new(&self.real)
+                .args(["-L", self.server.socket(), "list-panes", "-a", "-F", "#{pane_id}"])
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect()
+        }
+
+        async fn open(&self) -> crate::windows::ManagedWindow {
+            let dir = std::env::temp_dir();
+            self.server
+                .create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "t", &dir.to_string_lossy(), "sleep 30")
+                .await
+                .expect("open a pane")
+        }
+    }
+
+    /// A tag that fails once the marker exists.
+    const TAGS_FAIL: &str = "set-option) [ -e '@FAIL@' ] && exit 1 ;;";
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_first_open_whose_tags_fail_leaves_no_pane_behind() {
+        // ov-176: the window was made, the tag failed, and the pane ran on
+        // with no id while its record said the open had failed.
+        let Some(tmux) = SlowTmux::wrapping("a_first_open_whose_tags_fail_leaves_no_pane_behind", TAGS_FAIL).await else {
+            return;
+        };
+        tmux.fail_from_now();
+        let dir = std::env::temp_dir();
+        let opened = tmux
+            .server
+            .create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "t", &dir.to_string_lossy(), "sleep 30")
+            .await;
+        assert!(opened.is_err(), "{opened:?}");
+        assert_eq!(tmux.every_pane(), Vec::<String>::new(), "the failed open left a pane running");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_first_open_that_fails_takes_only_its_own_window_not_the_session() {
+        // While the first open is still tagging, something else adds a window
+        // to the session it just made: another open, or a person. Its failure
+        // must take its own window and nothing else.
+        let arms = "set-option) [ -e '@FAIL@' ] && { '@REAL@' -L \"$2\" new-window -d -t farcooler: 'sleep 30'; exit 1; } ;;";
+        let Some(tmux) =
+            SlowTmux::wrapping("a_first_open_that_fails_takes_only_its_own_window_not_the_session", arms).await
+        else {
+            return;
+        };
+        tmux.fail_from_now();
+        let terminal = Uuid::now_v7();
+        let dir = std::env::temp_dir();
+        let opened = tmux
+            .server
+            .create_terminal_window(Uuid::now_v7(), terminal, "t", &dir.to_string_lossy(), "sleep 30")
+            .await;
+        assert!(opened.is_err(), "{opened:?}");
+        let left = tmux.every_start();
+        assert!(!left.is_empty(), "the windows added meanwhile went with the failed open's");
+        assert!(
+            left.iter().all(|(_, started)| !started.contains(&terminal.to_string())),
+            "the failed open's own pane is still there: {left:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_later_open_whose_tags_fail_takes_back_only_its_own_window() {
+        let Some(tmux) = SlowTmux::wrapping("a_later_open_whose_tags_fail_takes_back_only_its_own_window", TAGS_FAIL).await
+        else {
+            return;
+        };
+        let first = tmux.open().await;
+        tmux.fail_from_now();
+        let dir = std::env::temp_dir();
+        let opened = tmux
+            .server
+            .create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "t", &dir.to_string_lossy(), "sleep 30")
+            .await;
+        assert!(opened.is_err(), "{opened:?}");
+        assert_eq!(tmux.every_pane(), vec![first.pane_id], "the earlier pane stays, the failed one goes");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_split_whose_tag_fails_takes_back_its_pane() {
+        let Some(tmux) = SlowTmux::wrapping("a_split_whose_tag_fails_takes_back_its_pane", TAGS_FAIL).await else {
+            return;
+        };
+        let first = tmux.open().await;
+        tmux.fail_from_now();
+        let dir = std::env::temp_dir();
+        let split = tmux
+            .server
+            .split_pane(&first.pane_id, crate::windows::Axis::Horizontal, Uuid::now_v7(), &dir.to_string_lossy(), "sleep 30", false)
+            .await;
+        assert!(split.is_err(), "{split:?}");
+        assert_eq!(tmux.every_pane(), vec![first.pane_id]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn only_a_marked_untagged_pane_is_an_unfinished_open() {
+        let Some(tmux) = SlowTmux::wrapping("only_a_marked_untagged_pane_is_an_unfinished_open", "").await else {
+            return;
+        };
+        let tagged = tmux.open().await;
+        // What an open cut off before its tags leaves: a window started with
+        // the opening mark, and no id on it.
+        let unfinished = crate::windows::marked("sleep 30", Uuid::now_v7());
+        let out = tmux
+            .server
+            .run(&["new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "farcooler:", &unfinished])
+            .await
+            .unwrap();
+        let unfinished = out.stdout.trim().to_string();
+        // And what a person or an agent adds through `TMUX`: untagged too,
+        // and not ours to touch.
+        let window = tmux.by_hand(&["new-window", "-t", "farcooler:"]);
+        let split = tmux.by_hand(&["split-window", "-t", &tagged.pane_id]);
+        let listed: Vec<String> =
+            tmux.server.unfinished_opens().await.expect("list").into_iter().map(|p| p.pane_id).collect();
+        assert_eq!(
+            listed,
+            vec![unfinished],
+            "only the marked pane: not the tagged {}, the hand window {window} or the hand split {split}",
+            tagged.pane_id
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn no_server_means_no_unfinished_opens() {
+        let Some(tmux) = SlowTmux::wrapping("no_server_means_no_unfinished_opens", "").await else { return };
+        assert_eq!(tmux.server.unfinished_opens().await.expect("no server is not an error"), Vec::new());
     }
 
     impl Drop for SlowTmux {
@@ -527,6 +715,7 @@ mod tests {
                 .stderr(Stdio::null())
                 .status();
             let _ = std::fs::remove_file(&self.wrapper);
+            let _ = std::fs::remove_file(self.fail_marker());
             let _ = std::fs::remove_file(&self.server.config_path);
         }
     }
@@ -536,7 +725,7 @@ mod tests {
         // ov-176: the first pane starts the server, and a loaded machine takes
         // more than a second over that. This open used to be cut off at one
         // second and reported as "tmux is unavailable".
-        let Some(slow) = SlowTmux::start("a_server_slow_to_start_still_opens_the_first_pane", "new-session") else { return };
+        let Some(slow) = SlowTmux::start("a_server_slow_to_start_still_opens_the_first_pane", "new-session").await else { return };
         let terminal = Uuid::now_v7();
         let dir = std::env::temp_dir();
         let opened = slow
@@ -555,7 +744,7 @@ mod tests {
         // The second the opening commands no longer get is still the bound on
         // everything else: a `send-keys` into a pane that never reads must not
         // hold the connection any longer than it did.
-        let Some(slow) = SlowTmux::start("a_keystroke_tmux_will_not_take_still_gives_up_in_a_second", "send-keys") else {
+        let Some(slow) = SlowTmux::start("a_keystroke_tmux_will_not_take_still_gives_up_in_a_second", "send-keys").await else {
             return;
         };
         let dir = std::env::temp_dir();
@@ -568,7 +757,7 @@ mod tests {
         let started = std::time::Instant::now();
         let sent = slow.server.send_keys(&window.pane_id, "x").await;
         let took = started.elapsed();
-        assert!(matches!(sent, Err(DomainError::TmuxUnavailable)), "{sent:?}");
+        assert!(matches!(sent, Err(DomainError::TmuxTimedOut)), "a timeout says so: {sent:?}");
         assert!(took < std::time::Duration::from_millis(1400), "send-keys waited {took:?}");
     }
 
@@ -576,7 +765,7 @@ mod tests {
     async fn attaching_to_a_pane_outlasts_a_slow_fork() {
         // `pipe-pane` forks a shell inside the server, the way opening a pane
         // does, and it is what attaching runs straight after the open.
-        let Some(slow) = SlowTmux::start("attaching_to_a_pane_outlasts_a_slow_fork", "pipe-pane") else {
+        let Some(slow) = SlowTmux::start("attaching_to_a_pane_outlasts_a_slow_fork", "pipe-pane").await else {
             return;
         };
         let dir = std::env::temp_dir();

@@ -8267,10 +8267,12 @@ mod pane_actor_tests {
             .expect("an odd preset still opens a pane");
 
         // tmux quotes a start command that has a space in it, so the quotes
-        // are trimmed before the tail is read rather than matched against.
+        // are trimmed before the tail is read rather than matched against,
+        // and the open's own mark (`OPENING_MARK`) comes off the end.
         let command = pane_start_command(&svc, term.id).await;
+        let launched = command.trim_matches('"').split(farcooler_tmux::windows::OPENING_MARK).next().unwrap_or("");
         assert!(
-            command.trim_matches('"').ends_with(" -il"),
+            launched.trim_end().ends_with(" -il"),
             "the builder refused to run it and gave a login shell: {command}"
         );
         assert!(

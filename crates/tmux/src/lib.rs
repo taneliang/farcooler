@@ -16,4 +16,4 @@ pub mod windows;
 pub use control::{Notification, parse_line};
 pub use inventory::LiveInventory;
 pub use server::{SESSION_NAME, TmuxServer};
-pub use windows::ManagedWindow;
+pub use windows::{ManagedWindow, UnfinishedOpen};

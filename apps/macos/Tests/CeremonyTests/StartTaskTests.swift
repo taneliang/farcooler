@@ -260,8 +260,8 @@ struct StartTaskTests {
             sentences.append(TaskFailure.undelivered(name: "fix-it", cause))
         }
         for code in [
-            "branch-exists", "worktree-exists", "tmux-unavailable", "capability-unsupported",
-            "invalid-argument", "something-new",
+            "branch-exists", "worktree-exists", "tmux-unavailable", "tmux-timed-out",
+            "capability-unsupported", "invalid-argument", "something-new",
         ] {
             sentences.append(TaskFailure.sentence(for: "error: x\ncode: \(code)"))
         }

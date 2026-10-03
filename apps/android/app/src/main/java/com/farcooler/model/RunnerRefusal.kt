@@ -62,6 +62,10 @@ enum class RunnerRefusal(val word: String, val sentence: String) {
         "tmux-unavailable",
         "The runner can’t reach tmux. Far Cooler runs every pane inside it, so install tmux " +
             "there and try again."),
+    /** tmux is there and answered too slowly: an open on a loaded runner. */
+    TMUX_TIMED_OUT(
+        "tmux-timed-out",
+        "The runner’s terminal took too long to answer. Try again in a moment."),
     /** A directory of that name is already on disk. */
     WORKTREE_EXISTS(
         "worktree-exists",

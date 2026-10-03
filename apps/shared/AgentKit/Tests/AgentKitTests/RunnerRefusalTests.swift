@@ -259,3 +259,12 @@ import Testing
         #expect(first.isUppercase, "\(refusal.rawValue) does not start a sentence")
     }
 }
+
+/// A runner whose tmux answered slowly still has tmux, so its sentence must
+/// not send anyone off to install it (ov-176).
+@Test func aSlowTmuxIsNotToldToInstallTmux() {
+    let slow = RunnerRefusal.tmuxTimedOut.sentence
+    #expect(slow.contains("took too long"), "\(slow)")
+    #expect(!slow.lowercased().contains("install"), "\(slow)")
+    #expect(RunnerRefusal(rawValue: "tmux-timed-out") == .tmuxTimedOut)
+}

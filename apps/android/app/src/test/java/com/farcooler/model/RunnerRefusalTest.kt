@@ -300,4 +300,13 @@ class RunnerRefusalTest {
             .map { it.groupValues[1] }.toSet()
         assertEquals(RunnerRefusal.entries.map { it.word }.toSet(), theirWords)
     }
+
+    /** A runner whose tmux answered slowly still has tmux (ov-176). */
+    @Test
+    fun aSlowTmuxIsNotToldToInstallTmux() {
+        val slow = RunnerRefusal.TMUX_TIMED_OUT.sentence
+        assertTrue(slow, slow.contains("took too long"))
+        assertTrue(slow, !slow.lowercase().contains("install"))
+        assertEquals("tmux-timed-out", RunnerRefusal.TMUX_TIMED_OUT.word)
+    }
 }

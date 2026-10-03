@@ -321,6 +321,8 @@ enum TaskFailure {
             "This runner already has a branch or folder with that name. Start again to use a different one."
         case "tmux-unavailable":
             "The runner can’t reach tmux. Far Cooler runs every agent inside it, so install tmux there and try again."
+        case "tmux-timed-out":
+            "The runner took too long to start the agent. Try again in a moment."
         case "capability-unsupported":
             "This runner’s Far Cooler is too old for this. Update it there, then try again."
         case "invalid-argument":

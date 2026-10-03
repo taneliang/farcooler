@@ -66,6 +66,14 @@ pub enum DomainError {
     #[error("tmux is unavailable")]
     TmuxUnavailable,
 
+    /// tmux is there, and a command to it ran past its deadline.
+    ///
+    /// Distinct from `TmuxUnavailable`, which every client words as "install
+    /// tmux": the wrong advice for a runner that answered slowly. Opening a
+    /// pane on a loaded machine is the usual cause (ov-176). Retryable.
+    #[error("tmux did not answer in time")]
+    TmuxTimedOut,
+
     // ---- review ----
     //
     // Six failures the review surface can produce. Each maps to a sentence a
@@ -159,6 +167,8 @@ impl DomainError {
             DomainError::InvalidArgument { .. } => (ErrorCode::InvalidArgument, false),
             DomainError::IdempotencyMismatch => (ErrorCode::IdempotencyMismatch, false),
             DomainError::TmuxUnavailable => (ErrorCode::TmuxUnavailable, true),
+            // Retryable: a loaded machine is slow, not broken.
+            DomainError::TmuxTimedOut => (ErrorCode::TmuxTimedOut, true),
             DomainError::PathNotAllowed => (ErrorCode::PathNotAllowed, false),
             DomainError::SensitiveRoot => (ErrorCode::SensitiveRoot, false),
             DomainError::ConfirmationRequired => (ErrorCode::ConfirmationRequired, false),
@@ -217,6 +227,7 @@ impl DomainError {
             | DomainError::NotFound
             | DomainError::IdempotencyMismatch
             | DomainError::TmuxUnavailable
+            | DomainError::TmuxTimedOut
             | DomainError::PathNotAllowed
             | DomainError::SensitiveRoot
             | DomainError::ConfirmationRequired
@@ -340,6 +351,7 @@ pub fn word(code: ErrorCode) -> &'static str {
         ErrorCode::InvalidArgument => "invalid-argument",
         ErrorCode::IdempotencyMismatch => "idempotency-mismatch",
         ErrorCode::TmuxUnavailable => "tmux-unavailable",
+        ErrorCode::TmuxTimedOut => "tmux-timed-out",
         ErrorCode::PathNotAllowed => "path-not-allowed",
         ErrorCode::ConfirmationRequired => "confirmation-required",
         // The word keeps the old spelling: the apps match on it.
@@ -402,6 +414,7 @@ mod tests {
             DomainError::InvalidArgument { what: "columns" },
             DomainError::IdempotencyMismatch,
             DomainError::TmuxUnavailable,
+            DomainError::TmuxTimedOut,
             DomainError::PathNotAllowed,
             DomainError::SensitiveRoot,
             DomainError::ConfirmationRequired,
@@ -683,11 +696,21 @@ mod tests {
         );
     }
 
+    /// A tmux that answered slowly is not a tmux that is missing: the two
+    /// reach a client as different words, because every client tells the
+    /// second to install tmux (ov-176).
+    #[test]
+    fn a_slow_tmux_is_not_a_missing_one() {
+        assert_ne!(DomainError::TmuxTimedOut.code(), DomainError::TmuxUnavailable.code());
+        assert_eq!(word(DomainError::TmuxTimedOut.code()), "tmux-timed-out");
+    }
+
     #[test]
     fn retryable_is_stable_and_deliberate() {
         // Clients auto-retry on these; a wrong value means retrying forever.
         assert!(DomainError::RepositoryLocked.retryable());
         assert!(DomainError::TmuxUnavailable.retryable());
+        assert!(DomainError::TmuxTimedOut.retryable());
         assert!(!DomainError::BranchExists.retryable());
         assert!(!DomainError::DirtyWorktree.retryable());
         assert!(!DomainError::ScopeDenied { needed: "control" }.retryable());

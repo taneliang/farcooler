@@ -128,6 +128,9 @@ struct TaskNameTests {
         #expect(taken.contains("already has a branch or folder"), "\(taken)")
         #expect(TaskFailure.sentence(for: "error: worktree path already exists\ncode: worktree-exists") == taken)
         #expect(TaskFailure.sentence(for: "error: tmux is unavailable\ncode: tmux-unavailable").contains("tmux"))
+        // A runner that answered slowly has tmux; telling it to install tmux is wrong.
+        let slow = TaskFailure.sentence(for: "error: tmux did not answer in time\ncode: tmux-timed-out")
+        #expect(slow.contains("took too long") && !slow.contains("install"), "\(slow)")
     }
 
     /// The code word decides, not the prose: a reworded message still maps,

@@ -36,6 +36,7 @@ use crate::wire;
 
 pub(crate) mod answer_wake;
 pub(crate) mod task_notice;
+mod reap;
 
 /// How often to look.
 ///
@@ -691,6 +692,9 @@ pub struct Watcher {
     /// for a repository the watcher does not cover: a registration that failed
     /// must leave the daemon where it was, not somewhere worse.
     worktree_marks: std::sync::Mutex<HashMap<Uuid, std::time::SystemTime>>,
+    /// When each untagged pane in our session was first seen. See
+    /// `unfinished_to_reap`. A std mutex, never held across an await.
+    unfinished_seen: std::sync::Mutex<HashMap<farcooler_tmux::UnfinishedOpen, std::time::Instant>>,
     /// When each repository was last reconciled.
     ///
     /// A std mutex on the same terms. Absent for a repository nothing has
@@ -2722,6 +2726,7 @@ impl Watcher {
             events,
             state: tokio::sync::Mutex::new(HashMap::new()),
             worktree_marks: std::sync::Mutex::new(HashMap::new()),
+            unfinished_seen: std::sync::Mutex::new(HashMap::new()),
             worktree_reconciles: std::sync::Mutex::new(HashMap::new()),
             change_set_probes: std::sync::Mutex::new(HashMap::new()),
             change_set_activity: std::sync::Mutex::new(HashMap::new()),
@@ -4407,6 +4412,10 @@ impl Watcher {
                     }
                 }
             }
+
+            // And the panes it cannot see: an open that never finished.
+            // See `reap`.
+            self.sweep_unfinished_opens().await;
 
             if !repaired.is_empty() {
                 panes = self.service.inventory.refresh().await;

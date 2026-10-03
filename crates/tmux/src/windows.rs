@@ -9,6 +9,40 @@ use uuid::Uuid;
 
 use crate::server::{SESSION_NAME, TmuxServer};
 
+/// What every pane an open makes carries in its start command, before any
+/// step of the open can fail: `<command> #farcooler-opening:<terminal id>`.
+///
+/// The mark is how the sweep tells a pane this daemon started and never
+/// finished from one somebody else made. Nothing unsets `TMUX` in a pane, so
+/// a `tmux split-window` typed in a Far Cooler terminal, an agent's teammate
+/// mode or tmuxinator all add panes to our session, untagged, and those are
+/// someone's work. They never carry this mark, because tmux records the
+/// command a pane was started with and theirs is not ours. Untagged and
+/// unmarked is never touched.
+///
+/// A trailing comment, so the command runs exactly as it would without it:
+/// tmux hands a one-string command to `default-shell -c`, and sh, bash, zsh,
+/// fish, dash and tcsh all read `#` after a space as the start of a comment.
+/// It is in the start command and not in an option set afterwards because
+/// that would be a second command, which is the very step that can fail.
+pub const OPENING_MARK: &str = "#farcooler-opening:";
+
+/// `command`, carrying the opening mark for `terminal_id`. See `OPENING_MARK`.
+pub fn marked(command: &str, terminal_id: Uuid) -> String {
+    format!("{command} {OPENING_MARK}{terminal_id}")
+}
+
+/// A pane an open started and never finished. See `unfinished_opens`.
+///
+/// The pid comes along because a pane id alone is only unique for one
+/// server's life: a server that restarts numbers from `%0` again, and a sweep
+/// that remembered `%0` from before would take the new one for the old.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UnfinishedOpen {
+    pub pane_id: String,
+    pub pid: u32,
+}
+
 /// A window created for one terminal, addressed by its stable tmux ids.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManagedWindow {
@@ -34,6 +68,8 @@ impl TmuxServer {
         // so nothing squats the base index.
         let session_exists = self.is_running().await;
         let target = format!("{SESSION_NAME}:");
+        let command = marked(command, terminal_id);
+        let command = command.as_str();
 
         let out = if session_exists {
             self.run(&[
@@ -79,13 +115,14 @@ impl TmuxServer {
             return Err(DomainError::TmuxUnavailable);
         }
 
-        if !session_exists {
-            self.tag_session().await?;
-        }
-
+        // The ids first, so that from here on a failure has a window to take
+        // back. See `abandon`.
         let line = out.stdout.trim();
         let mut parts = line.split_whitespace();
         let (Some(window_id), Some(pane_id)) = (parts.next(), parts.next()) else {
+            // No id to take back by. Not the session either, even one this
+            // open made: other opens may have added windows to it since. The
+            // pane carries `OPENING_MARK`, so the sweep finds it.
             tracing::warn!(line, "unparsable new-window output");
             return Err(DomainError::TmuxUnavailable);
         };
@@ -95,9 +132,95 @@ impl TmuxServer {
             pane_id: pane_id.to_string(),
         };
 
-        self.tag_window(&win.window_id, worktree_id).await?;
-        self.tag_pane(&win.pane_id, terminal_id).await?;
+        // The session's tags are best effort: nothing reads them, and a
+        // window that was made fine is not worth failing over them.
+        if !session_exists && let Err(e) = self.tag_session().await {
+            tracing::warn!(error = %e, "could not tag the session");
+        }
+        let tagged = async {
+            self.tag_window(&win.window_id, worktree_id).await?;
+            self.tag_pane(&win.pane_id, terminal_id).await
+        }
+        .await;
+        if let Err(e) = tagged {
+            // Only this open's own window, always. Even when this open made
+            // the session, other opens may have added theirs since, and tmux
+            // closes a session with its last window anyway.
+            self.abandon(&["kill-window", "-t", &win.window_id]).await;
+            return Err(e);
+        }
         Ok(win)
+    }
+
+    /// Take back what a failed open made.
+    ///
+    /// An open is several commands, and the first one already started the
+    /// process: once `new-window` has answered, a tag that then fails or times
+    /// out leaves a live pane with no terminal id. The inventory names panes by
+    /// that id, so nothing would ever see this one, and its terminal record is
+    /// marked failed. The person is told the open failed while the program runs
+    /// on out of sight. So the open closes what it made before it reports the
+    /// failure, and `unfinished_opens` sweeps up after an open that never got as
+    /// far as an id.
+    ///
+    /// Best effort. If tmux will not take this either, the sweep is the backstop.
+    async fn abandon(&self, args: &[&str]) {
+        match self.run(args).await {
+            Ok(out) if out.ok() => {}
+            Ok(out) => tracing::warn!(command = ?args, stderr = %out.stderr, "could not close a failed open"),
+            Err(e) => tracing::warn!(command = ?args, error = %e, "could not close a failed open"),
+        }
+    }
+
+    /// The panes an open started and never tagged.
+    ///
+    /// What `abandon` could not take back: an open whose client was cut off
+    /// before tmux answered with the window's id, so nothing knows which window
+    /// to close, or a close that failed in its turn. `list_tagged_panes` never
+    /// returns such a pane, which is the whole problem, so this asks for them
+    /// directly.
+    ///
+    /// All three must hold: in `SESSION_NAME` on this install's private
+    /// socket, no terminal id, and `OPENING_MARK` in the command tmux started
+    /// it with. The mark is what keeps a pane somebody added to our session by
+    /// hand, untagged as it is, out of this list. The tag is read as a format,
+    /// so a pane that inherits its terminal id from its window counts as
+    /// tagged. An empty list, not an error, when no server is running.
+    ///
+    /// A pane being opened right now is unfinished for a moment too, so this is
+    /// only a list. Deciding which have been unfinished too long to be an open
+    /// in progress is the caller's job (`watch::unfinished_to_reap`).
+    pub async fn unfinished_opens(&self) -> Result<Vec<UnfinishedOpen>> {
+        // The start command last: it is the one field that may hold a tab.
+        let fmt = format!(
+            "#{{session_name}}\t#{{pane_id}}\t#{{pane_pid}}\t#{{{}}}\t#{{pane_start_command}}",
+            tags::TERMINAL_ID
+        );
+        let out = self.run(&["list-panes", "-a", "-F", &fmt]).await?;
+        if !out.ok() {
+            if out.stderr.contains("no server running")
+                || out.stderr.contains("no current session")
+                || out.stderr.contains("error connecting")
+            {
+                return Ok(Vec::new());
+            }
+            tracing::warn!(stderr = %out.stderr, "list-panes failed");
+            return Err(DomainError::TmuxUnavailable);
+        }
+        Ok(out
+            .stdout
+            .lines()
+            .filter_map(|line| {
+                let mut fields = line.splitn(5, '\t');
+                let (session, pane, pid, tag) = (fields.next()?, fields.next()?, fields.next()?, fields.next()?);
+                let started = fields.next().unwrap_or("");
+                let ours = session == SESSION_NAME && pane.starts_with('%');
+                (ours && tag.trim().is_empty() && started.contains(OPENING_MARK)).then(|| UnfinishedOpen {
+                    pane_id: pane.to_string(),
+                    pid: pid.trim().parse().unwrap_or(0),
+                })
+            })
+            .collect())
     }
 
     /// Tag a window with what every pane in it shares.
@@ -998,7 +1121,8 @@ impl TmuxServer {
         if before {
             args.push("-b");
         }
-        args.extend_from_slice(&["-c", worktree, command]);
+        let command = marked(command, terminal_id);
+        args.extend_from_slice(&["-c", worktree, &command]);
 
         let out = self.run(&args).await?;
         if !out.ok() {
@@ -1009,7 +1133,11 @@ impl TmuxServer {
         if pane_id.is_empty() {
             return Err(DomainError::TmuxUnavailable);
         }
-        self.tag_pane(&pane_id, terminal_id).await?;
+        if let Err(e) = self.tag_pane(&pane_id, terminal_id).await {
+            // The split is running a program nothing can name. See `abandon`.
+            self.abandon(&["kill-pane", "-t", &pane_id]).await;
+            return Err(e);
+        }
         Ok(pane_id)
     }
 

@@ -50,6 +50,8 @@ public enum RunnerRefusal: String, CaseIterable, Sendable {
     case notFound = "not-found"
     /// The runner has no tmux, which is what it runs everything in.
     case tmuxUnavailable = "tmux-unavailable"
+    /// tmux is there and answered too slowly: an open on a loaded runner.
+    case tmuxTimedOut = "tmux-timed-out"
     /// A directory of that name is already on disk.
     case worktreeExists = "worktree-exists"
     /// A branch of that name is already in the repository.
@@ -94,6 +96,8 @@ public enum RunnerRefusal: String, CaseIterable, Sendable {
         case .tmuxUnavailable:
             "The runner can’t reach tmux. Far Cooler runs every pane inside it, so install tmux "
                 + "there and try again."
+        case .tmuxTimedOut:
+            "The runner’s terminal took too long to answer. Try again in a moment."
         case .worktreeExists:
             "There’s already a folder with that name on the runner. Pick another name."
         case .branchExists:
