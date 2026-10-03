@@ -359,11 +359,7 @@ struct ContentView: View {
         // this is exactly the state worth surviving all three.
         // Tells the menu bar the main window is key, and whether an overlay
         // is open over it. See `MainWindowFocus`.
-        .focusedSceneValue(
-            \.mainWindow,
-            MainWindowFocus(
-                overlayOpen: showQuickCreate || showPalette, taskOpen: Self.taskOpen(selection),
-                hasNavigator: selection.flatMap(workspaceScene)?.board != nil))
+        .focusedSceneValue(\.mainWindow, menuFocus)
         // The key window's alone: with two windows, both heard every
         // command, and ⌘B toggled one sidebar twice (review m2).
         .onCommand { command in if isKeyWindow { run(command) } }
@@ -3535,6 +3531,59 @@ struct ContentView: View {
 
     /// The worktree a tiling keystroke acts on.
     private var tileTarget: Worktree? { currentWorktree }
+
+    /// What the menu bar can act on in this window: each item dimmed when
+    /// what it reads here has nothing to act on (ov-211).
+    private var menuFocus: MainWindowFocus {
+        let scene = selection.flatMap(workspaceScene)
+        let terminals = allTerminals
+        var focus = MainWindowFocus(
+            overlayOpen: showQuickCreate || showPalette, taskOpen: Self.taskOpen(selection),
+            hasNavigator: scene?.board != nil)
+        focus.sidebarShown = sidebarVisibility != .detailOnly
+        focus.hasWorktree = currentWorktree != nil
+        focus.terminals = terminals.count
+        focus.stepsTerminals = terminals.count > 1 || (terminals.count == 1 && terminals.first != selectedPane)
+        focus.hasAttention =
+            NeedsYouNavigation.step(lastOpened: lastAttention, items: store.needsYou, fleet: store.fleet, showing: selection) != nil
+        focus.goesBack = Self.goesBack(focus: focusColumn, from: selection, trail: trail, board: scene?.board)
+        focus.focuses = scene?.opened != nil || selection?.focus != nil
+        focus.focused = focusColumn
+        focus.inWorkspace = scene != nil
+        if let scene, let board = scene.board {
+            let entries = worktreeEntries(scene)
+            let step = { (by: Int) in
+                WorkspaceWorktrees.step(
+                    from: selection, by: by, in: entries, host: scene.host, workspace: board, fleet: store.fleet) != nil
+            }
+            focus.nextWorktree = step(1)
+            focus.previousWorktree = step(-1)
+        }
+        focus.workspaces = WorkspaceNumbers.groups(in: store.fleet).flatMap(\.places).filter { $0.number != nil }.count
+        focus.makesWorkspaces = !workspaceRepositories.isEmpty
+        focus.layout = tileTarget.map { worktree in
+            let screen = onScreen(in: worktree)
+            let here = selectedPane.flatMap { screen?.group.pane($0.terminal) } ?? screen?.group.panes.first(where: \.focused)
+            // The pane Switch Between Terminal and Chat would switch, found
+            // as `tile(_:)` finds it.
+            let target = here.flatMap { rect in worktree.terminals.first { $0.id == rect.id } }
+                ?? selectedTerminal?.terminal
+                ?? screen?.group.panes.first.flatMap { pane in worktree.terminals.first { $0.id == pane.id } }
+            return LayoutMenuFocus.make(
+                group: screen?.group, here: here, layouts: screen?.groups ?? [],
+                switchesMode: target.map { $0.canSwitchPaneMode || $0.isAgentPane } ?? false)
+        }
+        return focus
+    }
+
+    /// Whether Back (⌃⌘←) does anything, by `goBack()`'s own steps: leave
+    /// Focus, go up a level, or close a loose worktree to its board.
+    nonisolated static func goesBack(focus: Bool, from selection: Selection?, trail: Selection?, board: String?) -> Bool {
+        let step = WorkspaceNavigation.backStep(focus: focus, oneAtATime: true, from: selection, trail: trail)
+        if step.leavesFocus || step.goesTo != nil { return true }
+        guard case .looseWorktree? = selection, let selection else { return false }
+        return WorkspaceNavigation.closing(selection, board: board) != nil
+    }
 
     /// Carry out a `⌃B`-prefixed command.
     ///

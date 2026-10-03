@@ -92,7 +92,7 @@ lost tmux, or runs an older Far Cooler, a banner across the top of the window
 says so, with **Reconnect** or the update, whether or not the sidebar is out.
 
 **The sidebar** is hidden in a new window, since the switcher does its work.
-Show it with the button in the title bar or View ▸ Toggle Sidebar (⌘B); the
+Show it with the button in the title bar or View ▸ Show Sidebar (⌘B); the
 window remembers whether you left it out, and if you used Far Cooler before
 the switcher, it stays as you had it. It lists each repository's workspaces,
 with Needs You above them. A workspace row shows its name, its orchestrator's

@@ -15,17 +15,31 @@ struct MainWindowFocusTests {
         #expect(!MainWindowFocus.closesTerminal(nil))
     }
 
-    @Test("Next Needing Attention acts only while the main window is key")
+    @Test("Next Needing Attention acts only while the main window is key, with something waiting")
     func nextAttentionActsOnlyInTheMainWindow() {
-        #expect(MainWindowFocus.stepsToAttention(MainWindowFocus(overlayOpen: false)))
+        var waiting = MainWindowFocus(overlayOpen: false)
+        waiting.hasAttention = true
+        #expect(MainWindowFocus.stepsToAttention(waiting))
+        // Nothing waiting: ⌃⌘N did nothing, and is dimmed (ov-211).
+        #expect(!MainWindowFocus.stepsToAttention(MainWindowFocus(overlayOpen: false)))
         #expect(!MainWindowFocus.stepsToAttention(nil))
     }
 
     @Test("Zoom Pane acts only in the main window with nothing open over it")
     func zoomPaneActsOnlyWithNothingOverTheWindow() {
-        #expect(MainWindowFocus.zoomsPane(MainWindowFocus(overlayOpen: false)))
+        func focus(overlay: Bool) -> MainWindowFocus {
+            var focus = MainWindowFocus(overlayOpen: overlay)
+            focus.layout = LayoutMenuFocus(panes: 2)
+            return focus
+        }
+        #expect(MainWindowFocus.zoomsPane(focus(overlay: false)))
         // The ⌘N panel or the ⌘P palette: ⇧⌘↩ is theirs.
-        #expect(!MainWindowFocus.zoomsPane(MainWindowFocus(overlayOpen: true)))
+        #expect(!MainWindowFocus.zoomsPane(focus(overlay: true)))
         #expect(!MainWindowFocus.zoomsPane(nil))
+        // One pane has nothing to zoom over, and no layout nothing to zoom.
+        var one = focus(overlay: false)
+        one.layout = LayoutMenuFocus(panes: 1)
+        #expect(!MainWindowFocus.zoomsPane(one))
+        #expect(!MainWindowFocus.zoomsPane(MainWindowFocus(overlayOpen: false)))
     }
 }

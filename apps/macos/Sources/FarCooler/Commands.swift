@@ -82,6 +82,8 @@ enum AppCommand: String {
 struct FarCoolerCommands: Commands {
     /// Nil unless the main window is key. See `MainWindowFocus`.
     @FocusedValue(\.mainWindow) private var mainWindow
+    /// Nil unless a diff is the focused pane. See `DiffMenuFocus`.
+    @FocusedValue(\.diffMenu) private var diff
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
@@ -107,6 +109,7 @@ struct FarCoolerCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Terminal") { AppCommand.newTerminal.post() }
                 .keyboardShortcut("t", modifiers: .command)
+                .disabled(!(MainWindowFocus.isKey(mainWindow) && mainWindow?.hasWorktree == true))
             // ⌘N, the plainest shortcut in the app, for the thing it is for.
             //
             // "New Worktree…" and not "New Task…", which it was until the
@@ -116,10 +119,13 @@ struct FarCoolerCommands: Commands {
             // name the other thing.
             Button("New Worktree…") { AppCommand.newWorktree.post() }
                 .keyboardShortcut("n", modifiers: .command)
+                .disabled(!MainWindowFocus.isKey(mainWindow))
             Button("New Workspace…") { AppCommand.newWorkspace.post() }
                 .keyboardShortcut("n", modifiers: [.command, .option])
+                .disabled(!(MainWindowFocus.isKey(mainWindow) && mainWindow?.makesWorkspaces == true))
             Button("Add Repository…") { AppCommand.addRepository.post() }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
+                .disabled(!MainWindowFocus.isKey(mainWindow))
         }
 
         // The board, beside the things it is about.
@@ -131,6 +137,7 @@ struct FarCoolerCommands: Commands {
         CommandGroup(after: .toolbar) {
             Button("Show Board") { AppCommand.showBoard.post() }
                 .keyboardShortcut("b", modifiers: [.command, .shift])
+                .disabled(!MainWindowFocus.isKey(mainWindow))
         }
 
         CommandGroup(after: .newItem) {
@@ -158,6 +165,7 @@ struct FarCoolerCommands: Commands {
             // string out of a choice that changes per runner.
             Button("Open in Editor") { AppCommand.openInEditor.post() }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
+                .disabled(!(MainWindowFocus.isKey(mainWindow) && mainWindow?.hasWorktree == true))
         }
 
         // A workspace's levels and panes. ⌃⌘ and ⌥⌘ because the usual chords are
@@ -170,15 +178,23 @@ struct FarCoolerCommands: Commands {
         CommandMenu("Workspace") {
             Button("Back") { AppCommand.back.post() }
                 .keyboardShortcut(.leftArrow, modifiers: [.command, .control])
-            Button("Focus") { AppCommand.focusColumn.post() }
+                .disabled(!MainWindowFocus.goes(\.goesBack, mainWindow))
+            // A checkmark while the terminals are at full size: it's a state,
+            // and the same item puts the rest back (HIG, Menus: "Consider using
+            // a checkmark to show that an attribute is currently in effect").
+            Toggle("Focus", isOn: Binding(get: { mainWindow?.focused == true }, set: { _ in AppCommand.focusColumn.post() }))
                 .keyboardShortcut(.return, modifiers: [.command, .control])
+                .disabled(!MainWindowFocus.goes(\.focuses, mainWindow))
             Divider()
             Button("Orchestrator") { AppCommand.focusConversation.post() }
                 .keyboardShortcut("1", modifiers: [.command, .option])
+                .disabled(!MainWindowFocus.goes(\.inWorkspace, mainWindow))
             Button("Navigator") { AppCommand.focusBoard.post() }
                 .keyboardShortcut("2", modifiers: [.command, .option])
+                .disabled(!MainWindowFocus.goes(\.inWorkspace, mainWindow))
             Button("Main Area") { AppCommand.focusTask.post() }
                 .keyboardShortcut("3", modifiers: [.command, .option])
+                .disabled(!MainWindowFocus.goes(\.inWorkspace, mainWindow))
             // A task's tabs (ov-98): ⌃⌘] and ⌃⌘[, the owner's keys, on the
             // bracket family's rule that `[` and `]` walk a list. They were
             // the diff's commits, which moved out a modifier to ⌃⌥⌘.
@@ -197,10 +213,10 @@ struct FarCoolerCommands: Commands {
                 // the loose ones under Worktrees.
                 Button("Next Worktree") { AppCommand.nextWorktree.post() }
                     .keyboardShortcut(.downArrow, modifiers: [.command, .control])
-                    .disabled(!MainWindowFocus.navigates(mainWindow))
+                    .disabled(!MainWindowFocus.goes(\.nextWorktree, mainWindow))
                 Button("Previous Worktree") { AppCommand.previousWorktree.post() }
                     .keyboardShortcut(.upArrow, modifiers: [.command, .control])
-                    .disabled(!MainWindowFocus.navigates(mainWindow))
+                    .disabled(!MainWindowFocus.goes(\.previousWorktree, mainWindow))
             }
             Section {
                 // ⌘0, which nothing else here or in the system's menus holds:
@@ -211,7 +227,7 @@ struct FarCoolerCommands: Commands {
                 ForEach(1...WorkspaceNumbers.count, id: \.self) { n in
                     Button("Workspace \(n)") { AppCommand.selectWorkspace(n) }
                         .keyboardShortcut(KeyEquivalent(Character("\(n)")), modifiers: .command)
-                        .disabled(!MainWindowFocus.navigates(mainWindow))
+                        .disabled(!MainWindowFocus.picksWorkspace(n, mainWindow))
                 }
             }
         }
@@ -230,8 +246,10 @@ struct FarCoolerCommands: Commands {
         CommandMenu("Terminal") {
             Button("Next Terminal") { AppCommand.nextTerminal.post() }
                 .keyboardShortcut("]", modifiers: .command)
+                .disabled(!MainWindowFocus.goes(\.stepsTerminals, mainWindow))
             Button("Previous Terminal") { AppCommand.previousTerminal.post() }
                 .keyboardShortcut("[", modifiers: .command)
+                .disabled(!MainWindowFocus.goes(\.stepsTerminals, mainWindow))
             Divider()
             // The one shortcut that is not a convention from elsewhere, because
             // nothing else has this idea: go straight to whatever is waiting on
@@ -244,6 +262,7 @@ struct FarCoolerCommands: Commands {
             ForEach(1...9, id: \.self) { n in
                 Button("Terminal \(n)") { AppCommand.selectIndex(n - 1) }
                     .keyboardShortcut(KeyEquivalent(Character("\(n)")), modifiers: [.command, .control])
+                    .disabled(!MainWindowFocus.picksTerminal(n, mainWindow))
             }
         }
 
@@ -255,9 +274,15 @@ struct FarCoolerCommands: Commands {
         CommandMenu("Layout") {
             // Splitting leads, because it is now the only way a layout grows and
             // the one thing every other item here presupposes.
+            //
+            // Each dimmed when the layout on screen can't do it, or there's
+            // none (ov-211).
             Button("Split Right") { TileCommand.splitRight.post() }
+                .disabled(!MainWindowFocus.lays(\.splits, mainWindow))
             Button("Split Down") { TileCommand.splitDown.post() }
+                .disabled(!MainWindowFocus.lays(\.splits, mainWindow))
             Button("Move Pane Out") { TileCommand.breakPane.post() }
+                .disabled(!MainWindowFocus.lays(\.movesOut, mainWindow))
             Divider()
             // ⇧⌘↩ rather than ⇧⌘Z, which is Edit ▸ Redo on every Mac and was
             // bound here twice over: the menu bar showed ⇧⌘Z in two menus, and
@@ -266,19 +291,27 @@ struct FarCoolerCommands: Commands {
             // the same idea, and nothing standard holds it.
             // `ShortcutSheetTests` now refuses a chord the system's own menus
             // already use.
-            Button("Zoom Pane") { TileCommand.zoom.post() }
+            //
+            // A checkmark while a pane is zoomed, since choosing it again
+            // puts the layout back.
+            Toggle("Zoom Pane", isOn: Binding(get: { mainWindow?.layout?.zoomed == true }, set: { _ in TileCommand.zoom.post() }))
                 .keyboardShortcut(.return, modifiers: [.command, .shift])
                 .disabled(!MainWindowFocus.zoomsPane(mainWindow))
             Button("Next Arrangement") { TileCommand.cycle.post() }
                 .keyboardShortcut(.space, modifiers: [.command, .shift])
+                .disabled(!MainWindowFocus.lays(\.arranges, mainWindow))
             // Double-clicking a divider evens out the two panes it separates.
             // This is the same idea for the whole layout, and it is here rather
             // than only on the divider because a gesture nobody has been told
             // about needs somewhere to be discovered.
             Button("Even Out Panes") { TileCommand.evenPanes.post() }
+                .disabled(!MainWindowFocus.lays(\.arranges, mainWindow))
+            // The submenu stays openable with its items dimmed, so what it
+            // offers can still be read.
             Menu("Arrangement") {
                 ForEach(TilePreset.allCases) { preset in
                     Button(preset.label) { TileCommand.preset(preset).post() }
+                        .disabled(!MainWindowFocus.lays(\.arranges, mainWindow))
                 }
             }
             Divider()
@@ -286,14 +319,21 @@ struct FarCoolerCommands: Commands {
             // key equivalent here: they are used constantly, and a menu item is
             // how someone finds out they exist.
             Button("Pane Left") { TileCommand.focus(.left).post() }
+                .disabled(!MainWindowFocus.lays(\.left, mainWindow))
             Button("Pane Right") { TileCommand.focus(.right).post() }
+                .disabled(!MainWindowFocus.lays(\.right, mainWindow))
             Button("Pane Above") { TileCommand.focus(.top).post() }
+                .disabled(!MainWindowFocus.lays(\.above, mainWindow))
             Button("Pane Below") { TileCommand.focus(.bottom).post() }
+                .disabled(!MainWindowFocus.lays(\.below, mainWindow))
             Divider()
             Button("Next Pane") { TileCommand.focusNext.post() }
+                .disabled(!MainWindowFocus.lays(\.stepsPanes, mainWindow))
             Button("Previous Pane") { TileCommand.focusPrevious.post() }
+                .disabled(!MainWindowFocus.lays(\.stepsPanes, mainWindow))
             Divider()
             Button("New Layout") { TileCommand.newGroup.post() }
+                .disabled(!MainWindowFocus.lays(\.splits, mainWindow))
             // A layout IS a tab here — the pill bar across the top of a worktree
             // is a tab strip, and these are the two verbs that walk it. So they
             // carry what every tabbed app on this machine binds for that:
@@ -306,8 +346,10 @@ struct FarCoolerCommands: Commands {
             // the whole app by a menu key equivalent.
             Button("Next Layout") { TileCommand.nextGroup.post() }
                 .keyboardShortcut("]", modifiers: [.command, .shift])
+                .disabled(!MainWindowFocus.lays(\.stepsLayouts, mainWindow))
             Button("Previous Layout") { TileCommand.previousGroup.post() }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
+                .disabled(!MainWindowFocus.lays(\.stepsLayouts, mainWindow))
             Divider()
             // Not really a layout verb — nothing about the arrangement
             // changes — but it is scoped to the focused pane exactly the way
@@ -316,6 +358,7 @@ struct FarCoolerCommands: Commands {
             Button("Switch Between Terminal and Chat") {
                 TileCommand.toggleAgentPane.post()
             }
+            .disabled(!MainWindowFocus.lays(\.switchesMode, mainWindow))
         }
 
         // The diff pane had not one shortcut in this file, which made the only
@@ -336,26 +379,34 @@ struct FarCoolerCommands: Commands {
         //
         // These act on the FOCUSED pane, like every other pane-scoped command
         // here. Click into a diff and it answers; with a terminal focused they
-        // do nothing, which is the same rule ⌘W and ⌃B z already keep.
+        // do nothing, and say so by being dimmed (ov-211): the focused diff
+        // publishes what it can do, as `DiffMenuFocus`.
         CommandMenu("Diff") {
             Button("Next Hunk") { AppCommand.diffNextHunk.post() }
                 .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+                .disabled(!DiffMenuFocus.allows(\.nextHunk, diff, in: mainWindow))
             Button("Previous Hunk") { AppCommand.diffPreviousHunk.post() }
                 .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+                .disabled(!DiffMenuFocus.allows(\.previousHunk, diff, in: mainWindow))
             Divider()
             Button("Next File") { AppCommand.diffNextFile.post() }
                 .keyboardShortcut("]", modifiers: [.command, .option])
+                .disabled(!DiffMenuFocus.allows(\.nextFile, diff, in: mainWindow))
             Button("Previous File") { AppCommand.diffPreviousFile.post() }
                 .keyboardShortcut("[", modifiers: [.command, .option])
+                .disabled(!DiffMenuFocus.allows(\.previousFile, diff, in: mainWindow))
             Divider()
             // The way IN to reading a branch commit by commit, which is
             // otherwise a thing you can only discover by opening the history
             // and picking the oldest row.
             Button("Read Commit by Commit") { AppCommand.diffFirstCommit.post() }
+                .disabled(!DiffMenuFocus.allows(\.readsCommits, diff, in: mainWindow))
             Button("Next Commit") { AppCommand.diffNextCommit.post() }
                 .keyboardShortcut("]", modifiers: [.command, .control, .option])
+                .disabled(!DiffMenuFocus.allows(\.nextCommit, diff, in: mainWindow))
             Button("Previous Commit") { AppCommand.diffPreviousCommit.post() }
                 .keyboardShortcut("[", modifiers: [.command, .control, .option])
+                .disabled(!DiffMenuFocus.allows(\.previousCommit, diff, in: mainWindow))
             Divider()
             // Not a movement, which is why it is below the divider: it says
             // something about the worktree rather than about where you are in
@@ -368,6 +419,7 @@ struct FarCoolerCommands: Commands {
             // item with a side effect the reader cannot see all of; a shortcut
             // next to ⌥⌘] would be reachable by accident.
             Button("Mark as Reviewed") { AppCommand.diffMarkRead.post() }
+                .disabled(!DiffMenuFocus.allows(\.marksReviewed, diff, in: mainWindow))
         }
 
         // Grouped only to stay inside what `CommandsBuilder` will build: it
@@ -382,8 +434,13 @@ struct FarCoolerCommands: Commands {
                 //
                 // No collision with the tiling prefix: that is ⌃B, a different
                 // modifier, and ⌘ never reaches a terminal anyway.
-                Button("Toggle Sidebar") { AppCommand.toggleSidebar.post() }
+                //
+                // Named for what it will do, Show Sidebar or Hide Sidebar (HIG,
+                // The menu bar: "Ensure that each show/hide item title reflects
+                // the current state of the corresponding view"). ov-204.
+                Button(MainWindowFocus.sidebarTitle(mainWindow)) { AppCommand.toggleSidebar.post() }
                     .keyboardShortcut("b", modifiers: .command)
+                    .disabled(!MainWindowFocus.isKey(mainWindow))
             }
 
             // Nothing here prints, and the Print item SwiftUI adds for free would
@@ -398,9 +455,11 @@ struct FarCoolerCommands: Commands {
                 // key for the two questions this app is always being asked.
                 Button("Go to Anything…") { AppCommand.commandPalette.post() }
                     .keyboardShortcut("p", modifiers: .command)
+                    .disabled(!MainWindowFocus.isKey(mainWindow))
                 // ⌘R, which is Reload everywhere else. ⌘0 is Actual Size.
                 Button("Reload Fleet") { AppCommand.reload.post() }
                     .keyboardShortcut("r", modifiers: .command)
+                    .disabled(!MainWindowFocus.isKey(mainWindow))
             }
 
             // In Edit, beside the other kinds of find, and with the ellipsis a
@@ -413,11 +472,13 @@ struct FarCoolerCommands: Commands {
                 // and says so; elsewhere it's the sidebar's find.
                 Button(MainWindowFocus.findTitle(mainWindow)) { AppCommand.search.post() }
                     .keyboardShortcut("f", modifiers: .command)
+                    .disabled(!MainWindowFocus.isKey(mainWindow))
             }
 
             CommandGroup(replacing: .help) {
                 Button("Keyboard Shortcuts") { AppCommand.showShortcuts.post() }
                     .keyboardShortcut("/", modifiers: .command)
+                    .disabled(!MainWindowFocus.isKey(mainWindow))
             }
         }
     }

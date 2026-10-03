@@ -124,6 +124,13 @@ struct ChangesPane: View {
             default: break
             }
         }
+        // The Diff menu, enabled for what this diff can do, and only while
+        // it's the focused pane: no diff focused, every item dimmed (ov-211).
+        .background {
+            if isFocused && !outOfSight {
+                DiffMenuPublisher(changes: changes, client: changes.client, hunks: hunkTargets, lastHunk: lastHunkJump)
+            }
+        }
     }
 
     /// More room when the pane has it, without letting navigation consume the
@@ -535,10 +542,16 @@ struct ChangesPane: View {
         jumpTo = target
     }
 
+    /// The open file's hunks, built from that file's rows alone: the Diff
+    /// menu asks on every redraw, and the whole diff's `rows` is too much to
+    /// build twice a frame (ov-211). The same rows `rows` gives for the file.
     private var hunkTargets: [String] {
-        let current = changes.selectedFile
-        return rows.compactMap { row in
-            guard row.path == current, case .hunk = row.kind else { return nil }
+        guard let path = changes.selectedFile, !changes.collapsedFiles.contains(path),
+            let file = changes.reviewOrder.first(where: { $0.path == path }), !file.binary,
+            let diff = changes.fileDiffs[path]
+        else { return [] }
+        return rows(of: file, diff: diff).compactMap { row in
+            guard case .hunk = row.kind else { return nil }
             return row.id
         }
     }

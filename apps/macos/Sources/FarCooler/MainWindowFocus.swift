@@ -20,6 +20,39 @@ struct MainWindowFocus: Equatable {
     /// ▸ Mark All as Read reads its Unread (ov-104).
     var hasNavigator = false
 
+    // What the rest of the menu bar can act on, so an item that can't is
+    // dimmed rather than left to do nothing (ov-211). HIG, The menu bar: "If a
+    // menu bar item isn't actionable, disable the action instead of hiding it
+    // from the menu."
+
+    /// The sidebar is showing: View ▸ Hide Sidebar, else Show Sidebar.
+    var sidebarShown = true
+    /// A worktree is on screen for ⌘T and Open in Editor to act on.
+    var hasWorktree = false
+    /// The terminals on screen, which ⌃⌘1 through ⌃⌘9 pick from.
+    var terminals = 0
+    /// ⌘] and ⌘[ go somewhere: another terminal, or the one terminal when
+    /// the keyboard isn't in it.
+    var stepsTerminals = false
+    /// Something is waiting on you, for ⌃⌘N to open.
+    var hasAttention = false
+    /// Back (⌃⌘←) has somewhere to go.
+    var goesBack = false
+    /// Focus (⌃⌘↩) has something to put at full size, and whether it has.
+    var focuses = false
+    var focused = false
+    /// A workspace is selected, for ⌥⌘1 through ⌥⌘3.
+    var inWorkspace = false
+    /// ⌃⌘↓ and ⌃⌘↑ each have a worktree to go to.
+    var nextWorktree = false
+    var previousWorktree = false
+    /// The workspaces ⌘1 through ⌘9 can go to.
+    var workspaces = 0
+    /// A repository on a runner with workspaces, for New Workspace.
+    var makesWorkspaces = false
+    /// The Layout menu's worktree, or nil when none is on screen.
+    var layout: LayoutMenuFocus?
+
     /// What ⌘F says it does: the navigator's filter in a workspace (or a
     /// loose worktree beside one), else the sidebar's find.
     static func findTitle(_ focus: MainWindowFocus?) -> String {
@@ -45,8 +78,9 @@ struct MainWindowFocus: Equatable {
 
     /// Next Needing Attention (⌃⌘N) acts only when the main window is key: with
     /// Settings or About key, it opened an item in the window behind.
+    /// And only with something waiting: with nothing, it did nothing (ov-211).
     static func stepsToAttention(_ focus: MainWindowFocus?) -> Bool {
-        focus != nil
+        focus?.hasAttention == true
     }
 
     /// Going somewhere from the keyboard (⌘0, ⌘1–⌘9, ⌃⌘↑ and ⌃⌘↓, ov-86)
@@ -64,7 +98,46 @@ struct MainWindowFocus: Equatable {
     /// see behind the overlay.
     static func zoomsPane(_ focus: MainWindowFocus?) -> Bool {
         guard let focus else { return false }
-        return !focus.overlayOpen
+        return !focus.overlayOpen && focus.layout?.zooms == true
+    }
+
+    /// A Layout menu item acts only with a worktree's layout on screen in
+    /// the key main window, nothing over it, and only when `can` says the
+    /// layout has what the item needs (ov-211).
+    static func lays(_ can: KeyPath<LayoutMenuFocus, Bool>, _ focus: MainWindowFocus?) -> Bool {
+        guard navigates(focus), let layout = focus?.layout else { return false }
+        return layout[keyPath: can]
+    }
+
+    /// A menu item that reads the main window (⌘N, ⌘P, ⌘R, ⌘/) acts only
+    /// while it's key: with Settings or About key, nothing hears it.
+    static func isKey(_ focus: MainWindowFocus?) -> Bool {
+        focus != nil
+    }
+
+    /// A Workspace or Terminal menu item that goes somewhere acts only in
+    /// the key main window, nothing over it, and when `can` says there's
+    /// somewhere to go (ov-211).
+    static func goes(_ can: KeyPath<MainWindowFocus, Bool>, _ focus: MainWindowFocus?) -> Bool {
+        guard navigates(focus), let focus else { return false }
+        return focus[keyPath: can]
+    }
+
+    /// ⌃⌘`n`: only for a terminal that's there.
+    static func picksTerminal(_ n: Int, _ focus: MainWindowFocus?) -> Bool {
+        navigates(focus) && n <= (focus?.terminals ?? 0)
+    }
+
+    /// ⌘`n`: only for a workspace that's there.
+    static func picksWorkspace(_ n: Int, _ focus: MainWindowFocus?) -> Bool {
+        navigates(focus) && n <= (focus?.workspaces ?? 0)
+    }
+
+    /// View ▸ Show Sidebar or Hide Sidebar, by what it would do. HIG, The menu
+    /// bar: "Ensure that each show/hide item title reflects the current state
+    /// of the corresponding view."
+    static func sidebarTitle(_ focus: MainWindowFocus?) -> String {
+        focus?.sidebarShown == false ? "Show Sidebar" : "Hide Sidebar"
     }
 }
 
