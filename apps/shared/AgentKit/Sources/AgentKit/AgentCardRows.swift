@@ -513,8 +513,9 @@ public struct AgentCardLayout: Sendable, Equatable {
     /// freshest word the card has.** A row whose runner last spoke longer ago
     /// ends earlier on the grid, and the columns after its last bucket are
     /// empty — which is the cross-runner skew made VISIBLE. It is not the skew
-    /// closed: rows are the last notice from each of several runners, up to
-    /// `ROW_QUIET_AFTER_MS` apart, and an empty trailing column says "this
+    /// closed: rows are the last notice from each of several runners, a
+    /// working row's up to `ROW_QUIET_AFTER_MS` old and a blocked or done
+    /// row's up to `ROW_RETENTION_MS`, and an empty trailing column says "this
     /// runner has said nothing since", not "this agent did nothing". The card
     /// has no clock of its own to tell those apart and must not borrow the
     /// phone's; see `ActivityTrace.rebucketed(to:)` on why.

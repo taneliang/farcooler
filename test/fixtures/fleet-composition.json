@@ -1,0 +1,120 @@
+{
+  "_about": [
+    "How a fleet is ranked and counted, once, for every side that does it (ov-166).",
+    "The relay composes the lock screen card (composeFleet in services/relay/src/index.ts); the app composes the widgets, the watch and the Island's fallback (FleetPublication and FleetSnapshot in AgentKit); the daemon ranks each agent (farcooler_core::feed::rank). Read by services/relay/test/fleet-composition.test.ts, apps/shared/AgentKit/Tests/AgentKitTests/FleetCompositionTests.swift and crates/core/src/feed.rs's tests.",
+    "Times are seconds before `now`: `sinceS` is how long the agent has been in its status, `heardS` how long since anything said so. `rank` is what the daemon sends for that status and `sinceS`; the relay ignores it and sorts on the status and its own clock, which is what this table holds the two to.",
+    "A runner's `needsYou` is the count (relay) or the length of the list (app) it sent, null when it sent none. `quiet` is a runner that stopped beating (relay) or whose link was lost (app).",
+    "Expected: `order` every agent, as each side ranks them. `blocked`, `working` and `needsYou` as the card's header and the widgets count them, and `header` the number they lead with: `needsYou` when any runner counted, else `blocked`. `review` (done agents) and `shown` (the card's lines, at most four) are the relay's alone: the app's widgets count reviews by worktree, and draw every agent.",
+    "No `failed` agent yet: ov-125 adds the relay's failed outcome and should add its cases here."
+  ],
+  "now": 1790000000000,
+  "cases": [
+    {
+      "name": "an empty fleet counts nothing and says no runner counted",
+      "runners": [],
+      "agents": [],
+      "expect": {
+        "order": [],
+        "blocked": 0, "review": 0, "working": 0, "needsYou": null, "header": 0,
+        "shown": []
+      }
+    },
+    {
+      "name": "blocked, then done, then working, then a status the card draws no tier for; the longest waiting first; the terminal breaks a tie",
+      "runners": [{ "id": "studio", "needsYou": null, "quiet": false }],
+      "agents": [
+        { "terminal": "w-new", "runner": "studio", "status": "working", "sinceS": 30, "heardS": 5, "rank": 299999969 },
+        { "terminal": "d-old", "runner": "studio", "status": "done", "sinceS": 900, "heardS": 5, "rank": 199999099 },
+        { "terminal": "b-new", "runner": "studio", "status": "blocked", "sinceS": 60, "heardS": 5, "rank": 99999939 },
+        { "terminal": "b-old", "runner": "studio", "status": "blocked", "sinceS": 600, "heardS": 5, "rank": 99999399 },
+        { "terminal": "idle", "runner": "studio", "status": "idle", "sinceS": 5000, "heardS": 5, "rank": 399994999 },
+        { "terminal": "w-twin", "runner": "studio", "status": "working", "sinceS": 300, "heardS": 5, "rank": 299999699 },
+        { "terminal": "w-old", "runner": "studio", "status": "working", "sinceS": 300, "heardS": 5, "rank": 299999699 }
+      ],
+      "expect": {
+        "order": ["b-old", "b-new", "d-old", "w-old", "w-twin", "w-new", "idle"],
+        "blocked": 2, "review": 1, "working": 3, "needsYou": null, "header": 2,
+        "shown": ["b-old", "b-new", "d-old", "w-old"]
+      }
+    },
+    {
+      "name": "working stops counting at an hour unheard; blocked and done hold at any age, and keep their lines",
+      "runners": [{ "id": "studio", "needsYou": null, "quiet": false }],
+      "agents": [
+        { "terminal": "w-fresh", "runner": "studio", "status": "working", "sinceS": 4000, "heardS": 3599, "rank": 299995999 },
+        { "terminal": "w-stale", "runner": "studio", "status": "working", "sinceS": 4000, "heardS": 3600, "rank": 299995999 },
+        { "terminal": "b-stale", "runner": "studio", "status": "blocked", "sinceS": 7200, "heardS": 7200, "rank": 99992799 },
+        { "terminal": "d-stale", "runner": "studio", "status": "done", "sinceS": 7200, "heardS": 7200, "rank": 199992799 }
+      ],
+      "expect": {
+        "order": ["b-stale", "d-stale", "w-fresh", "w-stale"],
+        "blocked": 1, "review": 1, "working": 1, "needsYou": null, "header": 1,
+        "shown": ["b-stale", "d-stale", "w-fresh"]
+      }
+    },
+    {
+      "name": "a quiet runner's working agents leave in flight at once; its blocked ones stay",
+      "runners": [
+        { "id": "studio", "needsYou": null, "quiet": false },
+        { "id": "laptop", "needsYou": null, "quiet": true }
+      ],
+      "agents": [
+        { "terminal": "s-w", "runner": "studio", "status": "working", "sinceS": 100, "heardS": 10, "rank": 299999899 },
+        { "terminal": "l-w", "runner": "laptop", "status": "working", "sinceS": 50, "heardS": 10, "rank": 299999949 },
+        { "terminal": "l-b", "runner": "laptop", "status": "blocked", "sinceS": 200, "heardS": 200, "rank": 99999799 }
+      ],
+      "expect": {
+        "order": ["l-b", "s-w", "l-w"],
+        "blocked": 1, "review": 0, "working": 1, "needsYou": null, "header": 1,
+        "shown": ["l-b", "s-w"]
+      }
+    },
+    {
+      "name": "needs you is per runner: its count where it sent one, its blocked agents where it did not",
+      "runners": [
+        { "id": "studio", "needsYou": 3, "quiet": false },
+        { "id": "laptop", "needsYou": null, "quiet": false }
+      ],
+      "agents": [
+        { "terminal": "s-b", "runner": "studio", "status": "blocked", "sinceS": 100, "heardS": 10, "rank": 99999899 },
+        { "terminal": "l-b1", "runner": "laptop", "status": "blocked", "sinceS": 300, "heardS": 10, "rank": 99999699 },
+        { "terminal": "l-b2", "runner": "laptop", "status": "blocked", "sinceS": 200, "heardS": 10, "rank": 99999799 },
+        { "terminal": "s-w", "runner": "studio", "status": "working", "sinceS": 20, "heardS": 2, "rank": 299999979 }
+      ],
+      "expect": {
+        "order": ["l-b1", "l-b2", "s-b", "s-w"],
+        "blocked": 3, "review": 0, "working": 1, "needsYou": 5, "header": 5,
+        "shown": ["l-b1", "l-b2", "s-b", "s-w"]
+      }
+    },
+    {
+      "name": "a runner that counts zero has already counted its own blocked agent",
+      "runners": [{ "id": "studio", "needsYou": 0, "quiet": false }],
+      "agents": [
+        { "terminal": "s-b", "runner": "studio", "status": "blocked", "sinceS": 100, "heardS": 10, "rank": 99999899 }
+      ],
+      "expect": {
+        "order": ["s-b"],
+        "blocked": 1, "review": 0, "working": 0, "needsYou": 0, "header": 0,
+        "shown": ["s-b"]
+      }
+    },
+    {
+      "name": "every agent is counted, and the card draws a line for the first four",
+      "runners": [{ "id": "studio", "needsYou": null, "quiet": false }],
+      "agents": [
+        { "terminal": "w1", "runner": "studio", "status": "working", "sinceS": 10, "heardS": 1, "rank": 299999989 },
+        { "terminal": "w2", "runner": "studio", "status": "working", "sinceS": 20, "heardS": 1, "rank": 299999979 },
+        { "terminal": "w3", "runner": "studio", "status": "working", "sinceS": 30, "heardS": 1, "rank": 299999969 },
+        { "terminal": "w4", "runner": "studio", "status": "working", "sinceS": 40, "heardS": 1, "rank": 299999959 },
+        { "terminal": "w5", "runner": "studio", "status": "working", "sinceS": 50, "heardS": 1, "rank": 299999949 },
+        { "terminal": "w6", "runner": "studio", "status": "working", "sinceS": 60, "heardS": 1, "rank": 299999939 }
+      ],
+      "expect": {
+        "order": ["w6", "w5", "w4", "w3", "w2", "w1"],
+        "blocked": 0, "review": 0, "working": 6, "needsYou": null, "header": 0,
+        "shown": ["w6", "w5", "w4", "w3"]
+      }
+    }
+  ]
+}

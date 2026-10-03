@@ -1612,13 +1612,14 @@ const CLAIM_MEMORY_MS = 60 * 60 * 1000
 /// up.
 const ROW_RETENTION_MS = 24 * 60 * 60 * 1000
 
-/// How long a row keeps a LINE on the card before it collapses into `+N more`.
+/// How long a WORKING row keeps a LINE on the card before it collapses into
+/// `+N more`. Blocked and done rows keep theirs at any age: see `speaks`.
 ///
 /// Deliberately `STALE_AFTER_S` again: a row goes quiet exactly when the card as
 /// a whole would be marked out of date, so there is one number to reason about
 /// rather than two that drift apart. A quiet row is still in the fleet — still
-/// counted in the header and in the totals — it just stops spending one of the
-/// few lines the card has on an agent that has said nothing for an hour.
+/// counted in the totals — it just stops spending one of the few lines the card
+/// has on a claim about now that nothing has vouched for in an hour.
 const ROW_QUIET_AFTER_MS = 60 * 60 * 1000
 
 /// How many agents the card draws a line for.
@@ -1748,7 +1749,7 @@ export function cut(text: string, bytes: number): string {
 const COALESCE_MS = 10 * 1000
 
 /// One agent's row, as the relay stores it. See migrations 0008 and 0011.
-interface AgentRow {
+export interface AgentRow {
   terminal: string
   label: string | null
   machine: string | null
@@ -1804,20 +1805,27 @@ function tier(status: string | null): number {
 
 /// Whether a row still has anything to say about now.
 ///
-/// Only rows in a tier the card draws, and only ones that have spoken inside
-/// `ROW_QUIET_AFTER_MS`. Both halves matter. It is the test the LINES use, and
+/// Only rows in a tier the card draws, and of those, a WORKING row only while
+/// it has spoken inside `ROW_QUIET_AFTER_MS`. It is the test the LINES use, and
 /// the test the `working` count uses: working is a claim about now, so a quiet
-/// working row leaves "in flight" with its line. Blocked and done are latched
-/// and stay in their counts at any age, and every quiet row is still in `more`.
+/// working row leaves "in flight" with its line, and `more` owns up to it.
+///
+/// **Blocked and done are latched, line and all** (ov-166). An agent that
+/// stopped for you two hours ago is still stopped for you: it stays in its
+/// count at any age, and it keeps its line too. This used to drop any row quiet
+/// for an hour, so a card could lead with "1 needs you" over lines that were
+/// all working agents, while the app's widget (`FleetSnapshot.isLatched`)
+/// listed that agent first. `test/fixtures/fleet-composition.json` holds the
+/// two to one answer.
 ///
 /// **And a working row whose runner stopped beating** (ov-71) says nothing about
 /// now either, well before its hour is up: the runner promised a beat and
 /// missed two. See `quietOf`.
 function speaks(row: AgentRow, now: number, quiet: Quiet = NOBODY_QUIET): boolean {
-  if (row.status === 'working' && row.daemon_id !== null && quiet.daemons.has(row.daemon_id)) {
-    return false
-  }
-  return tier(row.status) < 3 && now - row.updated_at < ROW_QUIET_AFTER_MS
+  if (row.status === 'blocked' || row.status === 'done') return true
+  if (row.status !== 'working') return false
+  if (row.daemon_id !== null && quiet.daemons.has(row.daemon_id)) return false
+  return now - row.updated_at < ROW_QUIET_AFTER_MS
 }
 
 /// What the card says about an account, derived on every push and stored
@@ -1931,7 +1939,7 @@ async function readFleet(
 }
 
 /// One `daemons` row, as `readFleet` reads it.
-interface Machine {
+export interface Machine {
   id: string
   label: string
   /// What the runner calls itself, from its beat. See migration 0015.
@@ -1983,7 +1991,7 @@ const NOBODY_QUIET: Quiet = { daemons: new Set(), names: [] }
 /// Named only when the runner has a row: the card is about agents, and a
 /// runner with none on it changes nothing the card claims. A row from before
 /// migration 0012 names no token and is never attributed.
-function quietOf(machines: Machine[], rows: AgentRow[], now: number, live?: string): Quiet {
+export function quietOf(machines: Machine[], rows: AgentRow[], now: number, live?: string): Quiet {
   const newest = new Map<string, Machine>()
   for (const machine of machines) {
     if (machine.beat_every === null || machine.last_seen_at === null) continue
@@ -2031,7 +2039,7 @@ function runnerOf(machine: Machine): string {
 /// None at all is what tells "nobody said" from "everybody said 0": the first
 /// is NULL and the card is exactly the card it was before counts existed; the
 /// second is a real 0.
-function countsOf(machines: Machine[], now: number): Counts | null {
+export function countsOf(machines: Machine[], now: number): Counts | null {
   const newest = new Map<string, Machine>()
   for (const machine of machines) {
     if (machine.needs_you === null) continue
@@ -2434,7 +2442,13 @@ function numeric(value: unknown): number | null {
 /// during a rollout, and letting one runner's count stand for the account would
 /// hide every other runner's blocked agents. With no count at all it is NULL,
 /// and the card falls back to `blocked` exactly as before.
-function composeFleet(
+///
+/// **Held to the app by a table.** `test/fixtures/fleet-composition.json` gives
+/// fleets and what each side must make of them, and the app's widgets
+/// (`FleetPublication` and `FleetSnapshot` in AgentKit) are tested against the
+/// same file, so the card and a widget can't count one fleet two ways. Exported,
+/// with `countsOf` and `quietOf`, for that test.
+export function composeFleet(
   rows: AgentRow[],
   counts: Counts | null,
   now: number,

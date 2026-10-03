@@ -4667,11 +4667,16 @@ describe('/v1/notify and Live Activities', () => {
       // A refresh draws the same headline an agent notice would, so the
       // card's remembered leader has to follow it: the dismissal rule reads
       // `leader_status` to know what the card is showing.
+      //
+      // A WORKING leader gone quiet, because only working goes quiet: a
+      // blocked one keeps its line and its lead at any age (ov-166, see
+      // `speaks`), which `fleet-composition.test.ts` pins.
       const calls = watchFetch()
       await ready()
       await running('term-1')
-      await post('/v1/notify', { title: 'claude needs you', terminal: 'term-1', status: 'blocked', needsYou: 1 }, 'mine')
+      await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working', needsYou: 1 }, 'mine')
       await post('/v1/notify', { title: 'codex', terminal: 'term-2', status: 'working', label: 'codex' }, 'mine')
+      expect(lastCard(calls).body.aps['content-state'].terminal).toBe('term-1')
       await env.DB.prepare(`UPDATE live_activities SET updated_at = ? WHERE terminal = 'term-1'`)
         .bind(Date.now() - 2 * 60 * 60 * 1000)
         .run()
