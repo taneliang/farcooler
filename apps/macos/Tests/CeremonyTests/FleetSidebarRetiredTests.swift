@@ -48,4 +48,47 @@ struct FleetSidebarRetiredTests {
         #expect(ConversationHeader.menu(hasSeat: false, charter: charter, wakeOnAnswer: nil) == [.showCharter])
         #expect(ConversationHeader.menu(hasSeat: false, charter: nil, wakeOnAnswer: nil).isEmpty)
     }
+
+    // MARK: - One sidebar, the navigator
+
+    /// A fresh suite, and its name to remove it by.
+    private static func defaults() throws -> UserDefaults {
+        let name = "ov178-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defaults.removePersistentDomain(forName: name)
+        return defaults
+    }
+
+    /// The old sidebar's "hidden" was everyone's who never opened it, and
+    /// "shown" was a choice about a list that's gone: neither says
+    /// anything about the navigator, which starts out either way.
+    @Test("A stored choice for the old sidebar falls back to the navigator shown, and is removed")
+    func anOldSidebarChoiceFallsBack() throws {
+        for old in ["hidden", "shown"] {
+            let defaults = try Self.defaults()
+            defaults.set(old, forKey: "window.sidebar")
+            defaults.set("\u{1}ws", forKey: "sidebar.openWorktrees")
+            defaults.set("\u{1}overnight", forKey: "sidebar.collapsedProjects")
+            defaults.set(
+                ["0.000000, 0.000000, 320.000000, 1130.000000, YES, NO"],
+                forKey: "NSSplitView Subview Frames X-1-AppWindow-1, SidebarNavigationSplitView")
+            #expect(!NavigatorVisibility.hiddenAtLaunch(in: defaults), "the old sidebar \(old) hid the navigator")
+            for key in NavigatorVisibility.retiredKeys + ["NSSplitView Subview Frames X-1-AppWindow-1, SidebarNavigationSplitView"] {
+                #expect(defaults.object(forKey: key) == nil, "\(key) is still there")
+            }
+        }
+    }
+
+    /// The navigator's own choice is kept, beside the old one's removal.
+    @Test("The navigator opens as it was left")
+    func theNavigatorOpensAsItWasLeft() throws {
+        let defaults = try Self.defaults()
+        #expect(!NavigatorVisibility.hiddenAtLaunch(in: defaults))
+        defaults.set(NavigatorVisibility.stored(true), forKey: NavigatorVisibility.key)
+        defaults.set("shown", forKey: "window.sidebar")
+        #expect(NavigatorVisibility.hiddenAtLaunch(in: defaults))
+        defaults.set(NavigatorVisibility.stored(false), forKey: NavigatorVisibility.key)
+        #expect(!NavigatorVisibility.hiddenAtLaunch(in: defaults))
+        #expect(NavigatorVisibility.key != "window.sidebar")
+    }
 }

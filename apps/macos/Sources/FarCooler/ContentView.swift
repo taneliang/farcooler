@@ -195,10 +195,10 @@ struct ContentView: View {
     /// Which workspaces are open in the sidebar, their worktrees listed, as
     /// `SidebarEntry.openKey`s, one a line. Empty by default (spec §9).
     @AppStorage("sidebar.openWorktrees") private var openWorktrees = ""
-    /// Whether the sidebar is out (ov-86): hidden for a new window, since the
-    /// title bar's switcher does its work, and kept as it was left by anyone
-    /// who has used the app. See `SidebarDefault`.
-    @State private var sidebarVisibility: NavigationSplitViewVisibility = Self.initialSidebar()
+    /// Whether this window's navigator is put away (⌘B, ov-178): as the
+    /// last window left it, and out the first time. See
+    /// `NavigatorVisibility`.
+    @State private var navigatorHidden = NavigatorVisibility.hiddenAtLaunch()
     /// Bumped by ⌘0 (Switch Workspace…): the title bar's switcher opens.
     @State private var switcherRequest = 0
     /// When each workspace's orchestrator start began, by `host|workspace`:
@@ -219,78 +219,75 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $sidebarVisibility) {
-            sidebar
-        } detail: {
-            // Top-aligned over the detail pane specifically, not the sidebar —
-            // `fleetPlaceholder` already owns the sidebar's pre-load state, and
-            // this banner only appears once something has actually been acted
-            // on, so the two never draw at once.
-            detailOpeningNotices
-                // The window's toolbar, inner to outer, so its items are
-                // laid out from the trailing end in (ov-105): see
-                // `LeadingToolbar` and `TrailingToolbar`.
-                .toolbar {
-                    TrailingToolbar(
-                        troubles: runnerTroubles, stale: store.staleHosts,
-                        updates: store.staleHosts.compactMap(daemonUpdate(for:)), needsYou: store.needsYou.count,
-                        needsYouSelected: selection == .needsYou, onNeedsYou: { selection = .needsYou },
-                        perform: { perform($0) })
-                }
-                .toolbar {
-                    // Not offered on a runner that has already said it cannot
-                    // read changes at all. Its daemon predates the whole
-                    // feature, so the split would open a pane running a
-                    // subcommand that runner has never heard of — a dead pane
-                    // where a diff was asked for, with nothing saying why.
-                    // For a worktree opened whole, with a terminal or not,
-                    // or the main checkout beside the Orchestrator column
-                    // (ov-78); not for a task, whose column shows its
-                    // changes already, without a pane (spec R3).
-                    if let ws = WorkspaceScreen.changesTarget(
-                        selection, in: store.fleet, repositories: repositoryIDs(selection?.host ?? "")),
-                        store.client(for: ws)?.changesSupported != false
-                    {
-                        ToolbarItem(placement: .automatic) {
-                            Button {
-                                toggleChangesPane(in: ws)
-                            } label: {
-                                Label("Changes", systemImage: "plusminus")
-                            }
-                            // Lit while one is open, the way a toggle in a
-                            // toolbar says which state you are in. This is a
-                            // `Button` rather than a `Toggle` because the two
-                            // directions are not symmetrical: opening splits a
-                            // pane, closing kills one, and a `Toggle`'s binding
-                            // would have to pretend they were one value.
-                            .symbolVariant(changesPane(in: ws) == nil ? .none : .fill)
-                            .help(
-                                changesPane(in: ws) == nil
-                                    ? "Show what this worktree changed, in a pane"
-                                    : "Close the changes pane")
-                        }
-                    }
-                }
-                // Attached here rather than beside each of the four
-                // `navigationTitle` calls, which sit in three different views
-                // that would each need the failure channel threaded down to
-                // them. This is the one place that decides which worktree the
-                // window is showing, which is exactly what the control acts on.
-                .openInEditorToolbar(worktree: detailWorktree) { editorError = $0 }
-                // The title would repeat the switcher or the breadcrumb
-                // (`TitleBar`); the window keeps it for the Window menu. The
-                // system's sidebar button stays, the only one (ov-177).
-                .toolbar(removing: TitleBar.showsTitle(for: selection) ? nil : .title)
-                .toolbar {
-                    LeadingToolbar(switcher: workspaceSwitcher)
-                }
-                .overlay(alignment: .top) {
-                    ErrorBanner(message: errorBanner) { errorBanner = nil }
-                }
-                // A message arriving on a keystroke, so the same snappy preset
-                // `PrefixHintOverlay` uses for its chip.
-                .animation(.snappy(duration: 0.22), value: errorBanner)
+        // The detail is the window: the old Fleet sidebar is gone, and the
+        // navigator inside a workspace is its one sidebar (ov-178).
+        detailOpeningNotices
+        // The window's toolbar, inner to outer, so its items are
+        // laid out from the trailing end in (ov-105): see
+        // `LeadingToolbar` and `TrailingToolbar`.
+        .toolbar {
+            TrailingToolbar(
+                troubles: runnerTroubles, stale: store.staleHosts,
+                updates: store.staleHosts.compactMap(daemonUpdate(for:)), needsYou: store.needsYou.count,
+                needsYouSelected: selection == .needsYou, onNeedsYou: { selection = .needsYou },
+                perform: { perform($0) })
         }
+        .toolbar {
+            // Not offered on a runner that has already said it cannot
+            // read changes at all. Its daemon predates the whole
+            // feature, so the split would open a pane running a
+            // subcommand that runner has never heard of — a dead pane
+            // where a diff was asked for, with nothing saying why.
+            // For a worktree opened whole, with a terminal or not,
+            // or the main checkout beside the Orchestrator column
+            // (ov-78); not for a task, whose column shows its
+            // changes already, without a pane (spec R3).
+            if let ws = WorkspaceScreen.changesTarget(
+                selection, in: store.fleet, repositories: repositoryIDs(selection?.host ?? "")),
+                store.client(for: ws)?.changesSupported != false
+            {
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        toggleChangesPane(in: ws)
+                    } label: {
+                        Label("Changes", systemImage: "plusminus")
+                    }
+                    // Lit while one is open, the way a toggle in a
+                    // toolbar says which state you are in. This is a
+                    // `Button` rather than a `Toggle` because the two
+                    // directions are not symmetrical: opening splits a
+                    // pane, closing kills one, and a `Toggle`'s binding
+                    // would have to pretend they were one value.
+                    .symbolVariant(changesPane(in: ws) == nil ? .none : .fill)
+                    .help(
+                        changesPane(in: ws) == nil
+                            ? "Show what this worktree changed, in a pane"
+                            : "Close the changes pane")
+                }
+            }
+        }
+        // Attached here rather than beside each of the four
+        // `navigationTitle` calls, which sit in three different views
+        // that would each need the failure channel threaded down to
+        // them. This is the one place that decides which worktree the
+        // window is showing, which is exactly what the control acts on.
+        .openInEditorToolbar(worktree: detailWorktree) { editorError = $0 }
+        // The title would repeat the switcher or the breadcrumb
+        // (`TitleBar`); the window keeps it for the Window menu.
+        .toolbar(removing: TitleBar.showsTitle(for: selection) ? nil : .title)
+        .toolbar {
+            LeadingToolbar(
+                switcher: workspaceSwitcher,
+                navigator: NavigatorToggle(
+                    hidden: navigatorHidden, available: selection.flatMap(workspaceScene)?.board != nil,
+                    toggle: { toggleNavigator() }))
+        }
+        .overlay(alignment: .top) {
+            ErrorBanner(message: errorBanner) { errorBanner = nil }
+        }
+        // A message arriving on a keystroke, so the same snappy preset
+        // `PrefixHintOverlay` uses for its chip.
+        .animation(.snappy(duration: 0.22), value: errorBanner)
         .task {
             Notifier.shared.requestAuthorization()
             PushRegistration.shared.label = { Host.current().localizedName ?? "Mac" }
@@ -371,8 +368,8 @@ struct ContentView: View {
                 selection = target
             }
         }
-        .onChange(of: sidebarVisibility, initial: true) { _, now in
-            UserDefaults.standard.set(SidebarDefault.stored(now != .detailOnly), forKey: SidebarDefault.key)
+        .onChange(of: navigatorHidden) { _, hidden in
+            UserDefaults.standard.set(NavigatorVisibility.stored(hidden), forKey: NavigatorVisibility.key)
         }
         .onChange(of: store.layouts) { _, _ in followLayoutFocus() }
         // Every client change reaches `store.fleet` — `FleetStore` remerges
@@ -2265,13 +2262,6 @@ struct ContentView: View {
 
     // MARK: - Getting around without the sidebar (ov-86)
 
-    /// The sidebar as a new window opens it: hidden, unless someone who
-    /// has used the app left it out, or has never chosen and has history
-    /// here from before it could be hidden.
-    private static func initialSidebar(in defaults: UserDefaults = .standard) -> NavigationSplitViewVisibility {
-        SidebarDefault.shown(in: defaults) ? .all : .detailOnly
-    }
-
     /// Whether this is the window menu commands are for: the key one, or
     /// the only one before its window is known.
     private var isKeyWindow: Bool { windowBox.window?.isKeyWindow ?? true }
@@ -2495,7 +2485,8 @@ struct ContentView: View {
         return WorkspaceView(
             opened: scene.opened,
             hasConversation: scene.hasConversation,
-            hasBoard: scene.board != nil,
+            // Put away with ⌘B, it's drawn as a scene without one.
+            hasBoard: scene.board != nil && !navigatorHidden,
             cell: TerminalMetrics.cell(preferences.terminalFont()).width,
             focused: focusColumn,
             navigatorWidth: $navigatorWidth,
@@ -3990,6 +3981,8 @@ struct ContentView: View {
             let step = WorkspaceNavigation.boardStep(.conversation, from: boardState)
             if step.selectsOrchestrator { selectOrchestrator(keyboard: step.keyboard) } else { apply(step) }
         case .focusBoard:
+            // Asked for by name, so it comes back if it was put away.
+            navigatorHidden = false
             apply(WorkspaceNavigation.boardStep(.board, from: boardState))
         case .focusTask:
             apply(WorkspaceNavigation.boardStep(.task, from: boardState))
@@ -4053,7 +4046,15 @@ struct ContentView: View {
         let scene = selection.flatMap(workspaceScene)
         return WorkspaceNavigation.BoardState(
             opened: scene?.opened != nil, focus: focusColumn, onBoard: keyboardOnBoard,
-            hasNavigator: scene?.board != nil)
+            hasNavigator: scene?.board != nil && !navigatorHidden)
+    }
+
+    /// ⌘B, View ▸ Toggle Sidebar and the title bar's button: the navigator
+    /// put away or brought back (ov-178). Put away with the keyboard in
+    /// it, the keyboard goes to what the main area shows.
+    private func toggleNavigator() {
+        navigatorHidden.toggle()
+        if navigatorHidden && keyboardOnBoard { key(.main) }
     }
 
     /// Does what a `BoardStep` says.
@@ -4066,6 +4067,12 @@ struct ContentView: View {
     private func key(_ target: WorkspaceNavigation.KeyTarget) {
         switch target {
         case .board:
+            // Never onto a navigator put away with ⌘B: what the main area
+            // shows takes it instead.
+            guard !navigatorHidden else {
+                keyMain()
+                return
+            }
             keyboardOnBoard = true
             windowBox.window?.makeFirstResponder(nil)
             boardFocusRequest += 1
@@ -4248,19 +4255,18 @@ struct ContentView: View {
                 }
             }
         case .showShortcuts: showShortcuts = true
-        // With the sidebar hidden its search isn't there to focus: the
-        // palette finds the same workspaces, tasks and agents.
-        //
-        // In a workspace, ⌘F filters its navigator's tasks instead (ov-103):
-        // the find a person in a list of tasks reaches for.
+        // In a workspace, ⌘F filters its navigator's tasks (ov-103): the
+        // find a person in a list of tasks reaches for, bringing the
+        // navigator back if it was put away. Anywhere else, the palette,
+        // which finds the same workspaces, tasks and agents the old
+        // sidebar's search did (ov-178).
         case .search:
             // A loose worktree draws its board's navigator too.
             if selection.flatMap(workspaceScene)?.board != nil {
+                navigatorHidden = false
                 boardFilterRequest += 1
-            } else if sidebarVisibility == .detailOnly {
-                showPalette = true
             } else {
-                searchFocused = true
+                showPalette = true
             }
 
         case .markAllRead:
@@ -4273,11 +4279,8 @@ struct ContentView: View {
         // machine closes that way.
         case .commandPalette: showPalette.toggle()
 
-        case .toggleSidebar:
-            // See `Sidebar.toggle`: AppKit's own action, with the collapse
-            // behavior set first so the detail pane absorbs the space instead of
-            // the window growing.
-            Sidebar.toggle()
+        // The window's one sidebar is the navigator (ov-178).
+        case .toggleSidebar: toggleNavigator()
 
         // Moving through a diff belongs to the pane showing one, and only to
         // the FOCUSED one — see `ChangesPane.isFocused`. Listed rather than

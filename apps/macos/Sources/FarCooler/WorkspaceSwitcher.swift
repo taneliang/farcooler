@@ -292,17 +292,18 @@ enum TitleBar {
     }
 }
 
-/// The toolbar's leading group (ov-105): the workspace switcher, after the
-/// traffic lights and the system's own sidebar button, as Mail and Notes
-/// keep theirs. One sidebar button, the system's (ov-177): ov-105 drew a
-/// second inside this group and asked the window to remove the system's,
-/// but the removal sat on the detail column, where it doesn't reach, so
-/// the title bar showed two. Then the flexible space, so this goes
-/// outermost of the window's toolbars.
+/// The toolbar's leading group (ov-105): the sidebar button, then the
+/// workspace switcher, after the traffic lights, as Mail and Notes keep
+/// theirs. One sidebar button (ov-177), and since the old Fleet sidebar
+/// went (ov-178) it's this one, for the navigator: the window has no
+/// `NavigationSplitView` for the system's to toggle. Then the flexible
+/// space, so this goes outermost of the window's toolbars.
 struct LeadingToolbar: ToolbarContent {
     let switcher: WorkspaceSwitcherButton
+    let navigator: NavigatorToggle
 
     var body: some ToolbarContent {
+        ToolbarItem(placement: .navigation) { navigator }
         // A new label is a new view, so the toolbar measures it again
         // (ov-177, round 2). The toolbar sizes an item when the window's
         // content is installed, and a label changed after that but before
@@ -319,6 +320,25 @@ struct LeadingToolbar: ToolbarContent {
         // their order, so the window's other items are `.automatic`, and
         // this group is applied outermost so the space comes first.
         ToolbarSpacer(.flexible)
+    }
+}
+
+/// The title bar's sidebar button (ov-178): the navigator put away or
+/// brought back, as ⌘B does. Dimmed where there's no navigator to show:
+/// Needs You, a loose worktree with no board, nothing chosen.
+struct NavigatorToggle: View {
+    let hidden: Bool
+    let available: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            Label(hidden ? "Show Sidebar" : "Hide Sidebar", systemImage: "sidebar.leading")
+        }
+        .labelStyle(.iconOnly)
+        .disabled(!available)
+        .help(hidden ? "Show the sidebar (⌘B)" : "Hide the sidebar (⌘B)")
+        .accessibilityIdentifier("navigator-toggle")
     }
 }
 

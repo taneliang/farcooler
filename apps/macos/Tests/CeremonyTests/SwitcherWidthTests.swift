@@ -23,22 +23,21 @@ struct SwitcherWidthTests {
         var repository = ""
     }
 
-    /// The window's leading toolbar as `ContentView` wires it.
+    /// The window's leading toolbar as `ContentView` wires it: on the
+    /// window's root view, with no `NavigationSplitView` since the old
+    /// Fleet sidebar went (ov-178).
     struct Window: View {
         let label: Label
         var body: some View {
-            NavigationSplitView(columnVisibility: .constant(.detailOnly)) {
-                List { Text("Main") }
-            } detail: {
-                WorkspaceStyle.canvas
-                    .toolbar(removing: .title)
-                    .toolbar {
-                        LeadingToolbar(
-                            switcher: WorkspaceSwitcherButton(
-                                title: label.title, repository: label.repository, entries: [], openRequest: 0,
-                                perform: { _ in }))
-                    }
-            }
+            WorkspaceStyle.canvas
+                .toolbar(removing: .title)
+                .toolbar {
+                    LeadingToolbar(
+                        switcher: WorkspaceSwitcherButton(
+                            title: label.title, repository: label.repository, entries: [], openRequest: 0,
+                            perform: { _ in }),
+                        navigator: NavigatorToggle(hidden: false, available: true, toggle: {}))
+                }
         }
     }
 

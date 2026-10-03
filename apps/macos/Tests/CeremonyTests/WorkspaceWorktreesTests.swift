@@ -266,41 +266,4 @@ struct WorkspaceWorktreesTests {
         #expect(places.compactMap(\.number) == Array(1...9))
         #expect(places.last?.number == nil)
     }
-
-    // MARK: - The sidebar's default
-
-    @Test("A new window starts without the sidebar; one used before keeps it")
-    func sidebarDefault() {
-        #expect(SidebarDefault.shown(stored: nil, hasHistory: false) == false)
-        #expect(SidebarDefault.shown(stored: nil, hasHistory: true) == true)
-        #expect(SidebarDefault.shown(stored: "hidden", hasHistory: true) == false)
-        #expect(SidebarDefault.shown(stored: "shown", hasHistory: false) == true)
-        #expect(SidebarDefault.shown(stored: nil, hasHistory: true, collapsedBefore: true) == false)
-    }
-
-    /// Read from the defaults themselves (review m3): history is any key
-    /// an earlier launch leaves, and a sidebar AppKit saved collapsed stays
-    /// collapsed.
-    @Test("The sidebar's default is read from what the defaults hold")
-    func sidebarDefaultFromDefaults() throws {
-        func fresh() throws -> UserDefaults {
-            let name = "ov86-\(UUID().uuidString)"
-            let defaults = try #require(UserDefaults(suiteName: name))
-            defaults.removePersistentDomain(forName: name)
-            return defaults
-        }
-        #expect(SidebarDefault.shown(in: try fresh()) == false)
-        let collapsedProjects = try fresh()
-        collapsedProjects.set("", forKey: "sidebar.collapsedProjects")
-        #expect(SidebarDefault.shown(in: collapsedProjects) == true)
-        let collapsed = try fresh()
-        collapsed.set("general", forKey: "settings.tab")
-        collapsed.set(
-            ["0.000000, 0.000000, 320.000000, 1130.000000, YES, NO", "0, 0, 1800, 1130, NO, NO"],
-            forKey: "NSSplitView Subview Frames X-1-AppWindow-1, SidebarNavigationSplitView")
-        #expect(SidebarDefault.shown(in: collapsed) == false)
-        let stored = try fresh()
-        stored.set("shown", forKey: SidebarDefault.key)
-        #expect(SidebarDefault.shown(in: stored) == true)
-    }
 }
