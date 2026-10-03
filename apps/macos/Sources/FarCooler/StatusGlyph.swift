@@ -1,4 +1,5 @@
 import AgentKit
+import AppKit
 import SwiftUI
 
 /// The status indicator.
@@ -178,15 +179,21 @@ struct StatusGlyph: View {
 /// stand-in for the motion that never arrived, and it survives as what a
 /// reader who has asked for less motion sees.
 ///
-/// One `repeatForever` on a real property rather than a clock: this runs on the
-/// render server and rebuilds no views, where `Ticking`'s once-a-second wake-up
-/// would be a blink rather than a breath and would cost a view update per row
-/// per second. The modifier is applied inside an `if`, so leaving the animating
-/// states tears the animation down with the branch instead of leaving a
-/// `repeatForever` oscillating on a dot that has settled.
+/// **Core Animation, not SwiftUI (ov-229).** It was then a SwiftUI
+/// `repeatForever`, on the belief that it ran on the render server. It did
+/// not: SwiftUI interpolates its animations in the app, a frame at a time,
+/// and one animating dot kept the whole window's view graph rendering at the
+/// display's refresh rate — a sampled 45-50 % of a core on a board of six
+/// working agents, in front or hidden. The mark is now hosted in a layer of
+/// its own whose opacity a `CABasicAnimation` drives, which the render server
+/// runs with nothing from this process: no view update, no frame, and nothing
+/// at all while the window is covered.
+///
+/// The modifier is applied inside an `if`, so leaving the animating states
+/// tears the layer down with the branch instead of leaving a dot breathing
+/// that has settled.
 private struct Breathing: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var dim = false
 
     func body(content: Content) -> some View {
         if reduceMotion {
@@ -194,11 +201,74 @@ private struct Breathing: ViewModifier {
             // part being asked for less of, not the dimming.
             content.opacity(0.85)
         } else {
-            content
-                .opacity(dim ? 0.45 : 1)
-                .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: dim)
-                .onAppear { dim = true }
+            BreathingLayer(content: content)
         }
+    }
+}
+
+/// Hosts a view in a layer that breathes. See `Breathing`.
+private struct BreathingLayer<Content: View>: NSViewRepresentable {
+    let content: Content
+
+    func makeNSView(context: Context) -> BreathingView<Content> {
+        BreathingView(content)
+    }
+
+    func updateNSView(_ view: BreathingView<Content>, context: Context) {
+        view.hosting.rootView = content
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: BreathingView<Content>, context: Context) -> CGSize? {
+        nsView.hosting.fittingSize
+    }
+}
+
+/// The breath itself: one infinite opacity animation on this view's layer.
+final class BreathingView<Content: View>: NSView {
+    let hosting: NSHostingView<Content>
+
+    init(_ content: Content) {
+        hosting = NSHostingView(rootView: content)
+        super.init(frame: .zero)
+        wantsLayer = true
+        addSubview(hosting)
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func layout() {
+        super.layout()
+        hosting.frame = bounds
+    }
+
+    /// Clicks, drags and menus belong to the row the dot sits in, which is
+    /// SwiftUI's to route. A hosting view of our own in the way would take them.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // Added on arrival rather than at init: a layer's animations can be
+        // dropped while it is out of a window, and re-adding under the same
+        // key is a no-op when one is still there.
+        guard window != nil, let layer, layer.animation(forKey: BreathingAnimation.key) == nil else { return }
+        layer.add(BreathingAnimation.make(), forKey: BreathingAnimation.key)
+    }
+}
+
+/// What `BreathingView` adds to its layer.
+enum BreathingAnimation {
+    static let key = "breathing"
+
+    static func make() -> CABasicAnimation {
+        let breath = CABasicAnimation(keyPath: "opacity")
+        breath.fromValue = 1.0
+        breath.toValue = 0.45
+        breath.duration = 1.1
+        breath.autoreverses = true
+        breath.repeatCount = .infinity
+        breath.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        breath.isRemovedOnCompletion = false
+        return breath
     }
 }
 

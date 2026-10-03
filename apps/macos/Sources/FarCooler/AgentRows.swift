@@ -698,6 +698,7 @@ struct WorkingRow: View {
     /// current second happened to land — so the shimmer began mid-word, which
     /// reads as a glitch rather than as a sweep.
     @State private var start: Date?
+    @Environment(\.windowVisible) private var windowVisible
 
     var body: some View {
         // Driven by `TimelineView`, not by an animated `@State`.
@@ -707,7 +708,13 @@ struct WorkingRow: View {
         // every streamed event — so the animation was restarted from zero many
         // times a second and never visibly moved. A timeline owns its own clock
         // and does not care how often the view is recreated.
-        TimelineView(.animation) { context in
+        //
+        // Paused while the window is covered or hidden, and at most thirty
+        // frames a second while it is not (ov-229): an unbounded `.animation`
+        // schedule renders the window at the display's rate for the whole of a
+        // turn — 120 Hz on a ProMotion screen — to move a highlight people
+        // read at a glance, and it went on doing so behind other windows.
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !windowVisible)) { context in
             Text("Working…")
                 .font(.callout)
                 .foregroundStyle(

@@ -9,6 +9,9 @@ struct FarCoolerApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                // What animates in this window pauses while nobody can see it.
+                // See `WindowVisibility`.
+                .modifier(WindowVisibilityReader())
                 .onAppear {
                     Appearance.apply(Preferences.shared.appearance)
                     promptForCLIToolsIfNeeded()
