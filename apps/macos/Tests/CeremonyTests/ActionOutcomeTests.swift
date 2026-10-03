@@ -140,27 +140,55 @@ struct ActionOutcomeTests {
         #expect(!shown.contains { $0.contains("error:") || $0.contains("tmux server exited") || $0.contains("code:") })
     }
 
-    /// The mapping, pinned: each word the daemon sends, and stderr with no
-    /// word at all, which is ssh's or the CLI's and goes to the log.
+    /// The mapping, pinned: every word `farcooler_core::error::word` has,
+    /// a word this build doesn't know, and stderr with no word, which is
+    /// ssh's, the transport's or the CLI's and goes to the log.
     @Test func eachCodeHasItsSentence() {
+        let app = "The runner couldn’t take the request as Far Cooler sent it. That’s a problem in the app, not in anything you did."
+        let reach = "Check that the runner is reachable, then try again."
+        let neutral = "Something went wrong. Try again."
         let cases: [(String, String)] = [
             ("code: not-found", "It isn’t on this runner anymore."),
             ("code: running-processes", "Something is still running in it. Stop it first, then try again."),
+            ("code: dirty-worktree", "It has changes that aren’t committed. Commit or discard them, then try again."),
+            ("code: branch-exists", "A branch with that name already exists on this runner."),
+            ("code: worktree-exists", "A worktree with that name already exists on this runner."),
+            ("code: repository-locked", "Git is busy with something else in this repository. Try again when it’s done."),
+            ("code: workspaces-exist", "It still has worktrees. Remove them first, then try again."),
+            ("code: path-not-allowed", "That folder isn’t one this runner lets Far Cooler use."),
+            ("code: sensitive-root", "Far Cooler won’t use that folder because it holds personal or system files."),
+            ("code: base-unresolvable", "The runner couldn’t find the branch to start from."),
+            ("code: confirmation-required", "The runner needs you to confirm this first."),
             ("code: tmux-unavailable", "The runner can’t reach tmux. Install tmux there, then try again."),
             ("code: capability-unsupported", "This runner’s Far Cooler is too old for this. Update it there, then try again."),
-            ("code: version-incompatible", "This runner’s Far Cooler is too old for this. Update it there, then try again."),
+            (
+                "code: version-incompatible",
+                "This runner’s Far Cooler and this app are different versions. Update the older one, then try again."
+            ),
             ("code: scope-denied", "This runner lets Far Cooler see it but not change it."),
             ("code: auth-required", "This runner didn’t accept Far Cooler’s sign-in."),
             ("code: resource-conflict\nwhat: not_held", "It changed while you were doing that. Try again."),
             ("code: host-offline", "The runner is offline."),
             ("code: agent-not-connected", "Its agent isn’t connected right now."),
+            ("code: attachment-limit", "That’s more than the runner takes at once."),
+            ("code: diff-too-large", "The changes are too large to show."),
+            ("code: diff-unsupported", "The runner can’t show these changes."),
+            ("code: pr-state-unavailable", "The runner couldn’t read the pull request."),
+            ("code: dispatch-unknown", "The runner didn’t say whether it went through. Check before trying again."),
+            ("code: output-gap", "The runner fell behind. Try again."),
+            ("code: client-too-slow", "The runner fell behind. Try again."),
             ("code: operation-failed", "The runner tried and it didn’t work. Try again."),
-            (
-                "code: invalid-argument",
-                "The runner couldn’t take the request as Far Cooler sent it. That’s a problem in the app, not in anything you did."
-            ),
-            ("ssh: connect to host runner port 22: Connection refused", "Check that the runner is reachable, then try again."),
-            ("error: unexpected argument '--frobnicate' found", "Check that the runner is reachable, then try again."),
+            ("code: invalid-argument", app),
+            ("code: idempotency-mismatch", app),
+            ("code: unspecified", neutral),
+            ("code: unrecognized", neutral),
+            ("code: some-word-from-a-newer-runner", neutral),
+            ("ssh: connect to host runner port 22: Connection refused", reach),
+            ("ssh: Could not resolve hostname runner: nodename nor servname provided", reach),
+            ("could not reach the daemon: No such file or directory (os error 2)", reach),
+            ("Connection closed by 10.0.0.2 port 22", reach),
+            ("error: unexpected argument '--frobnicate' found", neutral),
+            ("no layout matching \"@9\"", neutral),
         ]
         for (stderr, reason) in cases {
             #expect(ActionCopy.reason("error: whatever the daemon said\n" + stderr) == reason, "\(stderr)")
@@ -168,6 +196,73 @@ struct ActionOutcomeTests {
         #expect(
             ActionCopy.sentence(.close, subject: "“agent”", message: "ssh: Could not resolve hostname runner")
                 == "Couldn’t close “agent”. Check that the runner is reachable, then try again.")
+    }
+
+    /// A Close whose stop worked, where the refresh after the stop reaped
+    /// the record first: the remove finds nothing to remove, which is what
+    /// Close asked for. The CLI says so as `code: not-found` (its
+    /// `a_resolve_miss_carries_not_found_under_json`); without the word this
+    /// showed "Couldn’t close … Check that the runner is reachable".
+    @Test func aCloseRacingTheReapSucceeds() async {
+        let runner = Runner()
+        runner.fails["terminal remove"] = "error: no terminal matching \"t1\"\ncode: not-found"
+        let outcomes = ActionOutcomes()
+
+        await outcomes.perform(Self.key(.close, "t-1"), subject: "“agent”", on: client(runner)) {
+            await $0.stop(terminal: "t1")
+            await $0.removeTerminal("t1")
+        }
+
+        #expect(runner.calls.contains { $0.starts(with: ["terminal", "remove"]) })
+        #expect(outcomes.shown.isEmpty, "\(outcomes.shown)")
+    }
+
+    /// The banners show the latest few; the rest wait behind Show All.
+    @Test func theBannersAreCapped() {
+        let outcomes = ActionOutcomes()
+        for n in 1...5 { outcomes.settle(Self.key(.stop, "t-\(n)"), failure: "Couldn’t stop \(n).") }
+        #expect(outcomes.visible.map(\.sentence) == ["Couldn’t stop 3.", "Couldn’t stop 4.", "Couldn’t stop 5."])
+        #expect(outcomes.hiddenCount == 2)
+        outcomes.expanded = true
+        #expect(outcomes.visible.count == 5 && outcomes.hiddenCount == 0)
+        outcomes.dismissAll()
+        #expect(outcomes.shown.isEmpty && !outcomes.expanded)
+    }
+
+    /// A result goes with what it's about: a terminal closed elsewhere, a
+    /// worktree removed. And a Close that worked settles a Stop refused on
+    /// the same terminal a moment before.
+    @Test func aResultGoesWithItsTarget() throws {
+        let json = #"""
+            {"runtime_healthy":true,"live_panes":1,"worktrees":[{"id":"w-1","short":"w1","task":"fix-it",
+              "branch":"b","worktree":"/tmp/w","state":"active",
+              "terminals":[{"id":"t-1","short":"t1","title":"zsh","preset":"shell","state":"running","epoch":0}]}]}
+            """#
+        let fleet = try JSONDecoder().decode(Fleet.self, from: Data(json.utf8))
+        let outcomes = ActionOutcomes()
+        outcomes.settle(Self.key(.stop, "t-1"), failure: "Couldn’t stop “one”.")
+        outcomes.settle(Self.key(.restart, "t-2"), failure: "Couldn’t restart “two”.")
+        outcomes.settle(Self.key(.hide, "w-1"), failure: "Couldn’t hide “fix it”.")
+        outcomes.settle(Self.key(.hide, "w-9"), failure: "Couldn’t hide “gone”.")
+        outcomes.settle(Self.key(.resumeBranch, "repo b"), failure: "Couldn’t pick up “b”.")
+
+        outcomes.prune(in: fleet)
+        #expect(outcomes.shown.map(\.key) == [Self.key(.stop, "t-1"), Self.key(.hide, "w-1"), Self.key(.resumeBranch, "repo b")])
+
+        outcomes.settle(Self.key(.close, "t-1"), failure: nil)
+        outcomes.settle(Self.key(.unhide, "w-1"), failure: nil)
+        #expect(outcomes.shown.map(\.key) == [Self.key(.resumeBranch, "repo b")])
+    }
+
+    /// Navigation takes down the notice and nothing else: a refused move or
+    /// orchestrator start is an action's result, with an action's lifetime.
+    @Test func navigationLeavesActionResults() {
+        let outcomes = ActionOutcomes()
+        outcomes.settle(Self.key(.move, "w-1"), failure: "“fix it” or Billing isn’t on this runner anymore.")
+        outcomes.settle(Self.key(.startOrchestrator, "ws-1"), failure: "Couldn’t start the orchestrator for Billing.")
+        outcomes.notice = "Select a workspace first."
+        outcomes.clearNotice()
+        #expect(outcomes.shown.map(\.key.verb) == [.move, .startOrchestrator])
     }
 
     /// A runner already known not to answer refuses the click before it's

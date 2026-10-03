@@ -738,9 +738,13 @@ final class DaemonClient: ObservableObject {
         guard !openedAsChat.contains(terminal.id) else { return }
         openedAsChat.insert(terminal.id)
 
-        Task {
-            _ = await setPaneMode(terminal.short, mode: "agent")
-            await refresh()
+        // Outside any action: the preference switched it, not the click
+        // whose refresh found it, so a refusal is no click's failure.
+        ActionReporting.$current.withValue(nil) {
+            Task {
+                _ = await setPaneMode(terminal.short, mode: "agent")
+                await refresh()
+            }
         }
     }
 

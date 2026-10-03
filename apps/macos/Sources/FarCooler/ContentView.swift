@@ -273,11 +273,7 @@ struct ContentView: View {
                     toggle: { toggleNavigator() }))
         }
         .overlay(alignment: .top) {
-            VStack(spacing: 0) {
-                ForEach(outcomes.shown) { failure in
-                    ErrorBanner(message: failure.sentence) { outcomes.dismiss(failure.key) }
-                }
-            }
+            ActionBanners(outcomes: outcomes)
         }
         // A message arriving on a keystroke, so the same snappy preset
         // `PrefixHintOverlay` uses for its chip.
@@ -378,6 +374,9 @@ struct ContentView: View {
             // looking at — left the selection pointing at something that no
             // longer existed.
             healSelection(previous: old.worktrees)
+            // A result about a terminal or worktree that's gone describes
+            // nothing anymore, however it went.
+            outcomes.prune(in: store.fleet)
             // An agent finishing under your nose is a fleet change and nothing
             // else — no click, no selection change — so this is the only hook
             // that can catch the case where you were already watching it.
@@ -802,7 +801,9 @@ struct ContentView: View {
             Button("Stop Turn and Switch", role: .destructive) {
                 Task {
                     await act(
-                        .switchMode, on: pending.worktree, target: pending.terminal,
+                        .switchMode, on: pending.worktree,
+                        target: pending.worktree.terminals.first(where: { $0.short == pending.terminal })?.id
+                            ?? pending.terminal,
                         subject: pending.worktree.terminals.first(where: { $0.short == pending.terminal }).map { Self.quoted($0) }
                             ?? "this pane",
                         default: .failed("This runner can’t be reached right now.")
@@ -942,15 +943,18 @@ struct ContentView: View {
     /// Move to Workspace ▸.
     private func move(_ worktree: Worktree, to workspace: WorkspaceSummary) {
         Task {
-            // Refused first, as every write here is; see `act`.
-            if let why = store.refusalSentence(for: worktree.host ?? "") {
-                errorBanner = why
+            // Refused first, as every write here is; see `act`. Filed as
+            // the move's own result, which a selection change leaves alone.
+            let host = worktree.host ?? ""
+            if let why = store.refusalSentence(for: host) {
+                fileResult(.move, host: host, target: worktree.id, "\(ActionVerb.move.lead(Self.quoted(worktree))) \(why)")
                 return
             }
             guard let client = store.client(for: worktree) else { return }
             // Nothing moves on screen until the runner says it has: a
             // refused move leaves the row where it was, with the sentence.
-            if let refused = await client.assignWorktree(worktree, to: workspace) { errorBanner = refused }
+            let refused = await client.assignWorktree(worktree, to: workspace)
+            fileResult(.move, host: host, target: worktree.id, refused)
         }
     }
 
@@ -961,7 +965,8 @@ struct ContentView: View {
         _ workspace: WorkspaceSummary, host: String, harness: OrchestratorHarness, replace: Bool
     ) {
         if let why = store.refusalSentence(for: host) {
-            errorBanner = why
+            fileResult(.startOrchestrator, host: host, target: workspace.id,
+                 "\(ActionVerb.startOrchestrator.lead(workspace.name)) \(why)")
             return
         }
         guard let client = store.clients[host] else { return }
@@ -970,7 +975,7 @@ struct ContentView: View {
         Task {
             let refused = await client.startOrchestrator(workspace, harness: harness, replace: replace)
             startingOrchestrators.end(workspace, host: host)
-            if let refused { errorBanner = refused }
+            fileResult(.startOrchestrator, host: host, target: workspace.id, refused)
         }
     }
 
@@ -2492,6 +2497,13 @@ struct ContentView: View {
     /// A terminal as a sentence names it: its label, in quotes.
     static func quoted(_ terminal: Terminal) -> String { "“\(terminal.label)”" }
 
+    /// File the result of an action whose client call words its own
+    /// failure: the sentence, or nil for one that worked. Same lifetime as
+    /// `act`'s results, so navigation leaves it.
+    private func fileResult(_ verb: ActionVerb, host: String, target: String, _ failure: String?) {
+        outcomes.settle(ActionKey(verb: verb, host: host, target: target), failure: failure)
+    }
+
     /// A terminal's rendered screen, for the palette's preview tiles.
     ///
     /// `short` is what `ScreenPreviews` keys everything by, and short ids can
@@ -2539,14 +2551,15 @@ struct ContentView: View {
     private func useAsOrchestrator(_ pane: BoardPane) {
         let host = pane.worktree.host ?? ""
         if let why = store.refusalSentence(for: host) {
-            errorBanner = why
+            fileResult(.setRole, host: host, target: pane.terminal.id,
+                 "\(ActionVerb.setRole.lead(Self.quoted(pane.terminal))) \(why)")
             return
         }
         guard let id = pane.terminal.workspace,
             let workspace = store.fleet.runnerWorkspaces[host]?.first(where: { $0.id == id })
         else {
-            errorBanner = OrchestratorAdoption.refusal(
-                "code: invalid-argument\nwhat: workspace", terminal: pane.terminal.label, workspace: "")
+            fileResult(.setRole, host: host, target: pane.terminal.id, OrchestratorAdoption.refusal(
+                "code: invalid-argument\nwhat: workspace", terminal: pane.terminal.label, workspace: ""))
             return
         }
         if let old = OrchestratorAdoption.replacing(pane, in: workspace, host: host, fleet: store.fleet) {
@@ -2566,12 +2579,14 @@ struct ContentView: View {
         if let old {
             let (refused, message) = await client.setRole(old.terminal, to: OrchestratorAdoption.steppedDown(old.terminal))
             if refused {
-                errorBanner = OrchestratorAdoption.refusal(message, terminal: old.terminal.label, workspace: workspace.name)
+                fileResult(.setRole, host: host, target: pane.terminal.id,
+                     OrchestratorAdoption.refusal(message, terminal: old.terminal.label, workspace: workspace.name))
                 return
             }
         }
         let (refused, message) = await client.setRole(pane.terminal, to: "orchestrator")
         guard refused else {
+            fileResult(.setRole, host: host, target: pane.terminal.id, nil)
             // Adopted: what shares its window moves out, the orchestrator it
             // replaced included, so the column draws it alone (ov-78). The
             // adopting is the ask.
@@ -2582,7 +2597,8 @@ struct ContentView: View {
             }
             return
         }
-        errorBanner = OrchestratorAdoption.refusal(message, terminal: pane.terminal.label, workspace: workspace.name)
+        fileResult(.setRole, host: host, target: pane.terminal.id,
+             OrchestratorAdoption.refusal(message, terminal: pane.terminal.label, workspace: workspace.name))
         if let old { _ = await client.setRole(old.terminal, to: "orchestrator") }
     }
 
@@ -2594,10 +2610,8 @@ struct ContentView: View {
             store.fleet.runnerWorkspaces[pane.worktree.host ?? ""]?.first { $0.id == id }
         }
         let (refused, message) = await client.setRole(pane.terminal, to: OrchestratorAdoption.steppedDown(pane.terminal))
-        if refused {
-            errorBanner = OrchestratorAdoption.refusal(
-                message, terminal: pane.terminal.label, workspace: workspace?.name ?? "The workspace")
-        }
+        fileResult(.setRole, host: pane.worktree.host ?? "", target: pane.terminal.id, refused ? OrchestratorAdoption.refusal(
+            message, terminal: pane.terminal.label, workspace: workspace?.name ?? "The workspace") : nil)
     }
 
     private func worktree(host: String, id: String) -> Worktree? {
@@ -3017,7 +3031,7 @@ struct ContentView: View {
     private func togglePaneMode(_ terminal: Terminal, in worktree: Worktree) async {
         let target = terminal.isAgentPane ? "terminal" : "agent"
         let result = await act(
-            .switchMode, on: worktree, target: terminal.short, subject: Self.quoted(terminal),
+            .switchMode, on: worktree, target: terminal.id, subject: Self.quoted(terminal),
             default: DaemonClient.PaneModeResult.ok
         ) { c in
             await c.setPaneMode(terminal.short, mode: target)
@@ -3948,6 +3962,38 @@ enum SearchEscape {
 }
 
 enum TerminalAction { case restart, dismissLost, stop, useAsOrchestrator, stopBeingOrchestrator }
+
+/// The banners over the detail pane: the latest few results, and a row for
+/// the rest when there are more (`ActionOutcomes.visibleLimit`).
+struct ActionBanners: View {
+    @ObservedObject var outcomes: ActionOutcomes
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(outcomes.visible) { failure in
+                ErrorBanner(message: failure.sentence) { outcomes.dismiss(failure.key) }
+            }
+            if outcomes.hiddenCount > 0 || outcomes.expanded {
+                HStack(spacing: 12) {
+                    if outcomes.hiddenCount > 0 {
+                        Text(outcomes.hiddenCount == 1 ? "1 more failure" : "\(outcomes.hiddenCount) more failures")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    Button(outcomes.expanded ? "Show Fewer" : "Show All") { outcomes.expanded.toggle() }
+                    Button("Dismiss All") { outcomes.dismissAll() }
+                }
+                .buttonStyle(.link)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .floatingPanel()
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+            }
+        }
+    }
+}
 
 /// One result the app wrote: an action's failure, or the notice.
 ///
