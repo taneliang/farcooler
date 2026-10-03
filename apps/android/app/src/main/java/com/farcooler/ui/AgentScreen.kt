@@ -80,6 +80,7 @@ import com.farcooler.model.AgentActivity
 import com.farcooler.model.AgentChoice
 import com.farcooler.model.ComposerToken
 import com.farcooler.model.ConfigOption
+import com.farcooler.model.PromptImageBudget
 import com.farcooler.model.QueuedPrompt
 import com.farcooler.model.TailSample
 import com.farcooler.model.TranscriptItem
@@ -93,8 +94,10 @@ import com.farcooler.net.Connection
 import com.farcooler.net.PaneReconnect
 import com.farcooler.net.TerminalRef
 import com.farcooler.net.Waited
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
@@ -936,17 +939,22 @@ private fun AgentComposer(
             attachmentError = "That image couldn’t be read."
             return@rememberLauncherForActivityResult
         }
-        // PNG only when it really is one — a picker hands back HEIC as often as
-        // anything else, and telling the agent the wrong type fails at the far
-        // end.
-        val mime =
-            if (bytes.size > 4 && bytes[0] == 0x89.toByte() && bytes[1] == 'P'.code.toByte()) {
-                "image/png"
-            } else {
-                context.contentResolver.getType(uri) ?: "image/jpeg"
+        // Shrunk to fit ONE control envelope, and re-encoded when it is a type
+        // an agent refuses (HEIC, as often as not). Sending the picked bytes
+        // as they came is what this used to do, and the protocol refused every
+        // photo over a megabyte. See [PromptImageBudget]. Off the main thread:
+        // decoding a camera photo is tens of milliseconds at best.
+        scope.launch {
+            val fitted = withContext(Dispatchers.Default) {
+                runCatching { PromptImageBudget.fit(bytes) { promptImageEncoder(bytes) } }.getOrNull()
             }
-        attachments = attachments + AgentStream.Attachment(mime, bytes)
-        attachmentError = null
+            if (fitted == null) {
+                attachmentError = "That photo couldn’t be prepared to send."
+                return@launch
+            }
+            attachments = attachments + AgentStream.Attachment(fitted.second, fitted.first)
+            attachmentError = null
+        }
     }
 
     // Debounced rather than fired on every keystroke: each search is an SSH
