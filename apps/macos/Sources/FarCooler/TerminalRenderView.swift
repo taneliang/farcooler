@@ -101,6 +101,24 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     /// never overwritten, and sat on screen as stray characters until the pane
     /// re-attached.
     private var paneGrid: PaneGrid?
+    /// Whether the live stream feeding `core` says what size its pane is.
+    ///
+    /// When it does, the stream is the only thing that resizes the core. A pane
+    /// that grows is repainted by its program for the new size at once, and
+    /// those bytes reach this view before the layout reply that would tell it
+    /// the size; resizing on the reply meant drawing the repaint into the old
+    /// grid first, which wrapped every row of it, and then reflowing the
+    /// wreckage. The runner now puts the size in the stream in front of the
+    /// repaint, and the core resizes itself there (`farcooler_vt::size_marker`).
+    /// A reply that lands afterwards agrees and changes nothing — or it is
+    /// stale, from a drag sending sizes faster than replies return, and would
+    /// size the grid away from the pane the program is drawing for.
+    ///
+    /// A property of the stream rather than of the core: a kept frame was
+    /// sized by a stream that has gone, and until its new stream speaks it
+    /// follows the layout like any other. Re-learnt after every feed, and
+    /// forgotten whenever the core is replaced.
+    private var streamSizesCore = false
 
     // MARK: - Metrics
 
@@ -334,7 +352,11 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         }
         guard grid.columns > 0, grid.rows > 0, grid != paneGrid else { return }
         paneGrid = grid
-        core.resize(columns: grid.columns, rows: grid.rows)
+        // Not when the stream sizes the core: by now it already has. See
+        // `streamSizesCore`.
+        if !streamSizesCore {
+            core.resize(columns: grid.columns, rows: grid.rows)
+        }
         // The core waiting for the replay is resized too, or a pane that
         // changed size between opening its stream and receiving a byte would
         // apply that replay at the grid it USED to have. See `pendingCore`.
@@ -358,7 +380,11 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         lastReportedGeometry = fits
 
         if paneGrid == nil {
-            core.resize(columns: fits.columns, rows: fits.rows)
+            // The request still goes to tmux below; the answer comes back on
+            // the stream, at the right place in the bytes. See `streamSizesCore`.
+            if !streamSizesCore {
+                core.resize(columns: fits.columns, rows: fits.rows)
+            }
             // See `setPaneGrid` for why the pending core follows every resize.
             pendingCore?.resize(columns: fits.columns, rows: fits.rows)
         }
@@ -433,6 +459,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         // call is replacing, so it can only ever be adopted by mistake now.
         pendingCore = nil
         corePainted = false
+        streamSizesCore = false
         // A fresh core starts on the VT crate's own default palette, which is
         // not the theme in force. Without this, pointing a view at a different
         // terminal repainted its chrome correctly and left every character in
@@ -463,6 +490,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         }
         core.feed(bytes)
         corePainted = true
+        streamSizesCore = core.sizedByStream
     }
 
     /// Draw this terminal's last frame, from before its view was destroyed.
@@ -503,6 +531,8 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     /// revision is a claim about a core this view no longer holds.
     private func adopt(_ replacement: VTCore) {
         core = replacement
+        // Whatever stream sized it is not the one that will feed it next.
+        streamSizesCore = false
         // A core built elsewhere — or kept from before a theme change — is not
         // necessarily on the theme in force. Same reasoning as `reset`.
         core.setPalette(Themes.shared.current.packed)

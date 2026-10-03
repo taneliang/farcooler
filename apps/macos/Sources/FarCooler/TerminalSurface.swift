@@ -231,6 +231,10 @@ struct TerminalCanvas: NSViewRepresentable {
         // bytes come down the same stream we are already reading. The emulator
         // reflows what it already holds. Restarting was only ever needed because
         // the old client painted a captured screen it could not reflow.
+        //
+        // The repaint overtakes any word of the new size, though, so the runner
+        // puts the size in the stream ahead of it and the emulator resizes
+        // there. See `TerminalRenderView.streamSizesCore`.
         view.onGeometry = { columns, rows in
             coord.pendingGeometry?.cancel()
             // Whether this is the report that OPENS the stream, decided here

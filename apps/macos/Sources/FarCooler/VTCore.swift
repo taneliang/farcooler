@@ -51,6 +51,17 @@ final class VTCore {
         farcooler_vt_resize(handle, UInt16(clamping: columns), UInt16(clamping: rows))
     }
 
+    /// Whether the byte stream has said what size its pane is.
+    ///
+    /// Once it has, the core resizes itself at the point in the bytes where the
+    /// pane changed, and `resize` from a layout reply is late by definition —
+    /// the program's repaint for that size has already been fed. See
+    /// `TerminalRenderView.streamSizesCore`.
+    var sizedByStream: Bool {
+        guard let handle else { return false }
+        return farcooler_vt_sized_by_stream(handle)
+    }
+
     /// Changes whenever the screen may have changed. An unchanged value means
     /// the frame can be skipped entirely.
     var revision: UInt64 {
