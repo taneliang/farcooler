@@ -106,6 +106,18 @@ void farcooler_vt_feed(void *handle, const uint8_t *bytes, size_t len);
 void farcooler_vt_resize(void *handle, uint16_t columns, uint16_t rows);
 
 /*
+ * True once the byte stream has said what size its pane is.
+ *
+ * A runner puts the pane's size in the stream, in front of the first bytes
+ * written after it changes, and the core resizes itself right there. From then
+ * on the stream is the authority: stop calling farcooler_vt_resize when a
+ * layout reply arrives, because by then the program's repaint for the new size
+ * has already been fed, and resizing after it wraps the repaint at the wrong
+ * width. Until this is true — a runner too old to send sizes — resize as before.
+ */
+bool farcooler_vt_sized_by_stream(void *handle);
+
+/*
  * A counter that changes whenever the screen may have changed. Cache it; if it
  * has not moved, skip the frame. This is what keeps an idle terminal from
  * burning a redraw on every tick.

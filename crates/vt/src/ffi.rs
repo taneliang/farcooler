@@ -161,6 +161,20 @@ pub unsafe extern "C" fn farcooler_vt_resize(handle: *mut c_void, columns: u16, 
     h.revision = h.revision.wrapping_add(1);
 }
 
+/// Whether the byte stream has said what size its pane is.
+///
+/// Once true, the stream resizes the grid itself, at the exact point in the
+/// bytes where the pane changed size, and a client should stop calling
+/// `farcooler_vt_resize` on its own word: a layout reply lands after the
+/// program has already repainted for the new size. See `size_marker`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_vt_sized_by_stream(handle: *mut c_void) -> bool {
+    match unsafe { as_handle(handle) } {
+        Some(h) => h.terminal.sized_by_stream(),
+        None => false,
+    }
+}
+
 /// A counter that changes whenever the screen may have changed.
 ///
 /// A renderer that caches this value and finds it unchanged can skip the frame
@@ -702,6 +716,18 @@ mod tests {
         unsafe { farcooler_vt_free(h) };
     }
 
+    /// The stream's size reaches the grid through the ABI, and says so.
+    #[test]
+    fn a_size_from_the_stream_is_visible_through_the_abi() {
+        let h = farcooler_vt_new(40, 6);
+        assert!(!unsafe { farcooler_vt_sized_by_stream(h) });
+        feed(h, &crate::size_marker(90, 30));
+        let (snap, _) = read(h);
+        assert_eq!((snap.columns, snap.rows), (90, 30));
+        assert!(unsafe { farcooler_vt_sized_by_stream(h) });
+        unsafe { farcooler_vt_free(h) };
+    }
+
     #[test]
     fn pty_replies_are_drained_in_order_and_only_once() {
         let h = farcooler_vt_new(40, 6);
@@ -763,6 +789,7 @@ mod tests {
         unsafe {
             farcooler_vt_feed(null, b"x".as_ptr(), 1);
             farcooler_vt_resize(null, 10, 10);
+            assert!(!farcooler_vt_sized_by_stream(null));
             assert_eq!(farcooler_vt_revision(null), 0);
             assert!(!farcooler_vt_snapshot(null, std::ptr::null_mut()));
             assert_eq!(farcooler_vt_take_writes(null, std::ptr::null_mut(), 0), 0);

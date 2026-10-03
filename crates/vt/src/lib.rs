@@ -81,6 +81,10 @@ pub struct Terminal {
     /// the constants this used to be, because a theme is a thing the person
     /// looking at the screen chooses. See `grid::Palette`.
     palette: grid::Palette,
+    /// Watches the bytes for a pane size the runner put in the stream.
+    marker: MarkerScan,
+    /// Whether the stream has said what size its pane is. See `size_marker`.
+    sized_by_stream: bool,
 }
 
 impl Terminal {
@@ -104,6 +108,8 @@ impl Terminal {
             parser: Processor::new(),
             collector,
             palette: grid::Palette::default(),
+            marker: MarkerScan::default(),
+            sized_by_stream: false,
         }
     }
 
@@ -126,8 +132,49 @@ impl Terminal {
     ///
     /// Byte-exact and resumable: a sequence split across two calls parses the
     /// same as one call, which matters because the transport chunks arbitrarily.
+    ///
+    /// A size marker (see `size_marker`) resizes the grid at exactly the point
+    /// in the bytes where it sits: everything before it is applied at the old
+    /// size, everything after at the new one. The marker itself still goes
+    /// through the parser, which ignores application strings, so it draws
+    /// nothing.
     pub fn feed(&mut self, bytes: &[u8]) {
-        self.parser.advance(&mut self.term, bytes);
+        let mut start = 0;
+        for (index, &byte) in bytes.iter().enumerate() {
+            if let Some((columns, rows)) = self.marker.step(byte) {
+                self.parser.advance(&mut self.term, &bytes[start..=index]);
+                start = index + 1;
+                self.resize_for_stream(columns, rows);
+            }
+        }
+        self.parser.advance(&mut self.term, &bytes[start..]);
+    }
+
+    /// The runner said the pane is now this size.
+    ///
+    /// A synchronized update still being held is released first. Its bytes were
+    /// written before the resize, for the grid the program had then, and held
+    /// past the resize they would be applied to a grid they were not aimed at:
+    /// a line sent to the old bottom row would land on the new one. Ending the
+    /// hold early costs, at worst, one frame drawn half-finished.
+    fn resize_for_stream(&mut self, columns: u16, rows: u16) {
+        if self.sync_pending() {
+            self.parser.stop_sync(&mut self.term);
+        }
+        self.resize(columns, rows);
+        self.sized_by_stream = true;
+    }
+
+    /// Whether the stream has ever said what size its pane is.
+    ///
+    /// Once it has, the stream is the authority on this terminal's size, and a
+    /// client should stop resizing the grid on its own word: a resize it
+    /// applies when its layout reply lands is late — the program's repaint for
+    /// that size is already in the grid — and the stream will deliver the same
+    /// size at the right place anyway. A stream from a runner that predates
+    /// markers never says, and then the client's own resizes are all there is.
+    pub fn sized_by_stream(&self) -> bool {
+        self.sized_by_stream
     }
 
     /// Whether a synchronized update is being held back.
@@ -249,6 +296,92 @@ impl Terminal {
     pub(crate) fn term(&self) -> &Term<Collector> {
         &self.term
     }
+}
+
+/// What a runner puts in a terminal's byte stream to say its pane is now
+/// `columns` by `rows`.
+///
+/// The stream is the program's raw output (`pipe-pane`), and nothing in that
+/// output says what size it was written for. When tmux resizes a pane the
+/// program repaints for the new size at once, and those bytes overtake every
+/// other way a client could learn of the change — a layout reply, a poll — so a
+/// client that resized when it was told drew the repaint into the old grid
+/// first. Growing a pane wrapped every row of it; shrinking mostly got away
+/// with it, because a smaller picture fits inside a larger grid.
+///
+/// The runner's fanout writes this in front of the first bytes it reads after
+/// the pane's size changes, which puts it ahead of the repaint by causality:
+/// the program cannot answer a SIGWINCH it has not been sent.
+///
+/// An application program command (APC, `ESC _ … ESC \`), because every
+/// emulator already ignores those: a client that predates markers, or a person
+/// running `farcooler terminal stream` in their own terminal, sees nothing.
+pub fn size_marker(columns: u16, rows: u16) -> Vec<u8> {
+    format!("\x1b_{MARKER_TAG}{columns};{rows}\x1b\\").into_bytes()
+}
+
+/// The body every size marker starts with.
+const MARKER_TAG: &str = "farcooler-size;";
+
+/// Longer than any marker's body, so a long application string from a program
+/// is given up on quickly rather than buffered.
+const MARKER_BODY_LIMIT: usize = 32;
+
+/// Finds size markers in a byte stream, across however it was chunked.
+///
+/// A scanner of its own rather than a hook in the parser, because the parser
+/// throws application strings away without telling its handler — which is the
+/// property that makes the marker invisible everywhere else.
+#[derive(Default)]
+struct MarkerScan {
+    state: ScanState,
+    body: Vec<u8>,
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum ScanState {
+    #[default]
+    Ground,
+    Escape,
+    Body,
+    BodyEscape,
+}
+
+impl MarkerScan {
+    /// Advance by one byte. Returns a size when this byte completes a marker.
+    fn step(&mut self, byte: u8) -> Option<(u16, u16)> {
+        const ESC: u8 = 0x1b;
+        match (self.state, byte) {
+            (ScanState::Ground, ESC) => self.state = ScanState::Escape,
+            (ScanState::Ground, _) => {}
+            (ScanState::Escape, b'_') => {
+                self.body.clear();
+                self.state = ScanState::Body;
+            }
+            (ScanState::Escape, ESC) => {}
+            (ScanState::Escape, _) => self.state = ScanState::Ground,
+            (ScanState::Body, ESC) => self.state = ScanState::BodyEscape,
+            (ScanState::Body, _) if self.body.len() < MARKER_BODY_LIMIT => self.body.push(byte),
+            (ScanState::Body, _) => self.state = ScanState::Ground,
+            (ScanState::BodyEscape, b'\\') => {
+                self.state = ScanState::Ground;
+                return parse_marker(&self.body);
+            }
+            // An escape that is not the string terminator starts something else.
+            (ScanState::BodyEscape, _) => {
+                self.state = ScanState::Escape;
+                return self.step(byte);
+            }
+        }
+        None
+    }
+}
+
+fn parse_marker(body: &[u8]) -> Option<(u16, u16)> {
+    let rest = std::str::from_utf8(body).ok()?.strip_prefix(MARKER_TAG)?;
+    let (columns, rows) = rest.split_once(';')?;
+    let (columns, rows) = (columns.parse::<u16>().ok()?, rows.parse::<u16>().ok()?);
+    (columns > 0 && rows > 0).then_some((columns, rows))
 }
 
 /// How much history a terminal keeps.
@@ -827,6 +960,75 @@ mod tests {
         assert_eq!(render(&t)[0], "stranded", "and what it was holding reaches the screen");
         assert!(!t.sync_pending(), "with nothing left held");
         assert!(!t.flush_expired_sync(), "and nothing to release a second time");
+    }
+
+    /// The bug a resize made visible, and the reason the stream carries sizes.
+    ///
+    /// A pane that grows is told so by tmux, and the program in it repaints for
+    /// the new size at once. Those bytes reach the client on the stream well
+    /// before anything else can say the pane changed: measured on a local
+    /// runner, a `less` repaint landed about 60ms before `layout viewport` even
+    /// returned, and the app's layout pass comes after that. Drawn into the old,
+    /// smaller grid, every row of the repaint wrapped or clipped, and growing
+    /// the grid afterwards reflowed the wreckage rather than undoing it.
+    ///
+    /// So the size travels in the stream, in front of the bytes written for it.
+    #[test]
+    fn a_repaint_for_a_grown_pane_lands_at_the_size_it_was_written_for() {
+        let wide = "W".repeat(40);
+        let mut t = Terminal::new(20, 4);
+        t.feed(b"before the resize");
+        t.feed(&size_marker(40, 6));
+        t.feed(format!("\x1b[H\x1b[2J{wide}\x1b[6;1Hbottom").as_bytes());
+
+        assert_eq!((t.columns(), t.rows()), (40, 6), "the stream said the pane grew");
+        let rows = render(&t);
+        assert_eq!(rows[0], wide, "a full-width row is one row, not two");
+        assert_eq!(rows[1], "", "and nothing wrapped onto the next");
+        assert_eq!(rows[5], "bottom", "the new last row exists to be drawn on");
+        assert!(t.sized_by_stream());
+    }
+
+    /// The transport chunks arbitrarily, so a marker split anywhere is still one.
+    #[test]
+    fn a_size_marker_split_across_reads_still_resizes() {
+        let marker = size_marker(33, 7);
+        for split in 1..marker.len() {
+            let mut t = Terminal::new(20, 4);
+            assert!(!t.sized_by_stream());
+            t.feed(&marker[..split]);
+            t.feed(&marker[split..]);
+            t.feed(b"x");
+            assert_eq!((t.columns(), t.rows()), (33, 7), "split at {split}");
+            assert_eq!(render(&t)[0], "x", "the marker itself draws nothing (split at {split})");
+        }
+    }
+
+    /// Bytes the program wrote before the resize belong to the old grid, even
+    /// when a synchronized update is holding them back. Resizing first would
+    /// put a line aimed at the old bottom row on the new one.
+    #[test]
+    fn a_held_frame_is_applied_at_the_size_it_was_written_for() {
+        let mut t = Terminal::new(20, 4);
+        t.feed(b"\x1b[?2026h\x1b[99;1Hlast");
+        t.feed(&size_marker(20, 8));
+        t.feed(b"\x1b[?2026l");
+        let rows = render(&t);
+        assert_eq!(rows[3], "last", "drawn on the bottom row of the grid it was written for");
+        assert_eq!(rows[7], "");
+    }
+
+    /// Somebody else's application string is not a size, and neither is a
+    /// marker that does not parse.
+    #[test]
+    fn other_application_strings_do_not_resize() {
+        let mut t = Terminal::new(20, 4);
+        t.feed(b"a\x1b_something else;40;6\x1b\\b");
+        t.feed(b"\x1b_farcooler-size;0;6\x1b\\");
+        t.feed(b"\x1b_farcooler-size;40\x1b\\c");
+        assert_eq!((t.columns(), t.rows()), (20, 4));
+        assert_eq!(render(&t)[0], "abc");
+        assert!(!t.sized_by_stream());
     }
 
     #[test]
