@@ -431,8 +431,10 @@ the sections for tasks actually) so having the orchestrator in there might also 
       An item stays until its ticket is opened. Opening clears all of that ticket's items. Read state is kept
       per Mac in `BoardReads`, which holds a floor plus each ticket's last-opened mark. It's stored under
       `board.read.<runner>.<workspace>` through `BoardReadStore`, the seam a runner-synced store replaces
-      later. The first load starts at the old visit stamp. The period menu also offers **Last Hour** and
-      **Today**, plain time windows that reading doesn't change, and, under Unread, **Mark All as Read**.
+      later. The first load starts at the old visit stamp, held to the last day so an old visit can't flood
+      Done. There's no period menu: Last Hour and Today went with Since Last Visit, since they didn't act
+      like unreads (ov-104 review). **Mark All as Read** is in the section's context menu and in the menu
+      bar (Board ▸ Mark All as Read).
     - **Every task row is compact** (variant B, the owner's pick of three, ov-104), and none is a card:
       - line one is the key, in monospace and secondary in the board's one key column, then the title;
       - line two is a quiet meta line saying what the status header doesn't (`TaskRowMeta`): what the task
@@ -443,9 +445,12 @@ the sections for tasks actually) so having the orchestrator in there might also 
       page's rows are the same row (`CompactTaskRow`). The agent pill is gone; Go to Agent and the worktree
       menu are in the row's context menu.
     - **Done and Canceled** (ov-103) show every finished task that's still unread, plus everything finished
-      today, with a floor of the latest 3 (`BoardDone.shown`). An **All Done  N ›** row opens the History
-      page. Any other section shows 10, then an inline **Show N More**. Filtering shows every match and opens
-      every section that has one.
+      today, with a floor of the latest 3 (`BoardDone.shown`). The task selected is kept where it is, even
+      though opening it read it, until the selection moves on. While a section leaves tasks out, an **All
+      Done  N ›** row opens the History page. Done's "today" turns over at midnight on the board's tick. Any
+      other section shows 10, then an inline **Show N More** (and **Show Fewer**). Filtering shows every
+      match and opens every section that has one. In a workspace, or in a loose worktree beside its
+      navigator, ⌘F reads **Filter Tasks** and focuses the field. Elsewhere it's the sidebar's find.
     - **Group headers** use the shared header. The count is right-aligned, tertiary and in tabular digits
       (`SectionCount`, `GroupHeader`), never "Title (N)".
     - **Motion:**

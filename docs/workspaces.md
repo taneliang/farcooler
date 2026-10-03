@@ -113,8 +113,9 @@ The navigator has three sections:
   **Start Orchestrator** and **Use as Orchestrator…**.
 - **Tasks**: the board, by status, under **Unread**: what's finished, new, or
   waiting on you, and each ticket's latest note, until you open that ticket.
-  The menu by Unread switches to Last Hour or Today, and has **Mark All as
-  Read**. ⌘F filters every section by key or title.
+  To clear it at once, choose **Mark All as Read** from Unread's context
+  menu or from Board in the menu bar. ⌘F (Edit ▸ Filter Tasks) filters
+  every section by key or title.
 - **Worktrees**: the worktrees no task has, and **New Worktree…**.
 
 Select a task or a worktree and it takes the main area; select the orchestrator
@@ -142,7 +143,8 @@ an empty status is a header with a 0. Each task is one compact row: its key
 and title, and under them what it's waiting on, who's working it and how much
 of it holds. Done and Canceled start collapsed. They show what finished since
 you last opened it and what finished today, and at least the latest three.
-**All Done** opens the History page, which you can search and filter by area.
+When some are left out, **All Done** opens the History page, which you can
+search and filter by area.
 A long section shows ten tasks, then **Show N More**. The
 **+** button in the board's header (**New Task…**) files a task by hand. It's
 there when the runner lets this Mac write to the board. Beside it, the arrow
