@@ -570,7 +570,7 @@ def self_test():
 
     # Every job in every workflow has a timeout. Without one, a hang holds a
     # runner until GitHub kills it at six hours.
-    workflows = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+    workflows = sorted(p for p in (ROOT / ".github" / "workflows").iterdir() if p.suffix in (".yml", ".yaml"))
     count += 1
     if not workflows:
         failures.append("no workflows found under .github/workflows")
@@ -584,11 +584,12 @@ def self_test():
     timeout_cases = [
         ("a job without timeout-minutes", planted, 1),
         ("an empty timeout-minutes", canary.replace("    timeout-minutes: 5\n", "    timeout-minutes:\n", 1), 1),
+        ("a job calling a reusable workflow", canary.replace("\njobs:\n", "\njobs:\n  called:\n    uses: ./.github/workflows/linux-binaries.yml\n", 1), 0),
         ("the real canary.yml", canary, 0),
     ]
     for what, text, want in timeout_cases:
         count += 1
-        if text == canary and want:
+        if text == canary and what != "the real canary.yml":
             failures.append(f"timeout case {what!r}: the mutation no longer applies to canary.yml")
             continue
         got = timeout_problems(text)
