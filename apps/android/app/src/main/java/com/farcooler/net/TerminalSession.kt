@@ -13,6 +13,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -201,9 +202,29 @@ class TerminalSession(
     private var paneSize: Pair<Int, Int>? = null
     private var revision: ULong = 0uL
 
-    /** Consecutive stream attaches that produced nothing before ending. */
-    private var failedAttaches = 0
     private var started = false
+
+    /**
+     * The emulator [prime] built for a stream that has not spoken yet.
+     *
+     * Installed as [vt] at once only when nothing else is painting. When a poll
+     * loop is — every re-attach keeps polling until the stream carries bytes —
+     * an empty emulator in [vt] would blank a pane polling is keeping current.
+     * So it waits here, and [consume] swaps it in on the first byte. Never
+     * freed by [render], which may find it in [vt]; see [dropStreamCore].
+     *
+     * Its size travels with it because [render] moves [paneSize] on every
+     * poll, and the emulator installed on the first byte is this size.
+     */
+    private var streamCore: StreamCore? = null
+
+    private class StreamCore(val emulator: VtCore, val columns: Int, val rows: Int)
+
+    /** Gives up on a stream that opened and never spoke. See [waitForTheFirstByte]. */
+    private var silence: Job? = null
+
+    /** Starts painting a stream that has not spoken yet. See [waitForTheFirstByte]. */
+    private var firstPaint: Job? = null
 
     /** The re-attach waiting to happen, if any. Cancelled by [teardown]. See [StreamRetry]. */
     private val streamRetry = StreamRetry(scope, wanted = { started })
@@ -293,7 +314,7 @@ class TerminalSession(
             revision = 0uL
             paneSize = null
             _phase.value = Phase.Connecting
-            failedAttaches = 0
+            streamRetry.resetBackoff()
             hasResized = false
             lastResizeSent = null
             open()
@@ -381,10 +402,10 @@ class TerminalSession(
             started = true
             // A fresh visit deserves a fresh backoff. An interval an earlier
             // visit widened must not make this one wait out a slow poll for its
-            // first picture, and a strike count belonging to a link that has
-            // since been idle for ten minutes is not evidence about this one.
+            // first picture, and a retry wait widened by a link that has since
+            // been idle for ten minutes is not evidence about this one.
             interval = FAST_INTERVAL_MS
-            failedAttaches = 0
+            streamRetry.resetBackoff()
             open()
             scheduleResize()
         }
@@ -507,14 +528,39 @@ class TerminalSession(
      * visible. A spinner for that moment is honest; a wrong screen is not.
      */
     private suspend fun open() {
-        teardown()
+        // [teardown] minus the poll loop, which has to survive this call: a
+        // re-attach arrives here with polling painting the pane, and it keeps
+        // painting until a stream is genuinely carrying bytes again. Handing
+        // the screen back is [consume]'s job, on the first byte, so that at no
+        // instant do both paint.
+        teardownExceptPolling()
         // Awaited: stop and start go through the same core in the order they
         // are asked, and a stop still in flight would arrive after the start
         // below and cancel the stream this call just opened — leaving a session
         // that believes it is streaming attached to nothing, which is a screen
         // that stops updating and never says why.
         core.stopStream(terminalId)
-        val screen = prime() ?: return
+        val screen = prime()
+        if (screen == null) {
+            // A screen call that failed used to leave nothing running that
+            // would ever look again, so the pane kept "Could not load" even
+            // once the link was back. The poll loop is the retry: it reports
+            // its own failures, backs off, and the first answer returns the
+            // pane to live. And the stream is asked for again, because one
+            // failed call says nothing about whether this link can carry one.
+            //
+            // Only for a failure. A pane the host says is not running is not
+            // polled at all: that would be a round trip a second to be told the
+            // same true thing.
+            if (started && _phase.value is Phase.Failed) {
+                startLoop()
+                scheduleStreamRetry()
+            } else {
+                poller?.cancel()
+                poller = null
+            }
+            return
+        }
         // Re-checked after every suspension above, not only when a retry
         // wakes. [stop] can land while this is waiting on `stopStream` or
         // [prime], and its own `stopStream` has already gone by then:
@@ -524,10 +570,20 @@ class TerminalSession(
         if (!started) return
         if (attach()) {
             watchGeometry()
+            waitForTheFirstByte()
             return
         }
-        render(screen)
+        // Nothing opened, so the emulator [prime] built has nothing to fill it.
+        dropStreamCore()
+        // Painted only when nothing else is: on a retry a poll loop is already
+        // running, and this capture is as likely to be older than its next
+        // answer as newer.
+        if (poller == null) render(screen)
         startLoop()
+        // `startStream` answers false when there is no SSH session to open a
+        // second channel on, and a session comes back without anything here
+        // being told. One attempt on the widening interval covers it.
+        scheduleStreamRetry()
     }
 
     /**
@@ -556,14 +612,20 @@ class TerminalSession(
         // capture and still has to have something to feed: the bytes start
         // arriving the moment the channel opens, and a chunk with no emulator
         // to receive it is simply lost.
-        vt?.free()
+        dropStreamCore()
         val emulator = VtCore(response.columns, response.rows)
         // A fresh core starts on the VT crate's own default palette, not the
         // theme in force. Without this the chrome would be themed and every
         // character would not.
         emulator.setPalette(com.farcooler.data.Themes.current.packed())
         applyModes(response.modes, emulator)
-        vt = emulator
+        // Into [vt] only when nothing else is painting; otherwise it waits for
+        // the first byte. See [streamCore].
+        streamCore = StreamCore(emulator, response.columns, response.rows)
+        if (poller == null) {
+            vt?.free()
+            vt = emulator
+        }
         response
     } catch (e: Exception) {
         // A cancelled prime is a screen nobody is waiting for any more — the
@@ -605,13 +667,39 @@ class TerminalSession(
         return opened
     }
 
-    /** Feed everything that has arrived, in order, and redraw once. */
+    /**
+     * Feed everything that has arrived, in order, and redraw once — and, on the
+     * first byte, take the screen back from the poll loop.
+     */
     private suspend fun consume() {
-        val emulator = vt ?: return
         val bytes = inbox.take()
         if (bytes.isEmpty()) return
-        failedAttaches = 0
+        // The stream spoke: its deadlines are spent, and the wait the failures
+        // before it had widened starts over.
+        silence?.cancel()
+        silence = null
+        firstPaint?.cancel()
+        firstPaint = null
+        streamRetry.resetBackoff()
+        // The handover. Until this byte polling owned the screen; from it the
+        // stream does, and only ever one of them may. A swap and not merely a
+        // cancel, because a poll builds its own emulator for every capture and
+        // these bytes belong in the one [prime] built for them.
+        var wasScrolledBackTo = 0
+        streamCore?.let { core ->
+            poller?.cancel()
+            poller = null
+            wasScrolledBackTo = scrolledBackBy()
+            if (vt !== core.emulator) vt?.free()
+            vt = core.emulator
+            paneSize = core.columns to core.rows
+            streamCore = null
+        }
+        val emulator = vt ?: return
         emulator.feed(bytes)
+        // Once, on the replay that carried the history, and never on the live
+        // bytes after it.
+        if (wasScrolledBackTo > 0) emulator.scroll(wasScrolledBackTo)
         // Whatever the program asked to be written back — a cursor-position
         // report, a mouse reply — goes home, or a full-screen agent sits
         // waiting for an answer that is stuck in this buffer.
@@ -621,33 +709,82 @@ class TerminalSession(
     }
 
     /**
-     * The stream stopped. Try again, then settle for polling.
+     * The stream stopped. Hand the screen to polling, and try again.
      *
      * A stream ends for two very different reasons: the pane finished, or the
      * channel did. Only the host can tell those apart, so this asks it — by
      * reopening, which begins with the screen call that reports a pane that is
-     * no longer running. A channel that drops repeatedly without ever
-     * delivering a byte is a connection that cannot carry a stream, and
-     * retrying it forever would be a worse screen than the polling that
-     * definitely works.
+     * no longer running, and which stops the retries when it says so.
+     *
+     * It used to stop asking after three dead attaches and poll for good. That
+     * cap defended against channels piling up on the runner, and the awaited
+     * stop in [scheduleStreamRetry] is what prevents that now. The error is
+     * deliberately not shown: polling is painting and the stream is coming
+     * back on its own, and "Could not load" over a screen that is visibly
+     * working would be untrue. A failure polling can see is reported by [poll].
      */
-    private suspend fun streamEnded(error: String?) {
+    @Suppress("UNUSED_PARAMETER")
+    private fun streamEnded(error: String?) {
         if (!streaming) return
-        streaming = false
-        failedAttaches += 1
-        if (failedAttaches >= MAX_ATTACH_ATTEMPTS) {
-            if (error != null) _phase.value = humanFailure(error)
-            // Everything the streaming path set up goes before the polling path
-            // starts. Falling back used to start the poll loop and leave the
-            // rest running, so a stream that was still delivering fed the
-            // emulator correct bytes while the poll repainted a capture over
-            // the top of them — two painters, disagreeing, one of them every
-            // second. A fallback has to be a handover, not an addition.
-            teardown()
+        // Everything the streaming path set up goes before the polling path
+        // starts — a fallback has to be a handover, not an addition, or a
+        // stream still delivering and a poll repainting over it are two
+        // painters disagreeing once a second.
+        teardownExceptPolling()
+        startLoop()
+        scheduleStreamRetry()
+    }
+
+    /**
+     * Hand the channel back, wait on the widening interval, and attach again.
+     *
+     * The stop comes BEFORE the wait, and is awaited. Before, because a channel
+     * that just failed is the likeliest one to be wedged, and holding it for a
+     * wait that reaches half a minute is how the next pane finds none left.
+     * Awaited, because stop and start go through the core in the order asked,
+     * and a stop still in flight would cancel the stream the next start opens.
+     */
+    private fun scheduleStreamRetry() {
+        val id = terminalId
+        streamRetry.schedule(streamRetry.nextDelayMs(), before = { core.stopStream(id) }) { open() }
+    }
+
+    /**
+     * Give a stream that opened two deadlines to say something.
+     *
+     * Nothing in the protocol promises a first byte: a daemon too old to send a
+     * replay, an sshd with no channels left and a forced command that swallowed
+     * the stream all look the same from here — open, and silent. Without a
+     * deadline that was a "Loading…" spinner forever.
+     *
+     * Two waits, and the shorter one is the one a person feels.
+     * [FIRST_PAINT_GRACE_MS] only decides that this screen has waited long
+     * enough to be shown something, and starts the poll loop; the stream keeps
+     * its channel and [consume] hands the screen back on its first byte.
+     * [FIRST_BYTE_DEADLINE_MS] decides the channel is wedged, and hands it to
+     * the same recovery as a stream that ended. It is generous on purpose:
+     * firing early swaps a working terminal for polling.
+     */
+    private fun waitForTheFirstByte() {
+        silence?.cancel()
+        silence = scope.launch {
+            delay(FIRST_BYTE_DEADLINE_MS)
+            silence = null
+            // Only while this stream has said nothing: [streamCore] is consumed
+            // by the first byte. A stream that spoke and went quiet is an idle
+            // pane, not a wedged one.
+            if (!streaming || streamCore == null) return@launch
+            teardownExceptPolling()
             startLoop()
-            return
+            scheduleStreamRetry()
         }
-        streamRetry.schedule(STREAM_RETRY_MS) { open() }
+        firstPaint?.cancel()
+        firstPaint = scope.launch {
+            delay(FIRST_PAINT_GRACE_MS)
+            firstPaint = null
+            if (!streaming || streamCore == null) return@launch
+            startLoop()
+        }
     }
 
     // MARK: - Geometry
@@ -723,6 +860,9 @@ class TerminalSession(
     }
 
     private fun startLoop() {
+        // Never two loops: a retry restarts polling on a pane that may still
+        // have one running.
+        poller?.cancel()
         poller = scope.launch {
             while (isActive) {
                 poll()
@@ -764,6 +904,10 @@ class TerminalSession(
             }
             lastScreen = response
             interval = FAST_INTERVAL_MS
+            // A cancel cannot recall a round trip already asked for, and
+            // [consume] cancels this loop the instant the stream takes the
+            // screen. Painting after that is two painters.
+            if (!currentCoroutineContext().isActive) return
             render(response)
         } catch (e: Exception) {
             // Every keystroke cancels this poll on purpose — `write` calls
@@ -823,7 +967,8 @@ class TerminalSession(
         // move it straight back. Reapplied after the feed below, once there is
         // history to apply it to.
         val wasScrolledBackTo = scrolledBackBy()
-        vt?.free()
+        // Not freed when it is the stream's, still waiting for its first byte.
+        vt?.let { if (it !== streamCore?.emulator) it.free() }
         val emulator = VtCore(response.columns, response.rows)
         // A fresh core starts on the VT crate's own default palette, not the
         // theme in force. Without this the chrome would be themed and every
@@ -1177,16 +1322,32 @@ class TerminalSession(
     private fun teardown() {
         poller?.cancel()
         poller = null
-        // An `open` in progress is an attempt, and a retry firing on top of it
-        // would fork the chain in two; a stop with one waiting would have it
-        // open a channel after the stop. See [StreamRetry].
-        streamRetry.cancel()
         // The scrollback refresh goes with the loop it was lining up work for.
         // Left running it would answer into a pane nobody is looking at,
         // holding an SSH round trip open on a connection whose sessions are the
         // scarce thing here.
         historyRefresh?.cancel()
         historyRefresh = null
+        teardownExceptPolling()
+    }
+
+    /**
+     * Everything [teardown] stops except the poll loop, for the callers that
+     * hand the screen to polling and retry — [streamEnded], the first-byte
+     * deadline and [open], which every retry goes through. Cancelling the
+     * poller there would freeze the pane on its last capture for the length of
+     * the backoff.
+     */
+    private fun teardownExceptPolling() {
+        // An `open` in progress is an attempt, and a retry firing on top of it
+        // would fork the chain in two; a stop with one waiting would have it
+        // open a channel after the stop. See [StreamRetry].
+        streamRetry.cancel()
+        silence?.cancel()
+        silence = null
+        firstPaint?.cancel()
+        firstPaint = null
+        dropStreamCore()
         geometry?.cancel()
         geometry = null
         resizeDebounce?.cancel()
@@ -1194,6 +1355,16 @@ class TerminalSession(
         pendingResizeSize = null
         inbox.clear()
         streaming = false
+    }
+
+    /**
+     * Forget the stream's waiting emulator, freeing it unless it is also the
+     * one on screen. A native handle, so it is not the garbage collector's.
+     */
+    private fun dropStreamCore() {
+        val waiting = streamCore ?: return
+        streamCore = null
+        if (waiting.emulator !== vt) waiting.emulator.free()
     }
 
     /**
@@ -1297,8 +1468,19 @@ class TerminalSession(
          */
         const val GEOMETRY_INTERVAL_MS = 2_000L
 
-        const val STREAM_RETRY_MS = 500L
-        const val MAX_ATTACH_ATTEMPTS = 3
+        /**
+         * How long a stream that opened may say nothing before its channel is
+         * judged wedged. A wedged channel is still wedged twelve seconds later;
+         * firing early swaps a working terminal for polling.
+         */
+        const val FIRST_BYTE_DEADLINE_MS = 12_000L
+
+        /**
+         * How long a silent stream leaves the screen blank before polling
+         * paints it. A working stream delivers its replay in about 60 ms, so a
+         * healthy pane never reaches this.
+         */
+        const val FIRST_PAINT_GRACE_MS = 700L
 
         val HEX = "0123456789abcdef".toCharArray()
     }

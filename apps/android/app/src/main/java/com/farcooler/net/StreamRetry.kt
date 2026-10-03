@@ -22,6 +22,15 @@ import kotlinx.coroutines.launch
  * that has not ended, and [wanted] is asked once it has, so a retry already
  * resuming when the stop arrived still opens nothing.
  *
+ * **It never gives up.** A pane used to stop asking after three dead attaches
+ * and poll for good, which on a link that hiccuped three times stranded the
+ * pane on the slower path until somebody switched tabs and back. What kept
+ * those retries from being a load generator was the cap; the widening wait
+ * ([nextDelayMs]) does that now, from [FLOOR_MS] to [CEILING_MS], and the
+ * channel is released before every wait (the `before` of [schedule]), so
+ * retries cannot pile up channels on the runner. The iPhone's
+ * `scheduleStreamRetry` is the same rule.
+ *
  * Not thread-safe: called only from the session's own single-threaded scope.
  */
 class StreamRetry(
@@ -29,6 +38,32 @@ class StreamRetry(
     private val wanted: () -> Boolean,
 ) {
     private var job: Job? = null
+    private var delayMs = FLOOR_MS
+
+    /**
+     * How long the next re-attach waits, widening the one after it.
+     *
+     * Geometric on the poll loop's own factor, with a ceiling thirty times the
+     * poll's: an attach on a runner too old for the `terminal_stream` method
+     * execs a cold `farcoolerd --stream` there, and retrying that once a second
+     * would be a load generator aimed at a runner already having a bad time.
+     * Thirty seconds outlasts one attach's worst case, so attempts cannot queue
+     * behind each other, and a link that comes back is streaming again inside
+     * half a minute with nobody tapping anything.
+     */
+    fun nextDelayMs(): Long {
+        val now = delayMs
+        delayMs = minOf((delayMs * FACTOR).toLong(), CEILING_MS)
+        return now
+    }
+
+    /**
+     * Back to [FLOOR_MS]: a stream delivered, or a fresh visit began. A tally
+     * of what came before is no evidence about this link.
+     */
+    fun resetBackoff() {
+        delayMs = FLOOR_MS
+    }
 
     /** Whether a re-attach is waiting. */
     val pending: Boolean get() = job?.isActive == true
@@ -54,5 +89,12 @@ class StreamRetry(
     fun cancel() {
         job?.cancel()
         job = null
+    }
+
+    companion object {
+        /** The common failure is one dropped channel on a link that is otherwise fine. */
+        const val FLOOR_MS = 500L
+        const val CEILING_MS = 30_000L
+        const val FACTOR = 1.6
     }
 }
