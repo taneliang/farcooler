@@ -181,6 +181,9 @@ object Markdown {
         val link: String? = null,
     )
 
+    /** A line's words without its markup: what TalkBack reads for a row drawn from it (ov-98). */
+    fun plain(text: String): String = inline(text).joinToString("") { it.text }
+
     /**
      * Inline syntax only — bold, italic, code spans, links.
      *

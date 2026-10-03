@@ -119,7 +119,8 @@ struct TaskScreen: View {
                                 .foregroundStyle(line.met ? Color.secondary : Color.primary)
                         }
                         .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(line.text)
+                        // What it says, not its markup.
+                        .accessibilityLabel(TaskProse.plain(line.text))
                         .accessibilityValue(line.met ? "Met" : "Not met")
                     }
                 }
@@ -139,7 +140,9 @@ struct TaskScreen: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
-                            MarkdownText(text: note.body, spacing: .document)
+                            // As the Mac draws it: a status change in words,
+                            // not wire ids.
+                            MarkdownText(text: note.displayBody, spacing: .document)
                         }
                         .accessibilityElement(children: .combine)
                     }
@@ -147,6 +150,9 @@ struct TaskScreen: View {
             }
         }
         .listStyle(.insetGrouped)
+        // Links in task text open on the web or in mail, nothing else
+        // (`Markdown.opens`).
+        .environment(\.openURL, Markdown.openGuard)
     }
 
     /// The question it's waiting on, and its answers: the options as

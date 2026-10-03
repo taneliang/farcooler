@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.farcooler.model.Markdown
 
@@ -43,9 +44,15 @@ import com.farcooler.model.Markdown
  * unreadable.
  */
 @Composable
-fun MarkdownText(text: String, secondary: Boolean = false, modifier: Modifier = Modifier) {
+fun MarkdownText(
+    text: String,
+    secondary: Boolean = false,
+    modifier: Modifier = Modifier,
+    /** Between blocks: a reply's 6 dp, or a task's text on the 8 dp rhythm (ov-98). */
+    blockSpacing: Dp = 6.dp,
+) {
     val blocks = remember(text) { Markdown.blocks(text) }
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(blockSpacing)) {
         for (block in blocks) {
             when (block) {
                 is Markdown.Block.Paragraph -> Body(block.text, secondary)

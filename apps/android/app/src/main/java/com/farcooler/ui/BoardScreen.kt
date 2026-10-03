@@ -64,6 +64,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.coroutineScope
 import com.farcooler.model.BoardRow
 import com.farcooler.model.GlancePalette
+import com.farcooler.model.Markdown
 import com.farcooler.model.RunnerBoards
 import com.farcooler.model.TaskAcceptanceProgress
 import com.farcooler.model.TaskAgentLink
@@ -737,6 +738,7 @@ fun TaskDetailScreen(
                     // Markdown, as the Mac and iOS draw it (ov-98).
                     MarkdownText(
                         row.intent,
+                        blockSpacing = 8.dp,
                         modifier = Modifier.padding(horizontal = 16.dp).testTag("board-detail-intent"),
                     )
                 }
@@ -764,7 +766,10 @@ fun TaskDetailScreen(
                         },
                         modifier = Modifier
                             .testTag("board-acceptance-${line.id}")
-                            .semantics { contentDescription = "${line.text}. ${if (line.met) "Met" else "Not met"}" },
+                            .semantics {
+                                // What it says, not its markup.
+                                contentDescription = "${Markdown.plain(line.text)}. ${if (line.met) "Met" else "Not met"}"
+                            },
                     )
                 }
             }
