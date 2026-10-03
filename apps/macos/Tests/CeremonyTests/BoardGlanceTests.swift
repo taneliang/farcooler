@@ -93,8 +93,7 @@ struct BoardGlanceTests {
         let loose = Selection.looseWorktree(host: "h", worktree: "w-9", terminal: nil)
         #expect(EscapeBack.goesBack(responder: NSView(), selection: loose, focusColumn: false))
         #expect(!EscapeBack.goesBack(responder: TerminalRenderView(), selection: loose, focusColumn: false))
-        // At the workspace level, with the orchestrator popped open over
-        // the board: Esc puts it away.
+        // At the workspace level, in Focus: Esc leaves it.
         #expect(EscapeBack.goesBack(responder: NSView(), selection: top, focusColumn: true))
         #expect(!EscapeBack.goesBack(responder: NSView(), selection: top, focusColumn: false))
     }

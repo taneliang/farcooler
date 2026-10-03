@@ -4,9 +4,11 @@ import Foundation
 // Everything the sidebar does, and where else it's done (ov-86 review M1).
 //
 // A new window opens without the sidebar, so nothing may be reachable only
-// from it. The title bar's switcher, the runner banner and the worktree
-// menus are drawn from the values here, and `SidebarParityTests` checks
-// that between them they offer every `SidebarAction`.
+// from it. The title bar's switcher, the runner banner, the workspace
+// navigator (ov-92: what the orchestrator's rail did is its first row) and
+// the worktree menus are drawn from the values here, and
+// `SidebarParityTests` checks that between them they offer every
+// `SidebarAction`.
 
 /// One thing the sidebar lets you do.
 enum SidebarAction: String, CaseIterable {
@@ -21,8 +23,30 @@ enum SidebarAction: String, CaseIterable {
     case openWorktree, showChanges, newTerminal, moveToWorkspace, useAsOrchestrator, hide, unhide, removeWorktree
 }
 
+/// What the workspace navigator offers on its own (ov-92): opening a loose
+/// worktree from its row, its menus there, New Worktree… at the end of the
+/// Worktrees section, and, with no orchestrator, Use as Orchestrator… on
+/// the orchestrator's row. What its rows draw, from the same values.
+extension Navigator {
+    @MainActor
+    static func offers(worktrees: BoardWorktrees, orchestrator: NavigatorOrchestrator?) -> Set<SidebarAction> {
+        var out = Set<SidebarAction>()
+        let rows = BoardWorktreesSection.rows(worktrees)
+        if !rows.isEmpty { out.insert(.openWorktree) }
+        for worktree in rows { out.formUnion(worktrees.menu(worktree).map(\.action)) }
+        if !worktrees.hidden.isEmpty, worktrees.onUnhide != nil { out.insert(.unhide) }
+        if worktrees.onNew != nil { out.insert(.newWorktree) }
+        if let orchestrator, orchestrator.state == .none, !orchestrator.candidates.isEmpty,
+            orchestrator.offers.contains(where: { if case .start = $0 { true } else { false } })
+        {
+            out.insert(.useAsOrchestrator)
+        }
+        return out
+    }
+}
+
 /// What a worktree's menus offer away from the sidebar: on its row under
-/// the board list's Worktrees, on a task row's worktree, and in the
+/// the navigator's Worktrees, on a task row's worktree, and in the
 /// breadcrumb's worktree menu. The sidebar row's menus, one list.
 enum WorktreeMenu {
     enum Item: Hashable {

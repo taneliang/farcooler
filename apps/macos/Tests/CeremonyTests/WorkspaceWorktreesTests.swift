@@ -229,6 +229,39 @@ struct WorkspaceWorktreesTests {
         #expect(checkout?.terminals.map(\.id) == ["shell"])
     }
 
+    /// The navigator's sections (ov-92): Tasks holds the board's tasks and
+    /// nothing else; Worktrees holds the loose ones, never a task's, which
+    /// its task's row names; the orchestrator is its own row, never a
+    /// worktree's, and the main checkout it runs in lists every terminal
+    /// but it.
+    @Test("Each navigator section holds its own rows: worktrees apart from tasks, the orchestrator in neither")
+    func theNavigatorsSections() {
+        let fleet = Self.fleet()
+        for (summary, board) in [(Self.billingSummary, Self.board), (Self.workspaces[0], TaskBoardModel.empty)] {
+            let loose = WorkspaceWorktrees.loose(in: summary, host: "", board: board, fleet: fleet)
+            let worktrees = BoardWorktreesSection.rows(BoardWorktrees(shown: loose.shown, hidden: loose.hidden))
+            let items = Navigator.items(
+                orchestrator: true,
+                tasks: BoardKeys.rows(board, collapsed: [], showingAllDone: true, now: .now),
+                worktrees: worktrees.map(\.id))
+            let tasked = Set(WorkspaceWorktrees.taskWorktrees(on: board, host: "", in: fleet).values.map(\.id))
+            #expect(items.first == .orchestrator && items.filter { $0 == .orchestrator }.count == 1)
+            for item in items {
+                switch item {
+                case .orchestrator: break
+                case .task(let id): #expect(board.rows.contains { $0.id == id }, "\(id) isn't a task")
+                case .worktree(let id): #expect(!tasked.contains(id), "\(id) is a task's, in Worktrees")
+                }
+            }
+            // Tasks, then worktrees: never one among the other.
+            let kinds = items.dropFirst().map { if case .task = $0 { 0 } else { 1 } }
+            #expect(kinds == kinds.sorted(), "\(items)")
+            for worktree in worktrees {
+                #expect(!worktree.terminals.contains { $0.isOrchestrator }, "\(worktree.id) lists the orchestrator")
+            }
+        }
+    }
+
     // MARK: - ⌘1 through ⌘9
 
     @Test("⌘-numbers go to workspaces in the switcher's order, grouped by repository")

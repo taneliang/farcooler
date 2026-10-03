@@ -77,24 +77,32 @@ struct TaskRecordSwitchTests {
 
     /// A held arrow's repeats come faster than the window redraws: each
     /// steps on from the last step, not from the selection the window still
-    /// shows, and the walk stops at the end (live, ov-85: before this, twelve
-    /// repeats moved the list one row).
-    @Test("Repeats step on from the last step, ahead of the window")
+    /// shows, across the navigator's sections, and the walk stops at the end
+    /// (live, ov-85: before this, twelve repeats moved the list one row).
+    @Test("Repeats step on from the last step, ahead of the window, across sections")
     func repeatsStepOnFromTheLastStep() async throws {
         let store = store()
         await store.readIfNeverRead()
-        var glanced: [String] = []
-        store.onGlance = { glanced.append($0.id) }
+        var stepped: [NavigatorItem] = []
         let heard = TaskBoardView.Heard()
         heard.store = store
-        heard.rows = ["t9", "t1", "t5"]
-        heard.selected = "t9"
-        for _ in 0..<5 { _ = heard.step(1) }
-        #expect(glanced == ["t1", "t5"], "\(glanced)")
+        heard.onStep = { stepped.append($0) }
+        heard.items = Navigator.items(orchestrator: true, tasks: ["t9", "t1", "t5"], worktrees: ["w1"])
+        heard.selected = .orchestrator
+        for _ in 0..<6 { _ = heard.step(1) }
+        #expect(stepped == [.task("t9"), .task("t1"), .task("t5"), .worktree("w1")], "\(stepped)")
         // The window catches up, and ↑ goes back from there.
-        heard.selected = "t5"
+        heard.selected = .worktree("w1")
         heard.stepped = nil
         _ = heard.step(-1)
-        #expect(glanced.last == "t1")
+        #expect(stepped.last == .task("t5"))
+        // Without the window, a task is opened on the board itself.
+        var glanced: [String] = []
+        store.onGlance = { glanced.append($0.id) }
+        heard.onStep = nil
+        heard.selected = .task("t9")
+        heard.stepped = nil
+        _ = heard.step(1)
+        #expect(glanced == ["t1"])
     }
 }

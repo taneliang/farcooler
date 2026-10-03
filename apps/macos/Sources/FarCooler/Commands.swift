@@ -170,14 +170,14 @@ struct FarCoolerCommands: Commands {
             Divider()
             Button("Orchestrator") { AppCommand.focusConversation.post() }
                 .keyboardShortcut("1", modifiers: [.command, .option])
-            Button("Board") { AppCommand.focusBoard.post() }
+            Button("Navigator") { AppCommand.focusBoard.post() }
                 .keyboardShortcut("2", modifiers: [.command, .option])
-            Button("Task") { AppCommand.focusTask.post() }
+            Button("Main Area") { AppCommand.focusTask.post() }
                 .keyboardShortcut("3", modifiers: [.command, .option])
             // Only while the main window is key with nothing over it: with
             // the palette open or Settings key, they moved the window behind.
             Section {
-                // The worktrees in the board list's order: each task's, then
+                // The worktrees in the navigator's order: each task's, then
                 // the loose ones under Worktrees.
                 Button("Next Worktree") { AppCommand.nextWorktree.post() }
                     .keyboardShortcut(.downArrow, modifiers: [.command, .control])

@@ -10,7 +10,7 @@ import SwiftUI
 /// kanban; Refresh was a bordered word button beside it, and the row read as
 /// crowded.) ⌘R reloads the fleet, from the menu bar, as before.
 ///
-/// A board can be as narrow as `WorkspaceColumns.boardMinimum`, so the header
+/// A board can be as narrow as `WorkspaceColumns.navigatorMinimum`, so the header
 /// can't assume its sentences fit (ov-81 P1). It offers three arrangements,
 /// and `ViewThatFits` takes the first that fits whole: the waiting count and
 /// any trouble as sentences, then said short, then the title and one overflow

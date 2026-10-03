@@ -95,8 +95,6 @@ struct TileView: View {
 
     @ObservedObject private var prefix = PrefixMode.shared
     @ObservedObject private var preferences = Preferences.shared
-    /// What's drawn past the grid tmux is told of (`viewportSlack`).
-    @Environment(\.viewportSlack) private var viewportSlack
 
     /// The view size the last viewport report was sent for.
     ///
@@ -313,8 +311,6 @@ struct TileView: View {
     /// columns any one pane has — is tmux's answer, read back off the layout and
     /// handed to that pane's renderer. See `TilePane`'s `grid`.
     private func send(viewport size: CGSize, for group: PaneGroup) async {
-        // What's drawn past the grid tmux is told of (`viewportSlack`).
-        let size = CGSize(width: max(0, size.width - viewportSlack), height: size.height)
         let viewport = Viewport(size: size, group: group, font: preferences.revision)
         guard
             let window = TileGeometry.viewport(

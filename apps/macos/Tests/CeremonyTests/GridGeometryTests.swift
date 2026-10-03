@@ -234,7 +234,7 @@ struct GridGeometryTests {
         defaults.set(collapsedSummary, forKey: "board.summary.collapsed.\(store.hostKey).\(store.workspace.id)")
         let board = TaskBoardView(
             store: store, client: store.client, agents: .none, onGoTo: { _ in }, defaults: defaults)
-        let found = await marks(board, width: WorkspaceColumns.boardDefault)
+        let found = await marks(board, width: WorkspaceColumns.navigatorDefault)
         var expect: [String: CGFloat] = [
             "header.text": ColumnGrid.b,
             "summary.chevron": ColumnGrid.a,
@@ -263,7 +263,7 @@ struct GridGeometryTests {
         let defaults = UserDefaults(suiteName: "strip-\(UUID().uuidString)")!
         defaults.set(true, forKey: "board.summary.collapsed.\(store.hostKey).\(store.workspace.id)")
         let host = NSHostingController(rootView: BoardSummaryStrip(store: store, defaults: defaults))
-        for width in [WorkspaceColumns.boardMinimum, WorkspaceColumns.boardDefault] {
+        for width in [WorkspaceColumns.navigatorMinimum, WorkspaceColumns.navigatorDefault] {
             let height = host.sizeThatFits(in: CGSize(width: width, height: 400)).height
             #expect(height == ColumnGrid.rowHeight + 2 * ColumnGrid.rhythm, "\(height) tall at \(width)")
         }
@@ -276,7 +276,7 @@ struct GridGeometryTests {
     private static let rowFiles: [(name: String, until: String?)] = [
         ("SidebarViews.swift", nil), ("SidebarLayout.swift", nil), ("WorkspaceSidebar.swift", nil),
         ("BoardHeader.swift", nil), ("BoardSummaryStrip.swift", nil),
-        ("TaskBoard.swift", "struct TaskCard: View"),
+        ("TaskBoard.swift", "struct TaskCard: View"), ("Navigator.swift", nil), ("BoardWorktreesSection.swift", nil),
     ]
 
     /// Every numeric horizontal padding or x offset in `source`, with its

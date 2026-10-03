@@ -15,16 +15,14 @@ struct BoardWorktrees {
     /// The worktree open whole beside the board, drawn selected.
     var selected: String?
     var onOpen: (Worktree) -> Void = { _ in }
-    /// New Worktree…, the section header's +. Nil where the runner can't
-    /// take one.
+    /// New Worktree…, the section's trailing row. Nil where the runner
+    /// can't take one.
     var onNew: (() -> Void)?
     var onUnhide: ((Worktree) -> Void)?
     /// A worktree's menu, the sidebar row's (`WorktreeMenu.items`), and
     /// what choosing an item does.
     var menu: (Worktree) -> [WorktreeMenu.Item] = { _ in [] }
     var perform: (WorktreeMenu.Item, Worktree) -> Void = { _, _ in }
-    /// Where the section's collapsed state is kept, per board.
-    var collapseKey = ""
 
     static var none: BoardWorktrees { BoardWorktrees() }
 
@@ -33,91 +31,63 @@ struct BoardWorktrees {
     var isEmpty: Bool { shown.isEmpty && hidden.isEmpty && onNew == nil }
 }
 
-/// The Worktrees section at the bottom of the board list (ov-86): the
+/// The Worktrees section at the bottom of the navigator (ov-86, ov-92): the
 /// worktrees no task has, the main checkout and scratch ones, each opened
-/// beside the board on a click, with the hidden ones collapsed under them
-/// and New Worktree… on the header's +.
+/// in the main area on a click, with the hidden ones collapsed under them,
+/// and New Worktree… trailing. Its header is the navigator's
+/// (`NavigatorSectionHeader`), apart from the tasks' status groups.
 ///
-/// On the board's grid, as a status section is: its chevron at column A,
-/// its title at B, its count trailing; its rows' branch glyph at B and
-/// names at C.
+/// On the navigator's grid: its rows' branch glyph at B and names at C.
 struct BoardWorktreesSection: View {
     let worktrees: BoardWorktrees
     /// The list has the keyboard: a selected row reads in the accent.
     let keyed: Bool
 
-    @State private var collapsed: Bool
     @State private var hiddenExpanded = false
-    private let defaults: UserDefaults
 
-    init(worktrees: BoardWorktrees, keyed: Bool, defaults: UserDefaults = .standard) {
+    init(worktrees: BoardWorktrees, keyed: Bool) {
         self.worktrees = worktrees
         self.keyed = keyed
-        self.defaults = defaults
-        _collapsed = State(initialValue: defaults.bool(forKey: worktrees.collapseKey))
     }
 
-    private var expanded: Bool { !collapsed }
+    /// The rows ↑ and ↓ walk here: the shown ones, in order.
+    static func rows(_ worktrees: BoardWorktrees) -> [Worktree] { worktrees.shown }
 
     var body: some View {
         VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
-            HStack(spacing: 0) {
-                Button {
-                    withAnimation(Motion.snap) { collapsed.toggle() }
-                    if !worktrees.collapseKey.isEmpty { defaults.set(collapsed, forKey: worktrees.collapseKey) }
-                } label: {
+            ForEach(Self.rows(worktrees)) { worktree in
+                BoardWorktreeRow(
+                    worktree: worktree, selected: worktree.id == worktrees.selected, keyed: keyed,
+                    onOpen: { worktrees.onOpen(worktree) },
+                    menu: worktrees.menu(worktree), perform: { worktrees.perform($0, worktree) })
+                .id(NavigatorItem.worktree(worktree.id))
+            }
+            if !worktrees.hidden.isEmpty {
+                hiddenGroup
+            }
+            if let onNew = worktrees.onNew {
+                Button(action: onNew) {
                     HStack(spacing: 0) {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .bold))
-                            .rotationEffect(.degrees(expanded ? 90 : 0))
-                            .foregroundStyle(.secondary)
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .medium))
                             .frame(width: ColumnGrid.step, alignment: .leading)
-                            .gridMark("worktrees", .chevron)
-                        Text("Worktrees")
-                            .font(WorkspaceStyle.sectionTitle)
-                            .foregroundStyle(worktrees.shown.isEmpty ? Color.secondary : Color.primary)
-                            .gridMark("worktrees", .text)
-                        Spacer(minLength: SidebarGrid.gap)
+                        Text("New Worktree…")
+                            .font(.system(size: WorkspaceStyle.PaneText.body))
+                        Spacer(minLength: 0)
                     }
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, ColumnGrid.step)
                     .frame(minHeight: ColumnGrid.rowHeight)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Worktrees, \(worktrees.shown.count)")
-                .accessibilityValue(expanded ? "Expanded" : "Collapsed")
-                .accessibilityIdentifier("board-worktrees")
-                if let onNew = worktrees.onNew {
-                    Button(action: onNew) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 11, weight: .medium))
-                            .frame(width: SidebarGrid.control, height: SidebarGrid.control)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.borderless)
-                    .padding(.trailing, SidebarGrid.gap)
-                    .help("New Worktree…")
-                    .accessibilityLabel("New Worktree")
-                    .accessibilityIdentifier("board-new-worktree")
-                }
-                // Trailing, under the status sections' counts.
-                Text("\(worktrees.shown.count)")
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-            }
-            if expanded {
-                ForEach(worktrees.shown) { worktree in
-                    BoardWorktreeRow(
-                        worktree: worktree, selected: worktree.id == worktrees.selected, keyed: keyed,
-                        onOpen: { worktrees.onOpen(worktree) },
-                        menu: worktrees.menu(worktree), perform: { worktrees.perform($0, worktree) })
-                }
-                if !worktrees.hidden.isEmpty {
-                    hiddenGroup
-                }
+                .help("New Worktree…")
+                .accessibilityLabel("New Worktree")
+                .accessibilityIdentifier("board-new-worktree")
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("board-worktrees")
     }
 
     /// The hidden ones, collapsed under a "Hidden 2" line, each with
@@ -163,7 +133,7 @@ struct BoardWorktreesSection: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    .padding(.leading, 2 * ColumnGrid.step)
+                    .padding(.leading, ColumnGrid.c - ColumnGrid.a)
                     .frame(minHeight: ColumnGrid.rowHeight)
                 }
             }

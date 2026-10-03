@@ -89,17 +89,17 @@ struct TaskColumnTests {
 
     /// Back goes up one level at a time: from a worktree opened from its
     /// task to the task, from the task to the workspace, and from there
-    /// nowhere. Esc and ⌃⌘← put a popped-open orchestrator away first, then
-    /// leave Focus; the breadcrumb's chevron does all three at once.
-    @Test("Back goes worktree, task, workspace, after the orchestrator and Focus")
+    /// nowhere. ⌃⌘← leaves Focus first; the breadcrumb's chevron does both
+    /// at once.
+    @Test("Back goes worktree, task, workspace, after Focus")
     func backGoesUpOneLevelAtATime() {
         let top = ContentView.Selection.workspace(host: "", workspace: "ws", focus: nil)
         let task = ContentView.Selection.workspace(host: "", workspace: "ws", focus: .task("t-9"))
         let lane = WorkspaceNavigation.openWorktree("w-3", from: task)
         typealias Step = WorkspaceNavigation.BackStep
-        func back(_ from: ContentView.Selection?, trail: ContentView.Selection?, peek: Bool = false, focus: Bool = false,
+        func back(_ from: ContentView.Selection?, trail: ContentView.Selection?, focus: Bool = false,
                   oneAtATime: Bool = true) -> Step {
-            WorkspaceNavigation.backStep(peek: peek, focus: focus, oneAtATime: oneAtATime, from: from, trail: trail)
+            WorkspaceNavigation.backStep(focus: focus, oneAtATime: oneAtATime, from: from, trail: trail)
         }
         let fromLane = back(lane.next, trail: lane.trail)
         let fromTask = back(fromLane.goesTo, trail: nil)
@@ -107,12 +107,10 @@ struct TaskColumnTests {
         #expect(fromLane == Step(goesTo: task))
         #expect(fromTask == Step(goesTo: top))
         #expect(fromTop == Step(goesTo: nil))
-        let peeked = back(task, trail: nil, peek: true, focus: true)
         let focused = back(task, trail: nil, focus: true)
-        let chevron = back(task, trail: nil, peek: true, focus: true, oneAtATime: false)
-        #expect(peeked == Step(closesPeek: true))
+        let chevron = back(task, trail: nil, focus: true, oneAtATime: false)
         #expect(focused == Step(leavesFocus: true))
-        #expect(chevron == Step(closesPeek: true, leavesFocus: true, goesTo: top))
+        #expect(chevron == Step(leavesFocus: true, goesTo: top))
     }
 
     /// Where the keyboard lands after Back: the task's terminal, when the

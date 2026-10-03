@@ -1173,12 +1173,13 @@ struct BoardSidebarTests {
                 == WorkspaceSummary.implicit(repository: Self.repoA))
     }
 
-    /// A loose worktree opens beside its repository's board with that
-    /// board's orchestrator on the rail, as Main's own tasks do, so the rail
-    /// doesn't come and go between them (ov-85). On a runner without
-    /// workspaces, an implicit board has no orchestrator and no rail.
-    @Test("A loose worktree has its board's rail")
-    func aLooseWorktreeHasItsBoardsRail() throws {
+    /// A loose worktree opens beside its repository's navigator, with that
+    /// board's orchestrator kept mounted, as Main's own tasks do, so the
+    /// navigator and the orchestrator don't come and go between them (ov-85,
+    /// ov-92). On a runner without workspaces, an implicit board has no
+    /// orchestrator.
+    @Test("A loose worktree has its board's navigator and orchestrator")
+    func aLooseWorktreeHasItsBoardsNavigator() throws {
         let fleet = Self.fleet(
             workspaces: [Self.summary(Self.main, "Main", isMain: true), Self.summary(Self.billing, "Billing")],
             worktrees: [Self.worktree("stray", workspace: nil)])
@@ -1219,7 +1220,7 @@ struct BoardSidebarTests {
         #expect(ConversationColumn.offers(state) == OrchestratorHarness.allCases.map(ConversationColumn.Offer.start))
         #expect(OrchestratorAdoption.candidates(for: summary, host: "", in: fleet).map(\.terminal.id) == ["shell"])
         // The main area, laid out for it: the conversation fills it.
-        #expect(WorkspaceColumns.layout(width: 1032, opened: false, hasConversation: scene.hasConversation) == .workspace)
+        #expect(WorkspaceColumns.layout(opened: false, hasConversation: scene.hasConversation) == .workspace)
         // A runner without workspaces: no conversation, and the empty state
         // says so.
         let older = Self.fleet(workspaces: nil, worktrees: [])

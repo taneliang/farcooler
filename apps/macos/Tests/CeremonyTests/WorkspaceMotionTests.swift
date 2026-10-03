@@ -48,12 +48,11 @@ struct WorkspaceMotionTests {
     @MainActor
     final class Level: ObservableObject {
         @Published var opened: String?
-        @Published var boardOver = false
     }
 
-    /// A workspace 1032 pt wide: the board at 732–1032 in every state
-    /// (ov-89). With nothing open, the orchestrator fills 0–731; with a task
-    /// open, the rail is at 0–28 and the task at 29–731.
+    /// A workspace 1032 pt wide: the navigator at 0–280 in every state, and
+    /// the main area from 281, the orchestrator's with nothing open and the
+    /// task's with one (ov-92).
     @MainActor
     final class Harness {
         let level = Level()
@@ -69,12 +68,10 @@ struct WorkspaceMotionTests {
             var body: some View {
                 WorkspaceView(
                     opened: level.opened, hasConversation: true, cell: WorkspaceColumns.defaultCell,
-                    focused: false, peek: false, boardOver: level.boardOver, boardWidth: .constant(300),
+                    focused: false, navigatorWidth: .constant(280),
                     conversation: { MotionMarkerView(name: "conversation", tally: tally) },
-                    rail: { MotionMarkerView(name: "rail", tally: tally) },
-                    board: { MotionMarkerView(name: "board", tally: tally) },
-                    strip: { MotionMarkerView(name: "strip", tally: tally) },
-                    breadcrumb: { _ in Color.clear.frame(height: 30) },
+                    navigator: { MotionMarkerView(name: "board", tally: tally) },
+                    breadcrumb: { _ in Color.clear.frame(height: ColumnHeader.total) },
                     detail: { item, settled in
                         ZStack {
                             MotionMarkerView(name: item, tally: tally)
@@ -85,7 +82,7 @@ struct WorkspaceMotionTests {
                                     .task { tally.fetches[item, default: 0] += 1 }
                             }
                         }
-                    }, onDismissBoard: { level.boardOver = false }, motion: motion)
+                    }, motion: motion)
                 .frame(width: width, height: 400)
             }
         }
@@ -124,34 +121,33 @@ struct WorkspaceMotionTests {
     private static let slow = Animation.spring(response: 3, dampingFraction: 1)
     private static let quick = Animation.linear(duration: 0.05)
 
-    @Test("Opening, switching and closing keep the board, and make each task once")
+    @Test("Opening, switching and closing keep the navigator, and make each task once")
     func theBoardIsNeverRebuilt() async {
         let harness = Harness(motion: Self.quick)
         await harness.settle()
         #expect(harness.hit(400) == "conversation")
-        #expect(harness.hit(10) == "conversation")
-        #expect(harness.hit(900) == "board")
+        #expect(harness.hit(1020) == "conversation")
+        #expect(harness.hit(100) == "board")
         harness.level.opened = "bil-3"
         await harness.settle(10)
-        #expect(harness.hit(10) == "rail")
         #expect(harness.hit(400) == "bil-3")
-        #expect(harness.hit(900) == "board")
-        // Glancing: the next one in place, the board untouched.
+        #expect(harness.hit(1020) == "bil-3")
+        #expect(harness.hit(100) == "board")
+        // Glancing: the next one in place, the navigator untouched.
         harness.level.opened = "bil-7"
         await harness.settle(10)
         #expect(harness.hit(400) == "bil-7")
-        #expect(harness.hit(900) == "board")
+        #expect(harness.hit(100) == "board")
         harness.level.opened = nil
         await harness.settle(10)
         #expect(harness.hit(400) == "conversation")
-        #expect(harness.hit(900) == "board")
+        #expect(harness.hit(100) == "board")
         harness.close()
-        #expect(harness.tally.made["board"] == 1, "the board was rebuilt")
-        #expect(harness.tally.gone["board"] == nil, "the board was taken down")
-        // The orchestrator's view is moved, never made again.
+        #expect(harness.tally.made["board"] == 1, "the navigator was rebuilt")
+        #expect(harness.tally.gone["board"] == nil, "the navigator was taken down")
+        // The orchestrator's view is kept, never made again.
         #expect(harness.tally.made["conversation"] == 1, "the orchestrator was rebuilt")
         #expect(harness.tally.gone["conversation"] == nil, "the orchestrator was taken down")
-        #expect(harness.tally.made["rail"] == 1)
         #expect(harness.tally.made["bil-3"] == 1 && harness.tally.made["bil-7"] == 1)
         // Let go of once each: switched away from, and closed and settled.
         #expect(harness.tally.gone["bil-3"] == 1 && harness.tally.gone["bil-7"] == 1)
@@ -159,7 +155,7 @@ struct WorkspaceMotionTests {
 
     /// Mid-flight, on a spring slowed to three seconds: an open is an open
     /// at once, the task taking the click where the orchestrator is still
-    /// sliding away; a close is a close at once, the orchestrator taking it
+    /// fading out; a close is a close at once, the orchestrator taking it
     /// back; and opening again picks the motion up rather than waiting.
     @Test("Nothing waits on the motion, and rapid toggles end where they're last sent")
     func nothingWaitsOnTheMotion() async {
@@ -167,20 +163,19 @@ struct WorkspaceMotionTests {
         await harness.settle()
         harness.level.opened = "bil-3"
         await harness.settle(2)
-        // Barely moving, and already open: the orchestrator, still over the
-        // task, takes no click, and the board stays where it was.
-        #expect(harness.hit(400) == "bil-3", "the orchestrator sliding away took the click")
-        #expect(harness.hit(900) == "board")
+        // Barely faded, and already open: the orchestrator, still drawn
+        // under it, takes no click, and the navigator stays where it was.
+        #expect(harness.hit(400) == "bil-3", "the orchestrator fading out took the click")
+        #expect(harness.hit(100) == "board")
         try? await Task.sleep(for: .seconds(3.5))
         await harness.settle()
         #expect(harness.hit(400) == "bil-3")
-        #expect(harness.hit(10) == "rail")
-        // Closed: the task is still on screen, the orchestrator sliding back
-        // over it, and it takes no click.
+        // Closed: the task is still on screen, fading, and it takes no
+        // click; the orchestrator does.
         harness.level.opened = nil
         await harness.settle(2)
-        #expect(harness.hit(400) != "bil-3", "a closing task took the click")
-        #expect(harness.hit(900) == "board")
+        #expect(harness.hit(400) == "conversation", "a closing task took the click")
+        #expect(harness.hit(100) == "board")
         // Five more inside a tenth of a second.
         for next in ["bil-7", nil, "bil-9", nil, "bil-11"] as [String?] {
             harness.level.opened = next
@@ -189,13 +184,13 @@ struct WorkspaceMotionTests {
         try? await Task.sleep(for: .seconds(3.5))
         await harness.settle()
         #expect(harness.hit(400) == "bil-11")
-        #expect(harness.hit(900) == "board")
+        #expect(harness.hit(100) == "board")
         harness.close()
         #expect(harness.tally.made["board"] == 1)
         #expect(harness.tally.gone["board"] == nil)
         #expect(harness.tally.made["conversation"] == 1)
     }
-    /// Closed and, mid-flight, opened again: the same view slides back,
+    /// Closed and, mid-flight, opened again: the same view fades back,
     /// never taken down and made again. (Fails when what's drawn follows
     /// what's open instead of outliving it: `show` setting `drawn = item`
     /// for nil too.)
@@ -247,63 +242,23 @@ struct WorkspaceMotionTests {
         #expect(fetched == 1, "read \(fetched) records")
     }
 
-    /// A detail 700 pt wide, under the 779 that keeps the sidebar: the
-    /// board is a 28 pt strip at 671–699 in every state, the orchestrator
-    /// fills 0–670, and the strip pops the board open over the main area at
-    /// 371–670, where a click outside puts it away. The board is the same
-    /// view throughout (ov-89).
-    @Test("At a narrow width the board is a strip that pops open over the main area")
-    func aNarrowBoardIsAStrip() async {
-        let harness = Harness(motion: Self.quick, width: 700)
-        await harness.settle()
-        #expect(harness.hit(690) == "strip")
-        #expect(harness.hit(500) == "conversation")
-        harness.level.opened = "bil-3"
-        await harness.settle(10)
-        #expect(harness.hit(690) == "strip")
-        #expect(harness.hit(500) == "bil-3")
-        harness.level.boardOver = true
-        await harness.settle(10)
-        #expect(harness.hit(500) == "board")
-        #expect(harness.hit(690) == "strip")
-        // Outside it, the dimming takes the click and puts it away.
-        let outside = harness.host.hitTest(NSPoint(x: 200, y: 200))
-        #expect(!(outside is MotionMarker), "a click outside the board reached \(String(describing: outside))")
-        harness.level.boardOver = false
-        await harness.settle(10)
-        #expect(harness.hit(500) == "bil-3")
-        harness.level.opened = nil
-        await harness.settle(10)
-        #expect(harness.hit(500) == "conversation")
-        harness.close()
-        #expect(harness.tally.made["board"] == 1, "the board was rebuilt")
-        #expect(harness.tally.made["conversation"] == 1, "the orchestrator was rebuilt")
-    }
-
-    /// With nothing open, the orchestrator runs right up to the board, with
-    /// no band of canvas before it; beside a task, it's the rail's width
-    /// narrower. Either way the width its terminal reports to tmux, its own
-    /// less `viewportSlack`, is the same (ov-89 review). (Fails with the
-    /// panel at one width and a canvas band after it, as it was, or with the
-    /// slack not set.)
-    @Test("The orchestrator reaches the board and reports one width")
-    func theOrchestratorReachesTheBoard() async {
-        final class Seen { var drawn: [CGFloat] = []; var reported: [CGFloat] = [] }
+    /// The orchestrator is the main area's one width with nothing open, and
+    /// stays that width, hidden, with a task open and back again, so its
+    /// terminal never resizes, nor its tmux window, as the selection moves
+    /// (ov-92). (Fails with the hidden orchestrator drawn at any other
+    /// width, as on ov-89's rail.)
+    @Test("The orchestrator keeps one width as the selection moves")
+    func theOrchestratorKeepsOneWidth() async {
+        final class Seen { var drawn: [CGFloat] = [] }
         let seen = Seen()
         struct Probe: View {
             let seen: Seen
-            @Environment(\.viewportSlack) private var slack
             var body: some View {
                 GeometryReader { proxy in
-                    Color.clear.onAppear { record(proxy.size.width) }
-                        .onChange(of: proxy.size.width) { _, width in record(width) }
-                        .onChange(of: slack) { _, _ in record(proxy.size.width) }
+                    // To the point: layout lands a hair off whole points.
+                    Color.clear.onAppear { seen.drawn.append(proxy.size.width.rounded()) }
+                        .onChange(of: proxy.size.width) { _, width in seen.drawn.append(width.rounded()) }
                 }
-            }
-            // To the point: layout lands a hair off whole points.
-            func record(_ width: CGFloat) {
-                seen.drawn.append(width.rounded())
-                seen.reported.append((width - slack).rounded())
             }
         }
         let level = Level()
@@ -313,9 +268,9 @@ struct WorkspaceMotionTests {
             var body: some View {
                 WorkspaceView(
                     opened: level.opened, hasConversation: true, cell: WorkspaceColumns.defaultCell,
-                    focused: false, peek: level.boardOver, boardWidth: .constant(300),
-                    conversation: { Probe(seen: seen) }, rail: { Color.clear }, board: { Color.clear },
-                    strip: { Color.clear }, breadcrumb: { _ in Color.clear }, detail: { _, _ in Color.clear },
+                    focused: false, navigatorWidth: .constant(280),
+                    conversation: { Probe(seen: seen) }, navigator: { Color.clear },
+                    breadcrumb: { _ in Color.clear }, detail: { _, _ in Color.clear },
                     motion: .linear(duration: 0.02))
                 .frame(width: 1032, height: 400)
             }
@@ -333,22 +288,14 @@ struct WorkspaceMotionTests {
             }
         }
         await settle()
-        let filling = seen.drawn.last
         level.opened = "bil-3"
         await settle()
-        let railed = seen.drawn.last
-        // Popped open (`peek`, here driven by `boardOver`'s flag).
-        level.boardOver = true
+        level.opened = "bil-7"
         await settle()
         level.opened = nil
-        level.boardOver = false
         await settle()
         window.close()
-        // The main area is 1032 − 301 = 731 wide, all of it the orchestrator's.
-        let full: CGFloat = 731
-        let past: CGFloat = 702
-        #expect(filling == full, "\(seen.drawn)")
-        #expect(railed == past, "\(seen.drawn)")
-        #expect(Set(seen.reported) == [past], "reported \(seen.reported)")
+        // The main area is 1032 − 281 = 751 wide, all of it the orchestrator's.
+        #expect(Set(seen.drawn) == [751], "\(seen.drawn)")
     }
 }

@@ -3,9 +3,10 @@ import Foundation
 
 // Which panes the detail puts on screen for a selection, column by column.
 //
-// A workspace shows up to two tmux layouts at once: its orchestrator's, filling
-// the main area or popped open from its rail over what's opened, and a task's
-// agent or an opened worktree, in the main area beside the board.
+// A workspace draws up to two tmux layouts at once: its orchestrator's, kept
+// mounted whether or not it's selected, and a task's agent or an opened
+// worktree, in the main area beside the navigator. Only what's selected is on
+// screen.
 // Everything that asks "what is on screen" asks this, so the layout commands,
 // ⌘] and ⌘[, "seen", and the drawing itself can't come to disagree about it:
 // the one mistake worse than not marking a pane seen is marking one that isn't
@@ -310,19 +311,19 @@ enum WorkspaceScreen {
     }
 
     /// Of `shown`, the layouts a workspace actually draws in `arrangement`:
-    /// the conversation while it fills the main area or is popped open from
-    /// its rail, and what's opened while it's open. Nothing while the detail
-    /// hasn't been measured yet (`arrangement` nil).
+    /// the conversation while it's selected, and what's opened while it's
+    /// open. Nothing while the detail hasn't been measured yet
+    /// (`arrangement` nil).
     ///
     /// What "on screen" means for seen marks, the watching claim and the
-    /// keyboard: an orchestrator shrunk to its rail or hidden, marked seen,
-    /// would lose the notification it was about to send, for a pane nobody
-    /// can see.
+    /// keyboard: an orchestrator kept hidden while a task is selected,
+    /// marked seen, would lose the notification it was about to send, for a
+    /// pane nobody can see.
     static func visible(_ shown: [ShownLayout], arrangement: WorkspaceColumns.Arrangement?) -> [ShownLayout] {
         guard let arrangement else { return [] }
         return shown.filter { layout in
             switch layout.column {
-            case .conversation: return [.main, .peek].contains(arrangement.conversation)
+            case .conversation: return arrangement.conversation == .main
             case .task, .worktree: return arrangement.opened
             }
         }

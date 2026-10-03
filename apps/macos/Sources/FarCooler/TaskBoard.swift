@@ -651,6 +651,14 @@ struct TaskBoardView: View {
     /// of the board as it is now, here, where the board is observed: worked
     /// out by the window, it stayed as it was before the first read.
     let worktreesOf: (TaskBoardModel) -> BoardWorktrees
+    /// The orchestrator's row, at the top (ov-92): nil where the workspace
+    /// can't have one.
+    let orchestrator: NavigatorOrchestrator?
+    /// The row the window's selection lights (`Navigator.current`).
+    let current: NavigatorItem?
+    /// ↑ or ↓ onto a row: the window selects it, keeping the keyboard
+    /// here. Nil opens a task here, which is all a test needs.
+    let onStep: ((NavigatorItem) -> Void)?
 
     /// The list's collapsed sections: read from `defaults` in `init`, and
     /// again when the view is handed another board.
@@ -671,26 +679,31 @@ struct TaskBoardView: View {
     @State private var heard = Heard()
     final class Heard {
         var keyed = false
-        var selected: String?
-        /// The task the last ↑ or ↓ went to, until the window's selection
+        var selected: NavigatorItem?
+        /// The row the last ↑ or ↓ went to, until the window's selection
         /// catches up: key repeats come faster than it redraws, and each
         /// must step on from the last, not from where the window still says
         /// it is.
-        var stepped: String?
-        /// The rows shown, top to bottom, and the board they're on.
-        var rows: [String] = []
+        var stepped: NavigatorItem?
+        /// The rows shown, top to bottom, every section's
+        /// (`Navigator.items`), and the board they're on.
+        var items: [NavigatorItem] = []
         weak var store: TaskBoardStore?
+        var onStep: ((NavigatorItem) -> Void)?
 
-        /// ↑ or ↓: the task above or below the one open (or the last one
-        /// stepped to), opened beside the board in its place.
+        /// ↑ or ↓: the row above or below the one selected (or the last
+        /// one stepped to), across the sections, selected in its place.
         @MainActor
         func step(_ by: Int) -> KeyPress.Result {
             let from = stepped ?? selected
-            guard let store, let row = BoardKeys.row(BoardKeys.step(from: from, by: by, in: rows), in: store.board),
-                row.id != from
+            guard let next = Navigator.step(from: from, by: by, in: items), next != from
             else { return from == nil ? .ignored : .handled }
-            stepped = row.id
-            store.glance(row)
+            stepped = next
+            if let onStep {
+                onStep(next)
+            } else if case .task(let id) = next, let store, let row = BoardKeys.row(id, in: store.board) {
+                store.glance(row)
+            }
             return .handled
         }
     }
@@ -700,7 +713,9 @@ struct TaskBoardView: View {
         onGoTo: @escaping (BoardPane) -> Void, defaults: UserDefaults = .standard,
         selected: String? = nil, focusRequest: Int = 0, onKeyboard: @escaping () -> Void = {},
         onEnter: @escaping () -> Void = {}, hasKeyboard: Bool = false,
-        worktrees: @escaping (TaskBoardModel) -> BoardWorktrees = { _ in .none }
+        worktrees: @escaping (TaskBoardModel) -> BoardWorktrees = { _ in .none },
+        orchestrator: NavigatorOrchestrator? = nil, current: NavigatorItem? = nil,
+        onStep: ((NavigatorItem) -> Void)? = nil
     ) {
         self.store = store
         self.client = client
@@ -714,6 +729,9 @@ struct TaskBoardView: View {
         self.onEnter = onEnter
         self.hasKeyboard = hasKeyboard
         self.worktreesOf = worktrees
+        self.orchestrator = orchestrator
+        self.current = current ?? selected.map(NavigatorItem.task)
+        self.onStep = onStep
         _collapsed = State(
             initialValue: BoardForm.collapsed(
                 host: store.hostKey, workspace: store.workspace.id, from: defaults))
@@ -722,23 +740,7 @@ struct TaskBoardView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            if store.hasRead {
-                BoardSummaryStrip(store: store, defaults: defaults)
-                    .id(ObjectIdentifier(store))
-                Divider()
-            }
-            if !store.hasRead && store.reading {
-                centered { ProgressView() }
-            } else if let trouble = store.trouble, !store.hasRead {
-                centered {
-                    VStack(spacing: 10) {
-                        Text(trouble)
-                        Button("Try Again") { Task { await store.reload() } }
-                    }
-                }
-            } else {
-                list
-            }
+            list
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(WorkspaceStyle.canvas)
@@ -784,7 +786,7 @@ struct TaskBoardView: View {
     }
 
     private func centered<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack { Spacer(); content(); Spacer() }.frame(maxWidth: .infinity)
+        VStack { content() }.frame(maxWidth: .infinity, minHeight: 6 * ColumnGrid.rhythm)
     }
 
     // MARK: - Header
@@ -804,42 +806,81 @@ struct TaskBoardView: View {
 
     // MARK: - The list
 
+    /// The navigator's three sections (ov-92), each under its own header
+    /// and a divider apart: the orchestrator's row, the tasks by status
+    /// under the Since Last Visit summary, and the loose worktrees.
     private var list: some View {
         let worktrees = worktreesOf(store.board)
+        let inProgress = store.board.columns.first { $0.status == .inProgress }?.rows.count ?? 0
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
-                    ForEach(store.board.sections) { section in
-                        TaskListSection(
-                            section: section,
-                            expanded: BoardForm.isExpanded(section, collapsed: collapsed),
-                            onToggle: { toggle(section.status) },
-                            store: store, agents: agents, onGoTo: onGoTo,
-                            selected: selected, keyed: hasKeyboard,
-                            worktrees: worktrees,
-                            showingAllDone: $showingAllDone,
-                            onChoose: { row in
-                                listFocused = true
-                                store.choose(row)
-                            })
+                    if let orchestrator {
+                        section("Orchestrator") {
+                            OrchestratorRowView(
+                                model: orchestrator, inProgress: inProgress, selected: current == .orchestrator,
+                                keyed: hasKeyboard)
+                            .id(NavigatorItem.orchestrator)
+                        }
+                        Divider()
                     }
-                    if !store.board.unreadable.isEmpty {
-                        UnreadableColumnView(rows: store.board.unreadable)
+                    section("Tasks") { EmptyView() }
+                    if store.hasRead {
+                        BoardSummaryStrip(store: store, defaults: defaults)
+                            .id(ObjectIdentifier(store))
                     }
+                    Group {
+                        if !store.hasRead && store.reading {
+                            centered { ProgressView() }
+                        } else if let trouble = store.trouble, !store.hasRead {
+                            centered {
+                                VStack(spacing: 10) {
+                                    Text(trouble)
+                                    Button("Try Again") { Task { await store.reload() } }
+                                }
+                            }
+                        } else {
+                            ForEach(store.board.sections) { section in
+                                TaskListSection(
+                                    section: section,
+                                    expanded: BoardForm.isExpanded(section, collapsed: collapsed),
+                                    onToggle: { toggle(section.status) },
+                                    store: store, agents: agents, onGoTo: onGoTo,
+                                    selected: selected, keyed: hasKeyboard,
+                                    worktrees: worktrees,
+                                    showingAllDone: $showingAllDone,
+                                    onChoose: { row in
+                                        listFocused = true
+                                        store.choose(row)
+                                    })
+                            }
+                            if !store.board.unreadable.isEmpty {
+                                UnreadableColumnView(rows: store.board.unreadable)
+                            }
+                        }
+                    }
+                    // Measured from the navigator's edge: the sections'
+                    // chevrons and the cards' edges at column A.
+                    .padding(.horizontal, ColumnGrid.a)
                     if !worktrees.isEmpty {
-                        BoardWorktreesSection(worktrees: worktrees, keyed: hasKeyboard)
+                        Divider()
+                        section("Worktrees") {
+                            BoardWorktreesSection(worktrees: worktrees, keyed: hasKeyboard)
+                        }
                     }
                 }
-                // Measured from the board column's edge: the sections' chevrons
-                // and the cards' edges at column A.
-                .padding(.horizontal, ColumnGrid.a)
                 .padding(.vertical, ColumnGrid.rhythm)
             }
-            // The task open stays in sight as ↑ and ↓ step past the edge,
+            // The row selected stays in sight as ↑ and ↓ step past the edge,
             // scrolled by as little as that takes.
-            .onChange(of: selected) { _, id in
-                guard let id, hasKeyboard else { return }
-                withAnimation(WorkspaceMotion.spring) { proxy.scrollTo(id) }
+            .onChange(of: current) { _, item in
+                guard let item, hasKeyboard else { return }
+                withAnimation(WorkspaceMotion.spring) {
+                    switch item {
+                    case .task(let id): proxy.scrollTo(id)
+                    default: proxy.scrollTo(item)
+                    }
+                }
             }
         }
         .focusable()
@@ -856,33 +897,46 @@ struct TaskBoardView: View {
             arrowMonitor = nil
         }
         .onKeyPress(.return) {
-            // A task open: into it. Nothing open: the first task.
-            if selected != nil {
+            // A row selected, the orchestrator included: into it, as ⌥⌘3.
+            // Nothing selected: the first row.
+            if current != nil {
                 onEnter()
                 return .handled
             }
-            guard let row = BoardKeys.row(BoardKeys.step(from: nil, by: 1, in: rowIDs), in: store.board)
-            else { return .ignored }
-            store.glance(row)
-            return .handled
+            return heard.step(1)
         }
         .onChange(of: focusRequest) { _, _ in listFocused = true }
         // The window caught up with the steps taken.
-        .onChange(of: selected, initial: true) { _, now in
+        .onChange(of: current, initial: true) { _, now in
             heard.stepped = nil
             heard.selected = now
         }
         .onChange(of: listFocused) { _, focused in if focused { onKeyboard() } }
         .onChange(of: hasKeyboard, initial: true) { _, keyed in heard.keyed = keyed }
-        .onChange(of: rowIDs, initial: true) { _, rows in heard.rows = rows }
-        .onChange(of: ObjectIdentifier(store), initial: true) { _, _ in heard.store = store }
+        .onChange(of: items(worktrees: worktreesOf(store.board)), initial: true) { _, items in heard.items = items }
+        .onChange(of: ObjectIdentifier(store), initial: true) { _, _ in
+            heard.store = store
+            heard.onStep = onStep
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("board-list")
     }
 
-    /// The tasks the list shows, top to bottom: what ↑ and ↓ walk.
-    private var rowIDs: [String] {
-        BoardKeys.rows(store.board, collapsed: collapsed, showingAllDone: showingAllDone, now: Date())
+    /// The rows the navigator shows, top to bottom: what ↑ and ↓ walk.
+    private func items(worktrees: BoardWorktrees) -> [NavigatorItem] {
+        Navigator.items(
+            orchestrator: orchestrator != nil,
+            tasks: BoardKeys.rows(store.board, collapsed: collapsed, showingAllDone: showingAllDone, now: Date()),
+            worktrees: BoardWorktreesSection.rows(worktrees).map(\.id))
+    }
+
+    /// A navigator section: its header, and what's under it, at column A.
+    private func section<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: ColumnGrid.rhythm / 2) {
+            NavigatorSectionHeader(title: title)
+            content()
+        }
+        .padding(.horizontal, ColumnGrid.a)
     }
 
     /// Listen for ↑ and ↓, repeats included, in this board's window while

@@ -1,56 +1,49 @@
 import AppKit
 import SwiftUI
 
-/// A workspace in the detail (spec §4.3, ov-89): a main area that shows one
-/// thing, the orchestrator or the task or worktree opened in its place, and
-/// the board as a fixed sidebar on the right.
+/// A workspace in the detail (spec §4.3, ov-92): the navigator on the left,
+/// and the main area beside it, which shows what's selected there: the
+/// orchestrator, or the task or worktree opened in its place.
 ///
-/// Nothing here is navigation. The window says what's open (`opened`) and
-/// this view places it, by `WorkspaceColumns`' values for its own measured
-/// width, never the window's, which the detail shares with the sidebar.
+/// Nothing here is navigation. The window says what's open (`opened`, nil
+/// for the orchestrator) and this view places it, by `WorkspaceColumns`'
+/// values for its own measured width, never the window's, which the detail
+/// shares with the sidebar.
 ///
 /// Every structural change moves on one spring (`WorkspaceMotion.spring`):
-/// the orchestrator springing down to its rail as something opens and back
-/// to fill the main area as it closes, a task switched for another
-/// cross-fading in place, the orchestrator popping open from the rail, the
-/// rail leaving for Focus, and the board collapsing to its strip. Every part
-/// stays mounted while it moves, the orchestrator's terminal included, which
-/// is one view moved between the main area and the rail's panel; positions
-/// are driven from state, and nothing waits on the motion: a click
-/// mid-flight retargets it, and what takes clicks and the keyboard follows
-/// the window's state at once, not the motion's (`WorkspaceStage`).
+/// the orchestrator and what's opened cross-fading as the selection moves
+/// between them, one task switched for another cross-fading in place, and
+/// the navigator leaving for Focus. Every part stays mounted while it moves,
+/// the orchestrator's terminal included: it's mounted once, at the main
+/// area's width, and kept, hidden while something else is selected, so
+/// coming back to it is instant and nothing in it re-wraps. Nothing waits on
+/// the motion: a click mid-flight retargets it, and what takes clicks and
+/// the keyboard follows the window's state at once, not the motion's
+/// (`WorkspaceStage`).
 struct WorkspaceView<
-    Item: Hashable, Conversation: View, Rail: View, Board: View, Strip: View, Crumbs: View, Opened: View
+    Item: Hashable, Conversation: View, Navigator: View, Crumbs: View, Opened: View
 >: View {
     /// What's open in the main area: a task or a worktree, or nil for the
     /// orchestrator. Its identity is what's switched: a new one cross-fades
     /// in, the same one with another pane named stays.
     let opened: Item?
     /// Whether this workspace has a conversation at all: not a repository's
-    /// implicit workspace on a runner without `workstreams`, nor a loose
-    /// worktree.
+    /// implicit workspace on a runner without `workstreams`.
     let hasConversation: Bool
-    /// Whether there's a board to draw: not for a loose worktree whose board
-    /// can't be found.
+    /// Whether there's a navigator to draw: not for a loose worktree whose
+    /// board can't be found.
     var hasBoard = true
-    /// The terminal font's cell width: the minimums are in columns.
+    /// The terminal font's cell width: the main area's minimum is in
+    /// columns.
     let cell: CGFloat
-    /// Focus (⌃⌘↩): what's opened alone, without the rail or the board.
+    /// Focus (⌃⌘↩): what's opened alone, without the navigator.
     let focused: Bool
-    /// The conversation popped open from its rail over what's opened.
-    let peek: Bool
-    /// The board popped open from its strip over the main area, where the
-    /// detail is too narrow for the sidebar.
-    var boardOver = false
-    /// The board's width as its leading edge was last dropped. Kept per
-    /// device by the window.
-    @Binding var boardWidth: Double
+    /// The navigator's width as its trailing edge was last dropped. Kept
+    /// per device by the window.
+    @Binding var navigatorWidth: Double
     @ViewBuilder let conversation: () -> Conversation
-    @ViewBuilder let rail: () -> Rail
-    @ViewBuilder let board: () -> Board
-    /// The board collapsed: its icon, "Board" sideways and its count.
-    @ViewBuilder let strip: () -> Strip
-    /// The path over what's opened: Workspace › Task › Worktree, and its
+    @ViewBuilder let navigator: () -> Navigator
+    /// The jump bar over what's opened: Workspace › Task › Worktree, and its
     /// close button.
     @ViewBuilder let breadcrumb: (Item) -> Crumbs
     /// What's opened, drawn for `Item`: the one the window has open, or the
@@ -59,10 +52,6 @@ struct WorkspaceView<
     /// what's cheap is drawn, its header and its text, and nothing that
     /// mounts a terminal or reads the runner.
     @ViewBuilder let detail: (Item, Bool) -> Opened
-    /// A click outside the popped-open conversation: it closes.
-    var onDismissPeek: () -> Void = {}
-    /// A click outside the popped-open board: it closes.
-    var onDismissBoard: () -> Void = {}
     /// How everything moves: `WorkspaceMotion.spring`, slowed only by a test
     /// that reads it mid-flight.
     var motion: Animation = WorkspaceMotion.spring
@@ -75,47 +64,37 @@ struct WorkspaceView<
     /// arrow passes the rest without mounting or reading them.
     @State private var settled: Item?
     @State private var settling: Task<Void, Never>?
-    /// The board's width while its leading edge is dragged.
+    /// The navigator's width while its trailing edge is dragged.
     @State private var dragging: CGFloat?
-    /// The board's width when the drag began.
+    /// The navigator's width when the drag began.
     @State private var dragStart: CGFloat?
 
     init(
-        opened: Item?, hasConversation: Bool, hasBoard: Bool = true, cell: CGFloat, focused: Bool, peek: Bool,
-        boardOver: Bool = false, boardWidth: Binding<Double>,
-        @ViewBuilder conversation: @escaping () -> Conversation, @ViewBuilder rail: @escaping () -> Rail,
-        @ViewBuilder board: @escaping () -> Board, @ViewBuilder strip: @escaping () -> Strip,
+        opened: Item?, hasConversation: Bool, hasBoard: Bool = true, cell: CGFloat, focused: Bool,
+        navigatorWidth: Binding<Double>,
+        @ViewBuilder conversation: @escaping () -> Conversation, @ViewBuilder navigator: @escaping () -> Navigator,
         @ViewBuilder breadcrumb: @escaping (Item) -> Crumbs,
-        @ViewBuilder detail: @escaping (Item, Bool) -> Opened, onDismissPeek: @escaping () -> Void = {},
-        onDismissBoard: @escaping () -> Void = {}, motion: Animation = WorkspaceMotion.spring
+        @ViewBuilder detail: @escaping (Item, Bool) -> Opened, motion: Animation = WorkspaceMotion.spring
     ) {
         self.opened = opened
         self.hasConversation = hasConversation
         self.hasBoard = hasBoard
         self.cell = cell
         self.focused = focused
-        self.peek = peek
-        self.boardOver = boardOver
-        _boardWidth = boardWidth
+        _navigatorWidth = navigatorWidth
         self.conversation = conversation
-        self.rail = rail
-        self.board = board
-        self.strip = strip
+        self.navigator = navigator
         self.breadcrumb = breadcrumb
         self.detail = detail
-        self.onDismissPeek = onDismissPeek
-        self.onDismissBoard = onDismissBoard
         self.motion = motion
         // Drawn as it is from the first frame: a window reopening on a task
-        // doesn't spring the orchestrator away.
+        // doesn't fade the orchestrator out.
         _stage = State(initialValue: WorkspaceStage(open: opened, focused: focused))
         _settled = State(initialValue: opened)
     }
 
-    private func arrangement(width: CGFloat, open: Bool, focused: Bool) -> WorkspaceColumns.Arrangement {
-        WorkspaceColumns.layout(
-            width: width, opened: open, cell: cell, hasConversation: hasConversation, hasBoard: hasBoard,
-            focused: focused, peek: peek, boardOver: boardOver)
+    private func arrangement(open: Bool, focused: Bool) -> WorkspaceColumns.Arrangement {
+        WorkspaceColumns.layout(opened: open, hasConversation: hasConversation, hasBoard: hasBoard, focused: focused)
     }
 
     var body: some View {
@@ -124,109 +103,33 @@ struct WorkspaceView<
             let height = proxy.size.height
             // The window's state: what takes clicks, the keyboard and the
             // accessibility tree's notice, and what's on screen.
-            let now = arrangement(width: width, open: opened != nil, focused: focused)
+            let now = arrangement(open: opened != nil, focused: focused)
             // The motion's: where things are drawn.
-            let drawn = arrangement(width: width, open: stage.open != nil, focused: stage.focused)
-            let remembered = dragging ?? CGFloat(boardWidth)
-            let frames = WorkspaceColumns.frames(width: width, arrangement: drawn, board: remembered, cell: cell)
-            // What's opened stands where it stands open, coming and going
-            // too: the orchestrator slides over it and away, and nothing in
-            // it, a task's terminals included, is resized on the way.
-            let openFrames = WorkspaceColumns.frames(
-                width: width, arrangement: arrangement(width: width, open: true, focused: stage.focused),
-                board: remembered, cell: cell)
-            let railed = [.rail, .peek].contains(drawn.conversation)
+            let drawn = arrangement(open: stage.open != nil, focused: stage.focused)
+            let remembered = dragging ?? CGFloat(navigatorWidth)
+            let frames = WorkspaceColumns.frames(width: width, arrangement: drawn, navigator: remembered, cell: cell)
             ZStack(alignment: .topLeading) {
-                if !hasConversation {
-                    WorkspaceMain.nothingOpen
-                        .frame(width: frames.main, height: height)
-                        .opacity(stage.open == nil ? 1 : 0)
-                        .accessibilityHidden(opened != nil)
-                }
-                openedPane(height: height)
-                    // One piece: a task switched in is placed inside it and
-                    // moves with it.
-                    .geometryGroup()
-                    .frame(width: max(0, openFrames.opened), height: height)
-                    .offset(x: openFrames.openedX)
-                    .allowsHitTesting(opened != nil)
-                    .accessibilityHidden(opened == nil)
-                if hasConversation {
-                    HStack(spacing: 0) {
-                        rail()
-                            .frame(width: WorkspaceColumns.rail)
-                            .frame(maxHeight: .infinity)
-                        Divider()
-                    }
-                    .frame(height: height)
-                    .background(WorkspaceStyle.canvas)
-                    .offset(x: railed ? 0 : -(WorkspaceColumns.rail + WorkspaceColumns.divider))
-                    .allowsHitTesting([.rail, .peek].contains(now.conversation))
-                    .accessibilityHidden(![.rail, .peek].contains(now.conversation))
-                    // Over the orchestrator as it springs away to it, so the
-                    // rail is in sight from the first frame; under it as it
-                    // comes back to fill the main area.
-                    .zIndex(railed ? 2 : 0)
-                    // The orchestrator: filling the main area, or popped open
-                    // from the rail over what's opened, which resizes nothing
-                    // under it. One view, never two.
-                    ConversationPanel(
-                        state: now.conversation, drawn: drawn.conversation, width: frames.conversation,
-                        main: frames.main, content: conversation, onDismiss: onDismissPeek)
-                    .frame(width: max(0, frames.main - frames.conversationX), height: height)
-                    .offset(x: frames.conversationX)
-                    .zIndex(1)
-                }
-                // A click anywhere over the main area puts the popped-open
-                // board away, under a dimming that comes and goes with it.
-                Color.black
-                    .opacity(drawn.board == .over ? OrchestratorPeek.dimming : 0)
-                    .contentShape(Rectangle())
-                    .onTapGesture(perform: onDismissBoard)
+                main(now: now, drawn: drawn, height: height)
                     .frame(width: frames.main, height: height)
-                    .allowsHitTesting(now.board == .over)
-                    .accessibilityHidden(true)
-                    .zIndex(3)
-                board()
-                    .frame(width: max(0, frames.board), height: height)
-                    .background(WorkspaceStyle.canvas)
-                    // Popped open over the main area, its edge is drawn.
-                    .overlay(alignment: .leading) {
-                        Rectangle()
-                            .fill(Color(nsColor: .separatorColor))
-                            .frame(width: WorkspaceColumns.divider)
-                            .opacity(drawn.board == .over ? 1 : 0)
-                            .allowsHitTesting(false)
-                    }
-                    .compositingGroup()
-                    .shadow(color: .black.opacity(drawn.board == .over ? OrchestratorPeek.shadow : 0), radius: 8, x: -2)
-                    .offset(x: frames.boardX)
-                    .allowsHitTesting(now.boardInSight)
-                    .accessibilityHidden(!now.boardInSight)
-                    .accessibilityIdentifier("workspace-board")
-                    .zIndex(3)
-                boardEdge(
-                    height: height, at: frames.boardX, current: frames.board,
-                    shown: drawn.board == .side, live: now.board == .side, width: width)
-                .zIndex(3)
+                    .clipShape(Rectangle())
+                    .offset(x: frames.mainX)
                 HStack(spacing: 0) {
-                    Divider()
-                    strip()
-                        .frame(width: WorkspaceColumns.rail)
+                    navigator()
+                        .frame(width: frames.navigator)
                         .frame(maxHeight: .infinity)
+                    Divider()
                 }
                 .frame(height: height)
                 .background(WorkspaceStyle.canvas)
-                .offset(
-                    x: [.strip, .over].contains(drawn.board)
-                        ? width - WorkspaceColumns.rail - WorkspaceColumns.divider : width + WorkspaceMotion.overhang)
-                .allowsHitTesting([.strip, .over].contains(now.board))
-                .accessibilityHidden(![.strip, .over].contains(now.board))
-                .zIndex(3)
+                .offset(x: drawn.navigator ? 0 : -(frames.navigator + WorkspaceColumns.divider + WorkspaceMotion.overhang))
+                .allowsHitTesting(now.navigator)
+                .accessibilityHidden(!now.navigator)
+                .accessibilityIdentifier("workspace-board")
+                navigatorEdge(
+                    height: height, at: frames.navigator, current: frames.navigator, shown: drawn.navigator,
+                    live: now.navigator, width: width)
             }
             .frame(width: width, height: height, alignment: .topLeading)
-            // Peeking, popping the board and collapsing it move on the same
-            // spring as opening and closing, which `stage` already animates.
             .animation(motion, value: drawn)
             .clipShape(Rectangle())
             .contentShape(Rectangle())
@@ -248,8 +151,45 @@ struct WorkspaceView<
         }
     }
 
-    /// `next` settles: at once when it opens from closed or closes, and when
-    /// it switches, only once it has stayed put for `WorkspaceMotion.settle`.
+    /// The main area: the orchestrator, mounted and kept, faded out of
+    /// sight while something else is selected; and what's opened, faded in
+    /// over it. Both the main area's one width, so neither resizes as the
+    /// selection moves between them.
+    private func main(
+        now: WorkspaceColumns.Arrangement, drawn: WorkspaceColumns.Arrangement, height: CGFloat
+    ) -> some View {
+        let shown = now.conversation == .main
+        return ZStack(alignment: .topLeading) {
+            if hasConversation {
+                conversation()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(WorkspaceStyle.canvas)
+                    .opacity(drawn.conversation == .main ? 1 : 0)
+                    .allowsHitTesting(shown)
+                    .accessibilityHidden(!shown)
+                    // Nothing in it takes the keyboard while it's hidden:
+                    // not the terminal, not a chat composer, not a control.
+                    .environment(\.outOfSight, !shown)
+                    .disabled(!shown)
+                    .accessibilityIdentifier("workspace-conversation")
+            } else {
+                WorkspaceMain.nothingOpen
+                    .opacity(stage.open == nil ? 1 : 0)
+                    .accessibilityHidden(opened != nil)
+            }
+            openedPane(height: height)
+                // One piece: a task switched in is placed inside it and
+                // moves with it.
+                .geometryGroup()
+                .opacity(stage.open != nil ? 1 : 0)
+                .allowsHitTesting(opened != nil)
+                .accessibilityHidden(opened == nil)
+        }
+    }
+
+    /// `next` settles: at once when it opens from the orchestrator or goes
+    /// back to it, and when it switches, only once it has stayed put for
+    /// `WorkspaceMotion.settle`.
     private func settle(_ next: Item?, switching: Bool) {
         settling?.cancel()
         guard switching else {
@@ -263,10 +203,10 @@ struct WorkspaceView<
         }
     }
 
-    /// What's opened, under its breadcrumb: the window's, or the one
-    /// leaving. Another one switched in fades in over it on the spring,
-    /// while the one leaving goes in a blink, so two records are never
-    /// overprinted for long.
+    /// What's opened, under its jump bar: the window's, or the one leaving.
+    /// Another one switched in fades in over it on the spring, while the
+    /// one leaving goes in a blink, so two records are never overprinted
+    /// for long.
     private func openedPane(height: CGFloat) -> some View {
         ZStack {
             if let shown = stage.drawn {
@@ -288,16 +228,14 @@ struct WorkspaceView<
         .accessibilityIdentifier("workspace-opened")
     }
 
-    /// The board's leading edge, dragged to set its width, kept once
-    /// dropped. Dragged left, the board widens.
-    private func boardEdge(
+    /// The navigator's trailing edge, dragged to set its width, kept once
+    /// dropped. Dragged right, the navigator widens. The line itself is the
+    /// navigator's divider; this is the grip over it.
+    private func navigatorEdge(
         height: CGFloat, at x: CGFloat, current: CGFloat, shown: Bool, live: Bool, width: CGFloat
     ) -> some View {
-        Rectangle()
-            .fill(Color(nsColor: .separatorColor))
-            .frame(width: WorkspaceColumns.divider, height: height)
-            // A grip wider than the line, centered on it.
-            .padding(.horizontal, WorkspaceMotion.grip)
+        Color.clear
+            .frame(width: WorkspaceColumns.divider + 2 * WorkspaceMotion.grip, height: height)
             .contentShape(Rectangle())
             .pointerStyle(.columnResize)
             .gesture(
@@ -306,25 +244,25 @@ struct WorkspaceView<
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
                         if dragStart == nil { dragStart = current }
-                        dragging = WorkspaceColumns.boardWidth(
-                            (dragStart ?? current) - value.translation.width, width: width, cell: cell)
+                        dragging = WorkspaceColumns.navigatorWidth(
+                            (dragStart ?? current) + value.translation.width, width: width, cell: cell)
                     }
                     .onEnded { _ in
-                        if let dragging { boardWidth = Double(dragging) }
+                        if let dragging { navigatorWidth = Double(dragging) }
                         dragging = nil
                         dragStart = nil
                     })
-            .offset(x: x - WorkspaceColumns.divider - WorkspaceMotion.grip)
+            .offset(x: x - WorkspaceMotion.grip)
             .opacity(shown ? 1 : 0)
             .allowsHitTesting(live)
             .accessibilityHidden(true)
     }
 }
 
-/// What the main area shows with nothing open where no orchestrator can
-/// run: a repository's board on a runner without `workstreams`, which has
-/// no workspaces to seat one in. It's the orchestrator's place, so it's the
-/// orchestrator's empty state, saying why there's nothing to start. A
+/// What the main area shows with nothing selected where no orchestrator
+/// can run: a repository's board on a runner without `workstreams`, which
+/// has no workspaces to seat one in. It's the orchestrator's place, so it's
+/// the orchestrator's empty state, saying why there's nothing to start. A
 /// workspace that can have one and hasn't draws the conversation's own
 /// (`ConversationPlaceholder`), with Start Orchestrator and Use a Running
 /// Terminal….
@@ -349,14 +287,14 @@ enum WorkspaceMain {
 /// The one spring a workspace's structure moves on (ov-85), and what the
 /// view needs to keep its parts in reach while they move.
 enum WorkspaceMotion {
-    /// One spring for the board narrowing and widening, what's opened
-    /// sliding in, out and switching, the rail, and the orchestrator popping
-    /// open (ov-84's, which every one of them now shares).
+    /// One spring for the selection moving between the orchestrator, a
+    /// task and a worktree, and the navigator leaving for Focus (ov-84's,
+    /// which every one of them shares).
     static let spring = Animation.spring(response: 0.32, dampingFraction: 0.86)
-    /// Past the trailing edge when closed, so a shadow or a divider is out
-    /// of sight too.
+    /// Past the leading edge when put away, so its divider is out of
+    /// sight too.
     static let overhang: CGFloat = 24
-    /// Each side of the board's leading edge that takes a drag.
+    /// Each side of the navigator's trailing edge that takes a drag.
     static let grip: CGFloat = 3
     /// How long the one leaving takes to fade when another is switched in.
     static let leave = Animation.easeOut(duration: 0.08)
@@ -402,114 +340,18 @@ struct WorkspaceStage<Item: Hashable>: Equatable {
     }
 }
 
-/// The orchestrator, in the main area or popped open from its rail over
-/// what's opened, as one view (ov-89).
-///
-/// Mounted with the workspace and kept: springing down to the rail slides
-/// it off to the side, and popping it open or closing what's opened slides
-/// the same terminal view back, never a new one. It's the same width in
-/// every state, the main area less the rail, so none of those moves resizes
-/// its terminal or the tmux window behind it, and popped open → filling the
-/// main area is one slide on the spring. Filling the main area, it's drawn
-/// the rail's width wider, up to the board, but its terminal reports the
-/// same grid to tmux (`viewportSlack`): the difference is the terminal's own
-/// background at its trailing edge. Its width
-/// changes only with the window's, or the board collapsing, and then snaps,
-/// so it's never resized on every frame of a spring.
-///
-/// Whether it's in sight is `state`, the window's, and nothing here waits
-/// on the motion. The moment it reads railed, neither the panel nor the
-/// click-outside catcher takes a click or the accessibility tree's notice,
-/// however far it has left to slide; and it's clipped to the main area, past
-/// the rail once that's drawn. The rail is drawn over it while it springs
-/// away (`WorkspaceView`), so the rail is in sight and clickable from the
-/// first frame. Both of those are what made the rail seem dead while it
-/// moved (ov-84). The clip covers clicks as well as drawing.
-struct ConversationPanel<Content: View>: View {
-    typealias Place = WorkspaceColumns.Arrangement.Conversation
-
-    /// Where the window has it.
-    let state: Place
-    /// Where the motion draws it.
-    let drawn: Place
-    /// Its width (`WorkspaceColumns.Frames.conversation`), nil in Focus.
-    let width: CGFloat?
-    /// The main area's width: its width before it has ever been in sight.
-    let main: CGFloat
-    @ViewBuilder let content: () -> Content
-    var onDismiss: () -> Void
-
-    /// The width it last had, kept through Focus.
-    @State private var held: CGFloat?
-
-    var body: some View {
-        let shownWidth = width ?? held ?? main
-        // Filling the main area, it runs to the board: the rail's width
-        // more than its terminal's, drawn by the terminal in its own
-        // background and never told to tmux (`viewportSlack`).
-        let extra = drawn == .main ? WorkspaceColumns.rail + WorkspaceColumns.divider : 0
-        let open = state == .main || state == .peek
-        let out = drawn == .main || drawn == .peek
-        ZStack(alignment: .leading) {
-            // A click anywhere else over what's opened puts it away, under a
-            // dimming that comes and goes with it.
-            Color.black
-                .opacity(drawn == .peek ? OrchestratorPeek.dimming : 0)
-                .contentShape(Rectangle())
-                .onTapGesture(perform: onDismiss)
-                .allowsHitTesting(state == .peek)
-                .accessibilityHidden(true)
-            HStack(spacing: 0) {
-                content()
-                    .environment(\.viewportSlack, extra)
-                    .frame(width: shownWidth + extra)
-                    .frame(maxHeight: .infinity)
-                    .background(WorkspaceStyle.canvas)
-                    // Snapped: a terminal resized on every frame of the
-                    // spring would resize its tmux window on every frame.
-                    .animation(nil, value: shownWidth + extra)
-                Divider().opacity(drawn == .main ? 0 : 1)
-            }
-            .compositingGroup()
-            .shadow(color: .black.opacity(drawn == .peek ? OrchestratorPeek.shadow : 0), radius: 8, x: 2)
-            .offset(x: out ? 0 : OrchestratorPeek.hidden(width: shownWidth))
-            .allowsHitTesting(open)
-            .accessibilityHidden(!open)
-            // Nothing in it takes the keyboard while it's on the rail: not
-            // the terminal, not a chat composer, not a SwiftUI control.
-            .environment(\.outOfSight, !open)
-            .disabled(!open)
-            .accessibilityIdentifier("workspace-conversation")
-        }
-        // Drawn and clicked only over the main area past the rail: in
-        // flight, its far side is over the rail and the sidebar, and a clip
-        // alone stops the drawing there but not the clicks.
-        .clipShape(Rectangle())
-        .contentShape(Rectangle())
-        .allowsHitTesting(open)
-        .onChange(of: width, initial: true) { _, width in
-            if let width { held = width }
-        }
-    }
-}
-
 extension EnvironmentValues {
-    /// Mounted but out of sight: the orchestrator tucked away beside a task
-    /// (ov-84). A terminal or a composer under it takes no keyboard, by
-    /// click, Tab or its own claim, and lets go of one it holds.
+    /// Mounted but out of sight: the orchestrator kept while something else
+    /// is selected (ov-84, ov-92). A terminal or a composer under it takes
+    /// no keyboard, by click, Tab or its own claim, and lets go of one it
+    /// holds.
     @Entry var outOfSight = false
-    /// Points of a terminal view's width it doesn't report to tmux: the
-    /// orchestrator filling the main area is drawn the rail's width wider
-    /// than its grid, so its tmux window keeps one width in every state
-    /// (ov-89). Zero everywhere else.
-    @Entry var viewportSlack: CGFloat = 0
 }
 
 /// What an AppKit view that can take the keyboard does about `outOfSight`.
 enum KeyboardFence {
     /// Called as `takesKeyboard` turns off: the window's first responder,
-    /// if it's `view`, lets go, and what's opened takes it up from there
-    /// (`ContentView.closePeek`).
+    /// if it's `view`, lets go, and what's selected takes it up from there.
     @MainActor
     static func release(_ view: NSView) {
         guard let window = view.window, window.firstResponder === view else { return }
@@ -517,27 +359,14 @@ enum KeyboardFence {
     }
 }
 
-/// How the popped-open orchestrator moves, and what a press of the rail,
-/// ⌥⌘1, Esc or a click outside does to it: always the opposite of what it
-/// is now, at once, with nothing waiting on the motion (ov-84).
-enum OrchestratorPeek {
-    /// What's opened, dimmed under it.
-    static let dimming = 0.08
-    static let shadow = 0.18
-    /// Where the panel sits on its rail: wholly off to the side, past its
-    /// own width and its shadow (`WorkspaceMotion.overhang`).
-    static func hidden(width: CGFloat) -> CGFloat {
-        -(width + WorkspaceColumns.divider + WorkspaceMotion.overhang)
-    }
-
-    /// The state after a press of the rail or ⌥⌘1.
-    static func pressed(open: Bool) -> Bool { !open }
-
+/// The orchestrator's terminal, kept mounted whether or not it's selected
+/// (ov-92): what it draws, and when it's seen, watched and typed into.
+enum KeptOrchestrator {
     /// The layout the conversation's view draws, and whether it's on
-    /// screen. The panel draws the conversation's layout open or closed, so
-    /// it's one terminal view; it's on screen, seen, watched and given the
+    /// screen. It draws the conversation's layout selected or not, so it's
+    /// one terminal view; it's on screen, seen, watched and given the
     /// keyboard only when `visible` (`WorkspaceScreen.visible`) has it,
-    /// which is while it fills the main area or is popped open.
+    /// which is while it's selected.
     static func conversation(
         visible: [ShownLayout], drawable: [ShownLayout]
     ) -> (layout: ShownLayout?, onScreen: Bool) {

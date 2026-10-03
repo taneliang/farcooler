@@ -143,22 +143,15 @@ struct ContentView: View {
     /// The Needs You item ⌃⌘N last opened, by its key: where the next
     /// press goes on from, while the window is still showing it.
     @State private var lastAttention: String?
-    /// The board sidebar's width, as its leading edge was last dropped, on
-    /// this Mac (ov-89). The key is ov-85's, when it was the list beside a
-    /// task, so the width carries over.
-    @AppStorage("workspace.boardListWidth") private var boardWidth = Double(WorkspaceColumns.boardDefault)
-    /// Asks the board list for the keyboard: bumped by ⌥⌘2, and by a click
-    /// on a row, so ↑ and ↓ glance through the tasks from there.
+    /// The navigator's width, as its trailing edge was last dropped, on
+    /// this Mac (ov-92).
+    @AppStorage("workspace.navigatorWidth") private var navigatorWidth = Double(WorkspaceColumns.navigatorDefault)
+    /// Asks the navigator for the keyboard: bumped by ⌥⌘2, and by a click
+    /// on a row, so ↑ and ↓ walk it from there.
     @State private var boardFocusRequest = 0
     /// Focus (⌃⌘↩): a task or worktree opened, alone, without the
-    /// orchestrator's rail or the task's own text.
+    /// navigator.
     @State private var focusColumn = false
-    /// The orchestrator popped open from its rail, over the task or
-    /// worktree opened. Closed on going anywhere else.
-    @State private var orchestratorPeek = false
-    /// The board popped open from its strip over the main area, where the
-    /// detail is too narrow for the sidebar (ov-89).
-    @State private var boardPopped = false
     /// The detail's width, as the workspace view last measured it: which of
     /// a workspace's columns are on screen. Nil until one has been drawn.
     @State private var detailWidth: CGFloat?
@@ -344,12 +337,12 @@ struct ContentView: View {
                     !showPalette, !showQuickCreate,
                     EscapeBack.goesBack(
                         responder: window.firstResponder, selection: selection,
-                        focusColumn: focusColumn || orchestratorPeek || boardPopped,
+                        focusColumn: focusColumn,
                         closable: selection.flatMap { current in
                             WorkspaceNavigation.closing(current, board: workspaceScene(current)?.board)
                         } != nil)
                 else { return event }
-                goBack()
+                goBack(toOrchestrator: true)
                 return nil
             }
         }
@@ -407,7 +400,6 @@ struct ContentView: View {
         // what's seen and watched follows it.
         .onChange(of: detailWidth) { _, _ in markVisibleSeen() }
         .onChange(of: focusColumn) { _, _ in markVisibleSeen() }
-        .onChange(of: orchestratorPeek) { _, _ in markVisibleSeen() }
         .onChange(of: store.needsYouSettled) { _, _ in settleLaunch() }
         .onChange(of: selection) { _, now in
             if let saved = SelectionMemory.encode(now) { lastSelection = saved }
@@ -438,17 +430,10 @@ struct ContentView: View {
             // through, which makes it the narrowest point that sees every one
             // of them.
             errorBanner = nil
-            // Focus, the orchestrator popped open, and a board holding the
-            // keyboard are about the view that was on screen, not the next
-            // one. Focus and the popped-open orchestrator stay while the
+            // Focus and a navigator holding the keyboard are about the view
+            // that was on screen, not the next one. Focus stays while the
             // same thing is open, whichever of its panes is selected.
-            if !WorkspaceSelection.samePlace(old, new) {
-                focusColumn = false
-                orchestratorPeek = false
-            }
-            // The popped-open board stays only for a change it asked for: a
-            // glance with ↑ or ↓ in it.
-            if !boardKeyboardPending { boardPopped = false }
+            if !WorkspaceSelection.samePlace(old, new) { focusColumn = false }
             // Leaving a workspace ends a visit to it, whatever was open
             // beside its board; a loose worktree opened beside that same
             // board doesn't.
@@ -2107,11 +2092,10 @@ struct ContentView: View {
     private func shownLayouts(for selection: Selection?) -> [ShownLayout] {
         let all = drawableLayouts(for: selection)
         guard let selection, let scene = workspaceScene(selection) else { return all }
-        let arrangement = detailWidth.map { width in
+        let arrangement = detailWidth.map { _ in
             WorkspaceColumns.layout(
-                width: width, opened: scene.opened != nil, cell: TerminalMetrics.cell(preferences.terminalFont()).width,
-                hasConversation: scene.hasConversation, focused: focusColumn,
-                peek: orchestratorPeek)
+                opened: scene.opened != nil, hasConversation: scene.hasConversation, hasBoard: scene.board != nil,
+                focused: focusColumn)
         }
         return WorkspaceScreen.visible(all, arrangement: arrangement)
     }
@@ -2120,8 +2104,8 @@ struct ContentView: View {
     private var shown: [ShownLayout] { shownLayouts(for: selection) }
 
     /// Every layout `selection` could draw, on screen or not: the
-    /// conversation's included while it's tucked away beside a task, so the
-    /// popped-open panel draws one terminal view whether it's out or not.
+    /// conversation's included while it's kept hidden behind a task, so it's
+    /// one terminal view whether it's selected or not.
     private func drawableLayouts(for selection: Selection?) -> [ShownLayout] {
         func shown(_ selection: Selection?) -> [ShownLayout] {
             WorkspaceScreen.shown(
@@ -2130,8 +2114,8 @@ struct ContentView: View {
                 repositories: { host in store.clients[host]?.repositories.map(\.id) ?? [] },
                 chosen: { chosenAgents[$0] })
         }
-        // A loose worktree beside a workspace's board has that workspace's
-        // orchestrator on its rail, ahead of the worktree.
+        // A loose worktree beside a workspace's board keeps that
+        // workspace's orchestrator mounted, ahead of the worktree.
         if case .looseWorktree(let host, _, _)? = selection, let scene = workspaceScene(selection!),
             scene.hasConversation, let board = scene.board
         {
@@ -2396,15 +2380,36 @@ struct ContentView: View {
             shown: loose.shown, hidden: loose.hidden,
             selected: Self.openedWhole(selection).map(\.worktree)
                 ?? WorkspaceScreen.namedTerminal(selection).map(\.worktree),
-            onOpen: { worktree in
-                trail = nil
-                open(worktree, terminal: nil)
-            },
+            onOpen: { worktree in glance(at: worktree) },
             onNew: usable ? repository.map { repo in { newWorktree(host: host, project: repo.displayName) } } : nil,
             onUnhide: usable ? { ws in Task { await act(on: ws) { c in await c.unhideWorktree(ws.short) } } } : nil,
             menu: { worktreeMenu(for: $0) },
-            perform: { item, ws in perform(item, on: ws) },
-            collapseKey: "board.worktreesCollapsed.\(host)|\(workspace.id)")
+            perform: { item, ws in perform(item, on: ws) })
+    }
+
+    /// ↑ or ↓ in the navigator onto `item`: it's selected, and the
+    /// navigator keeps the keyboard, to go on (ov-92).
+    private func step(to item: NavigatorItem, host: String, workspace: WorkspaceSummary) {
+        switch item {
+        case .orchestrator:
+            selectOrchestrator(keyboard: .board)
+        case .task(let id):
+            chooseTask(id, host: host, workspace: workspace.id, glance: true)
+        case .worktree(let id):
+            if let found = worktree(host: host, id: id) { glance(at: found) }
+        }
+    }
+
+    /// A loose worktree in the navigator chosen, by a click or ↑ or ↓: it
+    /// opens in the main area, and the navigator keeps the keyboard, as a
+    /// task's row does.
+    private func glance(at worktree: Worktree) {
+        trail = nil
+        let step = WorkspaceNavigation.boardStep(.choose(glance: true), from: boardState)
+        if step.keyboard == .board { boardKeyboardPending = true }
+        focusColumn = step.focus
+        open(worktree, terminal: nil)
+        key(step.keyboard)
     }
 
     /// The breadcrumb's worktree menu for `place`: standing for a worktree
@@ -2431,9 +2436,10 @@ struct ContentView: View {
             perform: { item in if let named { perform(item, on: named) } })
     }
 
-    /// A workspace: the orchestrator's rail, the board, and the task or
-    /// worktree opened beside it under the breadcrumb (ov-85). A loose
-    /// worktree is drawn here too, beside its repository's board.
+    /// A workspace: the navigator, and what's selected in it in the main
+    /// area, the orchestrator or a task or worktree under its jump bar
+    /// (ov-92). A loose worktree is drawn here too, beside its repository's
+    /// navigator.
     private func workspaceDetail(_ scene: WorkspaceScene) -> some View {
         let host = scene.host
         let summary = scene.summary
@@ -2445,24 +2451,20 @@ struct ContentView: View {
             hasBoard: scene.board != nil,
             cell: TerminalMetrics.cell(preferences.terminalFont()).width,
             focused: focusColumn,
-            peek: orchestratorPeek,
-            boardOver: boardPopped,
-            boardWidth: $boardWidth,
+            navigatorWidth: $navigatorWidth,
             conversation: {
-                // The panel stays mounted while it's closed, and draws the
-                // same layout then as open; it just doesn't have the
-                // keyboard, or count as seen or watched (`shown`).
-                let drawn = OrchestratorPeek.conversation(visible: layouts, drawable: drawableLayouts(for: selection))
+                // Mounted and kept while something else is selected, drawing
+                // the same layout; it just doesn't have the keyboard, or
+                // count as seen or watched (`shown`).
+                let drawn = KeptOrchestrator.conversation(visible: layouts, drawable: drawableLayouts(for: selection))
                 conversationColumn(host: host, workspace: summary, shown: drawn.layout, onScreen: drawn.onScreen)
             },
-            rail: { conversationRail(host: host, workspace: summary) },
-            board: {
-                if let board = scene.board { boardColumn(host: host, id: board) }
-            },
-            strip: {
-                BoardStripView(
-                    waiting: summary.map { store.needsYou.count(in: $0.id) } ?? 0, open: boardPopped,
-                    onToggle: { focusWorkspaceColumn(.focusBoard) })
+            navigator: {
+                if let board = scene.board {
+                    boardColumn(
+                        host: host, id: board,
+                        orchestrator: scene.hasConversation ? navigatorOrchestrator(host: host, workspace: summary) : nil)
+                }
             },
             breadcrumb: { place in
                 let crumbs = crumbs(for: place, host: host, workspace: summary)
@@ -2476,19 +2478,11 @@ struct ContentView: View {
                     },
                     onClose: WorkspaceNavigation.closing(place, board: scene.board) == nil ? nil : { closeOpened() })
             },
-            detail: { place, settled in openedView(place, layouts: layouts, settled: settled) },
-            onDismissPeek: { closePeek() },
-            onDismissBoard: { closeBoard() }
+            detail: { place, settled in openedView(place, layouts: layouts, settled: settled) }
         )
         .onPreferenceChange(WorkspaceWidthPreference.self) { width in
             MainActor.assumeIsolated {
                 if let width, width != detailWidth { detailWidth = width }
-                // Wide enough for the sidebar again: nothing is popped open.
-                if let width, boardPopped,
-                    !WorkspaceColumns.collapses(width: width, cell: TerminalMetrics.cell(preferences.terminalFont()).width)
-                {
-                    boardPopped = false
-                }
             }
         }
         // No subtitle: "Billing · shop" is the switcher's, beside it (ov-86).
@@ -2651,16 +2645,27 @@ struct ContentView: View {
         }
     }
 
-    /// The conversation shrunk to a rail beside a task or a worktree: its
-    /// icon and state, its name set sideways, and a click that pops it open
-    /// over what's opened, or closes it again. See `OrchestratorRailView`.
-    private func conversationRail(host: String, workspace: WorkspaceSummary?) -> some View {
-        let seat = workspace.flatMap { WorkspaceScreen.orchestrator(of: $0, host: host, in: store.fleet) }
-        return OrchestratorRailView(
-            state: OrchestratorRail.state(seat: seat, waiting: workspace.map { store.needsYou.count(in: $0.id) } ?? 0),
+    /// The orchestrator's row in the navigator (ov-92): its state, what
+    /// it's doing now, and, with none, the ways to start one.
+    private func navigatorOrchestrator(host: String, workspace: WorkspaceSummary?) -> NavigatorOrchestrator? {
+        guard let workspace else { return nil }
+        let seat = WorkspaceScreen.orchestrator(of: workspace, host: host, in: store.fleet)
+        let canAct = store.refusal(for: host) == nil
+        let column = ConversationColumn.state(
+            seat: seat, isStarting: startingOrchestrators.isStarting(workspace, host: host),
+            startedAt: orchestratorStartedAt["\(host)|\(workspace.id)"], now: Date())
+        // Asked for here and not yet seated: starting, as its column says.
+        var state = OrchestratorRow.state(seat: seat)
+        if case .starting = column { state = .starting }
+        return NavigatorOrchestrator(
+            state: state,
             agent: ConversationHeader.agentName(seat),
-            open: orchestratorPeek,
-            onToggle: { focusWorkspaceColumn(.focusConversation) })
+            nowDoing: OrchestratorRow.nowDoing(seat?.terminal, state: state),
+            offers: ConversationColumn.offers(column, canAct: canAct),
+            candidates: OrchestratorAdoption.candidates(for: workspace, host: host, in: store.fleet),
+            onSelect: { selectOrchestrator(keyboard: .board) },
+            onStart: { harness in startOrchestrator(workspace, host: host, harness: harness, replace: false) },
+            onUse: { useAsOrchestrator($0) })
     }
 
     /// The breadcrumb over what's opened: Workspace › Task, Workspace › Task
@@ -2720,25 +2725,18 @@ struct ContentView: View {
         }
     }
 
-    /// Back (⌃⌘←, Esc): up one level, along the breadcrumb to a task a
-    /// worktree was opened from, else closed to the board.
-    ///
-    /// The popped-open orchestrator closes first, then Focus is left, one a
-    /// press.
-    private func goBack() {
-        if boardPopped {
-            closeBoard()
-            return
-        }
+    /// Back: up one level, Focus first. ⌃⌘← goes along the breadcrumb to a
+    /// task a worktree was opened from; Esc (`toOrchestrator`) goes up to
+    /// the orchestrator (ov-92).
+    private func goBack(toOrchestrator: Bool = false) {
         let step = WorkspaceNavigation.backStep(
-            peek: orchestratorPeek, focus: focusColumn, oneAtATime: true, from: selection, trail: trail)
+            focus: focusColumn, oneAtATime: true, toOrchestrator: toOrchestrator, from: selection, trail: trail)
         if step.leavesFocus { focusColumn = false }
         if let back = step.goesTo {
             guard back.focus != nil else {
                 closeOpened()
                 return
             }
-            orchestratorPeek = false
             if back == trail { trail = nil }
             // The keyboard follows to the level it lands on, by the
             // selection's own rule (`WorkspaceScreen.keyPane`), or, with no
@@ -2747,8 +2745,6 @@ struct ContentView: View {
             if WorkspaceScreen.keyPane(nil, in: shownLayouts(for: back), selection: back) == nil {
                 windowBox.window?.makeFirstResponder(nil)
             }
-        } else if step.closesPeek {
-            closePeek()
         } else if step.leavesFocus {
             keyOpened()
         } else if case .looseWorktree? = selection {
@@ -2756,32 +2752,36 @@ struct ContentView: View {
         }
     }
 
-    /// Close what's opened beside the board: the breadcrumb's close button,
-    /// a click on the selected task, or Back from a task. The board widens
-    /// back on the spring and takes the keyboard, so ↑ and ↓ go on from it.
+    /// Close what's opened: the jump bar's close button, a click on the
+    /// selected task, or Back from a task. The orchestrator is selected
+    /// again, and the navigator keeps the keyboard, so ↑ and ↓ go on from
+    /// it.
     private func closeOpened() {
         let board = selection.flatMap(workspaceScene)?.board
         guard let current = selection, let closed = WorkspaceNavigation.closing(current, board: board) else { return }
         trail = nil
-        orchestratorPeek = false
-        // The board keeps the keyboard where it's in sight; collapsed to its
-        // strip, the orchestrator filling the main area takes it.
         let step = WorkspaceNavigation.boardStep(.close, from: boardState)
         if step.keyboard == .board { boardKeyboardPending = true }
-        boardPopped = step.popped
         focusColumn = step.focus
         selection = closed
         key(step.keyboard)
     }
 
-    /// Put the popped-open board away, and give the keyboard back to what
-    /// fills the main area.
-    private func closeBoard() {
-        guard boardPopped else { return }
-        apply(WorkspaceNavigation.boardStep(.dismissBoard, from: boardState))
+    /// The orchestrator selected (⌥⌘1, its row, ↑ or ↓ onto it): whatever
+    /// was open goes, and `keyboard` says where the keyboard goes, into the
+    /// orchestrator or staying on the navigator.
+    private func selectOrchestrator(keyboard: WorkspaceNavigation.KeyTarget) {
+        guard let current = selection, let scene = workspaceScene(current) else { return }
+        trail = nil
+        focusColumn = false
+        if let board = scene.board, current.focus != nil || scene.opened != nil {
+            if keyboard == .board { boardKeyboardPending = true }
+            selection = .workspace(host: scene.host, workspace: board, focus: nil)
+        }
+        key(keyboard)
     }
 
-    /// The keyboard to what fills the main area: what's opened, else the
+    /// The keyboard to what the main area shows: what's opened, else the
     /// orchestrator.
     private func keyMain() {
         let layouts = shownLayouts(for: selection)
@@ -2796,14 +2796,6 @@ struct ContentView: View {
         }
     }
 
-    /// Put the popped-open orchestrator away, and give the keyboard back to
-    /// what's opened, or the board.
-    private func closePeek() {
-        guard orchestratorPeek else { return }
-        orchestratorPeek = false
-        keyOpened()
-    }
-
     /// The keyboard to the task's or worktree's terminal, if it has one on
     /// screen, else to the view itself, so Esc and the arrows reach it.
     private func keyOpened() {
@@ -2812,8 +2804,7 @@ struct ContentView: View {
         {
             step(to: pane)
         } else if case .workspace(_, _, nil)? = selection {
-            // Nothing opened: the orchestrator filling the main area takes
-            // it (ov-89).
+            // Nothing opened: the orchestrator takes it.
             keyMain()
         } else {
             keyPane = nil
@@ -3044,9 +3035,9 @@ struct ContentView: View {
         )
     }
 
-    /// A workspace's board, or a sentence saying where it went.
+    /// A workspace's navigator, or a sentence saying where its board went.
     @ViewBuilder
-    private func boardColumn(host: String, id: String) -> some View {
+    private func boardColumn(host: String, id: String, orchestrator: NavigatorOrchestrator?) -> some View {
         if let client = store.clients[host], client.daemonBuild.map({ !$0.can("tasks") }) == true {
             // A runner too old for boards: said, rather than a board that
             // can't be read.
@@ -3073,7 +3064,10 @@ struct ContentView: View {
                 onKeyboard: { keyboardOnBoard = true },
                 onEnter: { focusWorkspaceColumn(.focusTask) },
                 hasKeyboard: keyboardOnBoard,
-                worktrees: { board in boardWorktrees(host: host, workspace: workspace, client: client, board: board) }
+                worktrees: { board in boardWorktrees(host: host, workspace: workspace, client: client, board: board) },
+                orchestrator: orchestrator,
+                current: Navigator.current(selection, trail: trail, board: id),
+                onStep: { item in step(to: item, host: host, workspace: workspace) }
             )
         } else {
             // Said, rather than the generic "Select a worktree": this
@@ -3156,7 +3150,7 @@ struct ContentView: View {
             title: frame.title,
             subtitle: frame.subtitle,
             setsTitle: titled,
-            hasKeyboard: OrchestratorPeek.takesKeyboard(
+            hasKeyboard: KeptOrchestrator.takesKeyboard(
                 shown, onScreen: keyboard, key: selectedPane, onBoard: keyboardOnBoard)
         )
     }
@@ -3165,7 +3159,7 @@ struct ContentView: View {
         ContentUnavailableView {
             Label("No Workspace Selected", systemImage: "square.stack.3d.up")
         } description: {
-            Text("Choose one from the title bar. A workspace shows its board, with its orchestrator a click away on the left.")
+            Text("Choose one from the title bar. A workspace lists its orchestrator, tasks and worktrees on the left, and shows the one you pick.")
         } actions: {
             if !workspaceRepositories.isEmpty {
                 Button("New Workspace…") {
@@ -3827,8 +3821,6 @@ struct ContentView: View {
         changesFocus = nil
         keyboardOnBoard = false
         let inConversation = shown.contains { $0.column == .conversation && $0.contains(pane) }
-        // A click into what's opened puts the popped-open orchestrator away.
-        if orchestratorPeek, !inConversation { orchestratorPeek = false }
         // Taking up the orchestrator is a visit to its workspace, as reading
         // its board is: the board's "Since you were last here" starts there.
         if inConversation, case .workspace(let host, let id, _)? = selection {
@@ -3843,53 +3835,23 @@ struct ContentView: View {
         keyPane = pane
     }
 
-    /// ⌥⌘1, ⌥⌘2, ⌥⌘3: the conversation, the board, or the task or
-    /// worktree opened, brought on screen and given the keyboard.
-    ///
-    /// ⌥⌘1 gives the orchestrator the keyboard where it fills the main
-    /// area, and beside what's opened pops it open over it, closing it
-    /// pressed again. ⌥⌘2 gives the board the keyboard: the sidebar where
-    /// it stands, else popped open from its strip, and put away pressed
-    /// again (ov-89).
+    /// ⌥⌘1, ⌥⌘2, ⌥⌘3 (ov-92): the orchestrator selected and given the
+    /// keyboard; the navigator given the keyboard; the main area, whatever
+    /// it shows, given the keyboard.
     private func focusWorkspaceColumn(_ command: AppCommand) {
-        // A loose worktree beside its repository's board takes them too.
-        guard let current = selection, let scene = workspaceScene(current) else { return }
-        let focus = scene.opened
+        // A loose worktree beside its repository's navigator takes them too.
+        guard let current = selection, workspaceScene(current) != nil else { return }
         switch command {
         case .focusConversation:
-            // Beside what's opened, pressed again, or the rail clicked
-            // again: it closes, at once, mid-flight or not
-            // (`OrchestratorPeek`). Filling the main area, only the keyboard
-            // moves.
-            if focus != nil, !OrchestratorPeek.pressed(open: orchestratorPeek) {
-                closePeek()
-                return
-            }
-            if focus != nil { orchestratorPeek = true }
-            apply(WorkspaceNavigation.boardStep(.conversation, from: boardState))
+            let step = WorkspaceNavigation.boardStep(.conversation, from: boardState)
+            if step.selectsOrchestrator { selectOrchestrator(keyboard: step.keyboard) } else { apply(step) }
         case .focusBoard:
-            // Beside the others, the board has no text to type into: the
-            // terminals let go of the keyboard, and the list takes it;
-            // collapsed to its strip, it pops open over the main area, and
-            // is put away pressed again, or the strip clicked again.
-            guard scene.board != nil else { return }
-            orchestratorPeek = false
             apply(WorkspaceNavigation.boardStep(.board, from: boardState))
         case .focusTask:
-            // With nothing open, nothing to go to: nothing changes.
-            guard focus != nil else { return }
-            orchestratorPeek = false
             apply(WorkspaceNavigation.boardStep(.task, from: boardState))
         default:
             break
         }
-    }
-
-    /// Whether the board stands as the sidebar at the detail's width: else
-    /// it's collapsed to its strip.
-    private var boardBeside: Bool {
-        guard let width = detailWidth else { return false }
-        return !WorkspaceColumns.collapses(width: width, cell: TerminalMetrics.cell(preferences.terminalFont()).width)
     }
 
     /// Open a task: its workspace, with the task beside the board.
@@ -3898,34 +3860,31 @@ struct ContentView: View {
         selection = .workspace(host: host, workspace: workspace, focus: .task(id))
     }
 
-    /// A row on the board chosen: a click opens its task beside the board,
-    /// or, on the task already open, closes it; ↑ and ↓ (`glance`) only
-    /// open. Either way the board keeps the keyboard, to go on glancing.
+    /// A row in the navigator chosen: a click opens its task, or, on the
+    /// task already open, goes back to the orchestrator; ↑ and ↓ (`glance`)
+    /// only open. Either way the navigator keeps the keyboard, to go on.
     private func chooseTask(_ id: String, host: String, workspace: String, glance: Bool) {
         let next = WorkspaceNavigation.choosing(task: id, host: host, workspace: workspace, from: selection, toggles: !glance)
         guard next != selection else { return }
         trail = nil
-        // A click in the popped-open board puts it away, and the keyboard
-        // goes to the board only where it's still drawn; a glance keeps it.
-        let step = WorkspaceNavigation.boardStep(.choose(glance: glance, opening: next.focus != nil), from: boardState)
+        let step = WorkspaceNavigation.boardStep(.choose(glance: glance), from: boardState)
         if step.keyboard == .board { boardKeyboardPending = true }
-        boardPopped = step.popped
         focusColumn = step.focus
         selection = next
         key(step.keyboard)
     }
 
-    /// What `WorkspaceNavigation.boardStep` reads: the board at this width,
-    /// what's open, and what's popped.
+    /// What `WorkspaceNavigation.boardStep` reads: what's open, Focus, and
+    /// where the keyboard is.
     private var boardState: WorkspaceNavigation.BoardState {
-        WorkspaceNavigation.BoardState(
-            collapsed: !boardBeside, opened: selection.flatMap(workspaceScene)?.opened != nil,
-            popped: boardPopped, focus: focusColumn, onBoard: keyboardOnBoard)
+        let scene = selection.flatMap(workspaceScene)
+        return WorkspaceNavigation.BoardState(
+            opened: scene?.opened != nil, focus: focusColumn, onBoard: keyboardOnBoard,
+            hasNavigator: scene?.board != nil)
     }
 
     /// Does what a `BoardStep` says.
     private func apply(_ step: WorkspaceNavigation.BoardStep) {
-        boardPopped = step.popped
         focusColumn = step.focus
         key(step.keyboard)
     }
@@ -4091,7 +4050,6 @@ struct ContentView: View {
         case .back: goBack()
         case .focusColumn:
             if selection.flatMap(workspaceScene)?.opened != nil {
-                if !focusColumn { orchestratorPeek = false }
                 apply(WorkspaceNavigation.boardStep(.toggleFocus, from: boardState))
             } else if selection?.focus != nil {
                 focusColumn.toggle()

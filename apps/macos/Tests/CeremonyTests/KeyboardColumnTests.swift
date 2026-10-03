@@ -128,9 +128,8 @@ struct KeyboardColumnTests {
         #expect(!beside && alone)
     }
 
-    /// Focus, and the orchestrator popped open, stay while the same thing is
-    /// open: clicking between an opened worktree's panes names another pane,
-    /// which is no new place.
+    /// Focus stays while the same thing is open: clicking between an opened
+    /// worktree's panes names another pane, which is no new place.
     @Test("Focus survives a click between an opened worktree's panes")
     func focusColumnSurvivesAClickBetweenPanes() {
         let one = ContentView.Selection.workspace(host: "", workspace: "ws", focus: .worktree("w", terminal: "a"))

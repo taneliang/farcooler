@@ -458,23 +458,22 @@ enum WorkspaceNavigation {
         }
     }
 
-    /// What one Back does, in order: put the popped-open orchestrator away,
-    /// then leave Focus, then go up a level. Esc and ⌃⌘← (`oneAtATime`) stop
-    /// after the first that applies; the breadcrumb's chevron does all.
+    /// What one Back does, in order: leave Focus, then go up a level.
+    /// Esc and ⌃⌘← (`oneAtATime`) stop after the first that applies; the
+    /// breadcrumb's chevron does both. Esc (`toOrchestrator`) goes up to the
+    /// orchestrator, past a task a worktree was opened from (ov-92); ⌃⌘←
+    /// goes along the breadcrumb.
     struct BackStep: Equatable {
-        var closesPeek = false
         var leavesFocus = false
         var goesTo: Selection?
     }
 
     static func backStep(
-        peek: Bool, focus: Bool, oneAtATime: Bool, from selection: Selection?, trail: Selection?
+        focus: Bool, oneAtATime: Bool, toOrchestrator: Bool = false, from selection: Selection?, trail: Selection?
     ) -> BackStep {
-        var step = BackStep(closesPeek: peek, leavesFocus: false, goesTo: nil)
-        if peek && oneAtATime { return step }
-        step.leavesFocus = focus
+        var step = BackStep(leavesFocus: focus, goesTo: nil)
         if focus && oneAtATime { return step }
-        step.goesTo = back(from: selection, trail: trail)
+        step.goesTo = back(from: selection, trail: toOrchestrator ? nil : trail)
         return step
     }
 
@@ -483,9 +482,13 @@ enum WorkspaceNavigation {
     /// is (⌥⌘2 going up to it, a row chosen or glanced at, a close), where
     /// any other change would take it back.
     static func boardKeepsKeyboard(pending: Bool, from old: Selection?, to new: Selection?) -> Bool {
-        guard pending, let old, let new, old != new, case .workspace(let host, let id, _) = new else { return false }
-        switch old {
-        case .workspace(host, id, _), .looseWorktree(host, _, _): return true
+        guard pending, let old, let new, old != new, old.host == new.host else { return false }
+        switch (old, new) {
+        case (.workspace(_, let was, _), .workspace(_, let now, _)): return was == now
+        // From a loose worktree to its board's workspace, or to another
+        // loose worktree or from the workspace to one, in the navigator
+        // it's drawn beside.
+        case (.looseWorktree, .workspace), (.looseWorktree, .looseWorktree), (.workspace, .looseWorktree): return true
         default: return false
         }
     }
@@ -543,9 +546,8 @@ enum EscapeBack {
     }
 
     /// Whether an Esc in the main window goes back: something to go back
-    /// from (a task or a worktree opened beside the board, a loose one
-    /// included, Focus, or the orchestrator popped open, which
-    /// `focusColumn` stands for), and nobody else wanting it.
+    /// from (a task or a worktree selected, a loose one included, or
+    /// Focus, which `focusColumn` stands for), and nobody else wanting it.
     /// `closable` is whether what's open has somewhere to close to: a loose
     /// worktree with no board beside it doesn't, and keeps its Esc.
     static func goesBack(

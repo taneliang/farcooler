@@ -109,7 +109,6 @@ struct TerminalCanvas: NSViewRepresentable {
     func makeNSView(context: Context) -> TerminalRenderView {
         let view = TerminalRenderView()
         view.takesKeyboard = !context.environment.outOfSight
-        view.viewportSlack = context.environment.viewportSlack
         // BEFORE attaching, not after. Attaching replays the pane's history, and
         // tmux wrapped that history at the PANE width — so the emulator has to
         // already be that wide or every long line arrives wrapped a second time.
@@ -124,7 +123,6 @@ struct TerminalCanvas: NSViewRepresentable {
         // about size — which is nearly all of them.
         view.setPaneGrid(grid)
         view.takesKeyboard = !context.environment.outOfSight
-        view.viewportSlack = context.environment.viewportSlack
 
         // Only re-attach when the selected terminal actually changes, or when
         // the link underneath it has been replaced. Restarting on every

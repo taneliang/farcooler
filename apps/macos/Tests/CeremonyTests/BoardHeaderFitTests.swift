@@ -21,7 +21,7 @@ struct BoardHeaderFitTests {
     }
 
     @Test("The header fits every board width from the minimum up", arguments: [
-        WorkspaceColumns.boardMinimum, 300, 340, 400, 480, 640, 900, 1180,
+        WorkspaceColumns.navigatorMinimum, 300, 340, 400, 480, 640, 900, 1180,
     ])
     func fitsAtEveryWidth(board: CGFloat) {
         for (title, waiting) in [("Billing", 0), ("Billing · shop", 3), ("A Rather Long Workspace Name Indeed", 12)] {
@@ -72,7 +72,7 @@ struct BoardHeaderFitTests {
     private func list(_ r: Range<Int>) -> [Int] { Array(r) }
 
     @Test("No control is drawn into the header's edge padding at 1180 or the minimum",
-        arguments: [WorkspaceColumns.boardMinimum, 340, 1180])
+        arguments: [WorkspaceColumns.navigatorMinimum, 340, 1180])
     func controlsStayInside(board: CGFloat) {
         for (title, waiting) in [("Billing", 0), ("A Rather Long Workspace Name Indeed", 12)] {
             #expect(edgesAreBare(board: board, title: title, waiting: waiting), "\(title) at \(board)")
@@ -82,7 +82,7 @@ struct BoardHeaderFitTests {
     /// The summary strip, with rows and a long title, never asks for more than
     /// the board has either.
     @Test("The summary strip fits the board at the minimum and at 1180", arguments: [
-        WorkspaceColumns.boardMinimum, 1180,
+        WorkspaceColumns.navigatorMinimum, 1180,
     ])
     func stripFits(board: CGFloat) {
         let client = DaemonClient(target: "", notifications: NotificationCenter())

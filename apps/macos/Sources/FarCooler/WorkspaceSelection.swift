@@ -3,10 +3,11 @@ import Foundation
 
 // What the window is showing, now that a workspace is a place (spec §4.2).
 //
-// The sidebar lists workspaces, and selecting one shows its board, with its
-// orchestrator on a rail; a task, or one of its worktrees, opens beside the
-// board (ov-85). So a selection names a workspace and what's focused in it,
-// and a worktree is a place only when no workspace owns it.
+// The title bar's switcher and the sidebar list workspaces, and selecting one
+// shows its navigator, with its orchestrator selected; a task, or one of its
+// worktrees, selected there takes the main area (ov-85, ov-92). So a
+// selection names a workspace and what's focused in it, nil for the
+// orchestrator, and a worktree is a place only when no workspace owns it.
 //
 // Worked out here, as values, so the rules are the ones
 // `WorkspaceSelectionTests` pins: where every old selection lands, and where

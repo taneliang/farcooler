@@ -212,11 +212,6 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     var takesKeyboard = true {
         didSet { if !takesKeyboard { KeyboardFence.release(self) } }
     }
-    /// Points of its width it doesn't ask for (`viewportSlack`): drawn in
-    /// its background, past the grid.
-    var viewportSlack: CGFloat = 0 {
-        didSet { if viewportSlack != oldValue { reportGeometry() } }
-    }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func viewDidMoveToWindow() {
@@ -357,8 +352,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     private func reportGeometry() {
         guard
             let fits = TileGeometry.fitting(
-                CGSize(width: max(0, bounds.width - viewportSlack), height: bounds.height),
-                cell: CGSize(width: cellWidth, height: cellHeight))
+                bounds.size, cell: CGSize(width: cellWidth, height: cellHeight))
         else { return }
         guard fits != lastReportedGeometry else { return }
         lastReportedGeometry = fits
