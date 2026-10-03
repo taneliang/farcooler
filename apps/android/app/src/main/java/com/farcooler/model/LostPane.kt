@@ -4,9 +4,10 @@ package com.farcooler.model
  * What a terminal with no running pane says, and the two ways off it (ov-191).
  *
  * **A port of `AgentKit/LostPane.swift`, sentence for sentence**, which the
- * Mac's lost-terminal page and the iPhone's pane both read. `LostPaneTest`
- * asserts the same table as `LostPaneTests`, so a change made to one side and
- * not the other fails on whichever side it was left out of.
+ * Mac's lost-terminal page and the iPhone's pane both read. Both sides'
+ * tests replay `test/fixtures/lost-pane.json` and compare whole strings, so a
+ * sentence changed on one side and not the other fails on the side left
+ * behind.
  *
  * Restart runs the terminal's preset again: an agent comes back as that agent,
  * and a shell as a shell. What was typed into a shell was never recorded, so a
@@ -15,7 +16,15 @@ package com.farcooler.model
 object LostPane {
     enum class Kind { LOST, EXITED, ERROR }
 
-    enum class Action { RESTART, DISMISS }
+    /**
+     * The two answers, each with its one label and the sentence a refusal
+     * reads as. One word each, so Material's sentence case and Apple's title
+     * case agree.
+     */
+    enum class Action(val title: String, val failure: String) {
+        RESTART("Restart", "Couldn’t restart this terminal."),
+        DISMISS("Dismiss", "Couldn’t dismiss this terminal."),
+    }
 
     /** The page's kind for a terminal state, or null for a pane that's running or may be. */
     fun kind(state: StateKind): Kind? = when (state) {
@@ -57,4 +66,12 @@ object LostPane {
     }
 
     const val DISMISS_NOTE = "Dismiss removes it from the list."
+
+    /** The whole sentence a phone's pane says under the title: why, what Restart brings back, and Dismiss when offered. */
+    fun message(kind: Kind, preset: String): String =
+        listOfNotNull(
+            explanation(kind),
+            restartNote(preset),
+            DISMISS_NOTE.takeIf { Action.DISMISS in actions(kind) },
+        ).joinToString(" ")
 }

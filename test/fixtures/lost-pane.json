@@ -1,0 +1,49 @@
+{
+  "about": "A terminal with no running pane (ov-191): AgentKit's LostPaneTests and Android's LostPaneTest both replay every case, whole strings, so a sentence changed on one side and not the other fails on the side left behind.",
+  "kinds": [
+    {
+      "state": "LOST",
+      "title": "Terminal Lost",
+      "explanation": "Its tmux pane is gone. The pane was closed outside Far Cooler, tmux was quit, or the runner restarted. Nothing is running in it now.",
+      "actions": ["Restart", "Dismiss"],
+      "shell_message": "Its tmux pane is gone. The pane was closed outside Far Cooler, tmux was quit, or the runner restarted. Nothing is running in it now. Restart opens a new shell in this worktree. What was running in it wasn’t recorded, so you’ll need to start that again. Dismiss removes it from the list."
+    },
+    {
+      "state": "exited",
+      "title": "Terminal Ended",
+      "explanation": "Its program ended. Nothing is running in it now.",
+      "actions": ["Restart"],
+      "shell_message": "Its program ended. Nothing is running in it now. Restart opens a new shell in this worktree. What was running in it wasn’t recorded, so you’ll need to start that again."
+    },
+    {
+      "state": "error",
+      "title": "Terminal Didn’t Start",
+      "explanation": "The runner couldn’t start it.",
+      "actions": ["Restart"],
+      "shell_message": "The runner couldn’t start it. Restart opens a new shell in this worktree. What was running in it wasn’t recorded, so you’ll need to start that again."
+    }
+  ],
+  "not_this_page": ["running", "starting", "unknown", ""],
+  "restart_notes": [
+    { "preset": "shell", "note": "Restart opens a new shell in this worktree. What was running in it wasn’t recorded, so you’ll need to start that again." },
+    { "preset": "", "note": "Restart opens a new shell in this worktree. What was running in it wasn’t recorded, so you’ll need to start that again." },
+    { "preset": "claude:opus", "note": "Restart opens Claude Code again in this worktree, back in its conversation if it had one." },
+    { "preset": "codex", "note": "Restart opens Codex again in this worktree, back in its conversation if it had one." },
+    { "preset": "cursor", "note": "Restart opens Cursor again in this worktree." },
+    { "preset": "sleepnomore", "note": "Restart runs sleepnomore again in this worktree." }
+  ],
+  "dismiss_note": "Dismiss removes it from the list.",
+  "failures": { "Restart": "Couldn’t restart this terminal.", "Dismiss": "Couldn’t dismiss this terminal." },
+  "revives": [
+    { "from": "lost", "to": "running", "revives": true },
+    { "from": "exited", "to": "running", "revives": true },
+    { "from": "error", "to": "starting", "revives": true },
+    { "from": "unknown", "to": "running", "revives": true },
+    { "from": "running", "to": "running", "revives": false },
+    { "from": "lost", "to": "lost", "revives": false },
+    { "from": "running", "to": "exited", "revives": false },
+    { "from": "exited", "to": "error", "revives": false },
+    { "from": "error", "to": "lost", "revives": false },
+    { "from": "exited", "to": "unknown", "revives": false }
+  ]
+}

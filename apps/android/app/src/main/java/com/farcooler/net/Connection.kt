@@ -454,7 +454,17 @@ class Connection(
         ON_THE_BACKOFF,
     }
 
-    enum class Action { RESTART, STOP, DISMISS_LOST }
+    enum class Action {
+        RESTART, STOP, DISMISS_LOST;
+
+        companion object {
+            /** A lost terminal's answer, as the call it makes: the one mapping, so no screen spells it its own way. */
+            fun of(action: com.farcooler.model.LostPane.Action): Action = when (action) {
+                com.farcooler.model.LostPane.Action.RESTART -> RESTART
+                com.farcooler.model.LostPane.Action.DISMISS -> DISMISS_LOST
+            }
+        }
+    }
 
     private val _phase = MutableStateFlow<Phase>(Phase.Connecting)
     val phase: StateFlow<Phase> = _phase.asStateFlow()

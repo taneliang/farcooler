@@ -67,6 +67,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.core.TerminalPalette
 import com.farcooler.core.Vt
 import com.farcooler.model.LostPane
+import com.farcooler.model.NotLivePane
 import com.farcooler.model.StateKind
 import com.farcooler.model.TaskBoard
 import com.farcooler.model.TaskLink
@@ -219,6 +220,20 @@ fun TerminalPane(
         seenReconnects = reconnects
         if (live) session.relink()
     }
+    // The pane came back: restarted (from here, the Mac or anywhere), or a
+    // `starting` pane that hadn't finished when this one looked. A `NotLive`
+    // session is deliberately not polled, so nothing else would ever find out,
+    // and a lost pane's Restart led to "Not live" with nothing to press. On
+    // the CHANGE, as iOS does (`NotLivePane.revives`): the state is re-derived
+    // every poll, and reading it as a level would relink every poll.
+    val state = terminal?.state?.let(StateKind::parse)
+    var seenState by remember { mutableStateOf(state) }
+    LaunchedEffect(state, live) {
+        val was = seenState
+        seenState = state
+        if (!live || was == null || state == null) return@LaunchedEffect
+        if (session.phase.value is TerminalSession.Phase.NotLive && NotLivePane.revives(was, state)) session.relink()
+    }
     DisposableEffect(session) {
         onDispose { session.dispose() }
     }
@@ -350,7 +365,7 @@ fun TerminalPane(
                     name = name,
                     gone = terminal?.let { LostPane.kind(StateKind.parse(it.state)) },
                     preset = terminal?.preset.orEmpty(),
-                    onAct = { action -> terminal?.let { scope.launch { connection.act(action, it) } } },
+                    onAct = { action -> terminal?.let { scope.launch { connection.act(Connection.Action.of(action), it) } } },
                     fontFamily = TerminalFonts.family(fontChoice),
                     fontSize = fontSize,
                     onTap = { focusRequest += 1 },
@@ -672,7 +687,7 @@ private fun TerminalSurface(
     /** Its kind when the runner says it has no running pane (ov-191), else null. */
     gone: LostPane.Kind?,
     preset: String,
-    onAct: (Connection.Action) -> Unit,
+    onAct: (LostPane.Action) -> Unit,
     fontFamily: FontFamily,
     fontSize: Float,
     onTap: () -> Unit,
@@ -688,14 +703,10 @@ private fun TerminalSurface(
         // and, for a lost one, Dismiss, in the Mac's and the iPhone's words.
         // It used to say "Not live" and offer nothing (ov-191).
         is TerminalSession.Phase.NotLive -> if (gone != null) {
-            val offers = LostPane.actions(gone)
             Status(
                 title = LostPane.title(gone),
-                message = LostPane.explanation(gone) + " " + LostPane.restartNote(preset),
-                actions = buildList {
-                    add("Restart" to { onAct(Connection.Action.RESTART) })
-                    if (LostPane.Action.DISMISS in offers) add("Dismiss" to { onAct(Connection.Action.DISMISS_LOST) })
-                },
+                message = LostPane.message(gone, preset),
+                actions = LostPane.actions(gone).map { action -> action.title to { onAct(action) } },
             )
         } else Status(
             title = "Not live",

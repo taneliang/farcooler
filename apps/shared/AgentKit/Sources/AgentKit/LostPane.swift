@@ -38,9 +38,29 @@ public enum LostPane {
         }
     }
 
+    /// The two answers, each with its one label. Every surface that offers
+    /// them reads `title` here, so a Mac page, a context menu, a jumpbar and
+    /// both phones can't come to call them different things.
     public enum Action: Equatable, Sendable {
         case restart
         case dismiss
+
+        /// The button's label. One word each, so title case and Android's
+        /// sentence case agree.
+        public var title: String {
+            switch self {
+            case .restart: return "Restart"
+            case .dismiss: return "Dismiss"
+            }
+        }
+
+        /// What a screen says when the runner refuses it.
+        public var failure: String {
+            switch self {
+            case .restart: return "Couldn’t restart this terminal."
+            case .dismiss: return "Couldn’t dismiss this terminal."
+            }
+        }
     }
 
     /// What the page offers. Dismiss is for a lost terminal alone, since
@@ -63,7 +83,7 @@ public enum LostPane {
 
     /// Why there's nothing running, in words. For a lost terminal, all three
     /// causes, because the runner can't tell them apart: it only knows that
-    /// no tmux pane claims this terminal any more.
+    /// no tmux pane claims this terminal anymore.
     public static func explanation(for kind: Kind) -> String {
         switch kind {
         case .lost:
@@ -99,4 +119,13 @@ public enum LostPane {
 
     /// What Dismiss does, beside its button.
     public static let dismissNote = "Dismiss removes it from the list."
+
+    /// The whole sentence a phone's pane says under the title: why, what
+    /// Restart brings back, and what Dismiss does when it's offered. The Mac
+    /// sets the same three apart on its page.
+    public static func message(for kind: Kind, preset: String) -> String {
+        var parts = [explanation(for: kind), restartNote(preset: preset)]
+        if actions(for: kind).contains(.dismiss) { parts.append(dismissNote) }
+        return parts.joined(separator: " ")
+    }
 }
