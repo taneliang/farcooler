@@ -18,6 +18,7 @@ pub mod review;
 pub mod models;
 mod store;
 mod tasks;
+pub mod usage;
 mod wakes;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;

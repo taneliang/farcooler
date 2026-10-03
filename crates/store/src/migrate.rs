@@ -31,6 +31,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_0017_terminal_split_of,
     migration_0018_terminal_split_of_orchestrator,
     migration_0019_wake_on_answer,
+    crate::usage::migration_0020_agent_turns,
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
