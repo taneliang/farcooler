@@ -29,13 +29,16 @@ public enum BoardDone {
     }
 
     /// The finished tasks to draw, newest first: the unread ones, those
-    /// finished today, and at least the newest `floor`.
+    /// finished today, at least the newest `floor`, and `keeping`, the task
+    /// selected: opening it reads it, and it stays where it is until the
+    /// selection moves on (ov-104 review).
     public static func shown(
-        _ rows: [TaskRow], reads: BoardReads, now: Date, calendar: Calendar = .current
+        _ rows: [TaskRow], reads: BoardReads, keeping: String? = nil, now: Date, calendar: Calendar = .current
     ) -> [TaskRow] {
         newestFirst(rows).enumerated()
             .filter { index, row in
-                index < floor || reads.finishedUnread(row) || calendar.isDate(row.statusSince, inSameDayAs: now)
+                index < floor || row.id == keeping || reads.finishedUnread(row)
+                    || calendar.isDate(row.statusSince, inSameDayAs: now)
             }
             .map(\.element)
     }
@@ -58,7 +61,7 @@ extension TaskBoardColumn {
         /// Left out of a long section until "Show N More".
         public var hidden: Int
         /// Done and Canceled: the row to the History page, with every task
-        /// in the status.
+        /// in the status, while some aren't drawn here.
         public var history: Int?
     }
 
@@ -67,19 +70,26 @@ extension TaskBoardColumn {
     public var orderedRows: [TaskRow] { status.isFinished ? BoardDone.newestFirst(rows) : rows }
 
     /// The rows this section draws. Done and Canceled by `BoardDone`'s rule,
-    /// with the History row; any other the first `limit` until `showingAll`.
-    /// A filtered list (`filtering`) shows every match.
+    /// with the History row while it leaves some out; any other the first
+    /// `limit` until `showingAll`. A filtered list (`filtering`) shows every
+    /// match. `keeping`, the task selected, is never cut.
     public func cut(
-        reads: BoardReads, showingAll: Bool = false, filtering: Bool = false, now: Date,
+        reads: BoardReads, keeping: String? = nil, showingAll: Bool = false, filtering: Bool = false, now: Date,
         calendar: Calendar = .current
     ) -> Cut {
         if status.isFinished {
-            let shown = filtering ? BoardDone.newestFirst(rows) : BoardDone.shown(rows, reads: reads, now: now, calendar: calendar)
-            return Cut(rows: shown, hidden: 0, history: rows.isEmpty ? nil : rows.count)
+            let shown = filtering
+                ? BoardDone.newestFirst(rows)
+                : BoardDone.shown(rows, reads: reads, keeping: keeping, now: now, calendar: calendar)
+            return Cut(rows: shown, hidden: 0, history: shown.count < rows.count ? rows.count : nil)
         }
         guard !showingAll, !filtering, rows.count > BoardSectionCut.limit else {
             return Cut(rows: rows, hidden: 0, history: nil)
         }
-        return Cut(rows: Array(rows.prefix(BoardSectionCut.limit)), hidden: rows.count - BoardSectionCut.limit, history: nil)
+        var shown = Array(rows.prefix(BoardSectionCut.limit))
+        if let keeping, !shown.contains(where: { $0.id == keeping }), let kept = rows.first(where: { $0.id == keeping }) {
+            shown.append(kept)
+        }
+        return Cut(rows: shown, hidden: rows.count - shown.count, history: nil)
     }
 }

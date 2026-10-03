@@ -45,6 +45,47 @@ struct NavigatorListTests {
         #expect(BoardKeys.rows(all, collapsed: [], reads: reads, filtering: true, now: Self.now).count == 6)
     }
 
+    /// Opening a finished row reads it, and it stays put while it's
+    /// selected, so ↑ and ↓ go on from it (ov-104 review M2).
+    @Test("An opened row stays in the walk until the selection moves on")
+    func anOpenedRowStaysWhileSelected() {
+        let today = (0..<3).map { Self.row("t\($0)", .done, ago: Double($0 + 1) * 60) }
+        // Finished before today began, so only being unread keeps it.
+        let start = Calendar.current.startOfDay(for: Self.now)
+        let yesterday = TaskRow(
+            id: "id-y", key: "y", title: "Mac: y", status: .done, statusSince: start.addingTimeInterval(-3600),
+            updatedAt: start.addingTimeInterval(-3600))
+        let board = TaskBoardModel(columns: [TaskBoardColumn(status: .done, rows: today + [yesterday])])
+        var reads = BoardReads(floor: start.addingTimeInterval(-2 * 86_400))
+        #expect(BoardKeys.rows(board, collapsed: [], reads: reads, now: Self.now).last == "id-y")
+        reads.open(yesterday, now: Self.now)
+        let walk = BoardKeys.rows(board, collapsed: [], reads: reads, keeping: "id-y", now: Self.now)
+        #expect(walk.last == "id-y")
+        #expect(BoardKeys.step(from: "id-y", by: -1, in: walk) == "id-t2")
+        #expect(!BoardKeys.rows(board, collapsed: [], reads: reads, now: Self.now).contains("id-y"))
+    }
+
+    /// History's note hits count only for the query they answered.
+    @Test("Stale note hits don't match the next query")
+    func staleNoteHits() {
+        let hits = NoteHits(query: "sqlite", ids: ["a"])
+        #expect(hits.ids(for: "sqlite") == ["a"])
+        #expect(hits.ids(for: "sqlit").isEmpty)
+    }
+
+    /// ⌘F says what it does, and Mark All as Read is offered beside a
+    /// navigator only.
+    @Test("⌘F's title and Mark All as Read follow the navigator")
+    func theMenuFollowsTheNavigator() {
+        let board = MainWindowFocus(overlayOpen: false, hasNavigator: true)
+        let none = MainWindowFocus(overlayOpen: false)
+        #expect(MainWindowFocus.findTitle(board) == "Filter Tasks")
+        #expect(MainWindowFocus.findTitle(none) == "Find Workspace, Task, or Agent…")
+        #expect(MainWindowFocus.marksRead(board))
+        #expect(!MainWindowFocus.marksRead(none))
+        #expect(!MainWindowFocus.marksRead(MainWindowFocus(overlayOpen: true, hasNavigator: true)))
+    }
+
     /// The History page is a place the window remembers, and its breadcrumb
     /// names it.
     @Test("The History page is kept and named like any other place")
@@ -62,17 +103,19 @@ struct NavigatorListTests {
     /// never "Finished (14)" (owner, ov-104).
     @Test("No navigator file puts a count in parentheses")
     func noParenthesizedCounts() throws {
-        let pattern = try Regex(#"\(\\\([\w.]*(count|total)\)\)"#)
+        // Any interpolation alone in parentheses: "(\(n))", "(\(items.count))".
+        let pattern = try Regex(#"\(\\\([^()]*\)\)"#)
         for file in ["TaskBoard.swift", "BoardSummaryStrip.swift", "BoardHistoryView.swift", "Navigator.swift", "BoardWorktreesSection.swift"] {
             var text = try String(contentsOf: Self.sources.appendingPathComponent(file), encoding: .utf8)
             if let cut = text.range(of: "struct TaskCard: View") { text = String(text[..<cut.lowerBound]) }
             for (index, line) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated()
-            where line.contains(pattern) {
+            where line.contains(pattern) && !line.contains("// not a count") {
                 Issue.record("\(file):\(index + 1) parenthesizes a count: \(line.trimmingCharacters(in: .whitespaces))")
             }
         }
-        // The scan sees one.
+        // The scan sees them.
         #expect("Text(\"\\(title) (\\(items.count))\")".contains(pattern))
+        #expect("Text(\"Finished (\\(n))\")".contains(pattern))
     }
 
     /// What the Unread list animates by: a ticket and what happened to it,
@@ -84,9 +127,9 @@ struct NavigatorListTests {
         let note = { (id: String, ago: TimeInterval) in
             TaskNoteRow(id: id, kind: .comment, actor: "user", at: Self.now.addingTimeInterval(-ago), body: "x")
         }
-        let window = BoardSummary.Window.since(Self.now.addingTimeInterval(-24 * Self.hour))
-        let one = BoardSummary.make(rows: [a], notes: ["id-a": [note("n1", 60)]], window: window)
-        let two = BoardSummary.make(rows: [a], notes: ["id-a": [note("n1", 60), note("n2", 30)]], window: window)
+        let reads = BoardReads(floor: Self.now.addingTimeInterval(-24 * Self.hour))
+        let one = BoardSummary.make(rows: [a], notes: ["id-a": [note("n1", 60)]], reads: reads)
+        let two = BoardSummary.make(rows: [a], notes: ["id-a": [note("n1", 60), note("n2", 30)]], reads: reads)
         #expect(BoardSummaryStrip.identities(one) == ["id-a/done", "id-a/activity/n1"])
         #expect(BoardArrivals.new(old: BoardSummaryStrip.identities(one), now: BoardSummaryStrip.identities(two)) == ["id-a/activity/n2"])
     }
@@ -107,9 +150,8 @@ struct NavigatorListTests {
             client: client, workspace: .implicit(repository: "r"),
             readStore: DefaultsBoardReads(UserDefaults(suiteName: "ov104-\(UUID().uuidString)")!))
         await store.reload()
-        let window = BoardSummary.Window.unread(store.reads)
-        #expect(BoardSummaryStrip.summary(store: store, window: window, filter: "").created.count == 2)
-        #expect(BoardSummaryStrip.summary(store: store, window: window, filter: "phones").created.map(\.key) == ["ov-2"])
+        #expect(BoardSummaryStrip.summary(store: store, reads: store.reads, filter: "").created.count == 2)
+        #expect(BoardSummaryStrip.summary(store: store, reads: store.reads, filter: "phones").created.map(\.key) == ["ov-2"])
     }
 
     /// The second line says what the header doesn't: never the status word.

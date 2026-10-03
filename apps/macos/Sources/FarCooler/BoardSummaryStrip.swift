@@ -4,22 +4,19 @@ import SwiftUI
 /// Unread (ov-104): a compact, collapsible strip at the top of the board
 /// listing what's new to this person, each item opening its task. An item
 /// stays until its ticket is opened, and opening it clears that ticket's
-/// items (`BoardReads`). Last Hour and Today are plain time windows instead,
-/// which reading doesn't change.
+/// items (`BoardReads`). Mark All as Read is in its header's context menu and
+/// in the Board menu.
 ///
 /// The board's header hosts it. What goes in the strip is `BoardSummary`'s;
-/// this view only chooses the period, draws the lines and reads the records of
-/// the tasks that moved.
+/// this view only draws the lines and reads the records of the tasks that
+/// moved.
 struct BoardSummaryStrip: View {
     @ObservedObject var store: TaskBoardStore
     let defaults: UserDefaults
     /// The navigator's filter (⌘F), which narrows this too.
     var filter = ""
 
-    @State private var period: BoardSummary.Period
     @State private var collapsed: Bool
-    /// Where the period's menu pops.
-    @State private var periodAnchor = MenuAnchor()
     /// What was listed at the last draw, by identity: what tells a new
     /// arrival from an item that was already there (`BoardArrivals`). Nil
     /// before the first, so nothing flashes on opening the board.
@@ -32,7 +29,6 @@ struct BoardSummaryStrip: View {
         self.store = store
         self.defaults = defaults
         self.filter = filter
-        _period = State(initialValue: Self.readPeriod(store, defaults))
         _collapsed = State(initialValue: defaults.bool(forKey: Self.collapsedKey(store)))
     }
 
@@ -40,20 +36,9 @@ struct BoardSummaryStrip: View {
         "board.summary.collapsed.\(store.hostKey).\(store.workspace.id)"
     }
 
-    private static func periodKey(_ store: TaskBoardStore) -> String {
-        "board.summary.period.\(store.hostKey).\(store.workspace.id)"
-    }
-
-    /// The period chosen on this Mac. Since Last Visit's old choice reads as
-    /// Unread, which replaced it.
-    static func readPeriod(_ store: TaskBoardStore, _ defaults: UserDefaults) -> BoardSummary.Period {
-        defaults.string(forKey: periodKey(store)).flatMap(BoardSummary.Period.init(rawValue:)) ?? .unread
-    }
-
     var body: some View {
         BoardTick { now in
-            let window = BoardSummary.window(period, reads: store.reads, now: now)
-            let summary = Self.summary(store: store, window: window, filter: filter)
+            let summary = Self.summary(store: store, reads: store.reads, filter: filter)
             // Through the board's one collapsible section (ov-92): it opens
             // and closes on the shared spring, as every other one does.
             CollapsibleSection(
@@ -65,13 +50,13 @@ struct BoardSummaryStrip: View {
                         defaults.set(collapsed, forKey: Self.collapsedKey(store))
                     }),
                 count: collapsed ? nil : summary.count,
-                accessibilityLabel: period.title, fillsRow: collapsed,
+                accessibilityLabel: "Unread",
                 label: { open in headerLabel(summary, open: open) },
-                accessory: { periodMenu(summary) }
+                accessory: { EmptyView() }
             ) {
                 VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
                     if summary.isEmpty {
-                        Text(BoardSummary.nothing(in: period))
+                        Text(BoardSummary.nothing)
                             .font(.system(size: WorkspaceStyle.PaneText.body))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -96,10 +81,16 @@ struct BoardSummaryStrip: View {
             .padding(.top, Self.insets(collapsed: collapsed).top)
             .padding(.bottom, Self.insets(collapsed: collapsed).bottom)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(WorkspaceStyle.document)
-            .task(id: Self.notesKey(window: window, generation: store.generation, count: store.board.rows.count, collapsed: collapsed)) {
+            // No slab of its own (ov-104 review): its header and the
+            // navigator's spacing set it apart, as variant B drew the list.
+            .contentShape(Rectangle())
+            .contextMenu {
+                Button("Mark All as Read") { store.markAllRead() }
+                    .disabled(summary.isEmpty)
+            }
+            .task(id: Self.notesKey(reads: store.reads, generation: store.generation, count: store.board.rows.count, collapsed: collapsed)) {
                 guard !collapsed else { return }
-                await store.readSummaryNotes(window: window)
+                await store.readSummaryNotes(reads: store.reads)
             }
             .onChange(of: Self.identities(summary), initial: true) { _, ids in arrive(ids) }
         }
@@ -107,10 +98,10 @@ struct BoardSummaryStrip: View {
         .accessibilityIdentifier("board-summary")
     }
 
-    /// The summary drawn: `store`'s board in `window`, narrowed by the
-    /// navigator's filter.
-    static func summary(store: TaskBoardStore, window: BoardSummary.Window, filter: String) -> BoardSummary {
-        let summary = BoardSummary.make(rows: store.board.rows, notes: store.summaryNotes, window: window)
+    /// The summary drawn: what's unread on `store`'s board by `reads`,
+    /// narrowed by the navigator's filter.
+    static func summary(store: TaskBoardStore, reads: BoardReads, filter: String) -> BoardSummary {
+        let summary = BoardSummary.make(rows: store.board.rows, notes: store.summaryNotes, reads: reads)
         guard !BoardFilter.isEmpty(filter) else { return summary }
         let keep = Set(store.board.rows.filter { BoardFilter.matches($0, filter) }.map(\.id))
         return summary.filtered { keep.contains($0) }
@@ -156,87 +147,39 @@ struct BoardSummaryStrip: View {
         return (insets.top + headerAir, insets.bottom + (collapsed ? headerAir : 0))
     }
 
-    /// The collapsed strip's one line: "3 unread", "2 new today".
-    static func collapsedLine(count: Int, period: BoardSummary.Period) -> String {
-        BoardSummary.collapsedLine(count: count, period: period)
-    }
+    /// The collapsed strip's one line: "3 unread".
+    static func collapsedLine(count: Int) -> String { BoardSummary.collapsedLine(count: count) }
 
     /// What a notes read is keyed on. `collapsed` is in it so a strip expanded
-    /// after launch reads its notes then, not at the next minute; the window
-    /// so a ticket opened, or the period changed, reads again.
+    /// after launch reads its notes then, not at the next minute; the read
+    /// state so a ticket opened reads again.
     struct NotesKey: Hashable {
-        var window: String
+        var reads: String
         var generation: Int
         var count: Int
         var collapsed: Bool
     }
 
-    static func notesKey(window: BoardSummary.Window, generation: Int, count: Int, collapsed: Bool) -> NotesKey {
-        let key: String
-        switch window {
-        case .unread(let reads):
-            key = "unread \(reads.floor.timeIntervalSince1970) \(reads.opened.values.map(\.timeIntervalSince1970).reduce(0, +))"
-        case .since(let start):
-            key = "since \((start.timeIntervalSince1970 / 60).rounded(.down))"
-        }
-        return NotesKey(window: key, generation: generation, count: count, collapsed: collapsed)
+    static func notesKey(reads: BoardReads, generation: Int, count: Int, collapsed: Bool) -> NotesKey {
+        let marks = reads.opened.values.map(\.timeIntervalSince1970).reduce(0, +)
+        return NotesKey(
+            reads: "\(reads.floor.timeIntervalSince1970) \(marks)", generation: generation, count: count,
+            collapsed: collapsed)
     }
 
-    /// Closed, the strip is one quiet line saying how much is new (ov-83).
+    /// "Unread" open; closed, one quiet line saying how much (ov-83).
     @ViewBuilder
     private func headerLabel(_ summary: BoardSummary, open: Bool) -> some View {
-        if !open {
-            Text(Self.collapsedLine(count: summary.count, period: period))
+        if open {
+            SectionTitle(text: "Unread", style: .group, gridRow: "summary")
+        } else {
+            Text(Self.collapsedLine(count: summary.count))
                 .font(.system(size: WorkspaceStyle.PaneText.body))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .gridMark("summary", .text)
         }
-    }
-
-    /// Open, the period is the heading, as a menu, with Mark All as Read
-    /// under Unread's.
-    @ViewBuilder
-    private func periodMenu(_ summary: BoardSummary) -> some View {
-        if !collapsed {
-            // A real menu, popped at its words, rather than a `Picker`:
-            // a pop-up button's bezel would put its words past column B
-            // by an inset nobody chose (see `SidebarMenuButton`).
-            Button {
-                var items = BoardSummary.Period.allCases.map { choice in
-                    SidebarMenuItem(
-                        title: choice.title, action: { choose(choice) },
-                        isChecked: choice == period)
-                }
-                if period == .unread, !summary.isEmpty {
-                    items.append(SidebarMenuItem(title: "Mark All as Read", action: { store.markAllRead() }))
-                }
-                SidebarMenuItem.popUp(items, under: periodAnchor)
-            } label: {
-                HStack(spacing: 4) {
-                    Text(period.title)
-                        .font(.system(size: WorkspaceStyle.PaneText.body, weight: .semibold))
-                        .lineLimit(1)
-                        .gridMark("summary", .text)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(.secondary)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .background(MenuAnchorView(anchor: periodAnchor))
-            .help("Choose what to list")
-            .accessibilityLabel("Period")
-            .accessibilityValue(period.title)
-            .accessibilityIdentifier("board-summary-period")
-        }
-    }
-
-    private func choose(_ choice: BoardSummary.Period) {
-        period = choice
-        defaults.set(choice.rawValue, forKey: Self.periodKey(store))
     }
 
     private func open(_ taskID: String) {

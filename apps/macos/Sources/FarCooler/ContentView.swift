@@ -359,7 +359,9 @@ struct ContentView: View {
         // is open over it. See `MainWindowFocus`.
         .focusedSceneValue(
             \.mainWindow,
-            MainWindowFocus(overlayOpen: showQuickCreate || showPalette, taskOpen: Self.taskOpen(selection)))
+            MainWindowFocus(
+                overlayOpen: showQuickCreate || showPalette, taskOpen: Self.taskOpen(selection),
+                hasNavigator: selection.flatMap(workspaceScene)?.board != nil))
         // The key window's alone: with two windows, both heard every
         // command, and ⌘B toggled one sidebar twice (review m2).
         .onCommand { command in if isKeyWindow { run(command) } }
@@ -4103,12 +4105,18 @@ struct ContentView: View {
         // In a workspace, ⌘F filters its navigator's tasks instead (ov-103):
         // the find a person in a list of tasks reaches for.
         case .search:
-            if case .workspace? = selection, selection.flatMap(workspaceScene)?.board != nil {
+            // A loose worktree draws its board's navigator too.
+            if selection.flatMap(workspaceScene)?.board != nil {
                 boardFilterRequest += 1
             } else if sidebarVisibility == .detailOnly {
                 showPalette = true
             } else {
                 searchFocused = true
+            }
+
+        case .markAllRead:
+            if let scene = selection.flatMap(workspaceScene), let board = scene.board {
+                boardStores["\(scene.host)/\(board)"]?.markAllRead()
             }
 
         // Toggles rather than opens. ⌘P on an open palette is what a hand

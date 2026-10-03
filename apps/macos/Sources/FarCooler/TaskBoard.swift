@@ -108,11 +108,11 @@ final class TaskBoardStore: ObservableObject {
         readStore.save(reads, host: hostKey, workspace: workspace.id)
     }
 
-    /// Read the records of the few tasks that moved inside `window`, so the
-    /// summary can list their notes. One `task show` each, remembered until
+    /// Read the records of the tasks that moved since they were read, so
+    /// Unread can list their notes. One `task show` each, remembered until
     /// the task's `updatedAt` moves.
-    func readSummaryNotes(window: BoardSummary.Window) async {
-        let picked = BoardSummary.noteCandidates(rows: board.rows, window: window)
+    func readSummaryNotes(reads: BoardReads) async {
+        let picked = BoardSummary.noteCandidates(rows: board.rows, reads: reads)
         for row in picked where noteCache[row.id]?.updatedAt != row.updatedAt {
             let (data, _) = await client.taskDetail(key: row.key, repository: repositoryID)
             guard let data, let read = try? TaskDetailModel.decode(data) else { continue }
@@ -513,7 +513,7 @@ struct BoardPane: Identifiable, Equatable {
         let plain = panes.map(\.title)
         let counts = Dictionary(plain.map { ($0, 1) }, uniquingKeysWith: +)
         return zip(panes, plain).map { pane, title in
-            counts[title, default: 0] > 1 ? "\(title) (\(pane.terminal.short))" : title
+            counts[title, default: 0] > 1 ? "\(title) (\(pane.terminal.short))" : title  // not a count: a twin pane told apart by its id
         }
     }
 
@@ -993,7 +993,7 @@ struct TaskBoardView: View {
                 ? []
                 : BoardKeys.rows(
                     BoardFilter.narrowed(store.board, filter), collapsed: collapsed, reads: store.reads,
-                    showingMore: showingMore, filtering: filtering, now: Date()),
+                    keeping: selected, showingMore: showingMore, filtering: filtering, now: Date()),
             worktrees: closedSections.contains("worktrees") ? [] : BoardWorktreesSection.rows(worktrees).map(\.id))
     }
 
@@ -1061,15 +1061,19 @@ enum BoardKeys {
     /// The tasks the list shows, top to bottom: the expanded sections' rows,
     /// as each is cut (`TaskBoardColumn.cut`): Done's by its rule, a long
     /// one's first ten until it shows more.
+    /// `keeping`, the task selected, stays where it is though opening it
+    /// read it, so ↑ and ↓ go on from it (ov-104 review).
     static func rows(
-        _ board: TaskBoardModel, collapsed: Set<TaskStatus>, reads: BoardReads, showingMore: Set<TaskStatus> = [],
-        filtering: Bool = false, now: Date
+        _ board: TaskBoardModel, collapsed: Set<TaskStatus>, reads: BoardReads, keeping: String? = nil,
+        showingMore: Set<TaskStatus> = [], filtering: Bool = false, now: Date
     ) -> [String] {
         // Filtering opens every section with a match.
         board.sections
             .filter { BoardForm.isExpanded($0, collapsed: filtering ? [] : collapsed) }
             .flatMap {
-                $0.cut(reads: reads, showingAll: showingMore.contains($0.status), filtering: filtering, now: now)
+                $0.cut(
+                    reads: reads, keeping: keeping, showingAll: showingMore.contains($0.status), filtering: filtering,
+                    now: now)
                     .rows.map(\.id)
             }
     }
@@ -1198,7 +1202,15 @@ private struct TaskListSection: View {
     private var leads: Bool { section.status == .needsDecision }
 
     var body: some View {
-        let cut = section.cut(reads: store.reads, showingAll: showingMore, filtering: filtering, now: Date())
+        // On the board's tick, so Done's "today" turns over at midnight on a
+        // board nothing else redraws (ov-104 review).
+        BoardTick { now in
+            content(section.cut(
+                reads: store.reads, keeping: selected, showingAll: showingMore, filtering: filtering, now: now))
+        }
+    }
+
+    private func content(_ cut: TaskBoardColumn.Cut) -> some View {
         // Its chevron at column A, its title at B, its count trailing
         // (ov-83), through the board's one collapsible section (ov-92).
         CollapsibleSection(

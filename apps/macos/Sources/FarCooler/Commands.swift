@@ -21,6 +21,8 @@ enum AppCommand: String {
     case reload
     case showShortcuts
     case search
+    /// Board ▸ Mark All as Read: the navigator's Unread, read (ov-104).
+    case markAllRead
     case commandPalette
     case toggleSidebar
     case diffNextHunk
@@ -214,6 +216,13 @@ struct FarCoolerCommands: Commands {
             }
         }
 
+        // The navigator's board. Mark All as Read is the Unread section's
+        // context menu too; here so it can be found (ov-104 review).
+        CommandMenu("Board") {
+            Button("Mark All as Read") { AppCommand.markAllRead.post() }
+                .disabled(!MainWindowFocus.marksRead(mainWindow))
+        }
+
         CommandMenu("Terminal") {
             Button("Next Terminal") { AppCommand.nextTerminal.post() }
                 .keyboardShortcut("]", modifiers: .command)
@@ -396,7 +405,9 @@ struct FarCoolerCommands: Commands {
             // Search is navigation here, not a nicety: worktrees are unbounded
             // and typing is the fastest way to any of them, on any runner.
             CommandGroup(after: .textEditing) {
-                Button("Find Workspace, Task, or Agent…") { AppCommand.search.post() }
+                // In a workspace, ⌘F filters its navigator's tasks (ov-103),
+                // and says so; elsewhere it's the sidebar's find.
+                Button(MainWindowFocus.findTitle(mainWindow)) { AppCommand.search.post() }
                     .keyboardShortcut("f", modifiers: .command)
             }
 

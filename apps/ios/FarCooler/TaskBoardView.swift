@@ -189,6 +189,14 @@ struct WorkspaceBoardList: View {
                             }
                             .font(.footnote)
                             .accessibilityIdentifier("board-show-more-\(section.id)")
+                        } else if showingMore.contains(section.status), !section.status.isFinished,
+                            section.rows.count > BoardSectionCut.limit
+                        {
+                            Button("Show Fewer") {
+                                withAnimation { _ = showingMore.remove(section.status) }
+                            }
+                            .font(.footnote)
+                            .accessibilityIdentifier("board-show-fewer-\(section.id)")
                         }
                         if let total = cut.history {
                             // "All Done  94 ›": the History page, pushed.

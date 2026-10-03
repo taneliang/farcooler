@@ -293,19 +293,21 @@ struct OrchestratorRowView: View {
     }
 }
 
-/// The filter field atop the navigator (⌘F, ov-103): the system's own
-/// rounded field, a magnifying glass in it, and a clear button while it
-/// holds something. Esc clears it; on an empty field, Esc leaves it
+/// The filter field atop the navigator (⌘F, ov-103), and the History
+/// page's search: a rounded field, its glyph (the filter's funnel lines, or
+/// search's magnifying glass) in it, and a clear button while it holds
+/// something. Esc clears it; on an empty field, Esc leaves it
 /// (`onLeave`), as the sidebar's search does (`SearchEscape`).
 struct NavigatorFilterField: View {
     @Binding var text: String
     var focused: FocusState<Bool>.Binding
     var placeholder = "Filter"
+    var glyph = "line.3.horizontal.decrease"
     let onLeave: () -> Void
 
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: "line.3.horizontal.decrease")
+            Image(systemName: glyph)
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
             TextField(placeholder, text: $text)

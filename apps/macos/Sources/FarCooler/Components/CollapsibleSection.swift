@@ -187,7 +187,9 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
                         .font(.system(size: 9, weight: .bold))
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                         .foregroundStyle(.secondary)
-                        .opacity(canExpand ? 1 : 0.35)
+                        // None on an empty section: a dimmed chevron read
+                        // as a disabled control (ov-104 review).
+                        .opacity(canExpand ? 1 : 0)
                         .frame(width: ColumnGrid.step, alignment: .leading)
                         .gridMark(Self.gridRow(id), .chevron)
                     label(expanded)

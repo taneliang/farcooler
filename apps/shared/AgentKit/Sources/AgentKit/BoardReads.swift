@@ -86,12 +86,16 @@ public struct DefaultsBoardReads: BoardReadStore {
     }
 
     /// What's kept, or, the first time, the board's last visit (what Since
-    /// Last Visit kept) else the last day, written so it holds still.
+    /// Last Visit kept) if it's within the last day, else the last day,
+    /// written so it holds still.
     public func load(host: String, workspace: String, now: Date) -> BoardReads {
         let floorKey = Self.floorKey(host: host, workspace: workspace)
         guard defaults.object(forKey: floorKey) != nil else {
-            let first = BoardVisit.read(host: host, workspace: workspace, from: defaults)
-                .map { BoardReads(floor: $0) } ?? .firstLook(now: now)
+            // Never further back than a first look: a board last visited
+            // weeks ago would otherwise call every task finished since
+            // unread, and Done would list them all (ov-104 review).
+            let visit = BoardVisit.read(host: host, workspace: workspace, from: defaults)
+            let first = BoardReads(floor: max(visit ?? .distantPast, BoardReads.firstLook(now: now).floor))
             save(first, host: host, workspace: workspace)
             return first
         }

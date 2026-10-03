@@ -41,56 +41,56 @@ struct BoardSummaryStoreTests {
         let defaults = defaults()
         let store = store(defaults: defaults)
         await store.reload()
-        let window = BoardSummary.window(.unread, reads: store.reads, now: Date())
-        await store.readSummaryNotes(window: window)
-        let before = BoardSummary.make(rows: store.board.rows, notes: store.summaryNotes, window: window)
+        await store.readSummaryNotes(reads: store.reads)
+        let before = BoardSummary.make(rows: store.board.rows, notes: store.summaryNotes, reads: store.reads)
         #expect(before.activity.map(\.key) == ["a-1"])
 
         let row = try #require(store.board.rows.first)
         await store.open(row)
         let after = BoardSummary.make(
-            rows: store.board.rows, notes: store.summaryNotes, window: .unread(store.reads))
+            rows: store.board.rows, notes: store.summaryNotes, reads: store.reads)
         #expect(after.isEmpty, "still unread after opening: \(after)")
 
         let again = self.store(defaults: defaults)
         #expect(again.reads.opened.keys.sorted() == ["t1"])
         #expect(abs(again.reads.floor.timeIntervalSince(store.reads.floor)) < 0.001)
-        #expect(!BoardSummary.make(rows: store.board.rows, notes: store.summaryNotes, window: .unread(again.reads)).activity.contains { $0.key == "a-1" })
+        #expect(!BoardSummary.make(rows: store.board.rows, notes: store.summaryNotes, reads: again.reads).activity.contains { $0.key == "a-1" })
     }
 
-    /// Mark All as Read empties Unread, and Last Hour still lists the same.
-    @Test func markAllAsReadEmptiesUnreadOnly() async {
-        let store = store()
+    /// Mark All as Read empties Unread, and keeps it so.
+    @Test func markAllAsReadEmptiesUnread() async {
+        let defaults = defaults()
+        let store = store(defaults: defaults)
         await store.reload()
-        let hour = BoardSummary.Window.since(Date().addingTimeInterval(-3600))
-        await store.readSummaryNotes(window: hour)
+        await store.readSummaryNotes(reads: store.reads)
+        #expect(!BoardSummary.make(rows: store.board.rows, notes: store.summaryNotes, reads: store.reads).isEmpty)
         store.markAllRead()
-        #expect(BoardSummary.make(rows: store.board.rows, notes: store.summaryNotes, window: .unread(store.reads)).isEmpty)
-        #expect(!BoardSummary.make(rows: store.board.rows, notes: store.summaryNotes, window: hour).isEmpty)
+        #expect(BoardSummary.make(rows: store.board.rows, notes: store.summaryNotes, reads: store.reads).isEmpty)
+        #expect(BoardSummary.make(rows: store.board.rows, notes: store.summaryNotes, reads: self.store(defaults: defaults).reads).isEmpty)
     }
 
     @Test func aMovedTasksDecisionIsReadOnceAndKept() async {
         var shown: [String] = []
         let store = store { shown.append($0) }
         await store.reload()
-        let window = BoardSummary.Window.since(Date().addingTimeInterval(-3600))
-        await store.readSummaryNotes(window: window)
-        await store.readSummaryNotes(window: window)
+        let reads = BoardReads(floor: Date().addingTimeInterval(-3600))
+        await store.readSummaryNotes(reads: reads)
+        await store.readSummaryNotes(reads: reads)
         #expect(shown == ["a-1"], "read again though nothing moved")
-        let summary = BoardSummary.make(rows: store.board.rows, notes: store.summaryNotes, window: window)
+        let summary = BoardSummary.make(rows: store.board.rows, notes: store.summaryNotes, reads: reads)
         #expect(summary.activity.map(\.text) == ["Use SQLite"])
     }
 
     /// A strip expanded after launch reads its notes then: expanding changes the key.
     @Test func expandingTheStripChangesWhatTheNotesReadIsKeyedOn() {
         let at = Date(timeIntervalSince1970: 1_800_000_000)
-        let closed = BoardSummaryStrip.notesKey(window: .since(at), generation: 1, count: 3, collapsed: true)
-        let open = BoardSummaryStrip.notesKey(window: .since(at), generation: 1, count: 3, collapsed: false)
+        let closed = BoardSummaryStrip.notesKey(reads: BoardReads(floor: at), generation: 1, count: 3, collapsed: true)
+        let open = BoardSummaryStrip.notesKey(reads: BoardReads(floor: at), generation: 1, count: 3, collapsed: false)
         #expect(closed != open)
         // A ticket opened reads the notes again.
         var reads = BoardReads(floor: at)
-        let before = BoardSummaryStrip.notesKey(window: .unread(reads), generation: 1, count: 3, collapsed: false)
+        let before = BoardSummaryStrip.notesKey(reads: reads, generation: 1, count: 3, collapsed: false)
         reads.open(TaskRow(id: "t", key: "k", title: "", status: .todo, statusSince: at), now: at)
-        #expect(BoardSummaryStrip.notesKey(window: .unread(reads), generation: 1, count: 3, collapsed: false) != before)
+        #expect(BoardSummaryStrip.notesKey(reads: reads, generation: 1, count: 3, collapsed: false) != before)
     }
 }

@@ -14,8 +14,9 @@ struct BoardHistoryView: View {
 
     @State private var query = ""
     @State private var area: String?
-    /// The tasks whose notes carry `query`, as the runner last answered.
-    @State private var noteHits: Set<String> = []
+    /// The tasks whose notes carry a query, as the runner last answered,
+    /// and which query that was.
+    @State private var noteHits = NoteHits()
     @FocusState private var searchFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -23,10 +24,10 @@ struct BoardHistoryView: View {
 
     var body: some View {
         let all = rows
-        let found = BoardHistory.filter(all, query: query, area: area, noteHits: noteHits)
+        let found = BoardHistory.filter(all, query: query, area: area, noteHits: noteHits.ids(for: query))
         BoardTick { now in
             ScrollView {
-                VStack(alignment: .leading, spacing: 2 * ColumnGrid.rhythm) {
+                LazyVStack(alignment: .leading, spacing: 2 * ColumnGrid.rhythm) {
                     header(total: all.count)
                     chips(BoardHistory.areas(all))
                     if found.isEmpty {
@@ -64,16 +65,16 @@ struct BoardHistoryView: View {
         }
         .environment(\.taskKeyWidth, TaskKeyColumn.width(for: all.map(\.key)))
         .background(WorkspaceStyle.document)
-        // The runner's note search, a moment after typing stops.
+        // The runner's note search, a moment after typing stops. It matches
+        // the phrase as typed, where keys and titles match every word: the
+        // record's search is literal (`task search`). Its hits count only
+        // for the query they answered (`NoteHits`).
         .task(id: query) {
-            guard !BoardFilter.isEmpty(query) else {
-                noteHits = []
-                return
-            }
+            guard !BoardFilter.isEmpty(query) else { return }
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
             let hits = await store.noteHits(query)
-            if !Task.isCancelled { noteHits = hits }
+            if !Task.isCancelled { noteHits = NoteHits(query: query, ids: hits) }
         }
         .onAppear { searchFocused = true }
         .accessibilityIdentifier("board-history")
@@ -88,7 +89,10 @@ struct BoardHistoryView: View {
                 SectionCount(count: total)
             }
             .padding(.leading, ColumnGrid.step)
-            NavigatorFilterField(text: $query, focused: $searchFocused, placeholder: "Search keys, titles and notes") {
+            NavigatorFilterField(
+                text: $query, focused: $searchFocused, placeholder: "Search keys, titles, and notes",
+                glyph: "magnifyingglass"
+            ) {
                 searchFocused = false
             }
             .padding(.leading, ColumnGrid.step)
@@ -103,6 +107,16 @@ struct BoardHistoryView: View {
                 .padding(.leading, ColumnGrid.step)
         }
     }
+}
+
+/// The runner's note-search answer, kept with the query it answered: it
+/// counts only for that query, so the last one's hits never hold rows in
+/// while the next is being asked (ov-104 review).
+struct NoteHits: Equatable {
+    var query = ""
+    var ids: Set<String> = []
+
+    func ids(for current: String) -> Set<String> { current == query ? ids : [] }
 }
 
 /// A row of area chips, wrapping onto as many lines as it takes.

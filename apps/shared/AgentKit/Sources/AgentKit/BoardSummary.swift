@@ -1,59 +1,19 @@
 import Foundation
 
-/// What changed on a board: what's unread (ov-104), or what happened in the
-/// last hour or today.
+/// What's unread on a board (ov-104): what finished, moved to the person or
+/// was filed, and the notes written, that this person hasn't seen, an item
+/// staying until its ticket is opened (`BoardReads`).
 ///
 /// Built from what the board already holds, so it costs nothing to keep
 /// current. A task's `statusSince` says when it finished or moved to Needs
 /// Decision or In Review (the status it is in now, entered then), and
 /// `createdAt` says when it was filed. Notes live in a task's record, which
-/// `task list` doesn't carry; `noteCandidates` names the few tasks whose
-/// record is worth reading, and `make` takes what was read.
+/// `task list` doesn't carry; `noteCandidates` names the tasks whose record
+/// is worth reading, and `make` takes what was read.
+///
+/// Last Hour and Today, the plain windows Since Last Visit offered beside it,
+/// are gone (owner, ov-104 review): they didn't act like unreads.
 public struct BoardSummary: Equatable, Sendable {
-    /// What the summary covers.
-    public enum Period: String, CaseIterable, Sendable, Hashable, Identifiable {
-        /// Everything not read yet: an item stays until its ticket is opened.
-        case unread
-        /// A plain time window: reading changes nothing in it.
-        case lastHour
-        case today
-
-        public var id: String { rawValue }
-
-        public var title: String {
-            switch self {
-            case .unread: return "Unread"
-            case .lastHour: return "Last Hour"
-            case .today: return "Today"
-            }
-        }
-    }
-
-    /// Which items a summary takes: the unread ones, or those since a moment.
-    public enum Window: Equatable, Sendable {
-        case unread(BoardReads)
-        case since(Date)
-
-        /// Whether something that happened on `taskID` at `at` is in it.
-        public func includes(_ taskID: String, at: Date) -> Bool {
-            switch self {
-            case .unread(let reads): return reads.isUnread(taskID, at: at)
-            case .since(let start): return at >= start
-            }
-        }
-    }
-
-    /// The window `period` is, now.
-    public static func window(
-        _ period: Period, reads: BoardReads, now: Date, calendar: Calendar = .current
-    ) -> Window {
-        switch period {
-        case .unread: return .unread(reads)
-        case .lastHour: return .since(now.addingTimeInterval(-60 * 60))
-        case .today: return .since(calendar.startOfDay(for: now))
-        }
-    }
-
     /// One line of the summary, and the task it opens.
     ///
     /// `id` is the ticket's and what happened to it ("<task>/done"), so a
@@ -117,13 +77,13 @@ public struct BoardSummary: Equatable, Sendable {
         public var moreLine: String? { more > 0 ? "+\(more) more" : nil }
     }
 
-    /// Tasks that reached Done in the window.
+    /// Tasks that reached Done, unread.
     public var finished: [Item]
-    /// Tasks now in Needs Decision or In Review that got there in the window.
+    /// Tasks now in Needs Decision or In Review that got there, unread.
     public var moved: [Item]
-    /// Tasks filed in the window and not listed above.
+    /// Tasks filed, unread, and not listed above.
     public var created: [Item]
-    /// Notes written in the window, one entry per ticket.
+    /// Notes unread, one entry per ticket.
     public var activity: [Activity]
 
     public init(finished: [Item] = [], moved: [Item] = [], created: [Item] = [], activity: [Activity] = []) {
@@ -154,31 +114,29 @@ public struct BoardSummary: Equatable, Sendable {
     }
 
     /// What the strip says when it has nothing to list.
-    public static func nothing(in period: Period) -> String {
-        switch period {
-        case .unread: return "You’re all caught up."
-        case .lastHour: return "Nothing new in the last hour."
-        case .today: return "Nothing new today."
-        }
-    }
+    public static let nothing = "You’re all caught up."
 
     /// The note kinds Activity lists: every one a person or an agent writes.
     /// A move and a filing are the Finished and New groups' already.
     public static func listed(_ kind: TaskNoteKind) -> Bool { !kind.isMachineWritten }
 
+    /// How many tickets' records Unread reads for Activity at most: enough for
+    /// a busy night.
+    public static let noteLimit = 30
+
     /// The tasks whose records are worth reading for notes: those that moved
-    /// inside `window`, most recent first, at most `limit`. A card nothing
-    /// touched can't have a new note.
-    public static func noteCandidates(rows: [TaskRow], window: Window, limit: Int = 10) -> [TaskRow] {
-        rows.filter { $0.status != .cancelled && window.includes($0.id, at: $0.lastMoved) }
+    /// since they were last read, most recent first, at most `limit`. A card
+    /// nothing touched can't have a new note.
+    public static func noteCandidates(rows: [TaskRow], reads: BoardReads, limit: Int = noteLimit) -> [TaskRow] {
+        rows.filter { $0.status != .cancelled && reads.isUnread($0.id, at: $0.lastMoved) }
             .sorted { $0.lastMoved > $1.lastMoved }
             .prefix(limit).map { $0 }
     }
 
-    /// The summary of `rows` in `window`, with `notes` keyed by task id for
+    /// What's unread on `rows` by `reads`, with `notes` keyed by task id for
     /// the tasks whose records were read. Newest first in each list.
     public static func make(
-        rows: [TaskRow], notes: [String: [TaskNoteRow]] = [:], window: Window
+        rows: [TaskRow], notes: [String: [TaskNoteRow]] = [:], reads: BoardReads
     ) -> BoardSummary {
         var finished: [Item] = []
         var moved: [Item] = []
@@ -187,7 +145,7 @@ public struct BoardSummary: Equatable, Sendable {
             func item(_ what: String, _ detail: String?, at: Date) -> Item {
                 Item(id: "\(row.id)/\(what)", taskID: row.id, key: row.key, title: row.title, detail: detail, at: at)
             }
-            let changed = window.includes(row.id, at: row.statusSince)
+            let changed = reads.isUnread(row.id, at: row.statusSince)
             switch row.status {
             case .done where changed:
                 finished.append(item("done", nil, at: row.statusSince))
@@ -196,7 +154,7 @@ public struct BoardSummary: Equatable, Sendable {
             case .cancelled:
                 break
             default:
-                if let filed = row.createdAt, window.includes(row.id, at: filed) {
+                if let filed = row.createdAt, reads.isUnread(row.id, at: filed) {
                     created.append(item("created", nil, at: filed))
                 }
             }
@@ -204,7 +162,7 @@ public struct BoardSummary: Equatable, Sendable {
         var activity: [Activity] = []
         for row in rows where row.status != .cancelled {
             let written = (notes[row.id] ?? [])
-                .filter { listed($0.kind) && window.includes(row.id, at: $0.at) }
+                .filter { listed($0.kind) && reads.isUnread(row.id, at: $0.at) }
                 .sorted { $0.at > $1.at }
             guard let newest = written.first else { continue }
             activity.append(
@@ -224,13 +182,9 @@ public struct BoardSummary: Equatable, Sendable {
         body.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
-    /// The closed strip's one line: "3 unread", "2 new today".
-    public static func collapsedLine(count: Int, period: Period) -> String {
-        switch period {
-        case .unread: return count == 0 ? "Nothing unread" : "\(count) unread"
-        case .lastHour: return count == 0 ? "Nothing new in the last hour" : "\(count) new in the last hour"
-        case .today: return count == 0 ? "Nothing new today" : "\(count) new today"
-        }
+    /// The closed strip's one line: "3 unread".
+    public static func collapsedLine(count: Int) -> String {
+        count == 0 ? "Nothing unread" : "\(count) unread"
     }
 }
 

@@ -16,6 +16,21 @@ struct MainWindowFocus: Equatable {
     var overlayOpen: Bool
     /// A task is open in the main area, with its tabs (ov-98).
     var taskOpen = false
+    /// A workspace's navigator is on screen: ⌘F filters its tasks, and Board
+    /// ▸ Mark All as Read reads its Unread (ov-104).
+    var hasNavigator = false
+
+    /// What ⌘F says it does: the navigator's filter in a workspace (or a
+    /// loose worktree beside one), else the sidebar's find.
+    static func findTitle(_ focus: MainWindowFocus?) -> String {
+        focus?.hasNavigator == true ? "Filter Tasks" : "Find Workspace, Task, or Agent…"
+    }
+
+    /// Board ▸ Mark All as Read acts only on a navigator in the key main
+    /// window, nothing over it.
+    static func marksRead(_ focus: MainWindowFocus?) -> Bool {
+        navigates(focus) && focus?.hasNavigator == true
+    }
 
     /// A task's next or previous tab (⌃⌘] and ⌃⌘[) acts only with a task
     /// open in the key main window, nothing over it.

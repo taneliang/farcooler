@@ -16,6 +16,11 @@ private let utc: Calendar = {
     return cal
 }()
 
+
+/// Unread as of `start`: what a summary "since" a moment is, with nothing
+/// opened.
+private func unreadSince(_ start: Date) -> BoardReads { BoardReads(floor: start.addingTimeInterval(-0.001)) }
+
 private func row(
     _ key: String, _ status: TaskStatus, since ago: TimeInterval, created: TimeInterval? = nil, title: String? = nil
 ) -> TaskRow {
@@ -35,20 +40,20 @@ func openingATicketClearsItsUnreadItems() {
     let fin = row("fin", .done, since: hour)
     let new = row("new", .todo, since: 2 * hour, created: 2 * hour)
     let notes = ["id-new": [note("n1", .comment, ago: 30 * 60)]]
-    let before = BoardSummary.make(rows: [fin, new], notes: notes, window: .unread(reads))
+    let before = BoardSummary.make(rows: [fin, new], notes: notes, reads: reads)
     #expect(before.finished.map(\.key) == ["fin"])
     #expect(before.created.map(\.key) == ["new"])
     #expect(before.activity.map(\.key) == ["new"])
 
     reads.open(new, now: now)
-    let after = BoardSummary.make(rows: [fin, new], notes: notes, window: .unread(reads))
+    let after = BoardSummary.make(rows: [fin, new], notes: notes, reads: reads)
     #expect(after.created.isEmpty)
     #expect(after.activity.isEmpty)
     #expect(after.finished.map(\.key) == ["fin"], "another ticket's item stays")
 
     // A note written after it was opened is unread again.
     let later = ["id-new": [note("n2", .finding, ago: -60)]]
-    #expect(BoardSummary.make(rows: [new], notes: later, window: .unread(reads)).activity.map(\.noteID) == ["n2"])
+    #expect(BoardSummary.make(rows: [new], notes: later, reads: reads).activity.map(\.noteID) == ["n2"])
 
     // A runner clock ahead of this one: what it stamped is read on opening.
     var ahead = BoardReads(floor: now.addingTimeInterval(-day))
@@ -57,11 +62,11 @@ func openingATicketClearsItsUnreadItems() {
     #expect(!ahead.finishedUnread(future))
 
     // Last Hour and Today don't read: opening changes nothing in them.
-    #expect(BoardSummary.make(rows: [fin, new], notes: notes, window: .since(now.addingTimeInterval(-3 * hour))).created.map(\.key) == ["new"])
+    #expect(BoardSummary.make(rows: [fin, new], notes: notes, reads: unreadSince(now.addingTimeInterval(-3 * hour))).created.map(\.key) == ["new"])
 
     // Mark All as Read.
     reads.markAllRead(rows: [fin, new], now: now)
-    #expect(BoardSummary.make(rows: [fin, new], notes: notes, window: .unread(reads)).isEmpty)
+    #expect(BoardSummary.make(rows: [fin, new], notes: notes, reads: reads).isEmpty)
     #expect(reads.opened.isEmpty)
 }
 
@@ -74,6 +79,9 @@ func readStateIsKeptPerRunnerAndWorkspace() {
     // Since Last Visit's stamp, where there is one.
     BoardVisit.write(now.addingTimeInterval(-5 * hour), host: "h", workspace: "v", in: defaults)
     #expect(store.load(host: "h", workspace: "v", now: now).floor == now.addingTimeInterval(-5 * hour))
+    // One from weeks ago is held to the last day, so Done isn't flooded.
+    BoardVisit.write(now.addingTimeInterval(-30 * day), host: "h", workspace: "old", in: defaults)
+    #expect(store.load(host: "h", workspace: "old", now: now).floor == now.addingTimeInterval(-day))
 
     var reads = store.load(host: "h", workspace: "w", now: now)
     reads.open(row("a", .todo, since: hour), now: now)
@@ -98,7 +106,7 @@ func activityIsOneEntryPerTicket() {
         "id-b": [note("b1", .question, ago: 20 * 60, "Which?")],
         "id-x": [note("x1", .finding, ago: 60)],
     ]
-    let activity = BoardSummary.make(rows: rows, notes: notes, window: .since(now.addingTimeInterval(-day))).activity
+    let activity = BoardSummary.make(rows: rows, notes: notes, reads: unreadSince(now.addingTimeInterval(-day))).activity
     #expect(activity.map(\.key) == ["a", "b"])
     #expect(activity[0].noteID == "a2")
     #expect(activity[0].kind == .comment)
@@ -113,13 +121,13 @@ func activityIsOneEntryPerTicket() {
 func identityIsTheTicketsAndTheNotes() {
     let a = row("a", .done, since: hour)
     let notes = ["id-a": [note("n1", .comment, ago: 60)]]
-    let one = BoardSummary.make(rows: [a], notes: notes, window: .since(now.addingTimeInterval(-day)))
+    let one = BoardSummary.make(rows: [a], notes: notes, reads: unreadSince(now.addingTimeInterval(-day)))
     #expect(one.finished.map(\.id) == ["id-a/done"])
     #expect(one.activity.map(\.id) == ["id-a/activity"])
     // A newer note keeps the entry, under a new note id.
     let two = BoardSummary.make(
         rows: [a], notes: ["id-a": notes["id-a"]! + [note("n2", .decision, ago: 30)]],
-        window: .since(now.addingTimeInterval(-day)))
+        reads: unreadSince(now.addingTimeInterval(-day)))
     #expect(two.activity.map(\.id) == one.activity.map(\.id))
     #expect(two.activity.first?.noteID == "n2")
     // What arrived: by id, nothing on a first draw.
@@ -185,7 +193,7 @@ func theFilterNarrowsEverySection() {
     #expect(BoardFilter.narrowed(board, "OV-3").rows.map(\.key) == ["ov-3"])
     #expect(BoardFilter.narrowed(board, "nothing").columns.count == 2)
     #expect(BoardFilter.narrowed(board, "  ") == board)
-    let summary = BoardSummary.make(rows: board.rows, window: .since(now.addingTimeInterval(-day)))
+    let summary = BoardSummary.make(rows: board.rows, reads: unreadSince(now.addingTimeInterval(-day)))
     #expect(summary.filtered { id in mac.rows.contains { $0.id == id } }.finished.map(\.key) == ["ov-2"])
 }
 
@@ -193,9 +201,9 @@ func theFilterNarrowsEverySection() {
 func countsAreNeverParenthesized() {
     for line in [
         BoardDone.historyTitle(.done), BoardSectionCut.showMoreTitle(4),
-        BoardSummary.collapsedLine(count: 3, period: .unread), BoardSummary.collapsedLine(count: 2, period: .today),
+        BoardSummary.collapsedLine(count: 3), BoardSummary.collapsedLine(count: 0),
     ] {
         #expect(!line.contains("("), "\(line)")
     }
-    #expect(BoardSummary.collapsedLine(count: 3, period: .unread) == "3 unread")
+    #expect(BoardSummary.collapsedLine(count: 3) == "3 unread")
 }
