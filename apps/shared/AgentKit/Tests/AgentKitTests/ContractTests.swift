@@ -151,24 +151,25 @@ struct PulseContractTests {
 }
 
 struct PushContractTests {
-    /// What each alert the relay sends an Apple device opens, and the task
+    /// Where each alert the relay sends an Apple device opens (its `Destination`'s
+    /// place; ov-183 replaced `PushTap` with it), and the task
     /// notice it carries. Every fixture must have a line here.
-    static let expected: [String: (tap: PushTap, notice: TaskNotice?)] = [
+    static let expected: [String: (tap: Destination.Place, notice: TaskNotice?)] = [
         "agent-blocked": (.terminal("term-01999a8f2c4e"), nil),
         "agent-done-failed": (.terminal("term-01999a90aa10"), nil),
         "decision-legacy": (
-            .task(DecisionPush(key: "ov-90", runner: runner)),
+            .task(workspace: nil, task: .init(key: "ov-90")),
             TaskNotice(key: "ov-90", runner: runner, event: .decision, noticeId: noticeId, options: ["pdfkit", "pdf.js"])
         ),
         // A runner older than ov-94: no event and no notice id, so it opens
         // the task's card and is no task notice.
-        "decision-old-runner": (.task(DecisionPush(key: "ov-90", runner: runner)), nil),
+        "decision-old-runner": (.task(workspace: nil, task: .init(key: "ov-90")), nil),
         "task-decision": (
-            .task(DecisionPush(key: "ov-90", runner: runner)),
+            .task(workspace: nil, task: .init(key: "ov-90")),
             TaskNotice(key: "ov-90", runner: runner, event: .decision, noticeId: noticeId, options: ["pdfkit", "pdf.js"])
         ),
         "task-review": (
-            .task(DecisionPush(key: "ov-90", runner: runner)),
+            .task(workspace: nil, task: .init(key: "ov-90")),
             TaskNotice(key: "ov-90", runner: runner, event: .review, noticeId: noticeId, options: [])
         ),
     ]
@@ -184,7 +185,7 @@ struct PushContractTests {
         let aps = try #require(userInfo["aps"] as? [String: Any])
         let thread = try #require(aps["thread-id"] as? String)
         let want = try #require(Self.expected[name])
-        #expect(PushTap(userInfo: userInfo, thread: thread) == want.tap)
+        #expect(Destination(userInfo: userInfo, thread: thread)?.place == want.tap)
         #expect(TaskNotice(userInfo: userInfo) == want.notice)
         #expect(AgentPush(userInfo: userInfo) == Self.agents[name] ?? nil)
     }
