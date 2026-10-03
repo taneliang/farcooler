@@ -1968,94 +1968,11 @@ impl Rpc {
             // edited. `task_notes` carries a `BEFORE UPDATE` trigger that
             // refuses unconditionally, so such an arm would fail on a caller's
             // data rather than at review.
-            "task.list" => {
-                let Some(request::Payload::TaskList(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                Ok(result::Value::TaskList(crate::task_ops::list(svc, &p)?))
-            }
-
-            "task.get" => {
-                let Some(request::Payload::TaskGet(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                Ok(result::Value::TaskDetail(crate::task_ops::get(svc, &p)?))
-            }
-
-            "task.get_by_key" => {
-                let Some(request::Payload::TaskGetByKey(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                Ok(result::Value::TaskList(crate::task_ops::get_by_key(svc, &p)?))
-            }
-
-            "task.search" => {
-                let Some(request::Payload::TaskSearch(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                Ok(result::Value::TaskNoteHitList(crate::task_ops::search(svc, &p)?))
-            }
-
-            "task.create" => {
-                let Some(request::Payload::TaskCreate(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                Ok(result::Value::Task(crate::task_ops::create(svc, &self.watcher, &p)?))
-            }
-
-            "task.update" => {
-                let Some(request::Payload::TaskUpdate(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                Ok(result::Value::Task(crate::task_ops::update(svc, &self.watcher, &p)?))
-            }
-
-            "task.set_status" => {
-                let Some(request::Payload::TaskSetStatus(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                Ok(result::Value::Task(crate::task_ops::set_status(svc, &self.watcher, &p)?))
-            }
-
-            "task.note" => {
-                let Some(request::Payload::TaskNoteAppend(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                Ok(result::Value::TaskNote(crate::task_ops::note(svc, &self.watcher, &p)?))
-            }
-
-            "task.block" => {
-                let Some(request::Payload::TaskBlockSet(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                Ok(result::Value::TaskBlockList(crate::task_ops::block(
-                    svc,
-                    &self.watcher,
-                    &p,
-                )?))
-            }
-
-            "task.set_wait" => {
-                let Some(request::Payload::TaskSetWait(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                Ok(result::Value::Task(crate::task_starts::set_wait(svc, &self.watcher, &p)?))
-            }
-
-            "task.set_line" => {
-                let Some(request::Payload::TaskSetLine(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                Ok(result::Value::TaskList(crate::task_starts::set_line(svc, &self.watcher, &p)?))
-            }
-
-            "task.worker" => {
-                let Some(request::Payload::TaskWorkerSet(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                let pane = crate::task_starts::orchestrator_pane(svc, &p).await;
-                Ok(result::Value::Task(crate::task_starts::worker(svc, &self.watcher, &p, pane)?))
-            }
+            //
+            // The arms live in `rpc_board`; every route is named here.
+            "task.list" | "task.get" | "task.get_by_key" | "task.search" | "task.create" | "task.update"
+            | "task.set_status" | "task.note" | "task.block" | "task.set_wait" | "task.set_line"
+            | "task.worker" => crate::rpc_board::dispatch(svc, &self.watcher, req).await,
 
             // ---- workspaces ----
             //
