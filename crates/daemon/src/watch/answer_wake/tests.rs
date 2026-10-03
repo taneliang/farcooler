@@ -286,7 +286,7 @@ impl Board {
     async fn give_up(&self) -> Vec<String> {
         farcooler_store::testing::backdate_answer_wakes(&self.svc.store, GIVE_UP_AFTER_MS + 1);
         self.pump().await;
-        self.progress()
+        self.settled()
     }
 
     /// Nothing went near the pane: no claim, no paste, no note yet.
@@ -295,7 +295,14 @@ impl Board {
         assert_eq!(pending.len(), 1, "{pending:?}");
         assert_eq!(pending[0].claimed_at, None, "claimed");
         assert!(!si.log().contains("PASTE") && !si.log().contains("ENTER"), "{}", si.log());
-        assert!(self.progress().is_empty(), "{:?}", self.progress());
+        let said = self.progress();
+        assert!(said.len() <= 1 && said.iter().all(|n| n.starts_with(WAITING)), "{said:?}");
+    }
+
+    /// What the task said after the answer, the "Waiting to tell" note left
+    /// out.
+    fn settled(&self) -> Vec<String> {
+        self.progress().into_iter().filter(|n| !n.starts_with(WAITING)).collect()
     }
 }
 
@@ -448,7 +455,7 @@ async fn a_shell_in_the_foreground_is_never_typed_into() {
     b.pump().await;
     let pending = b.pending();
     assert_eq!(pending[0].claimed_at, None, "claimed a shell");
-    assert!(b.progress().is_empty());
+    assert_eq!(b.progress(), ["Waiting to tell Agent 2 about the decision: no agent is running in its pane."]);
     assert_eq!(b.give_up().await, ["Not delivered: no agent was running in the pane."]);
 }
 
@@ -524,7 +531,7 @@ async fn a_paste_the_box_doesnt_hold_exactly_is_not_sent() {
     b.pump().await;
     assert!(si.log().contains("PASTE "), "{}", si.log());
     assert!(!si.log().contains("ENTER"), "{}", si.log());
-    assert_eq!(b.progress(), ["Paste left in the composer; not sent"]);
+    assert_eq!(b.settled(), ["Paste left in the composer; not sent"]);
     assert!(b.pending().is_empty(), "and never tried again");
 }
 
@@ -546,7 +553,7 @@ async fn a_claim_left_by_a_crash_is_never_typed_again() {
     let after = Watcher::new(b.svc.clone());
     observe(&after, agent.id, AgentActivity::Idle).await;
     after.pump_wakes().await;
-    assert_eq!(b.progress(), ["Couldn't confirm the agent got the decision"]);
+    assert_eq!(b.settled(), ["Couldn't confirm the agent got the decision"]);
     assert!(!si.log().contains("PASTE"), "{}", si.log());
     assert!(b.pending().is_empty());
 }
@@ -592,7 +599,10 @@ async fn an_answer_is_told_exactly_once_across_a_restart() {
         watcher.pump_wakes().await;
         watcher.pump_wakes().await;
         assert_eq!(si.submitted().len(), 1, "{}", si.log());
-        assert_eq!(svc.store.notes_for(task.id, Some(NoteKind::Progress)).unwrap().len(), 1);
+        // Said to be waiting once, before the restart; told once after.
+        let said: Vec<String> =
+            svc.store.notes_for(task.id, Some(NoteKind::Progress)).unwrap().into_iter().map(|n| n.body).collect();
+        assert_eq!(said, ["Waiting to tell Agent 2 about the decision: it's busy.", "Told Agent 2 about the decision"]);
     }
     drop(dir);
 }
@@ -611,7 +621,7 @@ async fn a_newer_answer_replaces_one_not_yet_told() {
     b.doing(agent.id, AgentActivity::Idle).await;
     b.pump().await;
     assert_eq!(si.submitted(), [b.told("Actually, tabs")], "{}", si.log());
-    assert_eq!(b.progress(), ["Not delivered: a newer answer replaced it.", "Told Agent 2 about the decision"]);
+    assert_eq!(b.settled(), ["Not delivered: a newer answer replaced it.", "Told Agent 2 about the decision"]);
 }
 
 /// Answers on two tasks for one terminal go one at a time, the second once
@@ -918,7 +928,7 @@ async fn typing_during_the_read_back_stops_the_enter() {
     typist.await.unwrap();
     assert!(si.log().contains("PASTE "), "{}", si.log());
     assert!(!si.log().contains("ENTER"), "{}", si.log());
-    assert_eq!(b.progress(), ["Paste left in the composer; not sent"]);
+    assert_eq!(b.settled(), ["Paste left in the composer; not sent"]);
 }
 
 /// A paste that fails to send after the claim: never retried, and noted.
@@ -934,7 +944,7 @@ async fn a_send_failing_after_the_claim_is_not_retried() {
     b.doing(agent.id, AgentActivity::Idle).await;
     b.pump().await;
     b.pump().await;
-    assert_eq!(b.progress(), ["Couldn't confirm the agent got the decision"]);
+    assert_eq!(b.settled(), ["Couldn't confirm the agent got the decision"]);
     assert!(!si.log().contains("PASTE"), "{}", si.log());
     assert!(b.pending().is_empty());
 }
@@ -952,6 +962,80 @@ async fn with_no_agent_the_orchestrator_is_told() {
     b.pump().await;
     assert_eq!(si.submitted().len(), 1, "{}", si.log());
     assert_eq!(b.progress(), ["Told the orchestrator about the decision"]);
+}
+
+impl Board {
+    /// A shell pane in the lane, as the Mac opens one, adopted as the
+    /// workspace's orchestrator as the Mac's Make Orchestrator does: how
+    /// the owner's orchestrators are made, with claude started by hand.
+    async fn adopted_shell(&self) -> Terminal {
+        let shell = self.shell_pane().await;
+        self.svc.set_terminal_role(shell.id, TerminalRole::Orchestrator).await.expect("adopted")
+    }
+
+    async fn shell_pane(&self) -> Terminal {
+        let t = self.svc.create_terminal_with_prompt(self.lane.id, "Terminal 1", "shell", None, None).await.expect("a shell");
+        assert_eq!(t.workspace_id, Some(self.task.workspace_id));
+        t
+    }
+}
+
+/// An orchestrator adopted from a shell pane, running claude: told, as the
+/// agent its process proves it is. Before ov-193 its launch preset kept it
+/// from counting, and the task said "Nobody to tell".
+#[tokio::test]
+async fn a_hand_started_orchestrator_is_told() {
+    let b = board().await;
+    let orchestrator = b.adopted_shell().await;
+    let si = b.stand_in(&orchestrator, "claude", "claude").await;
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    b.answer("Drill in");
+    b.pump().await;
+    assert_eq!(si.submitted(), [b.told("Drill in")], "{}", si.log());
+    assert_eq!(b.progress(), ["Told the orchestrator about the decision"]);
+}
+
+/// The same agent in a shell pane nobody adopted is never typed into: not
+/// even the only pane in the task's lane, and one whose role reads Agent.
+/// Only the orchestrator's role stands in for an agent launch.
+#[tokio::test]
+async fn a_shell_pane_running_claude_by_hand_is_never_told() {
+    let b = board().await;
+    let task = b.svc.store.get_task(b.task.id).unwrap();
+    let on_lane = farcooler_store::models::TaskUpdate {
+        title: task.title.clone(),
+        intent: task.intent.clone(),
+        acceptance: task.acceptance.clone(),
+        constraints: task.constraints.clone(),
+        labels: task.labels.clone(),
+        worktree_id: Some(b.lane.id),
+    };
+    b.svc.store.update_task(task.id, task.resource_version, &on_lane).unwrap();
+    let shell = b.shell_pane().await;
+    let shell = b.svc.set_terminal_role(shell.id, TerminalRole::Agent).await.unwrap();
+    let si = b.stand_in(&shell, "claude", "claude").await;
+    b.doing(shell.id, AgentActivity::Idle).await;
+    b.answer("Drill in");
+    b.pump().await;
+    assert!(!si.log().contains("PASTE") && !si.log().contains("ENTER"), "{}", si.log());
+    assert_eq!(b.progress(), [NOBODY]);
+}
+
+/// An adopted orchestrator with no agent running, only its shell: nothing
+/// typed, the answer waits, and the task says whom it's waiting for.
+#[tokio::test]
+async fn an_adopted_orchestrator_at_its_shell_waits_and_says_so() {
+    let b = board().await;
+    let orchestrator = b.adopted_shell().await;
+    b.screen_with(orchestrator.id, "").await;
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    b.answer("Drill in");
+    b.pump().await;
+    b.pump().await;
+    let pending = b.pending();
+    assert_eq!(pending.len(), 1, "{pending:?}");
+    assert_eq!(pending[0].claimed_at, None, "claimed a shell");
+    assert_eq!(b.progress(), ["Waiting to tell the orchestrator about the decision: no agent is running in its pane."]);
 }
 
 /// Nobody running: the task says so, and nothing waits.

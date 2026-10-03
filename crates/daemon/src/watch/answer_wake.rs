@@ -15,8 +15,12 @@
 //! **Whom.** A running agent or orchestrator terminal in the task's
 //! workspace: the newest opened for the task (`Terminal.task_id`), else the
 //! only agent pane in the task's worktree, else the workspace's
-//! orchestrator. Never another workspace's terminal or a Changes pane.
-//! Nobody: "Nobody to tell about the decision".
+//! orchestrator. Never another workspace's terminal or a Changes pane. An
+//! agent pane counts only if launched as an agent; a pane ADOPTED as the
+//! orchestrator counts whatever it was launched as (a shell someone runs
+//! claude in by hand), and check 3 proves what it runs. A shell pane not
+//! adopted never counts, whatever runs in it. Nobody: "Nobody to tell about
+//! the decision".
 //!
 //! **The gate, for a TUI pane.** Every check runs on this pass, against the
 //! pane as it is now, and every one fails closed:
@@ -25,10 +29,12 @@
 //!    at a time per terminal. Nothing waits on catching a transition; each
 //!    tick looks at the pane as it is, and check 4 is what proves it idle.
 //! 2. Nobody has typed there lately (`typed_lately`).
-//! 3. The pane's foreground process is the agent its preset names, proven
-//!    by its executable, or for a Node install by the script Node runs
-//!    (`foreground_agent`), never by screen text. A shell, or anything not
-//!    recognized, isn't typed into.
+//! 3. The pane's foreground process is the agent its preset names (for an
+//!    adopted orchestrator launched as a shell, any agent), proven by its
+//!    executable, or for a Node install by the script Node runs
+//!    (`foreground_agent`), never by screen text. Checks 4 and 5 read the
+//!    pane as that proven agent. A shell, or anything not recognized, isn't
+//!    typed into.
 //! 4. A fresh capture classifies as neither Working nor Blocked, AND
 //!    `composer::read` positively recognizes the agent's box and finds it
 //!    empty. A menu, a picker, a prompt, an unfamiliar screen or a draft:
@@ -59,6 +65,9 @@
 //! yet told: only the newest is told, and the older is noted "Not
 //! delivered: a newer answer replaced it."
 //!
+//! **Waiting, said.** The first pass an answer waits on, its task says so
+//! once: "Waiting to tell the orchestrator about the decision: it's busy."
+//!
 //! **Bounded.** An answer not told within `GIVE_UP_AFTER_MS` is noted "Not
 //! delivered: <why it last waited>" and dropped.
 
@@ -70,7 +79,7 @@ use farcooler_core::composer::{self, Composer};
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::AgentActivity;
 use farcooler_store::PendingWake;
-use farcooler_store::models::{Actor, PaneMode, Task, TaskNote, Terminal, TerminalRole};
+use farcooler_store::models::{Actor, NoteKind, PaneMode, Task, TaskNote, Terminal, TerminalRole};
 use uuid::Uuid;
 
 use super::{Watcher, anyone_watching, now_millis};
@@ -100,6 +109,7 @@ const PASTE_LEFT: &str = "Paste left in the composer; not sent";
 const LEFT_AT_A_SHELL: &str = "Answer left at a shell prompt; not run";
 const SUPERSEDED: &str = "Not delivered: a newer answer replaced it.";
 const NOBODY: &str = "Nobody to tell about the decision";
+const WAITING: &str = "Waiting to tell";
 
 /// What the agent is told.
 pub(crate) fn message(key: &str, title: &str, answer: &str) -> String {
@@ -153,6 +163,19 @@ pub(crate) enum Held {
 }
 
 impl Held {
+    /// Why it's waiting now, as the "Waiting to tell" note says it.
+    fn now(self) -> &'static str {
+        match self {
+            Held::Busy => "it's busy",
+            Held::Prompt => "a question or menu is showing",
+            Held::Draft => "there's a draft in its box",
+            Held::Typing => "someone is typing there",
+            Held::NotAnAgent => "no agent is running in its pane",
+            Held::Unfamiliar => "its screen isn't one Far Cooler recognizes",
+            Held::Unproven => "Far Cooler can't tell yet whether it takes a paste",
+        }
+    }
+
     fn why(self) -> &'static str {
         match self {
             Held::Busy => "the agent stayed busy",
@@ -250,14 +273,41 @@ impl Watcher {
         let Some(to) = self.recipient(&task).await else {
             return self.settle(wake, Some(&task), Some(NOBODY.into()));
         };
-        if let Err(held) = self.ready(&to).await {
-            return Pass::Waiting(held);
+        let pass = match self.ready(&to).await {
+            Err(held) => Pass::Waiting(held),
+            Ok(()) => {
+                let text = message(&task.key, &task.title, &wake.body);
+                if to.pane_mode == PaneMode::Agent {
+                    self.prompt(wake, &task, &to, &text).await
+                } else {
+                    self.type_into(wake, &task, &to, &text).await
+                }
+            }
+        };
+        if let Pass::Waiting(held) = pass {
+            self.say_waiting(wake, &task, &to, held);
         }
-        let text = message(&task.key, &task.title, &wake.body);
-        if to.pane_mode == PaneMode::Agent {
-            return self.prompt(wake, &task, &to, &text).await;
+        pass
+    }
+
+    /// The first time an answer waits, say so on its task, once: whom it's
+    /// waiting to reach, and why. Once per answer across restarts, read
+    /// from the task's record.
+    fn say_waiting(&self, wake: &PendingWake, task: &Task, to: &Terminal, held: Held) {
+        // Held before on this run: said already.
+        if self.wake_holds.lock().unwrap_or_else(|e| e.into_inner()).contains_key(&wake.note) {
+            return;
         }
-        self.type_into(wake, &task, &to, &text).await
+        let store = &self.service.store;
+        let Ok(notes) = store.notes_for(task.id, Some(NoteKind::Progress)) else { return };
+        if notes.iter().any(|n| n.actor == Actor::Runner && n.at >= wake.enqueued_at && n.body.starts_with(WAITING)) {
+            return;
+        }
+        let body = format!("{WAITING} {} about the decision: {}.", spoken_name(to), held.now());
+        match store.add_note(task.id, NoteKind::Progress, Actor::Runner, &body, serde_json::json!({})) {
+            Ok(_) => self.announce_task_changed(task, None, Actor::Runner),
+            Err(e) => tracing::warn!(note = %wake.note, error = %e, "couldn't say an answer is waiting"),
+        }
     }
 
     /// Check 1 and 2 of the gate: the watcher reads it Idle or Done, newly
@@ -294,7 +344,7 @@ impl Watcher {
 
     /// A TUI pane: checks 3 to 5, then claim, paste, read back, Enter.
     async fn type_into(&self, wake: &PendingWake, task: &Task, to: &Terminal, text: &str) -> Pass {
-        let preset = to.command_preset.split(':').next().unwrap_or_default();
+        let launched = to.command_preset.split(':').next().unwrap_or_default();
         let tty = self
             .service
             .inventory_snapshot()
@@ -303,7 +353,11 @@ impl Watcher {
             .find(|p| p.proves_life())
             .map(|p| p.tty.clone());
         let Some(tty) = tty else { return Pass::Waiting(Held::NotAnAgent) };
-        if foreground_agent(&tty).await != Some(preset) {
+        // The agent in front, proven by its process. A pane launched as an
+        // agent must be running that one. An adopted orchestrator launched
+        // as anything else is read as the agent its process proves.
+        let Some(preset) = foreground_agent(&tty).await else { return Pass::Waiting(Held::NotAnAgent) };
+        if launched != preset && (is_an_agent_preset(launched) || to.role != TerminalRole::Orchestrator) {
             return Pass::Waiting(Held::NotAnAgent);
         }
         let Ok(composer) = self.box_of(to, preset).await else { return Pass::Waiting(Held::Unfamiliar) };
@@ -421,11 +475,16 @@ impl Watcher {
     /// Whom to tell about an answer on `task`. See this module's docs.
     async fn recipient(&self, task: &Task) -> Option<Terminal> {
         let store = &self.service.store;
+        // A pane adopted as the workspace's orchestrator is one whatever it
+        // was launched as: the Mac makes one of a shell someone ran claude
+        // in by hand. Only that role; check 3 still proves the agent.
         let eligible = |t: &Terminal, role: TerminalRole| {
             t.workspace_id == Some(task.workspace_id)
                 && t.role == role
                 && t.pane_mode != PaneMode::Changes
-                && (t.pane_mode == PaneMode::Agent || is_an_agent_preset(&t.command_preset))
+                && (t.pane_mode == PaneMode::Agent
+                    || is_an_agent_preset(&t.command_preset)
+                    || t.role == TerminalRole::Orchestrator)
                 && self.service.is_running(t)
         };
         let mut mine = store.terminals_for_task(task.id).ok()?;
