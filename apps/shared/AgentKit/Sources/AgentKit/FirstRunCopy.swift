@@ -26,8 +26,8 @@ public enum FirstRunCopy {
     public enum Welcome {
         public static let title = "Welcome to Far Cooler"
         public static let body =
-            "Far Cooler runs coding agents in terminals on this Mac or on a Linux computer you reach over SSH. "
-            + "They keep working after you close the app."
+            "Coding agents such as Claude Code keep working on this Mac after you close Far Cooler. "
+            + "You step in only when one needs you, from here or from your phone."
         public static let macTitle = "This Mac"
         public static let macChecking = "Checking this Mac…"
         public static let macNoTmux =
@@ -43,19 +43,23 @@ public enum FirstRunCopy {
         public static let tryAgain = "Try Again"
         public static let repositoryTitle = "Add a Repository"
         public static let repositoryBody =
-            "Choose a Git repository on this Mac. Agents work in worktrees of their own, so your checkout stays as you left it."
+            "Choose the Git repository you want agents to work on. "
+            + "They work in separate folders, so your own checkout stays as you left it."
         public static let repositoryButton = "Add Repository…"
         public static let orchestratorTitle = "Start the Orchestrator"
         public static let orchestratorBody =
-            "The orchestrator is the agent you talk to. It plans tasks and starts other agents to do them."
+            "Instead of running each agent yourself, you tell one agent, the orchestrator, what you want done. "
+            + "It splits the work into tasks and starts agents on them."
         public static let optional = "Optional"
         public static let phoneTitle = "Add Your Phone"
-        public static let phoneBody = "See what needs you and answer agents from an iPhone or Android phone."
+        public static let phoneBody = "Answer your agents from an iPhone or Android phone when you’re away from this Mac."
         public static let phoneButton = "Add Another Device…"
         public static let cliTitle = "Command-Line Tools"
         public static let cliBody = "Use the farcooler command in Terminal. You can also install it later in Settings."
         public static let cliButton = "Install"
-        public static let linuxPrompt = "Have a Linux computer?"
+        /// A sentence beside `linuxButton`, which names the runner it teaches.
+        public static let linuxBody =
+            "Agents can also run on a Linux computer you reach with SSH, so they keep working while this Mac is off."
         public static let linuxButton = "Add a Runner by Address…"
 
         /// "Ready to run Claude Code and Codex."
@@ -68,21 +72,24 @@ public enum FirstRunCopy {
     public enum Navigator {
         public static let orchestratorTitle = "Orchestrator"
         public static let notStarted = "Not Started"
-        public static let orchestratorBody = "Tell it what you want done. It plans the tasks and starts agents on them."
+        public static let orchestratorBody = "Tell it what you want done. It splits the work into tasks and starts an agent on each."
         public static let start = "Start Orchestrator"
         /// Under a harness the runner doesn't have, which is disabled.
         public static let notInstalled = "Not Installed"
         public static let useAsOrchestrator = "Use as Orchestrator"
         public static let notStartedAccessibility = "Orchestrator, not started"
         /// Under the skeleton rows, with no orchestrator.
-        public static let tasksNone = "The orchestrator’s tasks appear here."
+        public static let tasksNone = "When the orchestrator splits up your work, each piece appears here as a task."
         public static let tasksStarting = "No tasks yet."
         public static let tasksRunning = "No tasks yet. Tell the orchestrator what you want done."
         /// Only about a board with at least one task.
         public static let caughtUp = "You’re all caught up."
         /// Only while the main checkout is the workspace's one worktree.
         public static let worktreesCaption =
-            "Each agent works in a worktree of its own, listed here. Open a terminal in the main checkout when you need one."
+            "Each agent the orchestrator starts gets its own folder and branch, called a worktree, "
+            + "so agents don’t change each other’s files."
+        /// The main checkout row's tooltip: the terminals a person starts.
+        public static let mainCheckoutHelp = "Open a terminal here to run your own commands, such as a dev server."
         public static let noTerminals = "No terminals"
     }
 
@@ -90,15 +97,16 @@ public enum FirstRunCopy {
     public enum Conversation {
         public static let noneTitle = "No Orchestrator Yet"
         public static let noneBody =
-            "The orchestrator is the agent you talk to about this workspace. "
-            + "Tell it what you want done, and it plans the tasks and starts agents on them."
+            "Instead of running each agent yourself, tell the orchestrator what you want done. "
+            + "It splits the work into tasks and starts an agent on each. When it needs a decision, it asks you."
         public static let charter =
-            "The first time it starts, it asks a few questions about how you work, such as how changes land "
-            + "and who reviews them. Your answers become the workspace’s charter."
+            "The first time, it asks how you like work done, such as who reviews changes before they’re merged. "
+            + "It saves your answers as its charter and follows them from then on."
         public static let start = "Start Orchestrator"
         public static let useRunningTerminal = "Use Running Terminal"
         public static let startingTitle = "Starting Orchestrator…"
-        public static let startingBody = "The first time, it asks a few questions before it plans anything."
+        public static let startingBody =
+            "The first time, it asks a few questions about how you work. Answer them here, then tell it what you want done."
         public static let startingSlow = "This is taking longer than usual."
         public static let tryAgain = "Try Again"
         public static let useAnotherAgent = "Use Another Agent"
@@ -131,36 +139,46 @@ public enum FirstRunCopy {
         }
     }
 
+    /// The Mac's Needs You page with nothing waiting, under "Nothing Needs You".
+    public enum NeedsYou {
+        public static let emptyBody =
+            "When an agent needs an answer or a review from you, it waits here. Until then, there’s nothing you need to do."
+    }
+
     /// The iPhone. Android says the same in sentence case (`FirstRun.kt`).
     public enum Phone {
-        public static let onboardingTitle = "Connect a Runner"
+        public static let onboardingTitle = "Connect to Your Agents"
         public static let onboardingPrimary = "Connect This Device"
         public static let onboardingSecondary = "More Ways to Add…"
         public static let noRepositoriesBody =
-            "Add one here, or in the Mac app with File > Add Repository. Each one starts with a workspace called Main."
+            "Add the Git repository you want agents to work on, here or on your Mac with File > Add Repository."
         public static let addRepository = "Add Repository…"
         public static let nothingNeedsYou = "Nothing Needs You"
-        public static let noOrchestratorRunning = "No orchestrator is running yet. Open a workspace below to start one."
+        public static let noOrchestratorRunning =
+            "No agents are working yet. To give them work, open a workspace below and start its orchestrator."
         public static let orchestratorTitle = "No Orchestrator Yet"
         public static let orchestratorBody =
-            "Tell the orchestrator what you want done, and it plans the tasks and starts agents on them. "
-            + "The first time, it asks a few questions about how you work."
+            "Instead of running each agent yourself, tell the orchestrator what you want done. "
+            + "It splits the work into tasks and starts an agent on each. The first time, it asks how you like to work."
         public static let start = "Start Orchestrator"
         public static let tryAgain = "Try Again"
         public static let boardTitle = "No Tasks"
-        public static let boardNoOrchestrator = "Start the orchestrator and tell it what you want done. Its tasks appear here."
-        /// ov-184's `BoardForm.blankLine`, kept. One of the two goes when both land.
-        public static let boardWithOrchestrator = "Ask your orchestrator to plan the work. Its tasks appear here, grouped by status."
+        public static let boardNoOrchestrator =
+            "Start the orchestrator and tell it what you want done. Each piece of work it hands out appears here as a task."
+        /// Duplicates ov-184's `BoardForm.blankLine`; one of the two goes when both land.
+        public static let boardWithOrchestrator =
+            "Tell the orchestrator what you want done. Each piece of work it hands out appears here as a task."
         public static let showOrchestrator = "Show Orchestrator"
+        /// Shown only while this device isn't signed in: signing in pairs every
+        /// runner for push (the owner's ruling, 3 Oct), so it's the one step.
         public static let pushBody =
-            "Notifications arrive only while Far Cooler is open. To get them when it’s closed, sign in, "
-            + "then turn on notifications for your runner in Far Cooler on your Mac."
+            "To hear from your agents while Far Cooler is closed, sign in. Until then, notifications arrive only while it’s open."
         public static let signIn = "Sign In"
 
         /// `device` is the model's name: "iPhone" or "iPad".
         public static func onboardingBody(device: String) -> String {
-            "A runner is where your agents run: Far Cooler on a Mac or a Linux computer. "
-                + "Connect this \(device) to one to see what they’re doing and answer them."
+            "Your agents work on a Mac or Linux computer that runs Far Cooler, called a runner. "
+                + "Connect this \(device) to one to answer your agents while you’re away from it."
         }
 
         public static func noRepositoriesTitle(_ runner: String) -> String {
@@ -196,12 +214,13 @@ public enum FirstRunCopy {
             Welcome.macServiceDown, Welcome.tryAgain, Welcome.repositoryTitle, Welcome.repositoryBody,
             Welcome.repositoryButton, Welcome.orchestratorTitle, Welcome.orchestratorBody, Welcome.optional,
             Welcome.phoneTitle, Welcome.phoneBody, Welcome.phoneButton, Welcome.cliTitle, Welcome.cliBody,
-            Welcome.cliButton, Welcome.linuxPrompt, Welcome.linuxButton,
+            Welcome.cliButton, Welcome.linuxBody, Welcome.linuxButton,
             Welcome.macReady([]), Welcome.macReady(harnesses),
             Navigator.orchestratorTitle, Navigator.notStarted, Navigator.orchestratorBody, Navigator.start,
             Navigator.notInstalled, Navigator.useAsOrchestrator, Navigator.notStartedAccessibility,
             Navigator.tasksNone, Navigator.tasksStarting, Navigator.tasksRunning, Navigator.caughtUp,
-            Navigator.worktreesCaption, Navigator.noTerminals,
+            Navigator.worktreesCaption, Navigator.mainCheckoutHelp, Navigator.noTerminals,
+            NeedsYou.emptyBody,
             Conversation.noneTitle, Conversation.noneBody, Conversation.charter, Conversation.start,
             Conversation.useRunningTerminal, Conversation.startingTitle, Conversation.startingBody,
             Conversation.startingSlow, Conversation.tryAgain, Conversation.useAnotherAgent,

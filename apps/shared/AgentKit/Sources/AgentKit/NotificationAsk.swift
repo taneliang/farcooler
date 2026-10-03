@@ -24,7 +24,9 @@ enum NotificationAsk {
     static let title = "Get Notified When an Agent Needs You"
     /// No promise about a closed app: a push needs this device signed in and
     /// the runner paired with the relay, and a first run has neither (ov-205).
-    static let message = "Far Cooler can tell you when an agent asks a question or finishes."
+    static let message =
+        "Your agents keep working without you. Far Cooler can tell you when one has a question or finishes, "
+        + "so you don’t have to keep checking."
     static let allow = "Allow Notifications"
     static let decline = "Not Now"
 }
