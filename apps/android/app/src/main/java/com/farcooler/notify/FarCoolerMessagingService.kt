@@ -97,8 +97,8 @@ class FarCoolerMessagingService : FirebaseMessagingService() {
             if (task != null) {
                 putExtra(Notifier.PUSH_EXTRA_KIND, kind)
                 putExtra(Notifier.PUSH_EXTRA_TASK, task)
-                if (runner != null) putExtra(Notifier.PUSH_EXTRA_RUNNER, runner)
             }
+            if (runner != null) putExtra(Notifier.PUSH_EXTRA_RUNNER, runner)
         }
         val pending = PendingIntent.getActivity(
             this,

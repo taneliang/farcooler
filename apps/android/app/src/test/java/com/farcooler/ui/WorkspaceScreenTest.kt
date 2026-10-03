@@ -164,52 +164,11 @@ class WorkspaceScreenTest {
         assertEquals(WorkspacePresence.Gone, WorkspacePresence.of("other", Fleet(), repos, answered = true))
     }
 
-    /**
-     * The launch waits until every runner has listed its items or failed —
-     * a runner still connecting could be the one with the decision — and
-     * then decides. A runner stuck reconnecting doesn't get to move the
-     * screen minutes later: past the window, the app stays where it is.
-     */
-    @Test
-    fun `the launch settles when every runner has answered or failed, and not late`() {
-        val listed = LaunchReading(items = 2, failed = false)
-        val quiet = LaunchReading(items = 0, failed = false)
-        val connecting = LaunchReading(items = null, failed = false)
-        val failed = LaunchReading(items = null, failed = true)
-        assertEquals(LaunchDecision.Wait, LaunchRule.decide(listOf(listed, connecting), 1_000))
-        assertEquals(LaunchDecision.Decide(2), LaunchRule.decide(listOf(listed, failed), 1_000))
-        assertEquals(LaunchDecision.Decide(0), LaunchRule.decide(listOf(quiet), 1_000))
-        // Every runner failed: nothing said, nothing decided.
-        assertEquals(LaunchDecision.Wait, LaunchRule.decide(listOf(failed), 1_000))
-        assertEquals(LaunchDecision.Wait, LaunchRule.decide(emptyList(), 1_000))
-        // The stuck runner answers at last, long after launch.
-        assertEquals(LaunchDecision.Stay, LaunchRule.decide(listOf(quiet), LaunchRule.WINDOW_MS + 1))
-        assertEquals(LaunchDecision.Decide(0), LaunchRule.decide(listOf(quiet), LaunchRule.WINDOW_MS))
-    }
-
     /** A sheet made on a runner without workspaces names the repository, as the row and the screen do, not "Main". */
     @Test
     fun `a sheet names an implicit workspace by its repository`() {
         val repos = listOf(Repository(id = "repo", displayName = "overnight"))
         assertEquals("overnight", workspacePlace(WorkspaceSummary.implicit("repo"), repos))
         assertEquals("Billing", workspacePlace(WorkspaceSummary(id = "b", name = "Billing", repository = "repo"), repos))
-    }
-
-    /** Ruling 4: nothing waiting, and the app opens on the last workspace, over Needs You. */
-    @Test
-    fun `with nothing waiting, launch pushes the last workspace over Needs You`() {
-        val last = Route.Workspace("h", "billing", WorkspaceTab.BOARD)
-        assertEquals(listOf(Route.NeedsYou, last), Backstack.launch(listOf(Route.NeedsYou), waiting = 0, last = last))
-        // Nothing remembered: the front door.
-        assertEquals(listOf(Route.NeedsYou), Backstack.launch(listOf(Route.NeedsYou), waiting = 0, last = null))
-        // A stack somebody already has — restored, or moved — is left alone.
-        val restored = listOf(Route.NeedsYou, Route.Terminal("h", "w"))
-        assertEquals(restored, Backstack.launch(restored, waiting = 0, last = last))
-    }
-
-    @Test
-    fun `launch lands on Needs You when it has items`() {
-        val last = Route.Workspace("h", "billing")
-        assertEquals(listOf(Route.NeedsYou), Backstack.launch(listOf(Route.NeedsYou), waiting = 2, last = last))
     }
 }

@@ -520,15 +520,6 @@ object Backstack {
     }
 
     /**
-     * Where the app opens (ruling 4): on Needs You when it has items, and
-     * otherwise on the last workspace, pushed over Needs You so Back still
-     * reaches it. Only from the bare front door: a stack that came back after
-     * a process death, or one somebody has already moved, is where they are.
-     */
-    fun launch(stack: List<Route>, waiting: Int, last: Route.Workspace?): List<Route> =
-        if (waiting > 0 || last == null || stack != listOf(ROOT)) stack else goToWorkspace(stack, last)
-
-    /**
      * [stack] with [workspace]'s route on [tab]: the last route naming that
      * workspace, whatever tab it had, and nothing else. A tab tap moves no
      * other navigation state, so the screen keyed on the workspace is not

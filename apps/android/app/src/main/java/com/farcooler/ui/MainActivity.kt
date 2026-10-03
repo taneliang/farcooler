@@ -11,7 +11,7 @@ import androidx.activity.viewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import com.farcooler.notify.PushTap
+import com.farcooler.model.DestinationPayloads
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -35,7 +35,11 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         askForNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-        handleIntent(intent)
+        // Not again when the activity is only being rebuilt (a rotation, or a
+        // process restored from saved state): the intent that launched it is
+        // handed back, and a notification tapped an hour ago would pull the
+        // phone back to its subject (ov-183).
+        if (savedInstanceState == null) handleIntent(intent)
 
         setContent {
             FarCoolerTheme {
@@ -74,11 +78,8 @@ class MainActivity : ComponentActivity() {
             lifecycleScope.launch { model.account.handleCallback(uri) }
         }
         // Which extras a tap carries, and why an empty terminal is absent, is
-        // [PushTap]'s to say.
-        when (val tap = PushTap.from { intent.getStringExtra(it) }) {
-            is PushTap.Terminal -> model.openByTerminalId(tap.id)
-            is PushTap.Task -> model.openByTaskKey(tap.key, tap.runner)
-            null -> Unit
-        }
+        // [DestinationPayloads]'s to say. What it names opens as a launch from
+        // a notification: held for its runner, then opened or dropped.
+        DestinationPayloads.from({ intent.getStringExtra(it) })?.let(model::open)
     }
 }

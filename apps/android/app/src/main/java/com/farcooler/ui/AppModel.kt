@@ -13,11 +13,9 @@ import com.farcooler.data.Settings
 import com.farcooler.model.NeedsYouItem
 import com.farcooler.model.DecisionLink
 import com.farcooler.model.DecisionSource
-import com.farcooler.model.RunnerNeedsYou
+import com.farcooler.model.Destination
+import com.farcooler.model.DestinationResolver
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import com.farcooler.model.NeedsYouKind
 import com.farcooler.model.Terminal
 import com.farcooler.net.Connection
@@ -29,6 +27,7 @@ import com.farcooler.notify.Notifier
 import com.farcooler.notify.ReadingRegister
 import com.farcooler.notify.claim
 import com.farcooler.notify.release
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -155,8 +154,12 @@ class AppModel(
      */
     private var launchDecided: Boolean = saved.get<Boolean>(LAUNCH) ?: false
 
-    /** When this model was made: what [LaunchRule.WINDOW_MS] counts from. */
-    private val launchedAt = System.currentTimeMillis()
+    /**
+     * The destination waiting to open: the place the last run was in (a
+     * relaunch), or what a tapped notification is about. See [DestinationDriver].
+     */
+    private val destinations = DestinationDriver()
+    private var following: Job? = null
 
     init {
         Identity.initialize(application)
@@ -173,6 +176,9 @@ class AppModel(
         // fleet at this point in a launch — which is what `settle` is for.
         Backstack.decodeStack(saved[STACK])?.let { install(it, persist = false) }
         _focus.value = Backstack.decodeFocus(saved[FOCUS])
+        // A real relaunch has no saved stack: it goes back to where the last
+        // run was, whatever is waiting on Needs You (ov-182, the owner's ruling).
+        if (!launchDecided) requestRestore()
 
         // Generate the device key at launch rather than the first time
         // something asks for it. It used to appear only when the authorise
@@ -200,20 +206,6 @@ class AppModel(
                 snapshot, fleet.connection(host.id)?.daemon?.value, push.registered.value,
             )
             for (report in reports) notifier.report(report, host.displayLabel)
-        }
-
-        // The first moment every runner has said what needs you — or failed —
-        // decides where this launch opens (ruling 4). Once.
-        viewModelScope.launch {
-            fleet.active
-                .flatMapLatest { list ->
-                    if (list.isEmpty()) flowOf(emptyList())
-                    else combine(list.map { c -> c.needsYou.combine(c.phase) { reading, phase -> reading to phase } }) { it.toList() }
-                }
-                .collect { readings ->
-                    resolvePendingTask()
-                    decideLaunch(readings)
-                }
         }
 
         account.afterSignIn = { viewModelScope.launch { push.sendIfPossible() } }
@@ -252,48 +244,37 @@ class AppModel(
 
         // A notification tap outranks the front door: somebody who tapped
         // "claude needs you" asked for that pane by name.
-        resolvePendingTerminal()
-        resolvePendingTask()
+        resolveDestination()
         if (_landed.value) return
         land(if (hosts.hosts.value.isEmpty()) Route.Onboarding else Backstack.ROOT)
     }
 
     /**
-     * Decide once every runner has answered `needs_you` or failed: until then
-     * "nothing is waiting" is a claim nobody can make. A runner that answers
-     * nothing for long is a runner the front door already says is quiet.
+     * Go back to where the last run was (ov-182), as a launch.
+     *
+     * Restoring wins over Needs You, as on the iPhone and the Mac: the owner
+     * asked for "wherever the user was", and Needs You is one tap away with
+     * its badge. What was kept is [Settings.keptDestination]; a phone that
+     * kept none yet has its last workspace, which every earlier build wrote.
+     * Held for its runner and then opened, or, when what it names is gone,
+     * opened at the nearest level that's still there ([DestinationResolver]).
+     * A phone somebody has already moved is left alone.
      */
-    private fun decideLaunch(readings: List<Pair<RunnerNeedsYou?, Connection.Phase>>) {
-        if (launchDecided) return
-        val decision = LaunchRule.decide(
-            readings.map { (reading, phase) -> LaunchReading(reading?.items?.size, phase is Connection.Phase.Failed) },
-            System.currentTimeMillis() - launchedAt,
-        )
-        val waiting = when (decision) {
-            LaunchDecision.Wait -> return
-            LaunchDecision.Stay -> null
-            is LaunchDecision.Decide -> decision.waiting
-        }
-        launchDecided = true
-        saved[LAUNCH] = true
-        if (waiting == null) return
-        val last = settings.lastWorkspace?.let { saved ->
-            val host = saved.substringBefore('/')
-            val workspace = saved.substringAfter('/', "")
-            val connection = fleet.connection(host)
-            // Only a workspace its runner still lists: a deleted one is not
-            // somewhere to open onto.
-            val present = connection != null && workspace.isNotEmpty() && WorkspacePresence.of(
-                workspace, connection.fleet.value, connection.repositories.value, answered = true,
-            ) is WorkspacePresence.Found
-            if (!present) null
-            else Route.Workspace(
-                host,
-                workspace,
-                WorkspaceTab.parse(settings.workspaceTab(host, workspace)) ?: WorkspaceTab.ORCHESTRATOR,
-            )
-        }
-        install(Backstack.launch(_stack.value, waiting, last))
+    private fun requestRestore() {
+        val kept = settings.keptDestination?.let(Destination::decode)
+            ?: settings.lastWorkspace?.let { last ->
+                val host = last.substringBefore('/')
+                val workspace = last.substringAfter('/', "")
+                if (host.isEmpty() || workspace.isEmpty()) null
+                else Destination(
+                    runner = Destination.Runner(host = host),
+                    place = Destination.Place.Workspace(workspace),
+                    segment = WorkspaceTab.parse(settings.workspaceTab(host, workspace))?.let(DestinationRoutes::segment),
+                )
+            }
+            ?: return
+        destinations.request(kept, DestinationResolver.Arrival.RESTORE)
+        follow()
     }
 
     private fun land(route: Route) {
@@ -485,54 +466,97 @@ class AppModel(
     }
 
     /**
-     * Open the terminal a notification was about.
+     * Open what a tapped notification, or a link, is about (ov-183).
      *
-     * By id alone, because that is all a notification carries and all it can
-     * carry: it may have been posted by the messaging service in a process that
-     * had no fleet at all. The runner and worktree are looked up from whatever
-     * has since connected, and a tap that arrives before the fleet does simply
-     * lands on the list — which is the honest answer, not a guess.
+     * By what the notification carries and no more, because that is all it
+     * can carry: it may have been posted by the messaging service in a process
+     * that had no fleet at all. It is held for its runner and for what it names
+     * on it, a cold launch can take most of a minute to reach either, and then
+     * opened ([DestinationRoutes.stack]) or dropped, in the resolver's words
+     * ([DestinationResolver]). It outranks a restore still waiting: somebody
+     * asked for this by name.
      */
-    fun openByTerminalId(terminalId: String) {
-        pendingTerminal = terminalId
-        resolvePendingTerminal()
-    }
-
-    private var pendingTerminal: String? = null
-
-    /**
-     * Open the task a decision push was about, by its key: over its
-     * workspace's Board tab, so Back walks to the board and then Needs You.
-     * Held until a runner that knows the key has answered, as a terminal is.
-     */
-    fun openByTaskKey(key: String, runner: String? = null) {
-        pendingTask = key
-        pendingTaskRunner = runner
-        // Somebody asked for this by name; a launch decision must not move them.
+    fun open(destination: Destination) {
         launchDecided = true
         saved[LAUNCH] = true
-        resolvePendingTask()
-        if (pendingTask == null) return
-        // A runner's id is read after its needs-you list, so a push naming one
-        // is retried until it can be told from the rest. After a minute a name
-        // nobody answers to is dropped and the key searched for alone (iOS's
-        // `PhoneDecisionLink.followWithin`).
-        viewModelScope.launch {
-            val began = System.currentTimeMillis()
-            while (pendingTask == key) {
-                val over = System.currentTimeMillis() - began >= DECISION_FOLLOW_MS
-                resolvePendingTask(waitEnded = over)
-                if (over) {
-                    if (pendingTask == key) pendingTask = null
-                    return@launch
-                }
+        destinations.request(destination, DestinationResolver.Arrival.NOTIFICATION)
+        resolveDestination()
+        follow()
+    }
+
+    /** Ask again every half second until nothing is waiting, since runners come up on their own schedules. */
+    private fun follow() {
+        if (!destinations.isPending || following?.isActive == true) return
+        following = viewModelScope.launch {
+            while (destinations.isPending) {
                 delay(500)
+                resolveDestination()
             }
         }
     }
 
-    private var pendingTask: String? = null
-    private var pendingTaskRunner: String? = null
+    /** What this phone holds now, as the resolver reads it. */
+    private fun destinationWorld(): DestinationResolver.World {
+        val everyRunner = settings.allRunnersAtOnce.value
+        val selected = hosts.selectedId.value
+        val sources = hosts.hosts.value.map { host ->
+            val connection = fleet.connection(host.id)
+            val daemon = connection?.lastDaemon?.value
+            DestinationWorld.Source(
+                hostId = host.id,
+                runnerId = daemon?.runnerId,
+                ready = connection != null && connection.phase.value is Connection.Phase.Connected && daemon != null,
+                // A runner nothing is connecting: not selected, and the
+                // phone isn't holding every runner. Anything else is on its way.
+                idle = connection == null && !everyRunner && host.id != selected,
+                fleet = connection?.fleet?.value,
+                boardList = connection?.boardList().orEmpty(),
+                boards = connection?.boards?.value.orEmpty(),
+            )
+        }
+        val last = settings.lastWorkspace?.let { it.substringBefore('/') to it.substringAfter('/', "") }
+            ?.takeIf { it.first.isNotEmpty() && it.second.isNotEmpty() }
+        return DestinationWorld.world(sources, last)
+    }
+
+    private fun resolveDestination() {
+        if (!destinations.isPending) return
+        // Somebody has gone somewhere since launch: a restore yields to them.
+        val moved = _stack.value != listOf(Backstack.ROOT)
+        when (val step = destinations.step(destinationWorld(), moved)) {
+            DestinationDriver.Step.Wait -> Unit
+            is DestinationDriver.Step.Connect ->
+                hosts.hosts.value.firstOrNull { it.id == step.host }?.let(hosts::select)
+            is DestinationDriver.Step.Open -> land(step.destination)
+            // A restore moved past, or a tap whose subject isn't to be found:
+            // the app stays where it is. A launch is decided either way.
+            is DestinationDriver.Step.Stay -> {
+                launchDecided = true
+                saved[LAUNCH] = true
+            }
+        }
+    }
+
+    private fun land(destination: Destination) {
+        val landing = DestinationRoutes.stack(
+            destination,
+            rememberedTab = { host, workspace -> WorkspaceTab.parse(settings.workspaceTab(host, workspace)) },
+            taskOf = { host, terminal -> fleet.connection(host)?.terminal(terminal)?.taskId },
+        )
+        _landed.value = true
+        saved[LANDED] = true
+        launchDecided = true
+        saved[LAUNCH] = true
+        // `point`, not `choose`: a 3am ping is not a preference about where
+        // this worktree should open tomorrow. Over its workspace and its task,
+        // so Back walks up to them (spec §6.1).
+        val host = destination.runner.host
+        val worktree = landing.stack.lastOrNull() as? Route.Terminal
+        if (host != null && worktree != null && landing.pane != null) {
+            point(TerminalRef(host, worktree.worktreeId, landing.pane))
+        }
+        install(landing.stack)
+    }
 
     /**
      * Send one answer from a decision card: find its task as a tapped
@@ -560,43 +584,6 @@ class AppModel(
             if (over) return "Your phone can’t reach the runner ${answer.key} is on right now."
             delay(500)
         }
-    }
-
-    private fun resolvePendingTask(waitEnded: Boolean = false) {
-        val key = pendingTask ?: return
-        val sources = fleet.active.value.map {
-            DecisionSource(it.host.id, it.needsYou.value, it.boards.value, it.lastDaemon.value?.runnerId)
-        }
-        val target = DecisionLink.find(key, sources, pendingTaskRunner, waitEnded) ?: return
-        pendingTask = null
-        _landed.value = true
-        saved[LANDED] = true
-        val workspace = boardIdOf(target.hostId, target.workspaceId, target.repositoryId)
-        install(Backstack.chain(target.hostId, workspace, target.taskId, pane = null))
-    }
-
-    private fun resolvePendingTerminal() {
-        val wanted = pendingTerminal ?: return
-        val entry = fleet.entries.value.firstOrNull { entry ->
-            entry.worktree.terminals.any { it.id == wanted }
-        } ?: return
-        pendingTerminal = null
-        _landed.value = true
-        saved[LANDED] = true
-        // `point`, not `choose`: a 3am ping is not a preference about where
-        // this worktree should open tomorrow. Over its workspace and its task,
-        // so Back walks up to them (spec §6.1).
-        val terminal = entry.worktree.terminals.first { it.id == wanted }
-        point(TerminalRef(entry.host.id, entry.worktree.id, wanted))
-        install(
-            Backstack.chain(
-                hostId = entry.host.id,
-                workspaceId = boardIdOf(entry.host.id, terminal.workspace ?: entry.worktree.workspace, entry.worktree.repository),
-                taskId = terminal.taskId,
-                pane = Route.Terminal(entry.host.id, entry.worktree.id),
-                orchestrator = terminal.isOrchestrator,
-            )
-        )
     }
 
     fun navigate(route: Route) {
@@ -676,6 +663,7 @@ class AppModel(
         // to and never confirmed does not come back after a process death — the
         // one you last chose in that worktree does.
         if (chosen) saved[FOCUS] = Backstack.encodeFocus(_focus.value)
+        keepDestination()
     }
 
     /**
@@ -756,6 +744,22 @@ class AppModel(
         _stack.value = safe
         _route.value = safe.last()
         if (persist) saved[STACK] = Backstack.encodeStack(safe)
+        keepDestination()
+    }
+
+    /**
+     * Write down where this is, for the next launch to go back to (ov-182).
+     * Not before the launch is decided: until then the stack is the bare front
+     * door every launch starts on, and keeping it would throw away the place
+     * the last run left. On every move and not on exit, since an app that is
+     * swiped away or killed never gets a last word.
+     */
+    private fun keepDestination() {
+        if (!launchDecided) return
+        val destination = DestinationRoutes.destination(_stack.value) { host, worktree ->
+            (_focus.value[Backstack.key(host, worktree)]?.pane as? Pane.Terminal)?.terminalId
+        } ?: return
+        settings.setKeptDestination(destination.encoded())
     }
 
     private val _foreground = MutableStateFlow(true)
@@ -811,9 +815,6 @@ class AppModel(
     }
 
     private companion object {
-        /** How long a decision push waits for its task at most, as on iOS. */
-        const val DECISION_FOLLOW_MS = 60_000L
-
         /** How long an answer from a decision card looks for its runner. */
         const val ANSWER_FIND_MS = 15_000L
 

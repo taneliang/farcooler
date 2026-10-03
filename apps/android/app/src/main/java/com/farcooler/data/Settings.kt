@@ -203,9 +203,21 @@ class Settings(context: Context) {
         preferences.edit().putString(KEY_LAST_WORKSPACE, "$hostId/$workspaceId").apply()
     }
 
+    /**
+     * Where the app was when it was last used, as a `Destination`'s encoding
+     * (ov-182): what a relaunch goes back to. Null before any build wrote one.
+     */
+    val keptDestination: String? get() = preferences.getString(KEY_DESTINATION, null)
+
+    fun setKeptDestination(encoded: String) {
+        if (encoded == keptDestination) return
+        preferences.edit().putString(KEY_DESTINATION, encoded).apply()
+    }
+
     companion object {
         private const val KEY_WORKSPACE_TAB = "workspace.tab."
         private const val KEY_LAST_WORKSPACE = "workspace.last"
+        private const val KEY_DESTINATION = "nav.destination.v1"
 
         /**
          * Matches the size the Apple apps render at, so the same terminal on

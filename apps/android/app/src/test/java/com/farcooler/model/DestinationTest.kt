@@ -176,8 +176,9 @@ class DestinationTest {
         )
         val extras = DestinationPayloads.extras(value)
         assertEquals(value, DestinationPayloads.from(extras::get))
-        // Today's PushTap reads the legacy keys beside it.
-        assertEquals(com.farcooler.notify.PushTap.Task("bil-7", "r1"), com.farcooler.notify.PushTap.from(extras::get))
+        // The older spelling rides beside it, for a reader that doesn't know the encoding.
+        assertEquals("bil-7", extras["task"])
+        assertEquals("r1", extras["runner"])
     }
 
     @Test
@@ -186,11 +187,6 @@ class DestinationTest {
         assertEquals("r1" to "a:b", DestinationPayloads.parseNoticeId("t:r1:a:b"))
         assertNull(DestinationPayloads.parseNoticeId("t:0123456789abcdef"))
         assertNull(DestinationPayloads.parseNoticeId("t::bil-7"))
-    }
-
-    @Test
-    fun `the restore deadline is the launch rule's`() {
-        assertEquals(com.farcooler.ui.LaunchRule.WINDOW_MS, DestinationResolver.Deadline.RESTORE_MS)
     }
 
     /** A file in this checkout, found by walking up from wherever Gradle runs. */

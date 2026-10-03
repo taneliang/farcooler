@@ -25,7 +25,7 @@ object DestinationResolver {
 
     /** How long each arrival waits, in milliseconds. */
     object Deadline {
-        /** [com.farcooler.ui.LaunchRule.WINDOW_MS]. */
+        /** How long a launch waits for its runners before it stays where it is. */
         const val RESTORE_MS = 10_000L
         /** A phone's cold launch can take most of a minute to reach a runner. */
         const val NOTIFICATION_MS = 60_000L

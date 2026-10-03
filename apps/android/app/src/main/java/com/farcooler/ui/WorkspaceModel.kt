@@ -245,49 +245,6 @@ sealed interface WorkspacePresence {
     }
 }
 
-/** One runner, as the launch decision sees it. */
-data class LaunchReading(
-    /** How many items it listed, or null before it has listed any. */
-    val items: Int?,
-    /** Whether its connection has given up, which counts as an answer. */
-    val failed: Boolean,
-)
-
-/** Where a launch goes, once it can say (ruling 4). */
-sealed interface LaunchDecision {
-    /** Not every runner has answered yet. */
-    data object Wait : LaunchDecision
-
-    /** Too late to move anyone: stay where the app is. */
-    data object Stay : LaunchDecision
-
-    /** Every runner has answered: this many items are waiting. */
-    data class Decide(val waiting: Int) : LaunchDecision
-}
-
-object LaunchRule {
-    /**
-     * How long after launch a decision may still move the screen. A runner
-     * stuck reconnecting holds the decision open, and without a bound its
-     * answer minutes later would push the last workspace over a Needs You
-     * somebody is reading.
-     */
-    const val WINDOW_MS = 10_000L
-
-    /**
-     * Decide once every runner has listed its items or failed — until then
-     * "nothing is waiting" is a claim nobody can make — and at least one has
-     * listed. Past [WINDOW_MS], stay.
-     */
-    fun decide(readings: List<LaunchReading>, elapsedMs: Long): LaunchDecision {
-        if (elapsedMs > WINDOW_MS) return LaunchDecision.Stay
-        if (readings.isEmpty()) return LaunchDecision.Wait
-        if (!readings.all { it.items != null || it.failed }) return LaunchDecision.Wait
-        if (readings.none { it.items != null }) return LaunchDecision.Wait
-        return LaunchDecision.Decide(readings.sumOf { it.items ?: 0 })
-    }
-}
-
 /**
  * What a workspace is called on a sheet made from its screen: its name, or
  * for a runner without workspaces its repository's — the name its row and
