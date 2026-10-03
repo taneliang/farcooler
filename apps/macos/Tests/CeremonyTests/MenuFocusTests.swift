@@ -204,6 +204,8 @@ struct MenuWiringTests {
         "Close Terminal": "closesTerminal",
         "Open in Editor": "hasWorktree",
         "Back": "\\.goesBack",
+        "Forward": "\\.goesForward",
+        "Go to Jump Bar": "\\.hasJumpBar",
         "Focus": "\\.focuses",
         "Orchestrator": "\\.inWorkspace",
         "Navigator": "\\.inWorkspace",

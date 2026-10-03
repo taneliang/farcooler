@@ -33,9 +33,14 @@ enum AppCommand: String {
     case diffPreviousCommit
     case diffFirstCommit
     case diffMarkRead
-    /// Back along a workspace: from an opened worktree to its task, from a
-    /// task to the workspace (spec §4.9).
+    /// Back: where the window was before (ov-192); with nowhere, up a
+    /// level, from an opened worktree to its task, from a task to the
+    /// workspace (spec §4.9).
     case back
+    /// Forward: where Back left.
+    case forward
+    /// The jump bar takes the keyboard (⌘L, ov-192).
+    case jumpBar
     /// Focus: a task's or worktree's terminals alone, at full size, or the
     /// rest put back.
     case focusColumn
@@ -174,9 +179,19 @@ struct FarCoolerCommands: Commands {
         // fastest way between them. They were the terminals on
         // screen, which moved to ⌃⌘1 through ⌃⌘9.
         CommandMenu("Workspace") {
+            // ⌃⌘← and ⌃⌘→, Xcode's history pair (ov-192): ⌘[ and ⌘] are
+            // the terminals'.
             Button("Back") { AppCommand.back.post() }
                 .keyboardShortcut(.leftArrow, modifiers: [.command, .control])
                 .disabled(!MainWindowFocus.goes(\.goesBack, mainWindow))
+            Button("Forward") { AppCommand.forward.post() }
+                .keyboardShortcut(.rightArrow, modifiers: [.command, .control])
+                .disabled(!MainWindowFocus.goes(\.goesForward, mainWindow))
+            // ⌘L, a browser's "focus the location bar": nothing here or in
+            // the system's menus holds it, and ⌘ never reaches a terminal.
+            Button("Go to Jump Bar") { AppCommand.jumpBar.post() }
+                .keyboardShortcut("l", modifiers: .command)
+                .disabled(!MainWindowFocus.goes(\.hasJumpBar, mainWindow))
             // A checkmark while the terminals are at full size: it's a state,
             // and the same item puts the rest back (HIG, Menus: "Consider using
             // a checkmark to show that an attribute is currently in effect").

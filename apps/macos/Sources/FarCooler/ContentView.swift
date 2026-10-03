@@ -16,7 +16,7 @@ struct ContentView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.windowVisible) private var windowVisible
     @Environment(\.markReadConfirmation) private var markReadConfirmation
-    @State private var selection: Selection?
+    @State var selection: Selection?
 
     /// What a `+` meant, carried whole from the control that was clicked to
     /// the sheet it opens — or nil when no sheet is up.
@@ -142,7 +142,7 @@ struct ContentView: View {
     @State private var keyPane: PaneRef?
     /// The agent each task's column shows, by task id, when several are on
     /// it and one was picked.
-    @State private var chosenAgents: [String: String] = [:]
+    @State var chosenAgents: [String: String] = [:]
     /// The tab each task shows, Overview, Agent or Changes, as last chosen
     /// in this window (ov-98).
     @State private var taskTabs = TaskTabMemory()
@@ -157,15 +157,17 @@ struct ContentView: View {
     @State private var boardFocusRequest = 0
     /// Focus (⌃⌘↩): a task or worktree opened, alone, without the
     /// navigator.
-    @State private var focusColumn = false
+    @State var focusColumn = false
     /// The detail's width, as the workspace view last measured it: which of
     /// a workspace's columns are on screen. Nil until one has been drawn.
     @State private var detailWidth: CGFloat?
     /// The task a worktree was opened from with Open Worktree: where Back
     /// goes. See `WorkspaceNavigation`.
-    @State private var trail: Selection?
+    @State var trail: Selection?
     /// The worktree Open Worktree opened from `trail`.
-    @State private var trailWorktree: String?
+    @State var trailWorktree: String?
+    /// The jump bar's and history's window state (ov-192). See `JumpBarWindow`.
+    @State var jumpBar = JumpBarWindow()
     /// The task whose changes the keyboard is in: the Diff menu's
     /// shortcuts are for the diff you clicked into.
     @State private var changesFocus: String?
@@ -330,7 +332,7 @@ struct ContentView: View {
             escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 guard event.keyCode == 53, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
                     let window = event.window, window === windowBox.window, window.attachedSheet == nil,
-                    !showPalette, !showQuickCreate,
+                    !showPalette, !showQuickCreate, !jumpBar.active,
                     EscapeBack.goesBack(
                         responder: window.firstResponder, selection: selection,
                         focusColumn: focusColumn,
@@ -432,6 +434,7 @@ struct ContentView: View {
             // names what it was about, and a refused Stop that went away on
             // the next click would be the bug it exists to fix.
             outcomes.clearNotice()
+            jumpBar.history.record(from: old, to: new, trail: openedFrom(old))
             // Focus and a navigator holding the keyboard are about the view
             // that was on screen, not the next one. Focus stays while the
             // same thing is open, whichever of its panes is selected.
@@ -863,7 +866,7 @@ struct ContentView: View {
     }
 
     /// Whether to name runners at all.
-    private var showHosts: Bool { store.hosts.count > 1 }
+    var showHosts: Bool { store.hosts.count > 1 }
 
     /// One runner's daemon, as something the runner item can offer to replace —
     /// or nil, which is the ordinary case and the quiet one.
@@ -1137,7 +1140,7 @@ struct ContentView: View {
     /// fresh one when it comes back, and a store held over from the old one
     /// would go on talking to a connection nobody is answering. A workspace
     /// renamed since is a new store too, so the board's title follows it.
-    private func boardStore(for workspace: WorkspaceSummary, client: DaemonClient, host: String)
+    func boardStore(for workspace: WorkspaceSummary, client: DaemonClient, host: String)
         -> TaskBoardStore
     {
         let key = "\(host)/\(workspace.id)"
@@ -1270,7 +1273,7 @@ struct ContentView: View {
 
     /// The tab the task `selection` names shows (ov-98), or Agent for
     /// anything else, which has no tabs.
-    private func taskTab(for selection: Selection?) -> TaskTab {
+    func taskTab(for selection: Selection?) -> TaskTab {
         guard case .workspace(let host, _, .task(let id)?)? = selection else { return .agent }
         return taskTabs.tab(for: id, agentWorking: agentWorking(id, host: host))
     }
@@ -1284,7 +1287,7 @@ struct ContentView: View {
     /// Show `tab` for `task`, chosen; to the Agent tab, the keyboard goes
     /// with it, into the terminal. Leaving Changes, its diff gives up the
     /// Diff menu's keys.
-    private func choose(_ tab: TaskTab, for task: String) {
+    func choose(_ tab: TaskTab, for task: String) {
         taskTabs.choose(tab, for: task)
         if tab != .changes, changesFocus == task { changesFocus = nil }
         if tab == .agent { DispatchQueue.main.async { keyOpened() } }
@@ -1657,7 +1660,8 @@ struct ContentView: View {
         return WorktreeCrumb(
             title: segment.title, isHere: segment.isHere, tasks: segment.tasks, loose: segment.loose,
             worktree: named?.task, actions: named.map { worktreeMenu(for: $0).filter { $0 != .open } } ?? [],
-            perform: { item in if let named { perform(item, on: named) } }, opens: segment.opens, help: help)
+            perform: { item in if let named { perform(item, on: named) } }, opens: segment.opens, help: help,
+            children: named.map { JumpMenus.terminals(of: $0, selection: selection, fleet: store.fleet) } ?? [])
     }
 
     /// A workspace: the navigator, and what's selected in it in the main
@@ -1692,27 +1696,22 @@ struct ContentView: View {
                 }
             },
             breadcrumb: { place in
-                let crumbs = crumbs(for: place, host: host, workspace: summary)
                 let worktrees = worktreeCrumb(for: place, scene: scene)
+                let crumbs = WorkspaceWorktrees.crumbs(
+                    crumbs(for: place, host: host, workspace: summary), isHere: worktrees?.isHere == true)
                 DrillBreadcrumb(
-                    crumbs: WorkspaceWorktrees.crumbs(crumbs, isHere: worktrees?.isHere == true),
+                    crumbs: crumbs,
                     worktrees: worktrees,
                     onGo: { target in
                         if target == trail { trail = nil }
                         selection = target
                     },
                     onClose: WorkspaceNavigation.closing(place, board: scene.board) == nil ? nil : { closeOpened() },
-                    onOpen: { item in
-                        // A task's own worktree keeps the task as the way
-                        // back, as its Open Worktree does.
-                        if let from = item.trail, case .workspace(_, _, .worktree(let id, _)?) = item.target {
-                            trail = from
-                            trailWorktree = id
-                        } else if item.target == trail {
-                            trail = nil
-                        }
-                        selection = item.target
-                    })
+                    // A task's own worktree keeps the task as the way back, as its Open Worktree does.
+                    onOpen: { item in land(NavigationHistory.Stop(item.target, trail: item.trail)) },
+                    menus: jumpMenus(crumbs, place: place, host: host, summary: summary),
+                    onJump: { jump($0) }, focusRequest: jumpBar.request, onLeave: { keyOpened() },
+                    onActive: { jumpBar.active = $0 })
             },
             detail: { place, settled in openedView(place, layouts: layouts, settled: settled) }
         )
@@ -1999,7 +1998,7 @@ struct ContentView: View {
     /// Back: up one level, Focus first. ⌃⌘← goes along the breadcrumb to a
     /// task a worktree was opened from; Esc (`toOrchestrator`) goes up to
     /// the orchestrator (ov-92).
-    private func goBack(toOrchestrator: Bool = false) {
+    func goBack(toOrchestrator: Bool = false) {
         let step = WorkspaceNavigation.backStep(
             focus: focusColumn, oneAtATime: true, toOrchestrator: toOrchestrator, from: selection, trail: trail)
         if step.leavesFocus { focusColumn = false }
@@ -2262,7 +2261,7 @@ struct ContentView: View {
     /// the checkout can't draw a pane apart from it (ov-78). Opening it is
     /// the ask. If the move fails the selection stays where it was, with the
     /// banner saying why, rather than landing on a pane that isn't there.
-    private func navigate(to next: Selection, key: PaneRef? = nil) {
+    func navigate(to next: Selection, key: PaneRef? = nil) {
         func land() {
             selection = next
             if let key { keyPane = key }
@@ -2486,7 +2485,7 @@ struct ContentView: View {
 
     // MARK: - Behavior
 
-    private func worktree(host: String, id: String) -> Worktree? {
+    func worktree(host: String, id: String) -> Worktree? {
         store.fleet.worktrees.first { ($0.host ?? "") == host && $0.id == id }
     }
 
@@ -2669,7 +2668,9 @@ struct ContentView: View {
         focus.stepsTerminals = terminals.count > 1 || (terminals.count == 1 && terminals.first != selectedPane)
         focus.hasAttention =
             NeedsYouNavigation.step(lastOpened: lastAttention, items: store.needsYou, fleet: store.fleet, showing: selection) != nil
-        focus.goesBack = Self.goesBack(focus: focusColumn, from: selection, trail: trail, board: scene?.board)
+        focus.goesBack = jumpBar.history.canGoBack || Self.goesBack(focus: focusColumn, from: selection, trail: trail, board: scene?.board)
+        focus.goesForward = jumpBar.history.canGoForward
+        focus.hasJumpBar = scene?.opened != nil || selection?.focus != nil
         focus.focuses = scene?.opened != nil || selection?.focus != nil
         focus.focused = focusColumn
         focus.inWorkspace = scene != nil
@@ -3322,7 +3323,8 @@ struct ContentView: View {
                 // exactly this case.
                 errorBanner = "Select a workspace first."
             }
-        case .back: goBack()
+        case .back, .forward: step(back: command == .back)
+        case .jumpBar: jumpBar.request += 1
         case .focusColumn:
             if selection.flatMap(workspaceScene)?.opened != nil {
                 apply(WorkspaceNavigation.boardStep(.toggleFocus, from: boardState))

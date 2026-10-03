@@ -39,6 +39,10 @@ struct MainWindowFocus: Equatable {
     var hasAttention = false
     /// Back (⌃⌘←) has somewhere to go.
     var goesBack = false
+    /// Back has left somewhere to go Forward to (ov-192).
+    var goesForward = false
+    /// The jump bar is drawn, over a task or a worktree, for ⌘L (ov-192).
+    var hasJumpBar = false
     /// Focus (⌃⌘↩) has something to put at full size, and whether it has.
     var focuses = false
     var focused = false

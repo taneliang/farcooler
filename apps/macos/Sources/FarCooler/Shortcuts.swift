@@ -113,8 +113,9 @@ enum Shortcut {
         (
             "Workspaces",
             [
-                Item(keys: "⌃⌘←", action: "Back: from a worktree to its task, from a task to the orchestrator"),
-                Item(keys: "Esc", action: "Back to the orchestrator, from a task or a worktree"),
+                Item(keys: "⌃⌘← ⌃⌘→", action: "Back / forward through where you’ve been; with nowhere to go back, up a level"),
+                Item(keys: "⌘L", action: "Go to the jump bar: ← → between levels, ↓ for a menu, type to filter"),
+                Item(keys: "Esc", action: "Close what’s opened, back to the orchestrator"),
                 Item(keys: "⌃⌘↩", action: "Focus: what’s selected at full size, without the navigator; again to put it back"),
                 Item(keys: "⌥⌘1 ⌥⌘2 ⌥⌘3", action: "Select the orchestrator; go to the navigator; go to what’s selected"),
                 Item(keys: "↑ ↓", action: "In the navigator: the orchestrator, Unread, the tasks and the worktrees, in turn"),

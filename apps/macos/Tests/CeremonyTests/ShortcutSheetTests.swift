@@ -230,6 +230,20 @@ struct ShortcutSheetTests {
         #expect(rows.first { $0.keys == "⌃⌥⌘] ⌃⌥⌘[" }?.action.contains("commit") == true)
     }
 
+    /// History takes Xcode's ⌃⌘← and ⌃⌘→, since ⌘[ and ⌘] are the
+    /// terminals', and the jump bar takes ⌘L, a browser's location bar
+    /// (ov-192).
+    @Test("⌃⌘← ⌃⌘→ are Back and Forward, and ⌘L goes to the jump bar")
+    func historyAndJumpBar() {
+        #expect(Self.shortcut(after: "Back") == "⌃⌘←")
+        #expect(Self.shortcut(after: "Forward") == "⌃⌘→")
+        #expect(Self.shortcut(after: "Go to Jump Bar") == "⌘L")
+        #expect(Self.shortcut(after: "Previous Terminal") == "⌘[")
+        let rows = Shortcut.groups.flatMap { $0.1 }
+        #expect(rows.first { $0.keys == "⌃⌘← ⌃⌘→" }?.action.contains("where you’ve been") == true)
+        #expect(rows.first { $0.keys == "⌘L" }?.action.contains("jump bar") == true)
+    }
+
     /// "Repository" and "workspace" replaced "project" (spec §1): not in the
     /// ⌘/ sheet, and not in a menu item's title.
     @Test("No shortcut copy says project")

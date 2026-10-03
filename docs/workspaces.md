@@ -191,10 +191,19 @@ Agent… and Open Worktree… on its Agent and Changes tabs.
   the **×** at the end of the breadcrumb, press ⌥⌘1, or press Esc (when no
   terminal or field has the keyboard; Esc stays with the terminal you're typing
   in). Return in the navigator moves into what's selected.
-- Back (⌃⌘←, in the Workspace menu) goes up one level, from a worktree to the
-  task it was opened from, and from a task back to the orchestrator. The breadcrumb
-  goes straight to any level. Focus (⌃⌘↩) gives the task the whole view,
-  without the navigator; press it again to bring it back.
+- Back and Forward (⌃⌘← and ⌃⌘→, in the Workspace menu) go through where
+  you've been, as a browser's do. With nowhere to go back to, Back goes up one
+  level, from a worktree to the task it was opened from, and from a task back
+  to the orchestrator. Focus (⌃⌘↩) gives the task the whole view, without the
+  navigator; press it again to bring it back.
+- The jump bar (the breadcrumb over a task or a worktree) jumps anywhere close
+  by. Click a level for a menu of what sits beside it: the workspace's for
+  every workspace, grouped by repository; a task's for the orchestrator, the
+  tasks by status and the loose worktrees, with the task's own tabs on top; a
+  worktree's for its fellow worktrees, its terminals, and its lost terminals,
+  each opening its page. The place you're at is checked, and each item
+  shows its status ring. Type to filter a menu. ⌘L puts the keyboard in the
+  bar: ← and → move between levels, ↓ opens a menu, Return jumps, Esc leaves.
 - ⌥⌘1 selects the orchestrator, ⌥⌘2 gives the keyboard to the navigator, and
   ⌥⌘3 to the main area.
 - ⌃⌘↓ and ⌃⌘↑ (Workspace ▸ Next Worktree and Previous Worktree) go to the next
