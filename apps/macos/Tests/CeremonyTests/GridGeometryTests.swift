@@ -75,7 +75,9 @@ struct GridGeometryTests {
     /// Every mark on a column, each named one on its own, and every named
     /// one drawn.
     private func check(_ marks: [Mark], expect: [String: CGFloat]) {
-        for mark in marks where mark.role != .box {
+        // A box starts past the grid and a glyph is placed by its center
+        // (`checkTheLines`); everything else is on a column.
+        for mark in marks where mark.role == .text {
             #expect(ColumnGrid.isColumn(mark.x), "\(mark) is between columns")
         }
         for (name, column) in expect.sorted(by: { $0.key < $1.key }) {
@@ -130,6 +132,10 @@ struct GridGeometryTests {
         #expect(words == [NavigatorGrid.text], "text starts at \(words.sorted())")
         let carets = Set(found.filter { $0.role == .chevron }.map(\.midX))
         #expect(carets == [NavigatorGrid.glyphCenter], "caret centers at \(carets.sorted())")
+        // Every glyph is measured where it draws, and every one is there.
+        let drawn = Set(found.filter { $0.role == .icon }.map(\.row))
+        #expect(!carets.isEmpty, "no caret was drawn")
+        #expect(drawn.isSuperset(of: ["filter", "orchestrator"]), "glyphs drawn: \(drawn.sorted())")
         for icon in found where icon.role == .icon {
             #expect(abs(icon.midX - NavigatorGrid.glyphCenter) < 0.5, "\(icon) isn't centered on the carets")
             for caret in found where caret.role == .chevron {
@@ -160,10 +166,9 @@ struct GridGeometryTests {
         check(
             found,
             expect: [
-                "projectTerminal.box": NavigatorGrid.boxEdge, "projectTerminal.icon": NavigatorGrid.edge,
-                "projectTerminal.text": NavigatorGrid.text, "projectTerminalNew.icon": NavigatorGrid.edge,
-                "projectTerminalNew.text": NavigatorGrid.text, "boardWorktree.box": NavigatorGrid.boxEdge,
-                "boardWorktree.icon": NavigatorGrid.edge, "boardWorktree.text": NavigatorGrid.text,
+                "projectTerminal.box": NavigatorGrid.boxEdge,
+                "projectTerminal.text": NavigatorGrid.text, 
+                "projectTerminalNew.text": NavigatorGrid.text, "boardWorktree.box": NavigatorGrid.boxEdge, "boardWorktree.text": NavigatorGrid.text,
             ])
         checkTheLines(found)
     }
@@ -188,15 +193,10 @@ struct GridGeometryTests {
             // glyphs sit in the glyph column, checked below against the
             // carets.
             "filter.box": NavigatorGrid.boxEdge,
-            "filter.icon": NavigatorGrid.edge,
             "filter.text": NavigatorGrid.text,
             "orchestrator.box": NavigatorGrid.boxEdge,
-            "orchestrator.icon": NavigatorGrid.edge,
             "orchestrator.text": NavigatorGrid.text,
-            "summary.chevron": ColumnGrid.a,
             "summary.text": ColumnGrid.b,
-            "status.chevron": ColumnGrid.a,
-            "tasks.chevron": ColumnGrid.a,
             "tasks.text": ColumnGrid.b,
             "status.text": ColumnGrid.b,
             "card.text": ColumnGrid.b,

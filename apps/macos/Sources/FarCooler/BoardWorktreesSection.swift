@@ -97,8 +97,8 @@ struct BoardWorktreesSection: View {
                     HStack(spacing: 0) {
                         Image(systemName: "plus")
                             .font(.system(size: 10, weight: .medium))
-                            .glyphColumn()
                             .gridMark("boardWorktreeNew", .icon)
+                            .glyphColumn()
                         Text("New Worktree…")
                             .font(.system(size: WorkspaceStyle.PaneText.body))
                         Spacer(minLength: 0)
@@ -175,8 +175,8 @@ private struct BoardWorktreeRow: View {
             Image(systemName: WorktreeSection.glyph)
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.secondary)
-                .glyphColumn()
                 .gridMark("boardWorktree", .icon)
+                .glyphColumn()
             VStack(alignment: .leading, spacing: 2) {
                 Text(worktree.isMainCheckout ? "\(worktree.task) (main checkout)" : worktree.task)
                     .font(.system(size: WorkspaceStyle.PaneText.body))

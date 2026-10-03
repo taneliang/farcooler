@@ -343,9 +343,11 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
     }
 
     private var chevron: some View {
+        // Marked on the glyph itself, not its cell, so a test reads where
+        // the caret really draws.
         DisclosureChevron(expanded: expanded, visible: canExpand)
-            .frame(width: metrics.chevronWidth, alignment: metrics.chevronAlignment)
             .gridMark(Self.gridRow(id), .chevron)
+            .frame(width: metrics.chevronWidth, alignment: metrics.chevronAlignment)
     }
 
     private var header: some View {

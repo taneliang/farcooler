@@ -230,8 +230,8 @@ struct OrchestratorRowView: View {
             // In the glyph column, centered under the carets, so its title is
             // on the text column with every other row's (`NavigatorGrid`).
             icon
-                .glyphColumn()
                 .gridMark("orchestrator", .icon)
+                .glyphColumn()
             VStack(alignment: .leading, spacing: 2) {
                 if model.state == .none {
                     Text(OrchestratorRow.word(.none))
@@ -364,8 +364,8 @@ struct NavigatorFilterField: View {
             Image(systemName: glyph)
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
-                .glyphColumn()
                 .gridMark("filter", .icon)
+                .glyphColumn()
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: WorkspaceStyle.PaneText.body))
@@ -392,8 +392,8 @@ struct NavigatorFilterField: View {
         .frame(height: ColumnGrid.rowHeight)
         .background {
             RoundedRectangle.control.fill(Fill.inset(contrast))
-                .boxOutset()
                 .gridMark("filter", .box)
+                .boxOutset()
         }
         .overlay {
             RoundedRectangle.control
