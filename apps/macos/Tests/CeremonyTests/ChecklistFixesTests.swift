@@ -64,7 +64,7 @@ struct SidebarColumnTests {
         // The worktree directly under its workspace.
         #expect(rows.map(\.kind) == [.repository, .workspace("Main"), .worktree("w")])
         let workspace = rows[1].depth, worktree = rows[2].depth
-        // On ov-83's grid: repository text at A, a workspace's chevron
+        // On ov-83's grid: a repository's chevron at A (ov-101), a workspace's chevron
         // there too, its glyph at B and its name at C; a worktree's chevron
         // under that glyph, its glyph under the name, its title at D.
         // `GridGeometryTests` measures the drawn rows against the same.

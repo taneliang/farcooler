@@ -181,7 +181,9 @@ struct GridGeometryTests {
             "search.text": ColumnGrid.a,
             "needsYou.icon": ColumnGrid.a,
             "needsYou.text": ColumnGrid.b,
-            "repository.text": ColumnGrid.a,
+            // The shared section's chevron at A, the name at B (ov-101).
+            "repository.chevron": ColumnGrid.a,
+            "repository.text": ColumnGrid.b,
             "workspace.chevron": ColumnGrid.a,
             "workspace.icon": ColumnGrid.b,
             "workspace.text": ColumnGrid.c,

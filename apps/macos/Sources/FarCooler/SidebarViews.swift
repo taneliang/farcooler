@@ -558,113 +558,120 @@ struct ProjectHeader: View {
     var onToggleCollapse: (() -> Void)?
 
     @State private var hovering = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Show or Hide, on the shared spring (ov-101): its workspaces are
-    /// siblings of this row in the sidebar's flat list, so they come and go
-    /// as a workspace's worktrees do.
-    private func toggleCollapse() {
-        guard let onToggleCollapse else { return }
-        BoardMotion.toggle(reduceMotion: reduceMotion, onToggleCollapse)
-    }
+    /// A repository's header in the shared section's sidebar metrics, at
+    /// the height its `+` and `…` need.
+    static let metrics = SectionMetrics(
+        spacing: 0, chevronWidth: SidebarGrid.chevronColumn, minHeight: SidebarGrid.control,
+        headerInsets: EdgeInsets(top: 0, leading: SidebarGrid.edge, bottom: 0, trailing: SidebarGrid.edge),
+        isHeading: true)
 
     var body: some View {
-        // One band, and a `+` that is a Button rather than a Menu — so it sits in exactly the same column
-        // as the sidebar header's, which no amount of padding on a `Menu` could
-        // achieve.
-        SidebarRow {
-            HStack(spacing: 0) {
-                // Flush, like a section of Finder's sidebar: a repository
-                // heads its workspaces rather than containing them, so its
-                // name is at column A with no chevron, open or closed
-                // (ov-83). Show and Hide are words at the trailing edge, on
-                // hover, as in Finder. A silent runner's header keeps its
-                // machine icon at A, which is what says it names a runner,
-                // and its name at B, like Needs You.
-                if onToggleCollapse == nil {
-                    Image(systemName: "desktopcomputer")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: SidebarGrid.glyphColumn, alignment: .leading)
-                        .gridMark("runner", .icon)
-                }
-
-                HStack(spacing: 6) {
-                    Text(name)
-                        .font(WorkspaceStyle.sectionTitle)
-                        .foregroundStyle(.secondary)
-                        .gridMark(onToggleCollapse == nil ? "runner" : "repository", .text)
-                    if showHost {
-                        Text(host.isEmpty ? "This Mac" : host)
-                            .font(.system(size: 10.5))
+        Group {
+            if let onToggleCollapse {
+                // The shared section (ov-101): its chevron at A and its name
+                // at B, a workspace's glyph column, where ov-83 had the name
+                // flush at A and Finder's Show and Hide words trailing. The
+                // owner's rule is one collapsible, its chevron on the left.
+                // Its workspaces are its siblings in the sidebar's flat list,
+                // not its content, so the section holds nothing; they come
+                // and go with `BoardMotion.rowTransition` as it toggles.
+                CollapsibleSection(
+                    id: "repository.\(name)", metrics: Self.metrics,
+                    isExpanded: Binding(
+                        get: { !isCollapsed }, set: { open in if open == isCollapsed { onToggleCollapse() } }),
+                    accessibilityLabel: name, fillsRow: false,
+                    label: { _ in title },
+                    accessory: { trailing },
+                    content: { EmptyView() })
+            } else {
+                // A silent runner's header keeps its machine icon at A,
+                // which is what says it names a runner, and its name at B,
+                // like Needs You. It has nothing under it to collapse.
+                SidebarRow {
+                    HStack(spacing: 0) {
+                        Image(systemName: "desktopcomputer")
+                            .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(.tertiary)
-                            .lineLimit(1)
+                            .frame(width: SidebarGrid.glyphColumn, alignment: .leading)
+                            .gridMark("runner", .icon)
+                        title
+                        trailing
                     }
-                    HostDot(state: hostState, onReconnect: onReconnect, update: daemonUpdate)
-                    Spacer()
-
-                    if onNewWorktree != nil || onNewTerminal != nil {
-                        SidebarMenuButton(
-                            systemImage: "plus",
-                            help: "Add to \(name)",
-                            items: [
-                                onNewWorktree.map {
-                                    SidebarMenuItem(title: "New Worktree in \(name)…", action: $0)
-                                },
-                                // The main checkout is a place people work — a quick
-                                // build, a look at main while a worktree is
-                                // mid-changes — and it was the one directory this app
-                                // could not open a terminal in.
-                                onNewTerminal.map {
-                                    SidebarMenuItem(title: "New Terminal in \(name)", action: $0)
-                                },
-                            ].compactMap { $0 })
-                        // Shown on hover, like every other per-row control in a
-                        // sidebar. A `+` on every project header at all times is a
-                        // column of plus signs down a list meant to read as quiet
-                        // section labels.
-                        .opacity(hovering ? 1 : 0)
-                    }
-
-                    if let onRemove {
-                        // Its own button rather than a second item on the `+`
-                        // menu: that menu is for adding things, and a destructive
-                        // action one row below "New Worktree" is a misclick away
-                        // from removing a repository instead of branching one.
-                        SidebarMenuButton(
-                            systemImage: "ellipsis",
-                            help: "\(name) options",
-                            items: [SidebarMenuItem(title: "Remove \(name)…", action: onRemove)])
-                        .opacity(hovering ? 1 : 0)
-                    }
-
-                    // Finder's own words for a sidebar section, at the
-                    // trailing edge. Kept while collapsed: a section with
-                    // nothing under it has to say it can open.
-                    if onToggleCollapse != nil {
-                        Button(isCollapsed ? "Show" : "Hide", action: toggleCollapse)
-                            .buttonStyle(.plain)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .opacity(hovering || isCollapsed ? 1 : 0)
-                            .accessibilityLabel(isCollapsed ? "Show \(name)" : "Hide \(name)")
-                    }
+                    .frame(minHeight: SidebarGrid.control)
                 }
             }
         }
         .padding(.top, SidebarGrid.projectTopPadding)
         .padding(.bottom, SidebarGrid.projectBottomPadding)
-        .contentShape(Rectangle())
-        // The whole row toggles, not just the chevron: a section label is a big
-        // easy target and a 9-point glyph is not. The `+` and `…` are real
-        // Buttons, which take their own clicks ahead of this.
-        .onTapGesture { toggleCollapse() }
         .onHover { hovering = $0 }
-        // The `+`, the `…` and the chevron arrive at the same instant. Cut
-        // hard, that is three things appearing out of nothing under a
-        // pointer that only grazed the row. `Motion.snap` is the app's own
-        // "instant, but not a cut" — 0.22s.
+        // The `+` and the `…` arrive at the same instant. Cut hard, that is
+        // things appearing out of nothing under a pointer that only grazed
+        // the row. `Motion.snap` is the app's own "instant, but not a cut" —
+        // 0.22s.
         .animation(Motion.snap, value: hovering)
+    }
+
+    private var title: some View {
+        HStack(spacing: 6) {
+            Text(name)
+                .font(WorkspaceStyle.sectionTitle)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .gridMark(onToggleCollapse == nil ? "runner" : "repository", .text)
+            if showHost {
+                Text(host.isEmpty ? "This Mac" : host)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    /// The connection's dot after the name, and the `+` and `…` at the
+    /// trailing edge, on hover.
+    @ViewBuilder private var trailing: some View {
+        HostDot(state: hostState, onReconnect: onReconnect, update: daemonUpdate)
+            .padding(.leading, SidebarGrid.cellGap)
+        Spacer(minLength: SidebarGrid.gap)
+        HStack(spacing: 0) {
+            if onNewWorktree != nil || onNewTerminal != nil {
+                // A Button rather than a Menu, so it sits in exactly the same
+                // column as the sidebar header's `+`.
+                SidebarMenuButton(
+                    systemImage: "plus",
+                    help: "Add to \(name)",
+                    items: [
+                        onNewWorktree.map {
+                            SidebarMenuItem(title: "New Worktree in \(name)…", action: $0)
+                        },
+                        // The main checkout is a place people work — a quick
+                        // build, a look at main while a worktree is
+                        // mid-changes — and it was the one directory this app
+                        // could not open a terminal in.
+                        onNewTerminal.map {
+                            SidebarMenuItem(title: "New Terminal in \(name)", action: $0)
+                        },
+                    ].compactMap { $0 })
+                // Shown on hover, like every other per-row control in a
+                // sidebar. A `+` on every project header at all times is a
+                // column of plus signs down a list meant to read as quiet
+                // section labels.
+                .opacity(hovering ? 1 : 0)
+            }
+
+            if let onRemove {
+                // Its own button rather than a second item on the `+`
+                // menu: that menu is for adding things, and a destructive
+                // action one row below "New Worktree" is a misclick away
+                // from removing a repository instead of branching one.
+                SidebarMenuButton(
+                    systemImage: "ellipsis",
+                    help: "\(name) options",
+                    items: [SidebarMenuItem(title: "Remove \(name)…", action: onRemove)])
+                .opacity(hovering ? 1 : 0)
+            }
+        }
     }
 }
 
@@ -1440,6 +1447,9 @@ struct WorkspaceRow: View {
             DisclosureButton(
                 expanded: isOpen, accessibilityLabel: "Worktrees in \(name)", gridRow: "workspace",
                 width: SidebarGrid.chevronColumn, action: onToggle)
+            // The row, combined, says Expanded or Collapsed and has the
+            // toggle as a named action: read twice otherwise (ov-101 review).
+            .accessibilityHidden(true)
 
             Image(systemName: Self.glyph)
                 .font(.system(size: 11, weight: .medium))
@@ -1519,6 +1529,7 @@ struct WorkspaceRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction(named: "Open", onSelect)
+        .accessibilityValue(isOpen ? "Expanded" : "Collapsed")
         .accessibilityAction(named: isOpen ? "Hide Worktrees" : "Show Worktrees") {
             BoardMotion.toggle(reduceMotion: reduceMotion, onToggle)
         }
