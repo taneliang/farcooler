@@ -598,6 +598,9 @@ the task's text over its agent over its changes). A task need not have a worktre
   Each note is a block: a quiet "Kind · byline · time" line (`TaskProse.noteLine`), then its body. Newest first,
   answers under their questions (`TaskNoteFeed`). Type: labels subheadline semibold secondary, body `.body`,
   metadata caption; prose at about 70 characters (`TaskTypography.measure`); gaps on the 8 pt rhythm.
+- **Links** in task text (and the chat) are links only for http, https and mailto: any other scheme (`file:`,
+  an app's own, `javascript:`) is drawn as its words (`Markdown.inline`), and the views refuse to open one besides
+  (`Markdown.openGuard`). Task text is written by agents, and a `file:` link to a `.command` runs on one click.
 - **Agent:** the tmux layout holding the agent's terminal, drawn as selecting it draws it.
 - **Changes:** the worktree's `ChangesPane` (ruling 6: today's Changes view, reused without a tmux pane, so the
   agent's window keeps its size on every client; see R3). Made the first time it's shown.
@@ -607,7 +610,8 @@ the task's text over its agent over its changes). A task need not have a worktre
 - **Kept, not rebuilt:** Overview and Agent are mounted once and stay behind whichever tab is in front, faded
   out, out of sight (`outOfSight`: no keyboard), taking no clicks, so the terminal never re-wraps. The task's
   agent counts as on screen, for seen marks, the watching claim and the keyboard, only behind its Agent tab
-  (`WorkspaceScreen.visible(_:arrangement:taskTab:)`).
+  (`WorkspaceScreen.visible(_:arrangement:taskTab:)`); a task leaving the main area is out of sight whole, its front
+  tab included. Changes behind another tab takes no Diff menu keys and stops polling.
 - **With no agent,** the Agent tab says "No agent is working on this task." With neither an agent nor a
   worktree, Agent and Changes say "Nothing has started on this task yet." with **Start Agent…** and **Open
   Worktree…**: a compact panel near the top, never a full-height placeholder.
