@@ -1,13 +1,14 @@
 package com.farcooler.net
 
 import android.util.Base64
-import com.farcooler.core.ClientCore
+import com.farcooler.core.TerminalTransport
 import com.farcooler.core.TerminalGrid
 import com.farcooler.core.Vt
 import com.farcooler.core.VtCore
 import com.farcooler.core.refusalWord
 import com.farcooler.model.RunnerRefusal
 import com.farcooler.model.troubleFor
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -61,7 +62,12 @@ import kotlin.math.abs
  */
 class TerminalSession(
     terminalId: String,
-    private val core: ClientCore,
+    private val core: TerminalTransport,
+    /**
+     * Where this session runs. Null, as in the app, is its own emulator thread;
+     * a test passes a test dispatcher so the retry waits run on virtual time.
+     */
+    dispatcher: CoroutineDispatcher? = null,
 ) {
     sealed interface Phase {
         data object Connecting : Phase
@@ -75,7 +81,7 @@ class TerminalSession(
     }
 
     private val emulatorThread =
-        Executors.newSingleThreadExecutor { runnable ->
+        if (dispatcher != null) null else Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "farcooler-vt").apply { isDaemon = true }
         }.asCoroutineDispatcher()
 
@@ -89,7 +95,7 @@ class TerminalSession(
      * channel and free the emulator. Owning the scope means teardown is this
      * object's to complete, and [dispose] is the one thing that ends it.
      */
-    private val scope = CoroutineScope(SupervisorJob() + emulatorThread)
+    private val scope = CoroutineScope(SupervisorJob() + (dispatcher ?: emulatorThread!!))
 
     private val _phase = MutableStateFlow<Phase>(Phase.Connecting)
     val phase: StateFlow<Phase> = _phase.asStateFlow()
@@ -428,7 +434,7 @@ class TerminalSession(
             vt = null
         }.invokeOnCompletion {
             scope.cancel()
-            emulatorThread.close()
+            emulatorThread?.close()
         }
     }
 

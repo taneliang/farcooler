@@ -81,7 +81,7 @@ val Throwable.refusalWord: String?
  * identifiable in a trace: a native crash on an anonymous pool thread tells you
  * nothing about who was calling.
  */
-class ClientCore {
+class ClientCore : TerminalTransport {
     private val dispatcher =
         Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "farcooler-client").apply { isDaemon = true }
@@ -141,7 +141,7 @@ class ClientCore {
         submit { NativeClient.nativeConnect(it, config.toString()) }
 
     /** Invoke a method. */
-    suspend fun call(method: String, args: JsonObject = JsonObject(emptyMap())): JsonObject =
+    override suspend fun call(method: String, args: JsonObject): JsonObject =
         submit { NativeClient.nativeCall(it, method, args.toString()) }
 
     /**
@@ -199,7 +199,7 @@ class ClientCore {
      * Returns false when there is no SSH session to open a channel on, which is
      * a real answer and not an error: the caller falls back to polling.
      */
-    suspend fun startStream(
+    override suspend fun startStream(
         terminal: String,
         onChunk: (ByteArray) -> Unit,
         onEnd: (String?) -> Unit,
@@ -218,7 +218,7 @@ class ClientCore {
     }
 
     /** Stop watching. Safe when nothing is running. */
-    suspend fun stopStream(terminal: String) {
+    override suspend fun stopStream(terminal: String) {
         streams.remove(terminal)
         val h = handle
         if (h == 0L) return
