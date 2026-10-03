@@ -2828,9 +2828,11 @@ mod tests {
             },
         ];
 
-        let rendered = render_show(&detail, &["blocks"], None, &Default::default(), false);
+        // The board read names both, as it would on this runner.
+        let keys = [(uuid_of(&explained), "fc-7".to_string()), (uuid_of(&bare), "fc-8".to_string())].into();
+        let rendered = render_show(&detail, &["blocks"], None, &keys, false);
 
-        let (explained, bare) = (short_bytes(&explained), short_bytes(&bare));
+        let (explained, bare) = ("fc-7", "fc-8");
         assert!(
             rendered.contains(&format!("waits on {explained}  needs the migration first\n")),
             "a reason that was written is still printed beside its blocker:\n{rendered}"
