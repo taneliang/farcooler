@@ -28,6 +28,8 @@
 //!   a Mac `/usr/bin/security`, which gh runs to read its token from the login
 //!   keychain (measured: without it, `gh pr list` answers HTTP 401). The
 //!   daemon's own git calls never get these.
+//! - For git only: the daemon's LFS filter, `farcooler-lfs-filter`, which
+//!   takes no arguments, reads no config and execs nothing (`crate::git_lfs`).
 //! - On Linux, the ELF interpreter (`ld-linux…`) each of those names, since
 //!   the kernel opens it for execution as well.
 //!
@@ -36,8 +38,11 @@
 //! and fsmonitor command with arguments through `sh -c`, and a script's `#!`
 //! line through its interpreter, so with no shell on the list none of them
 //! can start, whatever the config says. That includes git-lfs: its filter is
-//! `git-lfs filter-process`, which git starts through `sh -c` (see
-//! `crate::git_guard` for why LFS is turned off rather than allowed).
+//! `git-lfs filter-process`, which git starts through `sh -c`, and git-lfs
+//! itself execs programs the repository's config names, with arguments
+//! (see `crate::git_lfs` for why it is never allowed, and what runs instead).
+//! Nothing on the list may be such a program: on Linux the dynamic loader is
+//! on it, and `ld-linux <file>` runs any program it is given.
 //!
 //! **How**: on a Mac, a Seatbelt profile (`(deny process-exec*)` and an
 //! `(allow process-exec (literal …))` per path), compiled once in the daemon

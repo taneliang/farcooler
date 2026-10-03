@@ -258,12 +258,26 @@ echo "==> Building the daemon with the tunnel linked (release)"
   exit 1
 }
 
+# The Git LFS filter the daemon's own gits run (`crates/daemon/src/git_lfs.rs`).
+# The daemon looks for it beside itself; without it, a worktree of an LFS
+# repository holds pointer files. Plain `cargo build`: it links nothing of Go's.
+echo "==> Building the daemon's LFS filter (release)"
+(cd "$ROOT" && cargo build --release -p farcooler-daemon --bin farcooler-lfs-filter) || {
+  echo "    the Rust build failed; refusing to bundle a stale binary"
+  exit 1
+}
+
 CLI="../../target/release/farcooler"
 DAEMON="../../target/release/farcoolerd"
-[ -x "$CLI" ] && [ -x "$DAEMON" ] || { echo "missing $CLI or $DAEMON after a successful build"; exit 1; }
+LFS_FILTER="../../target/release/farcooler-lfs-filter"
+[ -x "$CLI" ] && [ -x "$DAEMON" ] && [ -x "$LFS_FILTER" ] || {
+  echo "missing $CLI, $DAEMON or $LFS_FILTER after a successful build"
+  exit 1
+}
 cp "$CLI" "$APP/Contents/Resources/farcooler"
 cp "$DAEMON" "$APP/Contents/Resources/farcoolerd"
-echo "    bundled $("$CLI" --version 2>/dev/null || echo cli) + farcoolerd"
+cp "$LFS_FILTER" "$APP/Contents/Resources/farcooler-lfs-filter"
+echo "    bundled $("$CLI" --version 2>/dev/null || echo cli) + farcoolerd + farcooler-lfs-filter"
 
 # The Linux binaries `farcooler host install` uploads to a remote host, if this
 # machine has built any.
@@ -286,6 +300,7 @@ for SLUG in x86_64-linux aarch64-linux; do
   if [ -f "$SRC/farcoolerd" ] && [ -f "$SRC/farcooler" ]; then
     mkdir -p "$APP/Contents/Resources/dist/$SLUG"
     cp "$SRC/farcoolerd" "$SRC/farcooler" "$APP/Contents/Resources/dist/$SLUG/"
+    [ -f "$SRC/farcooler-lfs-filter" ] && cp "$SRC/farcooler-lfs-filter" "$APP/Contents/Resources/dist/$SLUG/"
     echo "    bundled $SLUG"
     BUNDLED_LINUX=$((BUNDLED_LINUX + 1))
   fi

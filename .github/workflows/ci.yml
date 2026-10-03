@@ -229,6 +229,31 @@ jobs:
           fi
           tmux -V
 
+      # git-lfs, for the two daemon tests that use it
+      # (`crates/daemon/tests/lfs_content_under_the_git_sandbox.rs`): one makes
+      # the repository the daemon's own LFS filter reads, and one shows that a
+      # planted `lfs.extension` does run under git-lfs, which is the control
+      # for the test that it runs nothing under the daemon. The daemon itself
+      # never runs git-lfs. With `CI` set, a missing git-lfs fails them rather
+      # than skipping. Both runner images usually have it; bounded like tmux.
+      - name: Install git-lfs
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          if command -v git-lfs >/dev/null 2>&1; then
+            git-lfs version
+            exit 0
+          fi
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+            sudo apt-get $APT_OPTS update
+            sudo apt-get $APT_OPTS install -y git-lfs
+          else
+            brew install git-lfs
+          fi
+          git-lfs version
+
       # fish, because it is a login shell people have and the one whose quoting
       # differs: inside single quotes it reads `\\` and `\'`, which sh does not.
       # A pane's command is parsed by the login shell, so the daemon's launch

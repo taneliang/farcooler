@@ -10,7 +10,7 @@
 //! object store both, the way git-lfs lays them out. The two tests that use
 //! the real git-lfs (one makes the repository with it; the other shows that
 //! the planted extension would run under it) skip when it isn't installed,
-//! and say so. CI installs it.
+//! and say so. CI installs it, and there a missing one fails them.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -66,9 +66,12 @@ fn git_lfs() -> Option<PathBuf> {
     std::env::split_paths(&path).map(|d| d.join("git-lfs")).find(|p| p.is_file())
 }
 
+/// git-lfs, or `None` and a line saying the test skipped. Under CI, where
+/// the workflow installs it, a missing git-lfs fails instead.
 fn skip_without_git_lfs(test: &str) -> Option<PathBuf> {
     let lfs = git_lfs();
     if lfs.is_none() {
+        assert!(std::env::var_os("CI").is_none(), "{test}: CI installs git-lfs, and it isn't on PATH");
         eprintln!("SKIPPED {test}: git-lfs isn't installed here (CI installs it)");
     }
     lfs

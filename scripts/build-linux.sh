@@ -113,11 +113,14 @@ cargo build --release --target "$TARGET" -p farcooler-cli
 # link one — see `apps/macos/build-app.sh` and
 # `scripts/build-ios-frameworks.sh`, which both still carry it.
 cargo build --release --target "$TARGET" -p farcooler-daemon --bin farcoolerd \
-  --features tailcat-helper
+  --bin farcooler-lfs-filter --features tailcat-helper
 
 mkdir -p "$OUT"
 cp "target/$TARGET/release/farcoolerd" "$OUT/"
 cp "target/$TARGET/release/farcooler" "$OUT/"
+# The Git LFS filter the daemon's own gits run, found beside `farcoolerd`
+# (`crates/daemon/src/git_lfs.rs`). Without it, LFS files stay pointers.
+cp "target/$TARGET/release/farcooler-lfs-filter" "$OUT/"
 # Beside the daemon, which is where the daemon looks: `helper_path` reads the
 # directory `farcoolerd` itself is in, the same way `farcooler` finds
 # `farcoolerd` next to itself. A `dist/` without this file is a runner that

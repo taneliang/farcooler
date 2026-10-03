@@ -46,6 +46,9 @@ pub(crate) fn tunnel_name() -> &'static str {
     farcooler_protocol::CHANNEL.tunnel_binary_name()
 }
 
+/// The daemon's Git LFS filter, installed beside it.
+const LFS_FILTER: &str = "farcooler-lfs-filter";
+
 /// The systemd unit file name for this channel.
 ///
 /// Channel-specific for the same reason the binary is: installing a preview
@@ -244,6 +247,16 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
             println!("        ./scripts/build-linux.sh {arch}");
         }
         None => {}
+    }
+
+    // The daemon's Git LFS filter, which it finds beside itself
+    // (`crates/daemon/src/git_lfs.rs`). One name on every channel: it speaks
+    // only git's filter protocol, so a stable and a canary daemon sharing
+    // `~/.local/bin` can share it too. Without it the runner works, and a
+    // worktree of an LFS repository holds pointer files.
+    match find_binary(&dir, &[LFS_FILTER]) {
+        Some(filter) => uploads.push((filter, LFS_FILTER)),
+        None => println!("    WARNING: no {LFS_FILTER} in {}; Git LFS files will be pointers.", dir.display()),
     }
 
     for (path, name) in &uploads {

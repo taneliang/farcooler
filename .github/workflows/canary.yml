@@ -511,7 +511,8 @@ jobs:
           # Each nested binary on its own, not `--deep`: the CLI and daemon in
           # Resources are separate executables and each needs its own signature
           # and hardened runtime. release.yml says the same at more length.
-          for binary in "$app/Contents/Resources/farcooler" "$app/Contents/Resources/farcoolerd"; do
+          for binary in "$app/Contents/Resources/farcooler" "$app/Contents/Resources/farcoolerd" \
+            "$app/Contents/Resources/farcooler-lfs-filter"; do
             codesign --force --options runtime --timestamp \
               --sign "$MACOS_SIGN_IDENTITY" "$binary"
           done

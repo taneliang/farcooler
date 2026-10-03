@@ -277,7 +277,8 @@ jobs:
           # --deep is deprecated and wrong for a bundle carrying its own
           # binaries: the CLI and daemon inside Resources are separate
           # executables and each needs its own signature and hardened runtime.
-          for binary in "$app/Contents/Resources/farcooler" "$app/Contents/Resources/farcoolerd"; do
+          for binary in "$app/Contents/Resources/farcooler" "$app/Contents/Resources/farcoolerd" \
+            "$app/Contents/Resources/farcooler-lfs-filter"; do
             codesign --force --options runtime --timestamp \
               --sign "$MACOS_SIGN_IDENTITY" "$binary"
           done
