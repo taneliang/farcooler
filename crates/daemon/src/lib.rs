@@ -10,6 +10,7 @@ pub mod file_diff;
 pub mod foreground;
 pub mod fs_watch;
 pub mod git;
+pub mod git_exclude;
 pub mod git_guard;
 pub mod git_launch;
 pub mod git_lfs;

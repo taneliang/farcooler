@@ -149,7 +149,7 @@ pub const PROJECT_HOOK_FILES: &[&str] = &[CODEX_HOOKS, CURSOR_HOOKS];
 ///
 /// Not the manager skill's files (`skill_install::PROJECT_SKILL_FILES`). Those
 /// are hidden by git itself, through a line in the repository's
-/// `info/exclude` (`service::exclude_locally`), which also keeps `git add -A`
+/// `info/exclude` (`git_exclude::exclude_locally`), which also keeps `git add -A`
 /// from committing them.
 ///
 /// Also takes out, and doesn't return, a temporary file a crash left beside

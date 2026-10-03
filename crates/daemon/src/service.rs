@@ -1301,7 +1301,7 @@ fn takes_plugin_dir(preset: &str) -> bool {
 ///   made.
 /// - **Nothing is written through a symbolic link** (`crosses_a_symlink`): a
 ///   `.agents` that links to a shared skills directory is outside the worktree.
-/// - **Git is told to ignore it first** (`exclude_locally`), in the
+/// - **Git is told to ignore it first** (`git_exclude::exclude_locally`), in the
 ///   repository's own `info/exclude`, which is local and never committed. The
 ///   copy is untracked, and without that line any agent's `git add -A` in this
 ///   worktree would commit a document naming this runner's CLI path. When the
@@ -1366,7 +1366,7 @@ async fn install_project_skill(
             );
             continue;
         }
-        if !exclude_locally(worktree, file.relative, deadline).await {
+        if !crate::git_exclude::exclude_locally(worktree, file.relative, deadline).await {
             tracing::warn!(
                 path = %path.display(),
                 "could not tell git to ignore the manager skill; not writing it"
@@ -1399,59 +1399,11 @@ fn tracked_by(answer: Result<git::GitBytes>) -> bool {
     }
 }
 
-/// Add `/relative` to the repository's `info/exclude`, unless a line already
-/// says exactly that, and say whether the line is there now.
-///
-/// `info/exclude` rather than `.gitignore`: it lives in the repository's own
-/// directory, is never committed, and is shared by every worktree of it,
-/// which is why the directory comes from `--git-common-dir` and not from the
-/// worktree's `.git`, a file in a linked worktree. The leading `/` anchors the
-/// pattern at a worktree's root, and the whole path names our file and nothing
-/// beside it, so a file of the owner's own in the same directory is still
-/// reported. An exclude line hides nothing git already tracks.
-async fn exclude_locally(worktree: &Path, relative: &str, deadline: tokio::time::Instant) -> bool {
-    let Ok(out) = git::git_bytes_by(deadline, worktree, &["rev-parse", "--git-common-dir"]).await else {
-        return false;
-    };
-    if !out.ok {
-        return false;
-    }
-    // Bytes, not text: a path that isn't UTF-8 must name the directory git
-    // reads, not a lossy copy of it.
-    use std::os::unix::ffi::OsStrExt;
-    let common = std::ffi::OsStr::from_bytes(out.stdout.strip_suffix(b"\n").unwrap_or(&out.stdout));
-    // Relative to the directory git ran in when it's relative at all.
-    let exclude = worktree.join(common).join("info").join("exclude");
-    let line = format!("/{relative}");
-    let existing = match std::fs::read_to_string(&exclude) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(_) => return false,
-    };
-    if existing.lines().any(|l| l.trim_end() == line) {
-        return true;
-    }
-    let separator = if existing.is_empty() || existing.ends_with('\n') { "" } else { "\n" };
-    // One comment says whose these lines are, however many follow it.
-    const WHOSE: &str = "# Far Cooler's manager skill for codex";
-    let said = existing.lines().any(|l| l.trim_end() == WHOSE);
-    let comment = if said { String::new() } else { format!("{WHOSE}\n") };
-    let append = || -> std::io::Result<()> {
-        use std::io::Write;
-        if let Some(info) = exclude.parent() {
-            std::fs::create_dir_all(info)?;
-        }
-        let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&exclude)?;
-        file.write_all(format!("{separator}{comment}{line}\n").as_bytes())
-    };
-    append().is_ok()
-}
-
 /// Whether a worktree holds a manager-skill file that removing it would lose
 /// and that `git::is_dirty` can't see: one at our path that isn't an unedited
 /// copy of ours, and that git doesn't track.
 ///
-/// `exclude_locally` tells git to ignore our paths in every worktree of the
+/// `git_exclude::exclude_locally` tells git to ignore our paths in every worktree of the
 /// repository, so an owner who edited our copy, or who put a file of their own
 /// at that path, has work git reports nowhere. A tracked file needs none of
 /// this: `is_dirty` reports its changes like any other file's, and its
