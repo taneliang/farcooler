@@ -21,6 +21,8 @@ struct AddDeviceView: View {
     /// Resolving costs an `ssh -G` each, and doing it while somebody is holding
     /// a phone up to a camera is the wrong moment.
     @State private var grantable: [CeremonyStore.RunnerRow] = []
+    /// Whether the offer's fingerprint is shown in full.
+    @State private var fingerprintOpen = false
     /// How far each runner's address travels, and what it was swapped for,
     /// keyed by the runner id the ceremony rows carry.
     ///
@@ -237,14 +239,20 @@ struct AddDeviceView: View {
     }
 
     private func fingerprint(_ offer: CeremonyOffer) -> some View {
-        DisclosureGroup {
+        // The shared section (ov-101), where a `DisclosureGroup` was.
+        CollapsibleSection(
+            id: "fingerprint", metrics: .inline, isExpanded: $fingerprintOpen,
+            accessibilityLabel: "Fingerprint \(abbreviated(offer.fingerprint))",
+            label: { _ in
+                Text(abbreviated(offer.fingerprint))
+                    .font(.system(.callout, design: .monospaced).weight(.semibold))
+            },
+            accessory: { EmptyView() }
+        ) {
             Text(offer.fingerprint ?? offer.key_a)
                 .font(.system(.caption, design: .monospaced))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-        } label: {
-            Text(abbreviated(offer.fingerprint))
-                .font(.system(.callout, design: .monospaced).weight(.semibold))
         }
     }
 

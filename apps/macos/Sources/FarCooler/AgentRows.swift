@@ -207,36 +207,33 @@ private struct ThoughtRow: View {
     let isLive: Bool
 
     @State private var expanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button {
-                withAnimation(Motion.snap) { expanded.toggle() }
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "chevron.right")
-                        .font(.caption2)
-                        .rotationEffect(.degrees(showing ? 90 : 0))
-                    Text(isLive ? "Thinking…" : "Thought")
-                        .font(.caption.weight(.medium))
-                }
-                .foregroundStyle(.secondary)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if showing {
-                // While it is being written, only the last few lines — enough
-                // to see it moving, which is the whole point. A thinking agent
-                // that shows one collapsed word looks stuck, and one that
-                // shows everything pushes the conversation off screen.
-                MarkdownText(text: isLive && !expanded ? Self.tail(of: text) : text, secondary: true)
-                    .padding(.leading, 2)
-            }
+        // The shared section (ov-101). A click toggles the reader's own
+        // choice, whatever the live rule is showing.
+        CollapsibleSection(
+            id: "thought", metrics: .inline,
+            isExpanded: Binding(get: { showing }, set: { _ in expanded.toggle() }),
+            accessibilityLabel: isLive ? "Thinking" : "Thought", fillsRow: false,
+            label: { _ in
+                Text(isLive ? "Thinking…" : "Thought")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            },
+            accessory: { EmptyView() }
+        ) {
+            // While it is being written, only the last few lines — enough
+            // to see it moving, which is the whole point. A thinking agent
+            // that shows one collapsed word looks stuck, and one that
+            // shows everything pushes the conversation off screen.
+            MarkdownText(text: isLive && !expanded ? Self.tail(of: text) : text, secondary: true)
+                .padding(.leading, 2)
         }
         // Driven by the model, not by a timer: a thought stops being live the
-        // instant something follows it, and the fold should follow that.
-        .animation(Motion.snap, value: isLive)
+        // instant something follows it, and the fold should follow that, on
+        // the shared spring.
+        .animation(BoardMotion.list(reduceMotion: reduceMotion), value: isLive)
         .animation(Motion.snap, value: text)
     }
 
@@ -269,6 +266,7 @@ private struct ToolRowView: View {
     private var expandable: Bool { tool.content != nil || tool.diff != nil }
 
     @State private var expanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         // One container for the summary and what it opens.
@@ -279,29 +277,35 @@ private struct ToolRowView: View {
         // and what it discloses are one object; drawing them as one says so.
         VStack(alignment: .leading, spacing: 0) {
             if expandable {
-                Button {
-                    withAnimation(Motion.snap) { expanded.toggle() }
-                } label: {
-                    label.contentShape(Rectangle())
+                // The shared section (ov-101), its chevron inside the box,
+                // not beside it: the chevron belongs to the row it opens, and
+                // outside the fill it aligned the detail to the wrong edge.
+                CollapsibleSection(
+                    id: "tool", metrics: .card,
+                    isExpanded: Binding(get: { showingDetail }, set: { _ in expanded.toggle() }),
+                    accessibilityLabel: tool.title,
+                    label: { _ in label },
+                    accessory: { EmptyView() }
+                ) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Divider()
+                        VStack(alignment: .leading, spacing: 8) {
+                            if let content = tool.content, !content.isEmpty {
+                                // No fill of its own: it is already inside one.
+                                DetailBox(text: content, chrome: false)
+                            }
+                            if let diff = tool.diff {
+                                DiffView(diff: diff)
+                            }
+                        }
+                        .padding(9)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
-                .buttonStyle(.plain)
             } else {
                 label
-            }
-
-            if showingDetail {
-                Divider()
-                VStack(alignment: .leading, spacing: 8) {
-                    if let content = tool.content, !content.isEmpty {
-                        // No fill of its own: it is already inside one.
-                        DetailBox(text: content, chrome: false)
-                    }
-                    if let diff = tool.diff {
-                        DiffView(diff: diff)
-                    }
-                }
-                .padding(9)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 6)
             }
 
             // The question, on the thing being asked about.
@@ -326,12 +330,11 @@ private struct ToolRowView: View {
                     .strokeBorder(GlancePalette.amber(scheme).opacity(0.45))
             }
         }
-        .animation(Motion.snap, value: expanded)
-        .animation(Motion.snap, value: pending != nil)
         // Driven by the model rather than a timer, exactly as the thought row
-        // is: the fold follows the turn moving on.
-        .animation(Motion.snap, value: isLive)
-        .animation(Motion.snap, value: running)
+        // is: the fold follows the turn moving on, on the shared spring.
+        .animation(BoardMotion.list(reduceMotion: reduceMotion), value: pending != nil)
+        .animation(BoardMotion.list(reduceMotion: reduceMotion), value: isLive)
+        .animation(BoardMotion.list(reduceMotion: reduceMotion), value: running)
     }
 
     /// Open on its own while it is waiting to be approved, and while it is
@@ -353,15 +356,6 @@ private struct ToolRowView: View {
 
     private var label: some View {
         HStack(spacing: 7) {
-            // Inside the box, not beside it — the chevron belongs to the row it
-            // opens, and outside the fill it aligned the detail to the wrong
-            // edge.
-            if expandable {
-                Image(systemName: "chevron.right")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(showingDetail ? 90 : 0))
-            }
             // The same dot the sidebar uses for a terminal's status, mapped
             // onto a tool call's own four states — one vocabulary for
             // "something is happening" everywhere it appears, rather than a
@@ -387,9 +381,8 @@ private struct ToolRowView: View {
         // Inset on a faint fill — applied to the whole container in `body`, so
         // a tool call reads as machinery rather than as something the agent
         // said. Without it the transcript is one undifferentiated column of
-        // text and the eye cannot find the prose.
-        .padding(.horizontal, 9)
-        .padding(.vertical, 6)
+        // text and the eye cannot find the prose. The inset is the card
+        // section's (`SectionMetrics.card`), or the same padding without one.
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -424,6 +417,7 @@ private struct SubagentBlockView: View {
     /// `nil` means nobody has said, so the automatic rule applies.
     @State private var toggled: Bool?
     @State private var showingAll = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// How many children a running block shows. Enough to see what it is
     /// doing; few enough that six at once still fit on a screen.
@@ -456,41 +450,45 @@ private struct SubagentBlockView: View {
     private var hidden: Int { block.children.count - shown.count }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(Motion.snap) { toggled = !showing }
-            } label: {
-                header.contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if showing && !block.children.isEmpty {
-                Divider()
-                VStack(alignment: .leading, spacing: 8) {
-                    // Above the rows it hides, because that is where they are:
-                    // these are the OLDEST children, and an affordance for them
-                    // placed below the newest ones would point the wrong way.
-                    if hidden > 0 {
-                        Button("… \(hidden) more") { withAnimation(Motion.snap) { showingAll = true } }
+        // The shared section (ov-101), in the card's metrics.
+        CollapsibleSection(
+            id: "subagent", metrics: .card,
+            isExpanded: Binding(get: { showing }, set: { toggled = $0 }),
+            accessibilityLabel: block.tool.title,
+            label: { _ in header },
+            accessory: { EmptyView() }
+        ) {
+            if !block.children.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 8) {
+                        // Above the rows it hides, because that is where they are:
+                        // these are the OLDEST children, and an affordance for them
+                        // placed below the newest ones would point the wrong way.
+                        if hidden > 0 {
+                            Button("… \(hidden) more") {
+                                BoardMotion.toggle(reduceMotion: reduceMotion) { showingAll = true }
+                            }
                             .buttonStyle(.plain)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        }
+                        ForEach(shown) { child in
+                            AgentRowView(
+                                row: child,
+                                // While the block runs, its newest child is what is
+                                // happening — the same thing `isLast` means at the
+                                // top level, asked one level down. Without it a
+                                // running subagent shows three shut rows and none of
+                                // the output that is the reason to watch it.
+                                isLast: running && child.id == block.children.last?.id,
+                                pending: permission(gating: child),
+                                onAnswer: onAnswer)
+                        }
                     }
-                    ForEach(shown) { child in
-                        AgentRowView(
-                            row: child,
-                            // While the block runs, its newest child is what is
-                            // happening — the same thing `isLast` means at the
-                            // top level, asked one level down. Without it a
-                            // running subagent shows three shut rows and none of
-                            // the output that is the reason to watch it.
-                            isLast: running && child.id == block.children.last?.id,
-                            pending: permission(gating: child),
-                            onAnswer: onAnswer)
-                    }
+                    .padding(9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(9)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .background(
@@ -498,19 +496,16 @@ private struct SubagentBlockView: View {
                 ? AnyShapeStyle(.quinary)
                 : AnyShapeStyle(Color.primary.opacity(0.035)),
             in: RoundedRectangle(cornerRadius: 7))
-        .animation(Motion.snap, value: showing)
         // Driven by the model rather than by the toggle alone: children arrive
         // while the block is open, and an unanimated insert makes the
-        // transcript below it jump.
-        .animation(Motion.snap, value: block.children.count)
+        // transcript below it jump. The fold follows the block finishing.
+        .animation(BoardMotion.list(reduceMotion: reduceMotion), value: block.children.count)
+        .animation(BoardMotion.list(reduceMotion: reduceMotion), value: running)
+        .animation(BoardMotion.list(reduceMotion: reduceMotion), value: pending != nil)
     }
 
     private var header: some View {
         HStack(spacing: 7) {
-            Image(systemName: "chevron.right")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .rotationEffect(.degrees(showing ? 90 : 0))
             StatusGlyph(status: status)
             Text(block.tool.title)
                 .font(.subheadline.weight(running || pending != nil ? .semibold : .medium))
@@ -526,8 +521,6 @@ private struct SubagentBlockView: View {
                 .lineLimit(1)
             Spacer(minLength: 4)
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 

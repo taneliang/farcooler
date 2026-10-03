@@ -71,6 +71,7 @@ struct ChangesPane: View {
 
     /// Kept mounted out of sight, behind a task's other tabs.
     @Environment(\.outOfSight) private var outOfSight
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var codeFont: Font { Font(preferences.terminalFont() as CTFont) }
 
@@ -1258,7 +1259,9 @@ struct ChangesPane: View {
                 GeometryReader { geo in
                     ScrollView([.vertical, .horizontal]) {
                         LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(rows) { r in row(r) }
+                            ForEach(rows) { r in
+                                row(r).transition(BoardMotion.rowTransition(reduceMotion: reduceMotion))
+                            }
                         }
                         // Stated, never measured. This is what keeps the lazy
                         // stack lazy in a scroll view that also scrolls
@@ -1610,22 +1613,20 @@ struct ChangesPane: View {
 
     private func fileHeading(_ f: ChangedFile) -> some View {
         HStack(spacing: 8) {
-            Button {
+            // The shared chevron (ov-101), on the shared spring: a file's
+            // lines are the heading's siblings in the flattened list, which
+            // come and go with `BoardMotion.rowTransition`.
+            DisclosureButton(
+                expanded: !changes.collapsedFiles.contains(f.path), accessibilityLabel: pathLabel(f),
+                width: 16, height: 18
+            ) {
                 if changes.collapsedFiles.contains(f.path) {
                     changes.collapsedFiles.remove(f.path)
                     Task { await changes.ensure(f.path) }
                 } else {
                     changes.collapsedFiles.insert(f.path)
                 }
-            } label: {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .rotationEffect(.degrees(changes.collapsedFiles.contains(f.path) ? -90 : 0))
-                    .frame(width: 16, height: 18)
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
             .help(changes.collapsedFiles.contains(f.path) ? "Expand file" : "Collapse file")
 
             FileStatusBadge(status: f.status, binary: f.binary)
@@ -2118,6 +2119,8 @@ private struct ReviewOutbox: View {
     @ObservedObject var comments: ReviewCommentQueue
     let agents: [ReviewAgentTarget]
     let branch: String
+    /// The sent batches opened to their text.
+    @State private var openReceipts: Set<UUID> = []
 
     /// The panes that have a composer on screen to put something in. A pane
     /// showing its raw terminal is a perfectly good target for a SEND and has
@@ -2256,23 +2259,34 @@ private struct ReviewOutbox: View {
                 .padding(.horizontal, 9)
                 .padding(.bottom, 2)
             ForEach(comments.sent) { batch in
-                DisclosureGroup {
-                    Text(batch.text)
-                        .font(.system(size: WorkspaceStyle.PaneText.minimum, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } label: {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(batch.count == 1 ? "1 note" : "\(batch.count) notes")
-                            .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                        Text(receiptDetail(batch))
-                            .font(.system(size: WorkspaceStyle.PaneText.minimum))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                // The shared section (ov-101), where a `DisclosureGroup` was.
+                let notes = batch.count == 1 ? "1 note" : "\(batch.count) notes"
+                CollapsibleSection(
+                    id: "receipt.\(batch.id)", metrics: .inline,
+                    isExpanded: Binding(
+                        get: { openReceipts.contains(batch.id) },
+                        set: { open in
+                            if open { openReceipts.insert(batch.id) } else { openReceipts.remove(batch.id) }
+                        }),
+                    accessibilityLabel: "\(notes), \(receiptDetail(batch))",
+                    label: { _ in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(notes)
+                                .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                            Text(receiptDetail(batch))
+                                .font(.system(size: WorkspaceStyle.PaneText.minimum))
+                                .foregroundStyle(.tertiary)
+                        }
+                    },
+                    accessory: { EmptyView() },
+                    content: {
+                        Text(batch.text)
+                            .font(.system(size: WorkspaceStyle.PaneText.minimum, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    })
                 .padding(.horizontal, 9)
                 .padding(.vertical, 3)
             }

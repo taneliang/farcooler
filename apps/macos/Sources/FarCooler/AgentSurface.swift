@@ -502,58 +502,52 @@ private struct PlanPanel: View {
 
     @State private var expanded = true
 
+    /// A card's section, at the plan's own inset.
+    private static let metrics = SectionMetrics(
+        spacing: 0, chevronWidth: SectionMetrics.card.chevronWidth, minHeight: 0,
+        headerInsets: EdgeInsets(top: 7, leading: 12, bottom: 7, trailing: 12))
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(Motion.snap) { expanded.toggle() }
-            } label: {
+        // The shared section (ov-101); its count trailing, as every
+        // section's is.
+        CollapsibleSection(
+            id: "plan", metrics: Self.metrics, isExpanded: $expanded,
+            accessibilityLabel: "Tasks, \(entries.doneCount) of \(entries.count) done",
+            label: { open in
                 HStack(spacing: 6) {
-                    Image(systemName: "chevron.right")
-                        .font(.caption2)
-                        .rotationEffect(.degrees(expanded ? 90 : 0))
                     Text("Tasks")
                         .font(.caption.weight(.semibold))
-                    Text("\(entries.doneCount) of \(entries.count)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
                     // The one currently being worked on, named in the header —
                     // so a collapsed list still answers the question people
                     // actually open it to ask.
-                    if !expanded, let active = entries.active {
+                    if !open, let active = entries.active {
                         Text("· \(active.content)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
-                    Spacer(minLength: 0)
                 }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-
-            if expanded {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
-                        HStack(alignment: .top, spacing: 7) {
-                            Image(systemName: PlanStatus(entry.status).symbol)
-                                .font(.system(size: 10))
-                                .foregroundStyle(PlanStatus(entry.status).tint)
-                                .frame(width: 12)
-                            Text(entry.content)
-                                .font(.system(size: 11.5))
-                                .strikethrough(PlanStatus(entry.status).isDone)
-                                .foregroundStyle(PlanStatus(entry.status).isDone ? .secondary : .primary)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Spacer(minLength: 0)
-                        }
+            },
+            accessory: { SectionCount(entries.doneCount, of: entries.count) }
+        ) {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+                    HStack(alignment: .top, spacing: 7) {
+                        Image(systemName: PlanStatus(entry.status).symbol)
+                            .font(.system(size: 10))
+                            .foregroundStyle(PlanStatus(entry.status).tint)
+                            .frame(width: 12)
+                        Text(entry.content)
+                            .font(.system(size: 11.5))
+                            .strikethrough(PlanStatus(entry.status).isDone)
+                            .foregroundStyle(PlanStatus(entry.status).isDone ? .secondary : .primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
             }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
         }
         // OPAQUE, because it floats over a scrolling transcript.
         //

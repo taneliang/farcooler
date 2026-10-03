@@ -19,6 +19,8 @@ struct RunnersSettings: View {
     @State private var newTarget = ""
     @State private var busy: Set<String> = []
     @State private var log: [String: String] = [:]
+    /// The runners whose ssh Details are open.
+    @State private var detailsOpen: Set<String> = []
     /// The runner whose settings sheet is open, by ssh target — `""` for this
     /// Mac, which is a real value here and not "nothing".
     ///
@@ -230,8 +232,17 @@ struct RunnersSettings: View {
             // What ssh said, behind a disclosure: a sentence in the row, and
             // the raw output for whoever is debugging.
             if let error = runner.lastError {
-                DisclosureGroup("Details") { DetailBox(text: error) }
-                    .font(.caption)
+                // The shared section (ov-101), where a `DisclosureGroup` was.
+                CollapsibleSection(
+                    "Details", id: "runner-details.\(runner.target)", style: .minor, metrics: .inline,
+                    isExpanded: Binding(
+                        get: { detailsOpen.contains(runner.target) },
+                        set: { open in
+                            if open { detailsOpen.insert(runner.target) } else { detailsOpen.remove(runner.target) }
+                        })
+                ) {
+                    DetailBox(text: error)
+                }
             }
 
             if let output = log[runner.target] {

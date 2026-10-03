@@ -369,6 +369,8 @@ struct DaemonUpdateCard: View {
     @State private var busy: Set<String> = []
     @State private var failures: [String: String] = [:]
     @State private var updated: Set<String> = []
+    /// The runners whose Version details are open.
+    @State private var versionsOpen: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -465,7 +467,23 @@ struct DaemonUpdateCard: View {
     @ViewBuilder
     private func versions(for target: DaemonUpdateTarget) -> some View {
         if let daemon = target.skew.daemonVersion {
-            DisclosureGroup {
+            // The shared section (ov-101), where a `DisclosureGroup` was.
+            CollapsibleSection(
+                id: "versions.\(target.host)", metrics: .inline,
+                isExpanded: Binding(
+                    get: { versionsOpen.contains(target.host) },
+                    set: { open in
+                        if open { versionsOpen.insert(target.host) } else { versionsOpen.remove(target.host) }
+                    }),
+                accessibilityLabel: "Version details",
+                label: { _ in
+                    // Sentence case: this is a label on a container, not a button.
+                    Text("Version details")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                },
+                accessory: { EmptyView() }
+            ) {
                 VStack(alignment: .leading, spacing: 3) {
                     version("App", AppVersion.display)
                     // "Daemon", and this is the one row that keeps the word.
@@ -476,12 +494,6 @@ struct DaemonUpdateCard: View {
                     // whole point of writing it down.
                     version("Daemon", daemon)
                 }
-                .padding(.top, 4)
-            } label: {
-                // Sentence case: this is a label on a container, not a button.
-                Text("Version details")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
     }
