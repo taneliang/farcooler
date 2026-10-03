@@ -23,6 +23,11 @@ version.sh already carries a comment about shallow clones failing silently.
     ./scripts/proto-lint.py --channel stable
     ./scripts/proto-lint.py --channel canary
     ./scripts/proto-lint.py --self-test     # the lint's own tests
+    ./scripts/proto-lint.py --compare OLD NEW   # two files, wire rules only
+
+`--compare` is for scripts/canary-baseline.sh, which checks the proto Canary
+shipped against the baseline it is about to replace. Without that check a
+break that shipped became the baseline, and every later lint passed against it.
 
 The two channels here are the two that ship: `promote.yml` writes
 `proto/baseline/<channel>.proto` for whichever of preview and stable it just
@@ -413,6 +418,22 @@ def self_test():
         if channel not in writers or not writers[channel](text):
             failures.append(f"nothing in {workflow} writes the {channel} baseline")
 
+    # Canary ships every push to main, so its ship jobs must wait for this lint
+    # in their own workflow. CI's `wire` job is no gate: canary.yml never waits
+    # for it, and CI cancels a run when the next push lands. The Mac job needs
+    # `linux`, so gating `linux` and `ios` gates every ship.
+    count += 1
+    canary = (ROOT / CHANNELS["canary"]).read_text()
+    gate = re.search(r"\n  (\w[\w-]*):\n(?:(?!\n  \w).)*?proto-lint\.py --channel canary", canary, re.S)
+    if not gate:
+        failures.append("canary.yml runs no `proto-lint.py --channel canary` job")
+    else:
+        for job in ["linux", "ios"]:
+            body = re.search(rf"\n  {job}:\n((?:(?!\n  \w).)*)", canary, re.S)
+            needs = re.search(r"\n    needs:\s*(\[[^\]]*\]|\S+)", "\n" + body.group(1)) if body else None
+            if not needs or not re.search(rf"\b{re.escape(gate.group(1))}\b", needs.group(1)):
+                failures.append(f"canary.yml's `{job}` job does not need `{gate.group(1)}`, so a wire break can ship")
+
     for f in failures:
         print(f"FAIL: {f}", file=sys.stderr)
     print(f"{count - len(failures)} passed, {len(failures)} failed")
@@ -423,12 +444,18 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--channel", default="preview", choices=sorted(CHANNELS))
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument("--compare", nargs=2, metavar=("OLD", "NEW"), type=pathlib.Path)
     args = ap.parse_args()
 
     if args.self_test:
         return self_test()
 
-    problems, verdict = lint(args.channel, ROOT / "proto" / "baseline")
+    if args.compare:
+        old, new = args.compare
+        problems = compare(parse(old.read_text()), parse(new.read_text()))
+        verdict = f"{new} is compatible with {old}"
+    else:
+        problems, verdict = lint(args.channel, ROOT / "proto" / "baseline")
     if problems:
         print(f"\n{len(problems)} wire compatibility problem(s):\n", file=sys.stderr)
         for p in problems:

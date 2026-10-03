@@ -44,6 +44,27 @@ env:
   FARCOOLER_CHANNEL: canary
 
 jobs:
+  # The wire lint, here, before anything ships. CI runs it too, but nothing
+  # here waited for CI: a renumbered field went red there and out to TestFlight
+  # here in the same push, and then the baseline jobs below recorded it as what
+  # Canary owes compatibility to, so every later lint passed against the break.
+  #
+  # A job of its own rather than waiting on CI's result for this commit. CI
+  # cancels its run when the next push lands, so a commit can have no CI
+  # verdict at all, and waiting for one means polling another workflow's
+  # checks. This takes seconds and needs no toolchain. `linux` and `ios` need
+  # it, and `macos` needs `linux`, so no ship job starts until it passes.
+  # proto-lint.py's self-test fails if either `needs` goes.
+  wire:
+    name: Wire compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/proto-lint.py --self-test
+      - run: ./scripts/proto-lint.py --channel canary
+      - run: ./scripts/proto-lint.py --channel preview
+      - run: ./scripts/proto-lint.py --channel stable
+
   # The static musl CLI and daemon the Mac app CARRIES, from the same file
   # release.yml calls.
   #
@@ -59,6 +80,7 @@ jobs:
   # and the Linux binaries would otherwise be stamped `local` and write the
   # Local channel's runtime directory on every host they reached.
   linux:
+    needs: wire
     uses: ./.github/workflows/linux-binaries.yml
     with:
       channel: canary
@@ -69,6 +91,7 @@ jobs:
     # Xcode 27 is only on this label, which GitHub calls a public preview.
     # To go back, put `macos-latest` here again and drop the check step.
     runs-on: xcode-27
+    needs: wire
     # Without the App Store key this cannot upload anything. Through `vars`, not
     # `secrets`: the `secrets` context is unavailable in an `if`, so
     # `secrets.X != ''` compares '' to '' and is ALWAYS false — it fails closed,
