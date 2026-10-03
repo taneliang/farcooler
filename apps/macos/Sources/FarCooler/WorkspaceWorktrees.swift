@@ -63,7 +63,7 @@ enum WorkspaceWorktrees {
 
     /// The workspace's worktrees in the order the board list draws them:
     /// each task's, section by section, with each section's rows as the
-    /// list draws them (Done newest first, `visibleRows`), then the
+    /// list draws them (Done newest first, `orderedRows`), then the
     /// Worktrees section's, then its Hidden ones, in the runner's order. A
     /// collapsed section, the Done tasks the list cuts and the hidden
     /// worktrees are walked too, in the place they're drawn when shown, so
