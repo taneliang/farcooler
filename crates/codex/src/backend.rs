@@ -944,9 +944,9 @@ mod tests {
         let (launch, capture) = fake_launch(script, refusal);
         let conn = CodexConnection::spawn(
             &launch.program,
-            &launch.args,
+            &crate::handshake::launch_args(&launch.args),
             &launch.env,
-            std::env::temp_dir(),
+            capture.0.clone(),
         )
         .await
         .expect("spawn a fake app-server");
@@ -955,8 +955,12 @@ mod tests {
 
     /// The same fake, as a `Launch` that `CodexBackend::start` can run.
     ///
-    /// An executable script rather than `sh -c`, because `start` puts
-    /// `app-server` first on the command line; the script ignores it.
+    /// `/bin/sh app-server`, run in the fake's own directory: `start` puts
+    /// `app-server` first on the command line, so sh reads the script by
+    /// that name. Nothing freshly written is executed, so the spawn can't
+    /// fail with ETXTBSY (a new executable exec'd while another test thread
+    /// forks with it still open for writing), as it did on CI's Linux.
+    /// Spawn it with the scratch directory as the working directory.
     fn fake_launch(script: &str, refusal: &str) -> (Launch, Capture) {
         // One directory per call, named by a process-wide counter: the tests
         // run in parallel in one process, and a clock-derived name collided
@@ -977,12 +981,9 @@ mod tests {
 fix() { if [ -n "$2" ]; then sed -n "$1p" "$FIX" | sed "s/^{\"id\":[0-9]*,/{\"id\":$2,/"; else sed -n "$1p" "$FIX"; fi; }
 refuse() { printf '%s\n' "$REFUSAL"; }
 "#;
-        let program = capture.0.join("app-server.sh");
-        std::fs::write(&program, format!("#!/bin/sh\n{prelude}{script}\n"))
+        std::fs::write(capture.0.join("app-server"), format!("{prelude}{script}\n"))
             .expect("write the fake server");
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
-            .expect("make it executable");
+        let program = std::path::PathBuf::from("/bin/sh");
         let env = std::collections::BTreeMap::from([
             ("CAP".to_string(), capture.file().display().to_string()),
             ("FIX".to_string(), fixture.display().to_string()),
@@ -1126,7 +1127,7 @@ take; printf '{"id":5,"result":{}}\n'; read -r done"#,
         let mut launch = launch;
         launch.env.insert("THREAD".into(), THREAD.into());
         let (mut backend, _prelude) =
-            CodexBackend::start(&launch, std::env::temp_dir(), Some(THREAD.into()))
+            CodexBackend::start(&launch, capture.0.clone(), Some(THREAD.into()))
                 .await
                 .expect("the fake handshake completes");
         backend.cancel().await.expect("Stop goes out");
