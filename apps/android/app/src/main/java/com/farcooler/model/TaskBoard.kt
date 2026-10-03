@@ -385,7 +385,7 @@ object TaskAgentLink {
     fun menuTitles(titles: List<String>, shorts: List<String>): List<String> {
         val counts = titles.groupingBy { it }.eachCount()
         return titles.mapIndexed { i, title ->
-            if ((counts[title] ?: 0) > 1 && i < shorts.size) "$title (${shorts[i]})" else title
+            if ((counts[title] ?: 0) > 1 && i < shorts.size) "$title (${shorts[i]})" else title // not a count: a twin pane's id
         }
     }
 

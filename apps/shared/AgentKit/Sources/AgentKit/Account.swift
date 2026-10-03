@@ -959,7 +959,7 @@ public enum AccountError: Error, Equatable, Sendable, LocalizedError {
         case .keychainUnreadable: return "keychain read returned nothing"
         case .signInIncomplete: return "sign-in returned no callback"
         case .relayAddressInvalid: return "relay address is not a URL"
-        case .unreachable(let reason): return "unreachable (\(reason))"
+        case .unreachable(let reason): return "unreachable (\(reason))"  // not a count: the reason
         case .unauthorized: return "HTTP 401 after refresh"
         case .rateLimited: return "HTTP 429"
         case .endpointMissing: return "HTTP 404"

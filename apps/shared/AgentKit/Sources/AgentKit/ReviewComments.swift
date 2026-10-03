@@ -318,9 +318,9 @@ public final class ReviewCommentQueue: ObservableObject {
         let count = pending.count
         let noun = count == 1 ? "note" : "notes"
         if branch.isEmpty {
-            lines.append("Review \(noun) from Far Cooler (\(count)):")
+            lines.append("Review \(noun) from Far Cooler (\(count)):")  // not UI copy: the agent's prompt
         } else {
-            lines.append("Review \(noun) on `\(branch)` from Far Cooler (\(count)):")
+            lines.append("Review \(noun) on `\(branch)` from Far Cooler (\(count)):")  // not UI copy
         }
         lines.append("")
         for (index, comment) in pending.enumerated() {

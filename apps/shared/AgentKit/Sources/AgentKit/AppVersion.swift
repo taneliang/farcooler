@@ -38,7 +38,7 @@ public enum AppVersion {
         if let stamped = string("FarCoolerDisplayVersion"), !stamped.isEmpty { return stamped }
         // Reconstructed rather than blank, so a bundle that missed the stamp
         // still says something true.
-        return channel == "stable" ? marketing : "\(marketing) (\(channel))"
+        return channel == "stable" ? marketing : "\(marketing) (\(channel))"  // not a count: the channel
     }
 
     /// What the relay is told, and what it shows back on the devices screen.

@@ -327,9 +327,9 @@ class ReviewCommentQueue(
         val lines = mutableListOf<String>()
         val noun = if (pending.size == 1) "note" else "notes"
         lines += if (branch.isEmpty()) {
-            "Review $noun from Far Cooler (${pending.size}):"
+            "Review $noun from Far Cooler (${pending.size}):" // not UI copy: the agent's prompt
         } else {
-            "Review $noun on `$branch` from Far Cooler (${pending.size}):"
+            "Review $noun on `$branch` from Far Cooler (${pending.size}):" // not UI copy
         }
         lines += ""
         for ((index, comment) in pending.withIndex()) {

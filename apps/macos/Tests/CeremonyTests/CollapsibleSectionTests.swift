@@ -9,7 +9,7 @@ import Testing
 /// `CollapsibleSection` (ov-92, owner: "make board UI components reusable so
 /// that you can ensure that they look and feel consistent"): drawn through
 /// it, by the ids it registers, and with no disclosure of its own left in
-/// the navigator's files.
+/// the navigator's files, nor anywhere else in the app (ov-101).
 @MainActor
 struct CollapsibleSectionTests {
     private static let sources = URL(fileURLWithPath: #filePath)
@@ -88,6 +88,54 @@ struct CollapsibleSectionTests {
             #expect(!text.contains("\"chevron.right\""), "\(file) draws its own disclosure chevron")
             #expect(!text.contains("\"Expanded\""), "\(file) says Expanded for itself")
         }
+    }
+
+    /// The disclosures in `text`, a Swift file's source: a system
+    /// `DisclosureGroup` or `OutlineGroup`, a chevron turned by
+    /// `rotationEffect` within a few lines of it, or a chevron swapped for
+    /// another by a ternary. Comments aside.
+    static func disclosures(in text: String) -> [String] {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map { line -> String in
+            // Code only: what a comment says about a disclosure isn't one.
+            guard let cut = line.range(of: "//") else { return String(line) }
+            return String(line[..<cut.lowerBound])
+        }
+        var found: [String] = []
+        let system = try! Regex(#"\b(DisclosureGroup|OutlineGroup|disclosureGroupStyle)\b"#)
+        let swap = try! Regex(#"\?\s*"chevron\.[a-z.]+"\s*:\s*"chevron\."#)
+        for (index, line) in lines.enumerated() {
+            if line.contains(system) { found.append("\(index + 1): a system disclosure") }
+            if line.contains(swap) { found.append("\(index + 1): a chevron swapped for another") }
+            if line.contains("\"chevron.") {
+                let window = lines[index..<min(lines.count, index + 8)]
+                if window.contains(where: { $0.contains(".rotationEffect") }) {
+                    found.append("\(index + 1): a chevron of its own, turned")
+                }
+            }
+        }
+        return found
+    }
+
+    /// No file in the app draws a disclosure of its own (ov-101): every one
+    /// is `CollapsibleSection` or `DisclosureButton`, and only
+    /// `Components/CollapsibleSection.swift` turns a chevron.
+    @Test("No file in the app rolls its own disclosure")
+    func noBespokeDisclosures() throws {
+        let files = FileManager.default.enumerator(at: Self.sources, includingPropertiesForKeys: nil)!
+            .compactMap { $0 as? URL }
+            .filter { $0.pathExtension == "swift" && $0.lastPathComponent != "CollapsibleSection.swift" }
+        #expect(files.count > 50, "the scan found the sources")
+        for file in files {
+            for hit in Self.disclosures(in: try String(contentsOf: file, encoding: .utf8)) {
+                Issue.record("\(file.lastPathComponent):\(hit); use CollapsibleSection or DisclosureButton")
+            }
+        }
+        // The scan sees each kind, and not a comment.
+        #expect(Self.disclosures(in: "DisclosureGroup(\"Details\") { Text(\"x\") }").count == 1)
+        #expect(Self.disclosures(in: "Image(systemName: \"chevron.right\")\n    .font(.caption2)\n    .rotationEffect(.degrees(open ? 90 : 0))").count == 1)
+        #expect(Self.disclosures(in: "Image(systemName: open ? \"chevron.down\" : \"chevron.right\")").count == 1)
+        #expect(Self.disclosures(in: "// the DisclosureGroup it was").isEmpty)
+        #expect(Self.disclosures(in: "Image(systemName: \"chevron.forward\")").isEmpty)
     }
 
     /// The header answers the keyboard and VoiceOver the same way

@@ -76,6 +76,11 @@ jobs:
       # Pure Python and needs no Mac, unlike icon-test.sh — which is why that
       # one lives in the `swift` job below and this one lives here instead.
       - run: ./scripts/appcast-test.sh
+      # No count in parentheses in the Mac's, the phones' or the shared
+      # package's copy (ov-101): its own patterns first, against cases it
+      # must catch and cases it must pass, then the tree.
+      - run: ./scripts/copy-lint.py --self-test
+      - run: ./scripts/copy-lint.py
 
   # The tunnel itself, which is Go, and which nothing in this workflow ran until
   # now.

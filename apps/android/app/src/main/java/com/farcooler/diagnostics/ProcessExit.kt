@@ -133,7 +133,7 @@ object ProcessExit {
         val extra = description?.takeIf { it.isNotBlank() }?.let { " — $it" } ?: ""
         val exit = if (reason == ApplicationExitInfo.REASON_SIGNALED ||
             reason == ApplicationExitInfo.REASON_EXIT_SELF
-        ) " ($status)" else ""
+        ) " ($status)" else "" // not a count: the exit status
         return "$age: ${word(reason)}$exit$rss$extra"
     }
 

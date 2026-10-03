@@ -110,7 +110,7 @@ extension TaskAgentLink {
             guard counts[title, default: 0] > 1, shorts.indices.contains(index) else {
                 return title
             }
-            return "\(title) (\(shorts[index]))"
+            return "\(title) (\(shorts[index]))"  // not a count: a twin pane told apart by its id
         }
     }
 }
