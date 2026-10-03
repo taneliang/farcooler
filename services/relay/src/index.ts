@@ -339,8 +339,9 @@ async function registerDevice(request: Request, env: Env): Promise<Response> {
   await env.DB.prepare(
     `INSERT INTO devices
        (id, account_id, platform, push_token, label, version, environment,
-        live_activity_start_token, key_a_fingerprint, notify_on_done, state, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        live_activity_start_token, key_a_fingerprint, notify_on_done, notify_events, state,
+        updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (platform, push_token)
      DO UPDATE SET account_id = excluded.account_id,
                    label = excluded.label,
@@ -352,6 +353,8 @@ async function registerDevice(request: Request, env: Env): Promise<Response> {
                      excluded.key_a_fingerprint, devices.key_a_fingerprint),
                    notify_on_done = COALESCE(
                      excluded.notify_on_done, devices.notify_on_done),
+                   notify_events = COALESCE(
+                     excluded.notify_events, devices.notify_events),
                    state = CASE
                              WHEN excluded.key_a_fingerprint IS NULL THEN devices.state
                              WHEN devices.key_a_fingerprint IS NULL THEN devices.state
@@ -383,6 +386,8 @@ async function registerDevice(request: Request, env: Env): Promise<Response> {
       // string an old or confused client sent — is NULL, which the fan-out
       // reads as "notify".
       typeof body.notifyOnDone === 'boolean' ? (body.notifyOnDone ? 1 : 0) : null,
+      // The task classes this device keeps on, or NULL for "the defaults".
+      notifyEventsOf(body.notifyEvents),
       // A new row is `pending`: it proves possession of a key, which is not a
       // ceremony having enrolled it. `verified` for a registration with no key
       // at all, matching the column's default — such a row carries no
@@ -451,6 +456,11 @@ interface Registration {
   /// Absent means notify. A build that predates the field sends nothing and
   /// keeps the behavior it has; see the COALESCE below and migration 0007.
   notifyOnDone?: unknown
+  /// The task notice classes this device wants: any of `decision`, `review`,
+  /// `blocked`, `done` and `new` (ov-94). Absent is the defaults, so a build
+  /// that predates the field keeps hearing about decisions, reviews and
+  /// blocks. An empty list is every class off. See migration 0017.
+  notifyEvents?: unknown
   /// The phone's own pulse token, 64 hex characters; anything else is
   /// ignored rather than refused. See migration 0015.
   pulseToken?: unknown
@@ -1051,6 +1061,25 @@ interface Notification {
   /// Never an option name or a command line. Validated by `askOf`; anything
   /// that fails is no ask, never a 400. See migration 0014.
   ask?: unknown
+
+  /// On a `kind: "task"` notice (ov-94): the id every platform replaces by,
+  /// `t:<runner id>:<task key>`, and the thread it files under. Anything not
+  /// matching `NOTICE_ID` is sent with no collapse id rather than refused.
+  noticeId?: unknown
+  /// The task notice's class: `decision`, `review`, `blocked`, `done` or
+  /// `new`. Each device hears only the classes it kept on (`notify_events`).
+  /// A class this relay doesn't know alerts nobody.
+  event?: unknown
+  /// How hard the alert interrupts: `time-sensitive`, `active` or `passive`.
+  /// Absent or unknown is the class's own default (`levelOf`).
+  level?: unknown
+  /// A task decision's answer options, for the notification's buttons. At
+  /// most three of at most forty characters; never on an agent's ask, whose
+  /// option names can be a command line.
+  options?: unknown
+  /// `false` on an agent notice whose task notice carries the alert: card
+  /// only, no banner. Absent or anything else alerts as before.
+  alert?: unknown
 }
 
 interface Device {
@@ -1062,6 +1091,65 @@ interface Device {
   /// NULL both mean notify — NULL is every row that predates migration 0007 and
   /// every build too old to send the field.
   notify_on_done: number | null
+  /// The task classes this device wants, comma-separated; NULL is
+  /// `DEFAULT_TASK_EVENTS`. See migration 0017.
+  notify_events: string | null
+}
+
+/// The five classes a task notice can be, in the order the apps list them.
+export const TASK_EVENTS = ['decision', 'review', 'blocked', 'done', 'new'] as const
+
+/// What a device that never said hears: a decision, a review and a block.
+/// Done and New Task are off until someone turns them on.
+export const DEFAULT_TASK_EVENTS: readonly string[] = ['decision', 'review', 'blocked']
+
+/// The shape a notice id must have to become an `apns-collapse-id` (64 bytes
+/// at most) and an FCM tag.
+const NOTICE_ID = /^[A-Za-z0-9:._-]{1,64}$/
+
+/// The longest option a notification button carries, and how many.
+const OPTION_MAX = 40
+const OPTIONS_MAX = 3
+
+/// A registration's `notifyEvents` as the column stores it: the known classes
+/// it names, in canonical order, comma-joined. `''` for an empty list, which
+/// is every class off. NULL for anything that isn't a list, which the upsert
+/// reads as "say nothing" and keeps what was there.
+function notifyEventsOf(raw: unknown): string | null {
+  if (!Array.isArray(raw)) return null
+  return TASK_EVENTS.filter(event => raw.includes(event)).join(',')
+}
+
+/// Whether `device` wants a task notice of class `event`.
+function wantsEvent(device: Device, event: string): boolean {
+  const kept = device.notify_events === null
+    ? DEFAULT_TASK_EVENTS
+    : device.notify_events.split(',').filter(e => e !== '')
+  return kept.includes(event)
+}
+
+/// A known class, or undefined.
+function eventOf(raw: unknown): string | undefined {
+  return typeof raw === 'string' && (TASK_EVENTS as readonly string[]).includes(raw) ? raw : undefined
+}
+
+/// The interruption level for a task notice: the daemon's word when it is one
+/// of the three, else the class's own default.
+function levelOf(raw: unknown, event: string | undefined): string {
+  if (raw === 'time-sensitive' || raw === 'active' || raw === 'passive') return raw
+  if (event === 'decision') return 'time-sensitive'
+  if (event === 'review' || event === 'blocked') return 'active'
+  return 'passive'
+}
+
+/// A decision's options as they may cross: strings of 1 to 40 characters, the
+/// first three. Anything else is dropped, not refused.
+function optionsOf(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const kept = raw
+    .filter((o): o is string => typeof o === 'string' && o.trim() !== '' && o.length <= OPTION_MAX)
+    .slice(0, OPTIONS_MAX)
+  return kept.length > 0 ? kept : undefined
 }
 
 /// The machine holding this token, or the response to send instead.
@@ -1106,8 +1194,15 @@ async function notify(request: Request, env: Env): Promise<Response> {
   // banner iOS may draw blank. A count has nothing to say to a person, and a
   // kind this relay has never heard of is not going to be shown to one.
   const kind = typeof body.kind === 'string' ? body.kind : undefined
-  const alerts = kind === undefined || kind === 'decision'
+  const alerts = kind === undefined || kind === 'decision' || kind === 'task'
   if (alerts && !body.title) return json({ error: 'title' }, 400)
+  // A task notice's class, id, level and options (ov-94). Each is checked
+  // here and dropped when it fails, never refused: the daemon ships apart.
+  const event = kind === 'task' ? eventOf(body.event) : undefined
+  const noticeId = kind === 'task' && typeof body.noticeId === 'string' && NOTICE_ID.test(body.noticeId)
+    ? body.noticeId
+    : undefined
+  const options = event === 'decision' ? optionsOf(body.options) : undefined
 
   // A misconfigured deployment, said out loud rather than delivered as silence.
   //
@@ -1172,7 +1267,8 @@ async function notify(request: Request, env: Env): Promise<Response> {
   }
 
   const devices = await env.DB.prepare(
-    `SELECT platform, push_token, environment, live_activity_start_token, notify_on_done
+    `SELECT platform, push_token, environment, live_activity_start_token, notify_on_done,
+            notify_events
      FROM devices WHERE account_id = ?`,
   )
     .bind(daemon.account_id)
@@ -1189,7 +1285,11 @@ async function notify(request: Request, env: Env): Promise<Response> {
   // of a `done` notify where every device has opted out, and for the same
   // reason — nothing is wrong, nobody wanted to hear it.
   let delivered = 0
-  if (alerts && body.status !== 'working') {
+  // `alert: false` is an agent notice whose task notice carries the banner
+  // (ov-94): the card below still moves, nothing buzzes. A task notice of a
+  // class this relay doesn't know buzzes nobody either.
+  const quiet = body.alert === false || (kind === 'task' && event === undefined)
+  if (alerts && body.status !== 'working' && !quiet) {
     for (const device of devices.results ?? []) {
       // "When an agent finishes or fails", off. Per device inside the loop and
       // not per request outside it, because one account can hold devices that
@@ -1199,7 +1299,9 @@ async function notify(request: Request, env: Env): Promise<Response> {
       // the other toggle's business and the reason this product exists — reading
       // this column on any other branch would take failures away from someone
       // who only silenced the endings.
-      if (body.status === 'done' && device.notify_on_done === 0) continue
+      if (kind !== 'task' && body.status === 'done' && device.notify_on_done === 0) continue
+      // A task notice goes only where its class is on.
+      if (kind === 'task' && !wantsEvent(device, event!)) continue
       const ok = await sendPush(
         env,
         device.platform,
@@ -1207,18 +1309,22 @@ async function notify(request: Request, env: Env): Promise<Response> {
         {
           title: body.title,
           subtitle: body.subtitle ?? '',
-          terminal: body.terminal ?? '',
-          status: body.status,
+          terminal: kind === 'task' ? '' : body.terminal ?? '',
+          status: kind === 'task' ? undefined : body.status,
           label: body.label,
           failed: body.failed,
           kind,
           task: typeof body.task === 'string' ? body.task.slice(0, 64) : undefined,
           // Only on a decision, and only if it looks like a runner id: the
           // heartbeat's own test, so a stray value is no id rather than a 400.
-          runner: kind === 'decision' && typeof body.runner === 'string'
+          runner: (kind === 'decision' || kind === 'task') && typeof body.runner === 'string'
             && /^[A-Za-z0-9-]{1,64}$/.test(body.runner)
             ? body.runner.toLowerCase()
             : undefined,
+          event,
+          noticeId,
+          level: kind === 'task' ? levelOf(body.level, event) : undefined,
+          options,
         },
         device.environment,
       )

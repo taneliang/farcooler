@@ -1311,7 +1311,9 @@ describe('the Android push body', () => {
 
     const message = fcm(calls)
     expect(message.android.notification.channel_id).toBe('agents.blocked')
-    expect(message.data).toEqual({ terminal: '', kind: 'decision', task: 'bil-7' })
+    // No `terminal` key at all: Firebase put `terminal=""` into the launch
+    // intent, which read as a terminal (ov-94).
+    expect(message.data).toEqual({ kind: 'decision', task: 'bil-7' })
   })
 
   it("names the decision's runner to an Android phone, and only a decision's", async () => {
@@ -1326,7 +1328,7 @@ describe('the Android push body', () => {
       'mine',
     )
     expect(fcm(calls).data).toEqual({
-      terminal: '', kind: 'decision', task: 'bil-7', runner: '7537626f-0002-415e-1e11-000d48034210',
+      kind: 'decision', task: 'bil-7', runner: '7537626f-0002-415e-1e11-000d48034210',
     })
   })
 
@@ -7056,5 +7058,252 @@ describe('a runner that stops beating, on the card', () => {
     const top = wranglerToml.split(/^\[env\./m)[0]
     expect(top).toMatch(/^\[triggers\]\s*\ncrons = \["\*\/5 \* \* \* \*"\]/m)
     expect(wranglerToml.slice(top.length)).not.toMatch(/triggers/)
+  })
+})
+
+// MARK: - Task notices (ov-94)
+
+/// A notice about a task rather than an agent: one thread per task, a newer
+/// update replacing the older one on every platform, and each device hearing
+/// only the classes it kept on. See the design doc,
+/// docs/superpowers/specs/2026-10-02-task-notifications-design.md, Phase 2.
+describe('a task notice', () => {
+  const runner = '7537626f-0002-415e-1e11-000d48034210'
+  const noticeId = `t:${runner}:ov-90`
+  const android = { platform: 'fcm', pushToken: 'android-token' }
+
+  function alerts(calls: Call[]): Call[] {
+    return pushes(calls).filter(call => call.headers['apns-push-type'] !== 'liveactivity')
+  }
+
+  function fcm(calls: Call[]): any {
+    return pushes(calls).find(call => call.url.includes('fcm.googleapis.com'))?.body.message
+  }
+
+  function task(fields: Record<string, unknown> = {}) {
+    return {
+      kind: 'task',
+      title: 'ov-90 Wake the agent on an answer',
+      subtitle: 'Moved to In Review · 3 files changed',
+      task: 'ov-90',
+      runner,
+      noticeId,
+      event: 'review',
+      level: 'active',
+      needsYou: 1,
+      ...fields,
+    }
+  }
+
+  it('goes only to the devices that kept its class on', async () => {
+    const calls = watchFetch()
+    await register('user_1', { pushToken: 'quiet-phone', notifyEvents: ['decision', 'blocked'] })
+    await register('user_1', { pushToken: 'loud-phone', notifyEvents: ['decision', 'review', 'blocked'] })
+    await pair('user_1', 'mine')
+
+    const response = await post('/v1/notify', task(), 'mine')
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ delivered: 1 })
+    const sent = alerts(calls)
+    expect(sent.length).toBe(1)
+    expect(sent[0].url).toContain('/device/loud-phone')
+  })
+
+  it('replaces the last one for the same task, on its own thread', async () => {
+    const calls = watchFetch()
+    await register('user_1')
+    await pair('user_1', 'mine')
+
+    await post('/v1/notify', task(), 'mine')
+
+    const [alert] = alerts(calls)
+    expect(alert.headers['apns-collapse-id']).toBe(noticeId)
+    expect(alert.body.aps['thread-id']).toBe(noticeId)
+    expect(alert.body.aps['interruption-level']).toBe('active')
+    expect(alert.body.aps.alert).toEqual({
+      title: 'ov-90 Wake the agent on an answer',
+      body: 'Moved to In Review · 3 files changed',
+    })
+    expect(alert.body.kind).toBe('task')
+    expect(alert.body.task).toBe('ov-90')
+    expect(alert.body.runner).toBe(runner)
+    expect(alert.body.event).toBe('review')
+    expect(alert.body.noticeId).toBe(noticeId)
+    // A task is not a pane: no terminal to open, none to fold into a widget.
+    expect(alert.body.terminal).toBeUndefined()
+  })
+
+  it('arrives quietly when the daemon says passive', async () => {
+    const calls = watchFetch()
+    await register('user_1', { notifyEvents: ['done'] })
+    await pair('user_1', 'mine')
+
+    await post('/v1/notify', task({ event: 'done', level: 'passive', subtitle: 'Done' }), 'mine')
+
+    const [alert] = alerts(calls)
+    expect(alert.body.aps['interruption-level']).toBe('passive')
+    expect(alert.body.aps.sound).toBeUndefined()
+  })
+
+  it('sends a notice id it cannot trust with no collapse id, rather than refusing it', async () => {
+    const calls = watchFetch()
+    await register('user_1')
+    await pair('user_1', 'mine')
+
+    for (const odd of ['t:' + 'x'.repeat(63), 't:has space', 't:new\nline']) {
+      const response = await post('/v1/notify', task({ noticeId: odd }), 'mine')
+      expect(response.status).toBe(200)
+    }
+
+    const sent = alerts(calls)
+    expect(sent.length).toBe(3)
+    for (const alert of sent) {
+      expect(alert.headers['apns-collapse-id']).toBeUndefined()
+      expect(alert.body.noticeId).toBeUndefined()
+    }
+  })
+
+  it('gives an old registration the three default classes', async () => {
+    // NULL, from every build that predates the field: Needs Decision, Needs
+    // Review and Blocked on; Done and New Task off.
+    const calls = watchFetch()
+    await register('user_1')
+    await pair('user_1', 'mine')
+
+    for (const event of ['decision', 'review', 'blocked', 'done', 'new']) {
+      await post('/v1/notify', task({ event, noticeId: `t:${runner}:${event}` }), 'mine')
+    }
+
+    expect(alerts(calls).map(call => call.body.event)).toEqual(['decision', 'review', 'blocked'])
+  })
+
+  it('reads an empty list as every class off, and an unknown class as none', async () => {
+    const calls = watchFetch()
+    await register('user_1', { pushToken: 'silent', notifyEvents: [] })
+    await register('user_1', { pushToken: 'odd', notifyEvents: ['review', 'sometimes'] })
+    await pair('user_1', 'mine')
+
+    await post('/v1/notify', task(), 'mine')
+    await post('/v1/notify', task({ event: 'invented', noticeId: `t:${runner}:x` }), 'mine')
+
+    const sent = alerts(calls)
+    expect(sent.map(call => call.url.split('/device/')[1])).toEqual(['odd'])
+  })
+
+  it('keeps its classes when an older build re-registers over them', async () => {
+    watchFetch()
+    await register('user_1', { notifyEvents: ['done', 'new'] })
+    await register('user_1', { label: 'Renamed' })
+    const row = await env.DB.prepare(`SELECT label, notify_events FROM devices`)
+      .first<{ label: string; notify_events: string | null }>()
+    expect(row?.label).toBe('Renamed')
+    expect(row?.notify_events).toBe('done,new')
+
+    // And a newer answer replaces it.
+    await register('user_1', { notifyEvents: ['decision'] })
+    const after = await env.DB.prepare(`SELECT notify_events FROM devices`)
+      .first<{ notify_events: string | null }>()
+    expect(after?.notify_events).toBe('decision')
+  })
+
+  it("carries a decision's options, and no one else's", async () => {
+    const calls = watchFetch()
+    await register('user_1', { notifyEvents: ['decision', 'review'] })
+    await pair('user_1', 'mine')
+
+    await post(
+      '/v1/notify',
+      task({ event: 'decision', level: 'time-sensitive', options: ['pdfkit', 'pdf.js', 'x'.repeat(41), 'qpdf', 'mupdf'] }),
+      'mine',
+    )
+    await post('/v1/notify', task({ options: ['Allow rm -rf /'] }), 'mine')
+
+    const [decision, review] = alerts(calls)
+    expect(decision.body.options).toEqual(['pdfkit', 'pdf.js', 'qpdf'])
+    expect(decision.body.aps['interruption-level']).toBe('time-sensitive')
+    expect(review.body.options).toBeUndefined()
+  })
+
+  it('tags an Android card by task and picks the channel by class', async () => {
+    const calls = watchFetch()
+    await register('user_1', android)
+    await pair('user_1', 'mine')
+
+    await post('/v1/notify', task(), 'mine')
+
+    const message = fcm(calls)
+    expect(message.android.notification.tag).toBe(noticeId)
+    expect(message.android.notification.channel_id).toBe('tasks.review')
+    expect(message.data).toEqual({
+      kind: 'task', task: 'ov-90', runner, event: 'review', noticeId,
+    })
+  })
+
+  it('sends an Android decision as data the app draws, with its options', async () => {
+    // The app has to draw the card itself to give it answer buttons, so a
+    // decision is data-only: no `notification` block for Firebase to draw.
+    const calls = watchFetch()
+    await register('user_1', android)
+    await pair('user_1', 'mine')
+
+    await post(
+      '/v1/notify',
+      task({ event: 'decision', level: 'time-sensitive', subtitle: 'Needs your decision · Which?', options: ['A', 'B'] }),
+      'mine',
+    )
+
+    const message = fcm(calls)
+    expect(message.notification).toBeUndefined()
+    expect(message.android.priority).toBe('HIGH')
+    expect(message.android.notification).toBeUndefined()
+    expect(message.data).toEqual({
+      kind: 'task',
+      task: 'ov-90',
+      runner,
+      event: 'decision',
+      noticeId,
+      title: 'ov-90 Wake the agent on an answer',
+      body: 'Needs your decision · Which?',
+      options: JSON.stringify(['A', 'B']),
+    })
+  })
+
+  it('omits an empty terminal from Android data', async () => {
+    const calls = watchFetch()
+    await register('user_1', android)
+    await pair('user_1', 'mine')
+    await post('/v1/notify', { kind: 'decision', task: 'bil-7', title: 'bil-7 needs a decision', needsYou: 1 }, 'mine')
+    expect(fcm(calls).data.terminal).toBeUndefined()
+  })
+
+  it('names the five task channels the way the Android app creates them', () => {
+    for (const event of ['decision', 'review', 'blocked', 'done', 'new']) {
+      expect(androidChannel(undefined, 'task', event)).toBe(`tasks.${event}`)
+      expect(notifierKt).toContain(`"tasks.${event}"`)
+    }
+  })
+})
+
+describe('an agent notice the daemon marks alert: false', () => {
+  it('moves the card and buzzes nobody', async () => {
+    // An agent working on a task: its task's thread carries the alert, and
+    // the agent notice is sent only for the Live Activity row.
+    const calls = watchFetch()
+    await register('user_1', { liveActivityStartToken: 'start-token' })
+    await pair('user_1', 'mine')
+
+    const response = await post(
+      '/v1/notify',
+      { title: 'claude needs you', terminal: 'term-1', status: 'blocked', label: 'claude', alert: false },
+      'mine',
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ delivered: 0 })
+    const sent = pushes(calls)
+    expect(sent.filter(call => call.headers['apns-push-type'] !== 'liveactivity').length).toBe(0)
+    expect(sent.filter(call => call.headers['apns-push-type'] === 'liveactivity').length).toBe(1)
+    expect(await roster('user_1')).toEqual(['term-1'])
   })
 })

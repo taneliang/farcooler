@@ -1,0 +1,17 @@
+-- Which classes of task notice this device wants (ov-94).
+--
+-- Additive only, same as 0002 through 0016: the previous worker is still
+-- serving requests while a deploy rolls out, and it never reads or writes
+-- this column.
+--
+-- A comma set drawn from `decision`, `review`, `blocked`, `done` and `new`,
+-- the five `event` classes a `kind: "task"` notice carries. The empty string
+-- is a device that turned every class off.
+--
+-- NULL is the defaults, and that is the important half, as it was for
+-- `notify_on_done` (0007): every row that exists when this runs, and every
+-- registration from a build too old to send `notifyEvents`, hears about a
+-- decision, a review and a block, and not about a task finishing or being
+-- filed. The upsert COALESCEs it, so an older build re-registering doesn't
+-- erase what a newer one chose.
+ALTER TABLE devices ADD COLUMN notify_events TEXT;

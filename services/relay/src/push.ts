@@ -63,7 +63,21 @@ export interface Payload {
   /// (`Host.runner_id`), so a key on two runners opens the right one. Only a
   /// decision carries it; forwarded as sent, never stored. A UUID the
   /// daemon derived from its install id: it names no person, path or host.
+  ///
+  /// A task notice (`kind: "task"`, ov-94) carries it too, for the same reason.
   runner?: string
+  /// A task notice's class: `decision`, `review`, `blocked`, `done` or `new`.
+  /// Picks the Android channel, and tells the apps which buttons to draw.
+  event?: string
+  /// The id a newer notice about the same task replaces by: APNs's
+  /// `apns-collapse-id` and `thread-id`, FCM's `tag`. Already checked against
+  /// `NOTICE_ID` by `notify`; absent when it failed.
+  noticeId?: string
+  /// `time-sensitive`, `active` or `passive`, a task notice's alone. An
+  /// agent notice keeps the time-sensitive level it always had.
+  level?: string
+  /// A task decision's answer options, for the notification's buttons.
+  options?: string[]
 }
 
 /// Which of Apple's two push services issued a device's token.
@@ -173,6 +187,7 @@ async function sendApns(
   environment: string | null,
 ): Promise<boolean> {
   const jwt = await apnsToken(env)
+  const passive = payload.level === 'passive'
   const response = await fetch(`https://${apnsHost(environment)}/3/device/${token}`, {
     method: 'POST',
     headers: {
@@ -182,14 +197,20 @@ async function sendApns(
       // Time-sensitive so an agent that is BLOCKED can break a Focus. It has
       // stopped and will stay stopped until answered, which is the definition
       // of the thing this interruption level exists for.
-      'apns-priority': '10',
+      'apns-priority': passive ? '5' : '10',
+      // A newer notice about the same task replaces this one rather than
+      // stacking under it (ov-94): the collapse id becomes the delivered
+      // request's identifier, which the apps' own local posts use too.
+      ...(payload.noticeId ? { 'apns-collapse-id': payload.noticeId } : {}),
     },
     body: JSON.stringify({
       aps: {
         alert: { title: payload.title, body: payload.subtitle },
-        sound: 'default',
-        'interruption-level': 'time-sensitive',
-        'thread-id': payload.terminal,
+        // A passive notice lands in the list without a sound.
+        ...(passive ? {} : { sound: 'default' }),
+        'interruption-level': payload.level ?? 'time-sensitive',
+        // One thread per task; an agent's is its terminal, as before.
+        'thread-id': payload.noticeId ?? payload.terminal,
         // Without this the notification service extension is never invoked,
         // and the phone's widgets stay on whatever the app last wrote — which
         // on a phone nobody has opened today is nothing at all. It costs the
@@ -197,13 +218,18 @@ async function sendApns(
         // the banner looks.
         'mutable-content': 1,
       },
-      terminal: payload.terminal,
+      // A task is not a pane: no terminal to open, and none for the
+      // extension to fold into a widget.
+      ...(payload.terminal ? { terminal: payload.terminal } : {}),
       status: payload.status,
       label: payload.label,
       failed: payload.failed,
       ...(payload.kind ? { kind: payload.kind } : {}),
       ...(payload.task ? { task: payload.task } : {}),
       ...(payload.runner ? { runner: payload.runner } : {}),
+      ...(payload.event ? { event: payload.event } : {}),
+      ...(payload.noticeId ? { noticeId: payload.noticeId } : {}),
+      ...(payload.options ? { options: payload.options } : {}),
     }),
   })
   return response.ok
@@ -697,11 +723,17 @@ const CHANNEL_DONE = 'agents.done'
 /// not an agent — but it is the same kind of news: somebody's work has stopped
 /// until a person answers it, and it stays stopped (ruling 3 of the workspace
 /// UI spec).
-export function androidChannel(status: string | undefined, kind?: string): string {
+///
+/// A task notice (ov-94) goes on its class's own channel, `tasks.<event>`, so
+/// the phone's per-channel switch and the app's own toggle agree. The five
+/// are created by the Android app's `Notifier.createChannels`.
+export function androidChannel(status: string | undefined, kind?: string, event?: string): string {
+  if (kind === 'task' && event) return `tasks.${event}`
   return status === 'blocked' || kind === 'decision' ? CHANNEL_BLOCKED : CHANNEL_DONE
 }
 
 async function sendFcm(env: any, token: string, payload: Payload): Promise<boolean> {
+  const drawnByApp = payload.kind === 'task' && payload.event === 'decision'
   const account = JSON.parse(env.FCM_SERVICE_ACCOUNT)
   const accessToken = await googleAccessToken(account)
   const response = await fetch(
@@ -712,7 +744,11 @@ async function sendFcm(env: any, token: string, payload: Payload): Promise<boole
       body: JSON.stringify({
         message: {
           token,
-          notification: { title: payload.title, body: payload.subtitle },
+          // A task decision is data only (ov-94): the app draws that card
+          // itself, because only the app can give it answer buttons. The cost
+          // is Firebase's: a force-stopped app isn't woken for data, and the
+          // decision is on the Needs You screen either way.
+          ...(drawnByApp ? {} : { notification: { title: payload.title, body: payload.subtitle } }),
           android: {
             priority: 'HIGH',
             // The half of this that reaches a sleeping phone.
@@ -725,7 +761,13 @@ async function sendFcm(env: any, token: string, payload: Payload): Promise<boole
             // right, and it overrides the manifest default the SDK falls back to
             // when a message names no channel. Without it every push landed on
             // whichever channel that manifest names, whatever it was about.
-            notification: { channel_id: androidChannel(payload.status, payload.kind) },
+            ...(drawnByApp ? {} : {
+              notification: {
+                channel_id: androidChannel(payload.status, payload.kind, payload.event),
+                // One card per task: a newer notice replaces the older one.
+                ...(payload.noticeId ? { tag: payload.noticeId } : {}),
+              },
+            }),
           },
           // And the half that reaches a phone somebody is holding.
           //
@@ -749,12 +791,22 @@ async function sendFcm(env: any, token: string, payload: Payload): Promise<boole
           // says it outright — an empty or invented status is worse than none —
           // and a daemon too old to send one must get exactly the behavior it
           // always got.
+          //
+          // An empty terminal stays absent too (ov-94): a decision or a task
+          // notice has none, and Firebase put `terminal=""` into the launch
+          // intent, which read as a terminal.
           data: {
-            terminal: payload.terminal,
+            ...(payload.terminal ? { terminal: payload.terminal } : {}),
             ...(payload.status ? { status: payload.status } : {}),
             ...(payload.kind ? { kind: payload.kind } : {}),
             ...(payload.task ? { task: payload.task } : {}),
             ...(payload.runner ? { runner: payload.runner } : {}),
+            ...(payload.event ? { event: payload.event } : {}),
+            ...(payload.noticeId ? { noticeId: payload.noticeId } : {}),
+            // What a data-only card is drawn from. FCM data is strings only,
+            // so the options travel as a JSON array.
+            ...(drawnByApp ? { title: payload.title, body: payload.subtitle } : {}),
+            ...(drawnByApp && payload.options ? { options: JSON.stringify(payload.options) } : {}),
           },
         },
       }),
