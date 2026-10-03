@@ -919,11 +919,12 @@ mod tests {
     /// The spec wants the skill read in a minute. It was held to 120 lines
     /// until the split section (spec, "Splitting is done by agents") and
     /// finding the board from the home added about 35; the split and the
-    /// interview are read only when they're needed.
+    /// interview are read only when they're needed. The ticket title rule
+    /// (ov-96) added 11 more, and it is read on every `task create`.
     #[test]
     fn the_skill_is_short() {
         let lines = skill_body(Harness::Claude).lines().count();
-        assert!(lines <= 160, "{lines} lines");
+        assert!(lines <= 170, "{lines} lines");
     }
 
     /// Not a check: the pressure harness's way to get the skill exactly as an

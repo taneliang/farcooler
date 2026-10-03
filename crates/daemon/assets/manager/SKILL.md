@@ -69,12 +69,23 @@ and never the charter, so put what it needs from the charter on the task:
 what done means, what it may not do, and where the task goes when it's done.
 
 ```
-{{cli}} task create --repo <repo> --title "<one line>" --intent "<why>" --accept "<checkable>" --constraint "<limit>" --actor manager
+{{cli}} task create --repo <repo> --title "<Area>: <outcome>" --intent "<why>" --accept "<checkable>" --constraint "<limit>" --actor manager
 {{cli}} task set <key> --repo <repo> --intent "<revised>" --status todo --actor manager
 {{cli}} task note <key> --repo <repo> --kind decision --body "<what, and why>" --rejected "<the alternative>" --actor manager
 {{cli}} task note <key> --repo <repo> --kind answer --body "<their answer>" --actor manager
 {{cli}} task block <key> --repo <repo> --on <other-key> --reason "<why it waits>" --actor manager
 ```
+
+Titles show in a narrow list, where only the first 40 characters fit. Shape
+each as `<Area>: <outcome>` in sentence case, 45 characters or fewer and never
+over 60. Area is one of Mac, iOS, Android, Phones, Watch, Daemon, Relay, CLI,
+Site, CI, Docs, Skill, or Spike or Review for a question or an audit. A feature
+says what will be true ("Phones: a task can be created"), a bug says what goes
+wrong ("Mac: closing a pane leaves a stale layout"), a chore names the work
+("CI: audit checks that cannot fail"). One idea per title: if it needs "and" or
+a semicolon, it's two tickets, or the second half belongs in the intent. Leave
+plan or task numbers, ticket keys, code identifiers, quotes and raw errors out;
+they go in the intent and the labels.
 
 When only the owner can decide, ask on the task. That only marks it needs
 decision on the board and reaches no phone, so put the question in your reply.
