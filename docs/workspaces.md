@@ -143,14 +143,28 @@ re-reads the board.
 ## Following a task to its changes
 
 Select a task, from the board, the sidebar, Needs You or ⌘P, to open it. It
-takes the main area, with the task selected in the board, under a breadcrumb: its key, title and status first, then everything on its card, never collapsed: what it's for, what
-counts as done, its notes, and, when it's waiting on a decision, the question
-with its answers. The status menu in the header moves the task.
+takes the main area, with the task selected in the board, under a breadcrumb.
+A compact header stays put at the top: the task's key and title, its agent's
+state ("claude working", "claude idle", "claude needs you"), and the status
+menu, which moves the task. Under it are three tabs, each the full height:
 
-Beneath the task, past a divider you can drag, is its work: a line naming its
-worktree and how many terminals it has, the agent working on it, and that
-worktree's **Changes**. When the task is In Review, the changes take the larger
-share. A task with nothing started is just that line.
+- **Overview** is the task itself, never collapsed: what it's for, what counts
+  as done (a checklist, met lines struck through), its notes, newest first,
+  and, when it's waiting on a decision, the question with its answers. The
+  text is Markdown, so paragraphs, lists, `code`, bold, italic and links show
+  as written, set at a comfortable reading width. The phones draw it the same
+  way.
+- **Agent** is the agent's terminal, drawn as selecting it draws it.
+- **Changes** is the worktree's diff.
+
+A task opens on Agent while an agent is working on it, and on Overview
+otherwise; once you pick a tab for a task, it opens on that one. ⌃⌘] and ⌃⌘[
+(Workspace ▸ Next Task Tab and Previous Task Tab) step through the tabs. The
+terminal stays put behind the other tabs, so coming back to it never redraws or
+re-wraps it, and only the tab in front counts as being watched. The bar over
+the tabs names the task's worktree and how many terminals it has, with a picker
+when several agents are on the task. A task with nothing started shows Start
+Agent… and Open Worktree… on its Agent and Changes tabs.
 
 - **Open Worktree** shows the worktree itself, full size, with all its terminals
   and layouts. The breadcrumb leads back to the task.
@@ -166,8 +180,8 @@ share. A task with nothing started is just that line.
   in). Return in the navigator moves into what's selected.
 - Back (⌃⌘←, in the Workspace menu) goes up one level, from a worktree to the
   task it was opened from, and from a task back to the orchestrator. The breadcrumb
-  goes straight to any level. Focus (⌃⌘↩) gives the agent and changes the whole
-  view, without the navigator; press it again to bring it back.
+  goes straight to any level. Focus (⌃⌘↩) gives the task the whole view,
+  without the navigator; press it again to bring it back.
 - ⌥⌘1 selects the orchestrator, ⌥⌘2 gives the keyboard to the navigator, and
   ⌥⌘3 to the main area.
 - ⌃⌘↓ and ⌃⌘↑ (Workspace ▸ Next Worktree and Previous Worktree) go to the next

@@ -583,23 +583,34 @@ gone):
 
 ### 4.4 The task view
 
-A task opened is the task first, whole, and its work beneath. A task need not have a worktree or a
-terminal at all (ov-79).
+A task opened is a compact header over three full-height tabs (ov-98, replacing the squeezed vertical split of
+the task's text over its agent over its changes). A task need not have a worktree or a terminal at all (ov-79).
 
-- **Header:** the key and title, and a status pop-up that replaces the card's "Move To" menu.
-- **The task's text,** never collapsed: its blocked line and times, intent, acceptance (each line met or not, as
-  the runner records it; the Mac has no write to tick one), constraints, the record of notes, and, in Needs
-  Decision, the question with its **Answer** buttons. This replaces the modal card sheet.
-- **Its work, beneath a draggable divider** whose place is remembered per window (the text starts at 40%):
-  - a line naming the worktree and its terminal count ("Worktree fc-3-webhooks · 2 terminals"), the agent or a
-    picker when several are on the task, and **Open Worktree**;
-  - the tmux layout holding the agent's terminal, drawn as selecting it draws it;
-  - the worktree's `ChangesPane`, under the agent, with a divider of its own (ruling 6: today's Changes view,
-    reused without a tmux pane, so the agent's window keeps its size on every client; see R3). In Review the
-    changes take the larger share; otherwise the agent does.
-- **With no agent,** the line says "No agent is working on this task.", and the changes fill the work area when
-  the task has a worktree. With neither an agent nor changes to show, the work area is that one line ("Nothing
-  has started on this task yet."), and the text takes the rest. Never a full-height placeholder.
+- **Header,** which never scrolls away: the key, the title (title2 semibold), the agent's state in the
+  navigator's own words ("claude working", "claude idle", "claude needs you"; `TaskColumnModel.agentLine`), and a
+  status pop-up that replaces the card's "Move To" menu. Under it, a 32 pt bar (`columnHeader()`) with the tabs
+  on the left and, on the right, the worktree and its terminal count ("ov-98-tabs · 2 terminals"), a picker when
+  several agents are on the task, and **Open Worktree**.
+- **Overview:** the task's text, never collapsed: its blocked line and times, intent, acceptance, constraints,
+  the record of notes, and, in Needs Decision, the question with its **Answer** buttons. Intent and notes are
+  Markdown through AgentKit's `MarkdownText` with `.document` spacing; acceptance lines are inline Markdown, a
+  monochrome checklist with met lines struck through (`TaskProse.acceptance`; the Mac has no write to tick one).
+  Each note is a block: a quiet "Kind · byline · time" line (`TaskProse.noteLine`), then its body. Newest first,
+  answers under their questions (`TaskNoteFeed`). Type: labels subheadline semibold secondary, body `.body`,
+  metadata caption; prose at about 70 characters (`TaskTypography.measure`); gaps on the 8 pt rhythm.
+- **Agent:** the tmux layout holding the agent's terminal, drawn as selecting it draws it.
+- **Changes:** the worktree's `ChangesPane` (ruling 6: today's Changes view, reused without a tmux pane, so the
+  agent's window keeps its size on every client; see R3). Made the first time it's shown.
+- **Which tab:** Agent while an agent is working on the task, else Overview; a tab chosen is remembered per task
+  in the window (`TaskTabMemory`, only choices, never defaults). ⌃⌘] and ⌃⌘[ step through them, wrapping; they
+  were Diff ▸ Next/Previous Commit, which moved to ⌃⌥⌘] and ⌃⌥⌘[.
+- **Kept, not rebuilt:** Overview and Agent are mounted once and stay behind whichever tab is in front, faded
+  out, out of sight (`outOfSight`: no keyboard), taking no clicks, so the terminal never re-wraps. The task's
+  agent counts as on screen, for seen marks, the watching claim and the keyboard, only behind its Agent tab
+  (`WorkspaceScreen.visible(_:arrangement:taskTab:)`).
+- **With no agent,** the Agent tab says "No agent is working on this task." With neither an agent nor a
+  worktree, Agent and Changes say "Nothing has started on this task yet." with **Start Agent…** and **Open
+  Worktree…**: a compact panel near the top, never a full-height placeholder.
 
 **Open Worktree** opens the worktree in the task's place, beside the board, with its own layouts (a `TileView`
 and `GroupBar`, as a worktree opened from the sidebar draws). The breadcrumb reads Workspace › bil-9 … › fc-3-webhooks, and Back goes
@@ -698,6 +709,7 @@ filters workspace rows and Worktrees.
   "Select a workspace first."
 - **Focus shortcuts:** ⌥⌘1 selects the orchestrator, ⌥⌘2 the navigator, ⌥⌘3 the main area, whatever it shows
   (ov-92; ov-89 popped the orchestrator open from its rail and the board from its strip). ⌘digits are the workspaces since ov-86 (§4.11); the terminals' moved to ⌃⌘digits.
+- **A task's tabs:** ⌃⌘] and ⌃⌘[ (ov-98; §4.4). The Diff menu's commits moved from them to ⌃⌥⌘] and ⌃⌥⌘[.
 - **Back** is ⌃⌘← and **Focus** is ⌃⌘↩. The usual chords are taken: ⌘[ is Previous Terminal
   (`Commands.swift:136-137`) and ⇧⌘↩ is Zoom Pane (`:170-171`). ⌃⌘←, ⌃⌘↩ and ⌥⌘1–3 are unused in `Commands.swift`
   and aren't in `ShortcutSheetTests.systemChords`. Back goes from a worktree to the task it was opened from, and
@@ -980,7 +992,7 @@ sessions, windows, worktree order and claims are untouched.
   collapse.
 - Expanded worktree rows were `@State` (`ContentView.swift:11`) and never persisted, so nothing is lost.
   - Worktrees disclosure state is new: `sidebar.openWorktrees`, empty by default.
-- New: `board.form.*` (§5), and the task view's dividers.
+- New: `board.form.*` (§5). The task view's dividers (`task.split.*` scene storage) went with ov-98's tabs; their stored shares are simply never read again.
 - **The first launch after the update** shows a one-time tip over the sidebar:
   - "Workspaces are now in the sidebar."
   - "Select one to see its orchestrator and board side by side. Its worktrees are one click down."
