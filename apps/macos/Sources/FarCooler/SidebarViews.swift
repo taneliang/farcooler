@@ -1325,9 +1325,8 @@ struct WorktreeDetail: View {
         Button("Open") { onOpenTerminal(t) }
         if let kind = LostPane.Kind(state: t.state) {
             Divider()
-            Button("Restart") { onTerminalAction(.restart, t) }
-            if LostPane.actions(for: kind).contains(.dismiss) {
-                Button("Dismiss") { onTerminalAction(.dismissLost, t) }
+            ForEach(LostPane.actions(for: kind), id: \.title) { action in
+                Button(action.title) { onTerminalAction(TerminalAction(action), t) }
             }
         }
     }

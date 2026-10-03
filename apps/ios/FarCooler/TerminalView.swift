@@ -801,6 +801,8 @@ struct TerminalView: View {
     /// with nothing to show is a dialog that will eventually be shown with
     /// nothing to show.
     @State private var heldLink: String?
+    /// Why the runner refused this pane's last Restart or Dismiss, or nil.
+    @State private var refused: ReviewTrouble?
 
     /// How far the grid is drawn from the row the emulator is on, plus the
     /// peaks a test reads. Written by the scroll driver in `KeystrokeSink`,
@@ -1270,14 +1272,23 @@ struct TerminalView: View {
         let mayAct = connection.daemon?.mayAct ?? true
         let offers = LostPane.actions(for: kind)
         if mayAct {
+            // A refused Restart (another orchestrator holds the seat, say)
+            // says so here, rather than the button doing nothing visible.
+            let message = [LostPane.message(for: kind, preset: terminal.preset), refused?.sentence]
+                .compactMap { $0 }.joined(separator: "\n\n")
+            let answer = { (action: LostPane.Action) in
+                Task {
+                    refused = nil
+                    refused = await connection.act(Connection.Action(action), on: terminal)
+                }
+            }
             status(
                 symbol: "moon.zzz", mark: .secondary, title: LostPane.title(for: kind),
-                message: LostPane.explanation(for: kind) + " " + LostPane.restartNote(preset: terminal.preset),
-                actionTitle: "Restart",
-                action: { Task { await connection.act(.restart, on: terminal) } },
-                secondaryTitle: offers.contains(.dismiss) ? "Dismiss" : nil,
-                secondary: offers.contains(.dismiss)
-                    ? { Task { await connection.act(.dismissLost, on: terminal) } } : nil)
+                message: message, transcript: refused?.transcript,
+                actionTitle: offers.first?.title,
+                action: offers.first.map { first in { answer(first) } },
+                secondaryTitle: offers.dropFirst().first?.title,
+                secondary: offers.dropFirst().first.map { second in { answer(second) } })
         } else {
             status(
                 symbol: "moon.zzz", mark: .secondary, title: LostPane.title(for: kind),

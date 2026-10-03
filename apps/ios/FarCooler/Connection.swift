@@ -46,6 +46,15 @@ final class Connection: ObservableObject {
 
     enum Action {
         case restart, stop, dismissLost
+
+        /// A lost terminal's answer, as the call it makes: the one mapping,
+        /// so no screen spells it its own way.
+        init(_ action: LostPane.Action) {
+            switch action {
+            case .restart: self = .restart
+            case .dismiss: self = .dismissLost
+            }
+        }
     }
 
     @Published private(set) var phase: Phase = .connecting
@@ -1646,15 +1655,27 @@ final class Connection: ObservableObject {
         await refresh()
     }
 
-    func act(_ action: Action, on terminal: Terminal) async {
+    /// Restart, stop or dismiss a terminal, and why the runner refused, if
+    /// it did. It used to drop the refusal (`try?`), so a refused Restart on
+    /// a lost pane did nothing visible (ov-191 review). A caller with nowhere
+    /// to show it still may ignore it.
+    @discardableResult
+    func act(_ action: Action, on terminal: Terminal) async -> ReviewTrouble? {
         let method: String
+        let failure: String
         switch action {
-        case .restart: method = "terminal.restart"
-        case .stop: method = "terminal.stop"
-        case .dismissLost: method = "terminal.dismiss_lost"
+        case .restart: (method, failure) = ("terminal.restart", LostPane.Action.restart.failure)
+        case .stop: (method, failure) = ("terminal.stop", "Couldn’t stop this terminal.")
+        case .dismissLost: (method, failure) = ("terminal.dismiss_lost", LostPane.Action.dismiss.failure)
         }
-        _ = try? await core.call(method, ["terminal": terminal.id])
+        var trouble: ReviewTrouble?
+        do {
+            _ = try await core.call(method, ["terminal": terminal.id])
+        } catch {
+            trouble = ClientCore.trouble(error, otherwise: failure)
+        }
         await refresh()
+        return trouble
     }
 
     /// Close a terminal: stop whatever is in it, then delete the record.

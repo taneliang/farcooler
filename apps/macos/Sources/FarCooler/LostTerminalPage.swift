@@ -67,12 +67,14 @@ struct LostTerminalPage: View {
                 .fixedSize(horizontal: false, vertical: true)
 
                 HStack(spacing: 10) {
-                    Button("Restart") { onAction(.restart) }
-                        .buttonStyle(.borderedProminent)
-                        .accessibilityIdentifier("lost-restart")
-                    if actions.contains(.dismiss) {
-                        Button("Dismiss") { onAction(.dismissLost) }
-                            .accessibilityIdentifier("lost-dismiss")
+                    ForEach(actions, id: \.title) { action in
+                        let button = Button(action.title) { onAction(TerminalAction(action)) }
+                            .accessibilityIdentifier(action == .restart ? "lost-restart" : "lost-dismiss")
+                        if action == .restart {
+                            button.buttonStyle(.borderedProminent)
+                        } else {
+                            button
+                        }
                     }
                 }
             }
@@ -89,12 +91,12 @@ struct LostTerminalPage: View {
         .focused($focused)
         .focusEffectDisabled()
         .onKeyPress(.return) {
-            onAction(.restart)
+            onAction(TerminalAction(.restart))
             return .handled
         }
         .onKeyPress(.delete) {
             guard actions.contains(.dismiss) else { return .ignored }
-            onAction(.dismissLost)
+            onAction(TerminalAction(.dismiss))
             return .handled
         }
         .onChange(of: hasKeyboard, initial: true) { _, keyed in if keyed { focused = true } }
@@ -113,6 +115,19 @@ private struct WindowTitled: ViewModifier {
                 .navigationSubtitle(worktree.windowSubtitle)
         } else {
             content
+        }
+    }
+}
+
+extension TerminalAction {
+    /// The one mapping from a lost terminal's answers to what the window
+    /// runs (`ContentView.run`): every Mac surface that offers them, the
+    /// page, a card's menu and the jumpbar's, goes through this, so none of
+    /// them spells the call its own way.
+    init(_ action: LostPane.Action) {
+        switch action {
+        case .restart: self = .restart
+        case .dismiss: self = .dismissLost
         }
     }
 }
