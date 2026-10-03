@@ -41,9 +41,9 @@ field decodes it.
 Canary is the third, and ships more than the other two together: every push to
 main reaches the owner's phones and Macs, so a field renumbered between two
 pushes is a Canary phone and a newer Canary daemon disagreeing with no error.
-`canary.yml` writes `proto/baseline/canary.proto` after each successful ship,
-through scripts/canary-baseline.sh, with a first comment line naming the commit
-it came from. The parser strips comments, so that line is invisible here.
+`canary-baseline.yml` writes `proto/baseline/canary.proto` when a Canary run
+that shipped ends, through scripts/canary-baseline.sh, with a first comment
+line naming the commit it came from. The parser strips comments, so that line is invisible here.
 
 Before a first release the baseline is absent and this exits 0 saying so:
 nothing has shipped, so nothing is owed compatibility.
@@ -64,8 +64,11 @@ PROTO = ROOT / "proto" / "farcooler.proto"
 CHANNELS = {
     "preview": ".github/workflows/promote.yml",
     "stable": ".github/workflows/promote.yml",
-    "canary": ".github/workflows/canary.yml",
+    "canary": ".github/workflows/canary-baseline.yml",
 }
+
+# The workflow that ships Canary, whose ship jobs must wait for this lint.
+CANARY_SHIP = ".github/workflows/canary.yml"
 
 # One declaration or brace, found ANYWHERE in the text rather than at the start
 # of a line: `message AgentCancel { bytes terminal_id = 1; }` puts the opening,
@@ -305,6 +308,79 @@ def timeout_problems(text):
     ]
 
 
+def top_level(text):
+    """A workflow's top-level keys, each with its block raw, comments dropped."""
+    blocks, key = {}, None
+    for line in text.splitlines():
+        bare = line.split(" #", 1)[0].rstrip() if not line.lstrip().startswith("#") else ""
+        if not bare:
+            continue
+        if not bare[0].isspace() and ":" in bare:
+            key, value = bare.split(":", 1)
+            blocks[key] = value.strip()
+        elif key:
+            blocks[key] += "\n" + bare.strip()
+    return blocks
+
+
+def listed(block, key):
+    """`key: [a, b]` or `key:` then `- a` lines, in a stripped block, as a list."""
+    lines = block.splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith(f"{key}:"):
+            value = line[len(key) + 1:].strip()
+            if value.startswith("["):
+                items = value.strip("[]").split(",")
+            else:
+                items = []
+                for rest in lines[i + 1:]:
+                    if not rest.startswith("- "):
+                        break
+                    items.append(rest[2:])
+            return [item.strip().strip("'\"") for item in items if item.strip()]
+    return []
+
+
+def recorder_problems(text, canary_text):
+    """How canary-baseline.yml could miss a build Canary shipped, as sentences.
+
+    It must run on every completed Canary run, cancelled ones above all, since
+    the cancel is what it exists for; under no concurrency group, which would
+    cancel a pending recording; with the permissions to read the run's jobs and
+    push the baseline; and record the run's commit, not main's.
+    """
+    top = top_level(text)
+    problems = []
+    trigger = top.get("on", "")
+    name = top_level(canary_text).get("name", "").strip("'\"")
+    if "workflow_run:" not in trigger:
+        problems.append("it is not triggered by workflow_run")
+    elif name not in listed(trigger, "workflows"):
+        problems.append(f"its workflow_run does not name canary.yml's workflow {name!r}, so it never runs")
+    if listed(trigger, "types") != ["completed"]:
+        problems.append("its workflow_run types must be exactly [completed], or it runs before anything shipped")
+    jobs = workflow_jobs(text)
+    if "concurrency" in top or any("concurrency" in keys for keys in jobs.values()):
+        problems.append("it has a concurrency group, which cancels a pending recording")
+    perms = top.get("permissions")
+    if perms is None or "write" in perms:
+        problems.append("its workflow-level permissions must be empty or read-only, so only the recording job writes")
+    writers = [j for j, keys in jobs.items() if "scripts/canary-baseline.sh" in keys.get("steps", "")]
+    if len(writers) != 1:
+        return problems + [f"expected one job running scripts/canary-baseline.sh, found {writers}"]
+    job = jobs[writers[0]]
+    for want in ("contents: write", "actions: read"):
+        if want not in job.get("permissions", ""):
+            problems.append(f"`{writers[0]}` lacks `{want}`")
+    if re.search(r"conclusion|\b(success|always|cancelled|failure)\(\)", job.get("if", "")):
+        problems.append(f"`{writers[0]}`'s `if` filters on the run's outcome, but a cancelled run can have shipped")
+    if "scripts/canary-shipped.py" not in job.get("steps", ""):
+        problems.append(f"`{writers[0]}` does not ask scripts/canary-shipped.py what shipped")
+    if "workflow_run.head_sha" not in job.get("steps", "") or "github.sha" in job.get("steps", ""):
+        problems.append(f"`{writers[0]}` must record workflow_run.head_sha; github.sha is main's head, not what shipped")
+    return problems
+
+
 def lint(channel, baseline_dir):
     """The problems, and the line to print if there are none."""
     problems = capability_problems()
@@ -542,7 +618,7 @@ def self_test():
     # in their own workflow. CI's `wire` job is no gate: canary.yml never waits
     # for it, and CI cancels a run when the next push lands.
     count += 1
-    canary = (ROOT / CHANNELS["canary"]).read_text()
+    canary = (ROOT / CANARY_SHIP).read_text()
     for problem in canary_gate_problems(canary):
         failures.append(f"canary.yml: {problem}")
 
@@ -595,6 +671,41 @@ def self_test():
         got = timeout_problems(text)
         if len(got) != want:
             failures.append(f"timeout case {what!r}: expected {want} problem(s), got {got}")
+
+    # The recorder: canary.yml cancels its own run when the next push lands,
+    # after a build may have shipped, so the baseline is recorded by a workflow
+    # outside that run. Its trigger and permissions are what make it run at all.
+    count += 1
+    path = ROOT / CHANNELS["canary"]
+    recorder = path.read_text() if path.exists() else ""
+    for problem in recorder_problems(recorder, canary):
+        failures.append(f"canary-baseline.yml: {problem}")
+    # And nothing in canary.yml records it, where the cancel would take it down.
+    count += 1
+    if "scripts/canary-baseline.sh" in canary or "contents: write" in canary:
+        failures.append("canary.yml records the baseline itself, inside the run its next push cancels")
+
+    recorder_cases = [
+        ("types gains requested", "types: [completed]", "types: [requested, completed]", 1),
+        ("workflows names another", "workflows: [Canary]", "workflows: [CI]", 1),
+        ("workflow_run gone", "  workflow_run:\n", "  push:\n", 1),
+        ("a concurrency group", "permissions: {}\n", "permissions: {}\n\nconcurrency:\n  group: canary-baseline\n", 1),
+        ("write-all at the top", "permissions: {}\n", "permissions: write-all\n", 1),
+        ("actions: read dropped", "      actions: read\n", "", 1),
+        ("contents: read only", "      contents: write\n", "      contents: read\n", 1),
+        ("success only", "    if: github.event.workflow_run.head_branch == 'main'\n",
+         "    if: github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success'\n", 1),
+        ("github.sha recorded", "${{ github.event.workflow_run.head_sha }}", "${{ github.sha }}", 1),
+        ("workflows as a block list", "workflows: [Canary]", "workflows:\n      - Canary", 0),
+    ]
+    for what, old, new, want in recorder_cases:
+        count += 1
+        if old not in recorder:
+            failures.append(f"recorder case {what!r}: canary-baseline.yml no longer contains {old!r}")
+            continue
+        got = recorder_problems(recorder.replace(old, new, 1), canary)
+        if bool(got) != bool(want):
+            failures.append(f"recorder case {what!r}: expected {'a problem' if want else 'none'}, got {got}")
 
     for f in failures:
         print(f"FAIL: {f}", file=sys.stderr)

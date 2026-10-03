@@ -24,12 +24,12 @@ on:
     # should not spend twenty minutes of macOS runner time shipping an identical
     # app to TestFlight.
     #
-    # proto/baseline/ too, though the baseline jobs below should never need it:
-    # they push with the default GITHUB_TOKEN, and GitHub raises no workflow
-    # event for that push, so their commit re-triggers neither this workflow
-    # nor CI. This is the second lock on that loop, for the day someone swaps
-    # the token for an app token or a PAT, which DO trigger workflows. It only
-    # skips a push that touches nothing else.
+    # proto/baseline/ too, though canary-baseline.yml should never need it: it
+    # pushes with the default GITHUB_TOKEN, and GitHub raises no workflow event
+    # for that push, so its commit re-triggers neither this workflow nor CI.
+    # This is the second lock on that loop, for the day someone swaps the token
+    # for an app token or a PAT, which DO trigger workflows. It only skips a
+    # push that touches nothing else.
     paths-ignore: ['services/relay/**', 'docs/**', '**/*.md', 'proto/baseline/**']
   workflow_dispatch:
 
@@ -46,8 +46,8 @@ env:
 jobs:
   # The wire lint, here, before anything ships. CI runs it too, but nothing
   # here waited for CI: a renumbered field went red there and out to TestFlight
-  # here in the same push, and then the baseline jobs below recorded it as what
-  # Canary owes compatibility to, so every later lint passed against the break.
+  # here in the same push, and then it was recorded as the baseline Canary owes
+  # compatibility to, so every later lint passed against the break.
   #
   # A job of its own rather than waiting on CI's result for this commit. CI
   # cancels its run when the next push lands, so a commit can have no CI
@@ -195,7 +195,7 @@ jobs:
       # internal tester group, and that its APNs topic is that identifier. The
       # canary relay's APNS_TOPIC secret has to match, or every push is rejected
       # and nothing says so.
-      - name: Archive and upload
+      - name: Archive and export
         working-directory: apps/ios
         env:
           APP_STORE_KEY_ID: ${{ secrets.APP_STORE_KEY_ID }}
@@ -270,6 +270,18 @@ jobs:
             sleep 30
           done
 
+      # Its own step, after the build, because this is the moment the build
+      # reaches the field. canary-baseline.yml records the wire from the steps
+      # of a cancelled run: a cancel during the archive shipped nothing, and a
+      # cancel during this step may have, so it counts. One step for both could
+      # not tell them apart. scripts/canary-shipped.py names this step.
+      - name: Upload to TestFlight
+        working-directory: apps/ios
+        env:
+          APP_STORE_KEY_ID: ${{ secrets.APP_STORE_KEY_ID }}
+          APP_STORE_ISSUER_ID: ${{ secrets.APP_STORE_ISSUER_ID }}
+        run: |
+          set -euo pipefail
           # altool's own output is where the 90382 signal shows up, so it's
           # captured to a file — still streamed to the log in full via tee —
           # rather than left to a plain pass/fail exit. `set +e` around it so
@@ -656,74 +668,13 @@ jobs:
             --content-type "application/xml; charset=utf-8" \
             --cache-control 'max-age=300' --remote
 
-      - uses: actions/upload-artifact@v4
+      # Named, because scripts/canary-shipped.py counts it as a ship.
+      - name: Upload the disk image
+        uses: actions/upload-artifact@v4
         with:
           name: canary-macos
           path: '*.dmg'
 
-  # The wire this channel now owes compatibility to, as
-  # proto/baseline/canary.proto, which ci.yml lints every commit against.
-  # Canary is on the owner's phones and Macs within the hour, so a field
-  # renumbered on main is a Canary phone and a newer Canary daemon silently
-  # decoding the same bytes as different things — unless this file exists.
-  #
-  # WHICH SHIP COUNTS: either. The phone (TestFlight) and the Mac app with its
-  # bundled daemons (the dmg) are both clients in the field, so the moment
-  # EITHER ships, this commit's proto is owed compatibility. Waiting for both
-  # would record nothing whenever one fails — the upload limit fails the iOS
-  # job while the Mac one ships.
-  #
-  # TWO JOBS, not one that `needs` both: `cancel-in-progress` above cancels this
-  # run when the next push lands, and a single job would wait for the slower
-  # ship — the Mac job, behind the Linux build — so an iOS build that uploaded
-  # would lose its record to any push in that window. Each of these starts
-  # the moment its own ship succeeds. Both recording the same commit is
-  # harmless: the second finds the baseline unchanged.
-  #
-  # Their own jobs, rather than a step at the end of the shipping jobs, so that
-  # `contents: write` is held by twenty lines of shell and not by jobs that run
-  # a build and third-party actions. The repository's default token is
-  # read-only, so without this block the push is refused.
-  #
-  # NO LOOP: the push uses the default GITHUB_TOKEN, which triggers no
-  # workflow, and paths-ignore above skips proto/baseline/ besides. NO RACE:
-  # one Canary run at a time (the concurrency group above), the script retries
-  # a push that loses to another, and it never moves the baseline to a commit
-  # that is not a descendant of the one recorded — which is what a re-run of an
-  # old run would otherwise do. See scripts/canary-baseline.sh.
-  baseline-ios:
-    name: Record the wire baseline (iOS shipped)
-    needs: ios
-    # Main only. Canary can be dispatched from any branch, and that branch's
-    # proto is not what main owes compatibility to; scripts/canary-baseline.sh
-    # refuses such a commit too.
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      # Main, where the baseline is committed, with full history so the script
-      # can tell whether this commit descends from the one recorded. The proto
-      # itself comes from github.sha — the commit that shipped — not from main,
-      # which has moved on during the build.
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-      - run: scripts/canary-baseline.sh "${{ github.sha }}"
-
-  baseline-macos:
-    name: Record the wire baseline (macOS shipped)
-    needs: macos
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-      - run: scripts/canary-baseline.sh "${{ github.sha }}"
+  # No job here records the wire baseline: canary-baseline.yml does, when this
+  # run ends, because the cancel above would take a recording job down with
+  # the run after its build had shipped. See that file.

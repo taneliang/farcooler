@@ -10,8 +10,8 @@
 #
 #   scripts/canary-baseline.sh <shipped commit>
 #
-# Run from a checkout of main with full history and push credentials; canary.yml
-# does that. It resets that checkout to origin/main, so never run it in a tree
+# Run from a checkout of main with full history and push credentials;
+# canary-baseline.yml does that, when a Canary run that shipped has ended. It resets that checkout to origin/main, so never run it in a tree
 # you care about.
 #
 # The first line of the baseline names the commit it came from, as a comment
@@ -68,13 +68,13 @@ refuse() {
 new="$(mktemp)"
 trap 'rm -f "$new"' EXIT
 {
-  printf '// Shipped by Canary at %s. Written by canary.yml; see scripts/proto-lint.py.\n' "$shipped"
+  printf '// Shipped by Canary at %s. Written by canary-baseline.yml; see scripts/proto-lint.py.\n' "$shipped"
   git show "$shipped:proto/farcooler.proto"
 } > "$new"
 
-# Three tries, because the two shipping jobs of one run finish minutes apart and
-# each records; a human push can land in between too. A rejected push starts
-# over from the new main rather than merging.
+# Three tries, because recordings of two Canary runs can push at once, and a
+# human push can land in between too. A rejected push starts over from the new
+# main rather than merging.
 for attempt in 1 2 3; do
   git fetch --quiet --no-tags origin main
   git checkout --quiet --detach FETCH_HEAD
@@ -82,7 +82,7 @@ for attempt in 1 2 3; do
   # Only a commit on main. Canary can be dispatched from any branch, and a
   # branch's proto recorded here would be compared against fields main may
   # never get — and, since no later main commit descends from it, would stop
-  # the baseline advancing for good. canary.yml gates on the ref as well; this
+  # the baseline advancing for good. canary-baseline.yml gates on the branch as well; this
   # is the lock that holds if that gate is ever lost.
   if ! git merge-base --is-ancestor "$shipped" HEAD; then
     echo "::warning::$shipped is not on main, so it is not recorded as the canary wire baseline"
@@ -124,8 +124,8 @@ for attempt in 1 2 3; do
     commit --quiet -m "chore: canary wire baseline at ${shipped:0:10}
 
 What the Canary channel now owes compatibility to: the proto of the commit
-Canary just shipped. Recorded by canary.yml rather than derived from git
-history — see scripts/proto-lint.py for why the file exists."
+Canary just shipped. Recorded by canary-baseline.yml rather than derived
+from git history — see scripts/proto-lint.py for why the file exists."
 
   # Never forced. A rejected push means main moved; forcing would erase
   # whatever moved it.
