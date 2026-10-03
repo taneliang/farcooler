@@ -73,6 +73,34 @@ pub enum SshError {
     },
 }
 
+impl SshError {
+    /// The stable word for this failure, which crosses the FFI beside the
+    /// message on a failed connect (ov-127).
+    ///
+    /// **The phones classify a connect failure by this, never by the
+    /// message.** They used to match phrases out of the `#[error]` strings
+    /// above — "rejected this key", "cannot reach", "is unknown" — so a
+    /// reword here changed which button a person was offered, and every test
+    /// on every side stayed green. Stable in the way a proto field name is:
+    /// an app in the field matches on these, so a rename is a breaking change
+    /// and not a tidy-up. snake_case, like `TunnelError::code` and
+    /// `CeremonyError::code`, the two vocabularies already crossing this FFI.
+    pub fn word(&self) -> &'static str {
+        match self {
+            SshError::Connect { .. } => "unreachable",
+            SshError::Handshake(_) => "handshake_failed",
+            SshError::AuthRejected { .. } => "key_rejected",
+            SshError::BadKey(_) => "bad_key",
+            SshError::HostKeyChanged { .. } => "host_key_changed",
+            SshError::HostKeyUnknown { .. } => "host_key_unknown",
+            SshError::Exec(_) => "exec_failed",
+            // The tunnel's own word travels beside this one, as `tunnel`.
+            SshError::Tunnel { .. } => "tunnel",
+            SshError::TunnelPortClosed { .. } => "tunnel_port_closed",
+        }
+    }
+}
+
 /// What to do about the host's key.
 #[derive(Debug, Clone)]
 pub enum HostKeyPolicy {
@@ -680,30 +708,42 @@ mod tests {
         assert!(!message.contains("os error"), "leaked the raw OS error text: {message}");
     }
 
-    /// The exact line the apps take a word OUT of, pinned whole.
+    /// One of every failure, for the tests that hold each to its word.
+    fn every_ssh_error() -> Vec<SshError> {
+        let io = || std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+        vec![
+            SshError::Connect { host: "box".into(), port: 22, source: io() },
+            SshError::Handshake("kex".into()),
+            SshError::AuthRejected { user: "me".into(), host: "box".into() },
+            SshError::BadKey("short".into()),
+            SshError::HostKeyChanged {
+                host: "box".into(),
+                expected: "SHA256:a".into(),
+                actual: "SHA256:b".into(),
+            },
+            SshError::HostKeyUnknown { host: "box".into(), fingerprint: "SHA256:a".into() },
+            SshError::Exec("no".into()),
+            SshError::Tunnel { code: "no_answer" },
+            SshError::TunnelPortClosed { source: io() },
+        ]
+    }
+
+    /// A word per failure, none shared, and each one snake_case.
     ///
-    /// `apps/shared/AgentKit/Sources/AgentKit/RunnerTrouble.swift` classifies a
-    /// tunnel failure by finding `"cannot open the tunnel: "` in this message
-    /// and reading the stable word that follows it — the word, not the prose,
-    /// because the word is the thing `TunnelError::code` promises to keep
-    /// stable. Nothing else connects the two files.
-    ///
-    /// So this is the other half of that pair. Reword the `#[error]` attribute
-    /// and every tunnel failure on both phones falls back to "undiagnosed",
-    /// which is the one kind that prints the core's own text on a screen — so
-    /// the symptom of a reword is `cannot open the tunnel: no_answer` in front
-    /// of somebody whose access was just revoked. That is invisible in a diff,
-    /// in a build, and in every other test in either language.
+    /// The words are what `RunnerTrouble(word:)` in AgentKit and
+    /// `Connection.Failure.of(word)` on Android switch on (ov-127). Two
+    /// failures sharing one would give them one button; a word in another
+    /// shape would match neither table and land on "undiagnosed".
     #[test]
-    fn the_tunnel_message_carries_the_word_the_apps_read() {
-        for error in [TunnelError::NoTailcatLinked, TunnelError::Derp, TunnelError::NoAnswer] {
-            let word = error.code();
-            let message = tunnel_error(error).to_string();
-            assert_eq!(
-                message,
-                format!("cannot open the tunnel: {word}"),
-                "RunnerTrouble.TunnelWord.marker no longer finds the word in this message"
+    fn every_ssh_error_has_a_word_of_its_own() {
+        let mut seen = std::collections::HashSet::new();
+        for error in every_ssh_error() {
+            let word = error.word();
+            assert!(
+                !word.is_empty() && word.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{error:?} has the word {word:?}, which is not snake_case"
             );
+            assert!(seen.insert(word), "{error:?} reuses the word {word}");
         }
     }
 

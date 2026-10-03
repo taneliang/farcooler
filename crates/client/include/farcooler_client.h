@@ -79,11 +79,22 @@ void farcooler_client_free(void *handle);
  *   - present     the key must match exactly, or the call fails naming both
  *                 fingerprints. That is either a reinstalled server or an
  *                 interception, and software should not guess which.
- *   - absent      first contact. The call FAILS, with the host's fingerprint in
- *                 its message, so you can show it to a human. Silently trusting
- *                 an unknown key is what makes an interception invisible.
+ *   - absent      first contact. The call FAILS with `"trouble":
+ *                 "host_key_unknown"` and the host's fingerprint as
+ *                 `"fingerprint"`, so you can show it to a human. Silently
+ *                 trusting an unknown key is what makes an interception
+ *                 invisible.
  *   - "accept-any"  connect without pinning. A deliberate choice, never a
  *                 default.
+ *
+ * A failure names what went wrong by a stable word, beside the prose:
+ *
+ *     {"ticket": 4, "ok": false, "error": "...", "trouble": "key_rejected"}
+ *     {"ticket": 4, "ok": false, "error": "...", "trouble": "tunnel",
+ *      "tunnel": "no_answer"}
+ *
+ * `trouble` is `SessionError::word` (crates/client/src/session.rs and
+ * `SshError::word` in ssh.rs). Classify by it, never by `error`.
  *
  * Returns a ticket, or 0 if the arguments could not be read.
  */

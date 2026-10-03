@@ -334,11 +334,14 @@ pub unsafe extern "C" fn farcooler_client_connect(
                         *session.lock().await = Some(open);
                         Ok(json!({ "daemon_version": version, "capabilities": capabilities }))
                     }
-                    Err(e) => Err(e.to_string()),
+                    Err(e) => Err(connect_failure(&e)),
                 },
-                Err(message) => Err(message),
+                // A config this boundary could not read never left the
+                // device, so it is no failure of the runner's; it gets a word
+                // of its own rather than none, on `trouble`'s terms.
+                Err(message) => Err(json!({ "error": message, "trouble": "bad_config" })),
             };
-            push(&finished, ticket, outcome);
+            push_connect(&finished, ticket, outcome);
         });
 
         ticket
@@ -490,6 +493,16 @@ pub unsafe extern "C" fn farcooler_client_paste_file(
     })
 }
 
+/// What an empty session slot says, on a call and on a stream alike.
+///
+/// **The one English sentence the phones still match exactly** (ov-127):
+/// `TerminalSession` on iOS and Android compares a failed read's message to
+/// it to tell a dropped link from a refused read, and `NotLivePane`'s
+/// `disconnectedMessage` is the Apple copy. Pinned by
+/// `the_empty_slot_still_says_not_connected`; change it there and in both
+/// apps, or not at all.
+pub(crate) const NOT_CONNECTED: &str = "not connected";
+
 /// Why a call produced no answer, kept apart from its message just long enough
 /// to decide whether the session is still worth keeping.
 enum Lost {
@@ -502,7 +515,7 @@ enum Lost {
 impl Lost {
     fn message(&self) -> String {
         match self {
-            Lost::Already => "not connected".to_string(),
+            Lost::Already => NOT_CONNECTED.to_string(),
             Lost::Call(e) => e.to_string(),
         }
     }
@@ -726,7 +739,7 @@ pub unsafe extern "C" fn farcooler_client_stream_start(
                     // happens to notice it.
                     push_line(
                         &finished,
-                        json!({ "stream": key, "error": "not connected" }).to_string(),
+                        json!({ "stream": key, "error": NOT_CONNECTED }).to_string(),
                     );
                     return;
                 };
@@ -2444,14 +2457,53 @@ fn push(queue: &Arc<Mutex<VecDeque<String>>>, ticket: u64, outcome: Result<Value
     locked(queue).push_back(payload.to_string());
 }
 
+/// A failed connect, in words a phone can switch on (ov-127).
+///
+/// ```text
+/// {"error": "<the core's prose>", "trouble": "key_rejected"}
+/// {"error": "...", "trouble": "tunnel", "tunnel": "no_answer"}
+/// {"error": "...", "trouble": "host_key_unknown", "fingerprint": "SHA256:..."}
+/// ```
+///
+/// `trouble` is `SessionError::word`. Both phones used to recover it from
+/// `error` by matching phrases of the `#[error]` strings, and the host-key
+/// question by finding "is unknown" and then the first word starting
+/// `SHA256:` — so a reword in `ssh.rs` silently changed which button a person
+/// was offered, or turned a fingerprint question into "Can't Connect". `error`
+/// stays, because two failures have nothing else to show: a changed host
+/// key's text carries the two fingerprints being compared, and an undiagnosed
+/// failure's is the only account there is.
+fn connect_failure(error: &SessionError) -> Value {
+    let mut line = json!({ "error": error.to_string(), "trouble": error.word() });
+    match error {
+        SessionError::Ssh(crate::ssh::SshError::Tunnel { code }) => line["tunnel"] = json!(code),
+        SessionError::Ssh(crate::ssh::SshError::HostKeyUnknown { fingerprint, .. }) => {
+            line["fingerprint"] = json!(fingerprint)
+        }
+        _ => {}
+    }
+    line
+}
+
+/// `push`'s envelope around `connect_failure`'s fields.
+fn push_connect(queue: &Arc<Mutex<VecDeque<String>>>, ticket: u64, outcome: Result<Value, Value>) {
+    let payload = match outcome {
+        Ok(value) => json!({ "ticket": ticket, "ok": true, "result": value }),
+        Err(mut failure) => {
+            failure["ticket"] = json!(ticket);
+            failure["ok"] = json!(false);
+            failure
+        }
+    };
+    locked(queue).push_back(payload.to_string());
+}
+
 /// The same envelope, plus the one thing a client cannot work out from the
 /// message: whether the link is gone.
 ///
-/// Both phone apps recover meaning from error strings by matching substrings.
-/// That is the right call on the connect path, where the message genuinely is
-/// all there is, and the wrong thing to extend to every call on a live
-/// session. Rust still has the type at the moment the error is produced, so it
-/// is answered once here instead of guessed separately in Swift and Kotlin.
+/// Rust still has the type at the moment the error is produced, so it is
+/// answered once here instead of guessed separately in Swift and Kotlin —
+/// the rule `connect_failure` follows for the connect path.
 fn push_call(
     queue: &Arc<Mutex<VecDeque<String>>>,
     ticket: u64,
@@ -2517,6 +2569,51 @@ mod tests {
     #[test]
     fn a_resync_reaches_the_line_as_one() {
         assert_eq!(event_line(&crate::session::FleetEvent::Resync), r#"{"event":"resync"}"#);
+    }
+
+    /// A failed connect carries its trouble as a word, and the tunnel's word
+    /// and the fingerprint as fields of their own (ov-127). The phones read
+    /// these and never `error`, so a reworded `#[error]` cannot change which
+    /// button a person is offered.
+    #[test]
+    fn a_failed_connect_names_its_trouble_by_word() {
+        use crate::ssh::SshError;
+        let queue = Arc::new(Mutex::new(VecDeque::new()));
+        let line = |error: SessionError| -> Value {
+            push_connect(&queue, 7, Err(connect_failure(&error)));
+            serde_json::from_str(&locked(&queue).pop_front().unwrap()).unwrap()
+        };
+
+        let rejected = line(SessionError::Ssh(SshError::AuthRejected {
+            user: "me".into(),
+            host: "box".into(),
+        }));
+        assert_eq!(rejected["ticket"], 7);
+        assert_eq!(rejected["ok"], false);
+        assert_eq!(rejected["trouble"], "key_rejected");
+        assert!(rejected["error"].as_str().is_some_and(|e| !e.is_empty()), "{rejected}");
+        assert!(rejected.get("tunnel").is_none() && rejected.get("fingerprint").is_none());
+
+        let tunnel = line(SessionError::Ssh(SshError::Tunnel { code: "derp" }));
+        assert_eq!(tunnel["trouble"], "tunnel");
+        assert_eq!(tunnel["tunnel"], "derp");
+
+        let unknown = line(SessionError::Ssh(SshError::HostKeyUnknown {
+            host: "box".into(),
+            fingerprint: "SHA256:abc".into(),
+        }));
+        assert_eq!(unknown["trouble"], "host_key_unknown");
+        assert_eq!(unknown["fingerprint"], "SHA256:abc");
+
+        let missing = line(SessionError::DaemonMissing { daemon: "farcoolerd" });
+        assert_eq!(missing["trouble"], "daemon_missing");
+    }
+
+    /// See `NOT_CONNECTED`: both phones compare against this exact text.
+    #[test]
+    fn the_empty_slot_still_says_not_connected() {
+        assert_eq!(NOT_CONNECTED, "not connected");
+        assert_eq!(Lost::Already.message(), "not connected");
     }
 
     /// The needs-you notice reaches a phone as a line of its own, which is

@@ -70,6 +70,22 @@ pub enum SessionError {
 }
 
 impl SessionError {
+    /// The stable word for a failed connect, which crosses the FFI beside the
+    /// message as `trouble` (ov-127). See `SshError::word`, whose words an
+    /// `Ssh` failure keeps, and for why the phones read this and never the
+    /// prose.
+    pub fn word(&self) -> &'static str {
+        match self {
+            SessionError::Ssh(e) => e.word(),
+            SessionError::Protocol(_) => "protocol",
+            SessionError::WrongResult { .. } => "wrong_result",
+            SessionError::DaemonMissing { .. } => "daemon_missing",
+            SessionError::VersionMismatch { .. } => "version_mismatch",
+            SessionError::Refused { .. } => "refused",
+            SessionError::Disconnected(_) => "disconnected",
+        }
+    }
+
     /// Whether this means the link is gone, rather than that the request was
     /// refused.
     ///
