@@ -38,7 +38,10 @@ export default defineWorkersConfig(async () => {
             // absent limiter is deliberate — `withinRate` fails open without one,
             // and these tests are about the routes, not the throttle.
             compatibilityDate: '2026-01-15',
-            d1Databases: ['DB'],
+            // SCRATCH starts empty in every test: `test/migrations.test.ts`
+            // applies the migrations to it one file at a time and compares the
+            // schema after each, which DB (migrated once, up front) can't show.
+            d1Databases: ['DB', 'SCRATCH'],
             analyticsEngineDatasets: { METRICS: { dataset: 'farcooler_events' } },
             bindings: {
               TEST_MIGRATIONS: migrations,

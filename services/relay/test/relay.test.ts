@@ -4810,28 +4810,6 @@ describe('/v1/notify and Live Activities', () => {
 /// callers all feed a payload whose size is what gets asserted — so the one
 /// property the function exists for, that what comes back is the beginning of
 /// what went in and is still decodable UTF-8, was guarded by nothing.
-describe('migration 0014', () => {
-  it('applies after 0013 and only adds nullable columns', async () => {
-    const migrations = (env as any).TEST_MIGRATIONS as { name: string; queries: string[] }[]
-    const names = migrations.map(each => each.name)
-    expect(names.indexOf('0014_row_ask.sql')).toBe(names.indexOf('0013_daemon_install.sql') + 1)
-    const statements = migrations.find(each => each.name === '0014_row_ask.sql')!.queries
-      .map(query => query.replace(/--.*$/gm, '').trim())
-      .filter(query => query)
-    expect(statements.map(query => query.replace(/\s+/g, ' ').replace(/;$/, ''))).toEqual([
-      'ALTER TABLE live_activities ADD COLUMN ask_id TEXT',
-      'ALTER TABLE live_activities ADD COLUMN ask_tool TEXT',
-      'ALTER TABLE live_activities ADD COLUMN ask_until INTEGER',
-    ])
-    const columns = await env.DB.prepare(`PRAGMA table_info(live_activities)`).all<any>()
-    for (const name of ['ask_id', 'ask_tool', 'ask_until']) {
-      const column = columns.results.find((each: any) => each.name === name)
-      expect(column?.notnull).toBe(0)
-      expect(column?.dflt_value).toBeNull()
-    }
-  })
-})
-
 describe('cutting a line to a byte budget', () => {
   /// Three bytes each in UTF-8, and one UTF-16 unit each. A budget that is not a
   /// multiple of three therefore cannot be spent exactly, which is the case a
