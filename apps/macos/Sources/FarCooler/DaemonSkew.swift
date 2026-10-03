@@ -84,6 +84,16 @@ enum DaemonSkew: Equatable {
     /// different idioms.
     case behind(daemon: String)
 
+    /// The daemon answered, it is not this app's build, and its database is
+    /// newer than this build's: the runner is ahead of this Mac (ov-143).
+    ///
+    /// Never offered as an update. "Updating" it would install this Mac's
+    /// older build over a newer one: every agent transcript there goes with
+    /// the restart, and where the older build can't open the newer database
+    /// the runner then refuses every device. `runner install` refuses it for
+    /// the same reason. The fix is on this side, and that is what it says.
+    case ahead(daemon: String)
+
     /// So old that the handshake itself was refused.
     ///
     /// `crates/cli/src/remote.rs`'s `explain` produces "update the older side"
@@ -104,9 +114,20 @@ enum DaemonSkew: Equatable {
     var offersUpdate: Bool {
         switch self {
         case .behind, .tooOldToTalk: return true
-        case .unavailable, .unknown, .current: return false
+        case .unavailable, .unknown, .current, .ahead: return false
         }
     }
+
+    /// Whether the sidebar shows anything for it: an update to offer, or a
+    /// runner ahead of this Mac, which offers nothing but says what to do.
+    var showsInSidebar: Bool {
+        if case .ahead = self { return true }
+        return offersUpdate
+    }
+
+    /// What a runner ahead of this Mac says. The fix is updating the app.
+    static let aheadTitle = "This runner is newer than this Mac"
+    static let aheadAdvice = "This runner is newer than this Mac. Update Far Cooler on this Mac."
 
     /// What the daemon said it was, when it said anything.
     var daemonVersion: String? {
@@ -250,7 +271,11 @@ struct DaemonSkewDot: View {
         .buttonStyle(.plain)
         .help(help)
         .popover(isPresented: $showingCard, arrowEdge: .bottom) {
-            DaemonUpdateCard(targets: [target]) { showingCard = false }
+            if case .ahead = target.skew {
+                DaemonAheadCard(target: target) { showingCard = false }
+            } else {
+                DaemonUpdateCard(targets: [target]) { showingCard = false }
+            }
         }
     }
 
@@ -263,6 +288,8 @@ struct DaemonSkewDot: View {
         case .tooOldToTalk:
             return "This runner is too old for the app to reach — "
                 + "click to see what updating costs"
+        case .ahead:
+            return DaemonSkew.aheadAdvice
         default:
             return "This runner is behind the app — "
                 + "click to see what updating costs"
@@ -330,6 +357,39 @@ struct DaemonUpdateBar: View {
     /// honest one.
     private var label: String {
         targets.count == 1 ? "Update Runner…" : "Update \(targets.count) Runners…"
+    }
+}
+
+// MARK: - A runner ahead of this Mac
+
+/// What a runner newer than this Mac says, and nothing to press but Done.
+///
+/// No Update button, on purpose: the only update on offer from here would
+/// install this Mac's older build over it. See `DaemonSkew.ahead`.
+struct DaemonAheadCard: View {
+    let target: DaemonUpdateTarget
+    let onDone: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(DaemonSkew.aheadTitle).font(.headline)
+                Text(target.name)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text("Update Far Cooler on this Mac.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                Button("Done") { onDone() }
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(16)
+        .frame(width: 340)
     }
 }
 

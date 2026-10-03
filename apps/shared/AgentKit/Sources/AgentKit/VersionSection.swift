@@ -136,9 +136,17 @@ public struct DaemonBuild: Equatable, Sendable {
     /// `TaskLink.taskNoticeReachesPhone`.
     public let pushPaired: Bool
 
+    /// Whether the runner's database is newer than this build's, so the two
+    /// builds differ in that direction (`runnerIsNewer` in `status --json`,
+    /// ov-143). `matches` alone can't say which way, and an older Mac read
+    /// every difference as the runner being behind and offered an "Update"
+    /// that was a downgrade. False from a CLI or runner too old to say.
+    public let runnerIsNewer: Bool
+
     public init(
         version: String, matches: Bool, platform: String, capabilities: Set<String> = [],
-        grantedScope: String = "unspecified", runnerId: String? = nil, pushPaired: Bool = false
+        grantedScope: String = "unspecified", runnerId: String? = nil, pushPaired: Bool = false,
+        runnerIsNewer: Bool = false
     ) {
         self.version = version
         self.matches = matches
@@ -147,6 +155,7 @@ public struct DaemonBuild: Equatable, Sendable {
         self.grantedScope = grantedScope
         self.runnerId = runnerId
         self.pushPaired = pushPaired
+        self.runnerIsNewer = runnerIsNewer
     }
 
     /// Whether this connection may ask for the calls that change the runner

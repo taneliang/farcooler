@@ -204,7 +204,11 @@ final class DaemonClient: ObservableObject {
             guard let build else {
                 return unreadable ? .unknown : .unavailable
             }
-            return build.matches ? .current : .behind(daemon: build.readable)
+            if build.matches { return .current }
+            // Which way they differ, before anything is offered: an "Update"
+            // for a runner newer than this Mac installs this Mac's older
+            // build over it (ov-143).
+            return build.runnerIsNewer ? .ahead(daemon: build.readable) : .behind(daemon: build.readable)
         }
     }
 
@@ -928,7 +932,10 @@ final class DaemonClient: ObservableObject {
             capabilities: Set(body["capabilities"] as? [String] ?? []),
             // Which runner this is, by the id a task notice names it by, so a
             // click on a pushed notice finds it (`TaskNoticeOpen`, ov-106).
-            runnerId: (body["runnerId"] as? String).flatMap { $0.isEmpty ? nil : $0 })
+            runnerId: (body["runnerId"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+            // Which way a mismatch goes (ov-143). Absent from an older CLI,
+            // which then reads as before.
+            runnerIsNewer: body["runnerIsNewer"] as? Bool ?? false)
         servedNeedsYou = daemonBuild?.can("needs_you") == true
         pushPaired = body["pushPaired"] as? Bool ?? false
     }

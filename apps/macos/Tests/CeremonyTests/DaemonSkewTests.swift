@@ -36,6 +36,25 @@ struct DaemonSkewTests {
         #expect(skew.daemonVersion != nil)
     }
 
+    /// A runner a newer Mac installed is not behind this one (ov-143). The
+    /// rule read only `matches`, so an older Mac drew it as behind and
+    /// offered an "Update" that installed the older build over it.
+    @Test func aRunnerNewerThanThisMacOffersNoUpdateAndSaysWhereTheFixIs() {
+        let newer = DaemonBuild(
+            version: "0.1.0+def5678", matches: false, platform: "linux", runnerIsNewer: true)
+        let skew = DaemonClient.skew(
+            state: .connected, build: newer, unreadable: false, remote: true)
+        #expect(skew == .ahead(daemon: newer.readable))
+        #expect(!skew.offersUpdate)
+        #expect(skew.showsInSidebar)
+        #expect(DaemonSkew.aheadAdvice
+            == "This runner is newer than this Mac. Update Far Cooler on this Mac.")
+        // And the behind case still offers one.
+        #expect(DaemonClient.skew(
+            state: .connected, build: build(matches: false), unreadable: false, remote: true
+        ).showsInSidebar)
+    }
+
     /// The distinction the `unreadable` flag exists for. A read that has not
     /// landed yet and a read that came back empty must not look the same, or
     /// the runner most likely to be stale is drawn as one whose answer is

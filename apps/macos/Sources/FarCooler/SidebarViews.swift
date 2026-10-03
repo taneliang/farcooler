@@ -713,7 +713,7 @@ struct HostDot: View {
     var update: DaemonUpdateTarget?
 
     var body: some View {
-        if let update, update.skew.offersUpdate {
+        if let update, update.skew.showsInSidebar {
             DaemonSkewDot(target: update)
         } else {
             connection
