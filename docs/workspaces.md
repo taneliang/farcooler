@@ -40,8 +40,7 @@ lands.
 
 **Needs You** is one list of everything waiting on you, from every workspace on
 every runner. On the Mac it's the tray beside the workspace switcher in the
-title bar (and at the top of the sidebar, when that's showing); on the phones
-it's the first screen. Each item names its workspace, and there are four kinds, most urgent
+title bar; on the phones it's the first screen. Each item names its workspace, and there are four kinds, most urgent
 first:
 
 - **An agent asking permission**, such as to run a command. Answer it in place
@@ -59,8 +58,7 @@ answered this." under its buttons until the list catches up.
 
 The count beside Needs You is the number of items, and it's the same number the
 lock screen, the widget and the watch show. Each workspace in the title bar's
-switcher, and each workspace row in the sidebar, carries its own share of that
-count.
+switcher carries its own share of that count.
 
 Some things aren't items, on purpose. An agent that finished its turn keeps its
 checkmark and its notification, and a worktree with unread changes keeps its dot,
@@ -89,17 +87,16 @@ as in any menu. Below the workspaces:
 
 The tray beside the switcher is Needs You. When a runner can't be reached, has
 lost tmux, or runs an older Far Cooler, a banner across the top of the window
-says so, with **Reconnect** or the update, whether or not the sidebar is out.
+says so, with **Reconnect** or the update.
 
-**The sidebar** is hidden in a new window, since the switcher does its work.
-Show it with the button in the title bar or View ▸ Show Sidebar (⌘B); the
-window remembers whether you left it out, and if you used Far Cooler before
-the switcher, it stays as you had it. It lists each repository's workspaces,
-with Needs You above them. A workspace row shows its name, its orchestrator's
-status (`◌` when it has none), and how many items need you. Its menu has
-**Show Board**, **Start Orchestrator** (or **Replace Orchestrator**) and **Show
-Charter**. With the sidebar hidden, ⌘F opens Go to Anything (⌘P), which finds
-the same workspaces, tasks and agents.
+There's one sidebar: the workspace's navigator, below. The button at the left
+of the title bar, or View ▸ Show Sidebar and Hide Sidebar (⌘B), puts it away and
+brings it back, and the window remembers which you left it. ⌘F and ⌥⌘2 bring it
+back too. Where there's no navigator (Needs You, or nothing chosen), the button
+and the menu item are dimmed. The Fleet sidebar that used to list every
+repository's workspaces is gone: the switcher, Needs You and Go to Anything (⌘P)
+do its work. With no workspace open, ⌘F opens Go to Anything, which finds the
+same workspaces, tasks and agents.
 
 Select a workspace to talk to its orchestrator. The workspace's **navigator**
 is on the left, and the main area beside it shows whatever you select in it.
@@ -116,6 +113,11 @@ The navigator has three sections:
   To clear it at once, choose **Mark All as Read** from Unread's context
   menu or from Board in the menu bar. ⌘F (Edit ▸ Filter Tasks) filters
   every section by key or title.
+- **Terminals**: the repository's own terminals, the ones you start by hand in
+  its main checkout for things that belong to no task, such as a proxy or a
+  log you keep an eye on. Every workspace of the repository lists them. Click
+  one to open it; **New Terminal** starts another. Nothing starts one for you,
+  and they never show up among the tasks or in Unread.
 - **Worktrees**: the worktrees no task has, and **New Worktree…**.
 
 Select a task or a worktree and it takes the main area; select the orchestrator
@@ -126,8 +128,9 @@ remembers the width.
 **Talking to the orchestrator.** The conversation is the orchestrator's own
 terminal, or a chat view when it's in chat mode. The `⋯` menu in the
 conversation's header switches with **Show as Chat** or **Show as Terminal**,
-and also has **Replace Orchestrator**, **Show Charter**, **Restart** and **Stop
-Being Orchestrator**. Tell it what you want done in plain words. It puts the work
+and also has **Replace Orchestrator**, **Show Charter**, **Wake the Agent When
+You Answer**, **Restart** and **Stop Being Orchestrator**. With no orchestrator
+running, it still has **Show Charter** and **Wake the Agent When You Answer**. Tell it what you want done in plain words. It puts the work
 on the board, dispatches agents, and reports back from the board, not from
 memory. It writes down what it decides, so its work survives a restart. The
 first time you talk to a new orchestrator, it interviews you for the charter:
@@ -152,7 +155,7 @@ re-reads the board.
 
 ## Following a task to its changes
 
-Select a task, from the board, the sidebar, Needs You or ⌘P, to open it. It
+Select a task, from the board, Needs You or ⌘P, to open it. It
 takes the main area, with the task selected in the board, under a breadcrumb.
 A compact header stays put at the top: the task's key and title, its agent's
 state ("claude working", "claude idle", "claude needs you"), and the status
@@ -218,7 +221,7 @@ Inside a workspace, the navigator is how you get around them.
 - **Under Worktrees, at the bottom of the navigator**: the ones no task has,
   such as the main checkout (under Main) and scratch ones. Main's also lists
   the repository's unclaimed worktrees. Click one to open it in the main area.
-  The section's last row is **New Worktree…**. Control-click a row for what the sidebar's row offered: **Show
+  The section's last row is **New Worktree…**. Control-click a row for **Show
   Changes**, **New Terminal**, **Move to Workspace**, **Use as Orchestrator**,
   **Hide** and **Remove Worktree…**. Control-click a task for the same, under
   **Worktree**. Hidden ones collapse under **Hidden**, each with **Unhide**.
@@ -230,17 +233,14 @@ Inside a workspace, the navigator is how you get around them.
 - **From ⌘P**, which finds a worktree by its name, its branch, or the key of
   the task it's for, and lists matching worktrees before the terminals inside
   them.
-- **Under a workspace's sidebar row.** Its chevron lists every worktree the
-  workspace owns, each with its task key and its line counts, including ones
-  with no task, such as a shell in a branch of your own. Clicking the row
-  itself still opens the workspace. Expanding a worktree lists its terminals,
-  one step further in. **New Worktree…** is on the workspace row's shortcut
-  menu.
 
-To move a worktree to another workspace, drag it onto that workspace's row, or
-Control-click it and choose **Move to Workspace**. From a terminal, use
-`farcooler worktree assign`. Worktrees no workspace owns are under Unclaimed,
-and hidden ones under Hidden.
+A worktree's own terminals, such as a dev server you run while reviewing it,
+are in the worktree: open it from its row, and its terminals are in the main
+area, or listed on its page when none is on screen.
+
+To move a worktree to another workspace, Control-click it and choose **Move to
+Workspace**. From a terminal, use `farcooler worktree assign`. Worktrees no
+workspace owns are listed under Main's Worktrees, and hidden ones under Hidden.
 
 Nothing about a worktree itself changed: its terminals, layouts and tmux
 commands work as they always have, in whichever view has focus. On the Mac,
@@ -254,7 +254,7 @@ A workspace with no orchestrator says so, with **Start Orchestrator**. Choose
 Claude, Codex or Cursor, and it starts working on its own: it reads the charter
 (or interviews you for one, if there isn't one yet) and then the board. You
 don't need to type anything to get it going. You can start one from the
-workspace's row in the sidebar, from its conversation, or on either phone.
+orchestrator's row in the navigator, from its conversation, or on either phone.
 
 If an orchestrator's terminal is lost, its conversation says "The orchestrator stopped". **Restart** picks the conversation back up where it left
 off, and **Replace…** starts a new one. Replacing asks you to confirm first,
@@ -270,7 +270,7 @@ farcooler workspace start-orchestrator Billing --harness codex --replace
 If you already have an agent running in a repository's main checkout, you don't
 have to start another. Make it the orchestrator:
 
-- **On the Mac**, Control-click its terminal in the sidebar and choose **Use as
+- **On the Mac**, Control-click its worktree's row and choose **Use as
   Orchestrator**, or choose **Use a Running Terminal…** beside Start
   Orchestrator in an empty conversation column. It's offered only for a running
   terminal that belongs to a workspace and sits in the main checkout, never for
@@ -292,7 +292,8 @@ among the worktree's terminals.) It's one pane: the column draws the
 orchestrator and nothing else. A split there (⌃B %, ⌃B " or ⌃B c) opens a new
 shell in the main checkout instead, beside the column, and **Changes** opens
 the main checkout's changes the same way. Every other terminal in the main
-checkout is listed under it in the sidebar and opens there.
+checkout is one of the repository's own terminals, under **Terminals** in the
+navigator.
 
 If another terminal already shares the orchestrator's tmux window, such as a
 shell split beside a Claude you later adopted, or a split made in the column

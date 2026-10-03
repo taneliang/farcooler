@@ -196,14 +196,14 @@ differs and why.
 FARCOOLER_BIN=$PWD/target/release/farcooler ./apps/macos/.build/debug/Far Cooler
 ```
 
-A fleet sidebar, per-terminal output, and an input box. It renders the state the
+A workspace navigator, per-terminal output, and an input box. It renders the state the
 daemon derived and never computes state itself, so two clients cannot disagree
 about the same terminal.
 
 Every runner added under Settings ▸ Runners is connected at once, over SSH,
 alongside this Mac — there is no picker and no "current runner" to switch
-between first. Projects from every runner appear in one sidebar, each naming
-the runner it is on. A runner that stops answering keeps its rows, dimmed,
+between first. Projects from every runner appear in the title bar's workspace
+switcher, each naming the runner it is on. A runner that stops answering keeps its rows, dimmed,
 rather than dropping them: reads keep showing the last good fetch, and an
 action against that runner is refused at once with its own error instead of
 hanging or being queued for later.
@@ -265,7 +265,7 @@ what an arrow key sends, and never speaks the protocol — see
   is the one that is refused while a managed terminal is running.
 - Git is the source of truth for which worktrees exist. Registering a
   repository adopts every worktree it already has, and a reconcile pass keeps
-  the sidebar honest against `git worktree add`/`remove` run outside Far Cooler.
+  the app honest against `git worktree add`/`remove` run outside Far Cooler.
 - Identity comes only from exact tmux tags. Names, indexes, and PIDs are
   diagnostic and never establish identity, so Far Cooler never adopts a process it
   did not launch.
