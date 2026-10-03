@@ -1265,7 +1265,8 @@ fn wanted_key(given: Option<String>) -> Result<String, Box<dyn std::error::Error
 fn actor_from(given: Option<&str>) -> Result<Actor, String> {
     let Some(word) = given else { return Ok(Actor::User) };
     let word = word.trim();
-    Actor::parse(word).ok_or_else(|| {
+    // `runner` is the runner's own voice, which it refuses from a caller.
+    Actor::parse(word).filter(|a| *a != Actor::Runner).ok_or_else(|| {
         format!("{word:?} is not an actor. use user, manager, or agent:<terminal id>")
     })
 }
@@ -2995,7 +2996,7 @@ mod tests {
             actor_from(Some(&format!("agent:{terminal}"))),
             Ok(Actor::Agent { terminal })
         );
-        for raw in ["agent:not-a-uuid", "agent:", "AGENT", "robot", ""] {
+        for raw in ["agent:not-a-uuid", "agent:", "AGENT", "robot", "", "runner"] {
             assert!(actor_from(Some(raw)).is_err(), "{raw:?} was accepted");
         }
     }

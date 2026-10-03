@@ -30,6 +30,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_0016_tasks_by_worktree,
     migration_0017_terminal_split_of,
     migration_0018_terminal_split_of_orchestrator,
+    migration_0019_wake_on_answer,
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -802,6 +803,32 @@ fn migration_0017_terminal_split_of(tx: &Transaction) -> rusqlite::Result<()> {
 /// made the orchestrator afterwards, and only the first is meant to be there.
 fn migration_0018_terminal_split_of_orchestrator(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch("ALTER TABLE terminals ADD COLUMN split_of_orchestrator INTEGER;")
+}
+
+/// Waking the agent when somebody answers its task's decision.
+///
+/// `workspaces.wake_on_answer` is the workspace's switch, on (1) for every
+/// workspace, old and new: the default the owner asked for.
+///
+/// `answer_wakes` is the queue, one row per ANSWER note, keyed by the note so
+/// an answer is told at most once however often the daemon restarts. A row
+/// stays after it is told, with `done_at` set, rather than being deleted: the
+/// key is what keeps a second enqueue of the same note from telling it again.
+/// It goes with its task.
+fn migration_0019_wake_on_answer(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        r#"
+        ALTER TABLE workspaces ADD COLUMN wake_on_answer INTEGER NOT NULL DEFAULT 1;
+
+        CREATE TABLE answer_wakes (
+            note_id BLOB PRIMARY KEY NOT NULL,
+            task_id BLOB NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            enqueued_at INTEGER NOT NULL,
+            done_at INTEGER
+        );
+        CREATE INDEX answer_wakes_pending ON answer_wakes (enqueued_at) WHERE done_at IS NULL;
+        "#,
+    )
 }
 
 /// Every migration below `version`, applied in one transaction, with the

@@ -198,6 +198,9 @@ pub struct Workspace {
     /// Order within the repository. Main is 0.
     pub ordinal: u32,
     pub resource_version: u64,
+    /// Whether answering one of this board's decisions types the answer
+    /// into the agent waiting on it. On unless somebody turned it off.
+    pub wake_on_answer: bool,
 }
 
 pub(crate) fn row_to_workspace(row: &Row) -> rusqlite::Result<Workspace> {
@@ -209,6 +212,7 @@ pub(crate) fn row_to_workspace(row: &Row) -> rusqlite::Result<Workspace> {
         is_main: row.get(4)?,
         ordinal: row.get::<_, i64>(5)? as u32,
         resource_version: row.get::<_, i64>(6)? as u64,
+        wake_on_answer: row.get(7)?,
     })
 }
 
@@ -508,6 +512,10 @@ pub enum Actor {
     User,
     Manager,
     Agent { terminal: Uuid },
+    /// The runner itself, saying what it did on its own: "Told Agent 2
+    /// about the decision". Never taken from a caller (`task_ops`
+    /// refuses it on the wire): nobody but the daemon speaks as it.
+    Runner,
 }
 
 impl std::fmt::Display for Actor {
@@ -516,6 +524,7 @@ impl std::fmt::Display for Actor {
             Actor::User => f.write_str("user"),
             Actor::Manager => f.write_str("manager"),
             Actor::Agent { terminal } => write!(f, "agent:{terminal}"),
+            Actor::Runner => f.write_str("runner"),
         }
     }
 }
@@ -525,6 +534,7 @@ impl Actor {
         match raw {
             "user" => Some(Actor::User),
             "manager" => Some(Actor::Manager),
+            "runner" => Some(Actor::Runner),
             _ => raw
                 .strip_prefix("agent:")
                 .and_then(|id| Uuid::parse_str(id).ok())

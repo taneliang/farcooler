@@ -106,11 +106,18 @@ fn note_kind_from_wire(raw: i32) -> Option<NoteKind> {
 ///
 /// `Actor::parse` is the store's own reader, paired with the `Display` that
 /// wrote the column and the event. There is no second stringifier here.
+///
+/// `runner` parses and is refused: it's the daemon's own voice ("Told Agent 2
+/// about the decision"), and a caller claiming it would put words in the
+/// runner's mouth.
 pub(crate) fn actor_from_wire(raw: &str) -> Result<Actor> {
     if raw.is_empty() {
         return Ok(Actor::User);
     }
-    Actor::parse(raw).ok_or(DomainError::InvalidArgument { what: "actor" })
+    match Actor::parse(raw) {
+        Some(Actor::Runner) | None => Err(DomainError::InvalidArgument { what: "actor" }),
+        Some(actor) => Ok(actor),
+    }
 }
 
 /// A uuid a request must carry. `NotFound` rather than `InvalidArgument`, the
@@ -708,7 +715,8 @@ mod tests {
         // The failure this guards: an agent whose uuid was mistyped filing its
         // decisions under `user`, where nothing in the record would ever say
         // otherwise.
-        for raw in ["agent:not-a-uuid", "agent:", "AGENT", "robot", " user"] {
+        // `runner` parses, and is still refused: only the daemon speaks as it.
+        for raw in ["agent:not-a-uuid", "agent:", "AGENT", "robot", " user", "runner"] {
             assert!(
                 matches!(
                     actor_from_wire(raw),

@@ -18,6 +18,7 @@ pub mod review;
 pub mod models;
 mod store;
 mod tasks;
+mod wakes;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 mod workspaces;
@@ -29,4 +30,5 @@ pub use models::{
 };
 pub use store::{IDEMPOTENCY_RETENTION_MILLIS, Store};
 pub use tasks::{TaskScope, derive_prefix};
+pub use wakes::PendingWake;
 pub use workspaces::{Vacated, valid_prefix};

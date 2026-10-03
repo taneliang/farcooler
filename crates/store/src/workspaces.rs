@@ -131,7 +131,7 @@ fn main_prefix(conn: &Connection, name: &str) -> rusqlite::Result<String> {
 
 /// Every column `row_to_workspace` reads, in its order.
 const WORKSPACE_COLUMNS: &str =
-    "id, repository_id, name, task_prefix, is_main, ordinal, resource_version";
+    "id, repository_id, name, task_prefix, is_main, ordinal, resource_version, wake_on_answer";
 
 /// A terminal is an unended orchestrator while its role says so and nothing
 /// on the row says it has ended: intent neither stopped nor failed, and no
@@ -373,6 +373,20 @@ impl Store {
             }
             tx.commit().map_err(map_err)?;
         }
+        self.get_workspace(id)
+    }
+
+    /// Turn waking the agent on an answer on or off for one workspace.
+    /// Setting what is already set still bumps the version, as a rename to
+    /// the same name does.
+    pub fn set_workspace_wake_on_answer(&self, id: Uuid, expected_version: u64, on: bool) -> Result<Workspace> {
+        self.run_versioned(
+            "UPDATE workspaces SET wake_on_answer = ?1, resource_version = resource_version + 1
+              WHERE id = ?2 AND resource_version = ?3",
+            &[&on, &uuid_blob(id), &(expected_version as i64)],
+            "SELECT 1 FROM workspaces WHERE id = ?1",
+            &[&uuid_blob(id)],
+        )?;
         self.get_workspace(id)
     }
 
