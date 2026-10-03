@@ -1,7 +1,6 @@
 package com.farcooler.net
 
 import android.os.SystemClock
-import android.util.Base64
 import com.farcooler.core.ClientCore
 import com.farcooler.core.DisconnectedException
 import com.farcooler.model.AgentEvent
@@ -25,6 +24,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import java.util.Base64
 
 /**
  * One terminal's agent session, live, over the same host connection a
@@ -39,6 +39,13 @@ class AgentStream(
     private val terminal: String,
     private val core: ClientCore,
     private val scope: CoroutineScope,
+    /**
+     * How a request reaches the runner. The core's, except in a test, which is
+     * how [answer] and [send] run in a JVM test as the app calls them.
+     */
+    call: suspend (method: String, args: JsonObject) -> JsonObject = { method, args ->
+        core.call(method, args)
+    },
 ) {
     val transcript = Transcript()
 
@@ -78,7 +85,7 @@ class AgentStream(
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    private val sending = AgentSending { method, args -> core.call(method, args) }
+    private val sending = AgentSending { method, args -> call(method, args) }
 
     /** The answer to a pending ask, while it is out and after it failed. */
     val answering: StateFlow<PermissionAnswering> = sending.answering
@@ -243,7 +250,7 @@ class AgentStream(
                                     put(
                                         "base64",
                                         JsonPrimitive(
-                                            Base64.encodeToString(attachment.data, Base64.NO_WRAP)
+                                            Base64.getEncoder().encodeToString(attachment.data)
                                         ),
                                     )
                                 }

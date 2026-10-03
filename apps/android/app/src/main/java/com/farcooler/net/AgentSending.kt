@@ -86,7 +86,10 @@ class AgentSending(private val call: suspend (method: String, args: JsonObject) 
      * drawing them twice would read as two messages.
      */
     suspend fun retry(): Boolean {
+        // Taken down before the call, so a second tap while it is out finds
+        // nothing to send rather than sending it twice. A failure puts it back.
         val failed = _sendFailure.value ?: return false
+        _sendFailure.value = null
         return prompt(failed.args)
     }
 
