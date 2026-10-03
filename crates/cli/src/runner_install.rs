@@ -164,6 +164,26 @@ Nice=-5
 WantedBy=default.target
 ";
 
+/// The running daemon's own account of itself on `target`, or `None` if it
+/// can't be had in reasonable time.
+async fn running_host(target: &str) -> Option<farcooler_protocol::v1::Host> {
+    let ask = async {
+        let mut link = crate::daemon_link::connect_to(Some(target)).await.ok()?;
+        crate::host_get(&mut link).await.ok()
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(20), ask).await.ok().flatten()
+}
+
+/// Why installing this build on `target` would be a downgrade, if it would.
+fn downgrade_refusal(target: &str, host: Option<&farcooler_protocol::v1::Host>) -> Option<String> {
+    host.filter(|h| crate::runner_is_newer(h)).map(|_| {
+        format!(
+            "{target} is running a newer Far Cooler than this one, so installing this one would \
+             downgrade it.\nUpdate Far Cooler here, then install again."
+        )
+    })
+}
+
 pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
     println!("==> Checking {target}");
     let probe = probe(target).await?;
@@ -175,6 +195,17 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
     // and then told you about the next.
     if !probe.installable() {
         return Err(format!("{target}:\n  - {}", probe.blockers.join("\n  - ")).into());
+    }
+
+    // Never a downgrade unasked (ov-143). An older Mac offered "Update" for a
+    // runner a newer one had installed, and this then installed the older
+    // build: every agent transcript went with the restart, and where the
+    // older build can't open the newer database, the runner refused every
+    // device until somebody reinstalled from a newer Mac. Asked of the
+    // running daemon; one that can't be reached, or is too old to say, is
+    // installed over as before.
+    if let Some(refusal) = downgrade_refusal(target, running_host(target).await.as_ref()) {
+        return Err(refusal.into());
     }
 
     let arch = probe.arch.as_str();
@@ -1094,4 +1125,20 @@ mod tests {
         assert_eq!(Platform::Linux.dist_slug("riscv64"), None);
     }
 
+    /// An install over a newer runner is refused before anything is uploaded
+    /// (ov-143); an equal or older one, or one too old to say, goes ahead.
+    #[test]
+    fn installing_over_a_newer_runner_is_refused() {
+        let here = farcooler_store::DatabaseSchema::here();
+        let at = |schema_version| farcooler_protocol::v1::Host { schema_version, ..Default::default() };
+
+        let refusal = downgrade_refusal("box", Some(&at(here + 1))).expect("refused");
+        assert!(refusal.starts_with("box is running a newer Far Cooler"), "{refusal}");
+        assert!(refusal.contains("Update Far Cooler here"), "{refusal}");
+
+        assert_eq!(downgrade_refusal("box", Some(&at(here))), None);
+        assert_eq!(downgrade_refusal("box", Some(&at(here - 1))), None);
+        assert_eq!(downgrade_refusal("box", Some(&at(0))), None, "too old to say");
+        assert_eq!(downgrade_refusal("box", None), None, "unreachable");
+    }
 }

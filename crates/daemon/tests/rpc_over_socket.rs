@@ -449,6 +449,11 @@ async fn host_get_carries_this_machines_settings() {
         panic!("expected a Host, got {:?}", result.value);
     };
     assert!(host.settings.is_some(), "a client cannot apply a prefix it was never sent");
+    // And its database, so a client can tell that installing its own build
+    // here would be a downgrade (ov-143). A fresh store is at this build's
+    // schema and says how far back it can be read.
+    assert_eq!(host.schema_version, farcooler_store::DatabaseSchema::here());
+    assert!(host.compatible_down_to > 0 && host.compatible_down_to <= host.schema_version, "{host:?}");
 }
 
 #[tokio::test]

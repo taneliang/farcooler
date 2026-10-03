@@ -940,6 +940,7 @@ dependencies = [
  "libc",
  "prost",
  "prost-types",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",

@@ -179,6 +179,14 @@ pub enum Ensured {
     Started,
     /// One was running from different source; it was stopped and replaced.
     Replaced,
+    /// One was running from different source, and left running: this
+    /// runner's database is newer than this build (ov-143). Replacing it would
+    /// be a downgrade, paid for with every agent transcript the running
+    /// daemon holds, and if this build can't open that database, it would
+    /// leave a runner that refuses everyone. The app goes on talking to the
+    /// newer daemon, and `status --json`'s `runnerIsNewer` says why the
+    /// builds differ.
+    KeptNewer,
 }
 
 impl Ensured {
@@ -187,6 +195,7 @@ impl Ensured {
             Ensured::Unchanged => "unchanged",
             Ensured::Started => "started",
             Ensured::Replaced => "replaced",
+            Ensured::KeptNewer => "kept_newer",
         }
     }
 }
@@ -206,30 +215,41 @@ impl Ensured {
 /// committed to SQLite per call.
 pub async fn ensure_local() -> Result<(Ensured, String), Box<dyn std::error::Error>> {
     let socket = farcooler_daemon::paths::socket_path()?;
+    let database = farcooler_daemon::paths::database_path()?;
+    ensure_in(&socket, &database).await
+}
 
-    let mut link = match dial(&socket).await {
+/// `ensure_local` against an explicit socket and database, so a test can
+/// point it at a daemon of its own.
+async fn ensure_in(
+    socket: &std::path::Path,
+    database: &std::path::Path,
+) -> Result<(Ensured, String), Box<dyn std::error::Error>> {
+    let mut link = match dial(socket).await {
         Ok(link) => link,
         Err(ClientError::Connect(_)) => {
             spawn_daemon()?;
-            let started = wait_for(&socket).await?;
+            let started = wait_for(socket).await?;
             return Ok((Ensured::Started, started.daemon_build().to_string()));
         }
         // Up, but refusing every session (`farcooler_daemon::refusal`): most
         // likely an older build than this one, held on a database a newer
-        // one wrote, which is exactly what installing this build was meant
-        // to fix. Its build is unknowable, since no session gets as far as
-        // the hello that carries it, so it's replaced on sight. If this
-        // build refuses too, `wait_for` says so in the daemon's own words;
-        // the cost of having replaced a refusing daemon of this same build
-        // is one process start and one read of the database's version.
-        Err(ClientError::Daemon { .. }) => {
-            let Some(pid) = peer_of(&socket).await else {
+        // one wrote, which is what installing this build was meant to fix.
+        // Its build is unknowable, since no session gets as far as the hello
+        // that carries it, so the database decides: if this build can't open
+        // it either, a replacement would only refuse again, and the refusal
+        // is passed on as it is.
+        Err(refused @ ClientError::Daemon { .. }) => {
+            if !schema_of(database).is_none_or(|s| s.opens_here()) {
+                return Err(Box::new(refused));
+            }
+            let Some(pid) = peer_of(socket).await else {
                 return Err("the daemon on this runner is refusing every session and did not identify itself".into());
             };
             terminate(pid)?;
-            wait_until_gone(&socket).await?;
+            wait_until_gone(socket).await?;
             spawn_daemon()?;
-            let started = wait_for(&socket).await?;
+            let started = wait_for(socket).await?;
             return Ok((Ensured::Replaced, started.daemon_build().to_string()));
         }
         Err(other) => return Err(Box::new(other)),
@@ -239,14 +259,25 @@ pub async fn ensure_local() -> Result<(Ensured, String), Box<dyn std::error::Err
         return Ok((Ensured::Unchanged, link.daemon_build().to_string()));
     }
 
+    // Different source, and before anything is stopped: which way? A daemon
+    // whose database is newer than this build is a newer daemon, and the
+    // replacement would be a downgrade. That's an older app at launch (a
+    // Local build from an older worktree, a reinstalled older DMG), and
+    // replacing used to cost every agent transcript and then, where this
+    // build can't open the database, start a daemon that refuses everyone.
     let running = link.daemon_build().to_string();
+    if schema_of(database).is_some_and(|s| s.newer_than_here()) {
+        tracing::info!(running, ours = farcooler_protocol::BUILD, "leaving a newer local daemon running");
+        return Ok((Ensured::KeptNewer, running));
+    }
+
     tracing::info!(running, ours = farcooler_protocol::BUILD, "replacing the local daemon");
     stop(&mut link).await?;
     drop(link);
-    wait_until_gone(&socket).await?;
+    wait_until_gone(socket).await?;
 
     spawn_daemon()?;
-    let started = wait_for(&socket).await?;
+    let started = wait_for(socket).await?;
     let build = started.daemon_build().to_string();
     if build != farcooler_protocol::BUILD {
         // The daemon beside this CLI is not the daemon this CLI was built with,
@@ -259,6 +290,17 @@ pub async fn ensure_local() -> Result<(Ensured, String), Box<dyn std::error::Err
         .into());
     }
     Ok((Ensured::Replaced, build))
+}
+
+/// What `database` says about who may open it, or `None` where there's no
+/// file or it can't be read. Unreadable falls back to what `ensure` did before
+/// it asked: a file this can't read, the daemon it would start can't either,
+/// and that daemon's own failure is the better report.
+fn schema_of(database: &std::path::Path) -> Option<farcooler_store::DatabaseSchema> {
+    farcooler_store::read_schema(database)
+        .inspect_err(|e| tracing::debug!(error = %e, "could not read the database's schema"))
+        .ok()
+        .flatten()
 }
 
 /// Ask the daemon to stop; failing that, tell the kernel to ask it.
@@ -511,6 +553,125 @@ mod tests {
         );
         assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
 
+        stop.notify_one();
+        held.await.expect("join").expect("held");
+    }
+
+    /// A daemon whose `daemon.shutdown` is only counted, built from source
+    /// that isn't this CLI's.
+    #[derive(Clone, Default)]
+    struct OtherBuild {
+        shutdowns: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl farcooler_transport::Handler for OtherBuild {
+        fn peer(&self) -> farcooler_transport::Peer {
+            farcooler_transport::Peer {
+                client_id: None,
+                scope: farcooler_protocol::v1::Scope::HostAdmin,
+            }
+        }
+
+        fn handle(
+            &self,
+            req: Request,
+        ) -> impl std::future::Future<Output = farcooler_protocol::v1::Response> + Send {
+            if req.method == "daemon.shutdown" {
+                self.shutdowns.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            let request_id = req.request_id.clone();
+            async move {
+                farcooler_protocol::v1::Response {
+                    request_id,
+                    outcome: Some(farcooler_protocol::v1::response::Outcome::Result(
+                        farcooler_protocol::v1::Result { value: None },
+                    )),
+                }
+            }
+        }
+    }
+
+    /// A database one schema ahead of this build, stamped as not readable
+    /// by it: what a newer daemon leaves behind.
+    fn newer_database(dir: &std::path::Path) -> PathBuf {
+        let path = dir.join("farcooler.db");
+        drop(farcooler_store::Store::open(&path).expect("store"));
+        let conn = rusqlite::Connection::open(&path).expect("open");
+        conn.execute_batch(
+            "UPDATE meta SET value = CAST(value AS INTEGER) + 1 WHERE key = 'schema_version';
+             UPDATE meta SET value = (SELECT value FROM meta WHERE key = 'schema_version')
+             WHERE key = 'compatible_down_to';",
+        )
+        .expect("bump");
+        path
+    }
+
+    /// The review's case (ov-143): an older app at launch, a newer daemon
+    /// running. It used to be stopped, taking every agent transcript, and
+    /// replaced with a daemon that refuses the database. It's left alone.
+    #[tokio::test]
+    async fn a_newer_daemon_is_left_running() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("farcooler.sock");
+        let database = newer_database(dir.path());
+        let daemon = OtherBuild::default();
+        let server = farcooler_transport::UnixListenerServer::bind(&socket).expect("bind");
+        let serving = {
+            let daemon = daemon.clone();
+            tokio::spawn(async move {
+                server
+                    .serve(move |_| {
+                        Some((
+                            farcooler_transport::HandshakeConfig {
+                                daemon_version: "a-newer-build".into(),
+                            },
+                            daemon.clone(),
+                        ))
+                    })
+                    .await
+            })
+        };
+
+        let (ensured, build) = ensure_in(&socket, &database).await.expect("ensured");
+        assert_eq!(ensured, Ensured::KeptNewer);
+        assert_eq!(build, "a-newer-build");
+        assert_eq!(daemon.shutdowns.load(std::sync::atomic::Ordering::SeqCst), 0, "asked to stop");
+        serving.abort();
+    }
+
+    /// And a refusing daemon on a database this build can't open either is
+    /// not replaced (a replacement would refuse too): its refusal is the
+    /// answer. Before, the socket's peer was sent SIGTERM, which in this test
+    /// is the test itself.
+    #[tokio::test]
+    async fn a_refusal_this_build_would_repeat_is_passed_on_not_replaced() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("farcooler.sock");
+        let database = newer_database(dir.path());
+        let stop = std::sync::Arc::new(tokio::sync::Notify::new());
+        let held = {
+            let socket = socket.clone();
+            let stop = stop.clone();
+            tokio::spawn(async move {
+                farcooler_daemon::refusal::hold(
+                    &socket,
+                    farcooler_core::DomainError::NewerData,
+                    stop.notified(),
+                )
+                .await
+            })
+        };
+        let mut tries = 0;
+        while !socket.exists() && tries < 100 {
+            tries += 1;
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        let err = ensure_in(&socket, &database).await.err().expect("refused");
+        assert_eq!(
+            err.to_string(),
+            "This runner's data was written by a newer Far Cooler. Update Far Cooler to use it."
+        );
         stop.notify_one();
         held.await.expect("join").expect("held");
     }

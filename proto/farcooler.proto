@@ -705,6 +705,15 @@ message Host {
   // owner's devices as pushes (ov-94). A Mac reads it to leave a notice to the
   // push rather than post it locally too: both would alert.
   bool push_paired = 13;
+  // This runner's database: the schema it is at, and the oldest schema whose
+  // build may still open it (ov-143). A client compares them with its own
+  // build's schema before offering to install that build here, because a
+  // database newer than the build is a downgrade, and one the build can't
+  // open leaves the runner refusing every device. Both 0 from a runner too
+  // old to say; `compatible_down_to` 0 also from a database no build has
+  // stamped, which vouches for no older build.
+  uint32 schema_version = 14;
+  uint32 compatible_down_to = 15;
 }
 
 enum SelfHealth {

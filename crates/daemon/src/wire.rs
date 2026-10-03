@@ -69,6 +69,7 @@ pub fn host(
     replay_bytes: u64,
     stand_in: Option<&str>,
     push_paired: bool,
+    schema: Option<farcooler_store::DatabaseSchema>,
 ) -> wire::Host {
     let healthy = runtime.inventory_healthy;
     wire::Host {
@@ -109,6 +110,10 @@ pub fn host(
         // Whether the relay delivers this runner's task notices (ov-94), so a
         // Mac leaves them to the push rather than posting them too.
         push_paired,
+        // So a client can tell that installing its build here would be a
+        // downgrade (ov-143). Zeros where the read failed: "too old to say".
+        schema_version: schema.map_or(0, |s| s.version),
+        compatible_down_to: schema.and_then(|s| s.compatible_down_to).unwrap_or(0),
     }
 }
 
@@ -839,9 +844,9 @@ mod tests {
     #[test]
     fn a_stand_in_agent_reaches_the_host() {
         let runtime = farcooler_core::inventory::RuntimeSnapshot::healthy(Vec::new());
-        let with = host("v", Uuid::nil(), &runtime, 0, Some("/bin/sleep"), false);
+        let with = host("v", Uuid::nil(), &runtime, 0, Some("/bin/sleep"), false, None);
         assert_eq!(with.stand_in_agent, "/bin/sleep");
-        let without = host("v", Uuid::nil(), &runtime, 0, None, false);
+        let without = host("v", Uuid::nil(), &runtime, 0, None, false, None);
         assert_eq!(without.stand_in_agent, "");
     }
 
@@ -850,8 +855,8 @@ mod tests {
     #[test]
     fn a_paired_runner_says_so_on_the_host() {
         let runtime = farcooler_core::inventory::RuntimeSnapshot::healthy(Vec::new());
-        assert!(host("v", Uuid::nil(), &runtime, 0, None, true).push_paired);
-        assert!(!host("v", Uuid::nil(), &runtime, 0, None, false).push_paired);
+        assert!(host("v", Uuid::nil(), &runtime, 0, None, true, None).push_paired);
+        assert!(!host("v", Uuid::nil(), &runtime, 0, None, false, None).push_paired);
     }
 
     #[test]

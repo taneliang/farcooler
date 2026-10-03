@@ -671,6 +671,7 @@ impl Rpc {
             0,
             crate::service::stand_in_agent(),
             crate::push::Pairing::load_in(svc.root_dir()).is_some(),
+            svc.store.schema().ok(),
         ))
     }
 
@@ -802,6 +803,7 @@ impl Rpc {
                     0,
                     crate::service::stand_in_agent(),
                     crate::push::Pairing::load_in(svc.root_dir()).is_some(),
+                    svc.store.schema().ok(),
                 )))
             }
 

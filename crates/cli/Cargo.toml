@@ -56,6 +56,10 @@ thiserror.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
+# Test-only: leaving a database the way a newer build would, for
+# `ensure_local`'s downgrade check. The store has no method that writes a
+# version it doesn't know, and must not.
+rusqlite.workspace = true
 # Test-only: `start_paused`, so `task dispatch`'s recheck budget is tested
 # against slow looks without the test sitting through them.
 tokio = { workspace = true, features = ["test-util"] }

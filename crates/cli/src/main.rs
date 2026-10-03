@@ -1380,6 +1380,12 @@ struct StatusCounts {
     terminals: usize,
 }
 
+/// Whether `host`'s database is at a newer schema than this build's
+/// (`Host.schema_version`). A runner too old to report one sends 0.
+pub(crate) fn runner_is_newer(host: &farcooler_protocol::v1::Host) -> bool {
+    host.schema_version > farcooler_store::DatabaseSchema::here()
+}
+
 /// `status --json`'s object.
 ///
 /// A function rather than built inline in `status`, which only runs against a
@@ -1422,6 +1428,11 @@ fn status_json(
         // it by (ov-106): a click on a pushed notice finds its runner here.
         // Null from a runner too old to say.
         "runnerId": (!host.runner_id.is_empty()).then_some(&host.runner_id),
+        // Whether this runner's database is newer than this build (ov-143),
+        // so builds that differ differ in that direction: installing this
+        // build there is a downgrade, and the Mac must not offer it as an
+        // update. False from a runner too old to say.
+        "runnerIsNewer": runner_is_newer(host),
         "roots": counts.roots,
         "repositories": counts.repositories,
         "worktrees": counts.worktrees,
@@ -3240,7 +3251,7 @@ async fn terminal_by_record(
 // Calls
 // ---------------------------------------------------------------------------
 
-async fn host_get(
+pub(crate) async fn host_get(
     link: &mut Link,
 ) -> Result<farcooler_protocol::v1::Host, Box<dyn std::error::Error>> {
     let r = link.call(req("host.health")).await?;
@@ -4857,6 +4868,21 @@ mod tests {
         assert_eq!(status_json(&host, &[], counts())["runnerId"], "r-1");
         let json = status_json(&farcooler_protocol::v1::Host::default(), &[], counts());
         assert!(json.get("runnerId").is_some_and(|v| v.is_null()), "{json}");
+    }
+
+    /// **Which way two builds differ** (ov-143). The Mac read only
+    /// `buildsMatch`, so a runner a newer Mac installed looked "behind" to an
+    /// older one, which offered an "Update" that was a downgrade.
+    #[test]
+    fn status_says_when_the_runner_is_newer_than_this_build() {
+        let counts = || StatusCounts { roots: 0, repositories: 0, worktrees: 0, terminals: 0 };
+        let here = farcooler_store::DatabaseSchema::here();
+        let at = |schema_version| farcooler_protocol::v1::Host { schema_version, ..Default::default() };
+        assert_eq!(status_json(&at(here + 1), &[], counts())["runnerIsNewer"], true);
+        assert_eq!(status_json(&at(here), &[], counts())["runnerIsNewer"], false);
+        assert_eq!(status_json(&at(here - 1), &[], counts())["runnerIsNewer"], false);
+        // A runner too old to say is not newer.
+        assert_eq!(status_json(&at(0), &[], counts())["runnerIsNewer"], false);
     }
 
     /// **A runner whose agents run a stand-in says so, in `status`** (ov-49).
