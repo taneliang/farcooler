@@ -1,4 +1,4 @@
-// Shipped by Canary at f178cafefd01aa51678904f15aaae1803008a85e. Written by canary.yml; see scripts/proto-lint.py.
+// Shipped by Canary at b1d7914eb8e8653d3746b2e2069fa051ac80daa7. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -1964,6 +1964,13 @@ enum ErrorCode {
   // shrug — and, more importantly, can say ANYTHING, where before the words
   // the person typed were dropped on the floor with a success reply.
   ERROR_CODE_AGENT_NOT_CONNECTED = 29;
+  // "The runner's terminal didn't answer in time." tmux is there and working,
+  // and a command to it ran past its deadline: an open on a loaded machine,
+  // or a pane too busy to take a keystroke.
+  //
+  // Distinct from TMUX_UNAVAILABLE, whose advice is to install tmux, which is
+  // wrong for a runner that only answered slowly. Retryable.
+  ERROR_CODE_TMUX_TIMED_OUT = 30;
 }
 
 // ---------------------------------------------------------------------------
