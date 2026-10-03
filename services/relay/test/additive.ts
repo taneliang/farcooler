@@ -17,7 +17,16 @@
 //     migration added as nullable, so every row the old worker writes holds
 //     a NULL there and SQLite never counts two NULLs as equal;
 //   - no data it relies on may vanish or change: no DELETE, and an UPDATE may
-//     only fill in columns this same migration added (a backfill).
+//     only fill in columns this same migration added (a backfill);
+//   - nothing it deletes may start failing: a new foreign key into a table
+//     that existed before this file must say ON DELETE CASCADE, or ON DELETE
+//     SET NULL on a nullable column. D1 enforces foreign keys, and the
+//     default action is NO ACTION, so once the new worker has written a child
+//     row the previous worker's revoke (`DELETE FROM devices …`, index.ts)
+//     would fail on the parent. CASCADE takes the child with it and SET NULL
+//     detaches it; either way the old worker's DELETE goes through. Leaving
+//     the key out entirely is the other way to keep it working. Every key in
+//     0001 through 0017 is already ON DELETE CASCADE.
 //
 // So the grammar below is an ALLOWLIST. A statement is accepted only if it is
 // one of the shapes named here; everything else — DROP, ALTER … RENAME,
@@ -28,6 +37,11 @@
 // is not a statement.
 //
 // 0001 is the baseline: it is read for the tables it creates and not judged.
+//
+// There is no waiver. A contract-phase change — dropping a column once no
+// worker that reads it can still be running — is a deliberate edit to this
+// file in the same commit, naming the migration it lets through, so review
+// sees the rule bend rather than a migration slip past it.
 
 export interface Migration {
   name: string
@@ -165,17 +179,58 @@ class Cursor {
 
 const upper = (t: Token) => (t.kind === 'word' ? t.text.toUpperCase() : '')
 
+/// The words of `tokens` outside any parentheses: `DEFAULT (CAST(0 AS
+/// INTEGER))` holds no constraint keyword, though it spells AS.
+function topLevelWords(tokens: Token[]): string[] {
+  return topLevelTokens(tokens).map(upper)
+}
+
+/// Every `REFERENCES <parent>` in `tokens` (a column definition or a table
+/// constraint) whose parent existed before this file must delete along with
+/// it: ON DELETE CASCADE, or ON DELETE SET NULL when `nullable`. See the
+/// header for why.
+function checkForeignKeys(where: string, tokens: Token[], existing: Set<string>, nullable: boolean) {
+  const words = topLevelWords(tokens)
+  for (let k = 0; k < words.length; k++) {
+    if (words[k] !== 'REFERENCES') continue
+    const parent = topLevelTokens(tokens)[k + 1]?.text.toLowerCase() ?? ''
+    if (!existing.has(parent)) continue
+    let action = ''
+    for (let j = k + 1; j < words.length && words[j] !== 'REFERENCES'; j++) {
+      if (words[j] === 'ON' && words[j + 1] === 'DELETE') {
+        action = words[j + 2] === 'SET' ? `SET ${words[j + 3]}` : words[j + 2]
+      }
+    }
+    if (action === 'CASCADE' || (action === 'SET NULL' && nullable)) continue
+    throw new Error(
+      `${where} references ${parent} ${action ? `ON DELETE ${action}` : 'with no ON DELETE'}, so the previous worker's DELETE from ${parent} fails once a row points at it: use ON DELETE CASCADE, or SET NULL on a nullable column`,
+    )
+  }
+}
+
+function topLevelTokens(tokens: Token[]): Token[] {
+  let depth = 0
+  const out: Token[] = []
+  for (const t of tokens) {
+    if (t.kind === 'punct' && t.text === '(') depth++
+    else if (t.kind === 'punct' && t.text === ')') depth--
+    else if (depth === 0) out.push(t)
+  }
+  return out
+}
+
+const isNotNull = (words: string[]) => words.some((w, k) => w === 'NOT' && words[k + 1] === 'NULL')
+
 /// The constraint words after a new column's type that the previous worker
 /// cannot trip over. NOT NULL is allowed only together with a DEFAULT.
 function checkNewColumn(table: string, column: string, spec: Token[]) {
-  const words = spec.map(upper)
+  const words = topLevelWords(spec)
   for (const banned of ['PRIMARY', 'UNIQUE', 'CHECK', 'GENERATED', 'AS']) {
     if (words.includes(banned)) {
       throw new Error(`${table}.${column} is added with ${banned}, which a row the previous worker writes can violate`)
     }
   }
-  const notNull = words.some((w, k) => w === 'NOT' && words[k + 1] === 'NULL')
-  if (notNull && !words.includes('DEFAULT')) {
+  if (isNotNull(words) && !words.includes('DEFAULT')) {
     throw new Error(`${table}.${column} is added NOT NULL with no DEFAULT, so the previous worker's INSERT fails`)
   }
 }
@@ -183,8 +238,8 @@ function checkNewColumn(table: string, column: string, spec: Token[]) {
 /// Whether a column definition is nullable and has no default — the shape a
 /// UNIQUE index needs to be harmless to rows the previous worker writes.
 function nullableNoDefault(spec: Token[]): boolean {
-  const words = spec.map(upper)
-  return !words.includes('DEFAULT') && !words.some((w, k) => w === 'NOT' && words[k + 1] === 'NULL')
+  const words = topLevelWords(spec)
+  return !words.includes('DEFAULT') && !isNotNull(words)
 }
 
 /// Every reason `migrations` (in order, 0001 first) is not additive, as
@@ -196,6 +251,8 @@ export function additiveViolations(migrations: Migration[]): string[] {
   migrations.forEach((migration, index) => {
     const baseline = index === 0
     const createdHere = new Set<string>()
+    /// The tables that existed before this file: the ones the previous worker knows.
+    const previous = new Set(tables)
     /// table -> columns this migration added to it, and whether each is nullable with no default
     const addedHere = new Map<string, Map<string, boolean>>()
     for (const tokens of statements(migration.sql)) {
@@ -209,7 +266,28 @@ export function additiveViolations(migrations: Migration[]): string[] {
             if (c.word('IF')) { c.expect('NOT'); c.expect('EXISTS') }
             const table = c.name()
             if (tables.has(table)) throw new Error(`table ${table} already exists, so this would replace or skip it`)
-            c.group()
+            const items = c.group()
+            // Foreign keys into tables that existed before this file. A
+            // column's own REFERENCES is judged with its own NOT NULL; a table
+            // constraint `FOREIGN KEY (a, b) REFERENCES …` with the NOT NULL of
+            // the columns it names.
+            const notNullColumns = new Set(
+              items.filter(item => !['FOREIGN', 'PRIMARY', 'UNIQUE', 'CHECK', 'CONSTRAINT'].includes(upper(item[0] ?? { kind: 'punct', text: '' })))
+                .filter(item => isNotNull(topLevelWords(item)))
+                .map(item => item[0].text.toLowerCase()),
+            )
+            for (const item of items) {
+              const head = upper(item[0] ?? { kind: 'punct', text: '' })
+              const keyColumns = head === 'FOREIGN' || head === 'CONSTRAINT'
+                ? (() => {
+                    const open = item.findIndex(t => t.kind === 'punct' && t.text === '(')
+                    const close = item.findIndex(t => t.kind === 'punct' && t.text === ')')
+                    return item.slice(open + 1, close).filter(t => t.kind !== 'punct').map(t => t.text.toLowerCase())
+                  })()
+                : [item[0]?.text.toLowerCase() ?? '']
+              const nullable = !keyColumns.some(column => notNullColumns.has(column))
+              checkForeignKeys(`${table}.${keyColumns.join(', ')}`, item, previous, nullable)
+            }
             // Only table options may follow the column list: no AS SELECT.
             for (const t of c.rest()) {
               if (!['WITHOUT', 'ROWID', 'STRICT'].includes(upper(t)) && !(t.kind === 'punct' && t.text === ',')) {
@@ -249,6 +327,7 @@ export function additiveViolations(migrations: Migration[]): string[] {
           const column = c.name()
           const spec = c.rest()
           checkNewColumn(table, column, spec)
+          checkForeignKeys(`${table}.${column}`, spec, previous, !isNotNull(topLevelWords(spec)))
           if (!addedHere.has(table)) addedHere.set(table, new Map())
           addedHere.get(table)!.set(column, nullableNoDefault(spec))
           continue

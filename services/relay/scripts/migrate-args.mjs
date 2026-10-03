@@ -11,6 +11,7 @@ export const CHANNELS = ['stable', 'preview', 'canary', 'local']
 
 /// wrangler's argv for `--env <channel>` in `argv`, or an Error saying what is
 /// missing. Stable is wrangler's top-level config, so it takes no `--env`.
+/// Any other argument is passed through.
 export function migrateArgs(argv) {
   const at = argv.indexOf('--env')
   const inline = argv.find(arg => arg.startsWith('--env='))
@@ -21,6 +22,11 @@ export function migrateArgs(argv) {
   if (!CHANNELS.includes(channel)) {
     return new Error(`There's no relay called "${channel}". Use one of: ${CHANNELS.join(', ')}.`)
   }
-  const args = ['d1', 'migrations', 'apply', 'DB', '--remote']
-  return channel === 'stable' ? args : [...args, '--env', channel]
+  // Everything else goes to wrangler as given. `--remote` is only the default:
+  // `--local` (or `--preview`) replaces it, so `--env canary --local` migrates
+  // the local copy of canary's database rather than the real one.
+  const rest = argv.filter((arg, k) => !(arg === '--env' || arg.startsWith('--env=') || (at >= 0 && k === at + 1)))
+  const target = rest.some(arg => ['--local', '--remote', '--preview'].includes(arg)) ? [] : ['--remote']
+  const env = channel === 'stable' ? [] : ['--env', channel]
+  return ['d1', 'migrations', 'apply', 'DB', ...target, ...env, ...rest]
 }
