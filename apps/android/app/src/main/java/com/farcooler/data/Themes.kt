@@ -92,7 +92,7 @@ object Themes {
         if (prefs != null) return
         prefs = context.applicationContext.getSharedPreferences("farcooler", Context.MODE_PRIVATE)
         builtIn = readBuiltIn()
-        _available.value = builtIn
+        _available.value = ThemeCatalog.merged(builtIn, byRunner) { it.name }
         _selected.value = prefs?.getString(KEY, FALLBACK_NAME) ?: FALLBACK_NAME
         _revision.value += 1
     }
@@ -114,21 +114,37 @@ object Themes {
         _revision.value += 1
     }
 
+    /** What each runner defines, by runner id. See [ThemeCatalog]. */
+    private val byRunner = mutableMapOf<String, List<Theme>>()
+
     /**
-     * Merge in whatever the connected runner defines.
+     * Record what ONE runner defines, and rebuild the catalog from every runner.
      *
      * Additive: the built-ins belong to this device and do not depend on which
      * runner it happens to be talking to, so switching runners must not empty
-     * the picker.
+     * the picker. **[runner] is not decoration**: without it a second runner
+     * answering deleted the first runner's themes. See [ThemeCatalog].
      */
-    fun merge(hostThemes: List<Theme>) {
-        val merged = builtIn.toMutableList()
-        for (theme in hostThemes) {
-            // The host wins a name collision — it is the one somebody edited a
-            // file on purpose to make.
-            val index = merged.indexOfFirst { it.name == theme.name }
-            if (index >= 0) merged[index] = theme else merged.add(theme)
-        }
+    @Synchronized
+    fun merge(hostThemes: List<Theme>, runner: String) {
+        if (byRunner[runner] == hostThemes) return
+        byRunner[runner] = hostThemes
+        rebuild()
+    }
+
+    /**
+     * Drop a removed runner's themes. Called from [RunnerStore.remove], the one
+     * place that sees a runner stop existing, and not when a connection is
+     * merely rebuilt, where the runner is still yours and its theme should stay.
+     */
+    @Synchronized
+    fun forget(runner: String) {
+        if (byRunner.remove(runner) == null) return
+        rebuild()
+    }
+
+    private fun rebuild() {
+        val merged = ThemeCatalog.merged(builtIn, byRunner) { it.name }
         if (merged == _available.value) return
         _available.value = merged
         _revision.value += 1

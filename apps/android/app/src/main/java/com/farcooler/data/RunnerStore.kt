@@ -344,6 +344,10 @@ class RunnerStore(context: Context) {
 
     fun remove(host: Runner) {
         _hosts.value = _hosts.value.filterNot { it.id == host.id }
+        // The theme catalog is a fold over the runners, so a removed one stops
+        // contributing to it. Here and not where a connection ends, which also
+        // happens on an edit, where the runner still exists. See [Themes.forget].
+        Themes.forget(host.id)
         if (_selectedId.value == host.id) {
             val next = _hosts.value.firstOrNull()
             _selectedId.value = next?.id

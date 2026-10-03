@@ -1,0 +1,79 @@
+{
+  "about": "Which themes a phone offers across several runners. Read by AgentKit's ThemeCatalogTests (ThemeCatalog.merged) and Android's ThemeCatalogTest (ThemeCatalog.merged and Themes.merge). Each case lists runners in the order they answered; the catalog must not depend on that order. A theme is its name plus a background that tells same-named themes apart.",
+  "builtIn": [
+    { "name": "Nord", "background": 1 },
+    { "name": "Solarized", "background": 2 }
+  ],
+  "cases": [
+    {
+      "case": "no runner leaves the built-ins alone",
+      "answered": [],
+      "catalog": [
+        { "name": "Nord", "background": 1 },
+        { "name": "Solarized", "background": 2 }
+      ]
+    },
+    {
+      "case": "every runner's themes are in the catalog at once",
+      "answered": [
+        { "runner": "a", "themes": [{ "name": "FromA", "background": 10 }] },
+        { "runner": "b", "themes": [{ "name": "FromB", "background": 11 }] }
+      ],
+      "catalog": [
+        { "name": "Nord", "background": 1 },
+        { "name": "Solarized", "background": 2 },
+        { "name": "FromA", "background": 10 },
+        { "name": "FromB", "background": 11 }
+      ]
+    },
+    {
+      "case": "the catalog does not depend on which runner answered first",
+      "answered": [
+        { "runner": "b", "themes": [{ "name": "FromB", "background": 11 }] },
+        { "runner": "a", "themes": [{ "name": "FromA", "background": 10 }] }
+      ],
+      "catalog": [
+        { "name": "Nord", "background": 1 },
+        { "name": "Solarized", "background": 2 },
+        { "name": "FromA", "background": 10 },
+        { "name": "FromB", "background": 11 }
+      ]
+    },
+    {
+      "case": "a runner's theme replaces the built-in of the same name in place",
+      "answered": [
+        { "runner": "a", "themes": [{ "name": "Nord", "background": 99 }] }
+      ],
+      "catalog": [
+        { "name": "Nord", "background": 99 },
+        { "name": "Solarized", "background": 2 }
+      ]
+    },
+    {
+      "case": "two runners defining one name resolve to the last in sorted runner order",
+      "answered": [
+        { "runner": "b", "themes": [{ "name": "Shared", "background": 2 }] },
+        { "runner": "a", "themes": [{ "name": "Shared", "background": 1 }] }
+      ],
+      "catalog": [
+        { "name": "Nord", "background": 1 },
+        { "name": "Solarized", "background": 2 },
+        { "name": "Shared", "background": 2 }
+      ]
+    },
+    {
+      "case": "a runner answering again replaces only its own share",
+      "answered": [
+        { "runner": "a", "themes": [{ "name": "FromA", "background": 10 }] },
+        { "runner": "b", "themes": [{ "name": "FromB", "background": 11 }] },
+        { "runner": "a", "themes": [{ "name": "FromA2", "background": 12 }] }
+      ],
+      "catalog": [
+        { "name": "Nord", "background": 1 },
+        { "name": "Solarized", "background": 2 },
+        { "name": "FromA2", "background": 12 },
+        { "name": "FromB", "background": 11 }
+      ]
+    }
+  ]
+}

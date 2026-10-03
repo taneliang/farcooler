@@ -14,7 +14,41 @@ private struct Theme: Identifiable, Equatable {
     var background: UInt32 = 0
 }
 
+/// `test/fixtures/theme-catalog.json`, which Android's `ThemeCatalogTest` reads
+/// too, so the two phones cannot drift apart on these rules.
+private struct CatalogFixture: Decodable {
+    struct Named: Decodable { var name: String; var background: UInt32 }
+    struct Answer: Decodable { var runner: String; var themes: [Named] }
+    struct Case: Decodable { var `case`: String; var answered: [Answer]; var catalog: [Named] }
+    var builtIn: [Named]
+    var cases: [Case]
+
+    static func load() throws -> CatalogFixture {
+        var root = URL(fileURLWithPath: #filePath)
+        // …/apps/shared/AgentKit/Tests/AgentKitTests/<this file>
+        for _ in 0..<6 { root.deleteLastPathComponent() }
+        let data = try Data(contentsOf: root.appendingPathComponent("test/fixtures/theme-catalog.json"))
+        return try JSONDecoder().decode(CatalogFixture.self, from: data)
+    }
+}
+
+private func theme(_ named: CatalogFixture.Named) -> Theme {
+    Theme(id: named.name, background: named.background)
+}
+
 struct ThemeCatalogTests {
+    /// Every case in the shared fixture, replayed in the order its runners answered.
+    @Test func theSharedFixturesCatalogs() throws {
+        let fixture = try CatalogFixture.load()
+        #expect(fixture.cases.count >= 5)
+        for each in fixture.cases {
+            var byRunner: [String: [Theme]] = [:]
+            for answer in each.answered { byRunner[answer.runner] = answer.themes.map(theme) }
+            let merged = ThemeCatalog.merged(builtIn: fixture.builtIn.map(theme), hostThemes: byRunner)
+            #expect(merged == each.catalog.map(theme), "\(each.case)")
+        }
+    }
+
     private let builtIn = [
         Theme(id: "Nord", background: 1), Theme(id: "Solarized", background: 2),
     ]

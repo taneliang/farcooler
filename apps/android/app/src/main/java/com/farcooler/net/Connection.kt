@@ -1417,7 +1417,7 @@ class Connection(
         val parsed = runCatching {
             json.decodeFromJsonElement(HostThemes.serializer(), data)
         }.getOrNull() ?: return
-        com.farcooler.data.Themes.merge(parsed.themes)
+        com.farcooler.data.Themes.merge(parsed.themes, runner = host.id)
     }
 
     @kotlinx.serialization.Serializable
@@ -1603,7 +1603,7 @@ class Connection(
      * would go to choose it.
      */
     suspend fun reloadThemes() {
-        com.farcooler.data.Themes.merge(hostThemes())
+        com.farcooler.data.Themes.merge(hostThemes(), runner = host.id)
     }
 
     /**
