@@ -36,6 +36,11 @@ shipped="${1:?usage: canary-baseline.sh <shipped commit>}"
 baseline=proto/baseline/canary.proto
 # Resolved now: the checkout below moves the tree, and this path with it.
 lint="$(cd "$(dirname "$0")" && pwd)/proto-lint.py"
+# No lint, no baseline: an unchecked proto is exactly what this must not record.
+if [ ! -x "$lint" ]; then
+  echo "::error::the wire lint is unavailable ($lint), so the shipped proto cannot be checked and the canary baseline was not advanced" >&2
+  exit 1
+fi
 
 # The shipped commit, by object, not by whatever main is now. Fetched if the
 # checkout lacks it, and loudly absent otherwise.
@@ -85,8 +90,15 @@ for attempt in 1 2 3; do
     fi
     # The same rules CI's and Canary's `wire` jobs apply, so what is refused
     # here is exactly what the lint would have refused before the ship.
+    # A break, or a lint that could not run (a crash prints no verdict), and
+    # either way nothing is recorded. Each says which it was.
     if ! problems="$("$lint" --compare "$baseline" "$new" 2>&1)"; then
-      echo "::error::$shipped breaks the wire Canary already shipped, so the baseline was not advanced. Ship a fix that restores compatibility." >&2
+      case "$problems" in
+        *"wire compatibility problem"*)
+          echo "::error::$shipped breaks the wire Canary already shipped, so the baseline was not advanced. Ship a fix that restores compatibility." >&2 ;;
+        *)
+          echo "::error::the wire lint failed to run, so the shipped proto cannot be checked and the canary baseline was not advanced" >&2 ;;
+      esac
       echo "$problems" >&2
       exit 1
     fi

@@ -172,5 +172,28 @@ check "and commits nothing" "$before" "$(commits)"
 case "$out" in *"::error::"*"alpha tag 1 (alpha) was removed"*) got=said ;; *) got="$out" ;; esac
 check "and says what broke" said "$got"
 
+# No lint beside the script: refused, and said so, rather than recorded
+# unchecked or blamed on a break that may not exist.
+mkdir -p "$scratch/nolint"
+cp "$SCRIPT" "$scratch/nolint/canary-baseline.sh"
+l="$(land kappa 12)"
+before="$(commits)"
+status=0
+out="$(cd "$scratch/ci" && "$scratch/nolint/canary-baseline.sh" "$l" 2>&1)" || status=$?
+check "a missing lint fails the job" 1 "$status"
+check "and commits nothing" "$before" "$(commits)"
+case "$out" in *"::error::the wire lint is unavailable"*) got=said ;; *) got="$out" ;; esac
+check "and says the lint is unavailable" said "$got"
+
+# A lint that crashes: the same, with its own words.
+printf '#!/bin/sh\necho Traceback >&2\nexit 1\n' > "$scratch/nolint/proto-lint.py"
+chmod +x "$scratch/nolint/proto-lint.py"
+status=0
+out="$(cd "$scratch/ci" && "$scratch/nolint/canary-baseline.sh" "$l" 2>&1)" || status=$?
+check "a crashing lint fails the job" 1 "$status"
+check "and commits nothing" "$before" "$(commits)"
+case "$out" in *"::error::the wire lint failed to run"*) got=said ;; *) got="$out" ;; esac
+check "and says the lint failed to run" said "$got"
+
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
