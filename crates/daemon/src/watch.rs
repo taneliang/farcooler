@@ -4499,10 +4499,9 @@ impl Watcher {
                 // An agent pane this daemon isn't following for bracketed
                 // paste yet, on a tmux too old to report it: one started
                 // before this daemon, or whose stream broke (`paste_mode`).
-                // Off the tick: subscribing can start a pipe.
+                // In the background: subscribing can start a pipe.
                 if self.service.wants_paste_mode_followed(&terminal.terminal) {
-                    let service = self.service.clone();
-                    tokio::spawn(async move { service.follow_paste_mode(id).await });
+                    self.service.follow_paste_mode(id);
                 }
                 // What is RUNNING, not what it was launched as — and with its
                 // arguments where there are any. `pane_current_command` is a

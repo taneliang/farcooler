@@ -21,27 +21,36 @@
 //! without the flag, the daemon subscribes to the fanout of each agent pane
 //! itself (`Service::follow_paste_mode`): right after it starts the agent,
 //! and on each sample for a running one it isn't following yet (a pane
-//! started before this daemon). The subscription keeps the pane's
-//! `pipe-pane` and fanout up for as long as the pane lives.
+//! started before this daemon). A subscription that fails is retried after
+//! `RETRY_FIRST`, doubling to `RETRY_MOST`.
 //!
-//! **What breaks a record.** The stream ending (the pane died, the pipe was
-//! replaced, or the fanout dropped this reader for falling behind), and a
-//! respawn: `respawn-pane -k` puts a new program in the pane, which tmux
-//! resets to bracketing off without a byte on the stream, and keeps the
-//! pipe. So each record carries the `#{pane_pid}` read before it subscribed,
-//! and is used only while the pane's pid is still that one.
+//! **What following costs**, below tmux 3.7 only, and only for a pane whose
+//! terminal runs an agent preset in its TUI (never a shell, a chat or a
+//! Changes pane): the pane's `pipe-pane` and its `farcoolerd --fanout`
+//! process stay up for as long as the pane lives, where before they lived
+//! only while a client watched. That is one more process per agent pane,
+//! a second copy of everything the agent writes, and `pipe-pane`, which a
+//! client opening the pane already takes today, held for good: a pipe
+//! someone sets on an agent pane by hand is replaced. In the daemon a
+//! follower holds `READ_CHUNK` bytes and a parser, nothing else.
 //!
-//! **What it can't close.** tmux writes a chunk to the pipe and then parses
-//! it, and the bytes reach the daemon a few milliseconds later. A program
-//! that turns bracketing off in the instant before an answer is checked can
-//! be read as still on. The same is true on tmux 3.7 between reading the
-//! flag and the paste arriving, only narrower; checks 3 and 4 of
-//! `answer_wake`'s gate still hold the agent in front, idle, with an empty
-//! box.
+//! **Two corners left open.** A subscription starts at a chunk boundary,
+//! not a sequence boundary, and the record reads its first byte as if at
+//! ground. Joined inside a DCS string, where tmux reads `ESC[?2004h` as
+//! text, it would count that as a set: a program would have to write a
+//! 2004 inside a DCS (tmux passthrough, say) in the instant the daemon
+//! subscribes. And the fanout drops anything starting like its size marker
+//! (`ESC P >farcooler-size`) for up to 64 bytes, so a program that wrote
+//! that prefix unterminated and then a DECRST in those bytes would hide it.
+//! Both need a program writing sequences no agent writes; neither is
+//! guarded against.
+//!
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::time::{Duration, Instant};
 
 /// What the stream says about bracketed paste.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,6 +101,13 @@ enum State {
     OtherString,
 }
 
+/// How much of a followed stream the daemon reads at a time.
+const READ_CHUNK: usize = 1024;
+/// How long after a failed subscription the pane is tried again, at first.
+pub const RETRY_FIRST: Duration = Duration::from_secs(1);
+/// The longest wait between tries, which the doubling stops at.
+pub const RETRY_MOST: Duration = Duration::from_secs(60);
+
 /// tmux's `param_buf` is 64 bytes; it discards a sequence that fills it.
 const LONGEST_PARAMS: usize = 62;
 /// tmux's `param_list` holds 24.
@@ -128,8 +144,9 @@ impl Decsets {
             DcsEscape => {
                 self.state = match b {
                     b'\\' => Ground,
-                    b'[' => {
-                        // tmux reads this as CSI if it timed the string out.
+                    // tmux reads these as CSI or as RIS if it timed the
+                    // string out, and as text if it didn't.
+                    b'[' | b'c' => {
                         self.mode = Mode::Unknown;
                         DcsString
                     }
@@ -276,7 +293,7 @@ impl Record {
         use tokio::io::AsyncReadExt;
         let me = self.clone();
         let task = tokio::spawn(async move {
-            let mut buf = vec![0u8; 16 * 1024];
+            let mut buf = vec![0u8; READ_CHUNK];
             // The fanout's own size markers out, so one written between two
             // halves of a program's sequence can't split it.
             let mut strip = crate::fanout::MarkerStrip::holding();
@@ -324,6 +341,104 @@ impl Record {
             Mode::Unknown => None,
         }
     }
+}
+
+/// Every followed pane's record, by pane id, and when a pane whose
+/// subscription failed is next tried.
+#[derive(Default)]
+pub struct Following {
+    records: Mutex<HashMap<String, Arc<Record>>>,
+    /// Whether this runner's tmux reports `bracket_paste_flag`: 0 not yet
+    /// known, 1 it does, 2 it doesn't. Read once, from the first pane asked.
+    tmux_reports: AtomicU8,
+    /// Per pane: failures in a row, and when it may be tried again.
+    retry: Mutex<HashMap<String, (u32, Instant)>>,
+}
+
+impl Following {
+    /// Whether tmux has been found to report the mode itself.
+    pub fn tmux_reports(&self) -> bool {
+        self.tmux_reports.load(Ordering::SeqCst) == 1
+    }
+
+    /// Whether `pane` should be followed and isn't: tmux can't report the
+    /// mode (or hasn't been asked), no live record covers it, and it isn't
+    /// waiting out a failure.
+    pub fn wants(&self, pane: &str) -> bool {
+        if self.tmux_reports() {
+            return false;
+        }
+        if self.records.lock().unwrap_or_else(|e| e.into_inner()).get(pane).is_some_and(|r| r.is_live()) {
+            return false;
+        }
+        self.retry.lock().unwrap_or_else(|e| e.into_inner()).get(pane).is_none_or(|(_, at)| Instant::now() >= *at)
+    }
+
+    pub fn record(&self, pane: &str) -> Option<Arc<Record>> {
+        self.records.lock().unwrap_or_else(|e| e.into_inner()).get(pane).cloned()
+    }
+
+    /// End `record` and forget it, if it's still `pane`'s.
+    pub fn forget(&self, pane: &str, record: &Arc<Record>) {
+        record.end();
+        let mut records = self.records.lock().unwrap_or_else(|e| e.into_inner());
+        if records.get(pane).is_some_and(|r| Arc::ptr_eq(r, record)) {
+            records.remove(pane);
+        }
+    }
+
+    /// Subscribe to `pane`'s fanout and follow it, unless tmux reports the
+    /// mode or a live record already covers the program in it.
+    pub async fn follow(self: Arc<Self>, runtime: crate::runtime::Runtime, pane: String) {
+        match self.tmux_reports.load(Ordering::SeqCst) {
+            1 => return,
+            2 => {}
+            _ => match runtime.tmux.pane_bracketed_paste(&pane).await {
+                Ok(Some(_)) => {
+                    self.tmux_reports.store(1, Ordering::SeqCst);
+                    return;
+                }
+                Ok(None) => self.tmux_reports.store(2, Ordering::SeqCst),
+                Err(_) => return self.failed(&pane),
+            },
+        }
+        // The pid first: a respawn between this and the subscription leaves
+        // a record about the program before it, which is never used.
+        let Ok(pid) = runtime.tmux.pane_pid(&pane).await else { return self.failed(&pane) };
+        let record = Record::new(pid);
+        {
+            let mut records = self.records.lock().unwrap_or_else(|e| e.into_inner());
+            records.retain(|_, r| r.is_live());
+            if let Some(old) = records.get(&pane) {
+                if old.pid == pid {
+                    return;
+                }
+                old.end();
+            }
+            records.insert(pane.clone(), record.clone());
+        }
+        match runtime.attach_to_fanout(&pane).await {
+            Ok(stream) => {
+                record.read(stream);
+                self.retry.lock().unwrap_or_else(|e| e.into_inner()).remove(&pane);
+            }
+            Err(_) => {
+                record.end();
+                self.failed(&pane);
+            }
+        }
+    }
+
+    fn failed(&self, pane: &str) {
+        let mut retry = self.retry.lock().unwrap_or_else(|e| e.into_inner());
+        let failures = retry.get(pane).map_or(0, |(n, _)| *n) + 1;
+        retry.insert(pane.to_string(), (failures, Instant::now() + retry_after(failures)));
+    }
+}
+
+/// How long to wait after `failures` failed subscriptions in a row.
+pub fn retry_after(failures: u32) -> Duration {
+    RETRY_FIRST.saturating_mul(1 << failures.saturating_sub(1).min(16)).min(RETRY_MOST)
 }
 
 #[cfg(test)]
@@ -414,6 +529,19 @@ mod tests {
         // string after five seconds: either way, not proof.
         assert_eq!(mode_after(&[b"\x1b[?2004h", b"\x1bPq#0\x1b[?2004l"]), Mode::Unknown);
         assert_eq!(mode_after(&[b"\x1bPq#0", b"\x1b[?2004h\x1b\\"]), Mode::Unknown);
+    }
+
+    #[test]
+    fn a_reset_inside_a_dcs_is_unknown() {
+        // RIS, if tmux had given up on the string: off. Text if it hadn't.
+        assert_eq!(mode_after(&[b"\x1b[?2004h", b"\x1bPq#0\x1bc"]), Mode::Unknown);
+    }
+
+    #[test]
+    fn a_failed_subscription_waits_longer_each_time() {
+        let waits: Vec<u64> = (1..=9).map(|n| retry_after(n).as_secs()).collect();
+        assert_eq!(waits, [1, 2, 4, 8, 16, 32, 60, 60, 60]);
+        assert_eq!(retry_after(u32::MAX), RETRY_MOST);
     }
 
     #[test]

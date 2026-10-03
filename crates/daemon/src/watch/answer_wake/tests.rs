@@ -117,11 +117,36 @@ impl Board {
         self.svc.start_orchestrator(self.task.workspace_id, "claude", false, None).await.expect("an orchestrator")
     }
 
-    /// Put `command` in `terminal`'s pane in place of what's there, and
-    /// follow its output as the daemon does after its own respawns.
+    /// Put `command` in `terminal`'s pane in place of what's there, as
+    /// someone else's `respawn-pane` would, and let the daemon find it as it
+    /// does in production: an answer's check drops the record of the
+    /// program before, and the next sample follows the new one.
     async fn run_in(&self, terminal: &Terminal, command: &str) {
         self.run_unfollowed(terminal, command).await;
-        self.svc.follow_paste_mode(terminal.id).await;
+        self.refollow(terminal.id).await;
+    }
+
+    /// What production does about a pane whose record is stale: check 5
+    /// drops it (`streamed_bracketed_paste`), the next sample follows the
+    /// pane afresh. Waits for the subscription where tmux can't report.
+    async fn refollow(&self, terminal: Uuid) {
+        self.svc.streamed_bracketed_paste(terminal).await;
+        self.watcher.sample().await;
+        if !tmux_tells_bracketing() {
+            assert!(self.followed(terminal).await, "the sample never followed the pane");
+        }
+    }
+
+    /// Whether, within two seconds, a live record follows the program now
+    /// in `terminal`'s pane.
+    async fn followed(&self, terminal: Uuid) -> bool {
+        for _ in 0..100 {
+            if self.svc.paste_mode_followed(terminal).await {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        false
     }
 
     /// `run_in`, as someone else's `respawn-pane` would: nothing follows the
@@ -545,8 +570,15 @@ async fn an_answer_is_told_exactly_once_across_a_restart() {
         let watcher = Watcher::new(svc.clone());
         if !tmux_tells_bracketing() {
             // A daemon that has just started knows nothing of the agent's
-            // bracketing until the agent sets it again.
-            svc.follow_paste_mode(agent.id).await;
+            // bracketing until its first sample follows the pane and the
+            // agent sets it again.
+            watcher.sample().await;
+            for _ in 0..100 {
+                if svc.paste_mode_followed(agent.id).await {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
             si.show("working").await;
             si.show("idle").await;
             for _ in 0..100 {
@@ -649,11 +681,15 @@ async fn a_node_running_something_else_is_never_typed_into() {
     assert_eq!(b.give_up().await, ["Not delivered: no agent was running in the pane."]);
 }
 
+/// The note an answer that was never proven takeable ends with.
+fn unproven() -> String {
+    format!("Not delivered: {}.", Held::Unproven.why())
+}
+
 /// A tmux too old to report bracketed paste, and an agent that set it
 /// before the daemon was following its output (an agent started before this
 /// daemon): nothing proves the agent takes a paste, so nothing is typed into
-/// its idle, empty box, and the task says why at once rather than after half
-/// an hour.
+/// its idle, empty box, and in the end the task says why.
 #[tokio::test]
 async fn stand_in_set_bracketing_before_anyone_followed() {
     if tmux_tells_bracketing() {
@@ -667,19 +703,20 @@ async fn stand_in_set_bracketing_before_anyone_followed() {
     b.run_unfollowed(&agent, &si_command(&b, &agent)).await;
     b.screen_with(agent.id, "stand-in").await;
     tokio::time::sleep(Duration::from_millis(300)).await;
-    b.svc.follow_paste_mode(agent.id).await;
+    b.refollow(agent.id).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     b.doing(agent.id, AgentActivity::Idle).await;
     b.answer("Drill in");
     b.pump().await;
-    assert!(!si.log().contains("PASTE") && !si.log().contains("ENTER"), "{}", si.log());
-    assert_eq!(b.progress(), [OLD_TMUX]);
-    assert!(b.pending().is_empty(), "and never tried again");
+    b.untouched(&si);
+    assert_eq!(b.give_up().await, [unproven()]);
 }
 
 /// What the stream said about one program says nothing about the next:
 /// respawned by someone else, the new agent sets bracketing on the same
-/// pipe, and the record, kept for the program before, isn't used.
+/// pipe, and the record, kept for the program before, isn't used. The
+/// answer waits, and once the daemon follows the new agent and it sets
+/// bracketing again, it's told.
 #[tokio::test]
 async fn a_record_from_before_a_respawn_is_never_used() {
     if tmux_tells_bracketing() {
@@ -694,14 +731,23 @@ async fn a_record_from_before_a_respawn_is_never_used() {
     b.doing(agent.id, AgentActivity::Idle).await;
     b.answer("Drill in");
     b.pump().await;
-    assert!(!si.log().contains("PASTE") && !si.log().contains("ENTER"), "{}", si.log());
-    assert_eq!(b.progress(), [OLD_TMUX]);
+    b.untouched(&si);
+    b.watcher.sample().await;
+    assert!(b.followed(agent.id).await, "the sample follows the new agent");
+    si.show("working").await;
+    si.show("idle").await;
+    b.stream_says(agent.id, Some(true)).await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    b.pump().await;
+    assert_eq!(si.submitted(), [b.told("Drill in")], "{}", si.log());
 }
 
 /// A stream that broke: whatever came through the gap is unseen, so the
-/// record is worth nothing, even though it last read bracketing on.
+/// record is worth nothing, even though it last read bracketing on. The
+/// answer waits rather than being given up, and is told once the stream is
+/// followed again and the agent sets bracketing.
 #[tokio::test]
-async fn a_broken_stream_proves_nothing() {
+async fn a_broken_stream_proves_nothing_until_it_is_followed_again() {
     if tmux_tells_bracketing() {
         return;
     }
@@ -715,8 +761,111 @@ async fn a_broken_stream_proves_nothing() {
     b.doing(agent.id, AgentActivity::Idle).await;
     b.answer("Drill in");
     b.pump().await;
-    assert!(!si.log().contains("PASTE") && !si.log().contains("ENTER"), "{}", si.log());
-    assert_eq!(b.progress(), [OLD_TMUX]);
+    b.untouched(&si);
+    b.watcher.sample().await;
+    assert!(b.followed(agent.id).await, "the sample follows the pane again");
+    si.show("working").await;
+    si.show("idle").await;
+    b.stream_says(agent.id, Some(true)).await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    b.pump().await;
+    assert_eq!(si.submitted(), [b.told("Drill in")], "{}", si.log());
+}
+
+// ---- following, through the daemon's own entry points ----
+//
+// None of these call `follow_paste_mode`: each drives the place production
+// starts a program and asserts the daemon followed it.
+
+/// An agent created through the service is followed from its start.
+#[tokio::test]
+async fn a_created_agent_is_followed() {
+    if tmux_tells_bracketing() {
+        return;
+    }
+    let b = board().await;
+    let agent = b.agent("Agent 2", "claude").await;
+    assert!(b.followed(agent.id).await);
+}
+
+/// An agent split beside another is followed from its start.
+#[tokio::test]
+async fn a_split_agent_is_followed() {
+    if tmux_tells_bracketing() {
+        return;
+    }
+    let b = board().await;
+    let first = b.agent("Agent 2", "claude").await;
+    let split = b
+        .svc
+        .split_terminal(b.lane.id, first.id, pb::SplitSide::Right, "Agent 3", "claude")
+        .await
+        .expect("a split agent");
+    assert!(b.followed(split.id).await);
+}
+
+/// A restarted agent is a new program, followed from its start.
+#[tokio::test]
+async fn a_restarted_agent_is_followed() {
+    if tmux_tells_bracketing() {
+        return;
+    }
+    let b = board().await;
+    let agent = b.agent("Agent 2", "claude").await;
+    assert!(b.followed(agent.id).await);
+    b.svc.restart_terminal(agent.id).await.expect("restarted");
+    b.svc.inventory.refresh().await;
+    assert!(b.followed(agent.id).await, "the program after the restart");
+}
+
+/// A chat pane switched back to its terminal is followed from its start.
+#[tokio::test]
+async fn a_pane_switched_to_its_terminal_is_followed() {
+    if tmux_tells_bracketing() {
+        return;
+    }
+    let b = board().await;
+    let agent = b.agent("Agent 2", "claude").await;
+    let now = b.svc.store.get_terminal(agent.id).unwrap();
+    b.svc.store.set_pane_mode(agent.id, now.resource_version, PaneMode::Agent, None, false).unwrap();
+    b.svc.set_pane_mode(agent.id, PaneMode::Terminal, true).await.expect("switched");
+    b.svc.inventory.refresh().await;
+    assert!(b.followed(agent.id).await, "the program after the switch");
+}
+
+/// An agent pane started before this daemon is followed on its first
+/// sample, the catch-up every typing test above also goes through.
+#[tokio::test]
+async fn a_pane_started_before_the_daemon_is_followed_on_a_sample() {
+    if tmux_tells_bracketing() {
+        return;
+    }
+    let b = board().await;
+    let agent = b.agent("Agent 2", "claude").await;
+    // Creation follows in the background: done with that first.
+    assert!(b.followed(agent.id).await);
+    b.run_unfollowed(&agent, "sleep 30").await;
+    b.svc.streamed_bracketed_paste(agent.id).await;
+    assert!(!b.svc.paste_mode_followed(agent.id).await);
+    b.watcher.sample().await;
+    assert!(b.followed(agent.id).await);
+}
+
+/// A tmux that reports bracketing itself gets no pipe and no fanout: after
+/// an agent is created and sampled, nothing is piping its pane.
+#[tokio::test]
+async fn a_tmux_that_reports_bracketing_starts_no_fanout() {
+    if !tmux_tells_bracketing() {
+        return;
+    }
+    let b = board().await;
+    let agent = b.agent("Agent 2", "claude").await;
+    b.watcher.sample().await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let pane = b.svc.inventory_snapshot().claimants(agent.id).into_iter().next().unwrap().pane_id.clone();
+    let piped = b.svc.tmux.run(&["display-message", "-p", "-t", &pane, "#{pane_pipe}"]).await.unwrap();
+    assert_eq!(piped.stdout.trim(), "0", "the pane is being piped");
+    assert!(!b.svc.paste_mode_followed(agent.id).await);
 }
 
 /// The command `stand_in` put in `agent`'s pane, to run it again.

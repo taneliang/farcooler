@@ -38,9 +38,10 @@
 //!    the pane's own output (`paste_mode`), which the daemon follows for
 //!    every agent pane from when it starts the agent. Known only if the
 //!    daemon has seen every byte since the agent last set or reset it, and
-//!    the pane still runs that agent. Otherwise nothing is typed, and the
-//!    task says so at once: "Not delivered: Far Cooler can't tell whether
-//!    the agent takes a paste…".
+//!    the pane still runs that agent. Otherwise the answer waits, as for
+//!    any other check, and is typed if the agent sets the mode again in
+//!    time; if not, its note says why: "Not delivered: Far Cooler couldn't
+//!    tell whether the agent takes a paste…".
 //!
 //! **Typing.** The row is claimed first, in its own write. The text goes in
 //! as one bracketed paste. The box is then read back until it holds exactly
@@ -99,8 +100,6 @@ const PASTE_LEFT: &str = "Paste left in the composer; not sent";
 const LEFT_AT_A_SHELL: &str = "Answer left at a shell prompt; not run";
 const SUPERSEDED: &str = "Not delivered: a newer answer replaced it.";
 const NOBODY: &str = "Nobody to tell about the decision";
-const OLD_TMUX: &str = "Not delivered: Far Cooler can't tell whether the agent takes a paste. It can for an \
-     agent started after Far Cooler on this runner, or on any agent with tmux 3.7 or later.";
 
 /// What the agent is told.
 pub(crate) fn message(key: &str, title: &str, answer: &str) -> String {
@@ -150,6 +149,7 @@ pub(crate) enum Held {
     Typing,
     NotAnAgent,
     Unfamiliar,
+    Unproven,
 }
 
 impl Held {
@@ -161,6 +161,10 @@ impl Held {
             Held::Typing => "someone kept typing there",
             Held::NotAnAgent => "no agent was running in the pane",
             Held::Unfamiliar => "the agent's screen wasn't one Far Cooler recognizes",
+            Held::Unproven => {
+                "Far Cooler couldn't tell whether the agent takes a paste. It can with tmux 3.7 or later, \
+                 or for an agent started after Far Cooler"
+            }
         }
     }
 }
@@ -313,11 +317,11 @@ impl Watcher {
             Ok(Some(on)) => on,
             // tmux can't say (older than 3.7): the pane's own output can, if
             // this daemon has followed it since the agent last set the mode.
+            // Not known yet: it may be once the agent sets it again (a
+            // respawn, a stream followed afresh), so the answer waits.
             Ok(None) => match self.service.streamed_bracketed_paste(to.id).await {
                 Some(on) => on,
-                // Not known, and not about to be: say so now rather than
-                // after half an hour of waiting.
-                None => return self.settle(wake, Some(task), Some(OLD_TMUX.into())),
+                None => return Pass::Waiting(Held::Unproven),
             },
             Err(_) => false,
         };
