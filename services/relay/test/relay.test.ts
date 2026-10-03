@@ -7204,7 +7204,45 @@ describe('the shared contract fixtures', () => {
     }
   })
 
-  it.each(contractNames('registration'))('files the %s app’s registration whole', async name => {
+  /// What the relay must store from each app's registration. Spelled out
+  /// here rather than read back off the fixture: a key renamed in an app
+  /// leaves its fixture without the key, and an expectation built from that
+  /// fixture would agree with the relay storing nothing.
+  const filed: Record<string, Record<string, unknown>> = {
+    ios: {
+      platform: 'apns',
+      label: 'iPhone',
+      environment: 'production',
+      live_activity_start_token: '80b9d3f7a2c64e1b9f0d8c7a6b5e4d3c2b1a09f8e7d6c5b4a3928170f6e5d4c3b2a1',
+      notify_on_done: 1,
+      notify_events: 'decision,review,blocked',
+      pulse_token: '5d41402abc4b2a76b9719d911017c592ae2f6b0c8e3d1f7a9b4c6e8d0f2a4b6c',
+    },
+    macos: {
+      platform: 'apns',
+      label: 'Studio',
+      environment: 'development',
+      live_activity_start_token: null,
+      notify_on_done: 0,
+      notify_events: 'decision,review,blocked,done',
+      pulse_token: null,
+    },
+    android: {
+      platform: 'fcm',
+      label: 'Pixel 9',
+      environment: null,
+      live_activity_start_token: null,
+      notify_on_done: 1,
+      notify_events: 'decision,review,blocked',
+      pulse_token: null,
+    },
+  }
+
+  it('has an expectation for every registration fixture', () => {
+    expect(contractNames('registration')).toEqual(Object.keys(filed).sort())
+  })
+
+  it.each(Object.keys(filed))('files the %s app’s registration whole', async name => {
     watchFetch()
     const body = contract(`registration/${name}.json`)
     const response = await register('user_1', body)
@@ -7215,16 +7253,12 @@ describe('the shared contract fixtures', () => {
               notify_on_done, notify_events, pulse_hash
        FROM devices`,
     ).first<Record<string, unknown>>()
+    const { pulse_token: pulse, ...want } = filed[name]
     expect(row).toEqual({
-      platform: body.platform,
+      ...want,
       push_token: body.pushToken,
-      label: body.label,
-      version: body.version,
-      environment: body.environment ?? null,
-      live_activity_start_token: body.liveActivityStartToken ?? null,
-      notify_on_done: body.notifyOnDone ? 1 : 0,
-      notify_events: body.notifyEvents === undefined ? null : body.notifyEvents.join(','),
-      pulse_hash: body.pulseToken === undefined ? null : await sha256(body.pulseToken),
+      version: '0.2.0 (canary) · 412',
+      pulse_hash: pulse === null ? null : await sha256(pulse as string),
     })
   })
 })
