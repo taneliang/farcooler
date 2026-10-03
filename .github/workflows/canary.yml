@@ -58,6 +58,7 @@ jobs:
   wire:
     name: Wire compatibility
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - run: ./scripts/proto-lint.py --self-test
@@ -92,6 +93,7 @@ jobs:
     # To go back, put `macos-latest` here again and drop the check step.
     runs-on: xcode-27
     needs: wire
+    timeout-minutes: 45
     # Without the App Store key this cannot upload anything. Through `vars`, not
     # `secrets`: the `secrets` context is unavailable in an `if`, so
     # `secrets.X != ''` compares '' to '' and is ALWAYS false — it fails closed,
@@ -316,6 +318,7 @@ jobs:
     # Xcode 27 is only on this label, which GitHub calls a public preview.
     # To go back, put `macos-latest` here again and drop the check step.
     runs-on: xcode-27
+    timeout-minutes: 45
     # Serialised behind the Linux build, which is a real cost paid for a real
     # reason — release.yml pays it too, and says why at length: the app carries
     # those binaries, so a Mac job that started before they existed would build
@@ -694,6 +697,7 @@ jobs:
     # refuses such a commit too.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: write
     steps:
@@ -712,6 +716,7 @@ jobs:
     needs: macos
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: write
     steps:

@@ -42,6 +42,7 @@ jobs:
   tag:
     name: Tag
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # A GitHub environment with required reviewers pauses here with the inputs
     # visible. The typed version above catches being wrong; this catches being
     # fast. A tag cannot be taken back once a build from it reaches TestFlight —
@@ -153,6 +154,7 @@ jobs:
     name: Record the wire baseline
     needs: [tag, build]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       # Main, because that is where the baseline is committed. But main is NOT
       # what shipped: this job waits on the whole release build, and anything

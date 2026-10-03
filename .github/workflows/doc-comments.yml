@@ -33,6 +33,7 @@ jobs:
   doc-comments:
     name: Doc comments on their items
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:

@@ -92,6 +92,7 @@ jobs:
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # A fork's push must not try to deploy to the upstream account. Gated on the
     # credential rather than on a repository name: a fork does not have the
     # secret, and a name in a workflow is one more thing to be wrong after a
