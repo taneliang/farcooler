@@ -33,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,6 +51,7 @@ import com.farcooler.model.Diff
 import com.farcooler.model.DiffComputation
 import com.farcooler.model.GapReason
 import com.farcooler.model.PendingPermission
+import com.farcooler.model.PermissionAnswering
 import com.farcooler.model.PermissionOption
 import com.farcooler.model.PlanEntry
 import com.farcooler.model.PlanStatus
@@ -253,7 +255,7 @@ private fun ToolRowView(
         // the same fact twice.
         if (pending != null && onAnswer != null) {
             HorizontalDivider()
-            ApprovalControls(pending.options, onAnswer, Modifier.padding(9.dp))
+            ApprovalControls(pending, onAnswer, Modifier.padding(9.dp))
         }
     }
 }
@@ -442,13 +444,20 @@ private fun GapRow(reason: GapReason) {
  *
  * Reject is NOT red. Red is for destructive; declining a command destroys
  * nothing, and spending the alarm color here leaves none for when it matters.
+ *
+ * Off while an answer to [pending] is out, and with a sentence under them when
+ * the last one did not land, read from [LocalAnswering]. See
+ * [PermissionAnswering].
  */
 @Composable
 fun ApprovalControls(
-    options: List<PermissionOption>,
+    pending: PendingPermission,
     onChoose: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val options = pending.options
+    val answering = LocalAnswering.current
+    val enabled = !answering.isSending(pending.id)
     val allow = options.firstOrNull { it.kind.lowercase().contains("once") && isAllow(it) }
         ?: options.firstOrNull(::isAllow)
     val reject = options.firstOrNull(::isReject)
@@ -457,10 +466,12 @@ fun ApprovalControls(
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (allow != null) {
-                Button(onClick = { onChoose(allow.id) }) { Text(allow.name) }
+                Button(onClick = { onChoose(allow.id) }, enabled = enabled) { Text(allow.name) }
             }
             if (reject != null) {
-                OutlinedButton(onClick = { onChoose(reject.id) }) { Text(reject.name) }
+                OutlinedButton(onClick = { onChoose(reject.id) }, enabled = enabled) {
+                    Text(reject.name)
+                }
             }
         }
         // Kept, because an adapter may offer options this client has never
@@ -472,11 +483,25 @@ fun ApprovalControls(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.MiddleEllipsis,
-                modifier = Modifier.clickable { onChoose(option.id) },
+                modifier = Modifier.clickable(enabled = enabled) { onChoose(option.id) },
+            )
+        }
+        answering.sentence(pending.id)?.let { sentence ->
+            Text(
+                sentence,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.error,
             )
         }
     }
 }
+
+/**
+ * The pane's answer to its pending ask, for the approval controls wherever
+ * the transcript draws them: on the row being asked about, inside a subagent's
+ * block, or on the card under the conversation.
+ */
+val LocalAnswering = compositionLocalOf { PermissionAnswering() }
 
 private fun isAllow(option: PermissionOption): Boolean {
     val kind = option.kind.lowercase()
@@ -513,7 +538,7 @@ fun ApprovalCard(pending: PendingPermission, onChoose: (String) -> Unit) {
                 color = MaterialTheme.colorScheme.onTertiaryContainer,
             )
         }
-        ApprovalControls(pending.options, onChoose)
+        ApprovalControls(pending, onChoose)
     }
 }
 

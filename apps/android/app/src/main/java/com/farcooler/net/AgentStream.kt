@@ -5,6 +5,7 @@ import android.util.Base64
 import com.farcooler.core.ClientCore
 import com.farcooler.core.DisconnectedException
 import com.farcooler.model.AgentEvent
+import com.farcooler.model.PermissionAnswering
 import com.farcooler.model.Sequenced
 import com.farcooler.model.Transcript
 import com.farcooler.model.Trouble
@@ -76,6 +77,14 @@ class AgentStream(
     private var epoch: Long = 0
 
     private val json = Json { ignoreUnknownKeys = true }
+
+    private val sending = AgentSending { method, args -> core.call(method, args) }
+
+    /** The answer to a pending ask, while it is out and after it failed. */
+    val answering: StateFlow<PermissionAnswering> = sending.answering
+
+    /** The prompt that did not go, if one didn't. See [AgentSending.sendFailure]. */
+    val sendFailure: StateFlow<AgentSending.SendFailure?> = sending.sendFailure
 
     fun start() {
         pollTask?.cancel()
@@ -243,9 +252,20 @@ class AgentStream(
                     )
                 }
             }
-            attempt { core.call("terminal.agent_prompt", args) }
+            // Said out loud, and retryable. This was `attempt`, and the words
+            // were already in the transcript above, so a send that failed
+            // looked exactly like one that worked.
+            sending.prompt(args)
         }
     }
+
+    /** Send the prompt that failed again. */
+    fun retrySend() {
+        scope.launch { sending.retry() }
+    }
+
+    /** Put the failed prompt's warning away. */
+    fun dismissSendFailure() = sending.dismissSendFailure()
 
     /** Rewrite a message that has not gone out yet. */
     fun editQueued(id: String, text: String) = fireAndForget(
@@ -279,15 +299,28 @@ class AgentStream(
     }
 
     fun answer(requestId: String, optionId: String) {
-        // Taken down on tap, not on an echo. The agent resumes without
-        // acknowledging the request it was blocked on, so a card that waited for
-        // confirmation sat there after the work it gated had happened.
-        transcript.clearPendingPermission()
-        _revision.value = transcript.revision
-        fireAndForget(
-            "terminal.agent_answer",
-            Connection.args("terminal" to terminal, "requestId" to requestId, "optionId" to optionId),
-        )
+        scope.launch {
+            // Taken down when the runner takes the answer, not on the tap.
+            //
+            // It used to come down on the tap with the call's error dropped.
+            // For a claude TUI ask the daemon holds the hook until an answer
+            // lands, so a refused answer left the ask held on the runner and
+            // gone from this pane for good: its permission is behind the
+            // cursor. The buttons are off while the answer is out instead, and
+            // a failure keeps the card and says so. See [PermissionAnswering].
+            val down = sending.answer(
+                requestId,
+                Connection.args(
+                    "terminal" to terminal, "requestId" to requestId, "optionId" to optionId,
+                ),
+            )
+            // Not on an echo either: the agent resumes without acknowledging
+            // the request it was blocked on, so a card that waited for one sat
+            // there after the work it gated had happened.
+            if (!down || transcript.pendingPermission?.id != requestId) return@launch
+            transcript.clearPendingPermission()
+            _revision.value = transcript.revision
+        }
     }
 
     fun setMode(mode: String) = fireAndForget(

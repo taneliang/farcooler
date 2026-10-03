@@ -49,7 +49,9 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -145,6 +147,8 @@ fun AgentScreen(
     // A class is not a value, so this is what makes the conversation redraw.
     val revision by stream.revision.collectAsStateWithLifecycle()
     val phase by stream.phase.collectAsStateWithLifecycle()
+    val answering by stream.answering.collectAsStateWithLifecycle()
+    val sendFailure by stream.sendFailure.collectAsStateWithLifecycle()
     val transcript = stream.transcript
 
     val terminal = model.fleet.terminal(ref)
@@ -208,136 +212,187 @@ fun AgentScreen(
         listState.animateScrollToItem(items.lastIndex)
     }
 
-    Column(Modifier.fillMaxSize()) {
-        Box(Modifier.weight(1f)) {
-            if (transcript.rows.isEmpty()) {
-                // Whatever this pane is waiting on goes above the empty state,
-                // not inside the transcript. On iOS the banner lived in the
-                // scroll view, which only exists once there are rows — so a
-                // session that never loaded showed "Say something to begin"
-                // with the reason it was empty hidden behind the very condition
-                // that made it empty.
-                AgentEmpty(
-                    phase = phase,
-                    // On the wire since the runner started reporting a pane
-                    // that could not start its agent. Read here rather than
-                    // inferred from [phase], which cannot know: a pane whose
-                    // adapter gave up holds no session, so the daemon answers
-                    // "no session" and every state in the ladder reads that as
-                    // a shim that is merely slow.
-                    failure = terminal?.agentFailure,
-                    // NOT gated on [Terminal.canSwitchPaneMode], deliberately.
-                    // That flag is the daemon's answer to "can this pane become
-                    // a chat", and a pane with no adapter answers no — which is
-                    // exactly one of the failures below. The way OUT of a chat
-                    // is always open; the daemon holds it open on purpose.
-                    onShowTerminal = terminal?.let { pane ->
-                        { scope.launch { connection.setPaneMode(pane, "terminal") } }
-                    },
-                )
-            } else {
-                LazyColumn(
-                    state = listState,
-                    // No bottom padding, because [TranscriptItem.End] is now
-                    // the last item and `spacedBy` puts the same 12 dp in front
-                    // of it. The slack under the last row is what it was.
-                    contentPadding = PaddingValues(
-                        start = 12.dp, top = 12.dp, end = 12.dp, bottom = 0.dp,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    items(items.size, key = { items[it].key }) { index ->
-                        when (val item = items[index]) {
-                            TranscriptItem.Notice -> {
-                                Text(
-                                    notice?.sentence.orEmpty(),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.tertiary,
-                                )
-                                // Rare by construction, and that is what makes
-                                // it bearable at the head of a transcript
-                                // already scrolled to its tail: the failure
-                                // that actually happens on a phone is a dropped
-                                // link, which carries a written sentence and no
-                                // transcript.
-                                notice?.transcript?.let { DetailBox(it) }
+    CompositionLocalProvider(LocalAnswering provides answering) {
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.weight(1f)) {
+                if (transcript.rows.isEmpty()) {
+                    // Whatever this pane is waiting on goes above the empty state,
+                    // not inside the transcript. On iOS the banner lived in the
+                    // scroll view, which only exists once there are rows — so a
+                    // session that never loaded showed "Say something to begin"
+                    // with the reason it was empty hidden behind the very condition
+                    // that made it empty.
+                    AgentEmpty(
+                        phase = phase,
+                        // On the wire since the runner started reporting a pane
+                        // that could not start its agent. Read here rather than
+                        // inferred from [phase], which cannot know: a pane whose
+                        // adapter gave up holds no session, so the daemon answers
+                        // "no session" and every state in the ladder reads that as
+                        // a shim that is merely slow.
+                        failure = terminal?.agentFailure,
+                        // NOT gated on [Terminal.canSwitchPaneMode], deliberately.
+                        // That flag is the daemon's answer to "can this pane become
+                        // a chat", and a pane with no adapter answers no — which is
+                        // exactly one of the failures below. The way OUT of a chat
+                        // is always open; the daemon holds it open on purpose.
+                        onShowTerminal = terminal?.let { pane ->
+                            { scope.launch { connection.setPaneMode(pane, "terminal") } }
+                        },
+                    )
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        // No bottom padding, because [TranscriptItem.End] is now
+                        // the last item and `spacedBy` puts the same 12 dp in front
+                        // of it. The slack under the last row is what it was.
+                        contentPadding = PaddingValues(
+                            start = 12.dp, top = 12.dp, end = 12.dp, bottom = 0.dp,
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        items(items.size, key = { items[it].key }) { index ->
+                            when (val item = items[index]) {
+                                TranscriptItem.Notice -> {
+                                    Text(
+                                        notice?.sentence.orEmpty(),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.tertiary,
+                                    )
+                                    // Rare by construction, and that is what makes
+                                    // it bearable at the head of a transcript
+                                    // already scrolled to its tail: the failure
+                                    // that actually happens on a phone is a dropped
+                                    // link, which carries a written sentence and no
+                                    // transcript.
+                                    notice?.transcript?.let { DetailBox(it) }
+                                }
+
+                                is TranscriptItem.Row -> {
+                                    val row = item.row
+                                    AgentRowView(
+                                        row = row,
+                                        isLast = row.id == transcript.rows.lastOrNull()?.id,
+                                        pending = transcript.pendingPermission?.takeIf { pending ->
+                                            names(pending, row) ||
+                                                (row.kind as? TranscriptRow.Kind.Subagent)
+                                                    ?.block?.children
+                                                    ?.any { names(pending, it) } == true
+                                        },
+                                        onAnswer = { optionId ->
+                                            transcript.pendingPermission?.let {
+                                                stream.answer(it.id, optionId)
+                                            }
+                                        },
+                                    )
+                                }
+
+                                // The turn that is still running, one line ahead of
+                                // what it has produced.
+                                TranscriptItem.Working -> WorkingRow()
+
+                                // Nothing to draw. It exists so that "the end of the
+                                // transcript" is an index rather than a sum.
+                                TranscriptItem.End -> Spacer(Modifier.height(0.dp))
                             }
-
-                            is TranscriptItem.Row -> {
-                                val row = item.row
-                                AgentRowView(
-                                    row = row,
-                                    isLast = row.id == transcript.rows.lastOrNull()?.id,
-                                    pending = transcript.pendingPermission?.takeIf { pending ->
-                                        names(pending, row) ||
-                                            (row.kind as? TranscriptRow.Kind.Subagent)
-                                                ?.block?.children
-                                                ?.any { names(pending, it) } == true
-                                    },
-                                    onAnswer = { optionId ->
-                                        transcript.pendingPermission?.let {
-                                            stream.answer(it.id, optionId)
-                                        }
-                                    },
-                                )
-                            }
-
-                            // The turn that is still running, one line ahead of
-                            // what it has produced.
-                            TranscriptItem.Working -> WorkingRow()
-
-                            // Nothing to draw. It exists so that "the end of the
-                            // transcript" is an index rather than a sum.
-                            TranscriptItem.End -> Spacer(Modifier.height(0.dp))
                         }
                     }
                 }
             }
-        }
 
-        // Everything that sits over the bottom of the conversation, in one
-        // place: the plan and the queue are ATTACHED to the composer rather
-        // than scattered around the screen. They are all "what happens next",
-        // and the plan — furthest away when it was pinned at the top — is the
-        // one the next message is most likely to change.
-        Column(
-            Modifier.padding(horizontal = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (transcript.plan.isNotEmpty()) {
-                PlanPanel(transcript.plan)
-            }
-            for (queued in transcript.queue) {
-                QueuedRow(
-                    queued = queued,
-                    onEdit = { text -> stream.editQueued(queued.id, text) },
-                    onCancel = { stream.cancelQueued(queued.id) },
-                    onSteer = { stream.steerQueued(queued.id) },
-                )
-            }
-            transcript.pendingPermission
-                ?.takeIf { pending -> transcript.rows.none { attached(pending, it) } }
-                ?.let { pending ->
-                    ApprovalCard(pending) { optionId -> stream.answer(pending.id, optionId) }
+            // Everything that sits over the bottom of the conversation, in one
+            // place: the plan and the queue are ATTACHED to the composer rather
+            // than scattered around the screen. They are all "what happens next",
+            // and the plan — furthest away when it was pinned at the top — is the
+            // one the next message is most likely to change.
+            Column(
+                Modifier.padding(horizontal = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (transcript.plan.isNotEmpty()) {
+                    PlanPanel(transcript.plan)
+                }
+                for (queued in transcript.queue) {
+                    QueuedRow(
+                        queued = queued,
+                        onEdit = { text -> stream.editQueued(queued.id, text) },
+                        onCancel = { stream.cancelQueued(queued.id) },
+                        onSteer = { stream.steerQueued(queued.id) },
+                    )
+                }
+                transcript.pendingPermission
+                    ?.takeIf { pending -> transcript.rows.none { attached(pending, it) } }
+                    ?.let { pending ->
+                        ApprovalCard(pending) { optionId -> stream.answer(pending.id, optionId) }
+                    }
+
+                sendFailure?.let { failure ->
+                    SendFailureRow(
+                        message = failure.message,
+                        onRetry = { stream.retrySend() },
+                        onDismiss = { stream.dismissSendFailure() },
+                    )
                 }
 
-            AgentComposer(
-                configOptions = transcript.configOptions,
-                availableModes = transcript.availableModes,
-                agentMode = transcript.agentMode,
-                availableCommands = transcript.availableCommands,
-                contextFraction = transcript.contextFraction,
-                harness = harness,
-                // Null until a session has said which — see [Transcript.backend].
-                backend = transcript.backend,
-                isWorking = isWorking,
-                worktreeId = ref.worktreeId,
-                terminalId = ref.terminalId,
-                connection = connection,
-                onSetConfig = { id, value -> stream.setConfig(id, value) },
-                onSetMode = { mode -> stream.setMode(mode) },
-                onCancel = { stream.cancel() },
-                onSend = { text, images -> stream.send(text, images) },
+                AgentComposer(
+                    configOptions = transcript.configOptions,
+                    availableModes = transcript.availableModes,
+                    agentMode = transcript.agentMode,
+                    availableCommands = transcript.availableCommands,
+                    contextFraction = transcript.contextFraction,
+                    harness = harness,
+                    // Null until a session has said which — see [Transcript.backend].
+                    backend = transcript.backend,
+                    isWorking = isWorking,
+                    worktreeId = ref.worktreeId,
+                    terminalId = ref.terminalId,
+                    connection = connection,
+                    onSetConfig = { id, value -> stream.setConfig(id, value) },
+                    onSetMode = { mode -> stream.setMode(mode) },
+                    onCancel = { stream.cancel() },
+                    onSend = { text, images -> stream.send(text, images) },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * A message that did not go, and the way to send it again.
+ *
+ * Its words are already in the conversation from the first try, so without
+ * this they read as sent, under an agent that never answers.
+ */
+@Composable
+private fun SendFailureRow(message: String, onRetry: () -> Unit, onDismiss: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .padding(start = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Outlined.Warning,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            message,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onRetry) { Text("Try Again") }
+        IconButton(onClick = onDismiss) {
+            Icon(
+                Icons.Outlined.Close,
+                contentDescription = "Dismiss",
+                tint = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.size(16.dp),
             )
         }
     }
