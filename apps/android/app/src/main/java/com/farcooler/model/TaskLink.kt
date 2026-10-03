@@ -46,9 +46,15 @@ object TaskLink {
      * notice, so it gives the runner's answer (`task_link::task_of`). The same
      * cases as AgentKit's `TaskLink.noticeTask`.
      *
+     * Where this phone can't see what the runner sees, it doesn't fold: a
+     * duplicate banner beats an agent nobody hears about.
+     *
      * - Never an orchestrator's.
-     * - The task it was opened for, when it was opened for one.
+     * - The task it was opened for, when that task is one of its lane's open
+     *   tasks: the runner folds only into a task it still has.
      * - Otherwise its lane's one open task; with two, none.
+     * - Not by lane for a pane that names its workspace: the runner refuses
+     *   another workspace's task, and `open_tasks` doesn't say whose it is.
      * - Never by lane in the repository's main checkout, where ad hoc agents
      *   run and one dispatched task would take in all of them. The runner's
      *   `task_of` still folds there (ov-107 report), so an agent there gets
@@ -56,9 +62,10 @@ object TaskLink {
      */
     fun noticeTaskId(pane: Terminal, worktree: Worktree?): String? {
         if (pane.isOrchestrator) return null
-        pane.taskId?.takeIf { it.isNotEmpty() }?.let { return it }
-        if (worktree == null || worktree.isMainCheckout) return null
-        return worktree.openTasks.singleOrNull()?.id
+        val open = worktree?.openTasks.orEmpty()
+        pane.taskId?.takeIf { it.isNotEmpty() }?.let { own -> return own.takeIf { open.any { it.id == own } } }
+        if (worktree == null || worktree.isMainCheckout || !pane.workspace.isNullOrEmpty()) return null
+        return open.singleOrNull()?.id
     }
 
     /**

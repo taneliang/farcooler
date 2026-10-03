@@ -67,9 +67,26 @@ class TaskLinkTest {
     @Test
     fun `an agent's notices fold into the task it was opened for, anywhere`() {
         val pane = Terminal(id = "p", preset = "claude", state = "running", taskId = "t-4")
-        assertEquals("t-4", TaskLink.noticeTaskId(pane, worktree(invoice)))
-        assertEquals("t-4", TaskLink.noticeTaskId(pane, worktree()))
-        assertEquals("t-4", TaskLink.noticeTaskId(pane, worktree(invoice).copy(isMainCheckout = true)))
+        assertEquals("t-4", TaskLink.noticeTaskId(pane, worktree(invoice, retries)))
+        assertEquals("t-4", TaskLink.noticeTaskId(pane, worktree(retries).copy(isMainCheckout = true)))
+    }
+
+    @Test
+    fun `an agent's own task the phone doesn't know folds nothing`() {
+        // The runner folds only into a task it still has; one missing here may
+        // be gone, so the banner stays: a duplicate at worst, never silence.
+        val pane = Terminal(id = "p", preset = "claude", state = "running", taskId = "t-4")
+        assertNull(TaskLink.noticeTaskId(pane, worktree()))
+        assertNull(TaskLink.noticeTaskId(pane, worktree(invoice)))
+    }
+
+    @Test
+    fun `a lane's task takes in an agent only when its workspace can't differ`() {
+        // The runner refuses another workspace's task, and `open_tasks`
+        // doesn't say whose a task is.
+        val pane = Terminal(id = "p", preset = "claude", state = "running", workspace = "ws-b")
+        assertNull(TaskLink.noticeTaskId(pane, worktree(invoice)))
+        assertEquals("t-9", TaskLink.noticeTaskId(pane.copy(workspace = null), worktree(invoice)))
     }
 
     @Test
@@ -101,8 +118,8 @@ class TaskLinkTest {
     fun `a banner is left to the task only where the task's notice arrives`() {
         val agent = Terminal(id = "p", preset = "claude", state = "running", taskId = "t-4")
         val loose = Terminal(id = "l", preset = "claude", state = "running")
-        org.junit.Assert.assertTrue(TaskLink.leavesBannerToTask(agent, worktree(), true))
-        org.junit.Assert.assertFalse(TaskLink.leavesBannerToTask(agent, worktree(), false))
+        org.junit.Assert.assertTrue(TaskLink.leavesBannerToTask(agent, worktree(retries), true))
+        org.junit.Assert.assertFalse(TaskLink.leavesBannerToTask(agent, worktree(retries), false))
         org.junit.Assert.assertFalse(TaskLink.leavesBannerToTask(loose, worktree(), true))
     }
 
@@ -123,7 +140,7 @@ class TaskLinkTest {
     fun `the fleet's reports leave a task-bound agent to its task's push`() {
         val agent = Terminal(id = "a", preset = "claude", state = "running", activity = "blocked", taskId = "t-4")
         val loose = Terminal(id = "l", preset = "claude", state = "running", activity = "blocked")
-        val fleet = Fleet(worktrees = listOf(worktree(terminals = listOf(agent, loose)).copy(task = "lane")))
+        val fleet = Fleet(worktrees = listOf(worktree(invoice, retries, terminals = listOf(agent, loose)).copy(task = "lane")))
         val paired = DaemonBuild("v", true, "linux", capabilities = setOf("tasks", "task_notices"), pushPaired = true)
         val reports = TaskLink.agentReports(fleet, paired, registered = true).associateBy { it.terminal.id }
         org.junit.Assert.assertTrue(reports.getValue("a").leftToTask)
