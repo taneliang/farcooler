@@ -120,3 +120,30 @@ extension TaskLink {
         return build.can("task_notices") && build.pushPaired && registered
     }
 }
+
+/// One pane's change, as the iPhone's `Notifier.report` hears it: the pane,
+/// its worktree's name for the banner's body, and whether its banner is left
+/// to its task's push (ov-107).
+struct AgentReport {
+    var terminal: Terminal
+    var worktree: String
+    var leftToTask: Bool
+}
+
+extension Fleet {
+    /// Every pane in this fleet as the iPhone's `Notifier.report` takes it,
+    /// read from the runner `build` describes. Here rather than in the app's
+    /// `Connection` so that the fold, the one decision in the loop, can be
+    /// tested: the phone has no unit test target of its own.
+    func agentReports(runner build: DaemonBuild?, registered: Bool) -> [AgentReport] {
+        let reaches = TaskLink.taskNoticeReachesPhone(build, registered: registered)
+        return worktrees.flatMap { worktree in
+            worktree.terminals.map { terminal in
+                AgentReport(
+                    terminal: terminal, worktree: worktree.task,
+                    leftToTask: TaskLink.leavesBannerToTask(terminal, in: worktree, noticeReachesHere: reaches))
+            }
+        }
+    }
+}
+

@@ -174,3 +174,22 @@ func thePhonesFleetLeavesAHandOpenedAgentInTheMainCheckoutToItself() throws {
     #expect(TaskLink.leavesBannerToTask(pane, in: worktree, noticeReachesHere: true))
 }
 
+/// The iPhone's call site: the reports its `Connection` hands `Notifier`,
+/// from a decoded fleet. A dispatched agent's banner is left to its task's
+/// push only from a paired runner that sends task notices, to a registered
+/// phone.
+@Test("The iPhone's fleet reports leave a task-bound agent to its task's push")
+func theIPhonesFleetReportsLeaveATaskBoundAgentToItsTask() throws {
+    var fleet = try FleetDecodeTests.decodeFleet()
+    fleet.worktrees[0].terminals[0].role = "agent"
+    fleet.worktrees[0].terminals[0].taskId = "0198f2c0-0000-7000-8000-00000000a002"
+    let id = fleet.worktrees[0].terminals[0].id
+    let paired = DaemonBuild(
+        version: "v", matches: true, platform: "linux", capabilities: ["tasks", "task_notices"], pushPaired: true)
+    let report = { (build: DaemonBuild?) in
+        fleet.agentReports(runner: build, registered: true).first { $0.terminal.id == id }
+    }
+    #expect(try #require(report(paired)).leftToTask)
+    #expect(try #require(report(nil)).leftToTask == false, "no runner build, no push to leave it to")
+}
+

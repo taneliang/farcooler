@@ -1005,16 +1005,9 @@ final class Connection: ObservableObject {
             // one place that learns what every agent is doing.
             //
             // An agent on a task is left to its task's push (ov-107), the
-            // same rule as the Mac's: `TaskLink.leavesBannerToTask`.
-            let noticeReaches = TaskLink.taskNoticeReachesPhone(
-                daemon, registered: PushRegistration.shared.registered)
-            for worktree in fleet.worktrees {
-                for terminal in worktree.terminals {
-                    Notifier.shared.report(
-                        terminal: terminal, worktree: worktree.task,
-                        leftToTask: TaskLink.leavesBannerToTask(
-                            terminal, in: worktree, noticeReachesHere: noticeReaches))
-                }
+            // same rule as the Mac's: see `Fleet.agentReports`.
+            for report in fleet.agentReports(runner: daemon, registered: PushRegistration.shared.registered) {
+                Notifier.shared.report(report)
             }
 
             // And write down what each blocked agent is asking, for the lock
