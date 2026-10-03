@@ -144,15 +144,19 @@ enum WorkspaceScreen {
     /// worktree's card of terminals: the card it was clicked on. Clicking
     /// it did nothing. This is the page it opens to instead, with Restart
     /// and Dismiss. An exited pane kept by `remain-on-exit` is still in its
-    /// layout, and stays drawn there.
+    /// layout, and stays drawn there; a lost one never is, so a layout that
+    /// still lists it is stale and doesn't count.
     static func paneless(_ selection: ContentView.Selection?, in fleet: Fleet, shown: ShownLayout?) -> BoardPane? {
         guard let named = namedTerminal(selection),
             let worktree = fleet.worktrees.first(where: { ($0.host ?? "") == named.host && $0.id == named.worktree }),
             let terminal = worktree.terminals.first(where: { $0.id == named.terminal }),
-            LostPane.Kind(state: terminal.state) != nil
+            let kind = LostPane.Kind(state: terminal.state)
         else { return nil }
+        // A lost terminal is in no tmux window, whatever layout the app read
+        // last says: a layout holding one is stale, and drawing it there
+        // drew a lone glyph with nothing to press.
         let ref = PaneRef(host: named.host, worktree: named.worktree, terminal: named.terminal)
-        if let shown, shown.contains(ref) { return nil }
+        if kind != .lost, let shown, shown.contains(ref) { return nil }
         return BoardPane(terminal: terminal, worktree: worktree)
     }
 

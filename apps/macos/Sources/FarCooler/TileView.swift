@@ -81,6 +81,8 @@ struct TileView: View {
     let onSearchFiles: (String) async -> [String]
     /// Switch a pane between its terminal and its chat.
     let onSwitchPaneMode: (Terminal) -> Void
+    /// Restart or Dismiss, from a lost pane's own page (ov-191).
+    var onTerminalAction: (TerminalAction, Terminal) -> Void = { _, _ in }
     /// The window's title and subtitle: the worktree's, or, for an
     /// orchestrator's pane, its workspace's. See `ContentView.frame(of:in:)`.
     let title: String
@@ -267,6 +269,7 @@ struct TileView: View {
             onDrop: { dragged, side in onDropOnPane(dragged, terminal.id, side) },
             onSearchFiles: onSearchFiles,
             onSwitchPaneMode: onSwitchPaneMode,
+            onAction: { action in onTerminalAction(action, terminal) },
             reviewTargets: worktree.reviewAgentTargets()
         )
         .onTapGesture { if !isFocused { onFocus(terminal.id) } }
@@ -377,6 +380,8 @@ private struct TilePane: View {
     let onSearchFiles: (String) async -> [String]
     /// Switch this pane between its terminal and its chat.
     let onSwitchPaneMode: (Terminal) -> Void
+    /// Restart or Dismiss, for a pane with nothing running (ov-191).
+    let onAction: (TerminalAction) -> Void
     /// The agent panes in this worktree a review note can be sent to, for the
     /// pane showing the diff.
     ///
@@ -484,6 +489,12 @@ private struct TilePane: View {
                 // swallows every keystroke, and only switching layouts (which
                 // rebuilds everything) appears to fix it.
                 .id("\(terminal.id)#\(terminal.paneMode ?? "terminal")")
+            } else if LostPane.Kind(state: terminal.state) != nil {
+                // A lost pane still in a layout the app last read: the
+                // window it was in is gone, and this is the only place it's
+                // drawn. Its page, not a lone glyph nothing happens on
+                // (ov-191).
+                LostTerminalPage(terminal: terminal, hasKeyboard: isFocused, onAction: onAction)
             } else {
                 ZStack {
                     Color(nsColor: Palette.background)

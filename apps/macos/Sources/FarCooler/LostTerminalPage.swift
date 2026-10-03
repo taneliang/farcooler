@@ -15,11 +15,14 @@ import SwiftUI
 /// ⌘R is Reload Fleet.
 struct LostTerminalPage: View {
     let terminal: Terminal
-    let worktree: Worktree
+    /// The worktree, to name the window, when the page has it to itself.
+    /// Nil in a tile, which leaves the window's title to the layout.
+    var worktree: Worktree? = nil
     var hasKeyboard = true
     let onAction: (TerminalAction) -> Void
 
     @FocusState private var focused: Bool
+    @ObservedObject private var themes = Themes.shared
 
     private var kind: LostPane.Kind { LostPane.Kind(state: terminal.state) ?? .lost }
     private var actions: [LostPane.Action] { LostPane.actions(for: kind) }
@@ -78,6 +81,10 @@ struct LostTerminalPage: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(nsColor: Palette.background))
+        // On the terminal's ground, so in the terminal theme's polarity, not
+        // the app's: under a light app and a dark theme, system text and
+        // buttons came out dark on dark (seen in the after-shot).
+        .environment(\.colorScheme, themes.current.dark ? .dark : .light)
         .focusable()
         .focused($focused)
         .focusEffectDisabled()
@@ -91,7 +98,21 @@ struct LostTerminalPage: View {
             return .handled
         }
         .onChange(of: hasKeyboard, initial: true) { _, keyed in if keyed { focused = true } }
-        .navigationTitle(worktree.windowTitle)
-        .navigationSubtitle(worktree.windowSubtitle)
+        .modifier(WindowTitled(worktree: worktree))
+    }
+}
+
+/// The worktree's title on the window, or nothing when there's no worktree.
+private struct WindowTitled: ViewModifier {
+    let worktree: Worktree?
+
+    func body(content: Content) -> some View {
+        if let worktree {
+            content
+                .navigationTitle(worktree.windowTitle)
+                .navigationSubtitle(worktree.windowSubtitle)
+        } else {
+            content
+        }
     }
 }

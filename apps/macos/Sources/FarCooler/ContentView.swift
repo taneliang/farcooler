@@ -2760,9 +2760,12 @@ struct ContentView: View {
             if !settled {
                 // Passed on the way: its terminals wait until it settles.
                 Color.clear
-            } else if let paneless = WorkspaceScreen.paneless(place, in: store.fleet, shown: shown) {
+            } else if let paneless = WorkspaceScreen.paneless(current ? selection : place, in: store.fleet, shown: shown) {
                 // A lost terminal clicked on its card: its own page, with
-                // Restart and Dismiss, not the card again (ov-191).
+                // Restart and Dismiss, not the card again (ov-191). Asked of
+                // the selection, not `place`, which leaves the pane out
+                // (`WorkspaceSelection.place`): asked of that, this never
+                // fired, and the click still did nothing.
                 bareTerminal(paneless, keyboard: current)
             } else if let shown {
                 tiled(shown, titled: false, keyboard: current)
@@ -3202,6 +3205,7 @@ struct ContentView: View {
             },
             onSearchFiles: { query in await store.client(for: ws)?.searchFiles(in: ws, query: query) ?? [] },
             onSwitchPaneMode: { terminal in Task { await togglePaneMode(terminal, in: ws) } },
+            onTerminalAction: { action, terminal in Task { await run(action, on: terminal, in: ws) } },
             title: frame.title,
             subtitle: frame.subtitle,
             setsTitle: titled,
