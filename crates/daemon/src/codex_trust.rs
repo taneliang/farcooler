@@ -256,17 +256,21 @@ pub async fn trust_for_worktree(root: &Path, worktree: &Path) {
 /// The path codex trusts a worktree through: the parent of the repository's
 /// common git directory, resolved the way codex resolves it.
 ///
-/// Blocking, and bounded: `git` is killed after `GIT_DEADLINE`. `GIT_DIR`
-/// and `GIT_COMMON_DIR` are removed so the daemon's own environment can't
-/// point the question at another repository.
+/// Blocking, and bounded: `git` is killed after `GIT_DEADLINE`. Every
+/// inherited `GIT_` variable is removed (`crate::git_guard::apply`), so the
+/// daemon's own environment can't point the question at another repository.
+///
+/// Under the fixed pins only, not the by-name ones the async calls also
+/// read: `rev-parse --git-common-dir` refreshes no index and changes no ref,
+/// so no hook or filter is ever looked up, and a second git to list them
+/// would cost this blocking step a process for nothing.
 pub fn main_checkout(worktree: &Path) -> Option<PathBuf> {
-    let mut child = std::process::Command::new("git")
+    let mut git = std::process::Command::new("git");
+    crate::git_guard::apply(&mut git, &crate::git_guard::fixed());
+    let mut child = git
         .arg("-C")
         .arg(worktree)
         .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_COMMON_DIR")
-        .env_remove("GIT_WORK_TREE")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())

@@ -226,15 +226,29 @@ struct GhCheck {
     status: Option<String>,
 }
 
+/// `gh`, carrying the pins the daemon's own git runs under in `worktree`.
+///
+/// gh finds the repository by running git there (`remote -v`, `config`,
+/// `rev-parse`), so a planted config would reach those gits the same way.
+async fn gh(worktree: &Path) -> Result<tokio::process::Command> {
+    let pins = crate::git::guard_pins(worktree).await?;
+    let mut gh = tokio::process::Command::new("gh");
+    crate::git_guard::apply(gh.as_std_mut(), &pins);
+    Ok(gh)
+}
+
 /// Everything GitHub knows about this repository's open and recently merged PRs.
 ///
 /// Returns `Ok(None)` when `gh` is absent, unauthenticated, or unreachable —
 /// that is a normal condition, not an error, and it must degrade to `Unknown`
 /// rather than failing a review the user is in the middle of.
 pub async fn fetch_prs(worktree: &Path) -> Result<Option<Vec<PrInfo>>> {
+    // gh runs git in the worktree to find the repository, so it carries the
+    // same pins as the daemon's own git (`crate::git_guard`).
+    let Ok(mut gh) = gh(worktree).await else { return Ok(None) };
     let out = tokio::time::timeout(
         GH_TIMEOUT,
-        tokio::process::Command::new("gh")
+        gh
             .current_dir(worktree)
             .args([
                 "pr",
@@ -482,9 +496,10 @@ struct GhBranchRef {
 /// string that arrived in the same response would be a network round trip for
 /// nothing.
 pub async fn fetch_repo_facts(worktree: &Path) -> RepoFacts {
+    let Ok(mut gh) = gh(worktree).await else { return RepoFacts::default() };
     let out = tokio::time::timeout(
         GH_TIMEOUT,
-        tokio::process::Command::new("gh")
+        gh
             .current_dir(worktree)
             .args(["repo", "view", "--json", "defaultBranchRef,url"])
             .stdin(std::process::Stdio::null())
