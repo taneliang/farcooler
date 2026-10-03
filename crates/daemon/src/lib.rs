@@ -18,6 +18,7 @@ pub mod log_join;
 pub mod log_watch;
 pub mod needs_you;
 pub mod orchestrator;
+pub mod paste_mode;
 pub mod pastes;
 pub mod paths;
 pub mod proc_cwd;

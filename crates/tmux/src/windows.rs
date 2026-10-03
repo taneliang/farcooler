@@ -303,6 +303,17 @@ impl TmuxServer {
         parse_flag(&out.stdout).ok_or(DomainError::TmuxUnavailable)
     }
 
+    /// The pid of the program tmux started in the pane: the one `respawn-pane`
+    /// replaces. Read to tell one program in a pane from the next, since a
+    /// respawn keeps the pane's id and its `pipe-pane`.
+    pub async fn pane_pid(&self, pane_id: &str) -> Result<u32> {
+        let out = self.run(&["display-message", "-p", "-t", pane_id, "#{pane_pid}"]).await?;
+        if !out.ok() {
+            return Err(DomainError::TmuxUnavailable);
+        }
+        out.stdout.trim().parse().map_err(|_| DomainError::TmuxUnavailable)
+    }
+
     /// Where the cursor is in the pane, zero-based as (column, row).
     ///
     /// A captured screen is text: it carries no cursor. Without asking tmux
@@ -619,7 +630,8 @@ fn parse_modes(text: &str) -> Option<PaneModes> {
 /// it empty even in a pane whose program turned bracketing on, while
 /// rendering `alternate_on` and `wrap_flag` as `0` and `1`, measured on a real
 /// 3.4. Each caller decides what not knowing means: `paste_path` pastes
-/// unbracketed, and `answer_wake` doesn't type at all.
+/// unbracketed, and `answer_wake` asks the daemon's record of the pane's
+/// output instead (`paste_mode`).
 ///
 /// Anything that is neither a flag nor empty is refused, so a tmux
 /// sanitizing its output to underscores in the C locale — the failure
