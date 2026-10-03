@@ -191,27 +191,6 @@ struct WorkspaceWorktreesTests {
         #expect(order == ["c1", "d3", "d2", "d1"])
     }
 
-    @Test("The breadcrumb's segment stands for a worktree opened whole, and follows a task")
-    func theBreadcrumbSegment() {
-        let entries = Self.entries()
-        func name(_ host: String, _ id: String) -> String? { id == "scratch" ? "scratch" : nil }
-        let whole = WorkspaceWorktrees.crumb(
-            for: .workspace(host: "", workspace: Self.billing, focus: .worktree("scratch", terminal: nil)),
-            entries: entries, name: name)
-        #expect(whole?.title == "scratch" && whole?.isHere == true)
-        let task = WorkspaceWorktrees.crumb(
-            for: .workspace(host: "", workspace: Self.billing, focus: .task("t3")), entries: entries, name: name)
-        #expect(task?.title == "tax" && task?.isHere == false)
-        let none = WorkspaceWorktrees.crumb(
-            for: .workspace(host: "", workspace: Self.billing, focus: .task("t1")), entries: entries, name: name)
-        #expect(none?.title == "Worktrees")
-        #expect(WorkspaceWorktrees.crumb(
-            for: .workspace(host: "", workspace: Self.billing, focus: nil), entries: entries, name: name) == nil)
-        let crumbs = [WorkspaceNavigation.Crumb(title: "Billing", target: nil), .init(title: "scratch", target: nil)]
-        #expect(WorkspaceWorktrees.crumbs(crumbs, isHere: true).map(\.title) == ["Billing"])
-        #expect(WorkspaceWorktrees.crumbs(crumbs, isHere: false).map(\.title) == ["Billing", "scratch"])
-    }
-
     // MARK: - The Worktrees section
 
     @Test("The Worktrees section holds only loose worktrees, hidden ones apart")

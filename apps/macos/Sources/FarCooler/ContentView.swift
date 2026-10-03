@@ -2445,28 +2445,42 @@ struct ContentView: View {
         key(step.keyboard)
     }
 
-    /// The breadcrumb's worktree menu for `place`: standing for a worktree
-    /// opened whole, or following a task as the worktree beneath it.
+    /// The breadcrumb's worktree segment for `place`: standing for a
+    /// worktree opened whole, or after a task's crumb, that task's own
+    /// (`WorkspaceWorktrees.segment`).
     private func worktreeCrumb(for place: Selection, scene: WorkspaceScene) -> WorktreeCrumb? {
         guard let board = scene.board else { return nil }
         let entries = worktreeEntries(scene)
         let current = WorkspaceSelection.samePlace(place, selection) ? selection : place
-        let menu = WorkspaceWorktrees.menu(entries, selection: current, host: scene.host, workspace: board, fleet: store.fleet)
-        guard let crumb = WorkspaceWorktrees.crumb(for: place, entries: entries, name: { worktree(host: $0, id: $1)?.task })
+        let rows = scene.summary.flatMap { summary in
+            store.clients[scene.host].map { boardStore(for: summary, client: $0, host: scene.host).board.rows }
+        } ?? []
+        guard let current,
+            let segment = WorkspaceWorktrees.segment(
+                for: current, trail: current == selection ? trail : nil, entries: entries,
+                taskWorktrees: { id in
+                    rows.first { $0.id == id }.map { WorkspaceWorktrees.worktrees(of: $0, host: scene.host, in: store.fleet) }
+                        ?? []
+                },
+                name: { worktree(host: $0, id: $1)?.task }, host: scene.host, workspace: board, fleet: store.fleet)
         else { return nil }
-        // The worktree it names, for its own menu's items.
+        // The worktree it stands for, for its own menu's items.
         let named: Worktree? = {
             switch place {
             case .workspace(let host, _, .worktree(let id, _)?), .looseWorktree(let host, let id, _):
                 return worktree(host: host, id: id)
             default:
-                return WorkspaceWorktrees.index(of: place, in: entries).map { entries[$0].worktree }
+                return nil
             }
         }()
+        let help =
+            segment.isWorkspace
+            ? WorktreeCrumb.workspaceHelp
+            : segment.opens != nil ? "Open \(segment.title)" : "Go to one of this task’s worktrees"
         return WorktreeCrumb(
-            title: crumb.title, isHere: crumb.isHere, tasks: menu.tasks, loose: menu.loose, worktree: named?.task,
-            actions: named.map { worktreeMenu(for: $0).filter { $0 != .open } } ?? [],
-            perform: { item in if let named { perform(item, on: named) } })
+            title: segment.title, isHere: segment.isHere, tasks: segment.tasks, loose: segment.loose,
+            worktree: named?.task, actions: named.map { worktreeMenu(for: $0).filter { $0 != .open } } ?? [],
+            perform: { item in if let named { perform(item, on: named) } }, opens: segment.opens, help: help)
     }
 
     /// A workspace: the navigator, and what's selected in it in the main
@@ -2509,7 +2523,18 @@ struct ContentView: View {
                         if target == trail { trail = nil }
                         selection = target
                     },
-                    onClose: WorkspaceNavigation.closing(place, board: scene.board) == nil ? nil : { closeOpened() })
+                    onClose: WorkspaceNavigation.closing(place, board: scene.board) == nil ? nil : { closeOpened() },
+                    onOpen: { item in
+                        // A task's own worktree keeps the task as the way
+                        // back, as its Open Worktree does.
+                        if let from = item.trail, case .workspace(_, _, .worktree(let id, _)?) = item.target {
+                            trail = from
+                            trailWorktree = id
+                        } else if item.target == trail {
+                            trail = nil
+                        }
+                        selection = item.target
+                    })
             },
             detail: { place, settled in openedView(place, layouts: layouts, settled: settled) }
         )
@@ -2908,7 +2933,9 @@ struct ContentView: View {
         let chosen = WorkspaceScreen.agent(of: row.id, host: host, in: store.fleet, chosen: chosenAgents[row.id])
         let worktreeID = TaskColumnModel.worktree(of: row, agent: chosen)
         let lane = worktreeID.flatMap { worktree(host: host, id: $0) }
-        let agent = TaskColumnModel.agent(hasAgent: chosen != nil, worktree: lane?.id)
+        let agent = TaskColumnModel.agent(
+            hasAgent: chosen != nil, worktree: lane?.id,
+            stopped: TaskColumnModel.hadAgent(row.id, host: host, in: store.fleet))
         let showsChanges = lane != nil && client.changesSupported != false
         let tab = taskTabs.tab(for: row.id, agentWorking: chosen != nil)
         let openWorktree = {

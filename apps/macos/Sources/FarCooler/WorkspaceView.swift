@@ -393,15 +393,19 @@ enum KeptOrchestrator {
 /// (`JumpBar`), in the shared header (`columnHeader`).
 struct DrillBreadcrumb: View {
     let crumbs: [WorkspaceNavigation.Crumb]
-    /// The trailing worktree segment (ov-86): "⎇ tax-rounding ⌄", a menu
-    /// of the workspace's worktrees, task ones by their task, then the
-    /// loose ones. It stands for a worktree opened whole, in place of its
-    /// crumb, and follows a task as the worktree beneath it.
+    /// The trailing worktree segment (ov-86, ov-185): "⎇ tax-rounding ⌄".
+    /// Standing for a worktree opened whole, in place of its crumb, it's a
+    /// menu of what's beside it: the workspace's worktrees, or its task's.
+    /// After a task's crumb it's that task's own: a way into its one, or a
+    /// menu of its several (`WorkspaceWorktrees.segment`).
     var worktrees: WorktreeCrumb?
     var onGo: (ContentView.Selection) -> Void
     /// Close: what's opened goes, and the orchestrator is selected again.
     /// Nil where there's nothing to close to, and no button.
     var onClose: (() -> Void)?
+    /// A worktree chosen from the segment, which may keep its task as the
+    /// way back (`MenuItem.trail`); `onGo` with its target when nil.
+    var onOpen: ((WorkspaceWorktrees.MenuItem) -> Void)? = nil
 
     /// One mark the bar draws, and the style it's drawn in.
     struct Piece: Equatable {
@@ -429,7 +433,8 @@ struct DrillBreadcrumb: View {
             if !crumbs.isEmpty { out.append(Piece(kind: .separator, style: JumpBar.chevron)) }
             out.append(Piece(kind: .menuIcon, style: JumpBar.icon(.menu, isHere: worktrees.isHere)))
             out.append(Piece(kind: .menuTitle, style: JumpBar.style(.menu, isHere: worktrees.isHere)))
-            out.append(Piece(kind: .menuChevron, style: JumpBar.chevron))
+            // A way into a task's one worktree is no menu, and has no ⌄.
+            if worktrees.opens == nil { out.append(Piece(kind: .menuChevron, style: JumpBar.chevron)) }
         }
         return out
     }
@@ -449,7 +454,13 @@ struct DrillBreadcrumb: View {
                 case .crumb(let index):
                     crumb(crumbs[index], style: piece.style)
                 case .menuIcon:
-                    if let worktrees { worktreeMenu(worktrees, pieces: pieces) }
+                    if let worktrees {
+                        if let item = worktrees.opens {
+                            worktreeButton(item, worktrees: worktrees, pieces: pieces)
+                        } else {
+                            worktreeMenu(worktrees, pieces: pieces)
+                        }
+                    }
                 case .menuTitle, .menuChevron:
                     // Drawn inside the menu's label, with its icon.
                     EmptyView()
@@ -503,10 +514,7 @@ struct DrillBreadcrumb: View {
     /// type, not the pop-up button's own, which set "Worktrees" a size
     /// larger than its neighbors (owner, 2 Oct).
     private func worktreeMenu(_ worktrees: WorktreeCrumb, pieces: [Piece]) -> some View {
-        let icon = pieces.first { $0.kind == .menuIcon }?.style ?? JumpBar.icon(.menu)
-        let title = pieces.first { $0.kind == .menuTitle }?.style ?? JumpBar.style(.menu)
-        let chevron = pieces.first { $0.kind == .menuChevron }?.style ?? JumpBar.chevron
-        return Menu {
+        Menu {
             if !worktrees.tasks.isEmpty {
                 Section("Tasks") {
                     ForEach(worktrees.tasks) { item in menuItem(item) }
@@ -528,26 +536,54 @@ struct DrillBreadcrumb: View {
                 }
             }
         } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Image(systemName: WorktreeSection.glyph)
-                    .font(icon.font)
-                    .foregroundStyle(icon.color)
-                Text(worktrees.title)
-                    .font(title.font)
-                    .foregroundStyle(title.color)
-                    .lineLimit(1)
-                Image(systemName: JumpBar.menuGlyph)
-                    .font(chevron.font)
-                    .foregroundStyle(chevron.color)
-            }
-            .contentShape(Rectangle())
+            worktreeLabel(worktrees, pieces: pieces)
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Go to another worktree in this workspace (⌃⌘↑ ⌃⌘↓)")
+        .help(worktrees.help)
         .accessibilityIdentifier("breadcrumb-worktrees")
+    }
+
+    /// The segment beside a task with one worktree: its name, which opens
+    /// it, as the task's Open Worktree does.
+    private func worktreeButton(_ item: WorkspaceWorktrees.MenuItem, worktrees: WorktreeCrumb, pieces: [Piece]) -> some View {
+        Button { open(item) } label: {
+            worktreeLabel(worktrees, pieces: pieces)
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .help(worktrees.help)
+        .accessibilityIdentifier("breadcrumb-worktrees")
+    }
+
+    /// The segment's label, for the menu and the button alike: the glyph,
+    /// the title and, when `pieces` has one (a menu), the ⌄, each in its
+    /// piece's style.
+    private func worktreeLabel(_ worktrees: WorktreeCrumb, pieces: [Piece]) -> some View {
+        let icon = pieces.first { $0.kind == .menuIcon }?.style ?? JumpBar.icon(.menu)
+        let title = pieces.first { $0.kind == .menuTitle }?.style ?? JumpBar.style(.menu)
+        let chevron = pieces.first { $0.kind == .menuChevron }?.style
+        return HStack(alignment: .firstTextBaseline, spacing: 3) {
+            Image(systemName: WorktreeSection.glyph)
+                .font(icon.font)
+                .foregroundStyle(icon.color)
+            Text(worktrees.title)
+                .font(title.font)
+                .foregroundStyle(title.color)
+                .lineLimit(1)
+            if let chevron {
+                Image(systemName: JumpBar.menuGlyph)
+                    .font(chevron.font)
+                    .foregroundStyle(chevron.color)
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func open(_ item: WorkspaceWorktrees.MenuItem) {
+        if let onOpen { onOpen(item) } else { onGo(item.target) }
     }
 }
 
@@ -556,7 +592,7 @@ extension DrillBreadcrumb {
     private func menuItem(_ item: WorkspaceWorktrees.MenuItem) -> some View {
         // A toggle, for the menu's own checkmark on where you are: a
         // button's image beside a subtitle was dropped (live, ov-86).
-        Toggle(isOn: Binding(get: { item.current }, set: { _ in onGo(item.target) })) {
+        Toggle(isOn: Binding(get: { item.current }, set: { _ in open(item) })) {
             if let subtitle = item.subtitle {
                 Text(item.title)
                 Text(subtitle)
@@ -570,7 +606,8 @@ extension DrillBreadcrumb {
 /// The breadcrumb's worktree menu, as the window builds it.
 struct WorktreeCrumb {
     /// What the segment says, after the branch glyph: "tax-rounding", the
-    /// worktree it stands for, or "Worktrees" beside a task with none.
+    /// worktree it stands for or a task's one, or "Worktrees" beside a task
+    /// with several.
     var title: String
     /// Whether it's the level you're at, a worktree opened whole, rather
     /// than the one beneath a task.
@@ -581,6 +618,12 @@ struct WorktreeCrumb {
     var worktree: String?
     var actions: [WorktreeMenu.Item] = []
     var perform: (WorktreeMenu.Item) -> Void = { _ in }
+    /// Beside a task with one worktree: a way into it, and no menu.
+    var opens: WorkspaceWorktrees.MenuItem? = nil
+    /// Its tooltip, which says whose worktrees it goes among.
+    var help = Self.workspaceHelp
+
+    static let workspaceHelp = "Go to another worktree in this workspace (⌃⌘↑ ⌃⌘↓)"
 }
 
 /// The arrangement a `WorkspaceView` drew, published from the value it

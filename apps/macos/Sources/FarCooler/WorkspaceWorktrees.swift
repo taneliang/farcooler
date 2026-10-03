@@ -6,8 +6,9 @@ import Foundation
 // The board list is the navigator inside a workspace: each task's row names
 // its worktree, and a Worktrees section at the bottom holds the ones no task
 // has, the main checkout and scratch ones. ⌃⌘↓ and ⌃⌘↑ walk them in that
-// order, and the breadcrumb's worktree menu lists them the same way: task
-// ones by their task, then the loose ones.
+// order, and the breadcrumb's worktree menu, straight under the workspace,
+// lists them the same way: task ones by their task, then the loose ones.
+// After a task's crumb it holds only that task's own (ov-185).
 //
 // Worked out here, as values, so the order, the menu and the section's
 // membership are the ones `WorkspaceWorktreesTests` pins.
@@ -135,6 +136,9 @@ enum WorkspaceWorktrees {
         var target: Selection
         /// Where the window is now: checked.
         var current: Bool
+        /// The task it's opened from, kept as the way back: set for a
+        /// task's own worktrees, as Open Worktree does.
+        var trail: Selection? = nil
 
         /// Where it goes: two worktrees can share a name, never a place.
         var id: Selection { target }
@@ -162,20 +166,101 @@ enum WorkspaceWorktrees {
         return (tasks, loose)
     }
 
-    /// The breadcrumb's worktree segment for `place`: the worktree opened
-    /// whole, standing in for its own crumb (`isHere`), or the one beneath a
-    /// task, after the task's crumb; a task with none says "Worktrees". Nil
-    /// at the board alone.
-    static func crumb(
-        for place: Selection, entries: [Entry], name: (_ host: String, _ worktree: String) -> String?
-    ) -> (title: String, isHere: Bool)? {
-        switch place {
-        case .workspace(let host, _, .worktree(let id, _)?), .looseWorktree(let host, let id, _):
-            return (name(host, id) ?? "Worktree", true)
-        case .workspace(_, _, .task?):
-            return (index(of: place, in: entries).map { entries[$0].worktree.task } ?? "Worktrees", false)
-        default:
+    /// The worktrees task `row` works in, its own first: `Task.worktree_id`
+    /// (which is also what puts it in a worktree's `open_tasks`, the
+    /// runner's lane fallback), then each worktree holding a pane opened for
+    /// it (`Terminal.task_id`), live or not, in the runner's order. Never by
+    /// a worktree's name: a lane called ov-177 is ov-177's by a person's
+    /// habit, which the runner doesn't know, and a guess here would offer
+    /// another task's work under this one.
+    static func worktrees(of row: TaskRow, host: String, in fleet: Fleet) -> [Worktree] {
+        let mine = fleet.worktrees.filter { ($0.host ?? "") == host }
+        var out: [Worktree] = []
+        if let own = row.worktreeID, !own.isEmpty, let found = mine.first(where: { $0.id == own }) {
+            out.append(found)
+        }
+        for worktree in mine where !out.contains(where: { $0.id == worktree.id }) {
+            let lane = worktree.openTaskIDs.contains(row.id)
+            let pane = worktree.terminals.contains { !$0.isOrchestrator && $0.taskId == row.id }
+            if lane || pane { out.append(worktree) }
+        }
+        return out
+    }
+
+    /// The breadcrumb's worktree segment, at the level it's drawn at.
+    struct Segment: Equatable {
+        /// What it says after the branch glyph.
+        var title: String
+        /// Whether it's the level you're at, a worktree opened whole, in
+        /// place of that worktree's own crumb.
+        var isHere: Bool
+        /// The menu's items: task worktrees by their task, then loose ones.
+        /// Beneath a task, only that task's own, all in `loose`.
+        var tasks: [MenuItem] = []
+        var loose: [MenuItem] = []
+        /// Beside a task with one worktree: no menu, a way into that one.
+        var opens: MenuItem?
+        /// Whether the menu is the whole workspace's.
+        var isWorkspace = false
+    }
+
+    /// The breadcrumb's worktree segment for `place` (ov-185). A level's menu
+    /// lists what sits beside it, as a jump bar's does:
+    ///
+    /// - A worktree opened whole stands in for its own crumb. Straight under
+    ///   the workspace, its menu is every worktree in the workspace, the
+    ///   order ⌃⌘↑ and ⌃⌘↓ walk. Opened from a task (`trail`), it's that
+    ///   task's worktrees.
+    /// - After a task's crumb, the task's own worktrees
+    ///   (`taskWorktrees`): none is no segment, one is a way into it, and
+    ///   several a menu of just those.
+    ///
+    /// Nil at the board alone. `host` and `workspace` are the board's, for
+    /// the workspace's menu.
+    static func segment(
+        for place: Selection, trail: Selection?, entries: [Entry], taskWorktrees: (_ task: String) -> [Worktree],
+        name: (_ host: String, _ worktree: String) -> String?, host: String, workspace: String, fleet: Fleet
+    ) -> Segment? {
+        let task: (from: Selection, id: String)? = {
+            if case .workspace(_, _, .task(let id)?) = place { return (place, id) }
+            if case .workspace(_, _, .worktree?) = place, let trail, case .workspace(_, _, .task(let id)?) = trail {
+                return (trail, id)
+            }
             return nil
+        }()
+        let here: (host: String, id: String)? = {
+            switch place {
+            case .workspace(let host, _, .worktree(let id, _)?), .looseWorktree(let host, let id, _): return (host, id)
+            default: return nil
+            }
+        }()
+        var items: [MenuItem] = []
+        if let task {
+            items = taskWorktrees(task.id).map { worktree in
+                MenuItem(
+                    title: worktree.task, subtitle: nil,
+                    target: WorkspaceNavigation.openWorktree(worktree.id, from: task.from).next,
+                    current: worktree.id == here?.id, trail: task.from)
+            }
+        }
+        if let here {
+            let title = name(here.host, here.id) ?? "Worktree"
+            guard let task else {
+                let menu = menu(entries, selection: place, host: host, workspace: workspace, fleet: fleet)
+                return Segment(title: title, isHere: true, tasks: menu.tasks, loose: menu.loose, isWorkspace: true)
+            }
+            // Opened from its task, though the task no longer names it.
+            if !items.contains(where: \.current) {
+                let target = WorkspaceNavigation.openWorktree(here.id, from: task.from).next
+                items.insert(MenuItem(title: title, subtitle: nil, target: target, current: true, trail: task.from), at: 0)
+            }
+            return Segment(title: title, isHere: true, loose: items)
+        }
+        guard task != nil else { return nil }
+        switch items.count {
+        case 0: return nil
+        case 1: return Segment(title: items[0].title, isHere: false, opens: items[0])
+        default: return Segment(title: "Worktrees", isHere: false, loose: items)
         }
     }
 

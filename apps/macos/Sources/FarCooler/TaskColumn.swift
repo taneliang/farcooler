@@ -18,10 +18,28 @@ enum TaskColumnModel {
         /// Nobody's working on it. `openWorktree` when the task has a
         /// worktree to open instead.
         case none(openWorktree: Bool)
+        /// No worktree of its own, and its agent's pane is there but
+        /// exited: something did start. The breadcrumb offers the worktree
+        /// it ran in (`WorkspaceWorktrees.worktrees(of:host:in:)`, ov-185).
+        case stopped
     }
 
-    static func agent(hasAgent: Bool, worktree: String?) -> Agent {
-        hasAgent ? .live : .none(openWorktree: worktree != nil)
+    /// `stopped` when an agent pane opened for the task is still listed
+    /// (`hadAgent(_:host:in:)`) though none is working it.
+    static func agent(hasAgent: Bool, worktree: String?, stopped: Bool = false) -> Agent {
+        if hasAgent { return .live }
+        if worktree == nil && stopped { return .stopped }
+        return .none(openWorktree: worktree != nil)
+    }
+
+    /// Whether `host` lists an agent's pane opened for task `id`, live or
+    /// exited: the breadcrumb's pane rule, agents only. Never an orchestrator,
+    /// whatever task id it carries.
+    static func hadAgent(_ id: String, host: String, in fleet: Fleet) -> Bool {
+        fleet.worktrees.contains { worktree in
+            (worktree.host ?? "") == host
+                && worktree.terminals.contains { !$0.isOrchestrator && $0.runsAgent && $0.taskId == id }
+        }
     }
 
     /// The sentence in place of an agent, or nil when there is one.
@@ -30,6 +48,7 @@ enum TaskColumnModel {
         case .live: return nil
         case .none(openWorktree: true): return "No agent is working on this task."
         case .none(openWorktree: false): return "Nothing has started on this task yet."
+        case .stopped: return "This task’s agent has stopped."
         }
     }
 
@@ -40,12 +59,14 @@ enum TaskColumnModel {
     }
 
     /// Whether the Agent and Changes tabs offer Start Agent… and Open
-    /// Worktree…: nothing has started, there's no worktree to open instead,
-    /// the task isn't finished, and the runner takes writes.
+    /// Worktree…: nothing has started or its agent stopped, there's no
+    /// worktree to open instead, the task isn't finished, and the runner
+    /// takes writes.
     static func offersStart(
         status: TaskStatus, worktree: Bool, agent: Agent, offersWrites: Bool
     ) -> Bool {
-        offersWrites && !status.isFinished && !worktree && agent == .none(openWorktree: false)
+        offersWrites && !status.isFinished && !worktree
+            && (agent == .none(openWorktree: false) || agent == .stopped)
     }
 
     /// The worktrees a task with none can be put on: this repository's own
