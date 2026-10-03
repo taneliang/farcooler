@@ -188,9 +188,7 @@ impl LogUsage {
                 }
             }
             Some("system") if record["subtype"] == "turn_duration" => {
-                if self.claude.is_some() {
-                    self.close_claude(at, record["durationMs"].as_i64());
-                }
+                self.close_claude(at, record["durationMs"].as_i64());
             }
             _ => {}
         }

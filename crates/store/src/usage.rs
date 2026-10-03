@@ -225,6 +225,9 @@ struct Row {
     usage: String,
 }
 
+/// Each turn's model rows, by turn.
+type ModelRows = HashMap<Uuid, Vec<ModelRow>>;
+
 struct ModelRow {
     model: String,
     tokens: TokenCounts,
@@ -357,7 +360,7 @@ impl Store {
         Ok((total, split))
     }
 
-    fn usage_rows(&self, f: &UsageFilter) -> Result<(Vec<Row>, HashMap<Uuid, Vec<ModelRow>>)> {
+    fn usage_rows(&self, f: &UsageFilter) -> Result<(Vec<Row>, ModelRows)> {
         let conn = self.conn();
         let blob = |id: Option<Uuid>| id.map(uuid_blob);
         let mut stmt = conn

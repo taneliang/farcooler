@@ -827,13 +827,7 @@ impl RunningSession {
                 if id.as_u64() == self.pending_prompt {
                     self.pending_prompt = None;
                     let reason = end_reason(result["stopReason"].as_str().unwrap_or_default());
-                    // ACP names no turn, so the key is made here, once; a
-                    // replay of this event carries the same one.
-                    let at = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_nanos())
-                        .unwrap_or_default();
-                    let usage = self.spend.ended(format!("acp:{}:{at}", self.session_id), &result);
+                    let usage = self.spend.ended(crate::usage::turn_key(&self.session_id), &result);
                     // Reporting the end is all this does now. Draining the
                     // queue is `ChatSession`'s job, and it triggers on exactly
                     // this event — which is what lets a backend that reports a

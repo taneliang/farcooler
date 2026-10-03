@@ -58,6 +58,17 @@ impl Spend {
     }
 }
 
+/// A key for a turn that ends now. ACP names no turn, so it is made once, at
+/// the end, and travels in the event: a replay of the event carries the same
+/// one, and a later turn of the same session never does.
+pub fn turn_key(session_id: &str) -> String {
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    format!("acp:{session_id}:{at}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
