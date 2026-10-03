@@ -21,6 +21,8 @@ pub mod codex;
 
 pub mod cursor;
 
+pub mod subagents;
+
 pub mod tail;
 
 pub mod usage;

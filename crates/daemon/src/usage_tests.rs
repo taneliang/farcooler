@@ -121,6 +121,26 @@ async fn a_terminal_agents_logged_turn_is_estimated_and_reportable() {
     assert_eq!(reply.total.unwrap().turns, 1);
 }
 
+/// A terminal claude's subagent, read from its own transcript, is filed with
+/// the pane that started it: under its task, as a run and not a turn, kept
+/// current as it grows.
+#[tokio::test]
+async fn a_subagents_spend_is_filed_under_its_parents_task() {
+    let (_dir, svc, task, terminal, _) = a_task_with_an_agent("claude").await;
+    let recorded = concat!(env!("CARGO_MANIFEST_DIR"), "/../core/fixtures/session-logs/claude-subagent-transcript.jsonl");
+    let lines: Vec<String> = std::fs::read_to_string(recorded).unwrap().lines().map(str::to_string).collect();
+    let mut fold = LogUsage::default();
+    lines[..4].iter().for_each(|l| fold.subagent_line("a1", l));
+    record_log(&svc.store, terminal, "claude", fold.take());
+    lines[4..].iter().for_each(|l| fold.subagent_line("a1", l));
+    record_log(&svc.store, terminal, "claude", fold.take());
+
+    let totals = task_usage(&svc, task).totals.unwrap();
+    assert_eq!((totals.turns, totals.subagent_runs, totals.active_ms), (0, 1, 0));
+    assert_eq!((totals.output_tokens, totals.cache_read_tokens), (681, 110_128));
+    assert!(totals.cost_estimated_micros > 0, "priced from the table like any claude call");
+}
+
 #[tokio::test]
 async fn an_unknown_dimension_is_refused() {
     let (_dir, svc, _, _, _) = a_task_with_an_agent("claude").await;

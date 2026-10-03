@@ -18,6 +18,7 @@ fn turn(key: &str, task: Option<Uuid>, harness: &str, ended_at: i64, models: Vec
         active_ms: Some(1000),
         usage: if models.is_empty() { "not_reported" } else { "reported" },
         models,
+        kind: TurnKind::Turn,
     }
 }
 
@@ -134,4 +135,28 @@ fn the_migration_only_adds() {
 fn tables(conn: &rusqlite::Connection) -> Vec<String> {
     let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").unwrap();
     stmt.query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect()
+}
+
+/// A subagent run is recorded again as it grows, replacing itself; it adds
+/// spend, and neither a turn nor active time.
+#[test]
+fn a_subagent_run_replaces_itself_as_it_grows_and_is_not_a_turn() {
+    let s = Store::open_in_memory().unwrap();
+    let task = Uuid::from_u128(1);
+    s.record_turn(&turn("t", Some(task), "claude", 10_000, vec![TurnModel::priced(None, OPUS, Some(5))])).unwrap();
+    let run = |output: u64| NewTurn {
+        kind: TurnKind::Subagent,
+        active_ms: Some(60_000),
+        ..turn("claude-log:agent:a1", Some(task), "claude", 20_000, vec![TurnModel::priced(
+            Some("claude-opus-5".into()),
+            TokenCounts { output, ..Default::default() },
+            None,
+        )])
+    };
+    s.record_turn(&run(100)).unwrap();
+    s.record_turn(&run(681)).unwrap();
+    assert!(!s.record_turn(&run(50)).unwrap(), "a smaller count is a follower that saw only the rest");
+    let (total, _) = s.task_usage(task).unwrap();
+    assert_eq!((total.turns, total.subagent_runs, total.active_ms), (1, 1, 1000));
+    assert_eq!(total.tokens.output, 4 + 681);
 }

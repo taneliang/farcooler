@@ -25,7 +25,7 @@ use farcooler_core::usage::{PRICE_TABLE, TokenCounts};
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1 as pb;
 use farcooler_store::Store;
-use farcooler_store::usage::{GroupBy, NewTurn, Surface, TurnModel, UsageFilter, UsageGroup, UsageTotals};
+use farcooler_store::usage::{GroupBy, NewTurn, Surface, TurnKind, TurnModel, UsageFilter, UsageGroup, UsageTotals};
 use uuid::Uuid;
 
 use crate::service::Service;
@@ -108,6 +108,7 @@ pub(crate) fn record_chat(store: &Store, terminal: Uuid, usage: &TurnUsage) {
             (Some(_), false) => "reported",
         },
         models,
+        kind: TurnKind::Turn,
     };
     write(store, &turn);
 }
@@ -139,6 +140,7 @@ pub(crate) fn record_log(store: &Store, terminal: Uuid, harness: &str, turns: Ve
             active_ms: t.active_ms,
             usage: t.state.as_str(),
             models,
+            kind: if t.subagent { TurnKind::Subagent } else { TurnKind::Turn },
         };
         write(store, &turn);
     }
@@ -230,6 +232,7 @@ fn totals(t: &UsageTotals) -> pb::UsageTotals {
         turns: t.turns,
         turns_partial: t.turns_partial,
         turns_not_reported: t.turns_not_reported,
+        subagent_runs: t.subagent_runs,
         active_ms: t.active_ms,
         input_tokens: t.tokens.input,
         output_tokens: t.tokens.output,

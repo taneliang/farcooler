@@ -3331,6 +3331,10 @@ message UsageTotals {
   // Unix milliseconds; zero when there are no turns.
   int64 first_ended_at_ms = 13;
   int64 last_ended_at_ms = 14;
+  // Claude subagent runs read from terminal agents' subagent transcripts:
+  // their spend is in the sums above, and they are not in `turns` or
+  // `active_ms`. (A chat pane's subagents are already inside its turns.)
+  uint64 subagent_runs = 15;
 }
 
 // A group's key: a field is set only where that dimension was grouped AND

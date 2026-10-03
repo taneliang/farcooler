@@ -29,6 +29,7 @@ paths and message text cut down, not synthesized records.
 | `claude-out-of-order-timestamps.jsonl` | adjacent lines whose `timestamp` goes backwards | 2.1.220 |
 | `claude-task-list.jsonl` | a task list being created, worked and listed | 2.1.227 |
 | `claude-subagents.jsonl` | one subagent spawned and finished, one spawned in the background | 2.1.223 |
+| `claude-subagent-transcript.jsonl` | a subagent's own transcript, for spend | 2.1.263 |
 
 **`claude-complete-turn.jsonl`** (7 lines) is drawn from a real session under
 `~/.claude/projects/`, a `Write a haiku... then tell me what 'esc to
@@ -52,6 +53,21 @@ field is replaced with a placeholder (it's meaningless to a parser and was
 several hundred bytes). The local stop-hook's shell command line is replaced
 with a generic equivalent, since it named a machine-local `$SUPERSET_HOME_DIR`
 path.
+
+**`claude-subagent-transcript.jsonl`** (13 lines) is a subagent's own file,
+`<session>/subagents/agent-<id>.jsonl`, from a real 2.1.263 session that
+dispatched a general-purpose agent ("Sleep 200 then report"). Every record is
+`isSidechain: true` with the `agentId`; none is in the parent's file. Kept:
+the opening `user` record (which carries a `promptId` but no `promptSource`),
+every `assistant` record and every `tool_result`; the 12 `attachment` records
+between them were dropped as noise. It is the evidence for counting a call by
+`message.id` at the field-wise maximum: `msg_…YJsMb7` is written twice, its
+`thinking` line stating 2 output tokens and its `tool_use` line 658.
+
+Redacted: the prompt, every `text`, `thinking` (and its signature) and tool
+input and result are cut to placeholders; `cwd` is `/Users/example/project`,
+`gitBranch` `main`, the agent id `a0000000000000001`; every uuid is replaced
+consistently. Model ids, `message.id`s, `usage` and timestamps are unaltered.
 
 **`claude-out-of-order-timestamps.jsonl`** (5 lines) is a real backward jump:
 line 2 (`hook_success` attachment) carries timestamp `22:50:49.010Z`, one

@@ -67,6 +67,10 @@ pub struct LoggedTurn {
     /// `None` is a codex turn before any `turn_context` named one.
     pub models: Vec<(Option<String>, TokenCounts)>,
     pub state: UsageState,
+    /// A claude subagent's whole run, not a turn: its spend counts, and the
+    /// turn count and active time leave it out (it runs inside, or after, a
+    /// turn of the agent that started it).
+    pub subagent: bool,
 }
 
 /// How many finished turns' keys are remembered, against a re-read. A
@@ -79,12 +83,77 @@ struct ClaudeTurn {
     key: String,
     started_at_ms: Option<i64>,
     last_at_ms: Option<i64>,
+    calls: Calls,
+}
+
+/// Claude model calls, each counted once however many lines repeat it.
+#[derive(Debug, Default)]
+struct Calls {
     /// By `message.id`: the model and the largest usage any of its lines
     /// stated. The field-wise maximum, so a line written mid-stream with a
-    /// smaller count cannot lower a later, complete one.
-    calls: HashMap<String, (Option<String>, TokenCounts)>,
+    /// smaller count (a subagent's `thinking` line saying 2 output tokens,
+    /// its `tool_use` line 658) cannot lower a later, complete one.
+    by_id: HashMap<String, (Option<String>, TokenCounts)>,
     order: Vec<String>,
     unreported: std::collections::HashSet<String>,
+}
+
+impl Calls {
+    /// One `message` of an `assistant` line.
+    fn saw(&mut self, message: &Value) {
+        let model = message["model"].as_str();
+        // Claude Code's own stand-in for an API error or a limit notice: no
+        // model ran, and its usage is all zeros.
+        if model == Some("<synthetic>") {
+            return;
+        }
+        let Some(id) = message["id"].as_str() else { return };
+        match claude_counts(&message["usage"]) {
+            Some(counts) => {
+                self.unreported.remove(id);
+                let entry = self.by_id.entry(id.to_string()).or_insert_with(|| {
+                    self.order.push(id.to_string());
+                    (model.map(str::to_string), TokenCounts::default())
+                });
+                entry.1 = max(entry.1, counts);
+            }
+            None if !self.by_id.contains_key(id) => {
+                self.unreported.insert(id.to_string());
+            }
+            None => {}
+        }
+    }
+
+    /// Tokens per model, in the order each model first appeared.
+    fn by_model(&self) -> Vec<(Option<String>, TokenCounts)> {
+        let mut models: Vec<(Option<String>, TokenCounts)> = Vec::new();
+        for id in &self.order {
+            let (model, counts) = &self.by_id[id];
+            match models.iter_mut().find(|(m, _)| m == model) {
+                Some((_, sum)) => sum.add(counts),
+                None => models.push((model.clone(), *counts)),
+            }
+        }
+        models
+    }
+
+    fn state(&self) -> UsageState {
+        match (self.by_id.is_empty(), self.unreported.is_empty()) {
+            (true, _) => UsageState::NotReported,
+            (false, true) => UsageState::Reported,
+            (false, false) => UsageState::Partial,
+        }
+    }
+}
+
+/// One subagent's transcript, as far as it has been read.
+#[derive(Debug, Default)]
+struct Subagent {
+    calls: Calls,
+    first_at_ms: Option<i64>,
+    last_at_ms: Option<i64>,
+    /// Read something new since it was last handed out.
+    moved: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -115,12 +184,28 @@ pub struct LogUsage {
     codex_settled: Option<Running>,
     finished: Vec<LoggedTurn>,
     seen: VecDeque<String>,
+    /// Claude subagents, by agent id.
+    subagents: std::collections::BTreeMap<String, Subagent>,
 }
 
 impl LogUsage {
-    /// The turns that finished since the last call.
+    /// The turns that finished since the last call, and every subagent
+    /// whose transcript grew since then, as it stands now.
     pub fn take(&mut self) -> Vec<LoggedTurn> {
-        std::mem::take(&mut self.finished)
+        let mut out = std::mem::take(&mut self.finished);
+        for (agent, run) in self.subagents.iter_mut().filter(|(_, run)| run.moved) {
+            run.moved = false;
+            out.push(LoggedTurn {
+                key: format!("claude-log:agent:{agent}"),
+                started_at_ms: run.first_at_ms,
+                ended_at_ms: run.last_at_ms,
+                active_ms: run.first_at_ms.zip(run.last_at_ms).map(|(f, l)| l - f),
+                models: run.calls.by_model(),
+                state: run.calls.state(),
+                subagent: true,
+            });
+        }
+        out
     }
 
     fn seen(&self, key: &str) -> bool {
@@ -150,42 +235,14 @@ impl LogUsage {
                     return;
                 }
                 self.close_claude(None, None);
-                self.claude = Some(ClaudeTurn {
-                    key,
-                    started_at_ms: at,
-                    last_at_ms: at,
-                    calls: HashMap::new(),
-                    order: Vec::new(),
-                    unreported: Default::default(),
-                });
+                self.claude = Some(ClaudeTurn { key, started_at_ms: at, last_at_ms: at, calls: Calls::default() });
             }
             Some("assistant") => {
                 let Some(turn) = self.claude.as_mut() else { return };
                 if at.is_some() {
                     turn.last_at_ms = at;
                 }
-                let message = &record["message"];
-                let model = message["model"].as_str();
-                // Claude Code's own stand-in for an API error or a limit
-                // notice: no model ran, and its usage is all zeros.
-                if model == Some("<synthetic>") {
-                    return;
-                }
-                let Some(id) = message["id"].as_str() else { return };
-                match claude_counts(&message["usage"]) {
-                    Some(counts) => {
-                        turn.unreported.remove(id);
-                        let entry = turn.calls.entry(id.to_string()).or_insert_with(|| {
-                            turn.order.push(id.to_string());
-                            (model.map(str::to_string), TokenCounts::default())
-                        });
-                        entry.1 = max(entry.1, counts);
-                    }
-                    None if !turn.calls.contains_key(id) => {
-                        turn.unreported.insert(id.to_string());
-                    }
-                    None => {}
-                }
+                turn.calls.saw(&record["message"]);
             }
             Some("system") if record["subtype"] == "turn_duration" => {
                 self.close_claude(at, record["durationMs"].as_i64());
@@ -197,19 +254,7 @@ impl LogUsage {
     fn close_claude(&mut self, ended_at_ms: Option<i64>, duration_ms: Option<i64>) {
         let Some(turn) = self.claude.take() else { return };
         let ended_at_ms = ended_at_ms.or(turn.last_at_ms);
-        let mut models: Vec<(Option<String>, TokenCounts)> = Vec::new();
-        for id in &turn.order {
-            let (model, counts) = &turn.calls[id];
-            match models.iter_mut().find(|(m, _)| m == model) {
-                Some((_, sum)) => sum.add(counts),
-                None => models.push((model.clone(), *counts)),
-            }
-        }
-        let state = match (turn.calls.is_empty(), turn.unreported.is_empty()) {
-            (true, _) => UsageState::NotReported,
-            (false, true) => UsageState::Reported,
-            (false, false) => UsageState::Partial,
-        };
+        let (models, state) = (turn.calls.by_model(), turn.calls.state());
         let active_ms = duration_ms.or_else(|| Some(ended_at_ms? - turn.started_at_ms?));
         self.finish(LoggedTurn {
             key: turn.key,
@@ -218,7 +263,30 @@ impl LogUsage {
             active_ms,
             models,
             state,
+            subagent: false,
         });
+    }
+
+    /// One line of a claude subagent's own transcript,
+    /// `<session>/subagents/agent-<agent>.jsonl`.
+    ///
+    /// A subagent's calls are not in the parent's file, and a background one
+    /// goes on after the parent's turn has closed, so it is its own entry,
+    /// handed out again by `take` each time it grows, under one key, for the
+    /// store to keep the latest of. Its file opens no turn (no
+    /// `promptSource`) and closes none, so the whole file is the entry.
+    pub fn subagent_line(&mut self, agent: &str, line: &str) {
+        let Ok(record) = serde_json::from_str::<Value>(line) else { return };
+        let at = record["timestamp"].as_str().and_then(super::claude::parse_iso8601_millis);
+        let run = self.subagents.entry(agent.to_string()).or_default();
+        if let Some(at) = at {
+            run.first_at_ms = Some(run.first_at_ms.map_or(at, |f| f.min(at)));
+            run.last_at_ms = Some(run.last_at_ms.map_or(at, |l| l.max(at)));
+        }
+        if record["type"] == "assistant" {
+            run.calls.saw(&record["message"]);
+            run.moved = true;
+        }
     }
 
     /// One line of a codex rollout.
@@ -283,6 +351,7 @@ impl LogUsage {
                     active_ms,
                     models,
                     state,
+                    subagent: false,
                 });
             }
             _ => {}

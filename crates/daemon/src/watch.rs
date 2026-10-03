@@ -1385,6 +1385,8 @@ struct PaneLog {
     usage: farcooler_core::session_log::usage::LogUsage,
     /// The format those lines were in, which names the harness.
     usage_harness: Option<&'static str>,
+    /// A claude session's subagent transcripts, read for spend alone.
+    subagents: farcooler_core::session_log::subagents::SubagentLogs,
 }
 
 /// What a pane's log follower knows on one tick, for `resolved_activity`.
@@ -1430,6 +1432,7 @@ impl PaneLog {
             rest_samples: 0,
             usage: Default::default(),
             usage_harness: None,
+            subagents: Default::default(),
         }
     }
 
@@ -1902,6 +1905,9 @@ fn advance_log(
     let lines = tail.read_new_lines();
     let events: Vec<TurnEvent> = lines.iter().flat_map(|line| format.parse_line(line)).collect();
     log.usage_harness = format.fold_usage(&mut log.usage, &lines).or(log.usage_harness);
+    if format == LogFormat::Claude {
+        log.subagents.follow(tail.path(), !lines.is_empty(), &mut log.usage);
+    }
     log.turn = fold_log_events(log.turn, &events, now);
     log.asked = fold_asks(log.asked.take(), &events);
 
@@ -7135,11 +7141,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("00000000-0000-4000-8000-000000000001.jsonl");
         std::fs::read_to_string(recorded).unwrap().lines().for_each(|l| append(&path, l));
+        // And a subagent's own transcript, beside it.
+        let agents = dir.path().join("00000000-0000-4000-8000-000000000001/subagents");
+        std::fs::create_dir_all(&agents).unwrap();
+        let subagent = recorded.replace("claude-complete-turn", "claude-subagent-transcript");
+        std::fs::read_to_string(subagent).unwrap().lines().for_each(|l| append(&agents.join("agent-a1.jsonl"), l));
         let pane = PaneJoin { preset: Some("claude".into()), pid: None, cwd: "/tmp".into(), title: String::new() };
         let (mut log, _) = advance_log(PaneLog::new(), &pane, 5_000, true, false, |_| Some(path.clone()));
         let spent = log.usage.take();
-        assert_eq!(spent.len(), 1);
+        assert_eq!(spent.len(), 2, "the turn and the subagent's run: {spent:?}");
         assert_eq!(spent[0].models[0].1.output, 868);
+        assert!(spent[1].subagent);
+        assert_eq!(spent[1].models[0].1.output, 681);
         assert_eq!(log.usage_harness, Some("claude"));
     }
 

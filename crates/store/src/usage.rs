@@ -16,7 +16,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use rusqlite::{Transaction, params};
+use rusqlite::{OptionalExtension, Transaction, params};
 use uuid::Uuid;
 
 use farcooler_core::Result;
@@ -49,7 +49,11 @@ pub(crate) fn migration_0020_agent_turns(tx: &Transaction) -> rusqlite::Result<(
             ended_at INTEGER NOT NULL,
             active_ms INTEGER,
             -- `reported`, `partial` (some calls stated none) or `not_reported`.
-            usage TEXT NOT NULL
+            usage TEXT NOT NULL,
+            -- `turn`, or `subagent`: a claude subagent's whole run, read from
+            -- its own transcript and kept current while it runs. Its spend
+            -- counts; turn counts and active time leave it out.
+            kind TEXT NOT NULL DEFAULT 'turn'
         );
         CREATE INDEX agent_turns_by_end ON agent_turns (ended_at);
         CREATE INDEX agent_turns_by_task ON agent_turns (task_id, ended_at) WHERE task_id IS NOT NULL;
@@ -88,6 +92,14 @@ impl Surface {
             Surface::Terminal => "terminal",
         }
     }
+}
+
+/// What a row stands for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnKind {
+    Turn,
+    /// A subagent's run so far, recorded again as it grows.
+    Subagent,
 }
 
 /// One model's share of a turn, priced.
@@ -132,6 +144,7 @@ pub struct NewTurn {
     /// `reported`, `partial` or `not_reported`; see the column.
     pub usage: &'static str,
     pub models: Vec<TurnModel>,
+    pub kind: TurnKind,
 }
 
 /// What to count. Every field narrows; `None` is everything.
@@ -179,6 +192,8 @@ pub struct UsageTotals {
     pub turns_partial: u64,
     /// Turns that stated no usage at all, counted but with no tokens.
     pub turns_not_reported: u64,
+    /// Claude subagent runs whose spend is included. Not turns.
+    pub subagent_runs: u64,
     pub active_ms: i64,
     pub tokens: TokenCounts,
     /// What the agents said it cost.
@@ -223,6 +238,7 @@ struct Row {
     ended_at: i64,
     active_ms: Option<i64>,
     usage: String,
+    subagent: bool,
 }
 
 /// Each turn's model rows, by turn.
@@ -239,16 +255,41 @@ struct ModelRow {
 impl Store {
     /// Record one finished turn. False when its key was already recorded,
     /// which is a turn heard twice and not an error.
+    ///
+    /// A subagent run is the exception: recorded again as it grows, it
+    /// replaces the row it had, unless the new count is smaller (a follower
+    /// that attached to a large transcript at its end sees only the rest).
     pub fn record_turn(&self, turn: &NewTurn) -> Result<bool> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
+        if turn.kind == TurnKind::Subagent {
+            let had: Option<(Vec<u8>, i64)> = tx
+                .query_row(
+                    "SELECT t.id, COALESCE((SELECT SUM(input_tokens + output_tokens + cache_read_tokens
+                         + cache_write_tokens) FROM agent_turn_models WHERE turn_id = t.id), 0)
+                       FROM agent_turns t WHERE t.turn_key = ?1",
+                    params![turn.key],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()
+                .map_err(map_err)?;
+            if let Some((id, had_tokens)) = had {
+                let now: u64 =
+                    turn.models.iter().map(|m| m.tokens.input + m.tokens.output + m.tokens.cache_read + m.tokens.cache_write).sum();
+                if (now as i64) < had_tokens {
+                    return Ok(false);
+                }
+                tx.execute("DELETE FROM agent_turn_models WHERE turn_id = ?1", params![id]).map_err(map_err)?;
+                tx.execute("DELETE FROM agent_turns WHERE id = ?1", params![id]).map_err(map_err)?;
+            }
+        }
         let id = Uuid::now_v7();
         let opt = |id: Option<Uuid>| id.map(uuid_blob);
         let inserted = tx
             .execute(
                 "INSERT OR IGNORE INTO agent_turns (id, turn_key, terminal_id, worktree_id, repository_id,
-                     workspace_id, task_id, harness, surface, started_at, ended_at, active_ms, usage)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                     workspace_id, task_id, harness, surface, started_at, ended_at, active_ms, usage, kind)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                 params![
                     uuid_blob(id),
                     turn.key,
@@ -263,6 +304,10 @@ impl Store {
                     turn.ended_at,
                     turn.active_ms,
                     turn.usage,
+                    match turn.kind {
+                        TurnKind::Turn => "turn",
+                        TurnKind::Subagent => "subagent",
+                    },
                 ],
             )
             .map_err(map_err)?;
@@ -365,7 +410,7 @@ impl Store {
         let blob = |id: Option<Uuid>| id.map(uuid_blob);
         let mut stmt = conn
             .prepare(
-                "SELECT id, task_id, worktree_id, workspace_id, repository_id, harness, ended_at, active_ms, usage
+                "SELECT id, task_id, worktree_id, workspace_id, repository_id, harness, ended_at, active_ms, usage, kind
                    FROM agent_turns
                   WHERE (?1 IS NULL OR ended_at >= ?1) AND (?2 IS NULL OR ended_at < ?2)
                     AND (?3 IS NULL OR task_id = ?3) AND (?4 IS NULL OR worktree_id = ?4)
@@ -400,6 +445,7 @@ impl Store {
                         ended_at: r.get(6)?,
                         active_ms: r.get(7)?,
                         usage: r.get(8)?,
+                        subagent: r.get::<_, String>(9)? == "subagent",
                     })
                 },
             )
@@ -464,6 +510,12 @@ fn key(turn: &Row, model: Option<&str>, group_by: &[GroupBy], offset_minutes: i3
 }
 
 fn add_turn(t: &mut UsageTotals, turn: &Row) {
+    t.first_ended_at = Some(t.first_ended_at.map_or(turn.ended_at, |a| a.min(turn.ended_at)));
+    t.last_ended_at = Some(t.last_ended_at.map_or(turn.ended_at, |a| a.max(turn.ended_at)));
+    if turn.subagent {
+        t.subagent_runs += 1;
+        return;
+    }
     t.turns += 1;
     match turn.usage.as_str() {
         "partial" => t.turns_partial += 1,
@@ -471,8 +523,6 @@ fn add_turn(t: &mut UsageTotals, turn: &Row) {
         _ => {}
     }
     t.active_ms += turn.active_ms.unwrap_or(0);
-    t.first_ended_at = Some(t.first_ended_at.map_or(turn.ended_at, |a| a.min(turn.ended_at)));
-    t.last_ended_at = Some(t.last_ended_at.map_or(turn.ended_at, |a| a.max(turn.ended_at)));
 }
 
 fn add_model(t: &mut UsageTotals, tables: &mut BTreeSet<String>, row: &ModelRow) {

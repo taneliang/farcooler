@@ -154,3 +154,59 @@ fn a_codex_turn_without_a_token_count_is_not_reported() {
     assert_eq!(turns[0].state, UsageState::NotReported);
     assert!(turns[0].models.is_empty());
 }
+
+/// A real subagent transcript (`claude-subagent-transcript.jsonl`): five calls
+/// over eight assistant lines, one of them written first with 2 output tokens
+/// and then with 658. Summed by line, output would read 688.
+const SUBAGENT: TokenCounts =
+    TokenCounts { input: 10, output: 681, cache_read: 110128, cache_write: 31610, cache_write_1h: 0 };
+
+#[test]
+fn a_subagents_transcript_counts_each_call_once_as_its_own_entry() {
+    let mut usage = LogUsage::default();
+    fixture("claude-subagent-transcript.jsonl").iter().for_each(|l| usage.subagent_line("a1", l));
+    let runs = usage.take();
+    assert_eq!(runs.len(), 1);
+    assert!(runs[0].subagent);
+    assert_eq!(runs[0].key, "claude-log:agent:a1");
+    assert_eq!(runs[0].models, vec![(Some("claude-opus-5".to_string()), SUBAGENT)]);
+    assert_eq!(runs[0].active_ms, Some(207_676), "first line to last");
+}
+
+/// A subagent still running is handed out again as it grows, whole, under
+/// the same key; one that wrote nothing new is not.
+#[test]
+fn a_running_subagent_is_handed_out_again_as_it_grows() {
+    let lines = fixture("claude-subagent-transcript.jsonl");
+    let mut usage = LogUsage::default();
+    lines[..4].iter().for_each(|l| usage.subagent_line("a1", l));
+    let early = usage.take();
+    assert_eq!(early[0].models[0].1.cache_write, 25414 + 1435);
+    lines[4..].iter().for_each(|l| usage.subagent_line("a1", l));
+    let later = usage.take();
+    assert_eq!((later.len(), later[0].key.as_str()), (1, "claude-log:agent:a1"));
+    assert_eq!(later[0].models[0].1, SUBAGENT);
+    assert!(usage.take().is_empty());
+}
+
+/// The follower finds the transcripts beside the session it follows.
+#[test]
+fn a_sessions_subagent_files_are_followed() {
+    let dir = std::env::temp_dir().join(format!("farcooler-subagents-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let session = dir.join("00000000-0000-4000-8000-000000000001.jsonl");
+    std::fs::write(&session, fixture("claude-complete-turn.jsonl").join("\n") + "\n").unwrap();
+    let agents = dir.join("00000000-0000-4000-8000-000000000001/subagents");
+    std::fs::create_dir_all(&agents).unwrap();
+    std::fs::write(agents.join("agent-a1.jsonl"), fixture("claude-subagent-transcript.jsonl").join("\n") + "\n").unwrap();
+    std::fs::write(agents.join("agent-a1.meta.json"), "{}").unwrap();
+
+    let mut usage = LogUsage::default();
+    let mut follower = super::super::subagents::SubagentLogs::default();
+    follower.follow(&session, false, &mut usage);
+    let runs = usage.take();
+    assert_eq!(runs.len(), 1, "the transcript, not its meta file");
+    assert_eq!(runs[0].models[0].1, SUBAGENT);
+    let _ = std::fs::remove_dir_all(&dir);
+}
