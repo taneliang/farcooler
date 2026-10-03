@@ -92,6 +92,22 @@ struct FleetSidebarRetiredTests {
         #expect(NavigatorVisibility.key != "window.sidebar")
     }
 
+    /// ⌘B, the menu item and the title-bar button do nothing where no
+    /// navigator is drawn: on Needs You, a loose worktree with no board, or
+    /// nothing chosen, flipping it put away the next workspace's navigator
+    /// unseen (ov-178 review).
+    @Test("The toggle never hides the navigator on a page without one")
+    func theToggleNeedsANavigator() {
+        #expect(NavigatorVisibility.toggled(false, hasNavigator: false) == false)
+        #expect(NavigatorVisibility.toggled(true, hasNavigator: false) == true)
+        #expect(NavigatorVisibility.toggled(false, hasNavigator: true) == true)
+        #expect(NavigatorVisibility.toggled(true, hasNavigator: true) == false)
+        // And the menu item is dimmed there, as the title-bar button is.
+        #expect(!MainWindowFocus.togglesSidebar(MainWindowFocus(overlayOpen: false, hasNavigator: false)))
+        #expect(MainWindowFocus.togglesSidebar(MainWindowFocus(overlayOpen: false, hasNavigator: true)))
+        #expect(!MainWindowFocus.togglesSidebar(nil))
+    }
+
     // MARK: - Nothing of the old sidebar is left to reach
 
     /// Every source file of the app, by name.

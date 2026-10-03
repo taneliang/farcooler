@@ -25,7 +25,8 @@ struct MainWindowFocus: Equatable {
     // menu bar item isn't actionable, disable the action instead of hiding it
     // from the menu."
 
-    /// The sidebar is showing: View ▸ Hide Sidebar, else Show Sidebar.
+    /// The sidebar, the workspace's navigator, is out: View ▸ Hide Sidebar,
+    /// else Show Sidebar (ov-178).
     var sidebarShown = true
     /// A worktree is on screen for ⌘T and Open in Editor to act on.
     var hasWorktree = false
@@ -54,7 +55,7 @@ struct MainWindowFocus: Equatable {
     var layout: LayoutMenuFocus?
 
     /// What ⌘F says it does: the navigator's filter in a workspace (or a
-    /// loose worktree beside one), else the sidebar's find.
+    /// loose worktree beside one), else Go to Anything's find.
     static func findTitle(_ focus: MainWindowFocus?) -> String {
         focus?.hasNavigator == true ? "Filter Tasks" : "Find Workspace, Task, or Agent…"
     }
@@ -138,6 +139,14 @@ struct MainWindowFocus: Equatable {
     /// of the corresponding view."
     static func sidebarTitle(_ focus: MainWindowFocus?) -> String {
         focus?.sidebarShown == false ? "Show Sidebar" : "Hide Sidebar"
+    }
+
+    /// View ▸ Show or Hide Sidebar (⌘B) acts only in the key main window,
+    /// and only where a navigator is drawn to show or hide: not on Needs
+    /// You, a loose worktree with no board, or nothing chosen, where it
+    /// flipped a state nothing showed (ov-178 review).
+    static func togglesSidebar(_ focus: MainWindowFocus?) -> Bool {
+        isKey(focus) && focus?.hasNavigator == true
     }
 }
 

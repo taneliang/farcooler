@@ -2753,7 +2753,7 @@ struct ContentView: View {
         var focus = MainWindowFocus(
             overlayOpen: showQuickCreate || showPalette, taskOpen: Self.taskOpen(selection),
             hasNavigator: scene?.board != nil)
-        focus.sidebarShown = sidebarVisibility != .detailOnly
+        focus.sidebarShown = !navigatorHidden
         focus.hasWorktree = currentWorktree != nil
         focus.terminals = terminals.count
         focus.stepsTerminals = terminals.count > 1 || (terminals.count == 1 && terminals.first != selectedPane)
@@ -3229,7 +3229,8 @@ struct ContentView: View {
     /// put away or brought back (ov-178). Put away with the keyboard in
     /// it, the keyboard goes to what the main area shows.
     private func toggleNavigator() {
-        navigatorHidden.toggle()
+        navigatorHidden = NavigatorVisibility.toggled(
+            navigatorHidden, hasNavigator: selection.flatMap(workspaceScene)?.board != nil)
         guard navigatorHidden, keyboardOnBoard else { return }
         keyboardOnBoard = false
         key(.main)

@@ -429,8 +429,8 @@ struct FarCoolerCommands: Commands {
         Group {
             CommandGroup(after: .sidebar) {
                 // ⌘B, because that is what it is in every editor people already have
-                // open next to this one. macOS's own ⌃⌘S still works; this is the one
-                // fingers reach for.
+                // open next to this one. It shows and hides the workspace's
+                // navigator, the window's one sidebar (ov-178).
                 //
                 // No collision with the tiling prefix: that is ⌃B, a different
                 // modifier, and ⌘ never reaches a terminal anyway.
@@ -440,7 +440,7 @@ struct FarCoolerCommands: Commands {
                 // the current state of the corresponding view"). ov-204.
                 Button(MainWindowFocus.sidebarTitle(mainWindow)) { AppCommand.toggleSidebar.post() }
                     .keyboardShortcut("b", modifiers: .command)
-                    .disabled(!MainWindowFocus.isKey(mainWindow))
+                    .disabled(!MainWindowFocus.togglesSidebar(mainWindow))
             }
 
             // Nothing here prints, and the Print item SwiftUI adds for free would

@@ -244,7 +244,7 @@ struct MenuWiringTests {
         "Next Commit": "DiffMenuFocus.allows(\\.nextCommit, diff",
         "Previous Commit": "DiffMenuFocus.allows(\\.previousCommit, diff",
         "Mark as Reviewed": "DiffMenuFocus.allows(\\.marksReviewed, diff",
-        "MainWindowFocus.sidebarTitle(mainWindow)": "MainWindowFocus.isKey(",
+        "MainWindowFocus.sidebarTitle(mainWindow)": "MainWindowFocus.togglesSidebar(",
         "Go to Anything…": "MainWindowFocus.isKey(",
         "Reload Fleet": "MainWindowFocus.isKey(",
         "MainWindowFocus.findTitle(mainWindow)": "MainWindowFocus.isKey(",

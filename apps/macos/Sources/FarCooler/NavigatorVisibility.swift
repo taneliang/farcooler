@@ -27,6 +27,14 @@ enum NavigatorVisibility {
         return defaults.string(forKey: key) == stored(true)
     }
 
+    /// The navigator's state after ⌘B, the menu item or the title-bar
+    /// button: flipped where a navigator is drawn (`hasNavigator`), and
+    /// left alone anywhere else, so Needs You or an empty window never puts
+    /// away the next workspace's navigator unseen.
+    static func toggled(_ hidden: Bool, hasNavigator: Bool) -> Bool {
+        hasNavigator ? !hidden : hidden
+    }
+
     /// The stored word for a state.
     static func stored(_ hidden: Bool) -> String { hidden ? "hidden" : "shown" }
 
