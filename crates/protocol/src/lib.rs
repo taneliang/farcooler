@@ -426,6 +426,12 @@ pub mod capability {
     /// Its own capability because no runner before this one can compute
     /// it: a client that reads it absent says the runner needs an update.
     pub const REPORT: &str = "report";
+    /// What agents spent (ov-194): `usage.report` and `usage.task`.
+    ///
+    /// Its own capability because no daemon before this one records it: a
+    /// client that reads it absent says the runner needs an update to report
+    /// spend, rather than showing zero.
+    pub const AGENT_USAGE: &str = "agent_usage";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -436,7 +442,7 @@ pub mod capability {
             WORKTREES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES,
             ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL, WORKTREE_ORDER, TASKS,
             LAUNCH_PROMPT, TERMINAL_TASK, WORKTREE_FORK_ONLY, WORKSTREAMS, ORCHESTRATOR_HANDOFF,
-            NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES, REPORT,
+            NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES, REPORT, AGENT_USAGE,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -601,6 +607,8 @@ pub mod method {
         NeedsYouList = "needs_you.list" => NEEDS_YOU,
         WorkspaceSetSettings = "workspace.set_settings" => WAKE_ON_ANSWER,
         ReportGet = "report.get" => REPORT,
+        UsageReport = "usage.report" => AGENT_USAGE,
+        UsageTask = "usage.task" => AGENT_USAGE,
     }
 }
 

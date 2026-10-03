@@ -446,6 +446,9 @@ fn route(method: Method) -> Option<&'static str> {
         // The CLI reads it today; the Summary page (ov-188 phase 3) will
         // route it here.
         Method::ReportGet => None,
+        // Spend (ov-194): the CLI's `farcooler report` reads it through
+        // `Session`; a task view's route is the follow-up lane's to add.
+        Method::UsageReport | Method::UsageTask => None,
     }
 }
 

@@ -189,6 +189,10 @@ message Request {
     WorkspaceSetSettings workspace_set_settings = 87;
     // `report.get`. Behind the `report` capability.
     ReportRequest report_request = 88;
+    // What agents spent (ov-194), behind the `agent_usage` capability. Tags
+    // from 120 so a lane adding board methods beside it cannot collide.
+    UsageQuery usage_report = 120;
+    TaskUsageRequest usage_task = 121;
   }
 }
 
@@ -277,6 +281,9 @@ message Result {
     // `report.get`: what got done in a period. Behind the `report`
     // capability.
     Report report = 46;
+    // `usage.report` and `usage.task`, behind `agent_usage`.
+    UsageReport usage_report = 120;
+    TaskUsage task_usage = 121;
   }
 }
 
@@ -3251,4 +3258,112 @@ message Report {
   // only when a field changes meaning; a reader ignores fields it doesn't
   // know.
   string report_json = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Agent spend (ov-194)
+//
+// One row per finished agent turn in the runner's store: tokens per model,
+// active time, and cost with where the cost came from. A cost is REPORTED (the
+// agent stated it), ESTIMATED (tokens times the runner's dated price table, at
+// API list prices) or unknown. On a subscription plan every dollar here is
+// notional, the API-equivalent cost and never what was spent; a client says
+// so, and never adds reported and estimated into one unlabeled figure.
+// ---------------------------------------------------------------------------
+
+enum UsageDimension {
+  USAGE_DIMENSION_UNSPECIFIED = 0;
+  USAGE_DIMENSION_TASK = 1;
+  USAGE_DIMENSION_WORKTREE = 2;
+  USAGE_DIMENSION_WORKSPACE = 3;
+  USAGE_DIMENSION_REPOSITORY = 4;
+  // `claude`, `codex`, or an ACP adapter's preset.
+  USAGE_DIMENSION_HARNESS = 5;
+  USAGE_DIMENSION_MODEL = 6;
+  // Periods, by the turn's end in the caller's `utc_offset_minutes`:
+  // `YYYY-MM-DD`, the week's Monday as `YYYY-MM-DD`, and `YYYY-MM`.
+  USAGE_DIMENSION_DAY = 7;
+  USAGE_DIMENSION_WEEK = 8;
+  USAGE_DIMENSION_MONTH = 9;
+}
+
+// `usage.report`. Every filter narrows; unset is everything.
+message UsageQuery {
+  // Unix milliseconds on the turn's end: since inclusive, until exclusive.
+  // Zero is unbounded.
+  int64 since_ms = 1;
+  int64 until_ms = 2;
+  optional bytes task_id = 3;
+  optional bytes worktree_id = 4;
+  optional bytes workspace_id = 5;
+  optional bytes repository_id = 6;
+  optional string harness = 7;
+  // Exact; empty is the turns whose harness named no model.
+  optional string model = 8;
+  // Any combination, e.g. TASK + HARNESS + MODEL for per task by harness and
+  // model. None is one group.
+  repeated UsageDimension group_by = 9;
+  int32 utc_offset_minutes = 10;
+}
+
+message UsageTotals {
+  // Each turn once per group it touches: a turn on two models is under both
+  // when grouped by model, so sum turns and active time across tasks or
+  // periods, never across models.
+  uint64 turns = 1;
+  // Turns whose tokens are a floor (some model call stated none).
+  uint64 turns_partial = 2;
+  // Turns that stated no usage: counted, with no tokens. "Not reported".
+  uint64 turns_not_reported = 3;
+  int64 active_ms = 4;
+  // Input is the uncached part; cache reads and writes are their own.
+  uint64 input_tokens = 5;
+  uint64 output_tokens = 6;
+  uint64 cache_read_tokens = 7;
+  uint64 cache_write_tokens = 8;
+  // Millionths of a US dollar, kept apart by provenance.
+  int64 cost_reported_micros = 9;
+  int64 cost_estimated_micros = 10;
+  // Tokens no cost is known for (no model named, or no rate for it).
+  uint64 unpriced_tokens = 11;
+  // The price tables the estimates came from (their dates), oldest first.
+  repeated string price_tables = 12;
+  // Unix milliseconds; zero when there are no turns.
+  int64 first_ended_at_ms = 13;
+  int64 last_ended_at_ms = 14;
+}
+
+// A group's key: a field is set only where that dimension was grouped AND
+// the turns had a value for it. The unnamed model is the empty string.
+message UsageGroup {
+  optional bytes task_id = 1;
+  optional bytes worktree_id = 2;
+  optional bytes workspace_id = 3;
+  optional bytes repository_id = 4;
+  optional string harness = 5;
+  optional string model = 6;
+  optional string period = 7;
+  // The task's key (`ov-194`) when grouped by task and it still exists.
+  string task_key = 8;
+  UsageTotals totals = 9;
+}
+
+message UsageReport {
+  repeated UsageDimension group_by = 1;
+  repeated UsageGroup groups = 2;
+  // Over everything the query admitted, ungrouped.
+  UsageTotals total = 3;
+  // The table this runner estimates with now.
+  string price_table = 4;
+}
+
+// `usage.task`: one task's totals, cheap enough to ask whenever it opens.
+message TaskUsageRequest { bytes task_id = 1; }
+
+message TaskUsage {
+  bytes task_id = 1;
+  UsageTotals totals = 2;
+  // The same, by harness and model.
+  repeated UsageGroup by_harness_model = 3;
+  string price_table = 4;
 }

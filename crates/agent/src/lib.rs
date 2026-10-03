@@ -17,7 +17,7 @@ pub mod ring;
 /// depend on it without depending on the orchestration above it. Every
 /// consumer — the daemon, the CLI, the client — still spells it the way it
 /// always did, because a crate split is not a reason to churn call sites.
-pub use farcooler_agent_core::{event, fs_guard};
+pub use farcooler_agent_core::{event, fs_guard, usage};
 
 /// Re-exported so `farcooler_agent::acp::conn::AcpConnection` keeps resolving.
 ///

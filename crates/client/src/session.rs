@@ -1726,6 +1726,32 @@ impl Session {
         }
     }
 
+    /// What agents spent on this runner, totaled as `query` asks
+    /// (`usage.report`, ov-194). Refused without a round trip on a runner
+    /// that records none.
+    pub async fn usage_report(
+        &mut self,
+        query: farcooler_protocol::v1::UsageQuery,
+    ) -> Result<farcooler_protocol::v1::UsageReport, SessionError> {
+        require(self.capabilities(), farcooler_protocol::capability::AGENT_USAGE, "usage.report")?;
+        match self.value("usage.report", None, Some(request::Payload::UsageReport(query))).await? {
+            result::Value::UsageReport(report) => Ok(report),
+            other => Err(wrong("usage_report", &other)),
+        }
+    }
+
+    /// One task's spend, for its view (`usage.task`).
+    pub async fn task_usage(&mut self, task: Uuid) -> Result<farcooler_protocol::v1::TaskUsage, SessionError> {
+        require(self.capabilities(), farcooler_protocol::capability::AGENT_USAGE, "usage.task")?;
+        let payload = request::Payload::UsageTask(farcooler_protocol::v1::TaskUsageRequest {
+            task_id: bytes::Bytes::copy_from_slice(task.as_bytes()),
+        });
+        match self.value("usage.task", None, Some(payload)).await? {
+            result::Value::TaskUsage(usage) => Ok(usage),
+            other => Err(wrong("task_usage", &other)),
+        }
+    }
+
     /// Mark a worktree as read, which is what clears its inbox badge.
     pub async fn changes_mark_read(&mut self, worktree: Uuid) -> Result<(), SessionError> {
         let payload =
@@ -2321,6 +2347,8 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::WorkspaceList(_) => "workspace_list",
         result::Value::NeedsYouList(_) => "needs_you_list",
         result::Value::Report(_) => "report",
+        result::Value::UsageReport(_) => "usage_report",
+        result::Value::TaskUsage(_) => "task_usage",
     }
 }
 

@@ -1315,6 +1315,22 @@ impl LogFormat {
         self == LogFormat::Cursor
     }
 
+    /// Fold `lines` into what the pane's turns spent, naming the harness, or
+    /// `None` for a format that states no usage (cursor).
+    fn fold_usage(
+        self,
+        usage: &mut farcooler_core::session_log::usage::LogUsage,
+        lines: &[String],
+    ) -> Option<&'static str> {
+        let (read, harness): (fn(&mut _, &str), _) = match self {
+            LogFormat::Claude => (farcooler_core::session_log::usage::LogUsage::claude_line, "claude"),
+            LogFormat::Codex => (farcooler_core::session_log::usage::LogUsage::codex_line, "codex"),
+            LogFormat::Cursor => return None,
+        };
+        lines.iter().for_each(|line| read(usage, line));
+        Some(harness)
+    }
+
     fn parse_line(self, line: &str) -> Vec<TurnEvent> {
         use farcooler_core::session_log::{claude, codex, cursor};
         match self {
@@ -1364,6 +1380,11 @@ struct PaneLog {
     /// Samples running that the screen has been at rest, up to
     /// `CONFIRMATIONS`.
     rest_samples: u8,
+    /// What its turns spent, folded from the same lines (`crate::usage`).
+    /// Kept across `adopt`, so a turn that spans a rotation is one turn.
+    usage: farcooler_core::session_log::usage::LogUsage,
+    /// The format those lines were in, which names the harness.
+    usage_harness: Option<&'static str>,
 }
 
 /// What a pane's log follower knows on one tick, for `resolved_activity`.
@@ -1400,7 +1421,16 @@ impl PaneLog {
     fn new() -> PaneLog {
         // Zero, not `now`: a pane seen for the first time should be looked up
         // on this tick and not in five seconds.
-        PaneLog { tail: None, attempted_at: 0, turn: None, asked: None, rested_at: None, rest_samples: 0 }
+        PaneLog {
+            tail: None,
+            attempted_at: 0,
+            turn: None,
+            asked: None,
+            rested_at: None,
+            rest_samples: 0,
+            usage: Default::default(),
+            usage_harness: None,
+        }
     }
 
     /// Everything `resolved_activity` needs from this pane's follower.
@@ -1869,8 +1899,9 @@ fn advance_log(
 
     let Some((tail, format)) = log.tail.as_mut() else { return (log, Vec::new()) };
     let format = *format;
-    let events: Vec<TurnEvent> =
-        tail.read_new_lines().iter().flat_map(|line| format.parse_line(line)).collect();
+    let lines = tail.read_new_lines();
+    let events: Vec<TurnEvent> = lines.iter().flat_map(|line| format.parse_line(line)).collect();
+    log.usage_harness = format.fold_usage(&mut log.usage, &lines).or(log.usage_harness);
     log.turn = fold_log_events(log.turn, &events, now);
     log.asked = fold_asks(log.asked.take(), &events);
 
@@ -4363,7 +4394,11 @@ impl Watcher {
         // the end of the file. That costs whatever was written in between,
         // which is the right trade against putting an entry back that a
         // panicking task may have left half-advanced.
-        let Ok((log, steps)) = log else { return (LogReading::default(), Vec::new()) };
+        let Ok((mut log, steps)) = log else { return (LogReading::default(), Vec::new()) };
+        let spent = log.usage.take();
+        if let Some(harness) = log.usage_harness.filter(|_| !spent.is_empty()) {
+            crate::usage::record_log(&self.service.store, id, harness, spent);
+        }
         // A copy rather than a move: the pane goes on holding the question
         // until its own log says otherwise, and this call is a reading of that
         // state and not a hand-off of it.
@@ -7089,6 +7124,23 @@ mod tests {
             resolved_without_a_question(AgentActivity::Idle, log.turn, 5_000, "", "codex", "Mac", 0),
             AgentActivity::Working
         );
+    }
+
+    /// The follower that reads a pane's turns also reads what they spent
+    /// (ov-194), from the same lines: a recorded claude turn, through the real
+    /// join and tail, comes out once, naming its harness.
+    #[test]
+    fn a_pane_follower_reads_what_its_turns_spent() {
+        let recorded = concat!(env!("CARGO_MANIFEST_DIR"), "/../core/fixtures/session-logs/claude-complete-turn.jsonl");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("00000000-0000-4000-8000-000000000001.jsonl");
+        std::fs::read_to_string(recorded).unwrap().lines().for_each(|l| append(&path, l));
+        let pane = PaneJoin { preset: Some("claude".into()), pid: None, cwd: "/tmp".into(), title: String::new() };
+        let (mut log, _) = advance_log(PaneLog::new(), &pane, 5_000, true, false, |_| Some(path.clone()));
+        let spent = log.usage.take();
+        assert_eq!(spent.len(), 1);
+        assert_eq!(spent[0].models[0].1.output, 868);
+        assert_eq!(log.usage_harness, Some("claude"));
     }
 
     /// Cursor's second turn, which read Idle from its first byte to its last.

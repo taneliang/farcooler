@@ -650,10 +650,24 @@ impl AgentSupervisor {
     /// Takes bare events rather than `Sequenced`, because only one of the two
     /// transports has a number to offer and neither number is the one this
     /// keeps: the position in this transcript is worked out below.
-    pub fn record<F>(&self, terminal: Uuid, events: Vec<AgentEvent>, on_events: &F)
+    pub fn record<F>(&self, terminal: Uuid, mut events: Vec<AgentEvent>, on_events: &F)
     where
         F: Fn(Uuid, Vec<Sequenced>),
     {
+        // A turn's spend is filed, never numbered or sent (`crate::usage`).
+        let heard = events.len();
+        events.retain(|event| match event {
+            AgentEvent::TurnUsage { usage } => {
+                if let Some(store) = self.records.as_ref() {
+                    crate::usage::record_chat(store, terminal, usage);
+                }
+                false
+            }
+            _ => true,
+        });
+        if events.is_empty() && heard > 0 {
+            return;
+        }
         if let Ok(mut sessions) = self.sessions.lock() {
             let entry = sessions.entry(terminal).or_default();
             for event in &events {

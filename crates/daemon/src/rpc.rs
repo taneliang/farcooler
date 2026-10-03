@@ -434,6 +434,8 @@ fn scope_of(method: Method) -> Scope {
         // Counts, durations, and the keys and titles of tasks: what the board
         // reads below already show a read-scoped phone.
         Method::ReportGet => Scope::Read,
+        // Counts, times and dollars about work, not the work (ov-194).
+        Method::UsageReport | Method::UsageTask => Scope::Read,
         // The board reads. A task's title, intent and record are metadata about
         // work, not the work: no path, no diff, no terminal byte — the same
         // ground `changes.inbox` stands on, and a read-scoped phone has to be
@@ -1862,6 +1864,20 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 Ok(result::Value::Report(crate::report::serve(&svc.store, &p, crate::review::now_millis())?))
+            }
+
+            "usage.report" => {
+                let Some(request::Payload::UsageReport(q)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::UsageReport(crate::usage::report(svc, &q)?))
+            }
+
+            "usage.task" => {
+                let Some(request::Payload::UsageTask(q)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::TaskUsage(crate::usage::task(svc, &q)?))
             }
 
             "stack.get" => {
