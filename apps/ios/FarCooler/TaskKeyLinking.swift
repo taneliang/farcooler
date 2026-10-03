@@ -10,8 +10,9 @@ extension Connection {
     /// the task, pushed over the screen showing. Links nothing without a
     /// navigator to push with, or before the runner is known.
     func taskKeyLinker(_ navigator: PhoneNavigator?) -> TaskKeyLinker {
-        guard let runner = hostId?.uuidString, let navigator else { return .none }
-        let index = TaskKeyIndex(runner: runner, workspaces: fleet.workspaces ?? [], boards: boards)
-        return TaskKeyLinker(index: index) { navigator.open($0.phoneRoute) }
+        var open: (@MainActor (PhoneRoute) -> Void)?
+        if let navigator { open = { navigator.open($0) } }
+        // `TaskKeyLinker.phone` holds the wiring, where `swift test` reaches it.
+        return .phone(runner: hostId?.uuidString, workspaces: fleet.workspaces ?? [], boards: boards, open: open)
     }
 }

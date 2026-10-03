@@ -1586,13 +1586,14 @@ struct TaskCard: View {
             section("Acceptance", detail: row.acceptanceProgress?.sentence) {
                 VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
                     ForEach(row.acceptance) { line in
+                        let linked = linker.linked(TaskProse.acceptance(line.text, met: line.met))
                         // Monochrome: a met line is ticked and struck
                         // through, quietly; one still open is plain.
                         HStack(alignment: .firstTextBaseline, spacing: ColumnGrid.rhythm) {
                             Image(systemName: line.met ? "checkmark.square" : "square")
                                 .foregroundStyle(.secondary)
                                 .accessibilityHidden(true)
-                            Text(linker.linked(TaskProse.acceptance(line.text, met: line.met)))
+                            Text(linked)
                                 .font(TaskTypography.body)
                                 .foregroundStyle(line.met ? Color.secondary : Color.primary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -1600,6 +1601,9 @@ struct TaskCard: View {
                         }
                         .accessibilityElement(children: .combine)
                         .accessibilityValue(line.met ? "Met" : "Not met")
+                        // Its task links, as actions: a combined element
+                        // needn't keep its text's links (ov-196).
+                        .taskKeyActions(linked, linker: linker)
                     }
                 }
             }

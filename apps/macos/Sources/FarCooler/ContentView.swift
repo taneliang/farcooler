@@ -3160,9 +3160,9 @@ struct ContentView: View {
     /// runner's boards read so far, opened as the palette opens one.
     private var taskKeyLinker: TaskKeyLinker {
         guard let host = selection?.host else { return .none }
-        let index = TaskKeyIndex.mac(
-            host: host, workspaces: store.fleet.runnerWorkspaces[host] ?? [], stores: boardStores.values)
-        return TaskKeyLinker(index: index) { openTask($0.task, host: $0.runner, workspace: $0.workspace) }
+        return .mac(
+            host: host, workspaces: store.fleet.runnerWorkspaces[host] ?? [], stores: boardStores.values,
+            openTask: { openTask($0, host: $1, workspace: $2) })
     }
 
     /// A finished status's History page, in the main area (ov-103). The

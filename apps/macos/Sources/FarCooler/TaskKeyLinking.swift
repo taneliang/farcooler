@@ -19,3 +19,19 @@ extension TaskKeyIndex {
         return TaskKeyIndex(runner: host, workspaces: workspaces, boards: boards)
     }
 }
+
+extension TaskKeyLinker {
+    /// The window's linker for `host`, each link opening its task through
+    /// `openTask` (`ContentView.openTask(_:host:workspace:)`, the palette's
+    /// way). Here rather than inline in `ContentView` so a test holds which
+    /// of the target's ids goes where.
+    @MainActor
+    static func mac(
+        host: String, workspaces: [WorkspaceSummary], stores: some Sequence<TaskBoardStore>,
+        openTask: @escaping @MainActor (_ task: String, _ host: String, _ workspace: String) -> Void
+    ) -> TaskKeyLinker {
+        TaskKeyLinker(index: .mac(host: host, workspaces: workspaces, stores: stores)) {
+            openTask($0.task, $0.runner, $0.workspace)
+        }
+    }
+}

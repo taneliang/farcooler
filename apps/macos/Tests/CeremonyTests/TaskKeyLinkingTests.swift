@@ -35,17 +35,22 @@ struct TaskKeyLinkingTests {
         let index = TaskKeyIndex.mac(host: "studio", workspaces: workspaces, stores: [mine, theirs])
         #expect(TaskKeyLinks.matches(in: "ov-190 and ov-7", index: index).map(\.key) == ["ov-190"])
 
-        final class Opened: @unchecked Sendable { var targets: [TaskKeyTarget] = [] }
+        // The window's own builder, as `ContentView.taskKeyLinker` calls it,
+        // with `openTask` recorded: which id goes where is the wiring.
+        final class Opened: @unchecked Sendable { var calls: [[String]] = [] }
         let opened = Opened()
-        let linker = TaskKeyLinker(index: index) { opened.targets.append($0) }
+        let linker = TaskKeyLinker.mac(host: "studio", workspaces: workspaces, stores: [mine, theirs]) {
+            opened.calls.append([$0, $1, $2])
+        }
+        #expect(linker.index == index)
         Markdown.openGuard(linker)(try #require(TaskKeyLinks.url(runner: "studio", key: "ov-190")))
-        let target = try #require(opened.targets.first)
-        #expect(target == TaskKeyTarget(runner: "studio", workspace: "ws-1", task: "t190", key: "ov-190"))
+        let call = try #require(opened.calls.first)
+        #expect(call == ["t190", "studio", "ws-1"], "openTask(task, host:, workspace:) got \(call)")
 
-        // What `ContentView.taskKeyLinker` hands `openTask`, which lands as
-        // the palette's open does.
+        // What `openTask` does with those, which lands as the palette's
+        // open does.
         let landed = WorkspaceNavigation.openingTask(
-            target.task, host: target.runner, workspace: target.workspace, from: WorkspaceNavigation.BoardState(opened: false))
+            call[0], host: call[1], workspace: call[2], from: WorkspaceNavigation.BoardState(opened: false))
         #expect(landed.selection == ContentView.Selection.workspace(host: "studio", workspace: "ws-1", focus: .task("t190")))
     }
 }

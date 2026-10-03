@@ -120,12 +120,13 @@ struct TaskScreen: View {
             if !row.acceptance.isEmpty {
                 Section("Acceptance") {
                     ForEach(row.acceptance) { line in
+                        let linked = linker.linked(TaskProse.acceptance(line.text, met: line.met))
                         HStack(alignment: .firstTextBaseline, spacing: PaneMetrics.step) {
                             // Monochrome, as on the Mac: met lines ticked
                             // and struck through, quietly.
                             Image(systemName: line.met ? "checkmark.square" : "square")
                                 .foregroundStyle(.secondary)
-                            Text(linker.linked(TaskProse.acceptance(line.text, met: line.met)))
+                            Text(linked)
                                 .font(.body)
                                 .foregroundStyle(line.met ? Color.secondary : Color.primary)
                         }
@@ -133,6 +134,9 @@ struct TaskScreen: View {
                         // What it says, not its markup.
                         .accessibilityLabel(TaskProse.plain(line.text))
                         .accessibilityValue(line.met ? "Met" : "Not met")
+                        // Its task links, which the one element hides
+                        // (ov-196): "Open ov-190" in the actions rotor.
+                        .taskKeyActions(linked, linker: linker)
                     }
                 }
             }
