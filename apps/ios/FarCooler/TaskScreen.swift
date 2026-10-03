@@ -98,10 +98,11 @@ struct TaskScreen: View {
             places(row)
 
             if !row.intent.isEmpty {
+                // Markdown, as the Mac draws it (ov-98): the same
+                // `TaskProse` blocks, with the document's spacing.
                 Section("Intent") {
-                    Text(row.intent)
-                        .font(.subheadline)
-                        .textSelection(.enabled)
+                    MarkdownText(text: row.intent, spacing: .document)
+                        .accessibilityIdentifier("task-intent")
                 }
             }
 
@@ -109,10 +110,13 @@ struct TaskScreen: View {
                 Section("Acceptance") {
                     ForEach(row.acceptance) { line in
                         HStack(alignment: .firstTextBaseline, spacing: PaneMetrics.step) {
-                            Image(systemName: line.met ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(line.met ? Color.accentColor : Color.secondary)
-                            Text(line.text)
-                                .font(.subheadline)
+                            // Monochrome, as on the Mac: met lines ticked
+                            // and struck through, quietly.
+                            Image(systemName: line.met ? "checkmark.square" : "square")
+                                .foregroundStyle(.secondary)
+                            Text(TaskProse.acceptance(line.text, met: line.met))
+                                .font(.body)
+                                .foregroundStyle(line.met ? Color.secondary : Color.primary)
                         }
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel(line.text)
@@ -124,23 +128,18 @@ struct TaskScreen: View {
             if let notes = record?.notes, !notes.isEmpty {
                 Section("Record") {
                     ForEach(TaskNoteFeed.newestFirst(notes)) { note in
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack {
-                                Text(note.kind.title)
-                                    .font(.caption.weight(.medium))
-                                Text(note.byline)
+                        // A block: the quiet "Kind · byline · time" line,
+                        // then the body as Markdown (ov-98).
+                        VStack(alignment: .leading, spacing: PaneMetrics.tight) {
+                            BoardTick { now in
+                                Text(
+                                    TaskProse.noteLine(
+                                        kind: note.kind.title, byline: note.byline,
+                                        ago: TaskRow.ago(now.timeIntervalSince(note.at))))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                Spacer()
-                                BoardTick { now in
-                                    Text(TaskRow.ago(now.timeIntervalSince(note.at)))
-                                        .font(.caption2)
-                                        .foregroundStyle(.tertiary)
-                                }
                             }
-                            Text(note.body)
-                                .font(.subheadline)
-                                .textSelection(.enabled)
+                            MarkdownText(text: note.body, spacing: .document)
                         }
                         .accessibilityElement(children: .combine)
                     }

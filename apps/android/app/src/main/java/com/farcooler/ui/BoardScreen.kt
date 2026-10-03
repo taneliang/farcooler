@@ -56,6 +56,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
@@ -733,9 +734,9 @@ fun TaskDetailScreen(
             if (row.intent.isNotEmpty()) {
                 item(key = "intent") {
                     Section("Intent")
-                    Text(
+                    // Markdown, as the Mac and iOS draw it (ov-98).
+                    MarkdownText(
                         row.intent,
-                        style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(horizontal = 16.dp).testTag("board-detail-intent"),
                     )
                 }
@@ -748,11 +749,19 @@ fun TaskDetailScreen(
                             Icon(
                                 if (line.met) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
                                 contentDescription = null,
-                                tint = if (line.met) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         },
-                        headlineContent = { Text(line.text) },
+                        // Its inline Markdown; met, struck through and quiet,
+                        // as on the Mac (ov-98).
+                        headlineContent = {
+                            Text(
+                                inline(line.text),
+                                color = if (line.met) MaterialTheme.colorScheme.onSurfaceVariant
+                                else MaterialTheme.colorScheme.onSurface,
+                                textDecoration = if (line.met) TextDecoration.LineThrough else null,
+                            )
+                        },
                         modifier = Modifier
                             .testTag("board-acceptance-${line.id}")
                             .semantics { contentDescription = "${line.text}. ${if (line.met) "Met" else "Not met"}" },
