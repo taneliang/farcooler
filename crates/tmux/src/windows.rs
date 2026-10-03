@@ -153,6 +153,12 @@ impl TmuxServer {
     /// of 300 `exit 42` panes. Waiting here costs nothing in the common case,
     /// where no pane is in that state, and a few milliseconds when one is.
     ///
+    /// The gap is not one loop pass on a busy machine. The exiting process
+    /// closes its files and signals its parent as two steps, and can be
+    /// descheduled between them: on tmux 3.4 the gap measured 13–51 ms with
+    /// eight CPU hogs on four cores and 124–195 ms with thirty-two, and a
+    /// 500 ms bound still lost a code on CI (run 37143698766).
+    ///
     /// Bounded by `EXIT_SETTLE`, because a command can close its tty and keep
     /// running if it ignores the hangup that follows. Such a pane is reported
     /// dead without a status, as tmux sees it, and is not waited for again
@@ -179,11 +185,13 @@ impl TmuxServer {
                 return Ok(panes);
             }
             tokio::time::sleep(EXIT_SETTLE_POLL).await;
-            // A failed re-read keeps the good read already in hand rather than
-            // turning one pane's exit into an unreadable inventory.
-            match self.list_tagged_panes_once().await {
-                Ok(again) => panes = again,
-                Err(_) => return Ok(panes),
+            // A failed re-read is asked again rather than taken as the answer.
+            // Returning the read in hand here handed back the very pane this
+            // loop exists to wait for. The good read is kept, so the deadline
+            // returns it rather than turning one pane's exit into an
+            // unreadable inventory.
+            if let Ok(again) = self.list_tagged_panes_once().await {
+                panes = again;
             }
         }
     }
@@ -545,10 +553,12 @@ impl TmuxServer {
 
 /// How long a read waits for a dead pane's exit status to arrive.
 ///
-/// Far longer than the gap ever is — that is one pass of tmux's event loop —
-/// so that a loaded machine still sees the code, and short enough that a pane
-/// which never settles costs the fleet render one pause and no more.
-const EXIT_SETTLE: std::time::Duration = std::time::Duration::from_millis(500);
+/// Far longer than the gap is at rest, which is one pass of tmux's event loop,
+/// because the gap grows with load (see `list_tagged_panes`) and 500 ms was
+/// not enough on CI. Only a pane caught mid-exit pays for it, and only for as
+/// long as its exit takes. A pane that never settles, one whose command closed
+/// its tty and ignored the hangup, pays it once.
+const EXIT_SETTLE: std::time::Duration = std::time::Duration::from_secs(3);
 const EXIT_SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(10);
 
 /// Parse one `list-panes -F` line. A line missing our tags is not ours.

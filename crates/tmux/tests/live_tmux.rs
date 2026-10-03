@@ -235,6 +235,38 @@ async fn a_dead_pane_is_never_read_without_its_exit_code() {
     srv.kill_server().await.unwrap();
 }
 
+/// An exit that takes its time to settle is still read with its code.
+///
+/// A stand-in for a loaded machine, made deterministic: the command closes
+/// its tty — on Linux that is the end of file that marks the pane dead — and
+/// only exits a second later, so tmux has no status to give for that second.
+/// On a busy CI runner the same gap opened on its own and outlasted a 500 ms
+/// wait. macOS reports no end of file while the process lives, so there the
+/// pane simply turns dead with its code.
+#[tokio::test]
+async fn an_exit_that_settles_slowly_is_still_read_with_its_code() {
+    let srv = unique_server();
+    let t = Uuid::now_v7();
+
+    // `trap '' HUP` because tmux closing the pty hangs up the session.
+    let cmd = "exec sh -c \"trap '' HUP; exec 0<&- 1>&- 2>&-; sleep 1; exit 42\"";
+    srv.create_terminal_window(Uuid::now_v7(), t, "slow", "/tmp", cmd).await.unwrap();
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let panes = srv.list_tagged_panes().await.unwrap();
+        let p = panes.iter().find(|p| p.terminal_id == t).expect("remain-on-exit retains the pane");
+        if p.dead {
+            assert_eq!(p.dead_status, Some(42), "a dead pane is read with its exit code");
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "timed out waiting for the exit");
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+
+    srv.kill_server().await.unwrap();
+}
+
 #[tokio::test]
 async fn a_command_killed_by_a_signal_is_observed_with_its_signal() {
     let srv = unique_server();
