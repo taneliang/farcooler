@@ -75,8 +75,9 @@ pub const NEEDS_UPDATE: &str = "This runner needs an update to show spend.";
 /// Again.
 pub const COULDNT_READ: &str = "Far Cooler couldn\u{2019}t read this task\u{2019}s usage.";
 
-/// The button beside `COULDNT_READ`.
-pub const TRY_AGAIN: &str = "Try Again";
+/// What "API-equivalent" means, said once under a task's spend total.
+pub const API_EQUIVALENT: &str =
+    "API-equivalent: what these tokens would cost at API list prices. On a subscription plan, you pay your plan\u{2019}s price instead.";
 
 /// What a cost or a count nobody stated says.
 pub const NOT_REPORTED: &str = "Not reported";

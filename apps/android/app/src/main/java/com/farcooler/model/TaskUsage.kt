@@ -116,7 +116,14 @@ object TaskUsageFormat {
     const val NEEDS_UPDATE = "This runner needs an update to show spend."
     /** What a read that didn't come back gets, beside [TRY_AGAIN]. */
     const val COULDNT_READ = "Far Cooler couldn’t read this task’s usage."
-    const val TRY_AGAIN = "Try Again"
+    /** The button beside [COULDNT_READ]: Android's own label, in sentence case (ov-204). */
+    const val TRY_AGAIN = "Try again"
+    /** What "API-equivalent" means, said once under the spend total. */
+    const val API_EQUIVALENT =
+        "API-equivalent: what these tokens would cost at API list prices. On a subscription plan, you pay your plan’s price instead."
+
+    /** Whether a cost line has a dollar figure, and so wants [API_EQUIVALENT] beneath it. */
+    fun isPriced(s: TaskSpend): Boolean = s.pricedMicros > 0
 
     /**
      * A token count, short, in [locale]'s digits: "999", "1.2K", "12K", "1M",

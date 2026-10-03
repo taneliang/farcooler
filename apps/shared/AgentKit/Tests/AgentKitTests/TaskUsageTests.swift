@@ -20,7 +20,7 @@ private struct UsageFixture: Decodable {
         var time: String?
         var rows: [Row]
     }
-    struct Words: Decodable { var nothingYet, needsUpdate, couldntRead, tryAgain: String }
+    struct Words: Decodable { var nothingYet, needsUpdate, couldntRead, apiEquivalent: String }
     var locale: String
     var words: Words
     var tokens: [Count]
@@ -96,7 +96,9 @@ struct TaskUsageTests {
         #expect(TaskUsageFormat.nothingYet == w.nothingYet)
         #expect(TaskUsageFormat.needsUpdate == w.needsUpdate)
         #expect(TaskUsageFormat.couldntRead == w.couldntRead)
-        #expect(TaskUsageFormat.tryAgain == w.tryAgain)
+        #expect(TaskUsageFormat.apiEquivalent == w.apiEquivalent)
+        // The button is this platform's own, in Apple's title case.
+        #expect(TaskUsageFormat.tryAgain == "Try Again")
     }
 
     @Test("An older runner needs an update; a read that didn't come back failed")

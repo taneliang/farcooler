@@ -111,7 +111,16 @@ public enum TaskUsageFormat {
     public static let needsUpdate = "This runner needs an update to show spend."
     /// What a read that didn't come back gets, beside `tryAgain`.
     public static let couldntRead = "Far Cooler couldn’t read this task’s usage."
+    /// The button beside `couldntRead`: the Apple platforms' own label, in
+    /// title case. Not in the shared fixture, which holds sentences only.
     public static let tryAgain = "Try Again"
+    /// What "API-equivalent" means, said once under the spend total.
+    public static let apiEquivalent =
+        "API-equivalent: what these tokens would cost at API list prices. On a subscription plan, you pay your plan’s price instead."
+
+    /// Whether a cost line has a dollar figure, and so wants `apiEquivalent`
+    /// beneath it.
+    public static func isPriced(_ s: TaskSpend) -> Bool { s.pricedMicros > 0 }
 
     /// A token count, short, in `locale`'s digits: "999", "1.2K", "12K",
     /// "1M", "2.1B". One decimal below ten of a unit, none above; a count

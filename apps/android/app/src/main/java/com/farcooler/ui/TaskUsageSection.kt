@@ -82,6 +82,13 @@ private fun Totals(t: TaskSpend) {
         Text(TaskUsageFormat.tokensLine(t), style = MaterialTheme.typography.bodyLarge)
         TaskUsageFormat.tokenDetail(t)?.let { Quiet(it) }
         Quiet(TaskUsageFormat.cost(t))
+        if (TaskUsageFormat.isPriced(t)) {
+            Text(
+                TaskUsageFormat.API_EQUIVALENT,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         TaskUsageFormat.time(t)?.let { Quiet(it) }
     }
 }
@@ -91,7 +98,7 @@ private fun Breakdown(rows: List<com.farcooler.model.TaskSpendRow>) {
     var open by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().testTag("task-usage-breakdown")) {
         ListItem(
-            headlineContent = { Text("By Harness and Model", style = MaterialTheme.typography.bodyMedium) },
+            headlineContent = { Text("By harness and model", style = MaterialTheme.typography.bodyMedium) },
             leadingContent = {
                 Icon(
                     if (open) Icons.Outlined.KeyboardArrowDown else Icons.AutoMirrored.Outlined.KeyboardArrowRight,

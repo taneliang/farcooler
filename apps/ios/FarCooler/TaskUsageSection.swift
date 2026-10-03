@@ -76,6 +76,11 @@ struct TaskUsageSection: View {
             Text(TaskUsageFormat.cost(t))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+            if TaskUsageFormat.isPriced(t) {
+                Text(TaskUsageFormat.apiEquivalent)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
             if let time = TaskUsageFormat.time(t) {
                 Text(time)
                     .font(.footnote)

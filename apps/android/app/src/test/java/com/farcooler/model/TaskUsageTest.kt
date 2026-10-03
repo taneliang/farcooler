@@ -72,7 +72,9 @@ class TaskUsageTest {
         assertEquals(words.string("nothing_yet"), TaskUsageFormat.NOTHING_YET)
         assertEquals(words.string("needs_update"), TaskUsageFormat.NEEDS_UPDATE)
         assertEquals(words.string("couldnt_read"), TaskUsageFormat.COULDNT_READ)
-        assertEquals(words.string("try_again"), TaskUsageFormat.TRY_AGAIN)
+        assertEquals(words.string("api_equivalent"), TaskUsageFormat.API_EQUIVALENT)
+        // The button is Android's own, in sentence case (ov-204).
+        assertEquals("Try again", TaskUsageFormat.TRY_AGAIN)
     }
 
     @Test

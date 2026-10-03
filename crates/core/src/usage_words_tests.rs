@@ -81,5 +81,6 @@ fn the_sections_sentences_are_the_fixtures() {
     assert_eq!(NOTHING_YET, w["nothing_yet"]);
     assert_eq!(NEEDS_UPDATE, w["needs_update"]);
     assert_eq!(COULDNT_READ, w["couldnt_read"]);
-    assert_eq!(TRY_AGAIN, w["try_again"]);
+    assert_eq!(API_EQUIVALENT, w["api_equivalent"]);
+    assert!(w.get("try_again").is_none(), "a button's label is each platform's own");
 }

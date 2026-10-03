@@ -80,7 +80,7 @@ struct TaskUsageView: View {
             Text(TaskUsageFormat.cost(t))
                 .font(TaskTypography.meta)
                 .foregroundStyle(.secondary)
-                .help("At API list prices: what this would cost on an API key, not what a subscription pays")
+                .help(TaskUsageFormat.apiEquivalent)
             if let time = TaskUsageFormat.time(t) {
                 Text(time)
                     .font(TaskTypography.meta)
