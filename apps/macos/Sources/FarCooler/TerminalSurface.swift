@@ -267,6 +267,10 @@ struct TerminalCanvas: NSViewRepresentable {
                 // screen, and it has to exist before the stream does — bytes
                 // start arriving the moment the process does. See
                 // `TerminalRenderView.beginLiveCore`.
+                // Sizes in the stream only from a runner that promises every
+                // marker in it is its own. See `StreamSizes`.
+                let sizes = StreamSizes.promised(by: hostArguments)
+                box.value.trustStreamSizes(sizes)
                 box.value.beginLiveCore()
                 let stream = TerminalStream(onBytes: { bytes in
                     DispatchQueue.main.async {
@@ -275,7 +279,7 @@ struct TerminalCanvas: NSViewRepresentable {
                 })
                 stream.start(
                     binary: binary, terminal: terminal, environment: environment,
-                    host: hostArguments)
+                    host: hostArguments, sizes: sizes)
                 coord.stream = stream
             }
         }

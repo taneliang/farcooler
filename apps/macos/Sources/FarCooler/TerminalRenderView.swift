@@ -118,7 +118,28 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     /// sized by a stream that has gone, and until its new stream speaks it
     /// follows the layout like any other. Re-learnt after every feed, and
     /// forgotten whenever the core is replaced.
+    ///
+    /// Never a promise that a marker will come, though. A resize nobody writes
+    /// after is announced only when somebody does, and a runner whose fanout
+    /// cannot read its pane's tty announces nothing; so a layout's size that no
+    /// marker follows within `sizeFallbackDelay` is applied after all. See
+    /// `fallBack(to:)`.
     private var streamSizesCore = false
+    /// Whether this view's stream is from a runner that promises every size
+    /// marker in it is its own. Only then does the core honor them. See
+    /// `StreamSizes`.
+    private var trustsStreamSizes = false
+    /// When the stream last applied a marker, and how many it had applied.
+    private var lastStreamResize: (count: UInt64, at: ContinuousClock.Instant?) = (0, nil)
+    /// A layout's size waiting to see whether the stream says it first.
+    private var sizeFallback: Task<Void, Never>?
+    /// How long a layout's size waits for a marker before it is applied anyway.
+    ///
+    /// Long enough for a program's repaint to have come and gone — measured,
+    /// the repaint arrives before the layout reply, so the marker ahead of it
+    /// is normally already here — and short enough that a quiet pane's resize
+    /// is not noticeably late.
+    static let sizeFallbackDelay: Duration = .milliseconds(150)
 
     // MARK: - Metrics
 
@@ -352,9 +373,11 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         }
         guard grid.columns > 0, grid.rows > 0, grid != paneGrid else { return }
         paneGrid = grid
-        // Not when the stream sizes the core: by now it already has. See
-        // `streamSizesCore`.
-        if !streamSizesCore {
+        // Not straight away when the stream sizes the core: by now it usually
+        // already has. See `streamSizesCore`.
+        if streamSizesCore {
+            fallBack(to: grid) { [weak self] in self?.paneGrid == grid }
+        } else {
             core.resize(columns: grid.columns, rows: grid.rows)
         }
         // The core waiting for the replay is resized too, or a pane that
@@ -382,7 +405,13 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         if paneGrid == nil {
             // The request still goes to tmux below; the answer comes back on
             // the stream, at the right place in the bytes. See `streamSizesCore`.
-            if !streamSizesCore {
+            // Later than a layout reply's wait, because this one has tmux's
+            // debounced round trip still ahead of it.
+            if streamSizesCore {
+                fallBack(to: fits, after: Self.sizeFallbackDelay * 3) { [weak self] in
+                    self?.paneGrid == nil && self?.lastReportedGeometry == fits
+                }
+            } else {
                 core.resize(columns: fits.columns, rows: fits.rows)
             }
             // See `setPaneGrid` for why the pending core follows every resize.
@@ -390,6 +419,42 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         }
         needsDisplay = true
         onGeometry?(fits.columns, fits.rows)
+    }
+
+    /// Apply `grid` after a short wait, unless the stream sizes the core first.
+    ///
+    /// What keeps a stream-sized view from ever being worse off than one sized
+    /// by layout replies: if no
+    /// marker arrives — a quiet pane, a runner that cannot read the tty — the
+    /// layout's size lands `delay` later than it used to, and nothing else
+    /// changes. A marker that arrives in the window, or arrived just before the
+    /// reply (the repaint usually beats the reply here), wins: a reply it
+    /// overtook may be stale, from a drag sending sizes faster than replies
+    /// come back.
+    private func fallBack(
+        to grid: PaneGrid, after delay: Duration = TerminalRenderView.sizeFallbackDelay,
+        stillWanted: @escaping () -> Bool
+    ) {
+        sizeFallback?.cancel()
+        let asked = ContinuousClock.now
+        let spoken = core.streamResizes
+        sizeFallback = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: delay)
+            guard let self, !Task.isCancelled, stillWanted(), self.streamSizesCore else { return }
+            if self.core.streamResizes != spoken { return }
+            if let at = self.lastStreamResize.at, asked - at < delay { return }
+            guard self.grid != grid else { return }
+            self.core.resize(columns: grid.columns, rows: grid.rows)
+            self.needsDisplay = true
+        }
+    }
+
+    /// Honor size markers in this view's stream, or not. Set by whoever opens
+    /// the stream, which is the one that knows whose it is. See `StreamSizes`.
+    func trustStreamSizes(_ trust: Bool) {
+        trustsStreamSizes = trust
+        core.setAcceptStreamSizes(trust)
+        pendingCore?.setAcceptStreamSizes(trust)
     }
 
     /// The grid the emulator is actually holding.
@@ -460,6 +525,8 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         pendingCore = nil
         corePainted = false
         streamSizesCore = false
+        core.setAcceptStreamSizes(trustsStreamSizes)
+        lastStreamResize = (core.streamResizes, nil)
         // A fresh core starts on the VT crate's own default palette, which is
         // not the theme in force. Without this, pointing a view at a different
         // terminal repainted its chrome correctly and left every character in
@@ -491,6 +558,10 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         core.feed(bytes)
         corePainted = true
         streamSizesCore = core.sizedByStream
+        let resizes = core.streamResizes
+        if resizes != lastStreamResize.count {
+            lastStreamResize = (resizes, ContinuousClock.now)
+        }
     }
 
     /// Draw this terminal's last frame, from before its view was destroyed.
@@ -521,6 +592,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         let grid = self.grid
         let fresh = VTCore(columns: grid.columns, rows: grid.rows)
         fresh.setPalette(Themes.shared.current.packed)
+        fresh.setAcceptStreamSizes(trustsStreamSizes)
         pendingCore = fresh
     }
 
@@ -533,6 +605,8 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         core = replacement
         // Whatever stream sized it is not the one that will feed it next.
         streamSizesCore = false
+        core.setAcceptStreamSizes(trustsStreamSizes)
+        lastStreamResize = (core.streamResizes, nil)
         // A core built elsewhere — or kept from before a theme change — is not
         // necessarily on the theme in force. Same reasoning as `reset`.
         core.setPalette(Themes.shared.current.packed)

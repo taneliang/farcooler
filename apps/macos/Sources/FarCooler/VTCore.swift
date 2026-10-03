@@ -51,6 +51,20 @@ final class VTCore {
         farcooler_vt_resize(handle, UInt16(clamping: columns), UInt16(clamping: rows))
     }
 
+    /// Honor size markers in the stream. Only for a stream from a runner that
+    /// promises them; see `StreamSizes`.
+    func setAcceptStreamSizes(_ accept: Bool) {
+        guard let handle else { return }
+        farcooler_vt_accept_stream_sizes(handle, accept)
+    }
+
+    /// How many size markers have been applied. Two readings say whether the
+    /// stream has spoken in between, even to repeat a size.
+    var streamResizes: UInt64 {
+        guard let handle else { return 0 }
+        return farcooler_vt_stream_resizes(handle)
+    }
+
     /// Whether the byte stream has said what size its pane is.
     ///
     /// Once it has, the core resizes itself at the point in the bytes where the

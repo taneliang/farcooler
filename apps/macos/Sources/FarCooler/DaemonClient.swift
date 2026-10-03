@@ -135,7 +135,14 @@ final class DaemonClient: ObservableObject {
     /// direction that would be embarrassing — a runner someone has just
     /// updated by hand would otherwise go on being reported as behind until
     /// the app was relaunched.
-    @Published private(set) var daemonBuild: DaemonBuild?
+    @Published private(set) var daemonBuild: DaemonBuild? {
+        // Terminal streams are opened far from here, by host arguments alone.
+        // `"stream_size_markers"` is `farcooler_protocol::capability::STREAM_SIZE_MARKERS`.
+        didSet {
+            let promised = daemonBuild?.can("stream_size_markers") == true
+            StreamSizes.record(cliHostArguments, promised: promised)
+        }
+    }
 
     /// Set when the read above ran and could not answer.
     ///

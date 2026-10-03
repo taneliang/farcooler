@@ -1,5 +1,32 @@
 import Foundation
 
+/// Which runners promise size markers in a terminal stream, by the host
+/// arguments that reach them.
+///
+/// A runner advertising `stream_size_markers` accepts `terminal stream
+/// --sizes`, and removes any marker a program prints, so every marker in its
+/// stream is its own (`farcooler_vt::size_marker`). Anything else gets neither
+/// the flag, which an older CLI would refuse, nor trust. Recorded by
+/// `DaemonClient` when it reads the runner's build, and read when a pane opens
+/// its stream; a pane that opens before the read stays on the old path until
+/// it next opens one.
+@MainActor
+enum StreamSizes {
+    private static var promising: Set<[String]> = []
+
+    static func record(_ host: [String], promised: Bool) {
+        if promised {
+            promising.insert(host)
+        } else {
+            promising.remove(host)
+        }
+    }
+
+    static func promised(by host: [String]) -> Bool {
+        promising.contains(host)
+    }
+}
+
 /// A live byte stream from one terminal.
 ///
 /// Runs `farcooler terminal stream <id>`, which emits the retained history and
@@ -21,14 +48,16 @@ final class TerminalStream {
         self.onEnd = onEnd
     }
 
+    /// `sizes` asks for the runner's size markers. See `StreamSizes`.
     func start(
-        binary: String, terminal: String, environment: [String: String], host: [String] = []
+        binary: String, terminal: String, environment: [String: String], host: [String] = [],
+        sizes: Bool = false
     ) {
         stop()
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: binary)
-        p.arguments = host + ["terminal", "stream", terminal]
+        p.arguments = host + ["terminal", "stream", terminal] + (sizes ? ["--sizes"] : [])
         p.environment = environment
 
         let out = Pipe()
