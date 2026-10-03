@@ -737,6 +737,20 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         agents.sorted { ($0.rank, $0.id) < ($1.rank, $1.id) }
     }
 
+    /// The terminals whose last turn this phone knows ended badly.
+    ///
+    /// For the Live Activity, whose push carries a status per row and no
+    /// outcome: the relay forwards `failed` only to the notification, and the
+    /// notification service writes it here (`NotificationService.swift`) as the
+    /// app does on every poll. A `done` row whose terminal is in this set is a
+    /// failed turn, drawn as one (ov-125).
+    ///
+    /// Gated on `done` here as well as at the reader, so a terminal that has
+    /// since gone back to work is never in it.
+    public var failedTurns: Set<String> {
+        Set(agents.lazy.filter { $0.status == "done" && $0.turnFailed }.map(\.id))
+    }
+
     /// How many things are waiting on a person. The number a small widget, a
     /// complication and the watch show.
     ///

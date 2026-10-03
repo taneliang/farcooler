@@ -347,7 +347,14 @@ public struct AgentCardLayout: Sendable, Equatable {
     /// and to-review hold, as they do at any age. The card is not ended: the
     /// relay's own rule is that a stale date is not a dismissal date, because
     /// a card that vanished on a timer could take a blocked agent with it.
-    public init?(state: AgentCardState, now: Date = Date(), stale: Bool) {
+    ///
+    /// **`failed` is the terminals this phone knows ended their turn badly**
+    /// — `FleetSnapshot.failedTurns`. The push carries a status per row and no
+    /// outcome, so without it a dead agent's row is the review ring, a calm
+    /// "have a look" (ov-125). Read only for a row the push calls `done`.
+    public init?(
+        state: AgentCardState, now: Date = Date(), stale: Bool, failed: Set<String> = []
+    ) {
         guard !state.rows.isEmpty, state.knowsFleet else { return nil }
 
         let drawn = state.rows.prefix(Self.rowsDrawn)
@@ -383,7 +390,8 @@ public struct AgentCardLayout: Sendable, Equatable {
             return Row(
                 row: row,
                 mark: GlanceMark(
-                    status: row.status, confidence: row.confidence(at: now, answering: !stale)),
+                    status: row.status, failed: failed.contains(row.terminal),
+                    confidence: row.confidence(at: now, answering: !stale)),
                 name: Self.name(of: row),
                 // Never a blocked row's question: it can carry the command,
                 // and this card is on a locked screen (ov-57).

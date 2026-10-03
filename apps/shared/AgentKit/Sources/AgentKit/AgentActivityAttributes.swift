@@ -91,9 +91,9 @@ public struct AgentCardState: Codable, Hashable, Sendable {
     /// relay are not Swift, so an enum here would be a fourth place that
     /// has to be taught every new state, and a value none of them knew
     /// about would fail to decode — taking the whole card down rather
-    /// than one word of it. `AgentStatus` below folds anything
-    /// unrecognized into "Working", so an older phone meeting a newer
-    /// daemon shows something sensible instead of nothing.
+    /// than one word of it. `GlanceState` draws anything unrecognized
+    /// as the tier that claims the least, with no word, so an older phone
+    /// meeting a newer daemon shows something sensible instead of nothing.
     public var status: String
 
     /// The line under the title, in every presentation.
@@ -671,11 +671,16 @@ extension Unicode.Scalar {
         }
     }
 
-    /// The three states a card can be in, and the words and color for each.
+    /// The three states a card can be in.
     ///
-    /// Here rather than in the widget so the app and the extension describe a
-    /// state identically. The widget draws it; the app uses it to decide whether
-    /// an activity is finished and should stop being tracked.
+    /// Here rather than in the widget so the app and the extension read a state
+    /// identically. The app uses it to decide whether an activity is finished
+    /// and should stop being tracked, and the widget whether its leader may be
+    /// answered. **It no longer draws or names anything**: the mark, the word
+    /// and the tint are `GlanceState`'s, the one table every glance surface
+    /// reads, because this enum's own mark drew `done` as the quiet hairline
+    /// beside rows drawing it as the review ring, and it could not say "Failed"
+    /// at all (ov-125).
     public enum AgentStatus: String, Sendable {
         case working
         case blocked
@@ -684,14 +689,6 @@ extension Unicode.Scalar {
         /// Anything unrecognized is treated as working — see `ContentState.status`.
         public init(_ raw: String) {
             self = AgentStatus(rawValue: raw) ?? .working
-        }
-
-        public var title: String {
-            switch self {
-            case .working: "Working"
-            case .blocked: "Needs You"
-            case .done: "Finished"
-            }
         }
 
         /// Whether the run is over. The relay ends the activity itself, but a

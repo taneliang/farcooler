@@ -435,6 +435,11 @@ private actor SnapshotSink {
         let line: String
         let label: String
         let status: String
+        /// Whether that agent's last turn failed, which its mark now draws
+        /// (ov-125). A `done` turn that died and one that worked carry the
+        /// same `status`, so without this a face would keep the ring of
+        /// whichever it rendered first.
+        let turnFailed: Bool
 
         /// The number `Circular` draws.
         let needingYou: Int
@@ -495,6 +500,7 @@ private actor SnapshotSink {
             line = top?.line ?? ""
             label = top?.label ?? ""
             status = top?.status ?? ""
+            turnFailed = top?.turnFailed ?? false
             needingYou = snapshot.needingYou
             hasSnapshot = snapshot.capturedAt.timeIntervalSince1970 > 0
             // Down rather than to nearest, so a rounded moment is never later

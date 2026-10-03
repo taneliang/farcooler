@@ -65,6 +65,16 @@ struct AgentActivityWidget: Widget {
             // to a runner that stopped beating (ov-71): either way nothing on
             // it vouches for "Working" now. See `AgentCardState.unvouched`.
             let stale = context.state.unvouched(stale: context.isStale)
+            // Which of the card's agents ended their last turn badly. The push
+            // says `done` for a turn that died exactly as for one that worked,
+            // and carries no outcome; the notification that came with it did,
+            // and the notification service wrote it to the App Group snapshot.
+            // So this card reads that file on every render now — one small
+            // JSON, as `FleetWidget` reads on every timeline — because a dead
+            // build drawn as a calm review ring is worse than a file read
+            // (ov-125). See `FleetSnapshot.failedTurns`.
+            let snapshot = SnapshotStore.read()
+            let failed = snapshot?.failedTurns ?? []
             // Which of the two cards this is. See `LockScreenCard`, which is
             // where the choice is argued: rows when the relay sent any and
             // there is nothing to answer, the headline otherwise.
@@ -75,7 +85,7 @@ struct AgentActivityWidget: Widget {
             // relay's sweep: its rows are gone and the tail names it.
             let layout =
                 ask.isPresent
-                ? nil : AgentCardLayout(state: context.state, stale: stale)
+                ? nil : AgentCardLayout(state: context.state, stale: stale, failed: failed)
             LockScreenCard(
                 state: context.state,
                 // The fleet line steps aside while there is an answer on offer.
@@ -88,16 +98,16 @@ struct AgentActivityWidget: Widget {
                 // anywhere else.
                 //
                 // The rows card does not read it at all — every figure on it
-                // came off the push — so the App Group file is not opened on
-                // that path. It is one small JSON on a render thread, but it is
-                // also the last thing this card needed a local file for.
+                // came off the push. It reads the snapshot only for `failed`.
                 tail: ask.isPresent || layout != nil
                     ? FleetTail.unknown
                     : FleetTail.current(
-                        for: context.state, snapshot: SnapshotStore.read(),
-                        stale: stale),
+                        for: context.state, snapshot: snapshot, stale: stale),
                 ask: ask,
                 layout: layout,
+                leader: GlanceState(
+                    status: context.state.status,
+                    failed: failed.contains(context.state.terminal)),
                 stale: stale)
                 // The card's own background. Left to the system's material
                 // rather than a color of ours: the lock screen wallpaper is
@@ -127,18 +137,20 @@ struct AgentActivityWidget: Widget {
                 // the Island draws.
                 .widgetURL(terminalURL(layout?.rows.first?.terminal ?? context.state.terminal))
         } dynamicIsland: { context in
-            let status = AgentStatus(context.state.status)
             let ask = LeaderAsk.current(for: context.state)
-            // See the lock screen's `stale` above.
+            // See the lock screen's `stale` and `failed` above.
             let stale = context.state.unvouched(stale: context.isStale)
+            let snapshot = SnapshotStore.read()
+            let leader = GlanceState(
+                status: context.state.status,
+                failed: snapshot?.failedTurns.contains(context.state.terminal) ?? false)
             let tail =
                 ask.isPresent
                 ? FleetTail.unknown
-                : FleetTail.current(
-                    for: context.state, snapshot: SnapshotStore.read(), stale: stale)
+                : FleetTail.current(for: context.state, snapshot: snapshot, stale: stale)
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    StatusBadge(status: status, stale: stale)
+                    StatusBadge(state: leader, stale: stale)
                         .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
@@ -226,7 +238,7 @@ struct AgentActivityWidget: Widget {
                 // phone's appearance is — §01's light palette answers a
                 // different question, "what does this look like on a pale
                 // backdrop", and there is no pale backdrop here.
-                GlanceMarkView(status.mark(stale: stale), size: .header)
+                GlanceMarkView(leader.mark(stale: stale), size: .header)
                     .environment(\.colorScheme, .dark)
             } compactTrailing: {
                 // §07's compact presentation, which is about the FLEET: "Count
@@ -261,7 +273,7 @@ struct AgentActivityWidget: Widget {
                             ? "\(context.state.label) +\(tail.others)" : context.state.label
                     )
                     .font(.caption2)
-                    .foregroundStyle(status.tint)
+                    .foregroundStyle(leader.tint)
                     // On a stale card with a count beside the name, the count
                     // is who the relay last knew about. See
                     // `FleetTail.dimsCompactCount`.
@@ -273,7 +285,7 @@ struct AgentActivityWidget: Widget {
                 // §07, verbatim: "MINIMAL: The ring alone at 15pt. No count, no
                 // trace — history is unreadable at this size." The lone
                 // indicator, which is the whole presentation.
-                GlanceMarkView(status.mark(stale: stale), size: .lone)
+                GlanceMarkView(leader.mark(stale: stale), size: .lone)
                     .environment(\.colorScheme, .dark)
             }
             .widgetURL(terminalURL(context.state.terminal))
@@ -579,7 +591,9 @@ private struct LockScreenCard: View {
     /// The rows card, or nil for the headline card. Built in the widget's own
     /// body so the choice and the tap target are made from one value.
     let layout: AgentCardLayout?
-    /// ActivityKit's `isStale`. See `AgentStatus.mark(stale:)`.
+    /// The leader's state, failure included. See `GlanceState`.
+    let leader: GlanceState
+    /// ActivityKit's `isStale`. See `GlanceState.mark(stale:)`.
     let stale: Bool
 
     var body: some View {
@@ -587,7 +601,9 @@ private struct LockScreenCard: View {
             GlanceCardView(layout: layout)
         } else {
             VStack(alignment: .leading, spacing: 10) {
-                LeaderRow(state: state, ask: ask, trace: tail.leaderTrace, stale: stale)
+                LeaderRow(
+                    state: state, leader: leader, ask: ask, trace: tail.leaderTrace,
+                    stale: stale)
                 if let rest = tail.line {
                     Divider()
                     Text(rest)
@@ -620,6 +636,7 @@ private struct LockScreenCard: View {
 /// `Link` here and there must not be one.
 private struct LeaderRow: View {
     let state: AgentActivityAttributes.ContentState
+    let leader: GlanceState
     let ask: LeaderAsk
     /// The leader's thirteen buckets, off the snapshot. See `FleetTail`, which
     /// is where a card gets anything the push could not carry.
@@ -627,7 +644,6 @@ private struct LeaderRow: View {
     let stale: Bool
 
     var body: some View {
-        let status = AgentStatus(state.status)
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 14) {
                 VStack(alignment: .leading, spacing: 3) {
@@ -690,7 +706,7 @@ private struct LeaderRow: View {
                 if !ask.isPresent, let trace = ActivityTrace(trace) {
                     GlanceTraceView(trace, size: .cardRow)
                 }
-                StatusBadge(status: status, stale: stale)
+                StatusBadge(state: leader, stale: stale)
             }
             // Guarded at the call site as well as inside the view. A `VStack`
             // asked to lay out a child that draws nothing is one more thing
@@ -731,56 +747,43 @@ private struct LeaderRow: View {
 /// often than true" — and a Live Activity is pushed on every change rather than
 /// reloaded twice an hour. The claim is true here when it is made.
 private struct StatusBadge: View {
-    let status: AgentStatus
+    let state: GlanceState
     /// 11pt — §07 gives the card's rows a leading column of exactly 11, which
     /// is §03's header diameter.
     var size: GlanceMarkSize = .header
-    /// ActivityKit's `isStale`. See `AgentStatus.mark(stale:)`.
+    /// ActivityKit's `isStale`. See `GlanceState.mark(stale:)`.
     let stale: Bool
 
     var body: some View {
         VStack(spacing: 4) {
-            GlanceMarkView(status.mark(stale: stale), size: size)
+            GlanceMarkView(state.mark(stale: stale), size: size)
             // No word for a leader the card can't state: "Working" beside a
             // "can't say" ring read as a contradiction, to the eye and to
             // VoiceOver, which now hears the ring's "Can’t say" alone.
-            if AgentCardLeader.isStated(status: status.rawValue, stale: stale) {
-                Text(status.title)
+            if let title = state.title(stale: stale) {
+                Text(title)
                     .glanceType(.monoFigures)
             }
         }
     }
 }
 
-extension AgentStatus {
-    /// This state as the one mark.
-    ///
-    /// Blocked is the only one that earns the heavy amber ring, and that is the
-    /// point: amber is reserved for the state that is waiting on a person, so a
-    /// glance at a locked phone answers "does this need me" without reading a
-    /// word. Working and finished both sit on the quiet hairline and are told
-    /// apart by the core, which is exactly the split §03 draws — "the core is
-    /// the agent's: filled while producing, absent at a prompt."
-    ///
-    /// Green has come off. It was the third hue in a system §01 allows two, and
-    /// what it was saying — "this finished" — is what an absent core says.
-    var mark: GlanceMark {
-        switch self {
-        case .working: GlanceMark(attention: .quiet, core: .producing)
-        case .blocked: GlanceMark(attention: .needsYou, core: .atAPrompt)
-        case .done: GlanceMark(attention: .quiet, core: .atAPrompt)
-        }
-    }
-
-    /// The same, on a card the relay has stopped vouching for.
+extension GlanceState {
+    /// This state's mark on a card the relay has stopped vouching for.
     ///
     /// ActivityKit's `isStale`: an hour since the last push, which is what a
     /// runner that stays down looks like from here. Working is the claim about
     /// now, so it becomes "can't say", the dashed ring with no core that
-    /// `AgentCardLayout` draws for the same card; blocked and finished hold.
-    func mark(stale: Bool) -> GlanceMark {
-        AgentCardLeader.isStated(status: rawValue, stale: stale) ? mark : .unsaid
-    }
+    /// `AgentCardLayout` draws for the same card; needs-you, failed and
+    /// finished hold, as `said(answering:)` holds them.
+    ///
+    /// The mark itself is `GlanceState.mark`, the table the card's rows, the
+    /// widgets and the watch read. This file drew its own until ov-125, and
+    /// drew `done` as the quiet hairline beside rows drawing the review ring.
+    func mark(stale: Bool) -> GlanceMark { mark.said(answering: !stale) }
+
+    /// The word beside the mark, or nil where the mark is "can't say".
+    func title(stale: Bool) -> String? { mark(stale: stale) == .unsaid ? nil : title }
 
     /// The color for the WORDS beside the mark. The mark colors itself.
     ///
@@ -789,10 +792,9 @@ extension AgentStatus {
     /// screen card sits over a wallpaper on the same dark ground. §01's light
     /// values are for a pale backdrop, which is not what either of these is.
     var tint: Color {
-        switch self {
-        case .working: GlancePalette.text2.darkColor
-        case .blocked: GlancePalette.amber.darkColor
-        case .done: GlancePalette.text2.darkColor
+        switch tone {
+        case .attention: GlancePalette.amber.darkColor
+        case .quiet: GlancePalette.text2.darkColor
         }
     }
 }

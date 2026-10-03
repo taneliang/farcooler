@@ -781,8 +781,11 @@ extension GlanceMark {
     ///
     /// Here rather than in `GlanceMark.swift` because that file is compiled
     /// without this one by the watch complication, which has no `Terminal`.
+    ///
+    /// **And how the turn ended**, which `GlanceState` reads only for `done`:
+    /// a failed turn is the failed tier, never the review ring (ov-125).
     init(terminal: Terminal) {
-        self.init(status: terminal.agent.rawValue)
+        self.init(status: terminal.agent.rawValue, failed: terminal.turnDidFail)
     }
 }
 

@@ -76,6 +76,23 @@ public struct GlanceMark: Hashable, Sendable {
         /// `FleetSnapshot.Agent` below, which produces this tier for `done`
         /// and for nothing else.
         case toReview
+        /// A turn that ended badly. Drawn exactly as `needsYou` — the heavy
+        /// amber ring — and SAID as "Failed".
+        ///
+        /// **Amber, because it needs you.** The owner's rule for the glance
+        /// surfaces is that color is for the states that want a person, and a
+        /// build that died overnight wants one at least as much as an agent
+        /// that stopped to ask. It arrives as `done`, and drawing it with the
+        /// review ring told the lock screen, the widget and the watch that it
+        /// was a calm "have a look" (ov-125). The Mac and Android draw it red
+        /// in the app; the glance palette has no red and §01 allows it none,
+        /// so the glance surfaces give it the one hue they reserve for "you".
+        ///
+        /// Its own case rather than `needsYou` with a footnote, so that the
+        /// words — VoiceOver's `phrase`, the Live Activity's badge — can say
+        /// what happened, and so a test can tell a failed turn from a blocked
+        /// one. See `GlanceState`, which is where a status becomes this.
+        case failed
         /// Nothing is wanted from you. A 1pt hairline at every size.
         case quiet
     }
@@ -152,42 +169,29 @@ public struct GlanceMark: Hashable, Sendable {
     /// take the whole snapshot down. So an unrecognised status lands on the
     /// quiet hairline, which is the tier that claims the least.
     ///
-    /// `.toReview` comes out of exactly one status, `done`, and out of no
-    /// other — see `Attention.toReview` for why that one is allowed and why a
-    /// per-agent `reviewsWaiting` or `unreadDiff` still is not.
+    /// **`turnFailed` is read here, and it was not.** A turn that died arrives
+    /// as `done`, exactly as one that worked does, and this initializer read
+    /// `status` alone — so every widget, the watch and its complication drew a
+    /// dead agent as the calm review ring. See `GlanceState`.
     public init(agent: FleetSnapshot.Agent, confidence: FleetSnapshot.Confidence = .known) {
-        self.init(status: agent.status, confidence: confidence)
+        self.init(status: agent.status, failed: agent.turnFailed, confidence: confidence)
     }
 
-    /// The same, over the status WORD alone.
+    /// The same, over the status WORD and how the turn ended.
     ///
     /// The lock screen card's rows are pushed by the relay and are not agents in
     /// any snapshot — see `AgentCardRow` — so they have a status and an age and
-    /// nothing else. The switch below is the one that was already here, moved
-    /// down one level rather than copied: a second mapping of `done` would be a
-    /// second chance for one surface to draw the review tier and another not to.
-    public init(status: String, confidence: FleetSnapshot.Confidence = .known) {
-        switch status {
-        // Blocked is latched — an agent stopped an hour ago is still stopped —
-        // so it keeps its heavy ring however old the snapshot is, and the core
-        // is genuinely absent rather than merely unstated: being at a prompt is
-        // what "blocked" means.
-        case "blocked": self.init(attention: .needsYou, core: .atAPrompt)
-        // The turn is over and nobody has looked at it. `.atAPrompt` for the
-        // same reason `blocked` is, one line up: the core is the agent's side
-        // of the mark and a finished agent is not producing anything.
-        //
-        // Latched, like `blocked` and unlike `working` — `confidence(in:at:)`
-        // vouches for both at any age, as the comment below this switch says,
-        // so the ring stays solid however old the snapshot is. Drawing a state
-        // the system latches as "nothing wanted" would contradict a decision
-        // this codebase has already made.
-        case "done": self.init(attention: .toReview, core: .atAPrompt)
-        case "working": self.init(attention: .quiet, core: .producing)
-        // An unrecognised status lands on the tier that claims the least, and
-        // that rule is untouched by `done` joining the review tier above.
-        default: self.init(attention: .quiet, core: .atAPrompt)
-        }
+    /// nothing else. The mapping itself is `GlanceState`, the one table every
+    /// surface reads: a second mapping of `done` would be a second chance for
+    /// one surface to draw the review tier and another not to.
+    ///
+    /// `failed` defaults to false for the callers that genuinely have no
+    /// per-agent outcome — a tier count, a needs-you item — and is only ever
+    /// read for `done`.
+    public init(
+        status: String, failed: Bool = false, confidence: FleetSnapshot.Confidence = .known
+    ) {
+        self = GlanceState(status: status, failed: failed).mark
         // Only the claim about the present decays. `confidence(in:at:)` has
         // already applied that rule — it vouches for blocked and done at any
         // age and stops vouching for working — so this is the ring following
@@ -254,6 +258,7 @@ public struct GlanceMark: Hashable, Sendable {
         let tier =
             switch attention {
             case .needsYou: "Needs you"
+            case .failed: "Failed"
             case .toReview: "To review"
             case .quiet: "Nothing wanted"
             }
@@ -271,6 +276,99 @@ public struct GlanceMark: Hashable, Sendable {
         // The surface declined to say. Saying "at a prompt" here would be this
         // file inventing the very claim `core == nil` exists to withhold.
         case nil: return tier
+        }
+    }
+}
+
+/// One agent's state, as every glance surface names, draws and colors it.
+///
+/// **The one table from the wire's words to a surface's mark, word and tone.**
+/// Before ov-125 there were three: `GlanceMark(status:)` for the widgets, the
+/// watch and the lock screen card's rows; `AgentStatus.mark` for the same
+/// card's leader badge and the Dynamic Island, which drew `done` as the quiet
+/// hairline beside rows drawing it as the review ring; and `ShellScreen.mark`
+/// in the app. None of the three read how the turn ended, so a turn that died
+/// was a calm "to review" or "Finished" on every surface a person glances at.
+/// Every one of them now asks this type.
+///
+/// Five states and no more, because the wire has three words and one flag:
+/// `blocked`, `done` (finished or failed, by `turnFailed`), `working`, and
+/// anything else — `idle`, or a word a newer daemon invents — which lands on
+/// the tier that claims the least.
+public enum GlanceState: String, CaseIterable, Sendable {
+    /// `blocked`: stopped, waiting on a person.
+    case needsYou
+    /// `done`, and the turn ended badly.
+    case failed
+    /// `done`, and the turn ended well. Nobody has looked yet.
+    case finished
+    /// `working`: producing.
+    case working
+    /// Anything else. Idle, or a word this build does not know.
+    case unstated
+
+    /// From the wire: the status word and whether the turn behind it failed.
+    ///
+    /// `failed` is read only for `done`, which is the daemon's own gate
+    /// (`Terminal.turnDidFail`): the failure belongs to the turn that ENDED,
+    /// and an agent already working again, or blocked on its next question,
+    /// is not failing.
+    public init(status: String, failed: Bool) {
+        switch status {
+        case "blocked": self = .needsYou
+        case "done": self = failed ? .failed : .finished
+        case "working": self = .working
+        default: self = .unstated
+        }
+    }
+
+    /// The one mark.
+    ///
+    /// Blocked and failed are the attention tier and both stand at a prompt —
+    /// the agent is producing nothing either way. A finished turn is the review
+    /// ring: "this is over, and you have not looked". Working is the hairline
+    /// with a core; anything else is the hairline without one.
+    public var mark: GlanceMark {
+        switch self {
+        case .needsYou: GlanceMark(attention: .needsYou, core: .atAPrompt)
+        case .failed: GlanceMark(attention: .failed, core: .atAPrompt)
+        case .finished: GlanceMark(attention: .toReview, core: .atAPrompt)
+        case .working: GlanceMark(attention: .quiet, core: .producing)
+        case .unstated: GlanceMark(attention: .quiet, core: .atAPrompt)
+        }
+    }
+
+    /// The word beside the mark, where a surface has room for one, or nil
+    /// where there is nothing true to say.
+    ///
+    /// "Failed" and "Finished" are the app's own words for a `done` turn —
+    /// the notification it posts says "claude failed" or "claude finished"
+    /// (`Notifications.swift`), and `Terminal.activityLabel` says "Failed".
+    /// "Needs You" in title case, as the Live Activity badge always wrote it.
+    public var title: String? {
+        switch self {
+        case .needsYou: "Needs You"
+        case .failed: "Failed"
+        case .finished: "Finished"
+        case .working: "Working"
+        case .unstated: nil
+        }
+    }
+
+    /// Which ink the WORDS take. The mark colors itself.
+    public enum Tone: Sendable, Equatable {
+        /// Amber: a person is wanted.
+        case attention
+        /// Everything else: the secondary neutral.
+        case quiet
+    }
+
+    /// Color only for the states that want a person — the owner's rule. A
+    /// finished turn's word stays neutral; its ring already says "review".
+    public var tone: Tone {
+        switch self {
+        case .needsYou, .failed: .attention
+        case .finished, .working, .unstated: .quiet
         }
     }
 }
@@ -353,6 +451,8 @@ public enum GlanceMarkSize: Hashable, Sendable, CaseIterable {
         case (.watchLone, .toReview): 4
         case (.watchLone, .quiet): 1.5
         case (_, .quiet): 1
+        // Drawn as needs-you, at every size. See `Attention.failed`.
+        case (_, .failed): stroke(.needsYou)
         }
     }
 
@@ -523,7 +623,7 @@ public struct GlanceMarkView: View {
 
     private var ringColor: Color {
         switch mark.attention {
-        case .needsYou: GlancePalette.amber(scheme)
+        case .needsYou, .failed: GlancePalette.amber(scheme)
         case .toReview: GlancePalette.review(scheme)
         case .quiet: GlancePalette.ink2(scheme)
         }

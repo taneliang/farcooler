@@ -34,6 +34,7 @@ private func words(_ mark: GlanceMark) -> [String?] {
     let attention =
         switch mark.attention {
         case .needsYou: "needsYou"
+        case .failed: "failed"
         case .toReview: "toReview"
         case .quiet: "quiet"
         }
@@ -71,5 +72,29 @@ func aLongLivedStateOnALiveLinkIsNotDrawnStale() throws {
         #expect(
             words(mark) == [item.expect.attention, item.expect.core, item.expect.link],
             "\(item.name)")
+    }
+}
+
+/// A turn that died stays failed through the in-app mark, at any age and on
+/// either link: ov-150 moved the shell onto `GlanceMark(terminal:)`, and
+/// before it read `turnDidFail` the merge would have drawn every failed turn
+/// as the review ring (ov-125).
+///
+/// Mutation: `GlanceMark(terminal:)` dropping `failed:`. Red.
+@Test("A failed turn stays failed through the in-app mark")
+func aFailedTurnStaysFailedThroughTheInAppMark() {
+    let now = Date().timeIntervalSince1970 * 1000
+    for age in [nil, 60.0, 4 * 3600.0] {
+        let terminal = Terminal(
+            id: "t", short: "t", title: "claude", preset: "claude", state: "running",
+            activity: "done", turnFailed: true, activitySince: age.map { now - $0 * 1000 },
+            epoch: 1)
+        for answering in [true, false] {
+            let mark = GlanceMark(terminal: terminal).said(answering: answering)
+            #expect(mark == GlanceState.failed.mark, "\(String(describing: age)) \(answering)")
+        }
+        var finished = terminal
+        finished.turnFailed = false
+        #expect(GlanceMark(terminal: finished) == GlanceState.finished.mark)
     }
 }
