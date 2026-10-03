@@ -200,6 +200,61 @@ mod tests {
         assert_eq!(COMPATIBLE_DOWN_TO, 15);
     }
 
+    /// The newest schema main writes is ov-194's agent-turn tables, and this
+    /// build counts them as its own: a file main left at that schema opens
+    /// as current, and only the schema after it is "newer".
+    ///
+    /// The file is built from migrations 0001-0019 plus 0020 by name, not
+    /// from `MIGRATIONS`, so it is main's schema whatever this list says. If
+    /// 0020 drops out of the list, this build is at 19 and refuses main's
+    /// file; if it moves, the 20th migration is not ov-194's.
+    #[test]
+    fn main_s_newest_schema_opens_here_and_the_one_after_it_is_refused() {
+        type Step = fn(&rusqlite::Transaction) -> rusqlite::Result<()>;
+        let ov_194 = crate::usage::migration_0020_agent_turns as Step;
+        assert!(
+            std::ptr::fn_addr_eq(MIGRATIONS[19].0, ov_194),
+            "the 20th migration is ov-194's agent turns"
+        );
+
+        let dir = std::env::temp_dir().join(format!("farcooler-main20-{}", Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("store.db");
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "PRAGMA foreign_keys = ON; PRAGMA recursive_triggers = ON; \
+                 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);",
+            )
+            .unwrap();
+            let tx = conn.transaction().unwrap();
+            for (m, _) in &MIGRATIONS[..19] {
+                m(&tx).unwrap();
+            }
+            ov_194(&tx).unwrap();
+            // Main has no marker: it vouches for nobody.
+            tx.execute("INSERT INTO meta (key, value) VALUES ('schema_version', '20')", []).unwrap();
+            tx.commit().unwrap();
+        }
+
+        let store = Store::open(&path).expect("main's newest schema is this build's own");
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        assert_eq!(read_schema_version(&conn).unwrap(), 20, "opened as current, nothing rerun");
+        assert_eq!(read_compatible_down_to(&conn).unwrap(), Some(COMPATIBLE_DOWN_TO));
+        assert_eq!(CURRENT_SCHEMA_VERSION, 20, "a new migration moves this test's 'next' along");
+        std::fs::remove_dir_all(&dir).ok();
+
+        let next = database_left_by_a_newer_build(21, None);
+        let err = Store::open(&next).err().expect("a schema after main's must not open unvouched");
+        assert!(matches!(err, DomainError::NewerData), "{err:?}");
+        assert_eq!(
+            err.redacted_message(),
+            "This runner's data was written by a newer Far Cooler. Update Far Cooler to use it."
+        );
+        std::fs::remove_dir_all(next.parent().unwrap()).ok();
+    }
+
     /// A fresh file holding a store, with its `meta` rewritten as given, the
     /// way a newer build would have left it.
     fn database_left_by_a_newer_build(schema: u32, floor: Option<u32>) -> std::path::PathBuf {
