@@ -272,33 +272,111 @@ async fn is_routed(session: &mut Session, name: &str) -> bool {
 /// config pickers were in none of them. A string literal that is not a wire
 /// method (`"fleet"`, a key, a label) parses as no `Method` and is ignored.
 ///
-/// The phone apps only. AgentKit is shared with the Mac, which reaches its
-/// runner through the CLI, and names `task.set_status` as data for a board
-/// menu no phone calls (until the Mac's half of ov-184 removes it).
+/// The phone apps, and the AgentKit sources the iPhone, the watch and its
+/// widget compile into themselves (`agentkit_the_phones_compile`): iOS's
+/// answer is named there, as `PhoneTaskAnswer.method`, and a task write
+/// added beside it would reach a phone screen as surely as one in
+/// `apps/ios`. The rest of AgentKit is the Mac's, which reaches its runner
+/// through the CLI.
 fn the_wire_methods_the_phones_name() -> std::collections::BTreeMap<Method, String> {
     let apps = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps");
-    let mut found = std::collections::BTreeMap::new();
+    let mut files = Vec::new();
     let mut pending = vec![apps.join("ios"), apps.join("android/app/src/main")];
     while let Some(dir) = pending.pop() {
         for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
             let path = entry.unwrap().path();
             if path.is_dir() {
                 pending.push(path);
-                continue;
-            }
-            let source = path.extension().is_some_and(|x| x == "swift" || x == "kt");
-            if !source {
-                continue;
-            }
-            let text = std::fs::read_to_string(&path).unwrap();
-            for literal in text.split('"').skip(1).step_by(2) {
-                if let Some(method) = Method::parse(literal) {
-                    found.entry(method).or_insert_with(|| path.display().to_string());
-                }
+            } else if path.extension().is_some_and(|x| x == "swift" || x == "kt") {
+                files.push(path);
             }
         }
     }
+    let generator = std::fs::read_to_string(apps.join("ios/generate-project.py")).unwrap();
+    let agentkit = agentkit_the_phones_compile(&generator, &apps.join("shared/AgentKit/Sources/AgentKit"));
+    assert!(agentkit.len() > 50, "found {} phone-compiled AgentKit sources, so this proves nothing", agentkit.len());
+    files.extend(agentkit);
+    methods_named_in(&files)
+}
+
+/// AgentKit's sources that the iPhone, the watch and its widget compile, by
+/// the three lists in `apps/ios/generate-project.py` that build them. iOS has
+/// no SwiftPM project; it compiles exactly these files, so these and no
+/// others are AgentKit's phone code. A listed file that isn't there panics
+/// when it is read.
+fn agentkit_the_phones_compile(generator: &str, sources: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    for list in ["AGENTKIT_SOURCES", "WATCH_AGENTKIT_SOURCES", "WATCH_WIDGET_AGENTKIT_SOURCES"] {
+        let head = format!("\n{list} = [");
+        let at = generator.find(&head).unwrap_or_else(|| panic!("generate-project.py has no {list}"));
+        let body = &generator[at + head.len()..];
+        let body = &body[..body.find("\n]").unwrap_or_else(|| panic!("{list} never closes"))];
+        for line in body.lines().filter(|l| !l.trim_start().starts_with('#')) {
+            files.extend(line.split('"').skip(1).step_by(2).filter(|n| n.ends_with(".swift")).map(|n| sources.join(n)));
+        }
+    }
+    files.sort();
+    files.dedup();
+    files
+}
+
+/// Wire methods the phones compile in and never send, each where it is
+/// named, until the Mac's half of ov-184 takes it out.
+///
+/// `TaskBoardModel.swift` is phone-compiled for its rows and sections; its
+/// move menu (`TaskBoardModel.moves`) is the Mac board's, and no phone screen
+/// calls it. Each entry must still be found, so it goes when its use does.
+const NAMED_BUT_NOT_SENT: [(&str, Method); 1] = [("TaskBoardModel.swift", Method::TaskSetStatus)];
+
+/// Each wire method a string literal in `files` names, with the first file
+/// that names it, leaving out `NAMED_BUT_NOT_SENT`.
+fn methods_named_in(files: &[std::path::PathBuf]) -> std::collections::BTreeMap<Method, String> {
+    let mut found = std::collections::BTreeMap::new();
+    let mut exempted = std::collections::BTreeSet::new();
+    for path in files {
+        let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        for literal in text.split('"').skip(1).step_by(2) {
+            let Some(method) = Method::parse(literal) else { continue };
+            if NAMED_BUT_NOT_SENT.contains(&(name, method)) {
+                exempted.insert((name, method));
+                continue;
+            }
+            found.entry(method).or_insert_with(|| path.display().to_string());
+        }
+    }
+    let stale: Vec<_> = NAMED_BUT_NOT_SENT.iter().filter(|e| !exempted.contains(e)).collect();
+    let scanned_agentkit = files.iter().any(|f| f.ends_with("AgentKit/TaskBoardModel.swift"));
+    assert!(!scanned_agentkit || stale.is_empty(), "no longer named, so drop them from NAMED_BUT_NOT_SENT: {stale:?}");
     found
+}
+
+/// **A task write planted in AgentKit's phone code is found** (ov-184).
+///
+/// The scan once read `apps/ios` only, and iOS's answer had moved into
+/// AgentKit, so a write beside it went unseen by `no_phone_can_write_a_task`.
+/// Here a generator that lists one AgentKit file on the watch's list, and
+/// one that is in no list, which must stay unread.
+#[test]
+fn a_task_write_in_agentkit_s_phone_code_is_found() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("Planted.swift"), "let m = \"task.create\"\n").unwrap();
+    std::fs::write(dir.path().join("MacOnly.swift"), "let m = \"task.update\"\n").unwrap();
+    let generator = "X = 1\nAGENTKIT_SOURCES = [\n    # \"MacOnly.swift\" is not here\n]\n\
+                     WATCH_AGENTKIT_SOURCES = [\n    \"Planted.swift\",\n]\n\
+                     WATCH_WIDGET_AGENTKIT_SOURCES = [\n]\n";
+    let files = agentkit_the_phones_compile(generator, dir.path());
+    assert_eq!(files, vec![dir.path().join("Planted.swift")]);
+    let named = methods_named_in(&files);
+    assert!(named.contains_key(&Method::TaskCreate), "the planted write went unseen: {named:?}");
+    assert!(!named.contains_key(&Method::TaskUpdate), "a file in no list was read: {named:?}");
+
+    // And the real lists reach the file iOS's answer is named in.
+    let apps = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps");
+    let generator = std::fs::read_to_string(apps.join("ios/generate-project.py")).unwrap();
+    let real = agentkit_the_phones_compile(&generator, &apps.join("shared/AgentKit/Sources/AgentKit"));
+    let shell: Vec<_> = real.into_iter().filter(|f| f.ends_with("ShellNavigation.swift")).collect();
+    assert!(methods_named_in(&shell).contains_key(&Method::TaskNote), "iOS's answer is outside the scan");
 }
 
 /// Every wire method a phone sends has a route, and an arm in `dispatch`.

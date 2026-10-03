@@ -217,25 +217,109 @@ struct PhoneFollowUpTests {
     /// **No iPhone, Watch or extension source names a task write the
     /// orchestrator owns** (ov-184), so no screen can reach one through the
     /// client core, which has no arm for them either
-    /// (`no_phone_can_write_a_task` in `crates/client`).
+    /// (`no_phone_can_write_a_task` in `crates/client`). The sources are
+    /// `apps/ios` and the AgentKit files those targets compile in
+    /// (`PhoneSources.agentKit`), where iOS's answer is named.
     @Test("No iOS source names task.create, task.update or task.set_status")
     func noPhoneSourceNamesATaskWrite() throws {
+        let ios = PhoneSources.apps.appendingPathComponent("ios")
+        let walker = try #require(FileManager.default.enumerator(at: ios, includingPropertiesForKeys: nil))
+        let app = walker.compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" }
+        #expect(app.count > 50, "found \(app.count) sources under \(ios.path), so this proves nothing")
+        let agentKit = try PhoneSources.agentKit()
+        #expect(agentKit.count > 50, "found \(agentKit.count) phone-compiled AgentKit sources")
+        let texts = try (app + agentKit).map {
+            ($0.lastPathComponent, try String(contentsOf: $0, encoding: .utf8))
+        }
+        // Proves the scan reads string literals, in both halves: the board's
+        // read where the app names it, and the answer's in AgentKit.
+        #expect(texts.contains { $0.1.contains("\"task.get\"") })
+        #expect(texts.contains { $0.0 == "ShellNavigation.swift" && $0.1.contains("\"task.note\"") })
+
+        let named = PhoneSources.taskWrites(in: texts)
+        #expect(named.isEmpty, "a task write the orchestrator owns: \(named)")
+        let all = PhoneSources.taskWrites(in: texts, exempting: [])
+        let stale = PhoneSources.namedButNotSent.subtracting(all)
+        #expect(stale.isEmpty, "no longer named, so drop them from namedButNotSent: \(stale)")
+    }
+
+    /// **A task write planted in AgentKit's phone code is found**: a listed
+    /// file is read, and a file on no list isn't.
+    @Test("A task write in a phone-compiled AgentKit file is found")
+    func aPlantedAgentKitTaskWriteIsFound() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ov184-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try "let m = \"task.create\"\n".write(
+            to: dir.appendingPathComponent("Planted.swift"), atomically: true, encoding: .utf8)
+        try "let m = \"task.update\"\n".write(
+            to: dir.appendingPathComponent("MacOnly.swift"), atomically: true, encoding: .utf8)
+        let generator = """
+            AGENTKIT_SOURCES = [
+                # "MacOnly.swift" is not here
+            ]
+            WATCH_AGENTKIT_SOURCES = [
+                "Planted.swift",
+            ]
+            WATCH_WIDGET_AGENTKIT_SOURCES = [
+            ]
+            """
+        let files = try PhoneSources.agentKit(generator: generator, sources: dir)
+        #expect(files.map(\.lastPathComponent) == ["Planted.swift"])
+        let texts = try files.map { ($0.lastPathComponent, try String(contentsOf: $0, encoding: .utf8)) }
+        #expect(PhoneSources.taskWrites(in: texts) == ["task.create in Planted.swift"])
+    }
+}
+
+/// The sources the iPhone, its extensions, the watch and its widget compile,
+/// for the task-write guard above.
+enum PhoneSources {
+    /// `…/apps`, from this file's path.
+    static var apps: URL {
         var root = URL(fileURLWithPath: #filePath)
         // …/apps/shared/AgentKit/Tests/AgentKitTests/<this file>
         for _ in 0..<5 { root.deleteLastPathComponent() }
-        let ios = root.appendingPathComponent("ios")
-        let walker = try #require(FileManager.default.enumerator(at: ios, includingPropertiesForKeys: nil))
-        let sources = walker.compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" }
-        #expect(sources.count > 50, "found \(sources.count) sources under \(ios.path), so this proves nothing")
-        // Proves the scan reads string literals: the board's read is found
-        // where the app names it (the answer's is `PhoneTaskAnswer.method`).
-        let texts = try sources.map { ($0.lastPathComponent, try String(contentsOf: $0, encoding: .utf8)) }
-        #expect(texts.contains { $0.1.contains("\"task.get\"") })
+        return root
+    }
 
-        let writes = ["task.create", "task.update", "task.set_status", "task.move", "task.block"]
-        let named = texts.flatMap { name, text in
+    /// The task writes the orchestrator owns, which no phone names.
+    static let writes = ["task.create", "task.update", "task.set_status", "task.move", "task.block"]
+
+    /// Named in phone-compiled code and never sent, until the Mac's half of
+    /// ov-184 removes it: `TaskBoardModel.moves` is the Mac board's menu. The
+    /// same entry as `NAMED_BUT_NOT_SENT` in `crates/client`.
+    static let namedButNotSent: Set<String> = ["task.set_status in TaskBoardModel.swift"]
+
+    /// Each task write a source in `texts` names, as "method in file", but
+    /// for `exempt`.
+    static func taskWrites(
+        in texts: [(String, String)], exempting exempt: Set<String> = namedButNotSent
+    ) -> [String] {
+        texts.flatMap { name, text in
             writes.filter { text.contains("\"\($0)\"") }.map { "\($0) in \(name)" }
+        }.filter { !exempt.contains($0) }
+    }
+
+    /// AgentKit's sources that the phone's targets compile, by the three lists
+    /// in `apps/ios/generate-project.py` that build them: iOS has no SwiftPM
+    /// project, and compiles exactly these files.
+    static func agentKit(generator: String? = nil, sources: URL? = nil) throws -> [URL] {
+        let text = try generator
+            ?? String(contentsOf: apps.appendingPathComponent("ios/generate-project.py"), encoding: .utf8)
+        let dir = sources ?? apps.appendingPathComponent("shared/AgentKit/Sources/AgentKit")
+        var names = Set<String>()
+        for list in ["AGENTKIT_SOURCES", "WATCH_AGENTKIT_SOURCES", "WATCH_WIDGET_AGENTKIT_SOURCES"] {
+            let lines = text.components(separatedBy: "\n")
+            let start = try #require(lines.firstIndex(of: "\(list) = ["), "generate-project.py has no \(list)")
+            let end = try #require(lines[start...].firstIndex(of: "]"), "\(list) never closes")
+            for line in lines[(start + 1)..<end]
+            where !line.trimmingCharacters(in: .whitespaces).hasPrefix("#") {
+                let parts = line.components(separatedBy: "\"")
+                names.formUnion(stride(from: 1, to: parts.count, by: 2).map { parts[$0] }
+                    .filter { $0.hasSuffix(".swift") })
+            }
         }
-        #expect(named.isEmpty, "a task write the orchestrator owns: \(named)")
+        return names.sorted().map { dir.appendingPathComponent($0) }
     }
 }
