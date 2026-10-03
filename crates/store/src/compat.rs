@@ -195,18 +195,20 @@ mod tests {
             .map(|(i, _)| i + 1)
             .collect();
         assert_eq!(welcome, vec![4, 11, 13, 16, 17, 18, 19, 20]);
-        // 0015 reshapes the board, so nothing before it may read past it,
-        // however many `Welcome` migrations follow.
-        assert_eq!(COMPATIBLE_DOWN_TO, 15);
+        // 0021 (ov-212, ov-213) is additive, but the notes and wakes this
+        // build writes into it break an older build's reads (see
+        // `waits::migration_0021_waits_and_workers`), so it is the floor.
+        assert_eq!(COMPATIBLE_DOWN_TO, 21);
     }
 
     /// The newest schema main writes is ov-194's agent-turn tables, and this
     /// build counts them as its own: a file main left at that schema opens
-    /// as current, and only the schema after it is "newer".
+    /// and migrates on to this build's, and only the schema after this
+    /// build's is "newer".
     ///
     /// The file is built from migrations 0001-0019 plus 0020 by name, not
     /// from `MIGRATIONS`, so it is main's schema whatever this list says. If
-    /// 0020 drops out of the list, this build is at 19 and refuses main's
+    /// 0020 drops out of the list, this build reruns a migration on main's
     /// file; if it moves, the 20th migration is not ov-194's.
     #[test]
     fn main_s_newest_schema_opens_here_and_the_one_after_it_is_refused() {
@@ -237,15 +239,15 @@ mod tests {
             tx.commit().unwrap();
         }
 
-        let store = Store::open(&path).expect("main's newest schema is this build's own");
+        let store = Store::open(&path).expect("main's newest schema opens here");
         drop(store);
         let conn = Connection::open(&path).unwrap();
-        assert_eq!(read_schema_version(&conn).unwrap(), 20, "opened as current, nothing rerun");
+        assert_eq!(read_schema_version(&conn).unwrap(), 21, "migrated on to ov-212's waits");
         assert_eq!(read_compatible_down_to(&conn).unwrap(), Some(COMPATIBLE_DOWN_TO));
-        assert_eq!(CURRENT_SCHEMA_VERSION, 20, "a new migration moves this test's 'next' along");
+        assert_eq!(CURRENT_SCHEMA_VERSION, 21, "a new migration moves this test's 'next' along");
         std::fs::remove_dir_all(&dir).ok();
 
-        let next = database_left_by_a_newer_build(21, None);
+        let next = database_left_by_a_newer_build(22, None);
         let err = Store::open(&next).err().expect("a schema after main's must not open unvouched");
         assert!(matches!(err, DomainError::NewerData), "{err:?}");
         assert_eq!(

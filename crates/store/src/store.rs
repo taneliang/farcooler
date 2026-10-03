@@ -102,6 +102,7 @@ impl Store {
             // running it is exactly what must stay safe if it does happen.
             // Stamped here too, so a database migrated before the marker
             // existed carries it from its next open.
+            crate::waits::sweep_unfitting(conn)?;
             return migrate::stamp_compatible_down_to(conn);
         }
 
@@ -115,6 +116,7 @@ impl Store {
         }
 
         migrate::migrate(conn, current)?;
+        crate::waits::sweep_unfitting(conn)?;
         migrate::stamp_compatible_down_to(conn)
     }
 

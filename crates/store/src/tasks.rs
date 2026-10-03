@@ -267,7 +267,7 @@ const UPDATED_AT: &str = updated_at_sql!();
 const TASK_COLUMNS: &str = concat!(
     "id, repository_id, key, title, status, status_since, \
      intent, acceptance, constraints, labels, worktree_id, resource_version, created_at, \
-     workspace_id, ",
+     workspace_id, wait_kind, wait_line, wait_until, wait_event, wait_since, ",
     updated_at_sql!()
 );
 
@@ -332,6 +332,30 @@ pub(crate) fn insert_note(
     Ok(note)
 }
 
+/// Move a task from `from` to `to` inside a caller's transaction: the row,
+/// what the move does to its wait and subagents (`waits::after_move`), and
+/// the `StatusChange` note saying so.
+pub(crate) fn move_in(
+    tx: &Connection,
+    task: Uuid,
+    from: TaskStatus,
+    to: TaskStatus,
+    actor: Actor,
+    now: i64,
+) -> Result<(TaskNote, crate::waits::Moved)> {
+    tx.execute(
+        "UPDATE tasks SET status = ?1, status_since = ?2 WHERE id = ?3",
+        params![to.as_str(), now, uuid_blob(task)],
+    )
+    .map_err(map_err)?;
+    let after = crate::waits::after_move(tx, task, from, to)?;
+    let mut extra = json!({ "from": from.as_str(), "to": to.as_str() });
+    after.annotate(&mut extra);
+    let body = format!("moved from {} to {}", from.as_str(), to.as_str());
+    let moved = insert_note(tx, task, NoteKind::StatusChange, actor, &body, &extra, None)?;
+    Ok((moved, after))
+}
+
 impl Store {
     // ---- the task row: current understanding ----
 
@@ -367,6 +391,7 @@ impl Store {
             created_at: now,
             // Equal, so a card nothing else has happened to reads "Added".
             updated_at: now,
+            wait: None,
         };
 
         tx.execute(
@@ -629,26 +654,14 @@ impl Store {
         }
 
         let now = now_millis();
-        tx.execute(
-            "UPDATE tasks SET status = ?1, status_since = ?2 WHERE id = ?3",
-            params![status.as_str(), now, uuid_blob(task)],
-        )
-        .map_err(map_err)?;
-        let moved = insert_note(
-            &tx,
-            task,
-            NoteKind::StatusChange,
-            actor,
-            &format!("moved from {} to {}", existing.status.as_str(), status.as_str()),
-            &json!({ "from": existing.status.as_str(), "to": status.as_str() }),
-            None,
-        )?;
+        let (moved, after) = move_in(&tx, task, existing.status, status, actor, now)?;
         tx.commit().map_err(map_err)?;
 
         // What `TASK_COLUMNS` would derive on a re-read: the move's note is
         // the newest thing on the card, and it read the clock after `now`.
         let updated_at = existing.updated_at.max(now).max(moved.at);
-        Ok(Task { status, status_since: now, updated_at, ..existing })
+        let wait = if after.wait_cleared.is_some() { None } else { existing.wait };
+        Ok(Task { status, status_since: now, updated_at, wait, ..existing })
     }
 
     // ---- the notes: the record of how it got there ----
@@ -730,7 +743,7 @@ impl Store {
         extra: serde_json::Value,
         supersedes: Option<Uuid>,
     ) -> Result<TaskNote> {
-        if matches!(kind, NoteKind::StatusChange | NoteKind::Created) {
+        if matches!(kind, NoteKind::StatusChange | NoteKind::Created | NoteKind::Wait | NoteKind::Worker) {
             return Err(DomainError::InvalidArgument { what: "kind" });
         }
         let written = insert_note(&self.conn(), task, kind, actor, body, &extra, supersedes);

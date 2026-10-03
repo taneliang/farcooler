@@ -24,6 +24,8 @@ mod store;
 mod tasks;
 pub mod usage;
 mod wakes;
+pub mod waits;
+pub mod workers;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 mod workspaces;

@@ -125,7 +125,10 @@ fn the_migration_only_adds() {
     conn.execute_batch("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);").unwrap();
     crate::migrate::migrate_only_to(&mut conn, 19);
     let before: Vec<String> = tables(&conn);
-    crate::migrate::migrate(&mut conn, 19).unwrap();
+    // 0020 alone: `migrate` would run every migration after it too.
+    let tx = conn.transaction().unwrap();
+    crate::usage::migration_0020_agent_turns(&tx).unwrap();
+    tx.commit().unwrap();
     let after = tables(&conn);
     let added: Vec<&String> = after.iter().filter(|t| !before.contains(t)).collect();
     assert_eq!(added, ["agent_turn_models", "agent_turns"]);

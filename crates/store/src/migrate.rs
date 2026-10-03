@@ -49,6 +49,9 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     // any table old code writes and no trigger. An older build records no
     // turns; the ones already there wait for a newer build.
     (crate::usage::migration_0020_agent_turns, Older::Welcome),
+    // Refused: the schema is additive, but the `wait` and `worker` notes and
+    // `hold_ended` wakes written into it break an older build. See its doc.
+    (crate::waits::migration_0021_waits_and_workers, Older::Refused),
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

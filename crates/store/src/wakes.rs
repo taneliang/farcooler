@@ -57,13 +57,16 @@ impl Store {
     }
 
     /// Every answer not yet told, oldest first.
+    ///
+    /// Answers only: a `hold_ended` row (`Store::release_due_holds`) waits
+    /// for the pump that knows how to tell one, which is ov-212's lane B.
     pub fn pending_answer_wakes(&self) -> Result<Vec<PendingWake>> {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(
                 "SELECT w.note_id, w.task_id, n.body, n.actor, w.enqueued_at, w.claimed_at
                    FROM answer_wakes w JOIN task_notes n ON n.id = w.note_id
-                  WHERE w.done_at IS NULL
+                  WHERE w.done_at IS NULL AND w.kind = 'answer'
                   ORDER BY w.enqueued_at, w.rowid",
             )
             .map_err(map_err)?;
@@ -163,7 +166,11 @@ impl Store {
     /// tick: an indexed probe of an almost always empty set.
     pub fn any_pending_answer_wake(&self) -> Result<bool> {
         self.conn()
-            .query_row("SELECT EXISTS (SELECT 1 FROM answer_wakes WHERE done_at IS NULL)", [], |r| r.get(0))
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM answer_wakes WHERE done_at IS NULL AND kind = 'answer')",
+                [],
+                |r| r.get(0),
+            )
             .map_err(map_err)
     }
 

@@ -466,6 +466,13 @@ pub enum NoteKind {
     StatusChange,
     /// A task came into being, and who made it.
     Created,
+    /// When a task will start changed: put in a line, held, parked, or let
+    /// go (ov-212). Written only by the store's own writes, like
+    /// `StatusChange`.
+    Wait,
+    /// A subagent started, ended or resumed on a task (ov-213). Written only
+    /// by the store's own writes.
+    Worker,
 }
 
 impl NoteKind {
@@ -479,6 +486,8 @@ impl NoteKind {
             NoteKind::Comment => "comment",
             NoteKind::StatusChange => "status_change",
             NoteKind::Created => "created",
+            NoteKind::Wait => "wait",
+            NoteKind::Worker => "worker",
         }
     }
 
@@ -492,6 +501,8 @@ impl NoteKind {
             "comment" => NoteKind::Comment,
             "status_change" => NoteKind::StatusChange,
             "created" => NoteKind::Created,
+            "wait" => NoteKind::Wait,
+            "worker" => NoteKind::Worker,
             _ => return None,
         })
     }
@@ -618,6 +629,10 @@ pub struct Task {
     /// tasks.rs), so no write path can forget to move it. A block does not
     /// move it: a block is a fact about another card.
     pub updated_at: i64,
+    /// When it will start, if anyone said and it still fits the status
+    /// (ov-212; see `crate::waits`). A wait that doesn't fit, left by an
+    /// older build that moved the task, reads as `None`.
+    pub wait: Option<crate::waits::TaskWait>,
 }
 
 /// Every field of `Task` a caller may legitimately revise in place.
@@ -705,7 +720,7 @@ fn get_actor(row: &Row, idx: usize) -> rusqlite::Result<Actor> {
     Actor::parse(&raw).ok_or_else(|| decode_failure(idx, format!("unreadable actor {raw:?}")))
 }
 
-fn get_optional_uuid(row: &Row, idx: usize) -> rusqlite::Result<Option<Uuid>> {
+pub(crate) fn get_optional_uuid(row: &Row, idx: usize) -> rusqlite::Result<Option<Uuid>> {
     let bytes: Option<Vec<u8>> = row.get(idx)?;
     bytes
         .map(|b| {
@@ -762,12 +777,13 @@ pub(crate) fn acceptance_to_json(items: &[AcceptanceItem]) -> String {
 }
 
 pub(crate) fn row_to_task(row: &Row) -> rusqlite::Result<Task> {
+    let status = get_status(row, 4)?;
     Ok(Task {
         id: get_uuid(row, 0)?,
         repository_id: get_uuid(row, 1)?,
         key: row.get(2)?,
         title: row.get(3)?,
-        status: get_status(row, 4)?,
+        status,
         status_since: row.get(5)?,
         intent: row.get(6)?,
         acceptance: get_acceptance(row, 7)?,
@@ -777,7 +793,8 @@ pub(crate) fn row_to_task(row: &Row) -> rusqlite::Result<Task> {
         resource_version: row.get::<_, i64>(11)? as u64,
         created_at: row.get(12)?,
         workspace_id: get_uuid(row, 13)?,
-        updated_at: row.get(14)?,
+        wait: crate::waits::read_wait(row, 14, status)?,
+        updated_at: row.get(19)?,
     })
 }
 
