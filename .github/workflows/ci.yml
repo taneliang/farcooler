@@ -95,7 +95,7 @@ jobs:
           ./scripts/file-size-budget.py
       # No new swallowed call to the host (ov-167): a `try?` on core.call or
       # runCLI, or an ignored runCatching/attempt or empty catch in the Android
-      # network and model code. Existing ones are listed, each with its reason,
+      # app's Kotlin. Existing ones are listed, each with its reason,
       # in scripts/swallow-lint-allow.txt.
       - run: ./scripts/swallow-lint.py --self-test
       - run: ./scripts/swallow-lint.py

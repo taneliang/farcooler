@@ -4,15 +4,6 @@
 # A reason starting TODO(ov-N) is a known bug carded as ov-N, kept here so CI
 # passes today. Fix the call and delete its line; the scan fails on a stale one.
 
-apps/macos/Sources/FarCooler/AgentStream.swift :: send :: _ = try? await runCLI(arguments) :: owned by ov-136 (Mac agent pane failures), which replaces these; don't edit here
-apps/macos/Sources/FarCooler/AgentStream.swift :: editQueued :: _ = try? await runCLI(["terminal", "agent-edit-queued", terminal, id, text]) :: owned by ov-136 (Mac agent pane failures), which replaces these; don't edit here
-apps/macos/Sources/FarCooler/AgentStream.swift :: steerQueued :: _ = try? await runCLI(["terminal", "agent-steer-queued", terminal, id]) :: owned by ov-136 (Mac agent pane failures), which replaces these; don't edit here
-apps/macos/Sources/FarCooler/AgentStream.swift :: cancelQueued :: _ = try? await runCLI(["terminal", "agent-cancel-queued", terminal, id]) :: owned by ov-136 (Mac agent pane failures), which replaces these; don't edit here
-apps/macos/Sources/FarCooler/AgentStream.swift :: setModel :: _ = try? await runCLI(["terminal", "agent-set-model", terminal, model]) :: owned by ov-136 (Mac agent pane failures), which replaces these; don't edit here
-apps/macos/Sources/FarCooler/AgentStream.swift :: setConfig :: _ = try? await runCLI(["terminal", "agent-set-config", terminal, id, value]) :: owned by ov-136 (Mac agent pane failures), which replaces these; don't edit here
-apps/macos/Sources/FarCooler/AgentStream.swift :: answer :: _ = try? await runCLI(["terminal", "agent-answer", terminal, requestID, optionID]) :: owned by ov-136 (Mac agent pane failures), which replaces these; don't edit here
-apps/macos/Sources/FarCooler/AgentStream.swift :: setMode :: _ = try? await runCLI(["terminal", "agent-set-mode", terminal, mode]) :: owned by ov-136 (Mac agent pane failures), which replaces these; don't edit here
-apps/macos/Sources/FarCooler/AgentStream.swift :: cancel :: _ = try? await runCLI(["terminal", "agent-cancel", terminal]) :: owned by ov-136 (Mac agent pane failures), which replaces these; don't edit here
 apps/ios/FarCooler/AgentStream.swift :: editQueued :: _ = try? await core.call( "terminal.agent_edit_queued", ["terminal": terminal, "queuedId": id, "text": text]) :: TODO(ov-179): a refused queue edit, model, mode or cancel is silent on iOS
 apps/ios/FarCooler/AgentStream.swift :: steerQueued :: _ = try? await core.call( "terminal.agent_steer_queued", ["terminal": terminal, "queuedId": id]) :: TODO(ov-179): a refused queue edit, model, mode or cancel is silent on iOS
 apps/ios/FarCooler/AgentStream.swift :: cancelQueued :: _ = try? await core.call( "terminal.agent_cancel_queued", ["terminal": terminal, "queuedId": id]) :: TODO(ov-179): a refused queue edit, model, mode or cancel is silent on iOS
