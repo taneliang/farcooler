@@ -1,0 +1,14 @@
+{
+  "aps": {
+    "timestamp": 1791019800,
+    "event": "end",
+    "content-state": {
+      "terminal": "",
+      "label": "",
+      "machine": "",
+      "status": "done",
+      "detail": ""
+    },
+    "dismissal-date": 1791019800
+  }
+}

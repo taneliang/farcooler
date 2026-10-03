@@ -7154,6 +7154,8 @@ describe('the shared contract fixtures', () => {
     expect(contractNames('push/fcm').length).toBeGreaterThanOrEqual(5)
     expect(contractNames('live-activity').length).toBeGreaterThanOrEqual(2)
     expect(contractNames('registration').length).toBeGreaterThanOrEqual(3)
+    expect(contractNames('runner')).toEqual(['heartbeat', 'retire', 'withdraw'])
+    expect(contractNames('activity')).toEqual(['dismissed', 'ended', 'running'])
   })
 
   it('has a notice behind every push and card fixture', () => {
@@ -7238,14 +7240,23 @@ describe('the shared contract fixtures', () => {
     },
   }
 
+  /// Each app's push token, spelled out for the reason `filed` is.
+  const tokens: Record<string, string> = {
+    ios: '7c3f1a9e2b8d4c6f0e1a3b5c7d9e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e',
+    macos: 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90',
+    android: 'fP3kQ9xR2sT:APA91bH7mN4vW8yZ1aC5dE9gJ2kL6nP0qS3tU7wX1zB4cF8hK2mO5rV9yA3dG7jL0pS4uW8xZ2bE6',
+  }
+
   it('has an expectation for every registration fixture', () => {
     expect(contractNames('registration')).toEqual(Object.keys(filed).sort())
   })
 
   it.each(Object.keys(filed))('files the %s app’s registration whole', async name => {
     watchFetch()
+    // Posted as the app sends it, not through `register`, whose defaults
+    // would fill in a `platform` or `pushToken` the app had renamed.
     const body = contract(`registration/${name}.json`)
-    const response = await register('user_1', body)
+    const response = await post('/v1/devices', body, await sessionFor('user_1'))
     expect(response.status, name).toBe(200)
 
     const row = await env.DB.prepare(
@@ -7256,9 +7267,109 @@ describe('the shared contract fixtures', () => {
     const { pulse_token: pulse, ...want } = filed[name]
     expect(row).toEqual({
       ...want,
-      push_token: body.pushToken,
+      push_token: tokens[name],
       version: '0.2.0 (canary) · 412',
       pulse_hash: pulse === null ? null : await sha256(pulse as string),
     })
+  })
+})
+
+describe("the runner's and the card's shared contract fixtures", () => {
+  /// The iPhone from its own registration fixture, which carries a
+  /// push-to-start token and a pulse token, and a runner paired to it.
+  async function iphone() {
+    const response = await post('/v1/devices', contract('registration/ios.json'), await sessionFor('user_1'))
+    expect(response.status).toBe(200)
+    await pair('user_1', 'mine')
+  }
+
+  function at(ms: number) {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(ms)
+  }
+
+  it('files a heartbeat and answers the pulse the widget decodes', async () => {
+    watchFetch()
+    try {
+      at(CONTRACT_NOW)
+      await iphone()
+      expect((await post('/v1/heartbeat', contract('runner/heartbeat.json'), 'mine')).status).toBe(200)
+      const row = await env.DB.prepare(`SELECT beat_every, install_id, name, version FROM daemons`)
+        .first<Record<string, unknown>>()
+      expect(row).toEqual({
+        beat_every: 300,
+        install_id: expect.any(String),
+        name: 'Studio',
+        version: '2026.10.3-canary.412+d35970c9',
+      })
+
+      // A minute and a half later, the widget asks with the phone's pulse token.
+      at(CONTRACT_NOW + 90_000)
+      const pulse = contract('registration/ios.json').pulseToken
+      const response = await post('/v1/pulse', {}, pulse)
+      expect(response.status).toBe(200)
+      expectContract('pulse/response.json', await response.json())
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('drops a withdrawn runner from the pulse', async () => {
+    watchFetch()
+    await iphone()
+    await post('/v1/heartbeat', contract('runner/heartbeat.json'), 'mine')
+    expect((await post('/v1/heartbeat', contract('runner/withdraw.json'), 'mine')).status).toBe(200)
+    const response = await post('/v1/pulse', {}, contract('registration/ios.json').pulseToken)
+    expect(await response.json()).toEqual({ runners: [] })
+  })
+
+  it('files a running card, updates it, and ends it when its runs retire', async () => {
+    const calls = watchFetch()
+    try {
+      at(CONTRACT_NOW)
+      await iphone()
+      const filed = await post('/v1/devices/activity', contract('activity/running.json'), await sessionFor('user_1'))
+      expect(filed.status).toBe(200)
+      expect(
+        await env.DB.prepare(`SELECT update_token, environment, dismissed_at FROM install_cards`).first(),
+      ).toEqual({
+        update_token: '80f1c2d3e4b5a6978869504132a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7',
+        environment: 'production',
+        dismissed_at: null,
+      })
+
+      await post('/v1/notify', contract('notify/agent-working.json'), 'mine')
+      const updates = pushes(calls).filter(call => call.headers['apns-push-type'] === 'liveactivity')
+      expect(updates.map(call => call.url.split('/device/')[1])).toEqual([
+        '80f1c2d3e4b5a6978869504132a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7',
+      ])
+      expectContract('live-activity/running/update.json', updates[0].body)
+
+      const retired = await post('/v1/notify/retire', contract('runner/retire.json'), 'mine')
+      expect(await retired.json()).toEqual({ retired: 1 })
+      const ends = pushes(calls).filter(call => call.headers['apns-push-type'] === 'liveactivity').slice(1)
+      expect(ends.length).toBe(1)
+      expectContract('live-activity/running/end.json', ends[0].body)
+      expect(await roster('user_1')).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('remembers a card a person swiped away, and forgets one that ended', async () => {
+    watchFetch()
+    await iphone()
+    const session = await sessionFor('user_1')
+    await post('/v1/devices/activity', contract('activity/running.json'), session)
+
+    expect((await post('/v1/devices/activity', contract('activity/dismissed.json'), session)).status).toBe(200)
+    const swiped = await env.DB.prepare(`SELECT update_token, dismissed_at FROM install_cards`)
+      .first<{ update_token: string; dismissed_at: number | null }>()
+    expect(swiped?.update_token).toBe('')
+    expect(swiped?.dismissed_at).toEqual(expect.any(Number))
+
+    await post('/v1/devices/activity', contract('activity/running.json'), session)
+    expect((await post('/v1/devices/activity', contract('activity/ended.json'), session)).status).toBe(200)
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM install_cards`).first()).toEqual({ n: 0 })
   })
 })

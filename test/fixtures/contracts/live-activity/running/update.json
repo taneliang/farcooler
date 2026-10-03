@@ -1,0 +1,40 @@
+{
+  "aps": {
+    "timestamp": 1791019800,
+    "event": "update",
+    "content-state": {
+      "terminal": "term-01999a8f2c4e",
+      "label": "claude",
+      "machine": "Studio",
+      "workspace": "Billing",
+      "status": "working",
+      "detail": "3/7 · Designing test matrix",
+      "startedAt": 1791018420000,
+      "blocked": 0,
+      "review": 0,
+      "working": 1,
+      "needsYou": 1,
+      "insertions": 142,
+      "deletions": 37,
+      "commits": 1,
+      "rows": [
+        {
+          "terminal": "term-01999a8f2c4e",
+          "label": "claude",
+          "machine": "Studio",
+          "workspace": "Billing",
+          "status": "working",
+          "detail": "3/7 · Designing test matrix",
+          "insertions": 142,
+          "deletions": 37,
+          "commits": 1,
+          "startedAt": 1791018420000,
+          "updatedAt": 1791019800000,
+          "trace": "EAAAAAAAAAAAAAAAAAAAHgAbAC0AIQAMAAkAAAAAAAAAAAAAAAAAAAB0AEABQAFAAUABKAAAAAAAAAAAAAAAAAEA",
+          "traceAnchor": 5970066
+        }
+      ],
+      "more": 0
+    }
+  }
+}

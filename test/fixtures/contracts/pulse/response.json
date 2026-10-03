@@ -1,0 +1,11 @@
+{
+  "runners": [
+    {
+      "label": "Studio",
+      "name": "Studio",
+      "heardAgo": 90000,
+      "beatEvery": 300,
+      "runner": "4266f947d4b7004a947abea580d30cc1027db90ff91fd7e6086c2e73b1209fd5"
+    }
+  ]
+}
