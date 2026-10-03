@@ -17,6 +17,16 @@
 //! sequence cut in half, which the client cannot detect — and the queue provides
 //! the two things that make it possible: `clear`, and `drained`, which says when
 //! a picture would be read rather than queued behind a stall.
+//!
+//! **A picture is pinned.** Whatever goes in through `replace` or `push_pinned`
+//! is outside the limit and outside `clear`: live output can be refused behind
+//! it, and dropped, but it can never evict it. A picture is the one thing that
+//! makes a client whole again, and it is routinely larger than the limit — a
+//! colored 2000-line history captures at 2.6 MiB — so a limit that counted it
+//! would throw it away on the very next live chunk, leaving the client holding
+//! a `Gap` it ignores and a screen that never repaints. Pinned bytes are bounded
+//! another way: there is at most one picture queued, because the only thing
+//! that queues a new one, `replace`, first empties the queue.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -25,14 +35,15 @@ use farcooler_protocol::v1::Event;
 use prost::Message;
 use tokio::sync::Notify;
 
-/// A new queue that holds at most `limit` bytes of encoded events — except that
-/// an empty queue always takes one, however large, so a single picture bigger
-/// than the limit can still be delivered.
+/// A new queue that holds at most `limit` bytes of encoded unpinned events —
+/// except that it always takes one when it holds none, however large. Pinned
+/// events are not counted against the limit; see the module docs.
 pub fn push_queue(limit: usize) -> (PushSender, PushReceiver) {
     let shared = Arc::new(Shared {
         state: Mutex::new(State {
             queue: VecDeque::new(),
             bytes: 0,
+            pinned_bytes: 0,
             receiver_waiting: false,
             receiver_gone: false,
             senders: 1,
@@ -66,9 +77,13 @@ struct Shared {
 }
 
 struct State {
-    queue: VecDeque<(Event, usize)>,
-    /// The encoded size of everything in `queue`.
+    /// Each event with its encoded size, and whether it is pinned.
+    queue: VecDeque<(Event, usize, bool)>,
+    /// The encoded size of the unpinned events in `queue`: what the limit is
+    /// held against.
     bytes: usize,
+    /// The encoded size of the pinned ones.
+    pinned_bytes: usize,
     /// The receiver found the queue empty and is parked in `recv`. Which, from
     /// `serve_connection`, means the connection's writer is below its high-water
     /// mark: it only asks for a push when it has room to send one.
@@ -117,18 +132,18 @@ impl PushSender {
         if state.receiver_gone {
             return Pushed::Closed;
         }
-        if !state.queue.is_empty() && state.bytes + size > self.shared.limit {
+        if state.bytes > 0 && state.bytes + size > self.shared.limit {
             return Pushed::Full;
         }
         state.bytes += size;
-        state.queue.push_back((event, size));
+        state.queue.push_back((event, size, false));
         state.receiver_waiting = false;
         drop(state);
         self.shared.to_receiver.notify_one();
         Pushed::Queued
     }
 
-    /// Replace whatever is queued with `events`, whatever their size.
+    /// Replace whatever is queued with `events`, pinned, whatever their size.
     ///
     /// For the one sender that has just been refused and has something to put
     /// in place of what it gives up — a resync, which is worth more to the
@@ -140,10 +155,24 @@ impl PushSender {
         }
         state.queue.clear();
         state.bytes = 0;
+        state.pinned_bytes = 0;
+        drop(state);
+        self.push_pinned(events)
+    }
+
+    /// Queue `events` behind whatever is there, pinned, whatever their size.
+    ///
+    /// For a picture that has nothing to replace: the opening replay of an
+    /// attachment. False when nothing will read it.
+    pub fn push_pinned(&self, events: Vec<Event>) -> bool {
+        let mut state = self.shared.lock();
+        if state.receiver_gone {
+            return false;
+        }
         for event in events {
             let size = event.encoded_len();
-            state.bytes += size;
-            state.queue.push_back((event, size));
+            state.pinned_bytes += size;
+            state.queue.push_back((event, size, true));
         }
         if !state.queue.is_empty() {
             state.receiver_waiting = false;
@@ -153,17 +182,28 @@ impl PushSender {
         true
     }
 
-    /// Drop everything queued, returning what was dropped so the caller can
-    /// account for it.
+    /// Drop everything queued that is not pinned, returning what was dropped so
+    /// the caller can account for it.
     pub fn clear(&self) -> Vec<Event> {
         let mut state = self.shared.lock();
         state.bytes = 0;
-        state.queue.drain(..).map(|(event, _)| event).collect()
+        let mut dropped = Vec::new();
+        let mut kept = VecDeque::new();
+        for (event, size, pinned) in state.queue.drain(..) {
+            if pinned {
+                kept.push_back((event, size, pinned));
+            } else {
+                dropped.push(event);
+            }
+        }
+        state.queue = kept;
+        dropped
     }
 
-    /// The encoded size of everything queued right now.
+    /// The encoded size of everything queued right now, pinned or not.
     pub fn queued_bytes(&self) -> usize {
-        self.shared.lock().bytes
+        let state = self.shared.lock();
+        state.bytes + state.pinned_bytes
     }
 
     /// Resolves once the queue is empty AND the receiver is waiting for more —
@@ -204,6 +244,7 @@ impl Drop for PushReceiver {
         state.receiver_gone = true;
         state.queue.clear();
         state.bytes = 0;
+        state.pinned_bytes = 0;
         drop(state);
         self.shared.to_senders.notify_waiters();
     }
@@ -217,8 +258,12 @@ impl PushReceiver {
             let notified = self.shared.to_receiver.notified();
             {
                 let mut state = self.shared.lock();
-                if let Some((event, size)) = state.queue.pop_front() {
-                    state.bytes -= size;
+                if let Some((event, size, pinned)) = state.queue.pop_front() {
+                    if pinned {
+                        state.pinned_bytes -= size;
+                    } else {
+                        state.bytes -= size;
+                    }
                     return Some(event);
                 }
                 if state.senders == 0 {
@@ -280,6 +325,22 @@ mod tests {
         assert!(tokio::time::timeout(std::time::Duration::from_secs(2), tx.drained()).await.unwrap());
         tx.push(event(10));
         assert!(reader.await.unwrap().is_some());
+    }
+
+    /// A picture bigger than the limit survives the live output that races it
+    /// (ov-118 review): live output is refused and cleared behind it, and the
+    /// picture still arrives whole, first.
+    #[tokio::test]
+    async fn live_output_never_evicts_a_pinned_picture() {
+        let (tx, mut rx) = push_queue(1000);
+        assert!(tx.replace(vec![event(5000), event(5000)]));
+        assert_eq!(tx.push(event(400)), Pushed::Queued, "live output may queue behind it");
+        assert_eq!(tx.push(event(400)), Pushed::Queued);
+        assert_eq!(tx.push(event(400)), Pushed::Full);
+        assert_eq!(tx.clear().len(), 2, "only the live output goes");
+        assert_eq!(rx.recv().await.unwrap().encoded_len(), event(5000).encoded_len());
+        assert_eq!(rx.recv().await.unwrap().encoded_len(), event(5000).encoded_len());
+        assert_eq!(tx.queued_bytes(), 0);
     }
 
     #[tokio::test]

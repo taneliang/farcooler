@@ -376,7 +376,7 @@ impl MarkerStrip {
 /// string-carrying OSC, DCS, SOS, PM and APC (ended by ST, BEL for OSC, or
 /// CAN/SUB), and UTF-8.
 #[derive(Default)]
-struct Boundary {
+pub(crate) struct Boundary {
     state: Parse,
 }
 
@@ -395,11 +395,11 @@ enum Parse {
 }
 
 impl Boundary {
-    fn at_ground(&self) -> bool {
+    pub(crate) fn at_ground(&self) -> bool {
         self.state == Parse::Ground
     }
 
-    fn feed(&mut self, bytes: &[u8]) {
+    pub(crate) fn feed(&mut self, bytes: &[u8]) {
         for &byte in bytes {
             self.step(byte);
         }

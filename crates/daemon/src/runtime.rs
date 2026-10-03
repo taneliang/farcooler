@@ -442,11 +442,10 @@ impl Runtime {
         // piece rather than chunked, because it is one picture: a client that
         // painted half of it would show a screen with no cursor and no modes.
         let bytes = self.opening_replay(&pane.pane_id).await;
-        let mut behind = match sink.output(bytes) {
-            Taken::Sent => false,
-            Taken::Behind => true,
-            Taken::Gone => return Ok(()),
-        };
+        if !sink.open(bytes) {
+            return Ok(());
+        }
+        let mut behind = false;
 
         // Then live bytes, shared with every other watcher of this pane through
         // the same fanout the stdout path uses — tmux allows one `pipe-pane`
@@ -458,12 +457,30 @@ impl Runtime {
         // No size markers over the wire: nothing on this path asks for them
         // yet, and the clients on it do not honor them. See `stream`.
         let mut strip = crate::fanout::MarkerStrip::holding();
+        // Where the output stands, so a resync is taken only between whole
+        // sequences. The picture's reset covers whatever the client was left
+        // holding BEFORE it; this covers what comes after it. Live bytes resume
+        // from wherever the last dropped read ended, and a read that ended
+        // inside a CSI would hand the freshly reset client the tail of a
+        // sequence whose start it never saw.
+        let mut boundary = crate::fanout::Boundary::default();
+        // The sink has caught up and a resync is owed, waiting only for the
+        // output to reach ground.
+        let mut owed = false;
         loop {
             if behind {
+                // Not forever: a program that stops mid-sequence would
+                // otherwise leave its client waiting for a picture that never
+                // comes. A torn sequence is the lesser harm.
+                let ground = boundary.at_ground();
                 tokio::select! {
-                    ready = sink.caught_up() => {
+                    ready = sink.caught_up(), if !owed => {
                         if !ready {
                             break;
+                        }
+                        if !ground {
+                            owed = true;
+                            continue;
                         }
                         // Captured now rather than when the sink fell behind:
                         // a picture taken while the client was stalled would
@@ -481,23 +498,37 @@ impl Runtime {
                         }
                         behind = false;
                     }
+                    _ = tokio::time::sleep(RESYNC_GROUND_WAIT), if owed => {
+                        boundary = crate::fanout::Boundary::default();
+                    }
                     read = reader.read(&mut buf) => match read {
                         Ok(0) | Err(_) => break,
                         // Still offered, so the sink can count what it drops,
                         // and still stripped, so a marker split across this
                         // read and the next is still recognized.
                         Ok(n) => {
-                            if sink.output(strip.strip(&buf[..n])) == Taken::Gone {
+                            let bytes = strip.strip(&buf[..n]);
+                            boundary.feed(&bytes);
+                            if sink.output(bytes) == Taken::Gone {
                                 break;
                             }
                         }
                     },
                 }
+                // Owed and now at ground: take the picture on the next turn,
+                // where `caught_up` answers at once.
+                if owed && boundary.at_ground() {
+                    owed = false;
+                }
                 continue;
             }
             match reader.read(&mut buf).await {
                 Ok(0) | Err(_) => break,
-                Ok(n) => match sink.output(strip.strip(&buf[..n])) {
+                Ok(n) => match sink.output({
+                    let bytes = strip.strip(&buf[..n]);
+                    boundary.feed(&bytes);
+                    bytes
+                }) {
                     Taken::Sent => {}
                     Taken::Behind => behind = true,
                     Taken::Gone => break,
@@ -805,7 +836,7 @@ const SYNCHRONIZED_REPLAY_BUDGET: usize = 1024 * 1024;
 ///
 /// Wrapped in a synchronized update, because this is a clear followed by a
 /// redraw and a person is looking at it. See the tail of the function.
-fn replay(
+pub(crate) fn replay(
     modes: Option<farcooler_tmux::windows::PaneModes>,
     scrollback: Option<&str>,
     screen: Option<&str>,
@@ -920,8 +951,16 @@ fn synchronized(out: Vec<u8>) -> Vec<u8> {
     framed
 }
 
+/// How long a resync that is owed waits for the output to reach ground before
+/// it is taken anyway. See `Runtime::attach`.
+const RESYNC_GROUND_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
+
 /// Where `Runtime::attach` puts a pane's output. See `attach`.
 pub trait AttachSink: Send {
+    /// Take the opening picture. It is never dropped for being large or for
+    /// being raced by live output. False when nothing will read it.
+    fn open(&mut self, picture: Vec<u8>) -> bool;
+
     /// Take a run of output. While the sink is behind it drops this and says
     /// so again.
     fn output(&mut self, bytes: Vec<u8>) -> Taken;

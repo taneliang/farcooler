@@ -128,6 +128,29 @@ impl TerminalSink {
         }
     }
 
+    /// A picture as the frames that carry it, in order, from `start`.
+    ///
+    /// Cut at `MAX_TERMINAL_PAYLOAD_BYTES`, because a picture can be far larger
+    /// than one envelope may be: a colored 2000-line history captures at 2.6
+    /// MiB, and `MAX_CONTROL_ENVELOPE_BYTES` refuses anything over 1 MiB — a
+    /// refusal `serve_connection` answered by dropping the connection, so a big
+    /// enough pane could never be opened from a phone at all. No header is
+    /// needed to put it back together: every client writes `Output` payloads
+    /// into one byte stream in arrival order, so consecutive frames ARE the
+    /// picture. A picture under `SYNCHRONIZED_REPLAY_BUDGET` is still one
+    /// synchronized update across its frames, since the emulator holds the
+    /// update open between feeds; one over it was never synchronized.
+    fn picture_frames(&self, start: u64, picture: Vec<u8>) -> Vec<farcooler_protocol::v1::Event> {
+        picture
+            .chunks(farcooler_protocol::MAX_TERMINAL_PAYLOAD_BYTES)
+            .scan(start, |at, chunk| {
+                let frame = self.output_frame(*at, chunk.to_vec());
+                *at += chunk.len() as u64;
+                Some(frame)
+            })
+            .collect()
+    }
+
     fn output_frame(&self, start: u64, bytes: Vec<u8>) -> farcooler_protocol::v1::Event {
         self.frame(farcooler_protocol::v1::terminal_frame::Kind::Output(
             farcooler_protocol::v1::TerminalOutput {
@@ -139,6 +162,13 @@ impl TerminalSink {
 }
 
 impl crate::runtime::AttachSink for TerminalSink {
+    fn open(&mut self, picture: Vec<u8>) -> bool {
+        let start = self.sequence;
+        self.sequence += picture.len() as u64;
+        let frames = self.picture_frames(start, picture);
+        self.push.push_pinned(frames)
+    }
+
     fn output(&mut self, bytes: Vec<u8>) -> crate::runtime::Taken {
         use crate::runtime::Taken;
         use farcooler_transport::Pushed;
@@ -193,8 +223,11 @@ impl crate::runtime::AttachSink for TerminalSink {
                 reason: farcooler_protocol::v1::GapReason::ClientTooSlow as i32,
             },
         ));
-        let output = self.output_frame(start, picture);
-        self.push.replace(vec![gap, output])
+        let mut frames = vec![gap];
+        frames.extend(self.picture_frames(start, picture));
+        // Pinned: live output that races it can be refused behind it, never
+        // put in place of it. See `push`.
+        self.push.replace(frames)
     }
 }
 
@@ -2662,6 +2695,95 @@ mod tests {
 
         // And live output flows again behind it.
         assert_eq!(sink.output(b"next".to_vec()), Taken::Sent);
+    }
+
+    /// **A picture larger than the backlog bound arrives whole, however live
+    /// output races it** (ov-118 review). A colored 2000-line history captures
+    /// at 2.6 MiB, more than twice `TERMINAL_BACKLOG_BYTES`. It used to be the
+    /// first thing the next live chunk evicted, leaving the client a `Gap` it
+    /// ignores and a frozen screen — and had it survived, its one 2.6 MiB frame
+    /// was over the envelope limit, which closed the connection.
+    ///
+    /// Here the picture is queued, then 3 MiB of live output races it with
+    /// nobody reading. What the client then reads is the gap, then the whole
+    /// picture in frames the wire accepts, and fed to the emulator every client
+    /// runs, it repaints.
+    #[tokio::test]
+    async fn a_picture_bigger_than_the_bound_survives_the_output_that_races_it() {
+        use crate::runtime::{AttachSink, Taken, replay, reset_then};
+        use farcooler_protocol::v1::{event::Payload, terminal_frame::Kind};
+
+        // Every cell its own color, as in the measured pane.
+        let history: Vec<String> = (1..=2000)
+            .map(|i| (0..220).map(|c| format!("\x1b[3{}m{}", (i + c) % 8, (b'a' + (c % 26) as u8) as char)).collect())
+            .collect();
+        let screen: Vec<String> = (1..=10).map(|i| format!("now{i}")).collect();
+        let modes = farcooler_tmux::windows::PaneModes { cursor_visible: true, wrap: true, ..Default::default() };
+        let picture = reset_then(replay(
+            Some(modes),
+            Some(&history.join("\n")),
+            Some(&screen.join("\n")),
+            Some((0, 9)),
+        ));
+        assert!(picture.len() > 2 * 1024 * 1024, "the picture should be the measured size: {}", picture.len());
+
+        let (push, mut pushes) = farcooler_transport::push_queue(TERMINAL_BACKLOG_BYTES);
+        let mut sink = TerminalSink::new(push.clone(), Uuid::now_v7(), 1);
+
+        // Fall behind, catch up, and queue the picture.
+        while sink.output(vec![b'y'; 16 * 1024]) != Taken::Behind {}
+        let waiting = tokio::spawn(async move {
+            let first = pushes.recv().await;
+            (first, pushes)
+        });
+        assert!(sink.caught_up().await);
+        assert!(sink.resync(picture.clone()));
+        // The parked receiver takes the first frame, the gap, and stops.
+        let (gap, mut pushes) = waiting.await.unwrap();
+        let Some(Payload::TerminalFrame(gap)) = gap.and_then(|e| e.payload) else { panic!("no gap") };
+        assert!(matches!(gap.kind, Some(Kind::Gap(_))));
+
+        // Live output, racing it, with nobody reading.
+        let mut refused = 0;
+        for _ in 0..(3 * 1024 * 1024 / (16 * 1024)) {
+            if sink.output(vec![b'z'; 16 * 1024]) == Taken::Behind {
+                refused += 1;
+            }
+        }
+        assert!(refused > 0, "the race should actually overflow the bound");
+
+        // What the client reads: the picture, whole and in order, in frames
+        // the wire carries.
+        let mut received = Vec::new();
+        while received.len() < picture.len() {
+            let event = tokio::time::timeout(std::time::Duration::from_secs(5), pushes.recv())
+                .await
+                .expect("the rest of the picture never came: live output evicted it")
+                .expect("more of the picture");
+            let encoded = farcooler_protocol::v1::WireEnvelope {
+                protocol_version: farcooler_protocol::PROTOCOL_VERSION,
+                message_id: farcooler_protocol::ids::new_id(),
+                body: Some(farcooler_protocol::v1::wire_envelope::Body::Event(event.clone())),
+            };
+            farcooler_protocol::framing::encode(&encoded).expect("a frame the wire accepts");
+            let Some(Payload::TerminalFrame(frame)) = event.payload else { panic!("not a frame") };
+            match frame.kind {
+                Some(Kind::Gap(_)) => assert!(received.is_empty(), "a gap inside the picture"),
+                Some(Kind::Output(output)) => received.extend_from_slice(&output.payload),
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+        assert_eq!(received.len(), picture.len());
+        assert!(received == picture, "the picture arrived changed");
+
+        // And it repaints the emulator every client runs.
+        let mut client = farcooler_vt::Terminal::new(80, 10);
+        client.feed(b"\x1b[?1049hfrozen\x1b[3");
+        client.feed(&received);
+        let snapshot = farcooler_vt::grid::snapshot(&client);
+        let top: String = snapshot.rows[0].cells.iter().map(|c| c.ch).collect();
+        assert_eq!(top.trim_end(), "now1");
+        assert!(snapshot.history_size > 1000, "the history came with it");
     }
 
     #[test]
