@@ -381,14 +381,6 @@ public enum GlanceState: String, CaseIterable, Sendable {
         }
     }
 
-    /// The leader of a lock screen card: its status, and how its turn ended —
-    /// the relay's word when it gave one (`AgentCardState.failed`), and the App
-    /// Group snapshot's (`known`, `FleetSnapshot.failedTurns`) when it did not.
-    public init(card: AgentCardState, known: Set<String>) {
-        self.init(
-            status: card.status, failed: card.failed ?? known.contains(card.terminal))
-    }
-
     /// This state's mark on a card or runner nobody is vouching for now.
     ///
     /// Working is the claim about now, so it becomes "can't say"; needs-you,

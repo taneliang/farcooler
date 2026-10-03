@@ -935,3 +935,16 @@ public enum AgentCardLeader {
         !stale || FleetSnapshot.isLatched(status)
     }
 }
+
+extension GlanceState {
+    /// The leader of a lock screen card: its status, and how its turn ended —
+    /// the relay's word when it gave one (`AgentCardState.failed`), and the App
+    /// Group snapshot's (`known`, `FleetSnapshot.failedTurns`) when it did not.
+    ///
+    /// Here and not beside `GlanceState` because the watch compiles
+    /// `GlanceMark.swift` without the card's types.
+    public init(card: AgentCardState, known: Set<String>) {
+        self.init(
+            status: card.status, failed: card.failed ?? known.contains(card.terminal))
+    }
+}
