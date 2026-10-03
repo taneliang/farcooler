@@ -35,6 +35,10 @@ struct Turn<'a> {
 }
 
 fn record(store: &farcooler_store::Store, repository: Uuid, t: Turn) {
+    record_as(store, repository, t, "reported");
+}
+
+fn record_as(store: &farcooler_store::Store, repository: Uuid, t: Turn, usage: &'static str) {
     let turn = NewTurn {
         key: t.key.into(),
         terminal_id: None,
@@ -47,7 +51,7 @@ fn record(store: &farcooler_store::Store, repository: Uuid, t: Turn) {
         started_at: Some(t.ended_at - t.active_ms),
         ended_at: t.ended_at,
         active_ms: Some(t.active_ms),
-        usage: "reported",
+        usage,
         models: t.models,
         kind: TurnKind::Turn,
     };
@@ -153,6 +157,7 @@ async fn the_report_counts_what_agents_spent_by_task_harness_model_and_day() {
     assert_eq!(usage.cost_reported_micros, Some(500_000));
     assert_eq!(usage.cost_estimated_micros, Some(estimated_micros));
     assert_eq!(usage.unpriced_tokens, Some(42_000));
+    assert_eq!((usage.turns_partial, usage.turns_not_reported), (Some(0), Some(0)));
     let docs_area = r.by_area.iter().find(|g| g.name == "Docs").expect("docs is in, by its spend alone");
     assert_eq!(docs_area.tally.usage.and_then(|u| u.agent_ms), Some(900_000));
 
@@ -181,4 +186,36 @@ fn a_longer_period_is_cut_into_weeks_then_months() {
     assert_eq!(unit(15), farcooler_store::usage::GroupBy::Week);
     assert_eq!(unit(92), farcooler_store::usage::GroupBy::Week);
     assert_eq!(unit(93), farcooler_store::usage::GroupBy::Month);
+}
+
+/// A turn that stated nothing and a turn on a model nobody named are one
+/// line, the unnamed model, never two lines under one name; and a task's
+/// tally says some of its turns weren't reported, so its dollars carry the
+/// caveat wherever they're shown.
+#[tokio::test]
+async fn unnamed_and_unreported_are_one_line_and_the_tally_says_so() {
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let store = &svc.store;
+    let main = store.ensure_main_workspace(repo).unwrap();
+    let task = store.create_task(main.id, "Docs: adapters", Actor::User).unwrap();
+    record_as(store, repo, Turn {
+        key: "acp:1", task: Some(task.id), workspace: main.id, harness: "gemini", ended_at: SEP_1_10H,
+        active_ms: 1_000, models: vec![],
+    }, "not_reported");
+    record(store, repo, Turn {
+        key: "acp:2", task: Some(task.id), workspace: main.id, harness: "gemini", ended_at: SEP_1_10H,
+        active_ms: 1_000, models: vec![TurnModel::priced(None, tokens(10, 5, 0), Some(30_000))],
+    });
+
+    let r = report(store, &ask(Some(main.id), 0));
+    let spend = r.spend.unwrap();
+    let models: Vec<(String, u64)> = spend.by_model.iter().map(|l| (l.name.clone(), l.spend.turns)).collect();
+    assert_eq!(models, vec![(String::new(), 2)], "one unnamed line, both turns on it");
+    let line = &spend.by_task[0].spend;
+    assert_eq!(line.line_detail(), "15 tokens · $0.03 partly not reported");
+    let usage = r.totals.usage.unwrap();
+    assert_eq!((usage.turns, usage.turns_not_reported), (Some(2), Some(1)));
+
+    let split = store.task_usage(task.id).unwrap().1;
+    assert_eq!(split.len(), 1, "one (harness, model) row for the task view: {split:?}");
 }

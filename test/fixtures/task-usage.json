@@ -1,6 +1,12 @@
 {
   "about": "What a task's Usage section says (ov-195), read by AgentKit's TaskUsageTests, Android's TaskUsageTest and farcooler-core's usage_words tests, so the Mac, iOS, Android and `farcooler report` word spend the same way. `usage` is the JSON `farcooler task usage --json` prints and the phones' `task.usage` route returns. Every expected string is en_US. A cost is API-equivalent always: Claude's own figure and the price table are both API list prices, which on a subscription is notional and on an API key is what was paid.",
   "locale": "en_US",
+  "words": {
+    "nothing_yet": "No agent usage recorded yet.",
+    "needs_update": "This runner needs an update to show spend.",
+    "couldnt_read": "Far Cooler couldn’t read this task’s usage.",
+    "try_again": "Try Again"
+  },
   "tokens": [
     { "n": 0, "text": "0" },
     { "n": 7, "text": "7" },
@@ -277,7 +283,37 @@
       "cost": "Under $0.01 · API-equivalent, estimated, partly not reported",
       "time": "Agent time under a minute · 2 turns",
       "rows": [
-        { "title": "claude · claude-haiku-4-5", "detail": "7 tokens · Under $0.01 estimated" }
+        { "title": "claude · claude-haiku-4-5", "detail": "7 tokens · Under $0.01 estimated, partly not reported" }
+      ]
+    },
+    {
+      "case": "a reported cost, one of whose turns stated only part: the row says so too",
+      "usage": {
+        "task": "8d3c1a52-0b8e-4c1e-9a3f-0f3b2a6c9e11",
+        "price_table": "2026-09-25",
+        "totals": {
+          "turns": 2, "turns_partial": 1, "turns_not_reported": 0, "subagent_runs": 0, "active_ms": 0,
+          "input_tokens": 300, "output_tokens": 200, "cache_read_tokens": 0, "cache_write_tokens": 0,
+          "cost_reported_micros": 3200000, "cost_estimated_micros": 0, "unpriced_tokens": 0, "price_tables": []
+        },
+        "by_harness_model": [
+          {
+            "harness": "claude", "model": "claude-opus-5",
+            "totals": {
+              "turns": 2, "turns_partial": 1, "turns_not_reported": 0, "subagent_runs": 0, "active_ms": 0,
+          "input_tokens": 300, "output_tokens": 200, "cache_read_tokens": 0, "cache_write_tokens": 0,
+          "cost_reported_micros": 3200000, "cost_estimated_micros": 0, "unpriced_tokens": 0, "price_tables": []
+            }
+          }
+        ]
+      },
+      "empty": false,
+      "tokens": "500 tokens",
+      "token_detail": "300 input · 200 output · 0 cache",
+      "cost": "$3.20 · API-equivalent, partly not reported",
+      "time": "2 turns",
+      "rows": [
+        { "title": "claude · claude-opus-5", "detail": "500 tokens · $3.20 partly not reported" }
       ]
     }
   ]

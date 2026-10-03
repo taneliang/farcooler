@@ -40,7 +40,7 @@ fn durations_read_as_the_fixture_says() {
 fn every_case_is_worded_as_the_fixture_says() {
     let f = fixture();
     let cases = f["cases"].as_array().unwrap();
-    assert!(cases.len() >= 8, "the fixture has its cases");
+    assert!(cases.len() >= 9, "the fixture has its cases");
     for case in cases {
         let name = case["case"].as_str().unwrap();
         let usage: TaskSpend = serde_json::from_value(case["usage"].clone()).expect(name);
@@ -72,4 +72,14 @@ fn the_json_round_trips_with_the_fixture_field_names() {
     let usage: TaskSpend = serde_json::from_value(raw.clone()).unwrap();
     assert_eq!(usage.totals.cost_reported_micros, 3_200_000);
     assert_eq!(serde_json::to_value(&usage).unwrap(), raw, "every field the apps read, by the same name");
+}
+
+#[test]
+fn the_sections_sentences_are_the_fixtures() {
+    let f = fixture();
+    let w = &f["words"];
+    assert_eq!(NOTHING_YET, w["nothing_yet"]);
+    assert_eq!(NEEDS_UPDATE, w["needs_update"]);
+    assert_eq!(COULDNT_READ, w["couldnt_read"]);
+    assert_eq!(TRY_AGAIN, w["try_again"]);
 }

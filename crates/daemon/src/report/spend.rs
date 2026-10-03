@@ -111,6 +111,8 @@ fn usage_of(s: &Spend) -> Usage {
         cache_write_tokens: Some(s.cache_write_tokens),
         agent_ms: (s.active_ms > 0).then_some(s.active_ms),
         turns: Some(s.turns),
+        turns_partial: Some(s.turns_partial),
+        turns_not_reported: Some(s.turns_not_reported),
         cost_reported_micros: Some(s.cost_reported_micros),
         cost_estimated_micros: Some(s.cost_estimated_micros),
         unpriced_tokens: Some(s.unpriced_tokens),

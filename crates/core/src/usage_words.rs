@@ -68,6 +68,16 @@ pub struct TaskSpend {
 /// What an empty Usage section says.
 pub const NOTHING_YET: &str = "No agent usage recorded yet.";
 
+/// What a Usage section says for a runner too old to record spend.
+pub const NEEDS_UPDATE: &str = "This runner needs an update to show spend.";
+
+/// What a Usage section says when the read didn't come back, beside Try
+/// Again.
+pub const COULDNT_READ: &str = "Far Cooler couldn\u{2019}t read this task\u{2019}s usage.";
+
+/// The button beside `COULDNT_READ`.
+pub const TRY_AGAIN: &str = "Try Again";
+
 /// What a cost or a count nobody stated says.
 pub const NOT_REPORTED: &str = "Not reported";
 
@@ -130,21 +140,24 @@ impl Spend {
         line
     }
 
-    /// A breakdown row's cost: "$3.20", "$0.42 estimated", or "Cost not
-    /// reported".
+    /// A breakdown row's cost: "$3.20", "$0.42 estimated", "$3.20 partly
+    /// not reported", or "Cost not reported". A row says what the total
+    /// says about its own part, so a caveat is never only on the total.
     pub fn row_cost(&self) -> String {
         let priced = self.priced_micros();
         if priced <= 0 {
             return "Cost not reported".to_string();
         }
-        let amount = dollars(priced);
+        let mut words = Vec::new();
         if self.cost_reported_micros == 0 {
-            format!("{amount} estimated")
+            words.push("estimated");
         } else if self.cost_estimated_micros > 0 {
-            format!("{amount} partly estimated")
-        } else {
-            amount
+            words.push("partly estimated");
         }
+        if self.partly_unknown() {
+            words.push("partly not reported");
+        }
+        if words.is_empty() { dollars(priced) } else { format!("{} {}", dollars(priced), words.join(", ")) }
     }
 
     /// One line of a breakdown: "1.2M tokens · $3.20", or "Not reported"

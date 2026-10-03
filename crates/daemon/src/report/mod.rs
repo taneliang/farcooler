@@ -250,6 +250,13 @@ pub struct Usage {
     /// Finished turns.
     #[serde(default)]
     pub turns: Option<u64>,
+    /// Of those, turns whose tokens are a floor, and turns that stated no
+    /// usage: while either is above zero, the costs below are only part of
+    /// it, and a reader says "partly not reported" (`usage_words`).
+    #[serde(default)]
+    pub turns_partial: Option<u64>,
+    #[serde(default)]
+    pub turns_not_reported: Option<u64>,
     /// Millionths of a dollar, kept apart by provenance as `usage_words`
     /// says them: what the agents reported, what the price table estimated.
     #[serde(default)]
@@ -277,6 +284,8 @@ impl Usage {
             cache_write_tokens: sum(self.cache_write_tokens, other.cache_write_tokens),
             agent_ms: sum(self.agent_ms, other.agent_ms),
             turns: sum(self.turns, other.turns),
+            turns_partial: sum(self.turns_partial, other.turns_partial),
+            turns_not_reported: sum(self.turns_not_reported, other.turns_not_reported),
             cost_reported_micros: sum(self.cost_reported_micros, other.cost_reported_micros),
             cost_estimated_micros: sum(self.cost_estimated_micros, other.cost_estimated_micros),
             unpriced_tokens: sum(self.unpriced_tokens, other.unpriced_tokens),
