@@ -271,3 +271,59 @@ enum TitleBar {
         }
     }
 }
+
+/// The toolbar's leading group (ov-105): the sidebar button and the
+/// workspace switcher, after the traffic lights, in one glass group, as
+/// Mail and Notes keep the sidebar button with what's beside it. The
+/// window removes the system's own sidebar button for this one. Then the
+/// flexible space, so this goes outermost of the window's toolbars.
+struct LeadingToolbar: ToolbarContent {
+    let sidebarHidden: Bool
+    let switcher: WorkspaceSwitcherButton
+
+    var body: some ToolbarContent {
+        ToolbarItemGroup(placement: .navigation) {
+            Button {
+                Sidebar.toggle()
+            } label: {
+                Label(sidebarHidden ? "Show Sidebar" : "Hide Sidebar", systemImage: "sidebar.left")
+            }
+            .help(sidebarHidden ? "Show Sidebar (⌘B)" : "Hide Sidebar (⌘B)")
+            switcher
+        }
+        // The room the title held, which pushes what follows to the
+        // trailing end. `.primaryAction` items stay before it whatever
+        // their order, so the window's other items are `.automatic`, and
+        // this group is applied outermost so the space comes first.
+        ToolbarSpacer(.flexible)
+    }
+}
+
+/// The toolbar's trailing end (ov-105): the runners' trouble while there
+/// is any (was the runner bar), then Needs You, apart from the window's
+/// own actions before them. Innermost of the window's toolbars, so it
+/// comes last.
+struct TrailingToolbar: ToolbarContent {
+    let troubles: [RunnerStatusItem.Trouble]
+    let stale: [String]
+    let updates: [DaemonUpdateTarget]
+    let needsYou: Int
+    let needsYouSelected: Bool
+    let onNeedsYou: () -> Void
+    let perform: (RunnerStatusItem.Entry) -> Void
+
+    var body: some ToolbarContent {
+        ToolbarSpacer(.fixed)
+        if let label = RunnerStatusItem.label(troubles: troubles, stale: stale) {
+            ToolbarItem {
+                RunnerStatusMenu(
+                    label: label, symbol: RunnerStatusItem.symbol(troubles: troubles),
+                    entries: RunnerStatusItem.entries(troubles: troubles, stale: stale), updates: updates,
+                    perform: perform)
+            }
+        }
+        ToolbarItem {
+            NeedsYouToolbarButton(count: needsYou, selected: needsYouSelected, onSelect: onNeedsYou)
+        }
+    }
+}
