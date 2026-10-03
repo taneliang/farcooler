@@ -1,4 +1,4 @@
-// Shipped by Canary at bffce9c1542a256e250c0e4cbb601b15277558a0. Written by canary.yml; see scripts/proto-lint.py.
+// Shipped by Canary at f178cafefd01aa51678904f15aaae1803008a85e. Written by canary.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -541,6 +541,9 @@ message Notice {
   repeated string options = 9;
   // The task's workspace, by name.
   string workspace = 10;
+  // The task's repository: a key is only unique within one, so a client
+  // opening the task names it too (ov-106).
+  bytes repository_id = 11;
 }
 
 message SnapshotChunk {
