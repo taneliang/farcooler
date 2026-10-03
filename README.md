@@ -1,294 +1,133 @@
 # Far Cooler
 
-A terminal-first command center for parallel coding agents on runners you own.
+**Run a fleet of coding agents on machines you own, and keep it moving from
+wherever you are.**
 
-A **worktree** is one directory git made and its branch, for one task, along
-with its terminals and agent processes. Far Cooler lets you run several at once
-and see, truthfully, which are alive. *Workspace* is reserved for the level
-above: a line of work with its own board and orchestrator, which owns the
-worktrees its agents use. Each word has one job — see
-[`docs/workspaces.md`](docs/workspaces.md).
+Far Cooler runs Claude Code, Codex, Cursor and opencode in real terminals on a
+*runner*: your Mac, or a Linux box you can SSH to. Each piece of work gets its
+own git worktree. An orchestrator agent keeps the task board, dispatches the
+agents and asks you when it needs a decision, and everything waiting on you
+reaches your Mac, your iPhone, your Apple Watch or your Android phone.
 
-A **runner** is one `farcoolerd`: one Unix user, on one host, with its own
-worktrees and its own `~/.ssh/authorized_keys`. A host may carry several — three
-engineers sharing a Linux box is three runners, sharing nothing — which is why
-the word is not *host*. See [`docs/runners.md`](docs/runners.md).
+<!-- Screenshot: docs/images/far-cooler-mac.png lands in a follow-up commit. -->
 
-Design: [`docs/farcooler-design.md`](docs/farcooler-design.md).
-Deferred work: [`TODOS.md`](TODOS.md).
+> **Early software.** There's no stable release yet. The Mac app ships as a
+> canary build from every push to `main`, and it breaks sometimes.
 
-## The one idea worth knowing
+## Why Far Cooler
 
-**Runtime state is derived, never stored.**
+- **Real terminals, not a transcript.** Every agent runs its own TUI inside
+  tmux on the runner, exactly as if you'd typed the command yourself, with its
+  colors and its cursor. When you'd rather read it as a conversation, flip the
+  pane into a chat view.
+- **Your agents keep working when you leave.** The terminals belong to the
+  runner, not the app. Close the laptop, lose signal, restart the app: the
+  agents are still there when you come back.
+- **It doesn't guess what's alive.** Far Cooler never stores "running." It asks
+  tmux every time, and a terminal that died says **Lost** rather than showing a
+  status that went stale.
+- **One list of what needs you.** Needs You collects, from every runner, the
+  agents asking permission (answer with **Allow** or **Deny**), agents blocked
+  at their terminal, decisions the orchestrator asked you for, and work ready
+  for review. It's the same count on the Mac, the lock screen, the widget and
+  the watch.
+- **You manage the orchestrator, not the tasks.** Tell the orchestrator what
+  you want in plain words. It writes a charter for how work gets done with you,
+  puts the work on the board, starts agents in fresh worktrees, and reports
+  back from the board.
+- **Your machines, over plain SSH.** The apps reach a runner the way you do:
+  over SSH, with a key each device generates and keeps. There's no port to open
+  on the runner and no second set of credentials.
 
-SQLite holds only what must outlive tmux: which worktrees exist, which branch
-each is on, and what you *intended* each terminal to be doing. tmux is the sole
-authority on whether a process is alive right now.
+## What's in the box
 
-The same rule decides what a worktree is called. Its name is its directory
-read back as prose, never a stored title — so there is no name that can
-disagree with the directory it describes, and none to keep in sync. Not the
-branch: one worktree hosts a stack of commits over its life, so naming it after
-the branch inside it would rename it every time the work moved forward.
+| | |
+| --- | --- |
+| **Mac** | The full workspace: the orchestrator's conversation, the board with its Unread section, every worktree's terminals, each branch's changes a commit at a time, Go to Anything (⌘P), and the Needs You tray. It runs this Mac's own runner for you. |
+| **iPhone and iPad** | Needs You first, then the boards, agents and terminals of every runner. Notifications you can answer, Home Screen widgets and a Live Activity. |
+| **Apple Watch** | What needs you, at a glance: allow or deny a permission ask, read what an agent did, and reply by dictation. A complication puts the agent that most needs you on your watch face. |
+| **Android** | Needs You, boards, agents and terminals, from the same Rust core as the other apps. |
+| **Command line** | `farcooler` does everything the apps do and more, on this machine or on any runner with `--runner you@box`. |
 
-There is no database column in which a stale `running` could ever be written, so
-Far Cooler structurally cannot tell you an agent is running after it died. When a
-terminal is expected to be alive and no live exactly-tagged pane proves it, the
-answer is `LOST` rather than a guess.
+A few words carry the whole product. A **workspace** is one line of work in a
+repository, with its own **board** of tasks, its own charter and its own
+**orchestrator**. A **worktree** is a directory and branch an agent works in.
+A **runner** is one `farcoolerd` daemon, for one Unix user on one host.
+[`docs/workspaces.md`](docs/workspaces.md) walks through all of it.
 
 ## Requirements
 
-- macOS (Apple silicon or Intel), or Linux
-- `tmux` 3.x
-- `git`
-- Rust 1.85+ to build
+- **Mac app:** macOS 26 or later. The canary build is for Apple silicon.
+- **iPhone and Apple Watch:** iOS 26 and watchOS 26 or later.
+- **Android:** Android 17 (API 37) or later.
+- **A Linux runner:** x86_64 or aarch64, with `tmux`, `git` and systemd user
+  sessions, reachable over SSH. Everything installs into your home directory;
+  no root needed. See [`docs/runners.md`](docs/runners.md).
+- **The agents themselves:** install and sign in to `claude`, `codex`,
+  `cursor-agent` or `opencode` on the runner. Far Cooler runs them; it doesn't
+  replace them.
+- **A Far Cooler account** is needed for push notifications and for pairing a
+  device by scanning a code. Adding a runner by its address works without one.
 
-## Build
+## Get started
 
-```sh
-cargo build --release
-./target/release/farcooler --help
-```
+1. **Install the Mac app.** Download the newest canary from the
+   [canary update feed](https://updates.farcooler.com/canary/appcast.xml) (the
+   `enclosure` link), or [build it from source](CONTRIBUTING.md#the-mac-app).
+   It's signed and notarized, checks for updates once a day, and asks before
+   installing one.
+2. **Open it.** Far Cooler starts a runner on this Mac, and offers to install
+   the command-line tools.
+3. **Add a repository** with File ▸ Add Repository… (⇧⌘R). It starts with one
+   workspace, called Main.
+4. **Start the orchestrator** from the workspace's navigator. The first time,
+   it interviews you for the charter: how work gets from idea to landed, what
+   done means, who reviews, and what it may decide alone. Then tell it what you
+   want done.
+5. **Add a Linux runner** (optional) with Add Device or Runner… ▸ Add a Runner
+   by Address…, then **Install** under Settings ▸ Runners. The Mac app carries
+   the Linux binaries and installs them over SSH. From a terminal,
+   `farcooler runner install you@box` does the same.
+6. **Add your phone** with Add Device or Runner… ▸ Scan Its Code…, with both
+   devices signed in to the same account. Or, on the phone, enter the runner's
+   address and add the key it shows to that runner's `~/.ssh/authorized_keys`.
 
-Go is needed only to build the tunnel, so that a runner can be reached behind
-NAT. It comes in two shapes: the Mac app links a c-archive
-(`./scripts/build-tailcat.sh <target>`) into the daemon it bundles, and a Linux
-release ships a separate `farcooler-tunnel` beside its daemon
-(`./scripts/build-tunnel-helper.sh <arch>`) — because a Go c-archive inside a
-musl binary segfaults on startup, which `docs/releasing.md` measures. `cargo
-build` itself never needs Go: it always produces a working `farcooler` that
-reaches runners by address, and reports `no_tailcat` for tunneled ones.
+The iPhone and Android apps aren't publicly distributed yet. Until they are,
+build them from source; [CONTRIBUTING.md](CONTRIBUTING.md) has the steps.
 
-The macOS app:
+Canary, preview and stable builds install side by side, each with its own app,
+daemon, database and command (`farcooler-canary` for the canary), so trying a
+canary never touches the fleet you depend on.
+[`docs/releasing.md`](docs/releasing.md) explains the channels.
 
-```sh
-cd apps/macos && swift build
-```
-
-## Tests
-
-```sh
-cargo test --workspace
-```
-
-That never runs the agents. Far Cooler recognizes claude, codex and
-cursor-agent by furniture they draw on screen, and that furniture changes with
-no changelog — so there is a second suite that drives the real binaries and
-checks the rules still hold:
-
-```sh
-FARCOOLER_LIVE_AGENTS=1 cargo test -p farcooler-core --test live_agents -- --ignored --nocapture
-```
-
-Run it after touching `activity.rs` or `title.rs`, and periodically to catch a
-third-party release. It costs a few cents and a few minutes, needs the CLIs
-already signed in, and fails when one is missing (name one agent to check only
-that one). A check that fails writes the captured screen to
-`target/live-agents/` — that file is both the bug report and the fix, since it
-belongs in `crates/core/captures/` once the rules are corrected.
-
-Every test that starts a real agent — this suite, the `live_turn` tests in
-`crates/claude` and `crates/codex`, and the handshakes in
-`crates/agent/tests/backends.rs` — is `#[ignore]` and also needs
-`FARCOOLER_LIVE_AGENTS=1`, so neither `cargo test` nor `cargo test -- --ignored`
-starts one by accident. See `test/live_agents.rs`.
-
-## Quick start
+## From the command line
 
 ```sh
-# 1. Allowlist a directory Far Cooler may operate in.
-farcooler root add ~/Dev
-
-# 2. Register a repository inside it.
-farcooler repo register ~/Dev/my-project
-
-# 3. Create worktrees. Each is a real git worktree on a new branch.
-farcooler repo list                       # note the id
-# The name becomes the worktree's directory, and cannot be changed later.
-farcooler worktree create <repo-id> "add auth"   --branch feat/auth
-farcooler worktree create <repo-id> "fix parser" --branch fix/parser
-
-# 4. Launch a terminal in each.
-farcooler worktree list                   # note the worktree ids
-farcooler terminal create <worktree-id> --preset claude
-farcooler terminal create <worktree-id> --preset shell
-
-# 5. See the fleet, with every state derived fresh from tmux.
-farcooler worktree list
+farcooler needs-you                          # what's waiting on you, most urgent first
+farcooler task list --repo my-app            # a repository's board
+farcooler report --since 7d                  # what got done, and how much of you it needed
+farcooler --runner you@box worktree list     # any command, on another runner
 ```
 
-```
-b8aed78c  add auth                active    feat/auth
-    bb5a5df9  claude            running   claude
-f0a16d76  fix parser              active    fix/parser
-    ba941f48  shell             running   shell
-```
+`farcooler --help` lists the rest, from worktrees and terminals to device
+enrollment.
 
-Drive a terminal:
+## Learn more
 
-```sh
-farcooler terminal send <term-id> 'git status
-'
-farcooler terminal read <term-id> --lines 50
-```
+- [`docs/workspaces.md`](docs/workspaces.md): workspaces, the orchestrator,
+  the board and Needs You, on every surface.
+- [`docs/runners.md`](docs/runners.md): installing and troubleshooting a Linux
+  runner, and its security posture.
+- [`docs/adapters.md`](docs/adapters.md): chat mode, and adding an agent of
+  your own.
+- [`docs/farcooler-design.md`](docs/farcooler-design.md): the design, and why
+  state is derived from tmux rather than stored.
 
-Recover one that died:
+## Contributing
 
-```sh
-farcooler terminal restart <term-id>       # new epoch, same preset
-farcooler terminal dismiss-lost <term-id>  # forget it, without claiming an exit
-```
-
-Attach to the real tmux session:
-
-```sh
-farcooler attach <ws-id>     # prints the exact command
-```
-
-## Presets
-
-`shell`, `claude`, `codex`, `cursor`, or any command. Presets run through your
-configured shell as an interactive login shell, so version managers, `direnv`,
-aliases, and startup files behave exactly as in a hand-launched terminal.
-
-A pane running one of the recognized agents can be flipped from a terminal
-into a native chat (`⌃B a` in the Mac app). That needs an ACP adapter, which
-not every agent has — see [`docs/adapters.md`](docs/adapters.md) for which
-agents ship one, the config file for adding your own, and known gaps.
-
-## The phone apps
-
-```sh
-# iOS — needs Go (see Build, above): --device builds and links the real
-# tunnel archive into farcooler-client, and fails outright without one
-# rather than quietly shipping a build with no tunnel.
-./scripts/build-ios-frameworks.sh --device && open apps/ios/FarCooler.xcodeproj
-
-# Android — links the tunnel dynamically, as `libtailcat.so` beside the core:
-# Go's own toolchain refuses `-buildmode=c-archive` for android/arm64, so this
-# is the one platform that loads the tunnel rather than bundling it.
-./scripts/build-android-libs.sh && (cd apps/android && ./gradlew installDebug)
-```
-
-The iOS app and its four extensions share an App Group, and Apple's own API
-cannot attach one to an App ID — so a channel you have never built on this
-Apple ID needs one manual pass first:
-
-```sh
-FASTLANE_USER=you@example.com ruby scripts/portal-app-groups.rb local
-```
-
-Skip it and the build still compiles and signs; it fails at INSTALL, on the
-device, with *"This app cannot be installed because its integrity could not be
-verified"* — which reads like a broken certificate and is not one. See the
-script's own header for why it needs a 2FA login when nothing else here does.
-
-Both connect over SSH with a key the device generates and never hands out, and
-both render from the same Rust cores the Mac does. The Android client is the
-newer of the two and connects to every configured runner at once, the way the
-Mac does; the iOS client still switches between them.
-[`apps/android/README.md`](apps/android/README.md) has the full list of what
-differs and why.
-
-## The macOS app
-
-```sh
-FARCOOLER_BIN=$PWD/target/release/farcooler ./apps/macos/.build/debug/Far Cooler
-```
-
-A workspace navigator, per-terminal output, and an input box. It renders the state the
-daemon derived and never computes state itself, so two clients cannot disagree
-about the same terminal.
-
-Every runner added under Settings ▸ Runners is connected at once, over SSH,
-alongside this Mac — there is no picker and no "current runner" to switch
-between first. Projects from every runner appear in the title bar's workspace
-switcher, each naming the runner it is on. A runner that stops answering keeps its rows, dimmed,
-rather than dropping them: reads keep showing the last good fetch, and an
-action against that runner is refused at once with its own error instead of
-hanging or being queued for later.
-
-The app owns this Mac's own daemon specifically — the one runner it can start
-and stop directly, because it ships one inside its own bundle. It runs
-`farcooler daemon ensure` at launch, which replaces any daemon built from
-different source than the app:
-
-```sh
-farcooler daemon ensure   # start one, or replace a mismatched one
-farcooler daemon stop     # terminals keep running: they belong to tmux
-```
-
-Two components built from different source speak the same protocol perfectly and
-still behave like two different programs, and the symptom is a bug you already
-fixed still happening.
-
-## Layout
-
-```
-crates/
-├── protocol    protobuf types, length-delimited framing, wire limits
-├── core        resource models, the derivation rule, errors, replay buffer
-├── store       SQLite: durable identity and intent only
-├── tmux        private tmux server, control mode, the live runtime inventory
-├── transport   Unix socket and stdio adapters, backpressure
-├── daemon      git worktree transactions, domain services
-├── cli         the farcooler command
-├── vt          the terminal emulator every client renders from
-├── client      "talk to a runner": ssh, protocol, and a C ABI over both
-└── android     a JNI shim over `client` and `vt`, and nothing else
-apps/macos      SwiftUI client
-apps/ios        SwiftUI client, over `client`'s C ABI
-apps/android    Compose client, over the same ABI through JNI
-apps/shared     the logic the two Apple apps must agree on, bit for bit
-proto/          canonical protocol source of truth
-```
-
-`core` defines the `RuntimeInventory` trait and `tmux` implements it, so crate
-dependencies point one way and the derivation rule is unit-testable with no tmux
-running.
-
-`vt` and `client` exist for the same reason as each other: the parts that must
-not differ between clients live in Rust, once, and each platform writes only a
-renderer. `apps/android`'s Kotlin never parses an escape sequence, never decides
-what an arrow key sends, and never speaks the protocol — see
-[`apps/android/README.md`](apps/android/README.md).
-
-## Safety properties
-
-- Repository roots are allowlisted. `/`, system directories, your home directory
-  itself, and any path nesting inside an existing root are refused.
-- Worktree creation never silently reuses an existing branch or worktree path.
-- A failed metadata write rolls back only a provably clean, untouched worktree.
-  A dirty one is preserved with the artifacts left in place.
-- Hiding a worktree never touches git, and is never refused for a running
-  terminal — it is a view preference, not a lifecycle step. Removing a worktree
-  is the one that is refused while a managed terminal is running.
-- Git is the source of truth for which worktrees exist. Registering a
-  repository adopts every worktree it already has, and a reconcile pass keeps
-  the app honest against `git worktree add`/`remove` run outside Far Cooler.
-- Identity comes only from exact tmux tags. Names, indexes, and PIDs are
-  diagnostic and never establish identity, so Far Cooler never adopts a process it
-  did not launch.
-
-## Status
-
-Working today: the Mac-first local slice. Repository roots, repositories,
-worktrees with their branches, terminals in a private tmux server, derived
-fleet state, input and output, restart, loss dismissal, hide/unhide, and the
-SwiftUI app.
-
-Also working: every configured runner connects over SSH at once, alongside
-this Mac, with its own reconnection and backoff — see `docs/farcooler-design.md`
-for the connection states this is built on.
-
-Also working: iOS and Android clients, over one Rust implementation of the SSH
-transport, the protocol and the terminal emulator — a C ABI that Swift imports
-directly and Kotlin reaches through the JNI shim in `crates/android`.
-
-Not built yet: the daemon's socket server is not wired to the CLI (the CLI links
-the service directly), and the terminal channel streams via `capture-pane`
-rather than control-mode streaming. See the final section of the design doc for
-the full picture.
+Bug reports and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md)
+covers building every part, running the tests and checks, and the repository's
+conventions.
 
 ## License
 
@@ -298,4 +137,4 @@ Copyright © 2026 E-Liang Tan. Far Cooler is licensed under the
 The bundled Iosevka Nerd Font Mono files remain licensed under the SIL Open Font
 License 1.1; see
 [`apps/ios/FarCooler/Fonts/IOSEVKA-LICENSE.md`](apps/ios/FarCooler/Fonts/IOSEVKA-LICENSE.md).
-The Android app ships the same files under the same licence.
+The Android app ships the same files under the same license.
