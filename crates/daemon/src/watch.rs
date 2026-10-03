@@ -889,6 +889,9 @@ pub struct Watcher {
     told: std::sync::Mutex<HashMap<Uuid, i64>>,
     /// Why each waiting answer last waited, for its "Not delivered" note.
     wake_holds: std::sync::Mutex<HashMap<Uuid, answer_wake::Held>>,
+    /// Make the next paste fail as a send would (`answer_wake`'s tests).
+    #[cfg(test)]
+    fail_sends: std::sync::atomic::AtomicBool,
 }
 
 /// One client's claim about what it is showing, and when it said so.
@@ -2700,6 +2703,8 @@ impl Watcher {
             wakes_hint: std::sync::atomic::AtomicBool::new(true),
             told: std::sync::Mutex::new(HashMap::new()),
             wake_holds: std::sync::Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            fail_sends: std::sync::atomic::AtomicBool::new(false),
             clears_pending: std::sync::Mutex::new(HashSet::new()),
             taps: std::sync::Mutex::new(None),
             #[cfg(test)]

@@ -10,7 +10,8 @@
 # bracketed paste, appends a paste or typed characters to its box, and on
 # Enter logs `SUBMIT <box>` and clears it. The control file picks what it
 # shows: idle, working, menu (a permission prompt), picker (a menu with no
-# box), mangle (a paste shows as `[Pasted text #1]`), or draft:<text> (a box
+# box), mangle (a paste shows as `[Pasted text #1]`), slow (a paste shows
+# a second late), nobracket (bracketed paste off), or draft:<text> (a box
 # already holding <text>).
 use strict;
 use warnings;
@@ -23,7 +24,7 @@ $| = 1;
 system("stty raw -echo 2>/dev/null");
 print "\e[?2004h";
 
-my ($composer, $mode, $pasting, @said) = ("", "", 0);
+my ($composer, $mode, $pasting, $late, $late_at, @said) = ("", "", 0, "", 0);
 
 sub mode {
     open(my $f, '<', $control) or return "idle";
@@ -98,8 +99,14 @@ while (1) {
     if ($now ne $mode) {
         $mode = $now;
         $composer = $1 if $mode =~ /^draft:(.*)$/s;
+        print($mode eq 'nobracket' ? "\e[?2004l" : "\e[?2004h");
         draw();
         logit("MODE $mode");
+    }
+    if ($late ne "" && time() >= $late_at) {
+        take($late);
+        $late = "";
+        draw();
     }
     my $rin = "";
     vec($rin, fileno(STDIN), 1) = 1;
@@ -114,7 +121,11 @@ while (1) {
             my $text = decode_utf8(substr($buf, 0, $end));
             $buf = substr($buf, $end + 6);
             $pasting = 0;
-            take($mode eq 'mangle' ? "[Pasted text #1]" : $text);
+            if ($mode eq 'slow') {
+                ($late, $late_at) = ($text, time() + 2);
+            } else {
+                take($mode eq 'mangle' ? "[Pasted text #1]" : $text);
+            }
             logit("PASTE $text");
         } elsif (substr($buf, 0, 6) eq "\e[200~") {
             $buf = substr($buf, 6);

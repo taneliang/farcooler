@@ -20,13 +20,15 @@
 //!
 //! **The gate, for a TUI pane.** Every check runs on this pass, against the
 //! pane as it is now, and every one fails closed:
-//! 1. The watcher reads the terminal Idle or Done, and has since this runner
-//!    last told it something (`told`): one answer at a time per terminal,
-//!    each after the agent has taken the last one and come back.
+//! 1. The watcher reads the terminal Idle or Done, and this runner hasn't
+//!    told it anything in the last `TOLD_SPACING_MS` (`told`): one answer
+//!    at a time per terminal. Nothing waits on catching a transition; each
+//!    tick looks at the pane as it is, and check 4 is what proves it idle.
 //! 2. Nobody has typed there lately (`typed_lately`).
 //! 3. The pane's foreground process is the agent its preset names, proven
-//!    by its executable (`foreground_agent`), never by screen text. A shell,
-//!    or anything not recognized, isn't typed into.
+//!    by its executable, or for a Node install by the script Node runs
+//!    (`foreground_agent`), never by screen text. A shell, or anything not
+//!    recognized, isn't typed into.
 //! 4. A fresh capture classifies as neither Working nor Blocked, AND
 //!    `composer::read` positively recognizes the agent's box and finds it
 //!    empty. A menu, a picker, a prompt, an unfamiliar screen or a draft:
@@ -44,6 +46,10 @@
 //!
 //! **A chat pane** takes the answer as a prompt on its agent channel, after
 //! check 1: the channel can't reach a shell, a menu or a draft.
+//!
+//! **Superseded.** A newer answer on the same task replaces an older one not
+//! yet told: only the newest is told, and the older is noted "Not
+//! delivered: a newer answer replaced it."
 //!
 //! **Bounded.** An answer not told within `GIVE_UP_AFTER_MS` is noted "Not
 //! delivered: <why it last waited>" and dropped.
@@ -67,6 +73,9 @@ pub(crate) const QUIET_MS: i64 = 5_000;
 /// The same, while a client says the pane is in front of a person
 /// (`terminal.watching`): someone looking at it may only be pausing.
 pub(crate) const QUIET_WATCHED_MS: i64 = 15_000;
+/// How long after telling a terminal one answer the next may be told: long
+/// enough for the agent to have drawn its turn, so check 4 sees it working.
+pub(crate) const TOLD_SPACING_MS: i64 = 2_000;
 /// How long an answer may wait to be told before it's dropped.
 pub(crate) const GIVE_UP_AFTER_MS: i64 = 30 * 60 * 1_000;
 /// Long enough for any answer picked from options and most written ones;
@@ -80,6 +89,8 @@ const PASTE_POLL: Duration = Duration::from_millis(100);
 
 const COULDNT_CONFIRM: &str = "Couldn't confirm the agent got the decision";
 const PASTE_LEFT: &str = "Paste left in the composer; not sent";
+const LEFT_AT_A_SHELL: &str = "Answer left at a shell prompt; not run";
+const SUPERSEDED: &str = "Not delivered: a newer answer replaced it.";
 const NOBODY: &str = "Nobody to tell about the decision";
 
 /// What the agent is told.
@@ -89,7 +100,9 @@ pub(crate) fn message(key: &str, title: &str, answer: &str) -> String {
     let title = one_line(title, LONGEST_TITLE);
     let stop = if cut.ends_with(['.', '!', '?', '…']) { "" } else { "." };
     let more = if cut != full { format!(" (Full answer: farcooler task show {key}.)") } else { String::new() };
-    format!("Decision on {key} (\"{title}\"): {cut}{stop}{more} Continue.")
+    // Curly quotes: in fish, `("…")` left at a prompt is a command
+    // substitution, and these are no quote to any shell.
+    format!("Decision on {key} (“{title}”): {cut}{stop}{more} Continue.")
 }
 
 /// `raw` on one line, safe to type: line breaks and tabs become spaces, runs
@@ -187,8 +200,13 @@ impl Watcher {
                 return;
             }
         };
-        for wake in pending {
-            if let Pass::Waiting(held) = self.wake(&wake).await {
+        for (n, wake) in pending.iter().enumerate() {
+            // A newer answer on the same task is waiting too: tell only it.
+            if wake.claimed_at.is_none() && pending[n + 1..].iter().any(|later| later.task == wake.task) {
+                self.settle(wake, None, Some(SUPERSEDED.into()));
+                continue;
+            }
+            if let Pass::Waiting(held) = self.wake(wake).await {
                 self.wake_holds.lock().unwrap_or_else(|e| e.into_inner()).insert(wake.note, held);
                 self.wakes_hint.store(true, Ordering::SeqCst);
             }
@@ -232,14 +250,14 @@ impl Watcher {
     /// Check 1 and 2 of the gate: the watcher reads it Idle or Done, newly
     /// since the last answer it was told, and nobody is typing.
     async fn ready(&self, to: &Terminal) -> std::result::Result<(), Held> {
-        let (activity, since, _) = self.activity(to.id).await;
+        let (activity, _, _) = self.activity(to.id).await;
         match activity {
             AgentActivity::Idle | AgentActivity::Done => {}
             AgentActivity::Blocked => return Err(Held::Prompt),
             _ => return Err(Held::Busy),
         }
         let told = self.told.lock().unwrap_or_else(|e| e.into_inner()).get(&to.id).copied();
-        if told.is_some_and(|told| since.is_none_or(|since| since <= told)) {
+        if told.is_some_and(|told| now_millis() - told < TOLD_SPACING_MS) {
             return Err(Held::Busy);
         }
         if self.typed_lately(to.id, now_millis()) {
@@ -294,7 +312,7 @@ impl Watcher {
         let runtime = Runtime { marks: None, ..self.service.runtime() };
         let paste: String = crate::pastes::encode_paste(true, text).iter().map(|b| format!("{b:02x}")).collect();
         let started = now_millis();
-        if runtime.send_bytes_hex(to.id, &paste).await.is_err() {
+        if self.fail_sends_for_tests() || runtime.send_bytes_hex(to.id, &paste).await.is_err() {
             return self.settle(wake, Some(task), Some(COULDNT_CONFIRM.into()));
         }
         let deadline = tokio::time::Instant::now() + PASTE_SETTLES;
@@ -311,7 +329,16 @@ impl Watcher {
                 break;
             }
         }
+        // Someone typed between the matching capture and now: no Enter.
+        if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
+            held_exactly = false;
+        }
         if !held_exactly {
+            // The agent may have gone, and a shell taken the pane: say where
+            // the text really is.
+            if foreground_agent(&tty).await != Some(preset) {
+                return self.settle(wake, Some(task), Some(LEFT_AT_A_SHELL.into()));
+            }
             return self.settle(wake, Some(task), Some(PASTE_LEFT.into()));
         }
         if runtime.send_bytes_hex(to.id, "0d").await.is_err() {
@@ -333,6 +360,14 @@ impl Watcher {
             AgentActivity::Idle => Ok(composer::read(preset, &screen)),
             _ => Err(Held::Unfamiliar),
         })
+    }
+
+    /// Whether a test asked the next paste to fail as a send would.
+    fn fail_sends_for_tests(&self) -> bool {
+        #[cfg(test)]
+        return self.fail_sends.swap(false, Ordering::SeqCst);
+        #[cfg(not(test))]
+        false
     }
 
     fn mark_told(&self, terminal: Uuid) {
@@ -426,15 +461,42 @@ pub(crate) fn agent_of_executable(path: &str) -> Option<&'static str> {
     None
 }
 
+/// Which agent a process is, by its executable or, when that's Node, by the
+/// script Node runs: the first argument that isn't a flag, `…/bin/claude`,
+/// `…/@anthropic-ai/claude-code/cli.js`, `…/bin/codex` or
+/// `…/@openai/codex/…`. Anything else is `None`.
+pub(crate) fn agent_of_process(exe: &str, args: &str) -> Option<&'static str> {
+    if let Some(agent) = agent_of_executable(exe) {
+        return Some(agent);
+    }
+    let program = exe.rsplit('/').next().unwrap_or(exe);
+    if program != "node" {
+        return None;
+    }
+    let script = args.split_whitespace().skip(1).find(|a| !a.starts_with('-'))?;
+    if script.contains("/@anthropic-ai/claude-code/") {
+        return Some("claude");
+    }
+    if script.contains("/@openai/codex/") {
+        return Some("codex");
+    }
+    match script.rsplit('/').next()? {
+        "claude" => Some("claude"),
+        "codex" => Some("codex"),
+        _ => None,
+    }
+}
+
 /// The agent the foreground process of `tty` (`/dev/ttys012`) is, proven by
-/// its executable. `None` for a shell, for anything else, and when it can't
-/// be read.
+/// its executable and arguments (`agent_of_process`). `None` for a shell, for
+/// anything else, and when it can't be read.
 ///
 /// The foreground process group can hold the shell that launched the agent
 /// (fish runs `-c` without job control, so the agent joins its group) and
 /// the agent's own children. What's in front is the one process in that
 /// group whose parent is outside it or is a shell, not counting a shell
-/// that is only waiting on a child in it.
+/// that is only waiting on a child in it. A background job isn't in the
+/// foreground group, so a shell claude backgrounded doesn't count.
 pub(crate) async fn foreground_agent(tty: &str) -> Option<&'static str> {
     let name = tty.strip_prefix("/dev/").unwrap_or(tty);
     let out = tokio::process::Command::new("ps")
@@ -448,7 +510,13 @@ pub(crate) async fn foreground_agent(tty: &str) -> Option<&'static str> {
     let exe = std::fs::read_link(format!("/proc/{pid}/exe"))
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or(comm);
-    agent_of_executable(&exe)
+    let args = tokio::process::Command::new("ps")
+        .args(["-o", "args=", "-p", &pid.to_string()])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .await
+        .ok()?;
+    agent_of_process(&exe, String::from_utf8_lossy(&args.stdout).trim())
 }
 
 /// The process in front, from `ps -o pid=,ppid=,stat=,comm=` for one tty,

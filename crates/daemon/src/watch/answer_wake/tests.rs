@@ -108,14 +108,41 @@ impl Board {
         si
     }
 
+    /// The stand-in run as Node runs an npm install: a copy of perl named
+    /// `node`, running the stand-in from a script named `script`.
+    async fn node_stand_in(&self, terminal: &Terminal, script: &str) -> StandIn {
+        let dir = self.dir.path().join(format!("si-{}", terminal.id.simple()));
+        std::fs::create_dir_all(dir.join("bin")).unwrap();
+        let node = dir.join("node");
+        std::fs::copy(farcooler_core::programs::find("perl").expect("perl"), &node).unwrap();
+        let file = dir.join("bin").join(script);
+        std::fs::write(&file, STAND_IN).unwrap();
+        let si = StandIn { control: dir.join("control"), log: dir.join("log") };
+        std::fs::write(&si.control, "idle").unwrap();
+        let q = |p: &std::path::Path| format!("'{}'", p.display());
+        self.run_in(terminal, &format!("{} {} claude {} {}", q(&node), q(&file), q(&si.control), q(&si.log))).await;
+        self.screen_with(terminal.id, "stand-in").await;
+        for _ in 0..100 {
+            if si.log().contains("MODE idle") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        si
+    }
+
     async fn doing(&self, terminal: Uuid, activity: AgentActivity) {
         observe(&self.watcher, terminal, activity).await;
     }
 
     /// Answer as the person at a client, through `task.note` itself.
     fn answer(&self, body: &str) {
+        self.answer_on(self.task.id, body);
+    }
+
+    fn answer_on(&self, task: Uuid, body: &str) {
         let req = pb::TaskNoteAppend {
-            task_id: self.task.id.as_bytes().to_vec().into(),
+            task_id: task.as_bytes().to_vec().into(),
             kind: pb::TaskNoteKind::Answer as i32,
             body: body.into(),
             ..Default::default()
@@ -191,12 +218,12 @@ async fn observe(watcher: &Watcher, terminal: Uuid, activity: AgentActivity) {
 
 #[test]
 fn the_message_is_one_line_with_the_answer_and_nothing_that_acts() {
-    assert_eq!(message("ov-79", "Drill-in layout", "Drill in"), r#"Decision on ov-79 ("Drill-in layout"): Drill in. Continue."#);
-    assert_eq!(message("ov-79", "Layout", "  Yes!  "), r#"Decision on ov-79 ("Layout"): Yes! Continue."#);
+    assert_eq!(message("ov-79", "Drill-in layout", "Drill in"), "Decision on ov-79 (“Drill-in layout”): Drill in. Continue.");
+    assert_eq!(message("ov-79", "Layout", "  Yes!  "), "Decision on ov-79 (“Layout”): Yes! Continue.");
     let said = message("ov-1", "T\x1b]0;x\x07", "Red\x1b[31m now\r\nplease\u{9b}2J\x7f\u{202e}gnp\u{200b}");
     assert!(!said.chars().any(|c| c.is_control() || invisible(c)), "{said:?}");
     assert!(said.contains(r"Red\u{1b}[31m now please\u{9b}2J\u{7f}\u{202e}gnp\u{200b}"), "{said}");
-    assert!(said.contains(r#"("T\u{1b}]0;x\u{7}")"#), "{said}");
+    assert!(said.contains(r"(“T\u{1b}]0;x\u{7}”)"), "{said}");
     let long = message("ov-1", "T", &"word ".repeat(200));
     assert!(long.contains("…") && long.contains("(Full answer: farcooler task show ov-1.)"), "{long}");
     assert!(long.chars().count() < LONGEST_ANSWER + 100, "{long}");
@@ -221,6 +248,9 @@ fn the_process_in_front_is_the_one_under_the_shell() {
     assert_eq!(in_front(fish_claude), Some((101, "/x/claude".into())));
     assert_eq!(in_front("100 1 Ss+ -zsh\n"), Some((100, "-zsh".into())));
     // A wrapper script waits on the agent, which is what reads the keys.
+    // A shell claude put in the background isn't in the foreground group.
+    let background = "100 1 Ss+ fish\n101 100 S+ /x/claude\n103 101 S /bin/zsh\n";
+    assert_eq!(in_front(background), Some((101, "/x/claude".into())));
     let wrapped = "100 1 Ss+ fish\n101 100 S+ /bin/bash\n102 101 S+ /x/codex\n";
     assert_eq!(in_front(wrapped), Some((102, "/x/codex".into())));
     // A wrapper that isn't a shell is what's in front, and isn't an agent.
@@ -450,25 +480,145 @@ async fn an_answer_is_told_exactly_once_across_a_restart() {
     drop(dir);
 }
 
-/// Two answers for one agent: the first is told; the second waits until the
-/// agent has come back idle since, then is told on its own.
+/// Two answers on one task before either is told: only the newest is
+/// told, and the older is noted as replaced.
 #[tokio::test]
-async fn two_answers_for_one_agent_go_one_at_a_time() {
+async fn a_newer_answer_replaces_one_not_yet_told() {
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
-    b.doing(agent.id, AgentActivity::Idle).await;
+    b.doing(agent.id, AgentActivity::Working).await;
     b.answer("Drill in");
     b.answer("Actually, tabs");
+    b.pump().await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    b.pump().await;
+    assert_eq!(si.submitted(), [b.told("Actually, tabs")], "{}", si.log());
+    assert_eq!(b.progress(), ["Not delivered: a newer answer replaced it.", "Told Agent 2 about the decision"]);
+}
+
+/// Answers on two tasks for one terminal go one at a time, the second once
+/// the spacing has passed, with no fresh sample in between: nothing waits
+/// on catching the agent's turn.
+#[tokio::test]
+async fn two_answers_for_one_terminal_go_one_at_a_time() {
+    let b = board().await;
+    let other = b.svc.store.create_task(b.task.workspace_id, "Tabs or spaces", Actor::Manager).unwrap();
+    let orchestrator = b.orchestrator().await;
+    let si = b.stand_in(&orchestrator, "claude", "claude").await;
+    b.doing(orchestrator.id, AgentActivity::Working).await;
+    b.answer("Drill in");
+    b.answer_on(other.id, "Tabs");
+    b.pump().await;
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
     b.pump().await;
     b.pump().await;
     assert_eq!(si.submitted(), [b.told("Drill in")], "{}", si.log());
     assert_eq!(b.pending().len(), 1);
 
-    tokio::time::sleep(Duration::from_millis(5)).await;
+    // A literal, so a longer spacing, or waiting on a fresh sample, fails.
+    tokio::time::sleep(Duration::from_millis(2_100)).await;
+    b.pump().await;
+    let second = message(&other.key, "Tabs or spaces", "Tabs");
+    assert_eq!(si.submitted(), [b.told("Drill in"), second], "{}", si.log());
+}
+
+// ---- the process in front, and the rest of the gate ----
+
+#[test]
+fn a_node_install_is_known_by_its_script() {
+    assert_eq!(agent_of_process("/opt/homebrew/bin/node", "node /opt/homebrew/bin/claude --model opus"), Some("claude"));
+    assert_eq!(
+        agent_of_process("/usr/local/bin/node", "node --no-warnings /usr/lib/node_modules/@anthropic-ai/claude-code/cli.js"),
+        Some("claude")
+    );
+    assert_eq!(agent_of_process("node", "node /x/node_modules/@openai/codex/bin/codex.js"), Some("codex"));
+    assert_eq!(agent_of_process("/opt/homebrew/bin/node", "node /x/server.js"), None);
+    assert_eq!(agent_of_process("/opt/homebrew/bin/node", "node"), None);
+    assert_eq!(agent_of_process("/bin/zsh", "zsh /x/bin/claude"), None, "only node's script counts");
+    assert_eq!(agent_of_process("/x/claude/versions/2.1.237", "2.1.237"), Some("claude"));
+}
+
+/// claude under node, as npm installs it: told.
+#[tokio::test]
+async fn a_node_claude_is_told() {
+    let b = board().await;
+    let agent = b.agent("Agent 2", "claude").await;
+    let si = b.node_stand_in(&agent, "claude").await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    b.answer("Drill in");
+    b.pump().await;
+    assert_eq!(si.submitted(), [b.told("Drill in")], "{}", si.log());
+}
+
+/// node running some other script, drawing claude's screen: nothing.
+#[tokio::test]
+async fn a_node_running_something_else_is_never_typed_into() {
+    let b = board().await;
+    let agent = b.agent("Agent 2", "claude").await;
+    let si = b.node_stand_in(&agent, "server.js").await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    b.answer("Drill in");
+    b.pump().await;
+    b.untouched(&si);
+    assert_eq!(b.give_up().await, ["Not delivered: no agent was running in the pane."]);
+}
+
+/// Bracketed paste off: nothing.
+#[tokio::test]
+async fn a_pane_without_bracketed_paste_is_never_typed_into() {
+    let b = board().await;
+    let agent = b.agent("Agent 2", "claude").await;
+    let si = b.stand_in(&agent, "claude", "claude").await;
+    si.show("nobracket").await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    b.answer("Drill in");
+    b.pump().await;
+    b.untouched(&si);
+}
+
+/// Someone types while the paste is being read back: no Enter.
+#[tokio::test]
+async fn typing_during_the_read_back_stops_the_enter() {
+    let b = board().await;
+    let agent = b.agent("Agent 2", "claude").await;
+    let si = b.stand_in(&agent, "claude", "claude").await;
+    si.show("slow").await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    let (root, id, log) = (b.svc.root_dir().to_path_buf(), agent.id, si.log.clone());
+    let typist = tokio::spawn(async move {
+        for _ in 0..200 {
+            if std::fs::read_to_string(&log).unwrap_or_default().contains("PASTE ") {
+                crate::runtime::mark_input(&root, id);
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    });
+    b.answer("Drill in");
+    b.pump().await;
+    typist.await.unwrap();
+    assert!(si.log().contains("PASTE "), "{}", si.log());
+    assert!(!si.log().contains("ENTER"), "{}", si.log());
+    assert_eq!(b.progress(), ["Paste left in the composer; not sent"]);
+}
+
+/// A paste that fails to send after the claim: never retried, and noted.
+#[tokio::test]
+async fn a_send_failing_after_the_claim_is_not_retried() {
+    let b = board().await;
+    let agent = b.agent("Agent 2", "claude").await;
+    let si = b.stand_in(&agent, "claude", "claude").await;
+    b.doing(agent.id, AgentActivity::Working).await;
+    b.answer("Drill in");
+    b.pump().await;
+    b.watcher.fail_sends.store(true, Ordering::SeqCst);
     b.doing(agent.id, AgentActivity::Idle).await;
     b.pump().await;
-    assert_eq!(si.submitted(), [b.told("Drill in"), b.told("Actually, tabs")], "{}", si.log());
+    b.pump().await;
+    assert_eq!(b.progress(), ["Couldn't confirm the agent got the decision"]);
+    assert!(!si.log().contains("PASTE"), "{}", si.log());
+    assert!(b.pending().is_empty());
 }
 
 // ---- whom ----
