@@ -169,6 +169,35 @@ struct MacDestinationTests {
         #expect(MacDestination.selection(for: Destination(place: .terminal("x")), in: fleet) == nil)
     }
 
+    @Test("A click on a task opens it as the navigator does; a relaunch only selects it, with its tab and agent")
+    func landings() {
+        let fleet = Self.fleet()
+        let task = Destination(
+            runner: .init(host: ""), place: .task(workspace: Self.billing, task: .init(id: Self.task)),
+            tab: .changes, agent: "agent")
+        let click = MacDestination.landing(task, click: true, in: fleet)
+        #expect(click.openTask == .init(id: Self.task, host: "", workspace: Self.billing))
+        #expect(click.selection == nil)
+        #expect(click.taskID == Self.task)
+        #expect(click.tab == .changes)
+        #expect(click.agent == "agent")
+        let relaunch = MacDestination.landing(task, click: false, in: fleet)
+        #expect(relaunch.openTask == nil)
+        #expect(relaunch.selection == .workspace(host: "", workspace: Self.billing, focus: .task(Self.task)))
+        #expect(relaunch.taskID == Self.task)
+
+        // A pane opens where going to it always has, with the keyboard in it.
+        let pane = Destination(runner: .init(host: ""), place: .worktree("lane", workspace: Self.billing), pane: "agent")
+        let landed = MacDestination.landing(pane, click: true, in: fleet)
+        #expect(landed.selection == .workspace(host: "", workspace: Self.billing, focus: .task(Self.task)))
+        #expect(landed.pane == PaneRef(host: "", worktree: "lane", terminal: "agent"))
+        #expect(landed.taskID == Self.task)
+
+        // What the fleet doesn't have opens nothing, and keeps no tab.
+        let gone = Destination(runner: .init(host: ""), place: .worktree("gone", workspace: nil), tab: .agent)
+        #expect(MacDestination.landing(gone, click: true, in: fleet) == MacDestination.Landing())
+    }
+
     // MARK: - Where the window goes back to
 
     @Test("Where a window goes back to is what's kept, else what an earlier build kept")

@@ -6,11 +6,11 @@ struct ContentView: View {
     @StateObject var store = FleetStore()
     /// This window's identity in `Notifier`'s per-window record of what is on
     /// screen, so a second window adds to it rather than overwriting it.
-    @State private var windowID = UUID()
+    @State var windowID = UUID()
     @ObservedObject private var preferences = Preferences.shared
     @ObservedObject private var themes = Themes.shared
     /// A click on a notification, waiting to be opened (ov-106, ov-183).
-    @ObservedObject private var noticeOpener = DestinationOpener.shared
+    @ObservedObject var noticeOpener = DestinationOpener.shared
     @Environment(\.openSettings) private var openSettings
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -93,7 +93,7 @@ struct ContentView: View {
     /// `settleLaunch`.
     @State private var launched = false
     /// Where this window is going back to, while it waits for its runner.
-    @State private var restoring: DestinationOpen?
+    @State var restoring: DestinationOpen?
     /// Bumped by ⌘F in a workspace: its navigator's filter takes the
     /// keyboard (ov-103).
     @State private var boardFilterRequest = 0
@@ -145,13 +145,13 @@ struct ContentView: View {
     /// it's on screen. See `WorkspaceScreen.keyPane`: with a task open, the
     /// conversation and the task's agent are both on screen, and ⌃B has to
     /// act on the one you were last in.
-    @State private var keyPane: PaneRef?
+    @State var keyPane: PaneRef?
     /// The agent each task's column shows, by task id, when several are on
     /// it and one was picked.
     @State var chosenAgents: [String: String] = [:]
     /// The tab each task shows, Overview, Agent or Changes, as last chosen
     /// in this window (ov-98).
-    @State private var taskTabs = TaskTabMemory()
+    @State var taskTabs = TaskTabMemory()
     /// The Needs You item ⌃⌘N last opened, by its key: where the next
     /// press goes on from, while the window is still showing it.
     @State private var lastAttention: String?
@@ -186,7 +186,7 @@ struct ContentView: View {
     /// leaves the keyboard on the board this once.
     @State private var boardKeyboardPending = false
     /// This window, for the Esc monitor, which hears every window's keys.
-    @State private var windowBox = WindowBox()
+    @State var windowBox = WindowBox()
     /// New Workspace…, with the name typed into the palette, while its
     /// sheet is up.
     @State private var newWorkspaceName: NewWorkspaceName?
@@ -2573,59 +2573,6 @@ struct ContentView: View {
         selection = decided
     }
 
-    /// Go back to `restoring`: resolved as the runners come up, with what the
-    /// fleet doesn't hold read from them, and opened where the window was or,
-    /// when that's gone, at its nearest level that isn't. A window somebody
-    /// has already moved is left alone.
-    private func restoreWhereYouWere() async {
-        guard let open = restoring else { return }
-        _ = await DestinationOpener.run(
-            open, isCurrent: { restoring?.id == open.id }, interrupted: { selection != nil },
-            world: destinationWorld, read: { await DestinationReads.read($1, from: store.clients[$0], fleet: store.fleet) },
-            land: { land($0, arrival: .restore) })
-        if restoring?.id == open.id { restoring = nil }
-    }
-
-    /// What this window holds now, as the resolver reads it.
-    private func destinationWorld() -> DestinationResolver.World {
-        MacDestination.world(
-            runners: store.clients.values.sorted { $0.target < $1.target }.map { MacDestination.Runner($0) },
-            fleet: store.fleet)
-    }
-
-    /// Open a resolved destination here. A relaunch sets the selection and
-    /// leaves the keyboard where the window put it; a click goes where the
-    /// navigator would (`openTask`, `navigate`) and brings the window forward.
-    private func land(_ destination: Destination, arrival: DestinationResolver.Arrival) {
-        let host = destination.runner.host ?? ""
-        let click = arrival == .notification
-        var opened: String?
-        if click, case .task(let workspace?, let ref) = destination.place, let id = ref.id {
-            openTask(id, host: host, workspace: workspace)
-            opened = id
-        } else if let next = MacDestination.selection(for: destination, in: store.fleet) {
-            let pane = MacDestination.pane(of: destination)
-            if click {
-                navigate(to: next, key: pane)
-            } else {
-                selection = next
-                if let pane { keyPane = pane }
-            }
-            if case .workspace(_, _, .task(let id)?) = next { opened = id }
-        }
-        // What was open on the task comes back with it, where the task still offers it.
-        if let id = opened {
-            if let tab = destination.tab.flatMap({ TaskTab(rawValue: $0.rawValue) }) { taskTabs.choose(tab, for: id) }
-            if let agent = destination.agent { chosenAgents[id] = agent }
-        }
-        if click { windowBox.window?.makeKeyAndOrderFront(nil) }
-    }
-
-    /// Where this window is, as `lastDestination` keeps it.
-    private var keptPlace: String? {
-        MacDestination.destination(selection, tabs: taskTabs, agents: chosenAgents, keyPane: keyPane)?.encoded
-    }
-
     // MARK: - Commands
 
     /// The terminals of the view on screen, in the order they're drawn:
@@ -3196,26 +3143,13 @@ struct ContentView: View {
     /// Open a task from outside its navigator (the palette, a notice):
     /// its workspace, with the task beside the board and the navigator
     /// holding the keyboard, as a row clicked in it does (`chooseTask`).
-    private func openTask(_ id: String, host: String, workspace: String) {
+    func openTask(_ id: String, host: String, workspace: String) {
         let opened = WorkspaceNavigation.openingTask(id, host: host, workspace: workspace, from: boardState)
         trail = nil
         if opened.step.keyboard == .board { boardKeyboardPending = true }
         focusColumn = opened.step.focus
         selection = opened.selection
         key(opened.step.keyboard)
-    }
-
-    /// Open what a notification was clicked for, in this window if it's the
-    /// one to (`DestinationOpener.claim`): a task through `openTask`, the
-    /// palette's way and the navigator's selection, a pane where going to it
-    /// lands, whatever kind of notification it was (ov-183).
-    private func openNoticedTask() async {
-        guard let open = noticeOpener.pending else { return }
-        await noticeOpener.drive(
-            open, window: windowID, isKey: { windowBox.window?.isKeyWindow == true },
-            world: destinationWorld,
-            read: { await DestinationReads.read($1, from: store.clients[$0], fleet: store.fleet) },
-            land: { land($0, arrival: .notification) })
     }
 
     /// A finished status's History page, in the main area (ov-103). The

@@ -138,6 +138,53 @@ enum MacDestination {
         }
     }
 
+    /// What a window holds, as the resolver reads it.
+    @MainActor
+    static func world(of store: FleetStore) -> World {
+        world(
+            runners: store.clients.values.sorted { $0.target < $1.target }.map { Runner($0) },
+            fleet: store.fleet)
+    }
+
+    /// What opening a resolved destination does, as values; `ContentView.land` does it.
+    struct Landing: Equatable {
+        /// A task a click opens as the navigator does (`openTask`).
+        var openTask: OpenTask?
+        /// What to select otherwise, and the pane the keyboard goes to.
+        var selection: Selection?
+        var pane: PaneRef?
+        /// The task that ends up open, whose tab and chosen agent come back with it.
+        var taskID: String?
+        var tab: TaskTab?
+        var agent: String?
+
+        struct OpenTask: Equatable {
+            var id: String
+            var host: String
+            var workspace: String
+        }
+    }
+
+    /// Where opening `destination` lands. A click on a task goes through
+    /// `openTask`, the palette's way; anything else is the selection
+    /// `selection(for:in:)` says, with the keyboard in the pane it names.
+    static func landing(_ destination: Destination, click: Bool, in fleet: Fleet) -> Landing {
+        var landing = Landing()
+        if click, case .task(let workspace?, let ref) = destination.place, let id = ref.id {
+            landing.openTask = .init(id: id, host: destination.runner.host ?? "", workspace: workspace)
+            landing.taskID = id
+        } else if let next = selection(for: destination, in: fleet) {
+            landing.selection = next
+            landing.pane = pane(of: destination)
+            if case .workspace(_, _, .task(let id)?) = next { landing.taskID = id }
+        }
+        if landing.taskID != nil {
+            landing.tab = destination.tab.flatMap { TaskTab(rawValue: $0.rawValue) }
+            landing.agent = destination.agent
+        }
+        return landing
+    }
+
     /// The pane the keyboard goes to once `destination` is open, when it
     /// names one: only a worktree's, since a task's agent is `agent`.
     static func pane(of destination: Destination) -> PaneRef? {
