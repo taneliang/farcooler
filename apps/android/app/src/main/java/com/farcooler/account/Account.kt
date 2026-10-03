@@ -247,32 +247,7 @@ class Account(context: Context) {
         val token = accessToken() ?: return false
         val body = post(
             "/v1/devices",
-            buildJsonObject {
-                put("pushToken", JsonPrimitive(pushToken))
-                put("platform", JsonPrimitive(platform))
-                put("label", JsonPrimitive(label))
-                // So the devices screen can show which of your runners is
-                // behind, without anyone having to go and look.
-                put("version", JsonPrimitive(AppVersion.reported))
-                // "When an agent finishes or fails", so the toggle reaches the
-                // pushes too. It used to be read only by this app's own
-                // `Notifier`, which runs when the app is running — the case the
-                // product is not about. With the phone asleep the tray card
-                // comes from the relay, and the relay had never heard of the
-                // setting: silence with the app open, banners with the phone in
-                // a pocket.
-                //
-                // Always sent, never omitted. The relay COALESCEs an absent
-                // field into what it already holds, which is right for a build
-                // too old to know about this and wrong for one turning the
-                // setting back ON.
-                put("notifyOnDone", JsonPrimitive(notifyOnDone))
-                // The task notice classes this device keeps on (ov-94), sent
-                // whole; an empty list is every class off.
-                if (notifyEvents != null) {
-                    put("notifyEvents", JsonArray(notifyEvents.map(::JsonPrimitive)))
-                }
-            },
+            registration(pushToken, platform, label, AppVersion.reported, notifyOnDone, notifyEvents),
             bearer = token,
         )
         return body is RelayAnswer.Answered
@@ -430,6 +405,45 @@ class Account(context: Context) {
         /** Credentials, so: the Keystore. Labels stay in preferences. */
         const val KEY_ACCESS = "account.access"
         const val KEY_REFRESH = "account.refresh"
+
+        /**
+         * What [registerDevice] sends the relay's `/v1/devices`. Pinned by
+         * `test/fixtures/contracts/registration/android.json`, which the
+         * relay's suite files (ov-121).
+         */
+        fun registration(
+            pushToken: String,
+            platform: String,
+            label: String,
+            version: String,
+            notifyOnDone: Boolean,
+            notifyEvents: List<String>?,
+        ): JsonObject = buildJsonObject {
+            put("pushToken", JsonPrimitive(pushToken))
+            put("platform", JsonPrimitive(platform))
+            put("label", JsonPrimitive(label))
+            // So the devices screen can show which of your runners is
+            // behind, without anyone having to go and look.
+            put("version", JsonPrimitive(version))
+            // "When an agent finishes or fails", so the toggle reaches the
+            // pushes too. It used to be read only by this app's own
+            // `Notifier`, which runs when the app is running — the case the
+            // product is not about. With the phone asleep the tray card
+            // comes from the relay, and the relay had never heard of the
+            // setting: silence with the app open, banners with the phone in
+            // a pocket.
+            //
+            // Always sent, never omitted. The relay COALESCEs an absent
+            // field into what it already holds, which is right for a build
+            // too old to know about this and wrong for one turning the
+            // setting back ON.
+            put("notifyOnDone", JsonPrimitive(notifyOnDone))
+            // The task notice classes this device keeps on (ov-94), sent
+            // whole; an empty list is every class off.
+            if (notifyEvents != null) {
+                put("notifyEvents", JsonArray(notifyEvents.map(::JsonPrimitive)))
+            }
+        }
     }
 }
 

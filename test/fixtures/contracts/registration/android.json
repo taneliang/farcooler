@@ -1,0 +1,12 @@
+{
+  "pushToken": "fP3kQ9xR2sT:APA91bH7mN4vW8yZ1aC5dE9gJ2kL6nP0qS3tU7wX1zB4cF8hK2mO5rV9yA3dG7jL0pS4uW8xZ2bE6",
+  "platform": "fcm",
+  "label": "Pixel 9",
+  "version": "0.2.0 (canary) · 412",
+  "notifyOnDone": true,
+  "notifyEvents": [
+    "decision",
+    "review",
+    "blocked"
+  ]
+}
