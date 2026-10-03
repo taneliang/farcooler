@@ -354,6 +354,12 @@ pub struct Following {
     tmux_reports: AtomicU8,
     /// Per pane: failures in a row, and when it may be tried again.
     retry: Mutex<HashMap<String, (u32, Instant)>>,
+    /// Per pane: held for the whole of a `follow`, so two never subscribe
+    /// to one pane at once. Each would start a `pipe-pane`, the second
+    /// closes the first's, and either can connect to the fanout that's
+    /// exiting: its record dies at once, and the program's start is missed.
+    /// A pane id's entry is kept for reuse; tmux numbers few.
+    turns: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl Following {
@@ -403,6 +409,8 @@ impl Following {
                 Err(_) => return self.failed(&pane),
             },
         }
+        let turn = self.turns.lock().unwrap_or_else(|e| e.into_inner()).entry(pane.clone()).or_default().clone();
+        let _turn = turn.lock().await;
         // The pid first: a respawn between this and the subscription leaves
         // a record about the program before it, which is never used.
         let Ok(pid) = runtime.tmux.pane_pid(&pane).await else { return self.failed(&pane) };
