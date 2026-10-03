@@ -733,7 +733,7 @@ fn render_show(ws: &pb::Workspace, repositories: &[pb::Repository], worktrees: &
     out.push_str(&format!("  task prefix   {}\n", ws.task_prefix));
     out.push_str(&format!("  orchestrator  {}\n", json["orchestrator"].as_str().unwrap_or("none running")));
     if let Some(on) = ws.wake_on_answer {
-        out.push_str(&format!("  wake on answer  {}\n", if on { "on" } else { "off" }));
+        out.push_str(&format!("  wake agent    {}\n", if on { "on" } else { "off" }));
     }
     if let Some(charter) = json["charter"].as_str() {
         out.push_str(&format!("  charter       {charter}\n"));

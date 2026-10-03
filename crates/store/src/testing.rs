@@ -42,3 +42,9 @@ pub fn edited_at(store: &crate::Store, task: Uuid) -> Option<i64> {
         .query_row("SELECT edited_at FROM tasks WHERE id = ?1", params![uuid_blob(task)], |r| r.get(0))
         .expect("the task exists")
 }
+
+/// Move every queued answer's `enqueued_at` back by `by_ms`, for a test of
+/// what happens to an answer that has waited too long.
+pub fn backdate_answer_wakes(store: &crate::Store, by_ms: i64) {
+    store.conn().execute("UPDATE answer_wakes SET enqueued_at = enqueued_at - ?1", params![by_ms]).unwrap();
+}

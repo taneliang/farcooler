@@ -815,6 +815,10 @@ fn migration_0018_terminal_split_of_orchestrator(tx: &Transaction) -> rusqlite::
 /// stays after it is told, with `done_at` set, rather than being deleted: the
 /// key is what keeps a second enqueue of the same note from telling it again.
 /// It goes with its task.
+///
+/// `claimed_at` is set, in its own write, before the first byte is typed.
+/// A row found claimed and not done was being typed when the daemon
+/// stopped, so it's never typed again: it's settled as unconfirmed.
 fn migration_0019_wake_on_answer(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
         r#"
@@ -824,6 +828,7 @@ fn migration_0019_wake_on_answer(tx: &Transaction) -> rusqlite::Result<()> {
             note_id BLOB PRIMARY KEY NOT NULL,
             task_id BLOB NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
             enqueued_at INTEGER NOT NULL,
+            claimed_at INTEGER,
             done_at INTEGER
         );
         CREATE INDEX answer_wakes_pending ON answer_wakes (enqueued_at) WHERE done_at IS NULL;

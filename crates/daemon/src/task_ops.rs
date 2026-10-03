@@ -553,12 +553,10 @@ pub fn note(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend) -> Resul
         return Err(DomainError::InvalidArgument { what: "body" });
     }
 
-    let written = match optional_id(req.supersedes.as_ref(), "supersedes")? {
-        Some(superseded) => {
-            svc.store.add_note_superseding(id, kind, actor, &req.body, extra, superseded)?
-        }
-        None => svc.store.add_note(id, kind, actor, &req.body, extra)?,
-    };
+    // A person's answer is queued to wake its agent in the same write
+    // (`watch::answer_wake`).
+    let supersedes = optional_id(req.supersedes.as_ref(), "supersedes")?;
+    let (written, queued) = svc.store.add_note_waking(id, kind, actor, &req.body, extra, supersedes)?;
 
     // The task rather than the note, because that is what a client re-reads —
     // and read after the append, so a `QUESTION` that moved nothing and one
@@ -572,9 +570,7 @@ pub fn note(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend) -> Resul
     }
     // Every client's answer arrives here, so this is where the agent waiting
     // on it is woken (`watch::answer_wake`).
-    if kind == NoteKind::Answer {
-        watcher.answered(&task, &written);
-    }
+    watcher.answered(&task, &written, queued);
     Ok(pb_note(&written))
 }
 

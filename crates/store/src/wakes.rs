@@ -7,10 +7,13 @@
 //! tells it twice.
 //!
 //! One row per ANSWER note, keyed by the note. A told row keeps its key with
-//! `done_at` set, so enqueueing the same note again is a no-op: exactly once
-//! is the primary key's job, not a caller's memory. Marking a row done and
-//! writing the note that says what happened are one transaction, so the
-//! record and the queue can't disagree.
+//! `done_at` set, so enqueueing the same note again is a no-op. A row is
+//! CLAIMED before anything is typed, so a crash mid-typing leaves a claimed
+//! row that is never typed again (at most once, then a note saying it
+//! couldn't be confirmed). Marking a row done and writing the note that says
+//! what happened are one transaction, so the record and the queue can't
+//! disagree. The row is written in the same transaction as the answer itself
+//! (`add_note_waking`), so a crash can't keep an answer and lose its wake.
 
 use rusqlite::params;
 use uuid::Uuid;
@@ -34,6 +37,9 @@ pub struct PendingWake {
     pub actor: Actor,
     /// Unix milliseconds.
     pub enqueued_at: i64,
+    /// When typing it began, if it did. Set and not done means it may or may
+    /// not have reached the agent.
+    pub claimed_at: Option<i64>,
 }
 
 impl Store {
@@ -55,7 +61,7 @@ impl Store {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(
-                "SELECT w.note_id, w.task_id, n.body, n.actor, w.enqueued_at
+                "SELECT w.note_id, w.task_id, n.body, n.actor, w.enqueued_at, w.claimed_at
                    FROM answer_wakes w JOIN task_notes n ON n.id = w.note_id
                   WHERE w.done_at IS NULL
                   ORDER BY w.enqueued_at, w.rowid",
@@ -72,10 +78,85 @@ impl Store {
                     // still goes to the agent rather than being dropped.
                     actor: Actor::parse(&actor).unwrap_or(Actor::User),
                     enqueued_at: r.get(4)?,
+                    claimed_at: r.get(5)?,
                 })
             })
             .map_err(map_err)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
+    }
+
+    /// Append a note and, when it's a person's answer on a board that wakes
+    /// on answers, queue it to be told, in one transaction. The bool says
+    /// whether it was queued. Otherwise as `add_note` and
+    /// `add_note_superseding`.
+    pub fn add_note_waking(
+        &self,
+        task: Uuid,
+        kind: NoteKind,
+        actor: Actor,
+        body: &str,
+        extra: serde_json::Value,
+        supersedes: Option<Uuid>,
+    ) -> Result<(TaskNote, bool)> {
+        if kind != NoteKind::Answer || actor != Actor::User {
+            let note = match supersedes {
+                Some(s) => self.add_note_superseding(task, kind, actor, body, extra, s)?,
+                None => self.add_note(task, kind, actor, body, extra)?,
+            };
+            return Ok((note, false));
+        }
+        if let Some(s) = supersedes {
+            // The same checks `add_note_superseding` makes, before writing.
+            let owner: Option<(Vec<u8>, String)> = {
+                use rusqlite::OptionalExtension;
+                self.conn()
+                    .query_row("SELECT task_id, kind FROM task_notes WHERE id = ?1", params![uuid_blob(s)], |r| {
+                        Ok((r.get(0)?, r.get(1)?))
+                    })
+                    .optional()
+                    .map_err(map_err)?
+            };
+            if !owner.is_some_and(|(t, k)| t == task.as_bytes().as_slice() && k == kind.as_str()) {
+                return Err(farcooler_core::DomainError::InvalidArgument { what: "supersedes" });
+            }
+        }
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(map_err)?;
+        let wakes: Option<bool> = {
+            use rusqlite::OptionalExtension;
+            tx.query_row(
+                "SELECT w.wake_on_answer FROM tasks t JOIN workspaces w ON w.id = t.workspace_id WHERE t.id = ?1",
+                params![uuid_blob(task)],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_err)?
+        };
+        let Some(wakes) = wakes else { return Err(farcooler_core::DomainError::NotFound) };
+        let note = insert_note(&tx, task, kind, actor, body, &extra, supersedes)?;
+        if wakes {
+            tx.execute(
+                "INSERT OR IGNORE INTO answer_wakes (note_id, task_id, enqueued_at) VALUES (?1, ?2, ?3)",
+                params![uuid_blob(note.id), uuid_blob(task), now_millis()],
+            )
+            .map_err(map_err)?;
+        }
+        tx.commit().map_err(map_err)?;
+        Ok((note, wakes))
+    }
+
+    /// Claim `note`'s wake: say typing is about to begin. False when it was
+    /// already claimed or done, and then nothing may be typed for it.
+    pub fn claim_answer_wake(&self, note: Uuid) -> Result<bool> {
+        let claimed = self
+            .conn()
+            .execute(
+                "UPDATE answer_wakes SET claimed_at = ?2
+                  WHERE note_id = ?1 AND claimed_at IS NULL AND done_at IS NULL",
+                params![uuid_blob(note), now_millis()],
+            )
+            .map_err(map_err)?;
+        Ok(claimed == 1)
     }
 
     /// Whether any answer is waiting to be told. Cheap enough to ask every
@@ -156,6 +237,41 @@ mod tests {
         assert!(!store.enqueue_answer_wake(answer.id, task).unwrap(), "a told answer queued again");
         let progress = store.notes_for(task, Some(NoteKind::Progress)).unwrap();
         assert_eq!(progress.len(), 1, "{progress:?}");
+    }
+
+    /// A person's answer on a board that wakes is queued with the answer, in
+    /// its transaction; anyone else's, or with the switch off, isn't. A claim
+    /// is taken once.
+    #[test]
+    fn a_persons_answer_is_queued_with_it_and_claimed_once() {
+        let (store, task) = board();
+        let (note, queued) =
+            store.add_note_waking(task, NoteKind::Answer, Actor::User, "Yes", serde_json::json!({}), None).unwrap();
+        assert!(queued);
+        assert_eq!(store.pending_answer_wakes().unwrap()[0].note, note.id);
+        assert_eq!(store.pending_answer_wakes().unwrap()[0].claimed_at, None);
+        assert!(store.claim_answer_wake(note.id).unwrap());
+        assert!(!store.claim_answer_wake(note.id).unwrap(), "claimed twice");
+        assert!(store.pending_answer_wakes().unwrap()[0].claimed_at.is_some());
+
+        for actor in [Actor::Manager, Actor::Agent { terminal: Uuid::now_v7() }] {
+            let (_, queued) =
+                store.add_note_waking(task, NoteKind::Answer, actor, "No", serde_json::json!({}), None).unwrap();
+            assert!(!queued, "{actor}");
+        }
+        let (_, queued) =
+            store.add_note_waking(task, NoteKind::Comment, Actor::User, "Hm", serde_json::json!({}), None).unwrap();
+        assert!(!queued, "a comment");
+        let ws = store.get_task(task).unwrap().workspace_id;
+        let version = store.get_workspace(ws).unwrap().resource_version;
+        store.set_workspace_wake_on_answer(ws, version, false).unwrap();
+        let (_, queued) =
+            store.add_note_waking(task, NoteKind::Answer, Actor::User, "Off", serde_json::json!({}), Some(note.id)).unwrap();
+        assert!(!queued, "switched off");
+        assert_eq!(store.pending_answer_wakes().unwrap().len(), 1);
+        assert!(store
+            .add_note_waking(task, NoteKind::Answer, Actor::User, "x", serde_json::json!({}), Some(Uuid::now_v7()))
+            .is_err());
     }
 
     /// The runner's note reads back as the runner's: the word round-trips.

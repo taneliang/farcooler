@@ -52,12 +52,21 @@ pub fn mark_input(root: &std::path::Path, terminal: Uuid) {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let _ = std::fs::write(&path, now.to_string());
+    // Written aside and renamed in, so a reader never sees it half written.
+    let aside = path.with_extension(format!("{}.tmp", std::process::id()));
+    if std::fs::write(&aside, now.to_string()).is_ok() {
+        let _ = std::fs::rename(&aside, &path);
+    }
 }
 
 /// When someone last typed into `terminal`, if anyone has (`mark_input`).
+/// A mark that's there and can't be read counts as typing just now: the
+/// reader is deciding whether it's safe to type, and doubt means no.
 pub fn last_input(root: &std::path::Path, terminal: Uuid) -> Option<i64> {
-    std::fs::read_to_string(input_mark(root, terminal)).ok()?.trim().parse().ok()
+    let raw = std::fs::read_to_string(input_mark(root, terminal)).ok()?;
+    Some(raw.trim().parse().unwrap_or_else(|_| {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(i64::MAX, |d| d.as_millis() as i64)
+    }))
 }
 
 impl Runtime {

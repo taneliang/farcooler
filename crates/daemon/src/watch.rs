@@ -884,6 +884,11 @@ pub struct Watcher {
     /// queued doesn't read the store. True at start, for answers queued
     /// before a restart. See `answer_wake`.
     wakes_hint: std::sync::atomic::AtomicBool,
+    /// When this runner last told each terminal an answer. The next waits
+    /// until the watcher has read it idle since (`answer_wake`).
+    told: std::sync::Mutex<HashMap<Uuid, i64>>,
+    /// Why each waiting answer last waited, for its "Not delivered" note.
+    wake_holds: std::sync::Mutex<HashMap<Uuid, answer_wake::Held>>,
 }
 
 /// One client's claim about what it is showing, and when it said so.
@@ -2693,6 +2698,8 @@ impl Watcher {
             ask_sync: tokio::sync::Mutex::new(()),
             wake_pump: tokio::sync::Mutex::new(()),
             wakes_hint: std::sync::atomic::AtomicBool::new(true),
+            told: std::sync::Mutex::new(HashMap::new()),
+            wake_holds: std::sync::Mutex::new(HashMap::new()),
             clears_pending: std::sync::Mutex::new(HashSet::new()),
             taps: std::sync::Mutex::new(None),
             #[cfg(test)]
