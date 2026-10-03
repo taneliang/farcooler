@@ -2301,6 +2301,22 @@ async fn dispatch(
             Ok(json!({}))
         }
 
+        // `{terminal, model}` and `{terminal, configId, value}`, as both
+        // phones send them. Both pickers show the choice before the runner
+        // confirms it, so an arm missing here was a picker that changed on
+        // screen and nowhere else.
+        "terminal.agent_set_model" => {
+            session.agent_set_model(id("terminal")?, &text("model")).await?;
+            Ok(json!({}))
+        }
+
+        "terminal.agent_set_config" => {
+            session
+                .agent_set_config(id("terminal")?, &text("configId"), &text("value"))
+                .await?;
+            Ok(json!({}))
+        }
+
         "terminal.agent_edit_queued" => {
             session
                 .agent_edit_queued(id("terminal")?, &text("queuedId"), &text("text"))
@@ -3223,6 +3239,9 @@ mod tests {
     }
 }
 
+/// The agent screen's controls against a real daemon, as a phone sends them.
+#[cfg(test)]
+mod phone_path_tests;
 
 fn decode_hex(text: &str) -> Option<Vec<u8>> {
     if text.len() % 2 != 0 {

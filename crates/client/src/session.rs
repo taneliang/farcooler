@@ -1494,6 +1494,37 @@ impl Session {
         }
     }
 
+    /// Switch the pane's agent to another model, as the model picker does.
+    pub async fn agent_set_model(&mut self, terminal: Uuid, model: &str) -> Result<Terminal, SessionError> {
+        let payload = request::Payload::AgentSetModel(farcooler_protocol::v1::AgentSetModel {
+            terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
+            model: model.to_string(),
+        });
+        match self.value("terminal.agent_set_model", None, Some(payload)).await? {
+            result::Value::Terminal(t) => Ok(t),
+            other => Err(wrong("terminal", &other)),
+        }
+    }
+
+    /// Set one of the options the agent advertises, by its id, as a config
+    /// picker does.
+    pub async fn agent_set_config(
+        &mut self,
+        terminal: Uuid,
+        config_id: &str,
+        value: &str,
+    ) -> Result<Terminal, SessionError> {
+        let payload = request::Payload::AgentSetConfig(farcooler_protocol::v1::AgentSetConfig {
+            terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
+            config_id: config_id.to_string(),
+            value: value.to_string(),
+        });
+        match self.value("terminal.agent_set_config", None, Some(payload)).await? {
+            result::Value::Terminal(t) => Ok(t),
+            other => Err(wrong("terminal", &other)),
+        }
+    }
+
     /// Rewrite a prompt that is still waiting for the current turn to end.
     pub async fn agent_edit_queued(
         &mut self,

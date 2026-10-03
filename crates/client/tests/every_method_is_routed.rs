@@ -8,11 +8,15 @@
 //! nothing failing anywhere — the same shape as `header.rs`, where a function
 //! exported and not declared is invisible to every client.
 //!
-//! Checked by reading the source rather than by calling, because `dispatch`
-//! needs a live session and the failure being guarded against is precisely a
-//! method nobody can call.
-
-const FFI: &str = include_str!("../src/ffi.rs");
+//! That routing is now checked from the protocol's method table rather than
+//! from lists typed here. `route` in `src/ffi/phone_path_tests.rs` is a match
+//! on every `Method`, and the tests beside it call each route it declares and
+//! each wire method the iOS and Android sources name. These lists were five
+//! hand-picked groups, and the agent screen's model and config pickers were in
+//! none of them.
+//!
+//! What stays here is the other half of being reachable: the header an app
+//! developer reads says these exist.
 
 /// The methods this crate must route for the enrollment ceremony to end in an
 /// enrollment. Their scopes and capabilities are `crates/protocol`'s, and the
@@ -51,59 +55,8 @@ const NEEDS_YOU: [&str; 3] = ["needs_you", "task.note", "workspace.start_orchest
 /// the pane and left it standing, dead, with the error swallowed.
 const TERMINALS: [&str; 2] = ["terminal.stop", "terminal.remove"];
 
-#[test]
-fn every_terminal_method_a_close_makes_can_be_called() {
-    for method in TERMINALS {
-        assert!(
-            FFI.contains(&format!("\"{method}\" =>")),
-            "the daemon serves {method} and no app can reach it: `dispatch` has no arm for it"
-        );
-    }
-}
-
-#[test]
-fn every_board_read_the_phone_makes_can_be_called() {
-    for method in BOARD {
-        assert!(
-            FFI.contains(&format!("\"{method}\" =>")),
-            "the daemon serves {method} and no app can reach it: `dispatch` has no arm for it"
-        );
-    }
-}
-
-#[test]
-fn the_needs_you_list_can_be_called() {
-    for method in NEEDS_YOU {
-        assert!(
-            FFI.contains(&format!("\"{method}\" =>")),
-            "the daemon serves {method} and no app can reach it: `dispatch` has no arm for it"
-        );
-    }
-}
-
-#[test]
-fn every_enrollment_method_the_daemon_serves_can_be_called() {
-    for method in ENROLLMENT {
-        assert!(
-            FFI.contains(&format!("\"{method}\" =>")),
-            "the daemon serves {method} and no app can reach it: `dispatch` has no arm for it"
-        );
-    }
-}
-
-#[test]
-fn every_worktree_method_the_daemon_serves_can_be_called() {
-    for method in WORKTREES {
-        assert!(
-            FFI.contains(&format!("\"{method}\" =>")),
-            "the daemon serves {method} and no app can reach it: `dispatch` has no arm for it"
-        );
-    }
-}
-
-/// And the header says so, which is the other half of being reachable: an app
-/// developer reads that file to find out what may be passed to
-/// `farcooler_client_call`.
+/// The header says so: an app developer reads that file to find out what may
+/// be passed to `farcooler_client_call`.
 #[test]
 fn the_header_tells_an_app_developer_these_exist() {
     const HEADER: &str = include_str!("../include/farcooler_client.h");
