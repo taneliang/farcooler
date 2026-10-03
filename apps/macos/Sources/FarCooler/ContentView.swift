@@ -3,7 +3,7 @@ import AppKit
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject private var store = FleetStore()
+    @StateObject var store = FleetStore()
     /// This window's identity in `Notifier`'s per-window record of what is on
     /// screen, so a second window adds to it rather than overwriting it.
     @State private var windowID = UUID()
@@ -119,7 +119,7 @@ struct ContentView: View {
     /// copied out after every action, which every command wrote and every
     /// good refresh cleared: a refused Stop vanished when the refresh after
     /// it worked, and a focus that worked showed a minute-old failure.
-    @StateObject private var outcomes = ActionOutcomes()
+    @StateObject var outcomes = ActionOutcomes()
     /// A sentence the app wrote that isn't one action's result: the one
     /// notice slot, cleared on navigation. See `ActionOutcomes.notice`.
     private var errorBanner: String? {
@@ -132,7 +132,7 @@ struct ContentView: View {
     /// A Replace Orchestrator waiting on its confirmation.
     @State private var orchestratorReplacement: OrchestratorReplacement?
     /// Use as Orchestrator on a workspace that has one, until confirmed.
-    @State private var adoptionPending: OrchestratorAdoptionPending?
+    @State var adoptionPending: OrchestratorAdoptionPending?
 
     /// The pane last clicked or focused, which the keyboard acts on while
     /// it's on screen. See `WorkspaceScreen.keyPane`: with a task open, the
@@ -2211,7 +2211,7 @@ struct ContentView: View {
     /// `break-pane -d`), so the orchestrator keeps its window and focus.
     /// Only on this click: nothing rearranges a runner's windows unasked.
     @discardableResult
-    private func moveOutOfOrchestratorWindow(_ terminal: Terminal, in worktree: Worktree) async -> Bool {
+    func moveOutOfOrchestratorWindow(_ terminal: Terminal, in worktree: Worktree) async -> Bool {
         guard let client = store.client(for: worktree) else { return false }
         if !(await client.moveToOwnWindow(terminal, in: worktree)) {
             errorBanner = "Couldn’t move \(terminal.label) to its own window. Check that the runner is reachable, then try again."
@@ -2458,52 +2458,6 @@ struct ContentView: View {
             ?? store.repositories.first?.repository.id
     }
 
-    /// Route a click to the runner a worktree is on, refusing it first, and
-    /// file its result under `verb` and `target` (`ActionOutcomes`).
-    ///
-    /// Checked here rather than at each call site — see `FleetStore.refusal(for:)`
-    /// for why. On refusal, `fallback` is handed back, nothing is called, and
-    /// the refusal is the result. Otherwise the result is what the commands
-    /// `body` ran said (`ActionReport`): the first failure in the app's
-    /// words, or nothing, which also takes down this action's earlier
-    /// failure on the same target. `target` defaults to the worktree's id,
-    /// `subject` (how the sentence names it) to its name.
-    @discardableResult
-    private func act<T>(
-        _ verb: ActionVerb, on ws: Worktree, target: String? = nil, subject: String? = nil,
-        default fallback: T, _ body: (DaemonClient) async -> T
-    ) async -> T {
-        let host = ws.host ?? ""
-        let key = ActionKey(verb: verb, host: host, target: target ?? ws.id)
-        let named = subject ?? Self.quoted(ws)
-        if let why = store.refusalSentence(for: host) {
-            outcomes.settle(key, failure: "\(verb.lead(named)) \(why)")
-            return fallback
-        }
-        guard let client = store.client(for: ws) else { return fallback }
-        return await outcomes.perform(key, subject: named, on: client, body)
-    }
-
-    private func act(
-        _ verb: ActionVerb, on ws: Worktree, target: String? = nil, subject: String? = nil,
-        _ body: (DaemonClient) async -> Void
-    ) async {
-        await act(verb, on: ws, target: target, subject: subject, default: ()) { client in await body(client) }
-    }
-
-    /// A worktree as a sentence names it: its task, in quotes.
-    static func quoted(_ ws: Worktree) -> String { "“\(WorktreeName.display(ws.task))”" }
-
-    /// A terminal as a sentence names it: its label, in quotes.
-    static func quoted(_ terminal: Terminal) -> String { "“\(terminal.label)”" }
-
-    /// File the result of an action whose client call words its own
-    /// failure: the sentence, or nil for one that worked. Same lifetime as
-    /// `act`'s results, so navigation leaves it.
-    private func fileResult(_ verb: ActionVerb, host: String, target: String, _ failure: String?) {
-        outcomes.settle(ActionKey(verb: verb, host: host, target: target), failure: failure)
-    }
-
     /// A terminal's rendered screen, for the palette's preview tiles.
     ///
     /// `short` is what `ScreenPreviews` keys everything by, and short ids can
@@ -2526,93 +2480,6 @@ struct ContentView: View {
     }
 
     // MARK: - Behavior
-
-    private func run(_ action: TerminalAction, on term: Terminal, in worktree: Worktree) async {
-        switch action {
-        case .restart:
-            await act(.restart, on: worktree, target: term.id, subject: Self.quoted(term)) { c in
-                await c.restart(terminal: term.short)
-            }
-        case .dismissLost:
-            await act(.dismissLost, on: worktree, target: term.id, subject: Self.quoted(term)) { c in
-                await c.dismissLost(term)
-            }
-        case .stop:
-            await act(.stop, on: worktree, target: term.id, subject: Self.quoted(term)) { c in
-                await c.stop(terminal: term.short)
-            }
-        case .useAsOrchestrator: useAsOrchestrator(BoardPane(terminal: term, worktree: worktree))
-        case .stopBeingOrchestrator: await stepDown(BoardPane(terminal: term, worktree: worktree))
-        }
-    }
-
-    /// Use as Orchestrator: make `pane`, already running, its workspace's
-    /// orchestrator. Asks first when that would replace one, naming it.
-    private func useAsOrchestrator(_ pane: BoardPane) {
-        let host = pane.worktree.host ?? ""
-        if let why = store.refusalSentence(for: host) {
-            fileResult(.setRole, host: host, target: pane.terminal.id,
-                 "\(ActionVerb.setRole.lead(Self.quoted(pane.terminal))) \(why)")
-            return
-        }
-        guard let id = pane.terminal.workspace,
-            let workspace = store.fleet.runnerWorkspaces[host]?.first(where: { $0.id == id })
-        else {
-            fileResult(.setRole, host: host, target: pane.terminal.id, OrchestratorAdoption.refusal(
-                "code: invalid-argument\nwhat: workspace", terminal: pane.terminal.label, workspace: ""))
-            return
-        }
-        if let old = OrchestratorAdoption.replacing(pane, in: workspace, host: host, fleet: store.fleet) {
-            adoptionPending = OrchestratorAdoptionPending(host: host, workspace: workspace, pane: pane, old: old)
-        } else {
-            Task { await adopt(pane, in: workspace, host: host, replacing: nil) }
-        }
-    }
-
-    /// Set the roles: `old` steps down first, since the runner allows one
-    /// live orchestrator a workspace, then `pane` takes the seat, and every
-    /// other pane in its window is moved to a window of its own. If the
-    /// runner refuses `pane`, `old` is put back, so a refusal never leaves
-    /// the workspace with none. The column follows on the refresh.
-    private func adopt(_ pane: BoardPane, in workspace: WorkspaceSummary, host: String, replacing old: BoardPane?) async {
-        guard let client = store.clients[host] else { return }
-        if let old {
-            let (refused, message) = await client.setRole(old.terminal, to: OrchestratorAdoption.steppedDown(old.terminal))
-            if refused {
-                fileResult(.setRole, host: host, target: pane.terminal.id,
-                     OrchestratorAdoption.refusal(message, terminal: old.terminal.label, workspace: workspace.name))
-                return
-            }
-        }
-        let (refused, message) = await client.setRole(pane.terminal, to: "orchestrator")
-        guard refused else {
-            fileResult(.setRole, host: host, target: pane.terminal.id, nil)
-            // Adopted: what shares its window moves out, the orchestrator it
-            // replaced included, so the column draws it alone (ov-78). The
-            // adopting is the ask.
-            for other in WorkspaceScreen.movedOnAdopting(
-                pane, replacing: old?.terminal.id, layouts: client.layouts[pane.worktree.id])
-            {
-                await moveOutOfOrchestratorWindow(other, in: pane.worktree)
-            }
-            return
-        }
-        fileResult(.setRole, host: host, target: pane.terminal.id,
-             OrchestratorAdoption.refusal(message, terminal: pane.terminal.label, workspace: workspace.name))
-        if let old { _ = await client.setRole(old.terminal, to: "orchestrator") }
-    }
-
-    /// Stop Being Orchestrator: `pane` goes back to what it would have been
-    /// made as (`OrchestratorAdoption.steppedDown`), and keeps running.
-    private func stepDown(_ pane: BoardPane) async {
-        guard let client = store.client(for: pane.worktree) else { return }
-        let workspace = pane.terminal.workspace.flatMap { id in
-            store.fleet.runnerWorkspaces[pane.worktree.host ?? ""]?.first { $0.id == id }
-        }
-        let (refused, message) = await client.setRole(pane.terminal, to: OrchestratorAdoption.steppedDown(pane.terminal))
-        fileResult(.setRole, host: pane.worktree.host ?? "", target: pane.terminal.id, refused ? OrchestratorAdoption.refusal(
-            message, terminal: pane.terminal.label, workspace: workspace?.name ?? "The workspace") : nil)
-    }
 
     private func worktree(host: String, id: String) -> Worktree? {
         store.fleet.worktrees.first { ($0.host ?? "") == host && $0.id == id }
