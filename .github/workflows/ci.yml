@@ -93,6 +93,12 @@ jobs:
         run: |
           ./scripts/file-size-budget.py --self-test
           ./scripts/file-size-budget.py
+      # No new swallowed call to the host (ov-167): a `try?` on core.call or
+      # runCLI, or an ignored runCatching/attempt or empty catch in the Android
+      # network and model code. Existing ones are listed, each with its reason,
+      # in scripts/swallow-lint-allow.txt.
+      - run: ./scripts/swallow-lint.py --self-test
+      - run: ./scripts/swallow-lint.py
 
   # The tunnel itself, which is Go, and which nothing in this workflow ran until
   # now.
