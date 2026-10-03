@@ -108,6 +108,32 @@ struct FleetSidebarRetiredTests {
         #expect(!MainWindowFocus.togglesSidebar(nil))
     }
 
+    /// The old sidebar's Unclaimed group is Main's Worktrees now, so its
+    /// rows say which are unclaimed: what Move to Workspace is for. Not the
+    /// main checkout, and not on a runner with no workspaces to claim for.
+    @Test("Main's worktrees no workspace owns are captioned Unclaimed")
+    func unclaimedWorktreesAreCaptioned() {
+        let repo = "0198f2c0-0000-7000-8000-0000000000aa"
+        func worktree(_ id: String, _ workspace: String?, host: String = "") -> Worktree {
+            Worktree(
+                id: id, short: id, task: id, branch: "b", repository: "overnight", host: host, path: "/tmp/\(id)",
+                state: "active", terminals: [], repositoryID: repo, workspace: workspace)
+        }
+        var checkout = worktree("checkout", nil)
+        checkout.is_main_checkout = true
+        let all = [
+            worktree("lane", "ws-main"), worktree("stray", nil), checkout, worktree("orphan", "ws-gone"),
+            worktree("elsewhere", nil, host: "box"),
+        ]
+        var fleet = Fleet(runtimeHealthy: true, livePanes: 0, worktrees: all, branchPrefix: nil)
+        fleet.runnerWorkspaces[""] = [
+            WorkspaceSummary(id: "ws-main", name: "Main", taskPrefix: "fc", isMain: true, ordinal: 0, repository: repo)
+        ]
+        #expect(BoardWorktrees.unclaimed(all, in: fleet) == ["stray", "orphan"])
+        #expect(BoardWorktrees.caption(all[1], unclaimed: true) == "Unclaimed · no terminals")
+        #expect(BoardWorktrees.caption(all[0], unclaimed: false) == "no terminals")
+    }
+
     // MARK: - Nothing of the old sidebar is left to reach
 
     /// Every source file of the app, by name.

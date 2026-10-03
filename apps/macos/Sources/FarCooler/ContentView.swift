@@ -1543,7 +1543,8 @@ struct ContentView: View {
             onUnhide: usable ? { ws in Task { await act(on: ws) { c in await c.unhideWorktree(ws.short) } } } : nil,
             menu: { worktreeMenu(for: $0) },
             perform: { item, ws in perform(item, on: ws) },
-            terminals: terminals)
+            terminals: terminals,
+            unclaimed: BoardWorktrees.unclaimed(loose.shown, in: store.fleet))
     }
 
     /// The navigator's Terminals section for `workspace` (ov-178): its

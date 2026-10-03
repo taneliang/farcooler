@@ -26,8 +26,31 @@ struct BoardWorktrees {
     /// The repository's own terminals, in their main checkout: the
     /// Terminals section beside the tasks (ov-178).
     var terminals: ProjectTerminals = .none
+    /// The shown ones no workspace owns, by id: Main lists its
+    /// repository's, captioned Unclaimed (ov-178, where the old sidebar's
+    /// Unclaimed group went), so Move to Workspace has its prompt.
+    var unclaimed: Set<String> = []
 
     static var none: BoardWorktrees { BoardWorktrees() }
+
+    /// Which of `worktrees` no workspace on their runner owns
+    /// (`WorkspaceSelection.owner`). Never the main checkout, which is the
+    /// repository's own directory rather than a worktree waiting to be
+    /// claimed; and none on a runner without workspaces, where there's
+    /// nothing to claim for.
+    static func unclaimed(_ worktrees: [Worktree], in fleet: Fleet) -> Set<String> {
+        Set(
+            worktrees.filter { worktree in
+                !worktree.isMainCheckout && fleet.runnerWorkspaces[worktree.host ?? ""] != nil
+                    && WorkspaceSelection.owner(of: worktree, in: fleet) == nil
+            }.map(\.id))
+    }
+
+    /// A loose worktree row's second line: what's in it, after "Unclaimed"
+    /// for one no workspace owns.
+    static func caption(_ worktree: Worktree, unclaimed: Bool) -> String {
+        unclaimed ? "Unclaimed · \(worktree.summary)" : worktree.summary
+    }
 
     /// Whether the board draws the section at all: not for a board whose
     /// window has no fleet to give it.
@@ -61,6 +84,7 @@ struct BoardWorktreesSection: View {
             ForEach(Self.rows(worktrees)) { worktree in
                 BoardWorktreeRow(
                     worktree: worktree, selected: worktree.id == worktrees.selected, keyed: keyed,
+                    caption: BoardWorktrees.caption(worktree, unclaimed: worktrees.unclaimed.contains(worktree.id)),
                     onOpen: { worktrees.onOpen(worktree) },
                     menu: worktrees.menu(worktree), perform: { worktrees.perform($0, worktree) })
                 .id(NavigatorItem.worktree(worktree.id))
@@ -129,6 +153,8 @@ private struct BoardWorktreeRow: View {
     let worktree: Worktree
     let selected: Bool
     let keyed: Bool
+    /// The line under its name (`BoardWorktrees.caption`).
+    let caption: String
     let onOpen: () -> Void
     let menu: [WorktreeMenu.Item]
     let perform: (WorktreeMenu.Item) -> Void
@@ -157,7 +183,7 @@ private struct BoardWorktreeRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .gridMark("boardWorktree", .text)
-                Text(worktree.summary)
+                Text(caption)
                     .font(.system(size: WorkspaceStyle.PaneText.minimum))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
