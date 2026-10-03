@@ -10,3 +10,7 @@ serde.workspace = true
 # `Value`, because a tool's input is whatever JSON the agent sent.
 serde_json.workspace = true
 thiserror.workspace = true
+# `openat` with `O_NOFOLLOW` from a held directory descriptor, so the file an
+# agent writes is the one `fs_guard::confine` judged. The version and features
+# are `crates/fence`'s: already in the lock, an edge rather than a tree.
+rustix = { version = "1", features = ["fs"] }
