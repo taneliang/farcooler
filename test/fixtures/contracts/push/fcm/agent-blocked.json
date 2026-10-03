@@ -1,0 +1,19 @@
+{
+  "message": {
+    "token": "android-token",
+    "notification": {
+      "title": "claude needs you",
+      "body": "auth-refactor — Do you want to run git push --force-with-lease?"
+    },
+    "android": {
+      "priority": "HIGH",
+      "notification": {
+        "channel_id": "agents.blocked"
+      }
+    },
+    "data": {
+      "terminal": "term-01999a8f2c4e",
+      "status": "blocked"
+    }
+  }
+}

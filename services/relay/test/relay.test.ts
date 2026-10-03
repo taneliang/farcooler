@@ -7093,3 +7093,138 @@ describe('a legacy decision to an Android phone', () => {
     })
   })
 })
+
+// MARK: - Contracts (ov-121)
+
+/// The JSON this relay reads and writes, against the shared fixtures in
+/// `test/fixtures/contracts/`: the daemon's `/v1/notify` bodies, the apps'
+/// `/v1/devices` registrations, and the alert and Live Activity payloads this
+/// relay sends on to the apps. See the README there for who writes and who
+/// reads each one.
+///
+/// Every other test in this file posts a body spelled here and asserts a key
+/// spelled here, so a key renamed on the daemon, or in an app, leaves this
+/// suite green. These post what the other side's own test says it writes
+/// (`push::contracts` in the daemon, `ContractTests` in AgentKit and
+/// `RegistrationContractTest` on Android), and pin what goes out to the
+/// fixtures the apps' tests decode.
+const CONTRACTS = import.meta.glob('../../../test/fixtures/contracts/**/*.json', {
+  eager: true,
+  import: 'default',
+}) as Record<string, unknown>
+
+const CONTRACT_ROOT = '../../../test/fixtures/contracts/'
+
+/// One fixture by its path under `contracts/`, or undefined for none.
+function contract(path: string): any {
+  return CONTRACTS[`${CONTRACT_ROOT}${path}`]
+}
+
+/// The fixtures in one directory, by name without `.json`.
+function contractNames(dir: string): string[] {
+  return Object.keys(CONTRACTS)
+    .filter(path => path.startsWith(`${CONTRACT_ROOT}${dir}/`))
+    .map(path => path.slice(`${CONTRACT_ROOT}${dir}/`.length, -'.json'.length))
+    .filter(name => !name.includes('/'))
+    .sort()
+}
+
+/// The instant the daemon's fixtures were sampled at, 2026-10-03 09:30:00
+/// UTC: `NOW_S` in the daemon's `push::contracts`. A trace anchor and an
+/// ask's end are only valid near it, and every timestamp the relay stamps is
+/// this one, so the payloads it writes are exact.
+const CONTRACT_NOW = 1_791_019_800_000
+
+/// `expect(actual).toEqual(fixture)`, saying what was written when the fixture
+/// is missing, so a new one can be copied from the failure.
+function expectContract(path: string, actual: unknown) {
+  const fixture = contract(path)
+  expect(fixture, `no fixture at contracts/${path}; this relay wrote:\n${JSON.stringify(actual, null, 2)}`)
+    .toBeDefined()
+  expect(actual, `contracts/${path}`).toEqual(fixture)
+}
+
+describe('the shared contract fixtures', () => {
+  const notices = contractNames('notify')
+
+  it('has every directory the README names', () => {
+    // An empty glob would make every test below loop over nothing.
+    expect(notices.length).toBeGreaterThanOrEqual(9)
+    expect(contractNames('push/apns').length).toBeGreaterThanOrEqual(5)
+    expect(contractNames('push/fcm').length).toBeGreaterThanOrEqual(5)
+    expect(contractNames('live-activity').length).toBeGreaterThanOrEqual(2)
+    expect(contractNames('registration').length).toBeGreaterThanOrEqual(3)
+  })
+
+  it('has a notice behind every push and card fixture', () => {
+    for (const dir of ['push/apns', 'push/fcm', 'live-activity']) {
+      for (const name of contractNames(dir)) expect(notices, `${dir}/${name}`).toContain(name)
+    }
+  })
+
+  /// One notice from the daemon's fixture, to one iPhone with a push-to-start
+  /// token and one Android phone, at the fixtures' instant.
+  async function deliver(name: string): Promise<Call[]> {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(CONTRACT_NOW)
+    try {
+      const calls = watchFetch()
+      await register('user_1', { liveActivityStartToken: 'start-token', environment: 'production' })
+      await register('user_1', { platform: 'fcm', pushToken: 'android-token' })
+      await pair('user_1', 'mine')
+      const response = await post('/v1/notify', contract(`notify/${name}.json`), 'mine')
+      expect(response.status, name).toBe(200)
+      return calls
+    } finally {
+      vi.useRealTimers()
+    }
+  }
+
+  it.each(notices)('reads the daemon’s %s notice into the payloads the apps decode', async name => {
+    const sent = pushes(await deliver(name))
+    const alerts = sent.filter(call => call.headers['apns-push-type'] === 'alert')
+    const fcm = sent.filter(call => call.url.includes('fcm.googleapis.com'))
+    const cards = sent.filter(call => call.headers['apns-push-type'] === 'liveactivity')
+
+    // A notice with no push fixture alerts nobody; one with a fixture sends
+    // exactly it, to each platform.
+    for (const [dir, calls] of [['push/apns', alerts], ['push/fcm', fcm]] as const) {
+      if (contract(`${dir}/${name}.json`) === undefined) {
+        expect(calls.map(call => call.body), `${dir}/${name}: no alert`).toEqual([])
+      } else {
+        expect(calls.length, `${dir}/${name}`).toBe(1)
+        expectContract(`${dir}/${name}.json`, calls[0].body)
+      }
+    }
+    if (contract(`live-activity/${name}.json`) === undefined) {
+      expect(cards.map(call => call.body), `live-activity/${name}: no card`).toEqual([])
+    } else {
+      expect(cards.length, `live-activity/${name}`).toBe(1)
+      expectContract(`live-activity/${name}.json`, cards[0].body)
+    }
+  })
+
+  it.each(contractNames('registration'))('files the %s app’s registration whole', async name => {
+    watchFetch()
+    const body = contract(`registration/${name}.json`)
+    const response = await register('user_1', body)
+    expect(response.status, name).toBe(200)
+
+    const row = await env.DB.prepare(
+      `SELECT platform, push_token, label, version, environment, live_activity_start_token,
+              notify_on_done, notify_events, pulse_hash
+       FROM devices`,
+    ).first<Record<string, unknown>>()
+    expect(row).toEqual({
+      platform: body.platform,
+      push_token: body.pushToken,
+      label: body.label,
+      version: body.version,
+      environment: body.environment ?? null,
+      live_activity_start_token: body.liveActivityStartToken ?? null,
+      notify_on_done: body.notifyOnDone ? 1 : 0,
+      notify_events: body.notifyEvents === undefined ? null : body.notifyEvents.join(','),
+      pulse_hash: body.pulseToken === undefined ? null : await sha256(body.pulseToken),
+    })
+  })
+})

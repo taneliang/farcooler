@@ -1,0 +1,19 @@
+{
+  "message": {
+    "token": "android-token",
+    "notification": {
+      "title": "codex failed",
+      "body": "pdf-export — Its last turn didn’t finish"
+    },
+    "android": {
+      "priority": "HIGH",
+      "notification": {
+        "channel_id": "agents.done"
+      }
+    },
+    "data": {
+      "terminal": "term-01999a90aa10",
+      "status": "done"
+    }
+  }
+}

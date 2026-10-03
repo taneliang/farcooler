@@ -1,0 +1,54 @@
+{
+  "aps": {
+    "timestamp": 1791019800,
+    "event": "start",
+    "content-state": {
+      "terminal": "term-01999a8f2c4e",
+      "label": "claude",
+      "machine": "Studio",
+      "workspace": "Billing",
+      "status": "blocked",
+      "detail": "auth-refactor — Do you want to run git push --force-with-lease?",
+      "startedAt": 1791018420000,
+      "ask": {
+        "id": "hook-ask-0199a8f3-1b2c-7d4e-8f50-6a7b8c9d0e1f",
+        "tool": "Bash",
+        "until": 1791020340000
+      },
+      "blocked": 1,
+      "review": 0,
+      "working": 0,
+      "needsYou": 2,
+      "insertions": 142,
+      "deletions": 37,
+      "commits": 1,
+      "rows": [
+        {
+          "terminal": "term-01999a8f2c4e",
+          "label": "claude",
+          "machine": "Studio",
+          "workspace": "Billing",
+          "status": "blocked",
+          "detail": "auth-refactor — Do you want to run git push --force-with-lease?",
+          "insertions": 142,
+          "deletions": 37,
+          "commits": 1,
+          "startedAt": 1791018420000,
+          "updatedAt": 1791019800000,
+          "trace": "EAAAAAAAAAAAAAAAAAAAHgAbAC0AIQAMAAkAAAAAAAAAAAAAAAAAAAB0AEABQAFAAUABKAAAAAAAAAAAAAAAAAEA",
+          "traceAnchor": 5970066
+        }
+      ],
+      "more": 0
+    },
+    "alert": {
+      "title": "2 need you",
+      "body": "auth-refactor — Do you want to run git push --force-with-lease?"
+    },
+    "attributes-type": "AgentActivityAttributes",
+    "attributes": {
+      "version": 3
+    },
+    "stale-date": 1791020340
+  }
+}

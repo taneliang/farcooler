@@ -1,0 +1,16 @@
+{
+  "aps": {
+    "alert": {
+      "title": "claude needs you",
+      "body": "auth-refactor — Do you want to run git push --force-with-lease?"
+    },
+    "sound": "default",
+    "interruption-level": "time-sensitive",
+    "thread-id": "term-01999a8f2c4e",
+    "mutable-content": 1
+  },
+  "terminal": "term-01999a8f2c4e",
+  "status": "blocked",
+  "label": "claude",
+  "failed": false
+}

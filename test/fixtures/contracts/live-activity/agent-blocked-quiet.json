@@ -1,0 +1,39 @@
+{
+  "aps": {
+    "timestamp": 1791019800,
+    "event": "start",
+    "content-state": {
+      "terminal": "term-01999a90aa10",
+      "label": "codex",
+      "machine": "Studio",
+      "status": "blocked",
+      "detail": "ov-90 — Waiting for your answer",
+      "startedAt": 1791019500000,
+      "blocked": 1,
+      "review": 0,
+      "working": 0,
+      "needsYou": 2,
+      "rows": [
+        {
+          "terminal": "term-01999a90aa10",
+          "label": "codex",
+          "machine": "Studio",
+          "status": "blocked",
+          "detail": "ov-90 — Waiting for your answer",
+          "startedAt": 1791019500000,
+          "updatedAt": 1791019800000
+        }
+      ],
+      "more": 0
+    },
+    "alert": {
+      "title": "2 need you",
+      "body": "ov-90 — Waiting for your answer"
+    },
+    "attributes-type": "AgentActivityAttributes",
+    "attributes": {
+      "version": 3
+    },
+    "stale-date": 1791023400
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "aps": {
+    "alert": {
+      "title": "codex failed",
+      "body": "pdf-export — Its last turn didn’t finish"
+    },
+    "sound": "default",
+    "interruption-level": "time-sensitive",
+    "thread-id": "term-01999a90aa10",
+    "mutable-content": 1
+  },
+  "terminal": "term-01999a90aa10",
+  "status": "done",
+  "label": "codex",
+  "failed": true
+}
