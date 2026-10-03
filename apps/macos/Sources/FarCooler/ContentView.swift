@@ -225,7 +225,7 @@ struct ContentView: View {
             // `fleetPlaceholder` already owns the sidebar's pre-load state, and
             // this banner only appears once something has actually been acted
             // on, so the two never draw at once.
-            detail
+            detailOpeningNotices
                 // The window's toolbar, inner to outer, so its items are
                 // laid out from the trailing end in (ov-105): see
                 // `LeadingToolbar` and `TrailingToolbar`.
@@ -403,9 +403,6 @@ struct ContentView: View {
             settleLaunch()
         }
         .onChange(of: store.needsYou) { _, _ in settleLaunch() }
-        // A click on a task notice: its task, opened as the navigator opens
-        // one, once its runner is connected (ov-106).
-        .task(id: noticeOpener.pending?.id) { await openNoticedTask() }
         // ⌃HJKL traverse the layout the keyboard is in, and pass through to
         // a lone pane's program. See `WorkspaceScreen.tiledPanes`.
         .onChange(of: WorkspaceScreen.tiledPanes(selectedPane, in: shown), initial: true) { _, count in
@@ -2171,6 +2168,14 @@ struct ContentView: View {
             return conversation + shown(selection)
         }
         return shown(selection)
+    }
+
+    /// `detail`, and a click on a task notice: its task, opened as the
+    /// navigator opens one, once its runner is connected (ov-106). Its own
+    /// property because `body`'s chain is already at the type checker's
+    /// limit: one more modifier there and it gives up.
+    private var detailOpeningNotices: some View {
+        detail.task(id: noticeOpener.pending?.id) { await openNoticedTask() }
     }
 
     @ViewBuilder
