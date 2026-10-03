@@ -15,6 +15,8 @@ struct TaskScreen: View {
     @State private var record: TaskDetailModel?
     /// The question still waiting, with its options, from the same read.
     @State private var question: TaskQuestion?
+    /// What its agents spent, read on arrival (ov-195).
+    @State private var usage: TaskUsageState = .loading
     /// The answer on its way, by option.
     @State private var sending: String?
     /// Why the last answer didn't land.
@@ -71,6 +73,7 @@ struct TaskScreen: View {
             // list (ov-103).
             if let row { PhoneReads.open(row, latest: read.detail.notes.map(\.at).max(), place: place) }
         }
+        usage = await connection.taskUsage(task).map(TaskUsageState.loaded) ?? .unavailable
     }
 
     private func list(_ row: TaskRow) -> some View {
@@ -128,6 +131,8 @@ struct TaskScreen: View {
                     }
                 }
             }
+
+            TaskUsageSection(state: usage)
 
             if let notes = record?.notes, !notes.isEmpty {
                 Section("Record") {

@@ -336,6 +336,36 @@ final class HarnessRunner {
                 "notes": waiting.contains("decision:\(Self.decisionTask)")
                     ? [question] : [question, answered]
             ])
+        case "usage.task":
+            // bil-7 has had two agents on it; every other task none yet.
+            guard args["task"] as? String == Self.decisionTask else {
+                let nothing: [String: Any] = [
+                    "task": args["task"] as? String ?? "", "price_table": "2026-09-25",
+                    "totals": [String: Any](), "by_harness_model": [Any](),
+                ]
+                return try json(nothing)
+            }
+            let claude: [String: Any] = [
+                "turns": 9, "active_ms": 7_800_000, "input_tokens": 41_000, "output_tokens": 18_400,
+                "cache_read_tokens": 1_020_000, "cache_write_tokens": 62_000, "cost_reported_micros": 2_870_000,
+            ]
+            let codex: [String: Any] = [
+                "turns": 3, "active_ms": 2_400_000, "input_tokens": 210_000, "output_tokens": 9_000,
+                "cache_read_tokens": 64_000, "unpriced_tokens": 283_000,
+            ]
+            let spent: [String: Any] = [
+                "task": Self.decisionTask, "price_table": "2026-09-25",
+                "totals": [
+                    "turns": 12, "active_ms": 10_200_000, "input_tokens": 251_000, "output_tokens": 27_400,
+                    "cache_read_tokens": 1_084_000, "cache_write_tokens": 62_000, "cost_reported_micros": 2_870_000,
+                    "unpriced_tokens": 283_000,
+                ],
+                "by_harness_model": [
+                    ["harness": "claude", "model": "claude-opus-5", "totals": claude] as [String: Any],
+                    ["harness": "codex", "model": "gpt-5.5", "totals": codex] as [String: Any],
+                ],
+            ]
+            return try json(spent)
         case "task.note":
             // An answer to bil-7, written as an answer, with words in it.
             guard args["task"] as? String == Self.decisionTask,

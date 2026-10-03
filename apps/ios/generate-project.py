@@ -99,6 +99,8 @@ SOURCES = [
     "NeedsYouScreen.swift",
     "WorkspaceScreen.swift",
     "TaskScreen.swift",
+    # A task's Usage section: what its agents spent (ov-195).
+    "TaskUsageSection.swift",
     # New Task… on a workspace's board, through `task.create` (ov-66).
     "NewTaskSheet.swift",
     # The same stack over a canned runner, for the UI suite. DEBUG only.
@@ -463,6 +465,8 @@ AGENTKIT_SOURCES = [
     "TaskBoardModel.swift",
     # The record's order: newest first, pairs kept, Created last.
     "TaskNoteFeed.swift",
+    # What a task's agents spent, in the words the CLI and Android use (ov-195).
+    "TaskUsage.swift",
     "TaskBoardAgents.swift",
     "RunnerBoards.swift",
     # Repository, then workspace, then its worktrees: the one grouping rule

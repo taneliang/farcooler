@@ -1572,6 +1572,13 @@ final class Connection: ObservableObject {
         return (detail, TaskQuestion.open(in: data))
     }
 
+    /// What agents spent on a task (`usage.task`, ov-195), or nil from a
+    /// runner too old to record it, or a read that didn't come back.
+    func taskUsage(_ task: String) async -> TaskUsage? {
+        guard let data = try? await rpc("usage.task", ["task": task]) else { return nil }
+        return try? TaskUsage.decode(data)
+    }
+
     /// One call on this runner, through a harness's stand-in when there is
     /// one. What the phone's workspace screens call through, so a UI test can
     /// stand them on a canned runner (`PhoneHarness`).
