@@ -29,6 +29,13 @@
 //! pull`). A worktree made from a checkout that has its LFS content gets that
 //! content.
 //!
+//! **Hydration is its own step** ([`hydrate`]). A new worktree is filled with
+//! LFS off, so it holds pointers and the fill stays inside `GIT_TIMEOUT`
+//! (measured: hydrating one 2 GB object took about 25 s). Then a `checkout`
+//! of the `filter=lfs` paths, with the helper, gets [`HYDRATE_LIMIT`]; one
+//! that fails or runs out is undone back to pointers and logged, and the
+//! worktree stands either way.
+//!
 //! With no helper beside the daemon (an install that didn't ship it), LFS is
 //! off as before: the filter is emptied, and the daemon says so once.
 
@@ -100,6 +107,83 @@ fn pins_for(helper: Option<&Helper>) -> Vec<Pin> {
         .collect()
 }
 
+/// `filter.lfs` off, whatever else is pinned: for a fill that must not wait
+/// on hydration.
+pub fn off() -> Vec<Pin> {
+    pins_for(None)
+}
+
+/// How a new worktree is filled (with [`off`]), and how one whose hydration
+/// was cut short is put back to pointers. `reset --hard
+/// --no-recurse-submodules` is what `worktree add` itself runs.
+pub const FILL: &[&str] = &["reset", "-q", "--hard", "--no-recurse-submodules"];
+
+/// Every path whose attributes say `filter=lfs`.
+const LFS_PATHS: &str = ":(attr:filter=lfs)";
+
+/// How long hydrating a new worktree may take, all objects together: long
+/// enough for a few GB, short enough that a task's start isn't held for
+/// longer than someone would wait for it.
+pub const HYDRATE_LIMIT: std::time::Duration = std::time::Duration::from_secs(120);
+
+#[cfg(test)]
+thread_local! {
+    /// [`HYDRATE_LIMIT`] for this thread's worktrees, for a test that wants a
+    /// hydration to run out.
+    pub(crate) static LIMIT: std::cell::Cell<Option<std::time::Duration>> = const { std::cell::Cell::new(None) };
+}
+
+fn hydrate_limit() -> std::time::Duration {
+    #[cfg(test)]
+    if let Some(limit) = LIMIT.with(std::cell::Cell::get) {
+        return limit;
+    }
+    HYDRATE_LIMIT
+}
+
+/// Replace the LFS pointers in the freshly filled `worktree` with their
+/// content, from the local store, within [`HYDRATE_LIMIT`]. Best effort:
+/// nothing here fails the worktree.
+///
+/// The `filter=lfs` files are removed, then a `checkout` of those paths
+/// writes them again from the index through the filter and records them in
+/// the index, so status sees them clean. One that fails or runs out was killed mid-write, so what it leaves
+/// is undone: its `index.lock` removed (nothing else writes a worktree this
+/// new) and the fill run again, which puts every file it didn't finish back
+/// to its pointer. An object the store doesn't have stays a pointer.
+pub async fn hydrate(worktree: &Path) {
+    if helper().is_none() {
+        return;
+    }
+    let listed = match crate::git::git_bytes(worktree, &["ls-files", "-z", "--", LFS_PATHS]).await {
+        Ok(l) if l.ok && !l.stdout.is_empty() => l.stdout,
+        _ => return,
+    };
+    // git rewrites only what it sees as changed, and a pointer the fill just
+    // wrote matches the index; gone, it's written again through the filter.
+    for path in listed.split(|b| *b == 0).filter(|p| !p.is_empty()) {
+        let path = worktree.join(<std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(path));
+        if std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_file()) {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+    let limit = hydrate_limit();
+    match crate::git::git_with(worktree, &["checkout", "-q", "--", LFS_PATHS], &[], limit).await {
+        Ok(out) if out.ok => return,
+        Ok(out) => tracing::warn!(stderr = %out.stderr, "Git LFS files couldn't be hydrated; they stay pointers"),
+        Err(_) => tracing::warn!(?limit, "Git LFS files took too long to hydrate; they stay pointers"),
+    }
+    match crate::git::git(worktree, &["rev-parse", "--absolute-git-dir"]).await {
+        Ok(dir) if dir.ok => {
+            let _ = std::fs::remove_file(Path::new(dir.stdout.trim_end()).join("index.lock"));
+        }
+        _ => {}
+    }
+    if !matches!(crate::git::git_with(worktree, FILL, &off(), crate::git::GIT_TIMEOUT).await, Ok(f) if f.ok) {
+        tracing::warn!(worktree = %worktree.display(), "a cut-short LFS hydration couldn't be undone");
+    }
+}
+
 /// `base` (the `PATH` git is otherwise handed) with the helper's directory
 /// first, so the bare [`NAME`] in [`pins`] finds this helper before any other
 /// of that name. `base` as it was when there is no helper.
@@ -150,6 +234,64 @@ mod tests {
         // A script can't run inside the allowlist, so it isn't one.
         executable(&root.join(NAME), b"#!/bin/sh\n");
         assert_eq!(locate(&root.join("farcoolerd")), None);
+    }
+
+    fn fixture_git(dir: &Path, args: &[&str]) {
+        let mut cmd = std::process::Command::new("git");
+        for (k, _) in std::env::vars_os() {
+            if k.to_string_lossy().starts_with("GIT_") {
+                cmd.env_remove(k);
+            }
+        }
+        let out = cmd
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .current_dir(dir)
+            .args(["-c", "core.hooksPath=/dev/null", "-c", "user.name=t", "-c", "user.email=t@example.com"])
+            .args(["-c", "filter.lfs.process=", "-c", "filter.lfs.required=false", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    /// A hydration that runs out of time, here a 16 MB object against a
+    /// limit a debug build can't stream it in, leaves a worktree all the
+    /// same: with the pointer, clean, and no lock behind. Then, given time,
+    /// the same worktree hydrates, so the first one really was cut short.
+    #[tokio::test]
+    async fn a_hydration_that_runs_out_still_leaves_a_worktree() {
+        use sha2::{Digest, Sha256};
+        assert!(helper().is_some(), "no {NAME} beside the test binary; `cargo test -p farcooler-daemon` builds it");
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let repo = root.join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        fixture_git(&repo, &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join(".gitattributes"), "*.bin filter=lfs -text\n").unwrap();
+        let big: Vec<u8> = (0..16u32 << 20).map(|i| (i.wrapping_mul(2_654_435_761) >> 11) as u8).collect();
+        let oid: String = Sha256::digest(&big).iter().map(|b| format!("{b:02x}")).collect();
+        let pointer = format!("version https://git-lfs.github.com/spec/v1\noid sha256:{oid}\nsize {}\n", big.len());
+        std::fs::write(repo.join("big.bin"), &pointer).unwrap();
+        let store = repo.join(".git/lfs/objects").join(&oid[0..2]).join(&oid[2..4]);
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::write(store.join(&oid), &big).unwrap();
+        fixture_git(&repo, &["add", "-A"]);
+        fixture_git(&repo, &["commit", "-q", "-m", "base"]);
+
+        let wt = root.join("wt");
+        LIMIT.with(|l| l.set(Some(std::time::Duration::from_millis(150))));
+        let made = crate::git::create_worktree(&repo, "feature", "HEAD", &wt).await;
+        LIMIT.with(|l| l.set(None));
+        made.expect("the worktree is made, hydrated or not");
+        assert_eq!(std::fs::read(wt.join("big.bin")).unwrap(), pointer.as_bytes(), "back to its pointer");
+        assert!(!crate::change_set::working_tree(&wt).await.unwrap().is_dirty(), "and clean");
+        let git_dir = std::fs::read_to_string(wt.join(".git")).unwrap();
+        let git_dir = Path::new(git_dir.trim_start_matches("gitdir: ").trim_end());
+        assert!(!git_dir.join("index.lock").exists(), "no lock left behind");
+
+        hydrate(&wt).await;
+        assert!(std::fs::read(wt.join("big.bin")).unwrap() == big, "given time, it hydrates");
+        assert!(!crate::change_set::working_tree(&wt).await.unwrap().is_dirty());
     }
 
     #[test]

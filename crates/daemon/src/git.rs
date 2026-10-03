@@ -78,7 +78,7 @@ pub async fn git(cwd: &Path, args: &[&str]) -> Result<GitOutput> {
 /// mid-scroll leaves a `git diff` running on the runner for as long as it likes,
 /// once per abandoned request.
 pub async fn git_bytes(cwd: &Path, args: &[&str]) -> Result<GitBytes> {
-    run_bounded(&*launch()?, GIT_TIMEOUT, cwd, args).await
+    run_bounded(&*launch()?, GIT_TIMEOUT, cwd, args, &[]).await
 }
 
 /// `git_bytes`, sharing one `deadline` with every other git of the same act.
@@ -94,7 +94,20 @@ pub async fn git_bytes_by(deadline: tokio::time::Instant, cwd: &Path, args: &[&s
         tracing::warn!(?args, "no time left for git in this act's budget");
         return Err(DomainError::OperationFailed);
     }
-    run_bounded(&*launch()?, left, cwd, args).await
+    run_bounded(&*launch()?, left, cwd, args, &[]).await
+}
+
+/// `git`, with `extra` pinned after every other pin (so it wins) and its own
+/// `timeout`: a worktree's fill with LFS off, and its LFS hydration with
+/// longer than [`GIT_TIMEOUT`] (`crate::git_lfs`).
+pub async fn git_with(
+    cwd: &Path,
+    args: &[&str],
+    extra: &[crate::git_guard::Pin],
+    timeout: Duration,
+) -> Result<GitOutput> {
+    let raw = run_bounded(&*launch()?, timeout, cwd, args, extra).await?;
+    Ok(GitOutput { ok: raw.ok, stdout: String::from_utf8_lossy(&raw.stdout).into_owned(), stderr: raw.stderr })
 }
 
 pub use crate::git_launch::{Launch, gh_launch, git_launch};
@@ -166,13 +179,20 @@ fn unguarded() -> bool {
 /// A listing that fails fails the call: running it without the pins would be
 /// running it unguarded. Both run inside the exec allowlist
 /// (`crate::git_sandbox`), which doesn't depend on the listing, and so holds
-/// across the moment between the two.
-async fn run_bounded(launch: &Launch, timeout: Duration, cwd: &Path, args: &[&str]) -> Result<GitBytes> {
+/// across the moment between the two. `extra` goes after every other pin.
+async fn run_bounded(
+    launch: &Launch,
+    timeout: Duration,
+    cwd: &Path,
+    args: &[&str],
+    extra: &[crate::git_guard::Pin],
+) -> Result<GitBytes> {
     let deadline = tokio::time::Instant::now() + timeout;
     let out = if unguarded() {
         spawn_bounded(launch, deadline, cwd, args, None).await?
     } else {
-        let pins = pins_by(launch, deadline, cwd).await?;
+        let mut pins = pins_by(launch, deadline, cwd).await?;
+        pins.extend_from_slice(extra);
         spawn_bounded(launch, deadline, cwd, &crate::git_guard::args(args), Some(&pins)).await?
     };
     Ok(GitBytes { ok: out.code == Some(0), stdout: out.stdout, stderr: out.stderr })
@@ -453,6 +473,11 @@ pub async fn create_worktree_with(
 /// lists the hooks and filters of that context. `reset --hard
 /// --no-recurse-submodules` is what `worktree add` itself runs to check out.
 ///
+/// The fill writes Git LFS files as their pointers (`crate::git_lfs::off`),
+/// so it stays inside [`GIT_TIMEOUT`] however much LFS content the store
+/// holds; hydrating them is a separate step, with its own limit, that never
+/// fails the worktree (`crate::git_lfs::hydrate`).
+///
 /// A checkout that fails is undone the way `worktree add` undoes its own: the
 /// worktree removed, and the branch with it when `made_branch` says this call
 /// made it.
@@ -468,8 +493,9 @@ async fn add_worktree(
     if !made.ok {
         return Ok(made);
     }
-    let filled = git(destination, &["reset", "-q", "--hard", "--no-recurse-submodules"]).await;
+    let filled = git_with(destination, crate::git_lfs::FILL, &crate::git_lfs::off(), GIT_TIMEOUT).await;
     if matches!(&filled, Ok(f) if f.ok) {
+        crate::git_lfs::hydrate(destination).await;
         return filled;
     }
     let dest = destination.to_string_lossy();
