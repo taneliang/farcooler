@@ -87,17 +87,14 @@ mod tests {
         let result = serde_json::json!({
             "type": "result", "subtype": "success", "is_error": true, "stop_reason": null
         });
-        assert_eq!(
-            live.frame_to_events(&result),
-            [AgentEvent::TurnEnded { reason: EndReason::MaxTokens }]
-        );
+        assert_eq!(ended(&mut live, &result), AgentEvent::TurnEnded { reason: EndReason::MaxTokens });
         // And with no frame before it, a result that says so itself.
         let said = serde_json::json!({
             "type": "result", "is_error": true, "stop_reason": "max_tokens"
         });
         assert_eq!(
-            Live::default().frame_to_events(&said),
-            [AgentEvent::TurnEnded { reason: EndReason::MaxTokens }]
+            ended(&mut Live::default(), &said),
+            AgentEvent::TurnEnded { reason: EndReason::MaxTokens }
         );
     }
 
@@ -112,27 +109,51 @@ mod tests {
         });
         let mut live = Live::default();
         assert_eq!(
-            live.frame_to_events(&overloaded),
-            [AgentEvent::TurnEnded {
+            ended(&mut live, &overloaded),
+            AgentEvent::TurnEnded {
                 reason: EndReason::Failed {
                     kind: farcooler_agent_core::event::FailureKind::Overloaded,
                     detail: "API Error: 529 Overloaded".into(),
                 }
-            }]
+            }
         );
         // The same error after a Stop is the Stop.
         live.interrupting();
         let stopped = serde_json::json!({
             "type": "result", "subtype": "error_during_execution", "is_error": true
         });
-        assert_eq!(
-            live.frame_to_events(&stopped),
-            [AgentEvent::TurnEnded { reason: EndReason::Cancelled }]
-        );
+        assert_eq!(ended(&mut live, &stopped), AgentEvent::TurnEnded { reason: EndReason::Cancelled });
         // And only that turn: the flag does not outlive the result it was for.
         assert!(matches!(
-            live.frame_to_events(&stopped).as_slice(),
-            [AgentEvent::TurnEnded { reason: EndReason::Failed { .. } }]
+            ended(&mut live, &stopped),
+            AgentEvent::TurnEnded { reason: EndReason::Failed { .. } }
         ));
+    }
+
+    #[test]
+    fn a_failed_or_stopped_turn_still_records_its_usage() {
+        // ov-194 counts a turn's spend off its `result`; the failure path
+        // returns its own events, and must not skip the usage that follows.
+        let failed = |sub: &str| serde_json::json!({
+            "type": "result", "subtype": sub, "is_error": true,
+            "api_error_status": 529, "result": "API Error: 529 Overloaded",
+            "total_cost_usd": 0.5,
+            "usage": { "input_tokens": 10, "output_tokens": 20 }
+        });
+        let mut live = Live::default();
+        let events = live.frame_to_events(&failed("success"));
+        assert!(matches!(events[0], AgentEvent::TurnEnded { reason: EndReason::Failed { .. } }));
+        assert!(matches!(events[1], AgentEvent::TurnUsage { .. }), "{events:?}");
+        live.interrupting();
+        let events = live.frame_to_events(&failed("error_during_execution"));
+        assert!(matches!(events[0], AgentEvent::TurnEnded { reason: EndReason::Cancelled }));
+        assert!(matches!(events[1], AgentEvent::TurnUsage { .. }), "{events:?}");
+    }
+
+    /// The `TurnEnded` a result frame yields; its usage follows it.
+    fn ended(live: &mut Live, frame: &serde_json::Value) -> AgentEvent {
+        let events = live.frame_to_events(frame);
+        assert!(matches!(events[1..], [AgentEvent::TurnUsage { .. }]), "{events:?}");
+        events[0].clone()
     }
 }
